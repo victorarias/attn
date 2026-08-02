@@ -107,9 +107,9 @@ import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/i
 import { boundTicketForSession } from './utils/tickets';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import {
+  advanceAfterTurnClosed,
   buildQueueBands,
   isQueueModeEnabled,
-  nextTurnAfterSettle,
   oldestWantedTurn,
   QUEUE_MODE_SETTING,
   isAutoSettleEnabled,
@@ -2874,33 +2874,54 @@ sendFetchPRDetails,
   const { needsAttention: prsNeedingAttention } = usePRsNeedingAttention(prs);
   const attentionCount = waitingLocalSessions.length + prsNeedingAttention.length;
 
-  // Settle the selected session's turn and move on to the next agent that still
-  // owes one, so closing a turn and picking up the next is one keystroke.
-  // Undefined while the queue arrangement is off so the shortcut is not
-  // registered at all.
+  // Settle the selected session's turn. Undefined while the queue arrangement is
+  // off so the shortcut is not registered at all.
   //
-  // The next agent is taken from the queue as it stands before the settle: the
-  // band only drops the settled row once the daemon broadcast lands, so reading
-  // it afterwards would either find the row still there or race the refresh.
-  //
-  // With nothing left to go to, the queue is empty and home is where that ends:
-  // staying on the agent just settled leaves you on the one screen guaranteed to
-  // be finished with.
+  // Only the settle. Moving on to the next agent is not this handler's job —
+  // see the effect below, which does it for every way a turn closes.
   const handleSettleActiveTurn = useMemo(
     () => (queueModeEnabled
       ? () => {
         if (!activeSessionId) return;
-        const next = nextTurnAfterSettle(queueBands?.turns ?? [], activeSessionId);
         sendSettleTurn(activeSessionId);
-        if (next) {
-          handleSelectSession(next.session.id);
-        } else {
-          goToDashboard();
-        }
       }
       : undefined),
-    [queueModeEnabled, activeSessionId, queueBands, sendSettleTurn, handleSelectSession, goToDashboard],
+    [queueModeEnabled, activeSessionId, sendSettleTurn],
   );
+
+  // Closing a turn hands over the next agent that owes one, or home when none
+  // does. This is the only place that happens, for every way a turn can close:
+  // the shortcut above, the sidebar row's button, an auto-settle countdown
+  // completing on a daemon timer, another client settling the same turn. They
+  // all arrive here as the same thing — the band the user was in changed — which
+  // is why the handover cannot drift between them. It did: for as long as the
+  // jump lived inside the shortcut handler, only the shortcut moved you.
+  //
+  // Reacting rather than predicting also means a settle the daemon rejects moves
+  // nobody, and costs only the round trip the settle already pays for.
+  //
+  // Scoped to the agent the user is actually looking at: auto-settle fires on
+  // unwatched sessions too, and a timer running somewhere off-screen must never
+  // move the selection. Grid is excluded for the same reason — every tile is
+  // being watched there, and an empty queue would drop the user out of the view
+  // entirely.
+  //
+  // advanceAfterTurnClosed owns which band move counts and where it leads; the
+  // two snapshots it compares are what makes the close observable at all, since
+  // the settled row is gone from the band by the time this runs.
+  const previousQueueTurnsRef = useRef<NonNullable<typeof queueBands>['turns']>([]);
+  useEffect(() => {
+    const previousTurns = previousQueueTurnsRef.current;
+    previousQueueTurnsRef.current = queueBands?.turns ?? [];
+    if (!queueModeEnabled || view !== 'session') return;
+    const advance = advanceAfterTurnClosed(previousTurns, queueBands, activeSessionId);
+    if (!advance) return;
+    if (advance.to === 'session') {
+      handleSelectSession(advance.row.session.id);
+    } else {
+      goToDashboard();
+    }
+  }, [queueBands, queueModeEnabled, view, activeSessionId, handleSelectSession, goToDashboard]);
 
   // Keep the selected session's turn, cancelling the auto-settle countdown that
   // is about to close it. Undefined while the queue arrangement is off, so — like

@@ -191,10 +191,10 @@ export function buildQueueBands<TSession extends QueueBandSession>(
  * The agent to land on once `settledSessionId`'s turn is closed: the next row in
  * queue order, wrapping to the top, and never the row just settled.
  *
- * The target is read from the queue as it stands *before* the settle. The settle
- * is a round trip to the daemon and the band only loses the row when the
- * broadcast comes back, so anything read after the call still contains the row
- * that was settled — deciding here keeps the jump off that race entirely.
+ * `turns` must be the band as it stood while that turn was still owed — the row
+ * being present is what gives the scan a position to continue from. Callers get
+ * that from advanceAfterTurnClosed, which holds the earlier snapshot for exactly
+ * this reason.
  *
  * A session that is not in the band (already settled, pinned, muted, the chief)
  * has no position to move on from, so the scan simply starts at the top. Null
@@ -213,4 +213,40 @@ export function nextTurnAfterSettle<TSession extends QueueBandSession>(
     }
   }
   return null;
+}
+
+/** Where selection goes when a turn closes: the next agent, or home. */
+export type QueueAdvance<TSession extends QueueBandSession> =
+  | { to: 'session'; row: QueueRow<TSession> }
+  | { to: 'dashboard' };
+
+/**
+ * Where the user should land when the turn they were looking at closed without
+ * them asking — an auto-settle countdown completing, or a settle from the
+ * sidebar row. Null means stay put: nothing closed, or what changed was not a
+ * settle.
+ *
+ * `previousTurns` is the turns band as it stood before `bands`, which is what
+ * makes "closed" observable at all — the row is gone from the band by the time
+ * anyone can react, so the two snapshots together are the only record that it
+ * was ever there, and the earlier one is also the only place the user's
+ * position in the queue still exists.
+ *
+ * The move that matters is turns → settled specifically. Pinning or muting a
+ * workspace clears turn_owed on its sessions too, and those rows leave the
+ * bands entirely rather than landing in settled — so requiring the arrival,
+ * rather than just the departure, is what keeps a pin from carrying the user
+ * away from the workspace they pinned to keep in view.
+ */
+export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
+  previousTurns: QueueRow<TSession>[],
+  bands: QueueBands<TSession> | null,
+  sessionId: string | null,
+): QueueAdvance<TSession> | null {
+  if (!sessionId || !bands) return null;
+  const owedBefore = previousTurns.some((row) => row.session.id === sessionId);
+  const settledNow = bands.settled.some((row) => row.session.id === sessionId);
+  if (!owedBefore || !settledNow) return null;
+  const next = nextTurnAfterSettle(previousTurns, sessionId);
+  return next ? { to: 'session', row: next } : { to: 'dashboard' };
 }

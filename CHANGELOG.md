@@ -29,6 +29,14 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   instead of what the agent actually said. Transcripts now resolve by the codex
   session's own id, the classifier no longer saves a log at all, and headless
   codex runs are excluded from transcript discovery.
+- **A turn that closes on its own hands you the next agent.** Auto-settle closes
+  a turn on a timer, and settling from a sidebar row goes straight to the
+  daemon — neither moved you on, so the countdown finishing on the agent you were
+  watching dropped its row from the queue and left you sitting on an agent that
+  was done with you. Closing a turn now hands over the next agent that owes one
+  (or takes you home when none does) however that turn closed, not just when you
+  pressed ⌘⇧E. A turn closing on an agent you are not looking at still leaves
+  your selection alone, and pinning a workspace still keeps you where you are.
 - **A workspace that holds only a tile can be closed again.** Closing the last
   notebook, markdown, or browser tile in a workspace with no agents left the
   workspace in the sidebar — and every later click on its × did nothing, so the

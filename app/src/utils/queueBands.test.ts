@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { buildQueueBands, nextTurnAfterSettle, oldestWantedTurn, type QueueBandSession } from './queueBands';
+import {
+  advanceAfterTurnClosed,
+  buildQueueBands,
+  nextTurnAfterSettle,
+  oldestWantedTurn,
+  type QueueBandSession,
+} from './queueBands';
 import { buildWorkspaceViewModels } from './workspaceViewModels';
 
 const workspaces = [
@@ -232,5 +238,94 @@ describe('nextTurnAfterSettle', () => {
     const turns = turnsFor(['oldest', 'newest']);
 
     expect(nextTurnAfterSettle(turns, 'elsewhere')?.session.id).toBe('oldest');
+  });
+});
+
+describe('advanceAfterTurnClosed', () => {
+  function owed(id: string, hour: number, workspaceId = 'ws-a'): QueueBandSession {
+    return { id, label: id, workspaceId, turnOwed: true, turnOpenedAt: `2026-07-26T0${hour}:00:00Z` };
+  }
+
+  it('moves on to the next turn in queue order when the watched turn closes', () => {
+    const queue = [owed('watched', 0), owed('next', 1), owed('after', 2)];
+    const before = buildQueueBands(views(queue));
+    const after = buildQueueBands(views([{ ...queue[0], turnOwed: false }, queue[1], queue[2]]));
+
+    const advance = advanceAfterTurnClosed(before.turns, after, 'watched');
+
+    expect(advance).toEqual({ to: 'session', row: expect.objectContaining({ workspaceTitle: 'A' }) });
+    expect(advance?.to === 'session' && advance.row.session.id).toBe('next');
+  });
+
+  it('reads the position from the earlier snapshot, where the closed row still is', () => {
+    // The row is already out of the turns band by the time this runs, so a
+    // decision made from the new bands alone would have no position to continue
+    // from and would restart at the top of the queue.
+    const queue = [owed('oldest', 0), owed('watched', 1), owed('newest', 2)];
+    const before = buildQueueBands(views(queue));
+    const after = buildQueueBands(views([queue[0], { ...queue[1], turnOwed: false }, queue[2]]));
+
+    const advance = advanceAfterTurnClosed(before.turns, after, 'watched');
+
+    expect(advance?.to === 'session' && advance.row.session.id).toBe('newest');
+  });
+
+  it('goes home when the closed turn was the last one owed', () => {
+    // Staying would leave the user on the one agent guaranteed to be finished
+    // with them.
+    const only = owed('watched', 0);
+    const before = buildQueueBands(views([only]));
+    const after = buildQueueBands(views([{ ...only, turnOwed: false }]));
+
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toEqual({ to: 'dashboard' });
+  });
+
+  it('stays put while the turn is still owed', () => {
+    const queue = [owed('watched', 0), owed('next', 1)];
+    const bands = buildQueueBands(views(queue));
+
+    expect(advanceAfterTurnClosed(bands.turns, bands, 'watched')).toBeNull();
+  });
+
+  it('stays put when the watched agent never owed the turn that closed', () => {
+    // Someone else's turn closing is not a reason to move the user.
+    const queue = [owed('elsewhere', 0)];
+    const before = buildQueueBands(views(queue));
+    const after = buildQueueBands(views([{ ...queue[0], turnOwed: false }, { id: 'watched', label: 'watched', workspaceId: 'ws-a' }]));
+
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toBeNull();
+  });
+
+  it('stays put when the row left the queue by being pinned rather than settled', () => {
+    // Pinning clears turn_owed too, but it means "keep this in view" — being
+    // carried off to another agent is the opposite of what was asked for. The
+    // row lands in no band at all, which is what tells the two apart.
+    const watched = owed('watched', 0);
+    const before = buildQueueBands(views([watched, owed('next', 1, 'ws-b')]));
+    const after = buildQueueBands(buildWorkspaceViewModels(
+      [{ id: 'ws-a', title: 'A', directory: '/repo/a', rank: 'a', pinned: true }, workspaces[1]],
+      [{ ...watched, turnOwed: false }, owed('next', 1, 'ws-b')],
+    ));
+
+    expect(after.turns.map((row) => row.session.id)).toEqual(['next']);
+    expect(after.settled).toEqual([]);
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toBeNull();
+  });
+
+  it('stays put when the watched agent is gone from the bands entirely', () => {
+    // A closed session, or a muted workspace: nothing settled, so nothing to
+    // move on from.
+    const watched = owed('watched', 0);
+    const before = buildQueueBands(views([watched, owed('next', 1)]));
+    const after = buildQueueBands(views([owed('next', 1)]));
+
+    expect(advanceAfterTurnClosed(before.turns, after, 'watched')).toBeNull();
+  });
+
+  it('stays put with no agent selected, or before any bands exist', () => {
+    const bands = buildQueueBands(views([owed('a', 0)]));
+
+    expect(advanceAfterTurnClosed(bands.turns, bands, null)).toBeNull();
+    expect(advanceAfterTurnClosed(bands.turns, null, 'a')).toBeNull();
   });
 });
