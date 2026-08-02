@@ -394,9 +394,12 @@ Design and gate decisions:
   client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
-- Restores are text-only: sixel/kitty images render from the live stream but are
-  not preserved across a restore (accepted; image-preserving restore is a
-  follow-up).
+- No image protocol renders anywhere today. Sixel does not exist in ghostty at
+  all, and kitty graphics are deliberately disabled in the worker terminal
+  (`KittyImageStorageLimit` 0 at construction) so the worker's authoritative
+  grid cannot desync from the client model, which never parses kitty — ghostty
+  hard-disables it on wasm. Worker-authoritative image support is planned in
+  [docs/plans/2026-08-02-terminal-kitty-images.md](docs/plans/2026-08-02-terminal-kitty-images.md).
 - Session switching must retain utility-terminal focus. `App.tsx` may fit the
   main terminal but focuses it only when utility is inactive;
   `SessionTerminalWorkspace` prefers the active `GhosttyTerminal` handle.

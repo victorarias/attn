@@ -14,6 +14,13 @@ const DefaultMaxScrollback = 10000
 // Options mirrors the real build's construction options.
 type Options struct {
 	MaxScrollback int
+
+	// KittyImageStorageLimit is the kitty graphics image storage cap in
+	// bytes, applied at construction. The zero value disables the kitty
+	// graphics protocol entirely — deliberate: the library's own default is
+	// 10MB, and a silently-live worker-side parser desyncs the grid from the
+	// client model, which never parses kitty.
+	KittyImageStorageLimit uint64
 }
 
 // Snapshot mirrors the real build's serialization result.
