@@ -25,9 +25,11 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
   comes from that transcript.
 - **A halted turn is only ever your own.** Quoting or pasting claude's
   `[Request interrupted by user]` marker into a prompt no longer settles the
-  session you are talking to, a turn codex ended for its own reasons is no longer
-  read as you halting it, and a session that resumes onto a transcript with older
-  halts in it no longer settles on one of them.
+  session you are talking to, a turn codex or copilot ended for its own reasons is
+  no longer read as you halting it, and a session that resumes onto a transcript
+  with older halts in it no longer settles on one of them. A copilot turn that
+  copilot itself abandoned still ends the turn — it just ends it without putting a
+  halt you never made in your history.
 - **A session waiting on its own background task no longer goes grey — or rings
   you — a minute in.** When a Claude turn yields with a background process still
   running ("the build is running; I'll continue when it completes"), attn now

@@ -267,6 +267,74 @@ func TestAHaltIsDatedByTheAgentNotTheRead(t *testing.T) {
 	}
 }
 
+// Copilot aborts for its own reasons too, and those are not the user halting the
+// turn — but they end it just the same, and the bracket they leave behind is the
+// watcher's own: nothing but this closes it, because copilot's turn_start is what
+// opened it and no `assistant.turn_end` follows an abort.
+//
+// It is not a bracket that expires. Copilot paints no heartbeat, so the resolver's
+// stale test can never retire it — `heartbeatSilentFor` answers "not silent"
+// forever for a session that has nothing to have gone quiet from — and the session
+// runs out the stuck timer and reports `unknown`. So the abort has to say the turn
+// is over, without saying the user did it.
+func TestACopilotAbortNobodyAskedForStillClosesTheTurn(t *testing.T) {
+	t.Setenv(toolhome.EnvVar, t.TempDir())
+	home, _ := toolhome.Dir()
+
+	d := newTraceDaemon(t)
+	id := "sess-copilot-tool-failure"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentCopilot, protocol.SessionStateWorking)
+	session := d.store.Get(id)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+
+	var seed func(t *testing.T, home, dir, sessionID string) string
+	for _, tc := range haltedTurnCases() {
+		if tc.name == "copilot" {
+			seed = tc.seed
+		}
+	}
+	path := seed(t, home, session.Directory, id)
+
+	d.startTranscriptWatcher(id, protocol.SessionAgentCopilot, session.Directory, time.Now())
+	t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+	waitForTranscriptDiscovery(t, d, id)
+
+	writeLine(t, path, fmt.Sprintf(
+		`{"type":"abort","timestamp":%q,"data":{"reason":"tool_failure"}}`,
+		time.Now().UTC().Format(time.RFC3339Nano),
+	))
+
+	got := waitForClosedTurnBracket(t, d, id)
+	if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
+		t.Fatal("copilot giving up on its own was filed as the user halting the turn")
+	}
+
+	// The bracket is what pins the session, and for copilot it pins it from the
+	// moment the abort lands: with no heartbeat to go silent, the resolver's stale
+	// test cannot retire the bracket at all, so `bracket_open` holds until the
+	// stuck timer converts it to `unknown`. Settling the turn is the classifier's
+	// job — this only has to prove nothing is still claiming the turn is running.
+	policy := sessionstate.PolicyFor(string(protocol.SessionAgentCopilot))
+	if reason := sessionstate.Resolve(got, policy, time.Now()).Reason; reason == sessionstate.ReasonBracketOpen {
+		t.Fatalf("reason %q: the abandoned turn held the session open", reason)
+	}
+}
+
+// waitForClosedTurnBracket blocks until the watcher has closed the evidence
+// brackets, which for copilot is the only thing that ends an abandoned turn.
+func waitForClosedTurnBracket(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
+	t.Helper()
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if got, ok := d.evidenceTable().snapshot(sessionID); ok && !got.TurnOpen && !got.ToolOpen {
+			return got
+		}
+		time.Sleep(transcriptPollInterval / 2)
+	}
+	t.Fatal("the abandoned turn left its bracket open")
+	return sessionstate.Evidence{}
+}
+
 // A user who quotes the marker back at claude — asking about it, pasting a log —
 // must not settle their own session. The dedicated field is what tells the two
 // apart, and this is the case that would make the fix worse than the bug.

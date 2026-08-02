@@ -289,6 +289,9 @@ func (d *Daemon) runTranscriptWatcher(w *transcriptWatcher) {
 						classifiedSeq = assistantSeq
 					}
 				}
+				if lineResult.BracketClosed {
+					d.recordTurnBracketClosedEvidence(w.sessionID, now)
+				}
 				if lineResult.State != "" && protocol.SessionState(lineResult.State) != sessionState {
 					d.recordTranscriptEvidence(w.sessionID, lineResult.State, "transcript line", now)
 					sessionState = protocol.SessionState(lineResult.State)

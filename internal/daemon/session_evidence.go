@@ -315,6 +315,25 @@ func (d *Daemon) recordTurnAbortedEvidence(sessionID, detail string, abortedAt, 
 	})
 }
 
+// recordTurnBracketClosedEvidence closes the brackets and says nothing else.
+//
+// It exists for the turn that ended in a way nobody needs reported: copilot
+// abandoning a turn for its own reasons, where filing a halt would put a user
+// action in the diagnosis that no user took, and asserting a state would guess at
+// what the session is doing before the classifier has looked. Closing the
+// brackets on their own is the whole true statement — the turn they described is
+// over — and it leaves the settle to the same quiet-window classification that
+// ends every other copilot turn.
+func (d *Daemon) recordTurnBracketClosedEvidence(sessionID string, at time.Time) {
+	if at.IsZero() {
+		at = time.Now()
+	}
+	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
+		e.TurnOpen = false
+		e.ToolOpen = false
+	})
+}
+
 // recordClassifierEvidence files a stop-time verdict.
 func (d *Daemon) recordClassifierEvidence(sessionID, state string, observedAt time.Time) {
 	if observedAt.IsZero() {

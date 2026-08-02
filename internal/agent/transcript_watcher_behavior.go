@@ -63,6 +63,15 @@ type WatcherLineResult struct {
 	Aborted     bool
 	AbortDetail string
 	AbortAt     time.Time
+
+	// BracketClosed: the turn this watcher was tracking is over, with nothing to
+	// say about how it ended. Clearing the behavior's own flag is not enough for
+	// an agent whose bracket the watcher opened in the first place — the evidence
+	// bracket outlives it, and for an agent with no heartbeat nothing retires a
+	// bracket except the stuck timer. Distinct from Aborted, which also closes the
+	// brackets but files a halt the resolver can report; and from State, which
+	// asserts what the session is doing now.
+	BracketClosed bool
 }
 
 // WatcherTickResult captures periodic watcher actions on each poll.
@@ -232,13 +241,19 @@ func (b *copilotTranscriptWatcherBehavior) HandleLine(line []byte, now time.Time
 	// without this the bracket below stays open and Tick pins the session working
 	// for the rest of its life. The bracket closes for every abort; only the user's
 	// own settles the session.
+	//
+	// Closing it means closing both: this watcher's flag and the evidence bracket
+	// the same `assistant.turn_start` opened through Tick. Copilot paints no
+	// heartbeat, so an evidence bracket nothing retires is not held for StaleAfter
+	// — it is held until the stuck timer, and the session reports `unknown`.
 	if abort, ok := transcript.CopilotTurnAborted(line); ok {
 		b.turnOpen = false
 		b.pendingTools = make(map[string]copilotPendingTool)
 		b.transcriptPendingLive = false
 		if !abort.UserHalt {
 			return WatcherLineResult{
-				Log: fmt.Sprintf("transcript watcher: copilot turn aborted without a user halt reason=%s", abort.Reason),
+				BracketClosed: true,
+				Log:           fmt.Sprintf("transcript watcher: copilot turn aborted without a user halt reason=%s", abort.Reason),
 			}
 		}
 		return WatcherLineResult{

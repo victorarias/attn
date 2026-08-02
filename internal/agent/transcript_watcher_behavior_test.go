@@ -234,7 +234,15 @@ func TestCopilotAbortClosesTheTurnBracket(t *testing.T) {
 				t.Fatal("an open copilot turn should block classification")
 			}
 
-			b.HandleLine([]byte(abort), now.Add(3*time.Second), protocol.SessionStateWorking)
+			got := b.HandleLine([]byte(abort), now.Add(3*time.Second), protocol.SessionStateWorking)
+
+			// Closing the flag below is only half of it. The same turn_start opened
+			// an evidence bracket through Tick, and the result is the only way to
+			// reach it — copilot paints no heartbeat, so a bracket left open there
+			// outlives the stale test and runs the session into `stuck`.
+			if !got.Aborted && !got.BracketClosed {
+				t.Fatalf("got %+v, want the evidence bracket closed: nothing else closes it", got)
+			}
 
 			tick := b.Tick(now.Add(4*time.Second), protocol.SessionStateWorking)
 			if tick.BlockClassification {
