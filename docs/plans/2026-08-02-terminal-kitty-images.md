@@ -299,45 +299,88 @@ Layers around the gate:
       in ghostty, but are replayed as plain anyway, because the client's own
       parser knows only BEL and ST and stripping a marker it would not have
       recognised leaves the two block tables disagreeing.
-- [ ] **Fuzz soak — still blocked, on disposal rather than framing.** The seed
-      corpus is green, `FuzzKittySegmenterFraming` soaks clean, and the framing
-      wall the whole-path target used to hit is gone: it ran 2.4s before the
-      merge and reaches ~30s after it. What it reaches now is not a framing
-      defect. Two ways the feed path moves the worker's grid without the wire
-      describing it are recorded below and under A4; both are older than this
-      segmenter, both reproduce on `main`, and neither is fixable by changing
-      where a sequence is cut. Make this target a gate once they close.
+- [x] **Fuzz soak, split by configuration.** The whole-path mirror property
+      answers a different question in each of the two kitty configurations, so
+      it runs as two targets. `FuzzKittyWireMirrorShipping` puts the worker at
+      the zero storage limit production runs today, which makes the property
+      pure DISPOSAL — which bytes reach the terminal, which reach the wire.
+      `FuzzKittyWireMirror` keeps kitty live, exercises synthesis, and is
+      knowingly red on the A4 defects, so it is not run with `-fuzz` in CI.
+      Both targets' SEEDS run on every `go test` and are green, so the recorded
+      corpus stays honest without reddening the build.
+      `FuzzKittySegmenterFraming` soaks the framing rules alone: 3 x 3 min
+      clean, 16.9M / 9.6M / 10.3M execs.
+- [ ] **Stripping an APC can desync the two UTF-8 decoders.** Found by
+      `FuzzKittyWireMirrorShipping` at 96s on
+      `"0000000000000000000\xc5\x1b_G"`, so it is a defect in the SHIPPING
+      configuration, not a deferred one. The worker receives the APC and the
+      wire does not, and the APC's leading ESC aborts a UTF-8 sequence the
+      client is still holding open. Measured, four shapes:
 
-#### Live defect: `OSC 133;A` is not grid-neutral
+      | what follows the stripped APC | result |
+      | --- | --- |
+      | nothing (quiesced) | worker has U+FFFD, client has none — transient |
+      | an ASCII byte | heals |
+      | a valid continuation byte | **permanent**: worker `\uFFFD\uFFFD`, client `ť` |
+      | more text | heals |
 
-Stripping markers from the worker terminal has always rested on the claim that
-they produce no cells, so both grids land in the same place either way. Measured
-against ghostty, that is false for prompt-start: with the cursor mid-line,
-`OSC 133;A` performs a line break. `0\x1b]133;A\x1b\\` leaves the cursor at
-`(0,1)`; the same stream without the marker leaves it at `(1,0)`. `B`, `C`, `D`
-and unknown subtypes are neutral, and only `A` is not — it is ghostty's
-"a prompt always starts on a fresh line" rule.
+      The permanent case needs an emitter to split a multi-byte character
+      around an APC, which is pathological but silent, and silent grid
+      divergence is the bug class this phase exists to remove. The transient
+      case is harmless: an attach serves the worker's dump, which corrects the
+      client.
 
-So today the worker, which never sees the marker, keeps the cursor mid-line
-while the client, which does, breaks the line. Every prompt drawn after output
-with no trailing newline diverges, which is not a rare shape. Nothing shows it
-until an attach, and then it shows badly: the client resets to the worker's
-dump, so the prompt the user was looking at on its own line jumps up to sit
-against the previous output.
+      A fix is measured and works on all four shapes: emit `ESC \` (ST) on the
+      wire where the APC was. ST from ground is a no-op for ghostty, and its
+      leading ESC aborts the client's pending sequence exactly as the APC's did
+      for the worker. Cost is two wire bytes per stripped APC and a decision
+      about whether synthesis is allowed to emit bytes when the grid did not
+      move — today `appendCSI` deliberately emits nothing at zero. Not taken
+      unilaterally; it changes the wire contract.
 
-This is not gated on the storage flip; it is live now, and it is the first thing
-the whole-path fuzz target finds (16.5s, on `0\x1b]133;A`). The fix measured to
-work is one line — write the marker's bytes to the terminal as well as the wire,
-pinning the block-table cursor after them rather than before — which makes the
-two grids agree by construction and leaves the block table on the row the prompt
-actually starts on. It changes zero tests: the stripping contract the suite
-asserts is segmenter-level (a marker is its own emission, never part of a plain
-run), which that fix keeps. The VT dump was measured not to re-emit OSC 133, so
-the marker reaching the terminal cannot leak into restore or double-seed the
-client's block store, which is what the Phase 3a contract requires.
+#### Pin skew: `OSC 133;A` is not grid-neutral, and the two ghosttys disagree
 
-It is left out of the segmenter change on purpose: that change moves framing
-only, and this moves disposal.
+Stripping markers from the worker terminal used to rest on the claim that they
+produce no cells, so both grids land in the same place either way. Half of that
+is false. Measured against the NATIVE ghostty the worker links, `OSC 133;A` with
+the cursor mid-line performs a line break — ghostty's "a prompt starts on a fresh
+line" rule. `0\x1b]133;A\x1b\\` leaves the cursor at `(0,1)`; the same stream
+without the marker leaves it at `(1,0)`. `B`, `C`, `D` and unknown subtypes are
+neutral; only `A` is not.
+
+The conclusion that first looked obvious — that the worker should therefore be
+fed the marker so both sides break together — is WRONG, and the corpus caught it.
+The app does not render the ghostty the worker links. `ghostty-vt-native.pin`
+records a native pin of `ab0b9da` against the frontend's ghostty-web at `29d4aba`
+and says converging them is a follow-up, and at that older pin the wasm model
+does NOT break the line. Feeding markers to the worker terminal makes the worker
+break where the real client does not, which is the divergence this phase exists
+to remove. Verified both directions: with the marker withheld the wasm replay
+agrees with the worker; with it written, the same entry goes red in the Go
+recording and the wasm replay at once.
+
+So today's disposal is correct and load-bearing rather than incidental, and
+`internal/pty/testdata/kitty_rewrite_corpus.json` pins it under
+"a prompt marker after output with no trailing newline" — output with no
+trailing newline, then a prompt marker, recorded with the worker NOT breaking
+the line and replayed into real wasm to prove the client agrees.
+
+Two consequences worth carrying forward:
+
+- **The Go-side client model had to be corrected, not the feed path.** The
+  corpus replay and the mirror fuzz targets stand a native terminal in for the
+  frontend, and a native terminal handed the raw wire acts on OSC 133 when the
+  real client would not. `writeAsClient` now drops recognised markers on the way
+  into that stand-in. The wasm replay is the authority; the Go model exists to
+  agree with it.
+- **A bounded live divergence remains, and it is the pin skew, not the design.**
+  A marker the segmenter replays as plain rather than extracting — a malformed
+  terminator (CAN, SUB, a stray ESC), or an introducer that was never in ground
+  — reaches the worker terminal as ordinary bytes, and the native build acts on
+  it while the wasm client does not. Only `A` matters, only mid-line, and only on
+  a malformed stream. It closes when the pins converge; until then it is a known
+  limit rather than a bug to chase, and `writeAsClient` deliberately does not
+  paper over it.
 
 ### A3 — protocol + frontend rendering
 
@@ -354,9 +397,14 @@ only, and this moves disposal.
 
 Four synthesis defects are known and deliberately deferred to here. All are
 unreachable while the storage limit is 0 — nothing dispatches, so the grid never
-moves and `writeAPC` returns early — and all become live the moment the limit
-is flipped. None may ship with the flip. (The `OSC 133;A` defect above is NOT
-one of these: it is live today and gated on nothing.)
+moves and `writeAPC` returns early — and all become live the moment the limit is
+flipped. None may ship with the flip.
+
+`FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
+property with kitty live, and it is knowingly red until the last two below are
+decided. Soaking it is part of this phase's work, not A2's. (The pin skew noted
+under A2 is NOT one of these — it is a live limit today, and gated on the two
+ghostty pins converging rather than on the storage flip.)
 
 - [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
       absolute column move, and a client with left/right margins enabled

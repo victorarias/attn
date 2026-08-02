@@ -27,11 +27,16 @@ package pty
 // transition measured against the terminal rather than read off the spec, and
 // the two smallest streams it found are corpus entries next door.
 //
-// What it reaches now is a different kind of defect, and the reason this target
-// is not yet a gate: the two remaining divergences are in what the feed path
-// DOES with a correctly framed sequence, not in where it cuts one. Both are
-// measured, reproduced, and written up under A4 in the plan; neither is fixable
-// inside a framing change.
+// What it reaches now is a different kind of defect: divergences in what the
+// feed path DOES with a correctly framed sequence, not in where it cuts one.
+// Those belong to the configuration that has kitty live, which is why the
+// property runs as two targets — see FuzzKittyWireMirrorShipping, the gate, and
+// FuzzKittyWireMirror, which is knowingly red on the A4 defects.
+//
+// The client in both is a native terminal standing in for the frontend's wasm
+// model, fed through writeAsClient rather than written raw. The two ghostty
+// builds are different pins and disagree about OSC 133; writing the wire
+// straight into a native terminal would fail this property on correct code.
 
 import (
 	"strings"
@@ -61,7 +66,33 @@ const (
 // after it on either side.
 var fuzzKittyFlush = []byte("\x1b\\")
 
+// FuzzKittyWireMirrorShipping is the gate: it runs the mirror property in the
+// configuration production actually runs, with the worker's kitty storage limit
+// at zero. Ghostty refuses every transmission there, so nothing is stamped and
+// writeAPC returns early — the property under test is the DISPOSAL, which is
+// what ships today: which bytes reach the terminal, which reach the wire, and
+// whether the two grids still agree afterwards.
+//
+// This one must stay green. A counterexample here is a live defect, not a
+// deferred one.
+func FuzzKittyWireMirrorShipping(f *testing.F) {
+	fuzzKittyWireMirror(f, 0)
+}
+
+// FuzzKittyWireMirror runs the same property with kitty LIVE, which is the
+// configuration A4 flips on. It exercises synthesis — the observed scroll and
+// cursor written in an APC's place — and it is known red on the two defects
+// recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md: an
+// undescribed image the placement diff cannot see because it appeared and died
+// inside one chunk, and the `Updated`-blind end-of-feed check. Both need a
+// decision that belongs to the flip, so this target is NOT a gate yet and is not
+// run with -fuzz in CI. Its seeds still run on every `go test`, which is what
+// keeps the recorded corpus honest without reddening the build.
 func FuzzKittyWireMirror(f *testing.F) {
+	fuzzKittyWireMirror(f, mirrorStorageLimit)
+}
+
+func fuzzKittyWireMirror(f *testing.F, storageLimit uint64) {
 	for _, in := range kittyCorpusInputs() {
 		f.Add([]byte(strings.Join(in.chunks, "")), uint16(len(in.chunks[0])))
 	}
@@ -75,7 +106,7 @@ func FuzzKittyWireMirror(f *testing.F) {
 		}
 		size := int(chunkSize%4096) + 1
 		baseline := ghosttyvt.LiveTrackedRefs()
-		worker := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+		worker := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{KittyImageStorageLimit: storageLimit})
 		client := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{})
 		feeder := newWireFeeder(worker)
 		if feeder == nil {
@@ -83,9 +114,10 @@ func FuzzKittyWireMirror(f *testing.F) {
 		}
 
 		resynced := ""
+		var clientSeg feedSegmenter
 		feed := func(chunk []byte) {
 			wire, resync := feeder.feed(chunk)
-			client.Write(wire)
+			writeAsClient(client, &clientSeg, wire)
 			if resync != "" && resynced == "" {
 				resynced = resync
 			}
@@ -122,15 +154,13 @@ func FuzzKittyWireMirror(f *testing.F) {
 // FuzzKittySegmenterFraming soaks the segmenter's framing rules on their own,
 // without the rest of the feed path in the loop.
 //
-// It exists because framing and disposal fail differently, and only framing is
-// settled. The whole-path property above still stops early, but no longer on a
-// framing defect: it now reaches two ways the feed path can move the worker's
-// grid without the wire describing it, both older than this segmenter and both
-// recorded as gates in the plan's A4 section. This target asks the one question
-// kittyseg.go answers — would ghostty's parser be in ground after these bytes?
-// — and asserts the segmenter agrees, under an arbitrary chunking, while
-// reconstructing every byte it was handed, so the framing rules keep a soak of
-// their own while those gates are open.
+// It exists because framing and disposal fail differently, and a whole-path
+// counterexample does not say which one broke. This target asks the one question
+// kittyseg.go answers — would ghostty's parser be in ground after these bytes? —
+// and asserts the segmenter agrees, under an arbitrary chunking, while
+// reconstructing every byte it was handed. A framing regression lands here as a
+// minimal input naming the exact transition, rather than as a grid diff two
+// layers away.
 //
 // Both halves matter. Agreement alone would pass for a segmenter that tracked
 // state perfectly and dropped a byte; reconstruction alone would pass for one

@@ -45,6 +45,9 @@ type mirror struct {
 	worker *ghosttyvt.Terminal
 	client *ghosttyvt.Terminal
 	feed   *wireFeeder
+	// clientSeg is the stand-in's own segmenter, used only to keep OSC 133 out
+	// of the client terminal — see writeAsClient.
+	clientSeg feedSegmenter
 
 	lastWire   []byte
 	lastResync string
@@ -79,12 +82,13 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 }
 
 // write feeds one chunk the way the read loop does and applies the produced
-// wire bytes to the client.
+// wire bytes to the client — through writeAsClient, so this harness models the
+// frontend the same way the corpus and the fuzz targets do.
 func (m *mirror) write(chunk string) {
 	wire, resync := m.feed.feed([]byte(chunk))
 	m.lastWire = append([]byte(nil), wire...)
 	m.lastResync = resync
-	m.client.Write(wire)
+	writeAsClient(m.client, &m.clientSeg, wire)
 }
 
 func (m *mirror) agree(t *testing.T, when string) {

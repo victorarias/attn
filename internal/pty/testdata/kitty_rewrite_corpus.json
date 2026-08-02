@@ -713,6 +713,33 @@
       "cursorRow": 0
     },
     {
+      "name": "a prompt marker after output with no trailing newline",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "b3V0",
+        "G10xMzM7QRtc",
+        "JCBscw0K",
+        "G10xMzM7RDswBw=="
+      ],
+      "wire": [
+        "b3V0",
+        "G10xMzM7QRtc",
+        "JCBscw0K",
+        "G10xMzM7RDswBw=="
+      ],
+      "resync": [
+        "",
+        "",
+        "",
+        ""
+      ],
+      "workerPlainText": "out$ ls",
+      "workerViewportText": "out$ ls\n\n\n\n\n\n\n\n",
+      "cursorCol": 0,
+      "cursorRow": 1
+    },
+    {
       "name": "markers split across feed chunks around an image",
       "cols": 20,
       "rows": 8,

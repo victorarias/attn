@@ -7,9 +7,10 @@ package pty
 // OSC 133 markers. This file decides where each of those goes, turning one
 // arriving chunk into two different things:
 //
-//   - the TERMINAL feed: every byte in order except the markers, which
-//     blockfeed.go turns into block-table entries instead. A complete kitty APC
-//     goes to ghostty whole, because ghostty is the system's only kitty parser.
+//   - the TERMINAL feed: every byte, in order. A complete kitty APC goes to
+//     ghostty whole, because ghostty is the system's only kitty parser. An OSC
+//     133 marker goes through too — it is not inert, and blockfeed.go pins a
+//     block-table entry once the terminal has run it.
 //   - the WIRE bytes: the same stream with each APC replaced, in position, by
 //     bytes that leave a kitty-ignorant terminal on the same grid — the scroll
 //     and the cursor the placement caused, and nothing else. Usually that is no
@@ -180,6 +181,17 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 			// The wire carries the marker and the terminal does not: the client
 			// runs its own OSC 133 parser over the wire, and the worker's block
 			// table takes the parsed marker in place of the bytes.
+			//
+			// Withholding the bytes is what keeps the two grids equal, and it
+			// is load-bearing rather than incidental. A marker is NOT inert in
+			// the native ghostty the worker links: measured, `OSC 133;A` with
+			// the cursor mid-line breaks the line, because a prompt starts on a
+			// fresh one. The wasm ghostty the app renders is a different pin
+			// and does not, so writing markers to the worker terminal would
+			// move the worker's grid and not the client's — the exact
+			// divergence this file exists to prevent. See the corpus entry
+			// "a prompt marker after output with no trailing newline", which
+			// pins both sides, and the pin-skew note in the plan.
 			f.wire = append(f.wire, seg.Bytes...)
 			f.blocks.mark(seg.Marker)
 		}
