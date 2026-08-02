@@ -6,6 +6,7 @@ enum DriverError: Error, CustomStringConvertible {
     case usage(String)
     case appNotRunning(String)
     case accessibilityDenied
+    case displayUnavailable(String)
     case invalidArgument(String)
     case eventCreationFailed(String)
 
@@ -17,6 +18,8 @@ enum DriverError: Error, CustomStringConvertible {
             return "App is not running for bundle id \(bundleId)"
         case .accessibilityDenied:
             return "Accessibility permission is required for the real app harness input driver."
+        case let .displayUnavailable(reason):
+            return "Input cannot be delivered: \(reason). Wake the display (and unlock the screen) before running packaged-app scenarios."
         case let .invalidArgument(message):
             return message
         case let .eventCreationFailed(message):
@@ -53,7 +56,7 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "drag", "menu", "window_park", "scroll":
+        case "activate", "activate_background", "frontmost", "display_state", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "drag", "menu", "window_park", "scroll":
             options.command = arg
         case "--window-title":
             index += 1
@@ -159,6 +162,7 @@ func parseOptions() throws -> Options {
               InputDriver.swift activate [--bundle-id com.attn.manager]
               InputDriver.swift activate_background [--bundle-id ...]
               InputDriver.swift frontmost
+              InputDriver.swift display_state
               InputDriver.swift windowid [--bundle-id ...] [--window-title <substring>]
               InputDriver.swift windowlist [--bundle-id ...]
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
@@ -190,7 +194,7 @@ func parseOptions() throws -> Options {
     }
 
     guard options.command != nil else {
-        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, windowid, windowlist, text, key, keycode, click, or menu.")
+        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, display_state, windowid, windowlist, text, key, keycode, click, or menu.")
     }
 
     return options
@@ -292,6 +296,76 @@ func axPressMenuItem(bundleId: String, path: [String]) throws {
 
 func frontmostBundleIdentifier() -> String {
     NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+}
+
+// Whether synthetic input can be delivered right now, and if not, why. Printed
+// verbatim by the `display_state` command so a run can record what the display
+// was doing without anyone having to reproduce it.
+//
+// `CGSSessionScreenIsLocked` is the reading that actually moves: it goes true
+// the moment the display goes dark, well before any password grace period
+// expires, so it covers display-off and a truly locked screen alike.
+// `CGDisplayIsAsleep` was measured against `pmset displaysleepnow` on the
+// built-in display and never flips, so it cannot carry this on its own; it
+// stays as the signal for an external display that reports sleep properly.
+struct DisplayState {
+    var screenLocked: Bool
+    var displayCount: Int
+    var asleepCount: Int
+    var awakeCount: Int { displayCount - asleepCount }
+
+    var blockReason: String? {
+        if screenLocked { return "the screen is locked or the display is off" }
+        if displayCount == 0 { return "no display is active" }
+        // Any awake display is enough: the app's window lives on one of them,
+        // and a multi-display setup routinely sleeps the ones nobody is
+        // looking at.
+        if awakeCount == 0 { return "every display is asleep (\(displayCount))" }
+        return nil
+    }
+
+    var asJSON: [String: Any] {
+        [
+            "screenLocked": screenLocked,
+            "displayCount": displayCount,
+            "asleepCount": asleepCount,
+            "blockReason": blockReason ?? NSNull(),
+        ]
+    }
+}
+
+func readDisplayState() -> DisplayState {
+    let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+    let locked = (session?["CGSSessionScreenIsLocked"] as? Bool) ?? false
+
+    var displayCount: UInt32 = 0
+    guard CGGetActiveDisplayList(0, nil, &displayCount) == .success, displayCount > 0 else {
+        return DisplayState(screenLocked: locked, displayCount: 0, asleepCount: 0)
+    }
+    var displays = [CGDirectDisplayID](repeating: 0, count: Int(displayCount))
+    guard CGGetActiveDisplayList(displayCount, &displays, &displayCount) == .success else {
+        return DisplayState(screenLocked: locked, displayCount: 0, asleepCount: 0)
+    }
+    let asleep = displays.prefix(Int(displayCount)).filter { CGDisplayIsAsleep($0) != 0 }.count
+    return DisplayState(screenLocked: locked, displayCount: Int(displayCount), asleepCount: asleep)
+}
+
+// A dark display accepts synthetic input without delivering it the way a live
+// session does: the event reaches the app, but the window-server work the app's
+// own handling depends on (menu-bar key equivalents, first responder,
+// rendering) does not run, so only some of a scenario's keystrokes take effect.
+// The scenario then fails on a product assertion that the product did not
+// break. Three TERMINAL-BLOCK-COPY runs failed exactly that way on 2026-08-02
+// between 22:31 and 22:35 local, inside a display-off window that `pmset -g log`
+// records as 22:21:57 to 22:48:33: ⇧⌘C copied, and ⌘C — the one the native
+// Edit > Copy item claims — silently did nothing, and the run could not capture
+// a window screenshot either. The same scenario is green on the same build with
+// the display awake. Refuse to post input instead of producing evidence nobody
+// can trust.
+func requireLiveDisplay() throws {
+    if let reason = readDisplayState().blockReason {
+        throw DriverError.displayUnavailable(reason)
+    }
 }
 
 func ensureAccessibility(prompt: Bool) throws {
@@ -807,6 +881,18 @@ func scrollWindow(
 do {
     let options = try parseOptions()
 
+    // Every command that posts synthetic input needs a live display, including
+    // `drag` (which never activates) and `activate` itself — failing on the
+    // scenario's first driver call is the clearest place to say so. AX-based
+    // and observation-only commands work fine against a sleeping display and
+    // are deliberately left alone.
+    switch options.command {
+    case "activate", "text", "key", "keycode", "click", "right_click", "scroll", "drag":
+        try requireLiveDisplay()
+    default:
+        break
+    }
+
     // HID-based commands must run against a frontmost app; AX-based and
     // observation-only commands must NOT activate (that is the whole point).
     switch options.command {
@@ -825,6 +911,9 @@ do {
         _ = try axApplication(bundleId: options.bundleId)
     case "frontmost":
         print(frontmostBundleIdentifier())
+    case "display_state":
+        let data = try JSONSerialization.data(withJSONObject: readDisplayState().asJSON, options: [.sortedKeys])
+        print(String(data: data, encoding: .utf8) ?? "{}")
     case "windowid":
         let wid = try mainWindowID(bundleId: options.bundleId, titleSubstring: options.windowTitle)
         print(wid)

@@ -1,0 +1,27 @@
+kind: fixed
+area: harness
+change: >
+  The packaged-app harness input driver now refuses to post synthetic input
+  while the display is off or the screen is locked, and says which of the two it
+  found. A new observation-only `display_state` command (`driver.displayState()`)
+  reports the same readings without touching the app.
+symptom: >
+  A scenario run against a dark display failed on a product assertion instead of
+  on the display. Input still reaches the app, but the window-server work the
+  app's handling depends on — menu-bar key equivalents, first responder,
+  rendering — does not run, so some keystrokes take effect and others silently
+  do nothing. Three TERMINAL-BLOCK-COPY runs failed this way and read as a
+  regression in terminal block copy: Cmd+Shift+C copied the command, Cmd+C
+  copied nothing, and the failure artifacts could not capture a window
+  screenshot either. The same scenario is green on the same build with the
+  display awake. Disproving it cost a full baseline build of the default branch.
+notes: >
+  `CGSSessionScreenIsLocked` is the reading that moves: it goes true the moment
+  the display goes dark, well before any password grace period expires.
+  `CGDisplayIsAsleep` was measured against `pmset displaysleepnow` on the
+  built-in display and never flips, so it cannot carry the check alone and stays
+  only as the signal for an external display that reports sleep properly. The
+  guard covers every command that posts synthetic input, including `drag` (which
+  never activates) and `activate` itself, so a scenario fails on its first
+  driver call. AX-based and observation-only commands work fine against a dark
+  display and are deliberately left alone.
