@@ -8,6 +8,21 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-08-02]
 
+### Added
+- **Terminal panes now show what they are doing.** A shell pane used to sit at
+  a grey idle dot forever; now it reads the terminal's foreground directly, so
+  it shows working while a command runs and returns to idle when the prompt
+  comes back. A long build in a terminal pane is finally visible from the
+  dashboard and the workspace roll-up. Shell panes still never enter the
+  attention queue.
+- **Command blocks and instant state edges in zsh and bash panes.** Terminal
+  panes now inject shell integration for zsh and bash, so both emit the same
+  prompt/command marks fish always has: commands become selectable blocks in
+  the terminal, and state transitions are instant and carry the command line
+  and exit code instead of waiting on the once-a-second foreground check. An
+  ssh session to a host whose shell emits the marks reports its remote prompt
+  and commands the same way. Set `ATTN_NO_SHELL_INTEGRATION=1` to opt out.
+
 ### Fixed
 - **Interrupting an agent settles its session right away.** Hitting ESC to halt
   claude, codex, or copilot mid-turn used to leave the session showing *working*

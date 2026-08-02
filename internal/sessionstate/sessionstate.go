@@ -237,6 +237,13 @@ const (
 	// visible settle that a late verdict then corrects; undershooting it
 	// reintroduces the flicker the gate exists to prevent.
 	defaultClassifierTimeout = 30 * time.Second
+	// shellHeartbeatTTL: a shell pane's heartbeat is the foreground process
+	// group, polled once a second and re-emitted on the same 1s keepalive the
+	// title observers use. 2.5s carries margin for one missed poll plus worker
+	// RPC latency. The short agent TTLs exist to stay out of the way of
+	// approval edges; a shell has no such edges, so its TTL is sized for
+	// steadiness instead.
+	shellHeartbeatTTL = 2500 * time.Millisecond
 )
 
 // PolicyFor returns the timing for an agent. An agent with no measured numbers
@@ -256,6 +263,9 @@ func PolicyFor(agent string) Policy {
 	}
 	if agent == string(protocol.SessionAgentClaude) {
 		policy.HeartbeatTTL = claudeHeartbeatTTL
+	}
+	if agent == string(protocol.SessionAgentShell) {
+		policy.HeartbeatTTL = shellHeartbeatTTL
 	}
 	return policy
 }

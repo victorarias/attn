@@ -333,10 +333,19 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		harnessSignalKind = agentdriver.EffectiveCapabilities(d).HarnessSignals
 	}
 	session.harnessSignals = newHarnessSignalObserver(harnessSignalKind)
-	if session.harnessSignals != nil && onState != nil {
+	isShellPane := agent == "shell"
+	if (session.harnessSignals != nil || isShellPane) && onState != nil {
 		session.onState = func(obs Observation) {
 			onState(opts.ID, obs)
 		}
+	}
+	// A shell has no harness to signal for it, so its heartbeat comes from the
+	// terminal itself: the foreground process group says whether a command is
+	// running, and OSC 133 markers (when the shell's integration emits them)
+	// sharpen that with instant command-start/end edges. See shell_signals.go.
+	if isShellPane && session.onState != nil {
+		session.shellSignals = newShellSignalArbiter(session.childProcessGroup())
+		go session.runShellForegroundPoller(shellForegroundPollInterval)
 	}
 
 	m.logf("pty spawn: id=%s agent=%s cwd=%s pid=%d", opts.ID, agent, opts.CWD, cmd.Process.Pid)
