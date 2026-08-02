@@ -4,7 +4,65 @@ macOS only for the **app** (the Tauri UI). Do not add Linux or Windows app
 compatibility unless requested. The **headless daemon**, however, is supported on
 Linux (amd64/arm64) — the hub cross-compiles and runs it on Linux remotes — so
 daemon-side code (`cmd/attn`, `internal/**`) must build and run on Linux too. See
-"Native VT library" below.
+"Native VT library" at the end.
+
+## What makes attn special?
+
+attn is Victor's most loved and most used piece of software. It is not widely
+used, by design — Victor doesn't want to carry a large user base — but the few
+people who run it matter to him. Maintain and iterate on it like something loved.
+
+The things we can never compromise on: frictionless experience, keyboard
+friendliness, and performance. They go hand in hand — a dropped frame or a
+forced reach for the mouse is friction. And attn runs all day, every day:
+memory that creeps or CPU burned while idle is a defect, not a footnote.
+
+## Note from Victor
+
+I love ambitious ideas and strive for simple, elegant systems. Refactoring
+first so a new feature weaves in gracefully is the norm here, not an exception
+to argue for. I work iteratively, crafting boutique software — not IKEA
+software. Nothing wrong with IKEA; it just doesn't spark passion in me. attn is
+my passion software.
+
+## You are probably running inside attn
+
+Most attn work is done from attn itself, often driven remotely. The session you
+are working in is an attn session: its PTY lives in `internal/ptyworker`, the
+daemon that owns it listens on `~/.attn/attn.sock`, and its state is in the
+production `~/.attn` database. A careless command ends your own session, or one of
+Victor's others.
+
+- Never kill by pattern. No `pkill -f attn`, no `pgrep | kill`, no killing a PID
+  you matched on a name, path, or worktree string — your own process and every
+  other live session carry those strings in their argv. Kill only a PID you
+  captured at spawn, or a port/socket owner you confirmed by its working
+  directory.
+- Production `~/.attn` is read-only to you. Copy out of it for realistic data,
+  but never point a daemon at it, never open it read-write, never clean it up.
+  See "Test safety".
+- Restart the dev daemon, never the one hosting you. Non-production builds,
+  installs, and restarts are pre-authorized precisely so you never need to touch
+  production; confirm the `[attn profile=…]` banner before any lifecycle command.
+
+## Language
+
+`docs/glossary.md` is the source of truth for attn's domain vocabulary —
+workspace context, the Notebook, tickets, delegations, turns, and friends. Read it
+before naming anything new, and when an implementation has drifted from a
+definition, fix one or the other in the same change.
+
+Several terms collide in this repo. Keep them apart:
+
+- **you** — the agent reading this file and changing attn.
+- **we**, **Victor** — who you are talking to; attn's maintainer.
+- **user** — the person using attn to direct agents. Usually Victor too, but the
+  distinction decides product questions.
+- **agent** — depending on context: you, the agent attn launches into a session
+  (Claude Code, Codex), or a delegated agent on the board. Say which whenever the
+  sentence does not make it obvious.
+- **session** — one attn-managed agent process with a PTY. Not a delegation, not
+  a workspace.
 
 ## Commands
 
@@ -37,43 +95,6 @@ pnpm --dir app run e2e
 Run full app builds/installs outside the sandbox: code signing needs the macOS
 keychain; sandboxed identity lookup can cause ad-hoc signing and lose persistent
 permissions.
-
-### Native VT library
-
-`internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
-darwin/arm64 **and** linux/amd64+arm64 (the daemon's restore path serializes on
-Linux too); every other target compiles a pure-Go stub. The `//go:build`
-constraint and the per-tuple `#cgo` directives in `ghosttyvt.go` must stay in
-lockstep with the supported-platform list in `scripts/lib/libghostty-vt.sh` and
-the Makefile. The static archive is **per platform**, living under gitignored
-`third_party/ghostty-vt/<goos>_<goarch>/`. On a fresh checkout it is absent, so
-the `build` target depends on the archive for the platform it targets and
-`scripts/build-libghostty-vt.sh` runs automatically on the first `make build`/
-`make dev`/`make install*` (and cross builds via `make build-linux-{amd64,arm64}`
-or `GOOS=… GOARCH=… make build`).
-
-**Download-first (no zig for most contributors, and none in CI/release).** The
-script fetches the prebuilt archive **for the target platform** — assets are
-named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
-(`ghostty-vt-native.pin`) plus the carried `ghostty-vt-native.patch` — from the
-rolling `native-vt-prebuilts` GitHub release and verifies it against the
-matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
-key is shared across platforms (same source); the lock carries one sha per
-platform. The repo is public, so this needs only network access. A **source
-build (zig 0.16.x)** happens only when you have edited the pin/patch (no
-published asset for the new key yet), when the download/verify fails, or when
-`ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
-script to a target when cross-building (the Makefile sets them).
-
-**Changing the VT source.** After editing `ghostty-vt-native.pin` or
-`ghostty-vt-native.patch`, run `make publish-native-vt`
-(`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported target
-from one host (needs zig 0.16.x and an authenticated `gh`), uploads all the keyed
-assets, and rewrites `ghostty-vt-native.lock` with the shared key + per-platform
-shas. **Commit the regenerated lock** — the Makefile depends on it, so committing
-it is what makes every other checkout re-fetch. Shared logic lives in
-`scripts/lib/libghostty-vt.sh`. See
-[docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 
 ## Profiles and live verification
 
@@ -135,6 +156,61 @@ Use the bundled CLI, not an unrelated `attn` on `PATH`. Preflight is diagnostic;
 fix reported tool/path/routing/daemon/protocol failures before treating scenario
 output as product evidence.
 
+### Packaged-app harness
+
+- Single-tenant: never run packaged-app scenarios in parallel.
+- Multiple scenarios: `pnpm --dir app run real-app:serial-matrix`.
+- Rebuild before evidence-sensitive runs.
+- Harness uses active `ATTN_PROFILE`, otherwise `dev`;
+  `ATTN_HARNESS_PROFILE` overrides it.
+- Production requires both `ATTN_HARNESS_PROFILE=` and `--run-against-prod`.
+- On failure, inspect captured pane text and native screenshots before diagnosis.
+- Remote scenarios target the local OrbStack VM (`attn-remote@orb`); provision with `pnpm --dir app run real-app:provision-remote`.
+
+## Hit every surface
+
+The most common defect is a change that works on the path you tested and is
+missing everywhere else. The verification tier above decides how hard to check;
+this decides what you forgot. Before calling work done, walk the list and say
+which entries applied:
+
+- **CLI.** `cmd/attn`. Behavior reachable from the app is usually also expected
+  from the command line, and headless or remote users have only the CLI.
+- **Daemon and app.** Most `internal/**` work reaches the app — protocol,
+  persisted state and its broadcasts, WebSocket events, PTY, PR/git flows. The
+  app's reaction is part of the behavior, not a follow-up.
+- **Protocol.** `generated.ts` moves with `generated.go` and `ProtocolVersion`
+  increments. Never hand-edit either.
+- **Linux.** `cmd/attn` and `internal/**` cross-compile and run on Linux remotes.
+  Darwin-only code needs a build constraint and a stub, not an assumption.
+- **Plugins and SDK.** `plugins/` and `sdk/` consume the same surfaces.
+- **Docs.** New vocabulary in `docs/glossary.md`, design and gate decisions in
+  `docs/plans/`, user-visible behavior in a `changelog.d/` fragment.
+
+If you added a way in, add the way out and the way to see it. Snooze needs
+unsnooze, an opened turn needs a way to settle, `bus disable` needs `bus enable`,
+a created profile needs `profile clean`. A one-way door is a bug.
+
+## Test safety
+
+Tests must never resolve `config.DataDir()` or derived paths to production
+`~/.attn`.
+
+- Scope with `ATTN_DATA_DIR`; never redirect `HOME`.
+- Any package reaching config paths must define `TestMain`, create one temp dir,
+  and call `config.ScopeTestEnvironment(dir)` before `m.Run()`.
+- Do not replace that call with raw `os.Setenv`: the helper also clears inherited
+  `ATTN_DB_PATH`, `ATTN_SOCKET_PATH`, `ATTN_CONFIG_PATH`, and `ATTN_PLUGIN_DIR`.
+- Individual tests may add `t.Setenv("ATTN_DATA_DIR", t.TempDir())`.
+- Under `go test`, missing `ATTN_DATA_DIR` intentionally panics.
+
+See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-mitigation.md).
+
+## Pull requests
+
+PR policy — ready-for-review, rebase onto main first, who approves — comes from
+the global guide. What is attn-specific is how you wait on one.
+
 To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
 --reviewer <login>` once; do not poll checks, reviews, and comments separately.
 It returns on the first poll with an actionable update and reports it by exit
@@ -159,31 +235,25 @@ lands while you are answering the last one is still reported, and a failing chec
 you were already told about does not return instantly a second time. `--reset`
 forgets that position and `--since <RFC3339>` replays from an instant.
 
-### Packaged-app harness
+## Change discipline
 
-- Single-tenant: never run packaged-app scenarios in parallel.
-- Multiple scenarios: `pnpm --dir app run real-app:serial-matrix`.
-- Rebuild before evidence-sensitive runs.
-- Harness uses active `ATTN_PROFILE`, otherwise `dev`;
-  `ATTN_HARNESS_PROFILE` overrides it.
-- Production requires both `ATTN_HARNESS_PROFILE=` and `--run-against-prod`.
-- On failure, inspect captured pane text and native screenshots before diagnosis.
-- Remote scenarios target the local OrbStack VM (`attn-remote@orb`); provision with `pnpm --dir app run real-app:provision-remote`.
-
-## Test safety
-
-Tests must never resolve `config.DataDir()` or derived paths to production
-`~/.attn`.
-
-- Scope with `ATTN_DATA_DIR`; never redirect `HOME`.
-- Any package reaching config paths must define `TestMain`, create one temp dir,
-  and call `config.ScopeTestEnvironment(dir)` before `m.Run()`.
-- Do not replace that call with raw `os.Setenv`: the helper also clears inherited
-  `ATTN_DB_PATH`, `ATTN_SOCKET_PATH`, `ATTN_CONFIG_PATH`, and `ATTN_PLUGIN_DIR`.
-- Individual tests may add `t.Setenv("ATTN_DATA_DIR", t.TempDir())`.
-- Under `go test`, missing `ATTN_DATA_DIR` intentionally panics.
-
-See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-mitigation.md).
+- Diagnose root cause. Do not remove requested behavior without explicit
+  approval. For refactors, list and verify behaviors that must survive.
+- Do not copy production code into tests or test compile-time guarantees.
+- Every PR adds a changelog fragment under `changelog.d/` — CI enforces it.
+  Do not edit `CHANGELOG.md` directly; it is compiled from fragments at
+  release time. Format and release process:
+  [docs/making-a-release.md](docs/making-a-release.md).
+- Complexity belongs at the boundary. The daemon owns orchestration and stays
+  authoritative (`applyState`, `wireProjections`); the frontend renders what it
+  is told.
+- No continuously repainting animations. attn renders GPU terminals, often on
+  high-refresh displays, beside agents that run all day — a permanent repaint
+  loop is a battery and thermal bug no test will catch.
+- Comments describe how a thing is used, and move when the code moves. Mostly on
+  functions and seams, not annotating every line.
+- Conventional commit titles with a scope, in plain language:
+  `fix(queue): hand over the next agent however a turn closes`.
 
 ## Architecture
 
@@ -358,12 +428,39 @@ Packaged-app default menu accelerators can consume shortcuts before DOM keydown.
   `$APPLOCALDATA/debug/<name>.jsonl`; follow `terminalDiagnosticsLog.ts` or
   `terminalLinkHitTestLog.ts`; remove temporary instrumentation after the fix.
 
-## Change discipline
+## Native VT library
 
-- Diagnose root cause. Do not remove requested behavior without explicit
-  approval. For refactors, list and verify behaviors that must survive.
-- Do not copy production code into tests or test compile-time guarantees.
-- Every PR adds a changelog fragment under `changelog.d/` — CI enforces it.
-  Do not edit `CHANGELOG.md` directly; it is compiled from fragments at
-  release time. Format and release process:
-  [docs/making-a-release.md](docs/making-a-release.md).
+`internal/ghosttyvt` links `libghostty-vt` (Ghostty's VT core) via cgo on
+darwin/arm64 **and** linux/amd64+arm64 (the daemon's restore path serializes on
+Linux too); every other target compiles a pure-Go stub. The `//go:build`
+constraint and the per-tuple `#cgo` directives in `ghosttyvt.go` must stay in
+lockstep with the supported-platform list in `scripts/lib/libghostty-vt.sh` and
+the Makefile. The static archive is **per platform**, living under gitignored
+`third_party/ghostty-vt/<goos>_<goarch>/`. On a fresh checkout it is absent, so
+the `build` target depends on the archive for the platform it targets and
+`scripts/build-libghostty-vt.sh` runs automatically on the first `make build`/
+`make dev`/`make install*` (and cross builds via `make build-linux-{amd64,arm64}`
+or `GOOS=… GOARCH=… make build`).
+
+**Download-first (no zig for most contributors, and none in CI/release).** The
+script fetches the prebuilt archive **for the target platform** — assets are
+named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
+(`ghostty-vt-native.pin`) plus the carried `ghostty-vt-native.patch` — from the
+rolling `native-vt-prebuilts` GitHub release and verifies it against the
+matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
+key is shared across platforms (same source); the lock carries one sha per
+platform. The repo is public, so this needs only network access. A **source
+build (zig 0.16.x)** happens only when you have edited the pin/patch (no
+published asset for the new key yet), when the download/verify fails, or when
+`ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
+script to a target when cross-building (the Makefile sets them).
+
+**Changing the VT source.** After editing `ghostty-vt-native.pin` or
+`ghostty-vt-native.patch`, run `make publish-native-vt`
+(`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported target
+from one host (needs zig 0.16.x and an authenticated `gh`), uploads all the keyed
+assets, and rewrites `ghostty-vt-native.lock` with the shared key + per-platform
+shas. **Commit the regenerated lock** — the Makefile depends on it, so committing
+it is what makes every other checkout re-fetch. Shared logic lives in
+`scripts/lib/libghostty-vt.sh`. See
+[docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).

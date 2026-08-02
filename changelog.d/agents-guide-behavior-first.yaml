@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  AGENTS.md restructured behavior-first (values and safety up top, build
+  reference at the end) and extended: what makes attn special, note from
+  Victor, running-inside-attn safety, language/glossary, hit-every-surface
+  checklist, and change-discipline additions.
