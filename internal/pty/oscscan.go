@@ -2,10 +2,13 @@ package pty
 
 // A read-only OSC scanner.
 //
-// The OSC 133 segmenter in osc133.go cannot be reused for this: it *strips* the
-// markers it finds, because OSC 133 produces no cells and the server-
-// authoritative restore rebuilds blocks from structured data rather than by
-// re-emitting markers into the VT dump. OSC 0 (window title) and OSC 777
+// The feed segmenter in kittyseg.go cannot be reused for this: it *strips* the
+// OSC 133 markers it finds, so that the server-authoritative restore rebuilds
+// blocks from structured data rather than by re-emitting markers into the VT
+// dump — and so that the marker's own grid effect stays off the worker's
+// terminal, which matters because native ghostty breaks the line on a mid-line
+// `OSC 133;A` and the wasm build the app renders does not (see wirefeed.go).
+// OSC 0 (window title) and OSC 777
 // (desktop notification) are different — the title is real terminal state the
 // client must keep, so nothing here may alter the byte stream. This scanner only
 // looks.

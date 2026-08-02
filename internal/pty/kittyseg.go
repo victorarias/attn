@@ -643,9 +643,12 @@ func (s *feedSegmenter) hold(buffer []byte, carried bool, from, resumeAt int) {
 		s.resume = resumeAt - from
 		return
 	}
-	// Everything else held here is at most a partial introducer, so copying it
-	// into a fresh slice costs two bytes and hands back whatever capacity an
-	// APC that just finished in this same call had grown to.
+	// Everything else held here is small: a partial introducer, a partial OSC
+	// 133 prefix, or a marker body still short of its terminator — bounded by
+	// osc133MarkerMaxPendingBytes rather than by the APC tripwire, and in
+	// practice a handful of bytes. Copying it into a fresh slice hands back
+	// whatever capacity an APC that just finished in this same call had grown
+	// to, which is the whole point of not carrying the buffer forward.
 	s.pending = append([]byte(nil), buffer[from:]...)
 	s.resume = resumeAt - from
 }

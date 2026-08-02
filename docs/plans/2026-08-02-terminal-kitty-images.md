@@ -359,13 +359,20 @@ to remove. Verified both directions: with the marker withheld the wasm replay
 agrees with the worker; with it written, the same entry goes red in the Go
 recording and the wasm replay at once.
 
+The client's indifference is the wasm build's own, not something the app arranges:
+the frontend never filters markers out before writing. `terminalOsc133.ts` tees —
+its segments span the whole `ESC ] 133 ; … BEL`, and `GhosttyTerminal.tsx` writes
+`segment.bytes` through to the wasm terminal and calls `blockStore.applyMarker`
+separately. So the marker bytes do reach the model, and it simply does not act on
+them at this pin.
+
 So today's disposal is correct and load-bearing rather than incidental, and
 `internal/pty/testdata/kitty_rewrite_corpus.json` pins it under
 "a prompt marker after output with no trailing newline" — output with no
 trailing newline, then a prompt marker, recorded with the worker NOT breaking
 the line and replayed into real wasm to prove the client agrees.
 
-Two consequences worth carrying forward:
+Three consequences worth carrying forward:
 
 - **The Go-side client model had to be corrected, not the feed path.** The
   corpus replay and the mirror fuzz targets stand a native terminal in for the
@@ -381,6 +388,15 @@ Two consequences worth carrying forward:
   a malformed stream. It closes when the pins converge; until then it is a known
   limit rather than a bug to chase, and `writeAsClient` deliberately does not
   paper over it.
+- **A wasm pin bump can flip the whole conclusion, so it is tripwired.** Every
+  argument above rests on the shipped ghostty-web ignoring `133;A`, which is a
+  property of one pin and not a guarantee. The corpus entry is the guard: its
+  WIRE carries the marker, and the wasm parity test replays that wire RAW — no
+  `writeAsClient`, no filtering — into the real shipped module, so it passes only
+  while the actual wasm still treats the marker as grid-inert. A pin that
+  implements prompt-start reddens it on the next run, which reopens the disposal
+  question with evidence instead of letting a grid drift in production. Note the
+  asymmetry on purpose: the Go-side stand-in is shimmed, the wasm witness is not.
 
 ### A3 — protocol + frontend rendering
 

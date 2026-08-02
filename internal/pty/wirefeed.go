@@ -186,12 +186,14 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 			// is load-bearing rather than incidental. A marker is NOT inert in
 			// the native ghostty the worker links: measured, `OSC 133;A` with
 			// the cursor mid-line breaks the line, because a prompt starts on a
-			// fresh one. The wasm ghostty the app renders is a different pin
-			// and does not, so writing markers to the worker terminal would
-			// move the worker's grid and not the client's — the exact
-			// divergence this file exists to prevent. See the corpus entry
-			// "a prompt marker after output with no trailing newline", which
-			// pins both sides, and the pin-skew note in the plan.
+			// fresh one. The wasm ghostty the app renders is a different pin and
+			// does not — and it is fed the marker bytes, unfiltered, by
+			// GhosttyTerminal; it simply does not act on them. So writing
+			// markers to the worker terminal would move the worker's grid and
+			// not the client's, the exact divergence this file exists to
+			// prevent. The corpus entry "a prompt marker after output with no
+			// trailing newline" is the witness, and is tripwired against a wasm
+			// pin bump: see the pin-skew note in the plan.
 			f.wire = append(f.wire, seg.Bytes...)
 			f.blocks.mark(seg.Marker)
 		}

@@ -367,12 +367,22 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			//
 			// `OSC 133;A` is not inert in the NATIVE ghostty the worker links:
 			// with the cursor mid-line it breaks the line, because a prompt
-			// starts on a fresh one. The wasm ghostty this corpus replays into
-			// is a different pin and does not. Stripping is what keeps them
-			// equal, so this entry records a worker that did NOT break the line
-			// (`out$ ls`) and the replay proves the client agrees. Feed the
-			// marker to the worker terminal and this entry goes red on both
-			// sides at once — the Go recording and the wasm replay.
+			// starts on a fresh one. The wasm build the app renders is a
+			// different pin and does not. Stripping is what bridges the two, so
+			// this entry records a worker that did NOT break the line
+			// (`out$ ls`).
+			//
+			// This is the tripwire for that asymmetry, and it is the one place
+			// it is checked against the real thing. The wire here carries the
+			// marker verbatim, and the wasm parity test replays the wire RAW —
+			// no writeAsClient, no filtering — into the shipped ghostty-web
+			// module. So the entry passes only while the actual shipped wasm
+			// still treats `133;A` as grid-inert. Bump ghostty-web to a pin that
+			// implements prompt-start and this goes red immediately, which is
+			// the signal to reopen the disposal question with evidence rather
+			// than discover it as a drifting grid. Feeding the marker to the
+			// worker terminal fails it from the other direction, reddening the
+			// Go recording and the wasm replay at once.
 			name: "a prompt marker after output with no trailing newline",
 			cols: 20, rows: 8,
 			chunks: []string{"out", "\x1b]133;A\x1b\\", "$ ls\r\n", "\x1b]133;D;0\x07"},
