@@ -152,20 +152,20 @@ var kittySegBattery = []kittySegCase{
 		want:  []kittyEmission{plainEmission("a\x1b\\b")},
 	},
 	{
-		name:  "an esc before the introducer stays plain",
+		// ESC ESC leaves ghostty mid-escape, so the _G that follows opens its
+		// APC from there and not from ground. Extracting it would carry the
+		// second ESC off the wire and leave the client's parser one escape
+		// behind — measured divergence, so the whole run stays plain.
+		name:  "an esc before the introducer keeps the apc on the wire",
 		input: "\x1b" + kittyRecovered,
-		want: []kittyEmission{
-			plainEmission("\x1b"),
-			apcEmission(kittyRecovered),
-		},
+		want:  []kittyEmission{plainEmission("\x1b" + kittyRecovered)},
 	},
 	{
-		name:  "a lone esc between two apcs stays plain",
+		name:  "a lone esc between two apcs suppresses the second",
 		input: kittyDirectRGB + "\x1b" + kittyRecovered,
 		want: []kittyEmission{
 			apcEmission(kittyDirectRGB),
-			plainEmission("\x1b"),
-			apcEmission(kittyRecovered),
+			plainEmission("\x1b" + kittyRecovered),
 		},
 	},
 	{
@@ -176,13 +176,12 @@ var kittySegBattery = []kittySegCase{
 		want:  []kittyEmission{plainEmission(kittyIntro + "a=T,f=24;AAAA\x1b[0mback to text")},
 	},
 	{
-		name:  "a stray esc that starts a new apc still yields that apc",
+		// The ESC that abandons the first APC is also what opens the second, so
+		// the second cannot be cut out without taking the first one's exit with
+		// it. Both stay on the wire and both parsers cut them in the same place.
+		name:  "a stray esc that starts a new apc keeps both on the wire",
 		input: kittyIntro + "a=T;AA" + kittyRecovered + "tail",
-		want: []kittyEmission{
-			plainEmission(kittyIntro + "a=T;AA"),
-			apcEmission(kittyRecovered),
-			plainEmission("tail"),
-		},
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA" + kittyRecovered + "tail")},
 	},
 	{
 		name:  "an abandoned apc does not hide a later one",
@@ -217,10 +216,216 @@ var kittySegBattery = []kittySegCase{
 		pending: kittyIntro + "a=T;AA\x1b",
 	},
 	{
-		name:    "an abandoned apc followed by a partial introducer",
-		input:   kittyIntro + "a=T;AA\x1b_",
-		want:    []kittyEmission{plainEmission(kittyIntro + "a=T;AA")},
-		pending: "\x1b_",
+		// The ESC abandons the APC and the _ that follows opens another one, so
+		// there is no introducer to complete and nothing to hold: an ESC _ is a
+		// candidate introducer only in ground.
+		name:  "an abandoned apc followed by a partial introducer holds nothing",
+		input: kittyIntro + "a=T;AA\x1b_",
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA\x1b_")},
+	},
+
+	// --- Foreign strings. An APC pattern inside one is text to ghostty, and
+	// cutting it out would take the string's own bytes off the wire.
+	{
+		// The smallest fuzz reproducer of the framing disagreement this machine
+		// exists to remove: the ESC \ ends the SOS, not an APC, and the client
+		// needs it to start printing again.
+		name:  "an apc pattern inside an sos string stays plain",
+		input: "\x1bX" + kittyIntro + kittyST + "0",
+		want:  []kittyEmission{plainEmission("\x1bX" + kittyIntro + kittyST + "0")},
+	},
+	{
+		name:  "an apc pattern inside an osc stays plain",
+		input: "\x1b]0;title" + kittyIntro + "a=T;AA\x07tail",
+		want:  []kittyEmission{plainEmission("\x1b]0;title" + kittyIntro + "a=T;AA\x07tail")},
+	},
+	{
+		name:  "an apc pattern inside a dcs stays plain",
+		input: "\x1bP1$r" + kittyIntro + "a=T;AA" + kittyST + "tail",
+		want:  []kittyEmission{plainEmission("\x1bP1$r" + kittyIntro + "a=T;AA" + kittyST + "tail")},
+	},
+	{
+		name:  "an apc pattern inside a pm string stays plain",
+		input: "\x1b^note" + kittyIntro + "a=T;AA" + kittyST + "tail",
+		want:  []kittyEmission{plainEmission("\x1b^note" + kittyIntro + "a=T;AA" + kittyST + "tail")},
+	},
+	{
+		name:  "an apc pattern inside a foreign apc stays plain",
+		input: "\x1b_Zvendor" + kittyIntro + "a=T;AA" + kittyST + "tail",
+		want:  []kittyEmission{plainEmission("\x1b_Zvendor" + kittyIntro + "a=T;AA" + kittyST + "tail")},
+	},
+	{
+		// Each foreign string ends where ghostty ends it, and the very next
+		// introducer is extractable again. This is the pair that proves the
+		// machine is tracking a mode rather than refusing to work after an ESC.
+		name:  "an apc after a terminated sos is extracted",
+		input: "\x1bXsos" + kittyST + kittyDirectRGB + "tail",
+		want: []kittyEmission{
+			plainEmission("\x1bXsos" + kittyST),
+			apcEmission(kittyDirectRGB),
+			plainEmission("tail"),
+		},
+	},
+	{
+		name:  "an apc after a bel-terminated osc is extracted",
+		input: "\x1b]0;title\x07" + kittyDirectRGB + "tail",
+		want: []kittyEmission{
+			plainEmission("\x1b]0;title\x07"),
+			apcEmission(kittyDirectRGB),
+			plainEmission("tail"),
+		},
+	},
+	{
+		// Measured: C1 ST ends every string type EXCEPT an OSC, so the same
+		// byte closes an SOS and is payload inside an OSC.
+		name:  "c1 st ends an sos but not an osc",
+		input: "\x1bXsos\x9c" + kittyDirectRGB + "\x1b]0;t\x9c" + kittyRecovered + "\x07" + kittyQuery,
+		want: []kittyEmission{
+			plainEmission("\x1bXsos\x9c"),
+			apcEmission(kittyDirectRGB),
+			plainEmission("\x1b]0;t\x9c" + kittyRecovered + "\x07"),
+			apcEmission(kittyQuery),
+		},
+	},
+	{
+		// A raw C1 introducer opens a string from escape state but is ordinary
+		// text in ground, so only the first of these two hides its APC.
+		name:  "a c1 introducer opens a string only after an esc",
+		input: "\x1b\x9e" + kittyIntro + "a=T;AA" + kittyST + "\x9e" + kittyDirectRGB,
+		want: []kittyEmission{
+			plainEmission("\x1b\x9e" + kittyIntro + "a=T;AA" + kittyST + "\x9e"),
+			apcEmission(kittyDirectRGB),
+		},
+	},
+
+	// --- Control bytes that cut a kitty APC short. Ghostty ends the sequence
+	// on each of them, so the segmenter must too, and none of them can be
+	// stripped: the byte has its own effect on the grid.
+	{
+		// The second fuzz reproducer: 0x84 (IND) ends the APC and scrolls, then
+		// the 0 prints and the ESC \ is a lone ST.
+		name:  "an ind inside the payload ends the apc",
+		input: kittyIntro + "a=T;AA\x840" + kittyST,
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA\x840" + kittyST)},
+	},
+	{
+		name:  "a can inside the payload ends the apc",
+		input: kittyIntro + "a=T;AA\x18text",
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA\x18text")},
+	},
+	{
+		name:  "a sub inside the payload ends the apc",
+		input: kittyIntro + "a=T;AA\x1atext",
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;AA\x1atext")},
+	},
+	{
+		// Ground is reached again the moment the aborting byte lands, so the
+		// next introducer is extractable — including immediately after it.
+		name:  "an apc right after an aborting byte is extracted",
+		input: kittyIntro + "a=T;AA\x18" + kittyDirectRGB + "tail",
+		want: []kittyEmission{
+			plainEmission(kittyIntro + "a=T;AA\x18"),
+			apcEmission(kittyDirectRGB),
+			plainEmission("tail"),
+		},
+	},
+	{
+		// Measured by dispatch, not by spec: a command carrying 98, 9e or 9f in
+		// its control section still parses whole, so inside a string those three
+		// are payload and the APC terminates normally.
+		name:  "c1 sos, pm and apc bytes are ordinary payload",
+		input: kittyIntro + "a=T;A\x98B\x9eC\x9fD" + kittyST + "tail",
+		want: []kittyEmission{
+			apcEmission(kittyIntro + "a=T;A\x98B\x9eC\x9fD" + kittyST),
+			plainEmission("tail"),
+		},
+	},
+	{
+		// The other three C1 introducers do cut the APC short: the command
+		// dispatches truncated at the byte and a DCS takes over, so the ST that
+		// follows closes THAT and not the APC. Extracting through it would take
+		// the DCS's terminator off the wire.
+		name:  "a c1 dcs byte ends the apc and opens a string",
+		input: kittyIntro + "a=T;A\x90B" + kittyST + "tail",
+		want:  []kittyEmission{plainEmission(kittyIntro + "a=T;A\x90B" + kittyST + "tail")},
+	},
+	{
+		// 9b opens a CSI, which ends at its own final byte rather than at ST —
+		// the clearest proof the machine is tracking the nested sequence and not
+		// just refusing to work after a C1.
+		name:  "a c1 csi byte ends the apc and the next apc is extracted",
+		input: kittyIntro + "a=T;A\x9b0m" + kittyDirectRGB,
+		want: []kittyEmission{
+			plainEmission(kittyIntro + "a=T;A\x9b0m"),
+			apcEmission(kittyDirectRGB),
+		},
+	},
+	{
+		// 9d opens an OSC, which ends on BEL and not on C1 ST.
+		name:  "a c1 osc byte ends the apc and swallows to bel",
+		input: kittyIntro + "a=T;A\x9dtitle\x07" + kittyDirectRGB,
+		want: []kittyEmission{
+			plainEmission(kittyIntro + "a=T;A\x9dtitle\x07"),
+			apcEmission(kittyDirectRGB),
+		},
+	},
+	{
+		// C1 ST terminates a kitty APC exactly as ESC \ does, so it is cut and
+		// stripped with the sequence rather than left on the wire.
+		name:  "c1 st terminates and is stripped with the apc",
+		input: "head" + kittyIntro + "a=T,f=24;AAAA\x9ctail",
+		want: []kittyEmission{
+			plainEmission("head"),
+			apcEmission(kittyIntro + "a=T,f=24;AAAA\x9c"),
+			plainEmission("tail"),
+		},
+	},
+
+	// --- CSI and escape state. Neither can host an extraction, and both have
+	// their own way back to ground.
+	{
+		name:  "an apc that cancels a csi stays plain",
+		input: "\x1b[1" + kittyRecovered + "tail",
+		want:  []kittyEmission{plainEmission("\x1b[1" + kittyRecovered + "tail")},
+	},
+	{
+		name:  "an apc after a finished csi is extracted",
+		input: "\x1b[1;31m" + kittyDirectRGB + "tail",
+		want: []kittyEmission{
+			plainEmission("\x1b[1;31m"),
+			apcEmission(kittyDirectRGB),
+			plainEmission("tail"),
+		},
+	},
+	{
+		name:  "a can ends a csi and the next apc is extracted",
+		input: "\x1b[1\x18" + kittyDirectRGB,
+		want: []kittyEmission{
+			plainEmission("\x1b[1\x18"),
+			apcEmission(kittyDirectRGB),
+		},
+	},
+	{
+		// An escape with intermediates reaches ground only at its final byte.
+		name:  "an apc after a charset designation is extracted",
+		input: "\x1b(B" + kittyDirectRGB,
+		want: []kittyEmission{
+			plainEmission("\x1b(B"),
+			apcEmission(kittyDirectRGB),
+		},
+	},
+	{
+		name:    "the stream ends mid-escape and the next chunk decides",
+		input:   "\x1b[1;31m\x1b",
+		want:    []kittyEmission{plainEmission("\x1b[1;31m")},
+		pending: "\x1b",
+	},
+	{
+		// Nothing is ever held outside ground: the wire must not stall behind a
+		// string whose end the segmenter is not waiting for.
+		name:  "an unterminated foreign string holds nothing",
+		input: "\x1bXsos and more",
+		want:  []kittyEmission{plainEmission("\x1bXsos and more")},
 	},
 }
 
@@ -454,9 +659,17 @@ func TestKittyAPCSegmenterAbandonsAnOversizedAPC(t *testing.T) {
 		t.Fatalf("the oversized apc left %d bytes pending, want none", len(seg.pending))
 	}
 
+	// Flushing does not put the stream back in ground: ghostty is still inside
+	// the APC it was never handed a terminator for, and so is the client that
+	// received the same bytes. Recovery is whatever ends that sequence — here
+	// the next escape's own ST — after which extraction resumes.
 	emissions := feedKitty(t, &seg, kittyRecovered, nil)
-	if !kittyEmissionsEqual(emissions, []kittyEmission{apcEmission(kittyRecovered)}) {
-		t.Fatalf("after abandoning, got %s, want the next apc", formatKittyEmissions(emissions))
+	if !kittyEmissionsEqual(emissions, []kittyEmission{plainEmission(kittyRecovered)}) {
+		t.Fatalf("while the flooded apc is still open, got %s, want it all plain", formatKittyEmissions(emissions))
+	}
+	emissions = feedKitty(t, &seg, kittyDirectRGB, nil)
+	if !kittyEmissionsEqual(emissions, []kittyEmission{apcEmission(kittyDirectRGB)}) {
+		t.Fatalf("after recovering, got %s, want the next apc", formatKittyEmissions(emissions))
 	}
 	if seg.pending != nil {
 		t.Fatalf("pending %q, want nothing held", seg.pending)

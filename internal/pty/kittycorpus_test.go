@@ -280,17 +280,60 @@ func kittyCorpusInputs() []kittyCorpusInput {
 		},
 		{
 			// PROBED, and pinned as measured: on a brand-new PRIMARY screen the
-			// cursor sits on absolute row 0, so a placement that scrolls pushes
-			// the anchor cell to the top of retained history — where the clamp
-			// guard cannot tell "retained at row 0" from "discarded and clamped
-			// there". It resyncs. The anchor is in fact intact (the primary
-			// screen keeps history), so this re-push is not needed; it is the
-			// accepted cost of a guard that must never guess, and it costs one
-			// snapshot on the first image of a session that has printed nothing.
-			// Pinned here so a future synthesis change has to look at it.
+			// cursor sits on absolute row 0, and a placement that scrolls pushes
+			// the anchor cell into retained history — where the pin keeps
+			// reporting a real row, so the scroll is fully visible and the wire
+			// carries it. The clamp guard deliberately does not fire here; the
+			// alternate-screen entry below is the one it exists for.
 			name: "first line of a fresh primary screen, image tall enough to scroll",
 			cols: 20, rows: 8,
 			chunks: []string{kittyPlaceRGB(22, 16, 160, "")},
+		},
+		{
+			// The two smallest streams the fuzzer found against the old
+			// byte-pattern segmenter, kept as corpus entries because they are
+			// the exact shapes a framing regression reintroduces. Here the ESC
+			// backslash ends the SOS string, NOT an APC: cutting the APC pattern
+			// out took the SOS's terminator with it and the client swallowed
+			// everything after.
+			name: "an apc pattern inside an sos string",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1bX\x1b_G\x1b\\0 done"},
+		},
+		{
+			// And here a C1 control ends the APC for ghostty but did not for the
+			// segmenter, so the wire lost the bytes that print.
+			name: "a c1 control ends an apc before its terminator",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1b_Ga=T,i=41,f=24,t=d,s=8,v=16;\x840 done\x1b\\"},
+		},
+		{
+			// The same disagreement one layer up: the ESC that abandons an APC
+			// is also what opens the next one, so neither can be extracted.
+			name: "an apc opened by the escape that abandoned the previous one",
+			cols: 20, rows: 8,
+			chunks: []string{"A" + kittyPlaceRGB(43, 8, 16, "") + "B"},
+		},
+		{
+			// An APC ghostty DOES parse as kitty but the segmenter must not cut
+			// out, because the ESC that introduces it is also what cancels the
+			// unfinished CSI before it. The bytes go to the wire whole, which
+			// keeps the two parsers in step — but the client cannot parse kitty,
+			// so the image the worker placed is on one grid only and the feeder
+			// resyncs. Reachable only once kitty storage is live.
+			name: "an apc that cancels an unfinished csi",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1b[1" + kittyPlaceRGB(44, 8, 16, "") + " done"},
+		},
+		{
+			// The mode has to survive a chunk boundary in every one of these
+			// states, which is the whole reason it is carried on the segmenter
+			// rather than recomputed per call. The APC pattern inside the OSC is
+			// text to ghostty; the one after it is a real kitty APC introduced
+			// from escape state, so it reaches the terminal whole and resyncs.
+			name: "a foreign string split across feed chunks around an apc pattern",
+			cols: 20, rows: 8,
+			chunks: []string{"\x1b]0;ti", "tle\x1b_Ga=T,i=42;AA", "\x07", kittyPlaceRGB(45, 8, 16, ""), " done"},
 		},
 		{
 			// The alternate screen keeps no history at all, so the same clamp
@@ -484,5 +527,145 @@ func writeKittyCorpus(t *testing.T, entries []kittyCorpusEntry) {
 	}
 	if err := os.WriteFile(kittyCorpusPath(), append(raw, '\n'), 0o644); err != nil {
 		t.Fatalf("write %s: %v", kittyCorpusFileName, err)
+	}
+}
+
+// --- The framing half of the same parity question -------------------------
+//
+// The corpus above proves the synthesized bytes mean the same thing to both
+// runtimes. This proves the segmenter cuts them out in the right place, which
+// is a question only ghostty's own parser can answer.
+//
+// Extraction removes bytes from the wire, so it is safe exactly when the
+// removed run is a whole sequence to both parsers. The leading ESC of a kitty
+// APC does double duty outside ground — it also ends whatever was open — so
+// taking the APC away would take that exit with it. kittyseg.go therefore
+// tracks where ghostty's parser stands and extracts only from ground. Every
+// transition in that machine is measured, and this is the measurement: for a
+// large set of byte sequences, the segmenter's idea of ground must equal
+// ghostty's, byte for byte.
+
+// kittyGroundProbeBytes is the alphabet the exhaustive walk below explores. It
+// carries one byte from every class the machine distinguishes: the string and
+// CSI introducers in both their 7-bit and raw C1 forms, the terminators, the
+// aborting controls, an escape intermediate, a final, and ordinary text.
+var kittyGroundProbeBytes = []byte{
+	0x00, 0x07, 0x18, 0x1a, 0x1b, 0x20, 0x28, 0x30, 0x47, 0x50, 0x5b, 0x5c,
+	0x5d, 0x5e, 0x5f, 0x6d, 0x7f, 0x80, 0x84, 0x90, 0x98, 0x9b, 0x9c, 0x9d,
+	0x9e, 0x9f, 0xff,
+}
+
+// kittyGroundNamedPrefixes puts the walk down inside each parser state so the
+// full 256-byte sweep that follows starts somewhere interesting rather than
+// only in ground.
+var kittyGroundNamedPrefixes = []string{
+	"",
+	"\x1b",
+	"\x1b\x1b",
+	"\x1b(",
+	"\x1b[1",
+	"\x1b]0;t",
+	"\x1bP1$r",
+	"\x1bXsos",
+	"\x1b^pm",
+	"\x1b_Zvendor",
+	"\x1b_Ga=T,f=24;AA",
+	"\x1b_Ga=T;AA\x1b",
+	"\x1b_Ga=T;AA\x18",
+	"\x1b]0;t\x1b",
+	"\x1b[1\x1b",
+}
+
+// ghosttyInGround reports whether ghostty's parser is in ground after input, by
+// the only signal the API exposes: a printable ADVANCES THE CURSOR there and
+// nowhere else — a string swallows it, an escape or CSI consumes it as a final.
+//
+// The cursor, not the printed text: the input is arbitrary under fuzzing and may
+// contain the probe character itself, which a "did it appear on screen" test
+// cannot tell apart from one the probe wrote. The CR normalizes the column
+// first, so the one printable that MOVES the cursor as a final byte (CSI Z,
+// cursor backward tab) has nowhere left to go and cannot read as ground.
+func ghosttyInGround(t *testing.T, input string) bool {
+	t.Helper()
+	term, err := ghosttyvt.New(20, 4, ghosttyvt.Options{})
+	if err != nil {
+		t.Fatalf("ghosttyvt.New: %v", err)
+	}
+	defer term.Close()
+	term.Write([]byte(input))
+	term.Write([]byte("\r"))
+	beforeCol, beforeRow := term.CursorPos()
+	term.Write([]byte("Z"))
+	afterCol, afterRow := term.CursorPos()
+	return afterCol != beforeCol || afterRow != beforeRow
+}
+
+// segmenterInGround runs input through a fresh segmenter and reports whether it
+// would extract an APC introduced by the very next byte. Held bytes count as
+// not-ground: a held ESC is one the segmenter has not classified yet, and
+// ghostty has already left ground on it.
+func segmenterInGround(t *testing.T, input string) bool {
+	t.Helper()
+	var seg kittyAPCSegmenter
+	rebuilt := make([]byte, 0, len(input))
+	seg.Feed([]byte(input), func(plain, apc []byte) {
+		rebuilt = append(rebuilt, plain...)
+		rebuilt = append(rebuilt, apc...)
+	})
+	// The byte-exactness invariant, checked on every case for free: a machine
+	// that tracked state correctly while losing a byte would still be a silent
+	// divergence.
+	if got := string(rebuilt) + string(seg.pending); got != input {
+		t.Fatalf("emissions rebuild %q, want %q", got, input)
+	}
+	return seg.mode == kittySegGround && len(seg.pending) == 0
+}
+
+func assertGroundAgrees(t *testing.T, input string) {
+	t.Helper()
+	want := ghosttyInGround(t, input)
+	if got := segmenterInGround(t, input); got != want {
+		t.Errorf("after %q: segmenter ground=%v, ghostty ground=%v", input, got, want)
+	}
+}
+
+// TestKittySegmenterGroundMatchesGhostty is the falsification gate for every
+// transition in kittyseg.go's machine. A rule that is wrong about which byte
+// ends which sequence shows up here as a disagreement on the exact input that
+// exposes it, which is also the input to add to the corpus.
+func TestKittySegmenterGroundMatchesGhostty(t *testing.T) {
+	// Every byte, from every named state: the per-state exit sets.
+	for _, prefix := range kittyGroundNamedPrefixes {
+		for b := range 0x100 {
+			assertGroundAgrees(t, prefix+string([]byte{byte(b)}))
+		}
+	}
+	// Two bytes from every named state: enough to open a sequence from inside
+	// another one and then close it, which is the only way to tell a C1
+	// introducer apart from a byte the current sequence swallows.
+	for _, prefix := range kittyGroundNamedPrefixes {
+		for _, a := range kittyGroundProbeBytes {
+			for _, b := range kittyGroundProbeBytes {
+				assertGroundAgrees(t, prefix+string([]byte{a, b}))
+			}
+		}
+	}
+	// Every three-byte sequence over the interesting alphabet: the transitions
+	// BETWEEN states, including the ones no named prefix reaches.
+	for _, a := range kittyGroundProbeBytes {
+		for _, b := range kittyGroundProbeBytes {
+			for _, c := range kittyGroundProbeBytes {
+				assertGroundAgrees(t, string([]byte{a, b, c}))
+			}
+		}
+	}
+	// The introducer is three bytes long, so the sequences that matter most are
+	// the ones that reach a kitty APC and then leave it.
+	for _, a := range kittyGroundProbeBytes {
+		for _, b := range kittyGroundProbeBytes {
+			assertGroundAgrees(t, "\x1b_G"+string([]byte{a, b}))
+			assertGroundAgrees(t, "\x1b_Ga=T;AA"+string([]byte{a, b}))
+			assertGroundAgrees(t, string([]byte{a, b})+"\x1b_G")
+		}
 	}
 }

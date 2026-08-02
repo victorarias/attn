@@ -57,6 +57,15 @@ const (
 	// kittyResyncReverseScroll: the grid moved DOWN under the cursor. Nothing a
 	// placement does looks like that, and synthesis does not express it.
 	kittyResyncReverseScroll = "kitty_layout_reverse_scroll"
+	// kittyResyncUndescribedImage: ghostty's kitty state moved on bytes that
+	// went to the wire verbatim rather than through synthesis. That happens when
+	// an APC is one ghostty parses as kitty but the segmenter cannot cut out —
+	// an APC introduced from inside another sequence, whose leading ESC is also
+	// that sequence's exit (see kittyseg.go). Replaying those bytes keeps the
+	// two PARSERS in step, which is what the segmenter guarantees, but the
+	// client cannot parse kitty, so the image the worker just placed moved its
+	// grid and not the client's. Only a snapshot can settle that.
+	kittyResyncUndescribedImage = "kitty_undescribed_image"
 )
 
 // kittyPlacementKey identifies a placement across observations: kitty's own
@@ -97,6 +106,13 @@ type wireFeeder struct {
 	// next feed — fanOut copies before it returns, which is the only consumer.
 	wire []byte
 
+	// generation is ghostty's kitty stamp as of the last change this feeder
+	// ACCOUNTED for. Every dispatch either goes through writeAPC, which
+	// describes it on the wire, or is one the wire cannot describe — and the
+	// difference between this and the terminal's own stamp at the end of a feed
+	// is exactly the second kind.
+	generation uint64
+
 	// placements is the placement set as of the last observation, the left side
 	// of the next diff.
 	placements []ghosttyvt.KittyPlacement
@@ -117,7 +133,7 @@ func newWireFeeder(term *ghosttyvt.Terminal) *wireFeeder {
 	if blocks == nil {
 		return nil
 	}
-	return &wireFeeder{term: term, blocks: blocks}
+	return &wireFeeder{term: term, blocks: blocks, generation: term.KittyGeneration()}
 }
 
 // feed writes one PTY chunk into the terminal and returns the bytes the wire
@@ -164,6 +180,25 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 		f.writeAPC(apc)
 	})
 
+	// Anything the terminal's kitty state did that writeAPC did not account for
+	// happened on bytes the wire carries verbatim, and the client ignores them.
+	// One cheap read per chunk buys the guarantee that no image ever lands on
+	// the worker's grid alone.
+	//
+	// Only an APPEARING placement is a divergence. The stamp also moves when
+	// ghostty prunes placements the screen no longer holds — leaving the
+	// alternate screen is the common one — and a placement going away costs the
+	// client nothing: it never drew the image, and the mode switch that pruned
+	// it is on the wire already.
+	if stamped := f.term.KittyGeneration(); stamped != f.generation {
+		f.generation = stamped
+		before := len(f.deltas)
+		f.observe()
+		if f.appeared(before) {
+			f.failResync(kittyResyncUndescribedImage)
+		}
+	}
+
 	if whole {
 		return data, f.resync
 	}
@@ -182,6 +217,10 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	f.term.Write(apc)
 
 	stamped := f.term.KittyGeneration()
+	// Claimed here rather than at each exit below: every branch from this point
+	// on has either described the dispatch or resynced over it, so the
+	// end-of-feed check must not see it a second time.
+	f.generation = stamped
 	movedCol, movedRow := f.term.CursorPos()
 	// An unchanged generation means the storage did not change, so no placement
 	// appeared, so nothing scrolled the grid on an image's behalf — which is
@@ -221,7 +260,18 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 		f.failResync(kittyResyncReverseScroll)
 		return
 	}
-	if scrolled > 0 && anchor == 0 {
+	// An anchor on row 0 only means the pin was CLAMPED there on the alternate
+	// screen, which keeps no history: a cell that scrolls off has nowhere to go,
+	// so it stops at the top and the scroll it took with it is unrecoverable.
+	// Measured, and both directions of it: on alt, a placement that fits and one
+	// that scrolls the top row away report the identical (anchor 0, scrolled 0),
+	// so the amount cannot be recovered from the numbers and every alt anchor at
+	// row 0 has to resync — not only the ones that already look scrolled. On the
+	// primary screen the same reading is trustworthy, because the pin follows
+	// its cell into retained history and keeps reporting a real row; the only
+	// way to lose it there is the scrollback cap discarding the cell, which
+	// ScreenPoint reports as gone and kittyResyncAnchorLost handles above.
+	if anchor == 0 && f.term.AltScreenActive() {
 		f.failResync(kittyResyncAnchorClamped)
 		return
 	}
@@ -270,6 +320,18 @@ func (f *wireFeeder) observe() {
 // failResync records the first observation failure of this chunk. The APC's
 // grid effect is already in the terminal; the wire gets nothing for it, and the
 // snapshot the client re-attaches for carries the truth.
+// appeared reports whether the observations recorded past index from brought
+// any placement into existence, as opposed to only retiring or moving ones the
+// wire has already accounted for.
+func (f *wireFeeder) appeared(from int) bool {
+	for _, delta := range f.deltas[from:] {
+		if len(delta.Added) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *wireFeeder) failResync(reason string) {
 	if f.resync == "" {
 		f.resync = reason

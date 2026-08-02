@@ -18,15 +18,14 @@ package pty
 // terminal still parses; random bytes alone would spend the whole budget on
 // streams with no APC in them at all.
 //
-// The seed corpus is green. A `-fuzz` soak is NOT: it reaches, in about a
-// second, a class of malformed stream where the segmenter's byte-pattern search
-// disagrees with ghostty's parser about which bytes belong to a kitty APC —
-// `\x1bX\x1b_G\x1b\\0` (an APC pattern inside an SOS string ghostty is
-// consuming opaquely) and `\x1b_G\x840\x1b\\` (a C1 control that aborts the APC
-// for ghostty but not for the segmenter) are the two smallest. Both leave the
-// worker and the client on different grids with no resync, in the shipping
-// zero-storage-limit configuration. They are open findings against kittyseg.go,
-// not harness bugs.
+// This is the search that drove kittyseg.go's framing rules. It used to reach,
+// in about a second, a class of malformed stream where a byte-pattern search
+// for the introducer disagreed with ghostty's parser about which bytes belong
+// to a kitty APC — an APC pattern inside a string ghostty was consuming
+// opaquely, or a C1 control that ended the APC early. The segmenter now tracks
+// where ghostty's parser stands and extracts only from ground, with every
+// transition measured against the terminal rather than read off the spec, and
+// the two smallest streams it found are corpus entries next door.
 
 import (
 	"strings"
@@ -110,6 +109,60 @@ func FuzzKittyWireMirror(f *testing.F) {
 		feeder.close()
 		if got := ghosttyvt.LiveTrackedRefs(); got != baseline {
 			t.Errorf("LiveTrackedRefs() = %d after the run, want the %d it started at", got, baseline)
+		}
+	})
+}
+
+// FuzzKittySegmenterFraming soaks the segmenter's framing rules on their own,
+// without the rest of the feed path in the loop.
+//
+// It exists because the whole-path property above cannot currently run: the
+// OSC 133 scanner nested inside it still finds its marker by byte pattern and
+// diverges within seconds on streams that contain no kitty escape at all, which
+// starves the search of the time it needs to reach anything here. This target
+// asks the one question kittyseg.go answers — would ghostty's parser be in
+// ground after these bytes? — and asserts the segmenter agrees, under an
+// arbitrary chunking, while reconstructing every byte it was handed.
+//
+// Both halves matter. Agreement alone would pass for a segmenter that tracked
+// state perfectly and dropped a byte; reconstruction alone would pass for one
+// that never extracted anything.
+func FuzzKittySegmenterFraming(f *testing.F) {
+	for _, c := range kittySegBattery {
+		f.Add([]byte(c.input), uint16(3))
+	}
+	for _, in := range kittyCorpusInputs() {
+		f.Add([]byte(strings.Join(in.chunks, "")), uint16(len(in.chunks[0])))
+	}
+	for _, prefix := range kittyGroundNamedPrefixes {
+		f.Add([]byte(prefix), uint16(1))
+	}
+
+	f.Fuzz(func(t *testing.T, data []byte, chunkSize uint16) {
+		if len(data) > fuzzKittyMaxInput {
+			data = data[:fuzzKittyMaxInput]
+		}
+		size := int(chunkSize%4096) + 1
+
+		var seg kittyAPCSegmenter
+		rebuilt := make([]byte, 0, len(data))
+		for start := 0; start < len(data); start += size {
+			chunk := data[start:min(start+size, len(data))]
+			// A copy per chunk, because an emission may alias the chunk and the
+			// segmenter is allowed to reuse its own buffer afterwards.
+			seg.Feed(append([]byte(nil), chunk...), func(plain, apc []byte) {
+				rebuilt = append(rebuilt, plain...)
+				rebuilt = append(rebuilt, apc...)
+			})
+		}
+		if got := string(rebuilt) + string(seg.pending); got != string(data) {
+			t.Fatalf("emissions rebuild %q, want %q (chunk size %d)", got, data, data)
+		}
+
+		want := ghosttyInGround(t, string(data))
+		got := seg.mode == kittySegGround && len(seg.pending) == 0
+		if got != want {
+			t.Errorf("after %q (chunk size %d): segmenter ground=%v, ghostty ground=%v", data, size, got, want)
 		}
 	})
 }

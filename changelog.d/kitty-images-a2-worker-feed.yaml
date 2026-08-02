@@ -23,3 +23,6 @@ notes: >
   ghostty that cannot parse kitty, and into the shipped wasm model the app
   actually renders — so the substitution is proven to mean the same thing in
   both runtimes; a Go fuzzer searches the same property over arbitrary streams.
+  Which bytes belong to a kitty escape is decided by tracking where ghostty's
+  own parser stands, so an escape pattern that appears inside another sequence
+  is left alone instead of being cut out of the middle of it.

@@ -278,8 +278,30 @@ Layers around the gate:
       OSC 133 inner), under `replayMu`.
 - [x] Placement-set diff + layout synthesis from observed deltas; forced
       snapshot re-push fallback.
-- [ ] Parity corpus + fuzz + unit layers above. No protocol change; the wire
-      still carries nothing new (limit stays 0 until A4).
+- [x] Segmenter framing: extract only from ground, with every transition
+      measured against the terminal (`TestKittySegmenterGroundMatchesGhostty`).
+      A kitty APC whose introducing ESC also ends the sequence before it cannot
+      be cut out without taking that exit with it, so it stays on the wire and
+      the feeder resyncs on the image it places (`kitty_undescribed_image`).
+- [x] Parity corpus (26 entries, replayed into native ghostty and the shipped
+      wasm model) + the unit layers above. No protocol change; the wire still
+      carries nothing new (limit stays 0 until A4).
+- [ ] **Fuzz soak — BLOCKED on the OSC 133 scanner, not on this phase.** The
+      seed corpus is green and a `-fuzz` soak finds nothing in the kitty layer,
+      but it reaches the INNER scanner in seconds. `osc133Segmenter` still finds
+      its marker by byte pattern, which is the same defect the kitty segmenter
+      just shed, in both directions: `\x1b]133;\x1b00` keeps swallowing past a
+      stray ESC that ends the OSC for ghostty, and `\x1b\x1b]133;\x1b\\00`
+      strips a marker whose `ESC ]` was never in ground, taking the lone ESC's
+      meaning with it. Both reproduce through `blockFeeder` alone with no kitty
+      escape in the stream. The fix is the same shape and wants the same machine
+      — `kittySegMode` already knows when the stream is in ground, and osc133
+      runs over exactly the plain runs it emits, so the tracking can be shared
+      rather than written twice. Re-run the whole-path soak once that lands: it
+      currently fails at 2.4s, and at 5.6s with the first of the two defects
+      patched out locally, so it has never run long enough to say anything about
+      the kitty rules. `FuzzKittySegmenterFraming` soaks those rules on their
+      own in the meantime.
 
 ### A3 — protocol + frontend rendering
 
@@ -293,6 +315,27 @@ Layers around the gate:
 - [ ] Packaged harness scenario.
 
 ### A4 — enable, restore, remote, receipts
+
+Two synthesis defects are known and deliberately deferred to here. Both are
+unreachable while the storage limit is 0 — nothing dispatches, so the grid never
+moves and `writeAPC` returns early — and both become live the moment the limit
+is flipped. Neither may ship with the flip.
+
+- [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
+      absolute column move, and a client with left/right margins enabled
+      measures `CHA` from the left MARGIN while the worker reports a column
+      from the screen edge. `\x1b[?69h\x1b[4;14s\x1b[?6h\x1b[3;2Hxy` plus a
+      placement puts the worker at column 11 and the client at 13. Fix by
+      making the column move relative (`CUF`/`CUB` from the pre-APC column) or
+      by resyncing when margins are on; either way it needs a corpus entry.
+- [ ] **An undescribed image forces a snapshot on every occurrence.** A kitty
+      APC introduced from inside another sequence reaches the terminal whole
+      and places an image the wire cannot describe, so the feeder resyncs
+      (`kitty_undescribed_image`). Correct but blunt: a producer that emits
+      images from a non-ground state would re-push a snapshot per image.
+      Measure real emitters before deciding whether that needs a cheaper
+      repair (a wire-side sequence-abort byte was sketched and rejected as
+      unproven; see the segmenter's header).
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
