@@ -40,7 +40,9 @@ const INCIDENT_FILE = `${DEBUG_DIR}/terminal-incidents.jsonl`;
 const STORAGE_KEY = 'attn:terminal-diagnostics';
 const RING_LIMIT = 3000;
 const INCIDENT_CONTEXT_EVENTS = 400;
-const FILE_SIZE_CAP_BYTES = 8 * 1024 * 1024;
+// Hard ceiling for each on-disk stream. Enforced against the projected size in
+// appendToFile, so it holds after every write, not eventually.
+export const FILE_SIZE_CAP_BYTES = 8 * 1024 * 1024;
 // A pane is only considered "should be showing something" once its model holds
 // at least this many printable cells; below it, an empty surface is expected.
 const MIN_CONTENT_CELLS = 40;
@@ -275,17 +277,29 @@ async function appendToFile(file: 'lifecycle' | 'incident', line: string) {
       }
       if (file === 'lifecycle') lifecycleSizeSeeded = true; else incidentSizeSeeded = true;
     }
-    // Truncate-and-restart when a file grows past the cap so prod usage over
-    // days stays bounded. A rotate marker keeps the stream self-describing.
+    // Truncate-and-restart so prod usage over days stays bounded. The decision
+    // is made against the size the file WOULD reach once this line is appended,
+    // never against the size it already has: a single record can be large (a
+    // model_fault carries a ~2MB input capture), so deciding after the fact
+    // would let one write overshoot the cap by that record's whole size and
+    // only rotate on some later, unrelated event.
+    //
+    // Invariant: after every write the file is at most the cap, as long as the
+    // rotate marker plus the line fit within it. A line too big for even a
+    // fresh file still lands whole — evidence is never truncated — and the next
+    // write rotates it away.
     const bytes = file === 'lifecycle' ? lifecycleBytes : incidentBytes;
-    const willReset = bytes > FILE_SIZE_CAP_BYTES;
-    const payload = willReset ? `${JSON.stringify({ at: Date.now(), kind: 'rotate' })}\n${line}` : line;
-    await writeTextFile(path, payload, {
+    const lineBytes = byteLength(line);
+    const willReset = bytes + lineBytes > FILE_SIZE_CAP_BYTES;
+    // A rotate marker keeps the stream self-describing, and its own bytes count
+    // toward the fresh file.
+    const marker = willReset ? `${JSON.stringify({ at: Date.now(), kind: 'rotate' })}\n` : '';
+    await writeTextFile(path, willReset ? `${marker}${line}` : line, {
       baseDir: BaseDirectory.AppLocalData,
       append: !willReset,
       create: true,
     });
-    const written = byteLength(payload);
+    const written = byteLength(marker) + lineBytes;
     if (file === 'lifecycle') {
       lifecycleBytes = willReset ? written : lifecycleBytes + written;
     } else {

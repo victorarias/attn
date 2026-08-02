@@ -16,4 +16,8 @@ notes: >
   bytes, 2048 ops, 512KB of restore dump (32x the largest of 106 real attach
   snapshots measured in a production daemon log), and 2MB of encoded capture
   per record. A restore dump that does not fit is marked snapshotTruncated and
-  the replay tool refuses it rather than replaying a divergent screen.
+  the replay tool refuses it rather than replaying a divergent screen. The
+  diagnostics files now decide rotation from the size they would reach after
+  appending a record rather than the size they already have, so their 8MB cap
+  holds after every write instead of after the next one — with megabyte-sized
+  fault records the old check could overshoot by a whole capture.
