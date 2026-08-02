@@ -111,9 +111,14 @@ PTY read loop (worker, per chunk, under replayMu):
     │      APC bytes ─────────► ghostty term.Write (ghostty parses — the one parser)
     │                            ├─ observe: placement-set diff via kitty_graphics.h
     │                            │    iterator (before/after) → add/remove/update
-    │                            ├─ observe: cursor + scroll delta (TrackedRef pin
-    │                            │    before the APC, CursorPos after)
-    │                            └─ synthesize: IND×scroll + CUP into the wire chunk
+    │                            ├─ observe: cursor + scroll (TrackedRef pinned at
+    │                            │    the cursor before the APC; both it and a ref
+    │                            │    at the new cursor resolved after, so the pair
+    │                            │    shares one coordinate frame)
+    │                            └─ synthesize: SU×scroll + CUU/CUD + CHA into the
+    │                                 wire chunk (relative and column-only: absolute
+    │                                 row addressing is measured from the scroll
+    │                                 region under origin mode)
     ├─ lastReplaySeq = seq   (unchanged)
   outside the lock: drain/forward ghostty's `_G` ACKs to the program (unchanged)
   fanOut(wireChunk, seq)     ← rewritten bytes, same seq
@@ -135,6 +140,21 @@ frontend:
 
 Design rules:
 
+- **The cursor rides the content.** A tracked ref pinned at the cursor reports
+  how far the cursor moved relative to the cell it was on, not how far the grid
+  moved: a placement that scrolls carries that cell along with everything else.
+  The scroll is `(rowBefore - rowAfter) + refDelta`, an identity that holds on
+  the primary screen, on the alternate, and inside a scroll region — the three
+  places the coordinate frames differ. Measured, not assumed: ghostty moves the
+  cursor down by the image's row count and then back up one, so a one-row image
+  on the bottom row still scrolls.
+- **A discarded ref clamps; it does not fail.** `ScreenPoint` reports ok=false
+  only when the cell is pruned out of a *scrollback* that is already at its cap
+  (thousands of rows, so an image can never do it). On the alternate screen,
+  which keeps no history, a scroll destroys the cell and the ref silently
+  resolves to the top row instead — which reads as a shorter scroll than
+  happened. Synthesis therefore treats "the anchor reached row 0 while the grid
+  scrolled" as unrepresentable and re-pushes, rather than trusting the number.
 - **Observe, never interpret.** The worker never implements kitty semantics.
   Deletes (`a=d`), chunked transmissions (`m=1`), ids, z-order, quiet flags —
   all fall out of diffing ghostty's authoritative placement list before/after
@@ -188,9 +208,12 @@ The invariants that keep images from breaking it:
    agrees with a model that lived through the rewritten stream. That
    equivalence is precisely what the parity corpus asserts.
 5. **The escape hatch is the existing restore.** If synthesis meets a case it
-   cannot represent (lost tracked ref, exotic scroll state), the worker
-   triggers a snapshot re-push instead of guessing. Worst case is a re-sync
-   the user doesn't notice, not a silent desync.
+   cannot represent (an anchor that no longer resolves or that clamped to the
+   top of history, a grid that moved backwards), the worker drops the session's
+   subscribers with a named reason — the same `pty_desync` round trip an
+   overflowing client buffer already takes, after which the frontend re-attaches
+   and is served a fresh snapshot. Worst case is a re-sync the user doesn't
+   notice, not a silent desync.
 
 ## Verification
 
@@ -248,12 +271,12 @@ Layers around the gate:
 
 ### A2 — worker: segmenter, observation, synthesis (feature dark)
 
-- [ ] `ghosttyvt`: expose the kitty C API — storage-limit/APC-max options, the
+- [x] `ghosttyvt`: expose the kitty C API — storage-limit/APC-max options, the
       `decode_png` hook, placement iterator + `image_get`, on the same
       darwin/linux cgo tuples; stubs degrade like every other ghostty use.
-- [ ] Kitty APC segmenter (wire side) + feed-path composition (kitty outer,
+- [x] Kitty APC segmenter (wire side) + feed-path composition (kitty outer,
       OSC 133 inner), under `replayMu`.
-- [ ] Placement-set diff + layout synthesis from observed deltas; forced
+- [x] Placement-set diff + layout synthesis from observed deltas; forced
       snapshot re-push fallback.
 - [ ] Parity corpus + fuzz + unit layers above. No protocol change; the wire
       still carries nothing new (limit stays 0 until A4).

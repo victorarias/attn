@@ -1,0 +1,20 @@
+kind: internal
+area: terminal
+change: >
+  Worker-side groundwork for kitty graphics: the PTY feed path now splits the
+  stream into plain runs and complete kitty APC escapes, feeds the APCs to the
+  worker's ghostty terminal (the system's only kitty parser) and everything else
+  through the existing OSC 133 scanner, and returns the bytes the wire carries
+  in their place. Those bytes are read back off the terminal rather than derived
+  from the protocol: the scroll and cursor a placement caused, reproduced so a
+  client that cannot parse kitty lands on the same grid. Placement-set changes
+  are diffed into add/remove/update records for the rendering phase, and a chunk
+  whose grid effect cannot be expressed on the wire drops subscribers with a
+  named reason so the client re-attaches and is served a fresh snapshot instead
+  of quietly diverging. ghosttyvt gains read-only kitty observation and a PNG
+  decode hook.
+notes: >
+  Phase A2 of docs/plans/2026-08-02-terminal-kitty-images.md, feature-dark: the
+  production terminal keeps the zero kitty storage limit from A1, so ghostty
+  refuses every transmission and the only observable effect is that kitty escape
+  bytes stop reaching clients that could never render them. No protocol change.

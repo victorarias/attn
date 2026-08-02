@@ -108,7 +108,7 @@ func TestBlockSnapshotAtomicity(t *testing.T) {
 		startedAt:   time.Now(),
 	}
 	s.ghostty = gt
-	s.blockFeed = &blockFeeder{term: gt, seg: markerScanSegmenter{}, table: table}
+	s.wireFeed = &wireFeeder{term: gt, blocks: &blockFeeder{term: gt, seg: markerScanSegmenter{}, table: table}}
 	go s.readLoop(nil, func(string, ...any) {})
 
 	// Writer: each iteration opens a "block" (marker pins the cursor row, then

@@ -319,7 +319,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		return fmt.Errorf("ghostty terminal construction failed: %w", err)
 	}
 	session.ghostty = gt
-	session.blockFeed = newBlockFeeder(gt)
+	session.wireFeed = newWireFeeder(gt)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session
