@@ -8,6 +8,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 
 ## [2026-08-01]
 
+### Added
+- **Automatic session titles from your first conversation.** When a new session
+  finishes its first exchange, attn generates a descriptive title from what you
+  discussed and replaces the default folder-name label. Manual renames always
+  win — any session you've renamed stays that way.
+
 ### Changed
 - **Queue rows give the whole line to the session name.** Sidebar rows in the
   agent queue no longer show the workspace name, the waiting time sits at the
