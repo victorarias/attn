@@ -128,3 +128,5 @@ generated from `attn profile tauri-config`, the authority's port and bundle id
 baked into the binary so a profiled app can never reach another profile's
 daemon); and **`attn profile clean`** for teardown. See
 `docs/plans/2026-06-13-parallel-profiles.md` for the design history.
+
+<!-- changelog-gate red test: trivial change, intentionally no fragment -->
