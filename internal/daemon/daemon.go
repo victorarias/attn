@@ -29,6 +29,7 @@ import (
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/hub"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/pathutil"
@@ -37,7 +38,6 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/statetrace"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -414,21 +414,21 @@ type Daemon struct {
 	pendingSnapshots     map[string]func()
 	pendingSnapshotOrder []string
 
-	// compactRunner is the durable task runner that owns the keeper's
-	// workspace-context compaction duty (kind "compact_context") and the
-	// notebook-narration tasks. It replaces the bespoke time.AfterFunc scheduling +
-	// single-flight/cancel/commit-fence guards.
+	// jobQueue is the durable job queue that owns the keeper's
+	// workspace-context compaction duty (kind "compact_context"), the
+	// notebook-narration kinds, and ticket reconciliation. It replaces the bespoke
+	// time.AfterFunc scheduling + single-flight/cancel/commit-fence guards.
 	//
-	// compactRunnerMu guards the POINTER swap only. startCompactRunner runs late in
+	// jobQueueMu guards the POINTER swap only. startJobQueue runs late in
 	// Start() and replaces the placeholder runner, while Stop()/enqueue/forget read
 	// the field concurrently (the websocket server accepts connections — and can
 	// drive a teardown enqueue — before the runner is rebuilt). Production code
-	// therefore reads via compactRunnerRef() and writes via setCompactRunner(); the
+	// therefore reads via jobQueueRef() and writes via setJobQueue(); the
 	// runner itself is internally synchronized. Tests assign the field directly,
 	// which is race-free because they never run Start() concurrently with that
 	// assignment.
-	compactRunnerMu sync.RWMutex
-	compactRunner   *tasks.Runner
+	jobQueueMu sync.RWMutex
+	jobQueue   *jobs.Runner
 	// The *Threshold/*Debounce/*Timeout fields remain the test-override knobs
 	// feeding the size gate, the Enqueue debounce, and RegisterWithTimeout.
 	keeperCompactThreshold int
@@ -751,10 +751,10 @@ func NewForTesting(socketPath string) *Daemon {
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
 		spawnLocks:         make(map[string]*spawnLock),
-		// A disabled runner (no root) keeps the unconditional Cancel/Enqueue
-		// callsites nil-safe in tests; tests that exercise a live compaction
-		// override this with an enabled runner (see newTestCompactRunner).
-		compactRunner: tasks.New(tasks.Options{}),
+		// A disabled queue (no store) keeps the unconditional Cancel/Enqueue
+		// callsites nil-safe in tests; tests that exercise a live run override
+		// this with an enabled one (see installTestCompactQueue).
+		jobQueue: jobs.New(jobs.Options{}),
 	}
 	d.ensureEventBus()
 	return d
@@ -797,7 +797,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
 		spawnLocks:         make(map[string]*spawnLock),
-		compactRunner:      tasks.New(tasks.Options{}),
+		jobQueue:           jobs.New(jobs.Options{}),
 	}
 	d.ensureEventBus()
 	return d
@@ -1035,27 +1035,19 @@ func (d *Daemon) Start() error {
 	// never stops protecting a thread's worktree from A3/A4 pruning.
 	go d.runTicketRetentionSweep()
 
-	// Construct + start the durable compaction runner (kinds compact_context,
-	// summarize_session, narrate_workspace).
-	d.startCompactRunner()
+	// Construct + start the durable job queue. It owns the background kinds
+	// (compact_context, summarize_session, narrate_workspace, reconcile) and the
+	// two periodic ticks, which run on it as cron entries.
+	d.startJobQueue()
 
 	// Now that the runner exists, enqueue the deferred removal-boundary retrospectives
 	// for any workspaces reaped during startup reconciliation. loadWorkspacesFromStore
-	// ran before startCompactRunner, so enqueuing inline there would have been a
+	// ran before startJobQueue, so enqueuing inline there would have been a
 	// nil-runner no-op; deferring to here gives a startup-reaped workspace its final
 	// narrate, matching the live removal paths.
 	for _, wsID := range reapedWorkspaceIDs {
 		d.enqueueFinalNarrateWorkspace(wsID)
 	}
-
-	// Start the notebook cron enqueuer (enqueues the nightly daily-narrate backstop
-	// onto the durable runner when due). Launched AFTER startCompactRunner so the
-	// narrate executor is registered before the first tick fires.
-	go d.startNotebookCronEnqueuer(d.done)
-
-	// Start the scheduled-automation observation loop (claims and delivers due
-	// scheduled-trigger occurrences).
-	go d.startAutomationScheduleLoop(d.done)
 
 	d.signalStarted()
 	startSucceeded = true
@@ -1612,7 +1604,7 @@ func (d *Daemon) Stop() {
 	close(d.done)
 	d.stopNotebookWatcher()
 	d.stopFsWatchers()
-	if runner := d.compactRunnerRef(); runner != nil {
+	if runner := d.jobQueueRef(); runner != nil {
 		runner.Stop()
 	}
 	d.stopEventBus()

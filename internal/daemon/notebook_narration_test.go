@@ -11,9 +11,9 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // drainingConn returns a net.Conn whose writes are silently consumed, so
@@ -184,22 +184,24 @@ func installNotebookNarrationRunner(t *testing.T, d *Daemon) string {
 	d.store.SetSetting(SettingNotebookRoot, root)
 	d.store.SetSetting(canonicalExecutableSettingKey("claude"), writeFakeAgentExecutable(t))
 
-	runner := tasks.New(tasks.Options{
-		Root:         filepath.Join(t.TempDir(), "tasks"),
+	runner := jobs.New(jobs.Options{
+		Store:        newTestJobStore(t, d),
 		Log:          func(string, ...interface{}) {},
 		PollInterval: 2 * time.Millisecond,
 	})
-	if err := runner.RegisterWithTimeout(notebookSummarizeSessionKind, d.summarizeSessionExecutor, notebookSummarizeSessionTimeout); err != nil {
+	if err := runner.RegisterWith(notebookSummarizeSessionKind, d.summarizeSessionHandler,
+		jobs.HandlerConfig{Timeout: notebookSummarizeSessionTimeout}); err != nil {
 		t.Fatalf("register summarize_session: %v", err)
 	}
-	if err := runner.RegisterWithTimeout(notebookNarrateWorkspaceKind, d.narrateWorkspaceExecutor, notebookNarrateWorkspaceTimeout); err != nil {
+	if err := runner.RegisterWith(notebookNarrateWorkspaceKind, d.narrateWorkspaceHandler,
+		jobs.HandlerConfig{Timeout: notebookNarrateWorkspaceTimeout}); err != nil {
 		t.Fatalf("register narrate_workspace: %v", err)
 	}
 	if err := runner.Start(); err != nil {
 		t.Fatalf("start runner: %v", err)
 	}
 	t.Cleanup(runner.Stop)
-	d.compactRunner = runner
+	d.jobQueue = runner
 	return root
 }
 
@@ -216,11 +218,11 @@ func writeFakeAgentExecutable(t *testing.T) string {
 	return path
 }
 
-func waitForTaskState(t *testing.T, d *Daemon, kind, subject string, want tasks.State) *tasks.Task {
+func waitForTaskState(t *testing.T, d *Daemon, kind, subject string, want jobs.State) *jobs.Job {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		task, err := d.compactRunner.Get(tasks.TaskID(kind, subject))
+		task, err := d.jobQueue.GetByKey(kind, subject)
 		if err != nil {
 			t.Fatalf("get task: %v", err)
 		}
@@ -266,10 +268,10 @@ func TestSummarizeSessionExecutorVerifiesDigestLedger(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
 	if _, err := os.Stat(digest); err != nil {
 		t.Fatalf("digest not written: %v", err)
@@ -292,7 +294,7 @@ func TestSummarizeSessionExecutorFailsWhenDigestMissing(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "claimed done"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, "session-1")
@@ -312,21 +314,21 @@ func TestSummarizeSessionExecutorSkipsRemovedSession(t *testing.T) {
 	}
 
 	// No session row exists -> the executor no-ops successfully (nothing to retry).
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "gone-session", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "gone-session"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "gone-session", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "gone-session", jobs.StateDone)
 	if executed {
 		t.Fatal("executor ran the agent for a removed session")
 	}
 }
 
-// TestSummarizeSessionExecutorUsesCarriedMetaWhenRowGone is the core fix: after a
+// TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone is the core fix: after a
 // single-session-workspace teardown deletes BOTH the session row and the workspace
 // row, the debounced summarize must still write the digest to the workspace's bucket
 // (RawSessionsDir/<wsID>/<sid>.md), NOT the _solo bucket — using the transcript path
 // and workspace id carried on the task, since neither row exists to re-derive from.
-func TestSummarizeSessionExecutorUsesCarriedMetaWhenRowGone(t *testing.T) {
+func TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	root := installNotebookNarrationRunner(t, d)
 	// NO session row and NO workspace row: the teardown already removed both. Block
@@ -356,15 +358,16 @@ func TestSummarizeSessionExecutorUsesCarriedMetaWhenRowGone(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
-		Meta: map[string]string{
-			notebookSummarizeMetaTranscript: carriedTranscript,
-			notebookSummarizeMetaWorkspace:  "ws-gone",
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+		UniqueKey: "session-1",
+		Payload: summarizeSessionPayload{
+			Transcript:  carriedTranscript,
+			WorkspaceID: protocol.Ptr("ws-gone"),
 		},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
 	if _, err := os.Stat(digest); err != nil {
 		t.Fatalf("digest not written to workspace bucket: %v", err)
@@ -397,15 +400,16 @@ func TestSummarizeSessionReNarratesWhenWorkspaceRemoved(t *testing.T) {
 	}
 
 	// No workspace row for ws-gone, both rows gone -> the hook should re-narrate.
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
-		Meta: map[string]string{
-			notebookSummarizeMetaTranscript: carriedTranscript,
-			notebookSummarizeMetaWorkspace:  "ws-gone",
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+		UniqueKey: "session-1",
+		Payload: summarizeSessionPayload{
+			Transcript:  carriedTranscript,
+			WorkspaceID: protocol.Ptr("ws-gone"),
 		},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
 	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-gone") {
 		t.Fatal("digest success for a removed workspace did not re-enqueue a narrate")
@@ -430,17 +434,18 @@ func TestSummarizeSessionDoesNotReNarrateWhenWorkspacePresent(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{
-		Meta: map[string]string{notebookSummarizeMetaWorkspace: "ws-live"},
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+		UniqueKey: "session-1",
+		Payload:   summarizeSessionPayload{WorkspaceID: protocol.Ptr("ws-live")},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
 	// The workspace is alive -> no re-narrate. Give the worker a beat; the narrate
 	// record must never appear.
 	time.Sleep(20 * time.Millisecond)
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-live"))
+	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-live")
 	if err != nil {
 		t.Fatalf("get narrate: %v", err)
 	}
@@ -474,10 +479,10 @@ func TestNarrateWorkspaceExecutorActiveDayVerifiesMarker(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
 
 	journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
 	content, err := os.ReadFile(journal)
@@ -510,10 +515,10 @@ func TestNarrateWorkspaceExecutorRemovalPassDerivesFlagFromAbsentRow(t *testing.
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-removed", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-removed"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-removed", tasks.StateDone)
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-removed", jobs.StateDone)
 	if !sawRemoval {
 		t.Fatal("removal pass did not derive IS_REMOVAL_PASS=true from absent workspace row")
 	}
@@ -534,7 +539,7 @@ func TestNarrateWorkspaceExecutorFailsWhenMarkerMissing(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "wrote wrong marker"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
@@ -546,15 +551,15 @@ func TestNarrateWorkspaceExecutorFailsWhenMarkerMissing(t *testing.T) {
 // waitForNonDoneFailure waits until a task has recorded a failure (LastError set
 // and not done). The runner auto-requeues failed tasks, so the task may cycle
 // failed->queued->running; we only assert it recorded the failure at least once.
-func waitForNonDoneFailure(t *testing.T, d *Daemon, kind, subject string) *tasks.Task {
+func waitForNonDoneFailure(t *testing.T, d *Daemon, kind, subject string) *jobs.Job {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		task, err := d.compactRunner.Get(tasks.TaskID(kind, subject))
+		task, err := d.jobQueue.GetByKey(kind, subject)
 		if err != nil {
 			t.Fatalf("get task: %v", err)
 		}
-		if task != nil && task.LastError != "" && task.State != tasks.StateDone {
+		if task != nil && task.LastError != "" && task.State != jobs.StateDone {
 			return task
 		}
 		if time.Now().After(deadline) {
@@ -605,7 +610,7 @@ func TestHandleStopEnqueuesOnlyDigestForSoloSession(t *testing.T) {
 		t.Fatal("stop did not enqueue summarize_session for solo session")
 	}
 	// No workspace -> no narrate task at all.
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, ""))
+	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "")
 	if err != nil {
 		t.Fatalf("get narrate: %v", err)
 	}
@@ -614,11 +619,11 @@ func TestHandleStopEnqueuesOnlyDigestForSoloSession(t *testing.T) {
 	}
 }
 
-// TestHandleStopStashesTranscriptAndWorkspaceInMeta proves the Stop trigger carries
-// the transcript path and the workspace id onto the summarize task's Meta, where both
-// the session row and the workspace row still exist — so the debounced run can still
-// resolve them after a teardown deletes both rows.
-func TestHandleStopStashesTranscriptAndWorkspaceInMeta(t *testing.T) {
+// TestHandleStopCarriesTranscriptAndWorkspaceOnThePayload proves the Stop trigger
+// carries the transcript path and the workspace id onto the summarize job's payload,
+// where both the session row and the workspace row still exist — so the debounced run
+// can still resolve them after a teardown deletes both rows.
+func TestHandleStopCarriesTranscriptAndWorkspaceOnThePayload(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
 	installNotebookNarrationRunner(t, d)
@@ -636,21 +641,25 @@ func TestHandleStopStashesTranscriptAndWorkspaceInMeta(t *testing.T) {
 	if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
 		t.Fatal("stop did not enqueue summarize_session")
 	}
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookSummarizeSessionKind, "session-1"))
+	task, err := d.jobQueue.GetByKey(notebookSummarizeSessionKind, "session-1")
 	if err != nil || task == nil {
 		t.Fatalf("get summarize task: %v", err)
 	}
-	if task.Meta[notebookSummarizeMetaTranscript] != transcript {
-		t.Fatalf("summarize Meta transcript = %q, want %q", task.Meta[notebookSummarizeMetaTranscript], transcript)
+	var carried summarizeSessionPayload
+	if err := task.DecodePayload(&carried); err != nil {
+		t.Fatalf("decode summarize payload: %v", err)
 	}
-	if task.Meta[notebookSummarizeMetaWorkspace] != "ws-1" {
-		t.Fatalf("summarize Meta workspace = %q, want ws-1", task.Meta[notebookSummarizeMetaWorkspace])
+	if carried.Transcript != transcript {
+		t.Fatalf("summarize payload transcript = %q, want %q", carried.Transcript, transcript)
+	}
+	if carried.WorkspaceID == nil || *carried.WorkspaceID != "ws-1" {
+		t.Fatalf("summarize payload workspace = %v, want ws-1", carried.WorkspaceID)
 	}
 }
 
-// TestWorkspaceRemovalEnqueuesFinalNarrateWithZeroDebounce proves the removal
-// boundary enqueues the final retrospective narrate that overrides a pending
-// active-day debounce (ZeroDebounce -> NextAttemptAt is not pushed forward).
+// TestWorkspaceRemovalEnqueuesFinalNarrate proves the removal boundary enqueues the
+// final retrospective narrate that overrides a pending active-day debounce (RunNow ->
+// ScheduledAt is not pushed forward).
 func TestWorkspaceRemovalEnqueuesFinalNarrate(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
@@ -658,10 +667,12 @@ func TestWorkspaceRemovalEnqueuesFinalNarrate(t *testing.T) {
 	d.narrateWorkspaceExecution = blockingExecution(t)
 
 	// Pre-seed a far-future debounced active-day narrate.
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{Debounce: time.Hour}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: "ws-1", Delay: time.Hour,
+	}); err != nil {
 		t.Fatalf("seed pending narrate: %v", err)
 	}
-	before, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-1"))
+	before, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
 	if err != nil || before == nil {
 		t.Fatalf("get seeded task: %v", err)
 	}
@@ -672,24 +683,24 @@ func TestWorkspaceRemovalEnqueuesFinalNarrate(t *testing.T) {
 	if d.store.GetWorkspace("ws-1") != nil {
 		t.Fatal("workspace not removed")
 	}
-	after, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-1"))
+	after, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
 	if err != nil || after == nil {
 		t.Fatalf("get final task: %v", err)
 	}
-	// ZeroDebounce overrode the hour-long debounce: the final attempt is no later
-	// than the seeded one (in practice much sooner / now).
-	if after.NextAttemptAt.After(before.NextAttemptAt) {
+	// RunNow overrode the hour-long debounce: the final attempt is no later than the
+	// seeded one (in practice much sooner / now).
+	if after.ScheduledAt.After(before.ScheduledAt) {
 		t.Fatalf("final narrate did not override the pending debounce: before=%s after=%s",
-			before.NextAttemptAt, after.NextAttemptAt)
+			before.ScheduledAt, after.ScheduledAt)
 	}
 }
 
 // TestNarrationTriggersAreNilSafeBeforeRunner proves the Stop and removal triggers
-// tolerate a nil compactRunner (the window before startCompactRunner runs).
+// tolerate a nil jobQueue (the window before startJobQueue runs).
 func TestNarrationTriggersAreNilSafeBeforeRunner(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	d.compactRunner = nil // mimic production before startCompactRunner
+	d.jobQueue = nil // mimic production before startJobQueue
 
 	// Neither must panic.
 	d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1"})
@@ -758,7 +769,7 @@ func TestSummarizeSessionExecutorRejectsTraversalSessionID(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, craftedID, tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, craftedID)
@@ -786,7 +797,7 @@ func TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, craftedID, tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, craftedID)
@@ -827,7 +838,7 @@ func TestSummarizeSessionExecutorRequiresFreshDigest(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookSummarizeSessionKind, "session-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, "session-1")
@@ -859,7 +870,7 @@ func TestNarrateWorkspaceExecutorRequiresFreshEntry(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
@@ -931,10 +942,10 @@ func TestNarrateWorkspaceScopesSessionsToWorkspace(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{}); err != nil {
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
 }
 
 // --- config-time validation (fail fast, not mid-run hang) ---
@@ -981,7 +992,7 @@ func taskExists(t *testing.T, d *Daemon, kind, subject string) bool {
 	t.Helper()
 	deadline := time.Now().Add(time.Second)
 	for {
-		task, err := d.compactRunner.Get(tasks.TaskID(kind, subject))
+		task, err := d.jobQueue.GetByKey(kind, subject)
 		if err != nil {
 			t.Fatalf("get task: %v", err)
 		}

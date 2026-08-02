@@ -10,7 +10,7 @@ import (
 // registry of named consumers holding a position in that space. The delivery
 // semantics — ordering, at-least-once, filters, retention window — live in
 // internal/bus, which reaches this through an interface so neither package
-// depends on the other (the daemon adapts them, as it does for internal/tasks).
+// depends on the other (the daemon adapts them, as it does for internal/jobs).
 //
 // The shape is lifted from the ticket event log (migration 56), which proved it:
 // a monotonic seq is a cursor space, and a consumer that was down catches up by

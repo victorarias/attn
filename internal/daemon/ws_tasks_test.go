@@ -3,14 +3,13 @@ package daemon
 import (
 	"context"
 	"encoding/json"
-	"path/filepath"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // testTaskKind is a fake executor kind tests enqueue against. Its behavior (succeed
@@ -23,23 +22,23 @@ const testTaskKind = "test_task"
 // MaxAttempts is 1 with a huge backoff so a single failure lands the task in dead
 // and never auto-requeues, making the retry assertions deterministic. The runner's
 // own tasks dir is a throwaway temp dir, and the OnChange broadcast wiring is
-// attached exactly as startCompactRunner does so the wiring is under test too.
-func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*tasks.Runner, *atomic.Bool) {
+// attached exactly as startJobQueue does so the wiring is under test too.
+func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*jobs.Runner, *atomic.Bool) {
 	t.Helper()
 	shouldFail := &atomic.Bool{}
-	runner := tasks.New(tasks.Options{
-		Root:         filepath.Join(t.TempDir(), "tasks"),
+	runner := jobs.New(jobs.Options{
+		Store:        newTestJobStore(t, d),
 		Log:          func(string, ...interface{}) {},
 		PollInterval: 2 * time.Millisecond,
 		MaxAttempts:  1,
 		BackoffBase:  time.Hour,
 		BackoffCap:   time.Hour,
 	})
-	if err := runner.Register(testTaskKind, func(context.Context, *tasks.Task) error {
+	if err := runner.Register(testTaskKind, func(context.Context, *jobs.Job) (any, error) {
 		if shouldFail.Load() {
-			return context.DeadlineExceeded
+			return nil, context.DeadlineExceeded
 		}
-		return nil
+		return nil, nil
 	}); err != nil {
 		t.Fatalf("register %s: %v", testTaskKind, err)
 	}
@@ -48,38 +47,39 @@ func installInstrumentedTaskRunner(t *testing.T, d *Daemon) (*tasks.Runner, *ato
 		t.Fatalf("start runner: %v", err)
 	}
 	t.Cleanup(runner.Stop)
-	d.compactRunner = runner
+	d.jobQueue = runner
 	return runner, shouldFail
 }
 
-// TestTaskToProtocolMapsFieldsAndOmitsMeta verifies the field mapping and,
-// critically, that the internal Meta bag (transcript filesystem paths and other
-// kind-specific inputs) never reaches the user-facing protocol type.
-func TestTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
+// TestTaskToProtocolMapsFieldsAndOmitsPayload verifies the field mapping and,
+// critically, that the internal payload and result (transcript filesystem paths and
+// other kind-specific inputs and outputs) never reach the user-facing protocol type.
+func TestTaskToProtocolMapsFieldsAndOmitsPayload(t *testing.T) {
 	next := time.Date(2026, 6, 14, 9, 30, 0, 0, time.UTC)
 	created := time.Date(2026, 6, 14, 9, 0, 0, 0, time.UTC)
 	updated := time.Date(2026, 6, 14, 9, 15, 0, 0, time.UTC)
 	secret := "/Users/victor/.claude/transcripts/SUPER-SECRET-PATH.jsonl"
-	task := &tasks.Task{
-		ID:            "test_task:ws-1",
-		Kind:          testTaskKind,
-		Subject:       "ws-1",
-		State:         tasks.StateFailed,
-		Attempts:      3,
-		NextAttemptAt: next,
-		LastError:     "boom",
-		CreatedAt:     created,
-		UpdatedAt:     updated,
-		Meta:          map[string]string{"transcript_path": secret},
+	task := &jobs.Job{
+		ID:          "job-1",
+		Kind:        testTaskKind,
+		UniqueKey:   "ws-1",
+		State:       jobs.StateFailed,
+		Attempts:    3,
+		ScheduledAt: next,
+		LastError:   "boom",
+		CreatedAt:   created,
+		UpdatedAt:   updated,
+		Payload:     []byte(`{"transcript_path":"` + secret + `"}`),
+		Result:      []byte(`{"wrote":"` + secret + `"}`),
 	}
 
 	pt := taskToProtocol(task)
 
-	if pt.ID != task.ID || pt.Kind != task.Kind || pt.Subject != task.Subject {
+	if pt.ID != task.ID || pt.Kind != task.Kind || pt.Subject != task.UniqueKey {
 		t.Fatalf("identity fields = %+v, want id/kind/subject from %+v", pt, task)
 	}
-	if pt.State != string(tasks.StateFailed) {
-		t.Fatalf("state = %q, want %q", pt.State, tasks.StateFailed)
+	if pt.State != string(jobs.StateFailed) {
+		t.Fatalf("state = %q, want %q", pt.State, jobs.StateFailed)
 	}
 	if pt.Attempts != 3 {
 		t.Fatalf("attempts = %d, want 3", pt.Attempts)
@@ -94,17 +94,20 @@ func TestTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
 		t.Fatalf("last_error = %v, want ptr to %q", pt.LastError, "boom")
 	}
 
-	// The protocol struct has no Meta field, so the only way it could leak is via
-	// JSON. Serialize and assert the secret path is nowhere in the wire form.
+	// The protocol struct has no payload or result field, so the only way either
+	// could leak is via JSON. Serialize and assert the secret path is nowhere in
+	// the wire form.
 	raw, err := json.Marshal(pt)
 	if err != nil {
 		t.Fatalf("marshal protocol task: %v", err)
 	}
 	if strings.Contains(string(raw), secret) {
-		t.Fatalf("protocol task JSON leaked Meta secret: %s", raw)
+		t.Fatalf("protocol task JSON leaked the payload/result secret: %s", raw)
 	}
-	if strings.Contains(string(raw), "meta") {
-		t.Fatalf("protocol task JSON contains a meta key: %s", raw)
+	for _, key := range []string{"payload", "result"} {
+		if strings.Contains(string(raw), key) {
+			t.Fatalf("protocol task JSON contains a %s key: %s", key, raw)
+		}
 	}
 
 	// An empty LastError stays a nil pointer (omitted on the wire).
@@ -117,10 +120,10 @@ func TestTaskToProtocolMapsFieldsAndOmitsMeta(t *testing.T) {
 // TestTasksToProtocolSkipsNil guards the nil-skip in the slice converter so
 // a sparse runner list can never index-panic or emit a zero-value record.
 func TestTasksToProtocolSkipsNil(t *testing.T) {
-	in := []*tasks.Task{
-		{ID: "a", Kind: testTaskKind, Subject: "a", State: tasks.StateQueued},
+	in := []*jobs.Job{
+		{ID: "a", Kind: testTaskKind, UniqueKey: "a", State: jobs.StateQueued},
 		nil,
-		{ID: "b", Kind: testTaskKind, Subject: "b", State: tasks.StateDone},
+		{ID: "b", Kind: testTaskKind, UniqueKey: "b", State: jobs.StateDone},
 	}
 	out := tasksToProtocol(in)
 	if len(out) != 2 || out[0].ID != "a" || out[1].ID != "b" {
@@ -135,15 +138,15 @@ func TestTasksToProtocolSkipsNil(t *testing.T) {
 func TestSendTaskListWSResult(t *testing.T) {
 	d := newNotebookDaemon(t)
 	runner, _ := installInstrumentedTaskRunner(t, d)
-	if _, err := runner.Enqueue(testTaskKind, "ws-a", tasks.EnqueueOptions{}); err != nil {
+	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-a"}); err != nil {
 		t.Fatalf("enqueue ws-a: %v", err)
 	}
-	if _, err := runner.Enqueue(testTaskKind, "ws-b", tasks.EnqueueOptions{}); err != nil {
+	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-b"}); err != nil {
 		t.Fatalf("enqueue ws-b: %v", err)
 	}
 	// Let the worker run both to a terminal state so the records are stable.
-	waitForTaskState(t, d, testTaskKind, "ws-a", tasks.StateDone)
-	waitForTaskState(t, d, testTaskKind, "ws-b", tasks.StateDone)
+	waitForTaskState(t, d, testTaskKind, "ws-a", jobs.StateDone)
+	waitForTaskState(t, d, testTaskKind, "ws-b", jobs.StateDone)
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.sendTaskListWSResult(client, "list-1")
@@ -165,11 +168,11 @@ func TestSendTaskListWSResult(t *testing.T) {
 		if !ok {
 			t.Fatalf("subject %q missing from list: %+v", subject, msg.Tasks)
 		}
-		if task.Kind != testTaskKind || task.State != string(tasks.StateDone) {
+		if task.Kind != testTaskKind || task.State != string(jobs.StateDone) {
 			t.Fatalf("task %q = %+v, want kind=%s state=done", subject, task, testTaskKind)
 		}
-		if task.ID != tasks.TaskID(testTaskKind, subject) {
-			t.Fatalf("task %q id = %q, want %q", subject, task.ID, tasks.TaskID(testTaskKind, subject))
+		if want := jobIDForKey(t, runner, testTaskKind, subject); task.ID != want {
+			t.Fatalf("task %q id = %q, want %q", subject, task.ID, want)
 		}
 	}
 }
@@ -178,7 +181,7 @@ func TestSendTaskListWSResult(t *testing.T) {
 // empty WS result, not a transport error.
 func TestSendTaskListWSResultNilRunner(t *testing.T) {
 	d := newNotebookDaemon(t)
-	d.compactRunner = nil
+	d.jobQueue = nil
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.sendTaskListWSResult(client, "list-nil")
@@ -198,24 +201,24 @@ func TestSendTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 	runner, shouldFail := installInstrumentedTaskRunner(t, d)
 	shouldFail.Store(true)
 
-	if _, err := runner.Enqueue(testTaskKind, "ws-fail", tasks.EnqueueOptions{}); err != nil {
+	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-fail"}); err != nil {
 		t.Fatalf("enqueue ws-fail: %v", err)
 	}
-	dead := waitForTaskState(t, d, testTaskKind, "ws-fail", tasks.StateDead)
+	dead := waitForTaskState(t, d, testTaskKind, "ws-fail", jobs.StateDead)
 	if dead.LastError == "" {
 		t.Fatalf("dead task has no last_error: %+v", dead)
 	}
 
 	before := time.Now()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendTaskRetryWSResult(client, "retry-1", tasks.TaskID(testTaskKind, "ws-fail"))
+	d.sendTaskRetryWSResult(client, "retry-1", dead.ID)
 
 	var msg protocol.TaskRetryResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
 	if msg.Event != protocol.EventTaskRetryResult || msg.RequestID != "retry-1" || !msg.Success {
 		t.Fatalf("retry result = %+v, want success task_retry_result for retry-1", msg)
 	}
-	if msg.Task == nil || msg.Task.State != string(tasks.StateQueued) {
+	if msg.Task == nil || msg.Task.State != string(jobs.StateQueued) {
 		t.Fatalf("retry result task = %+v, want state queued", msg.Task)
 	}
 	if msg.Task.Attempts != 0 {
@@ -235,7 +238,7 @@ func TestSendTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 // is a clear, non-panicking failure result rather than a silent success.
 func TestSendTaskRetryWSResultNilRunner(t *testing.T) {
 	d := newNotebookDaemon(t)
-	d.compactRunner = nil
+	d.jobQueue = nil
 
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.sendTaskRetryWSResult(client, "retry-nil", "test_task:gone")
@@ -250,7 +253,7 @@ func TestSendTaskRetryWSResultNilRunner(t *testing.T) {
 // TestTasksChangedBroadcastReachesClient drives a REAL task transition
 // through the daemon-wired runner and asserts the live tasks_changed
 // broadcast actually lands on a subscribed websocket client with the correct event
-// name. This covers the end-to-end path startCompactRunner relies on (runner.OnChange
+// name. This covers the end-to-end path startJobQueue relies on (runner.OnChange
 // -> the task.changed fact -> wsHub), which the per-handler result tests
 // cannot see: a renamed event or a broken broadcast message would slip past them but
 // is caught here. (That the runner invokes OnChange at all is a tasks-package property
@@ -262,9 +265,9 @@ func TestTasksChangedBroadcastReachesClient(t *testing.T) {
 	go d.wsHub.run()
 
 	// installInstrumentedTaskRunner wires runner.OnChange -> the task.changed fact
-	// exactly as startCompactRunner does, so a real transition exercises the live path.
+	// exactly as startJobQueue does, so a real transition exercises the live path.
 	runner, _ := installInstrumentedTaskRunner(t, d)
-	if _, err := runner.Enqueue(testTaskKind, "ws-bcast", tasks.EnqueueOptions{}); err != nil {
+	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-bcast"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 

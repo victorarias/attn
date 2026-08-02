@@ -3,25 +3,26 @@ package daemon
 import (
 	"time"
 
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
-// taskToProtocol converts one durable task-runner record into the
-// user-facing protocol type. Timestamps are emitted as RFC3339 (UTC); LastError
-// becomes a pointer only when non-empty.
+// taskToProtocol converts one durable job record into the user-facing protocol
+// type. Timestamps are emitted as RFC3339 (UTC); LastError becomes a pointer
+// only when non-empty. Subject is the job's coalescing key, which for every kind
+// the daemon queues is the entity the run acts on (see jobSubject).
 //
-// SECURITY: Task.Meta carries internal inputs (e.g. transcript filesystem paths)
-// and Task.CommitGuard is a live run latch — neither has a field on
-// protocol.Task, so neither can leak to a client. Do not add them.
-func taskToProtocol(t *tasks.Task) protocol.Task {
+// SECURITY: Job.Payload and Job.Result carry internal inputs and outputs (e.g.
+// transcript filesystem paths) and Job.CommitGuard is a live run latch — none
+// has a field on protocol.Task, so none can leak to a client. Do not add them.
+func taskToProtocol(t *jobs.Job) protocol.Task {
 	pt := protocol.Task{
 		ID:            t.ID,
 		Kind:          t.Kind,
-		Subject:       t.Subject,
+		Subject:       jobSubject(t),
 		State:         string(t.State),
 		Attempts:      t.Attempts,
-		NextAttemptAt: t.NextAttemptAt.UTC().Format(time.RFC3339),
+		NextAttemptAt: t.ScheduledAt.UTC().Format(time.RFC3339),
 		CreatedAt:     t.CreatedAt.UTC().Format(time.RFC3339),
 		UpdatedAt:     t.UpdatedAt.UTC().Format(time.RFC3339),
 	}
@@ -31,9 +32,8 @@ func taskToProtocol(t *tasks.Task) protocol.Task {
 	return pt
 }
 
-// tasksToProtocol converts a slice of runner records, skipping nil
-// entries.
-func tasksToProtocol(ts []*tasks.Task) []protocol.Task {
+// tasksToProtocol converts a slice of queue records, skipping nil entries.
+func tasksToProtocol(ts []*jobs.Job) []protocol.Task {
 	out := make([]protocol.Task, 0, len(ts))
 	for _, t := range ts {
 		if t == nil {
@@ -44,13 +44,13 @@ func tasksToProtocol(ts []*tasks.Task) []protocol.Task {
 	return out
 }
 
-// sendTaskListWSResult lists the durable runner's records and replies to
+// sendTaskListWSResult lists the durable queue's records and replies to
 // a websocket client with a task_list_result event correlated by
 // requestID. A nil runner (disabled / not yet built) is a successful empty list,
 // not an error. This WS path is the only task-list path; the former unix-socket
 // CLI task-list command was removed.
 func (d *Daemon) sendTaskListWSResult(client *wsClient, requestID string) {
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil {
 		d.sendToClient(client, protocol.TaskListResultMessage{
 			Event:     protocol.EventTaskListResult,
@@ -77,7 +77,7 @@ func (d *Daemon) sendTaskListWSResult(client *wsClient, requestID string) {
 // runner's OnChange callback fires broadcastTasksChanged automatically on
 // a successful retry transition, so this handler does NOT broadcast itself.
 func (d *Daemon) sendTaskRetryWSResult(client *wsClient, requestID, taskID string) {
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil {
 		d.sendToClient(client, protocol.TaskRetryResultMessage{
 			Event:     protocol.EventTaskRetryResult,

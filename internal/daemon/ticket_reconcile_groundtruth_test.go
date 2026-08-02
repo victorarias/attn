@@ -192,7 +192,7 @@ func TestReconcileGroundTruthAnnotatesMergedPR(t *testing.T) {
 		}, nil
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		Title:          "Ship the fix",
 		Brief:          "Land the fix.",
@@ -202,7 +202,7 @@ func TestReconcileGroundTruthAnnotatesMergedPR(t *testing.T) {
 		TranscriptPath: transcript,
 		CloseContext:   "found orphaned by the periodic sweep",
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	comments := reconcileComments(t, d, ticketID)
@@ -258,7 +258,7 @@ func TestReconcileGroundTruthSilentWhenPROpen(t *testing.T) {
 		}, nil
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		Title:          "Ship the fix",
 		Brief:          "Land the fix.",
@@ -268,7 +268,7 @@ func TestReconcileGroundTruthSilentWhenPROpen(t *testing.T) {
 		TranscriptPath: transcript,
 		CloseContext:   "found orphaned by the periodic sweep",
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	comments := reconcileComments(t, d, ticketID)
@@ -312,7 +312,7 @@ func runGroundTruthReconcile(t *testing.T, d *Daemon, ticketID, whatsLeft string
 		return agentdriver.HeadlessTaskResult{StructuredOutput: []byte(verdict)}, nil
 	}
 
-	if err := d.reconcileTaskExecutor(context.Background(), reconcileTask(ticketReconcileInputs{
+	if _, err := d.reconcileJobHandler(context.Background(), reconcileTask(ticketReconcileInputs{
 		TicketID:       ticketID,
 		Title:          "Ship the fix",
 		Brief:          "Land the fix.",
@@ -322,7 +322,7 @@ func runGroundTruthReconcile(t *testing.T, d *Daemon, ticketID, whatsLeft string
 		TranscriptPath: transcript,
 		CloseContext:   "found orphaned by the periodic sweep",
 	})); err != nil {
-		t.Fatalf("reconcileTaskExecutor: %v", err)
+		t.Fatalf("reconcileJobHandler: %v", err)
 	}
 
 	comments := reconcileComments(t, d, ticketID)

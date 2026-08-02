@@ -97,13 +97,13 @@ func TestSnapshotWorkspaceContextAtRemovalSites(t *testing.T) {
 }
 
 // The startup-reconciliation reap (loadWorkspacesFromStore) is the fourth removal
-// site. It runs before the compaction runner exists (compactRunner nil), and the
+// site. It runs before the compaction runner exists (jobQueue nil), and the
 // snapshot must still land — it does not touch the runner.
 func TestSnapshotWorkspaceContextAtLoadTimeReap(t *testing.T) {
 	d := newNotebookDaemon(t)
 	// Mimic production: an orphaned workspace row + context with no live session,
-	// reaped during Start() before startCompactRunner runs.
-	d.compactRunner = nil
+	// reaped during Start() before startJobQueue runs.
+	d.jobQueue = nil
 	d.store.AddWorkspace(&protocol.Workspace{ID: "ws-orphan", Title: "orphan", Directory: "/repo/orphan"})
 	if _, _, err := d.store.UpdateWorkspaceContext("ws-orphan", "# Old context\nstale but durable", "s-orphan", 0); err != nil {
 		t.Fatalf("seed orphan context: %v", err)

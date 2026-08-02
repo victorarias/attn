@@ -9,9 +9,9 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/notebook"
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // pinUTCSlot configures the daily-narrate cron to use the shared nightly slot in a
@@ -102,12 +102,16 @@ func TestEnqueueDueDailyNarratesDueFiresOnceAndClearsActivity(t *testing.T) {
 	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-A") {
 		t.Fatal("due fire did not enqueue narrate_workspace for the active workspace")
 	}
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-A"))
+	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-A")
 	if err != nil || task == nil {
 		t.Fatalf("get narrate task: %v", err)
 	}
-	if task.Meta[notebookNarrateMetaDailyPass] != "1" {
-		t.Fatalf("daily narrate task missing the daily-pass Meta flag: %+v", task.Meta)
+	var carried narrateWorkspacePayload
+	if err := task.DecodePayload(&carried); err != nil {
+		t.Fatalf("decode narrate payload: %v", err)
+	}
+	if !carried.DailyPass {
+		t.Fatalf("daily narrate job missing the daily-pass flag: %s", task.Payload)
 	}
 
 	// The activity set was cleared on the fire, so a later due day with no new
@@ -142,7 +146,7 @@ func TestEnqueueDueDailyNarratesGatesOnActivity(t *testing.T) {
 	}
 	// Give the worker a beat; ws-B must never get a task.
 	time.Sleep(20 * time.Millisecond)
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-B"))
+	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-B")
 	if err != nil {
 		t.Fatalf("get ws-B narrate: %v", err)
 	}
@@ -172,7 +176,7 @@ func TestEnqueueDueDailyNarratesSkipsRemovedWorkspace(t *testing.T) {
 		t.Fatalf("anchor did not advance on a fire that skipped a removed workspace: %q", state.ScheduledFrom)
 	}
 	time.Sleep(20 * time.Millisecond)
-	task, err := d.compactRunner.Get(tasks.TaskID(notebookNarrateWorkspaceKind, "ws-gone"))
+	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-gone")
 	if err != nil {
 		t.Fatalf("get ws-gone narrate: %v", err)
 	}
@@ -257,12 +261,13 @@ func TestNarrateWorkspaceDailyPassUnchangedIsDone(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "nothing new"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{
-		Meta: map[string]string{notebookNarrateMetaDailyPass: "1"},
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: "ws-1",
+		Payload:   narrateWorkspacePayload{DailyPass: true},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
 }
 
 // A daily-flagged narrate whose agent writes NO entry at all goes DONE (not failed):
@@ -278,12 +283,13 @@ func TestNarrateWorkspaceDailyPassAbsentIsDone(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "no entry"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{
-		Meta: map[string]string{notebookNarrateMetaDailyPass: "1"},
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: "ws-1",
+		Payload:   narrateWorkspacePayload{DailyPass: true},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", tasks.StateDone)
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
 }
 
 // A daily-flagged REMOVAL pass keeps STRICT gating: an unchanged/absent block still
@@ -308,13 +314,14 @@ func TestNarrateWorkspaceDailyFlagRemovalPassStillStrict(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
 	}
 
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-removed", tasks.EnqueueOptions{
-		Meta: map[string]string{notebookNarrateMetaDailyPass: "1"},
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: "ws-removed",
+		Payload:   narrateWorkspacePayload{DailyPass: true},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-removed")
-	if task.State == tasks.StateDone {
+	if task.State == jobs.StateDone {
 		t.Fatal("daily flag wrongly relaxed a removal pass to done")
 	}
 }
@@ -340,8 +347,8 @@ func TestNarrateWorkspaceRoutinePassUnchangedStillFails(t *testing.T) {
 		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
 	}
 
-	// No daily Meta flag -> strict gating.
-	if _, err := d.compactRunner.Enqueue(notebookNarrateWorkspaceKind, "ws-1", tasks.EnqueueOptions{}); err != nil {
+	// No daily-pass payload -> strict gating.
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
 	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")

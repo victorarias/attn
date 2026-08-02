@@ -26,7 +26,7 @@
 //
 // The package accepts a Store and a LogFunc at construction and MUST NOT import
 // internal/daemon (the daemon imports this package and adapts internal/store to
-// the Store seam, exactly as it does for internal/tasks).
+// the Store seam, exactly as it does for internal/jobs).
 //
 // See docs/plans/2026-08-01-ext-a1-event-bus.md.
 package bus
@@ -64,7 +64,7 @@ const (
 // every registration.
 var ErrAlreadyStarted = errors.New("bus: consumers must be registered before Start")
 
-// LogFunc matches the daemon's injected logger shape (see internal/tasks,
+// LogFunc matches the daemon's injected logger shape (see internal/jobs,
 // internal/pty). Runtime logging goes through it — never log.Printf, whose stderr
 // is discarded when the daemon runs in the background.
 type LogFunc func(format string, args ...interface{})
@@ -740,7 +740,7 @@ func (d *durable) stallReason() string {
 	return d.stalled
 }
 
-// backoff is capped exponential, matching internal/tasks' schedule.
+// backoff is capped exponential, matching internal/jobs' schedule.
 func backoff(base, ceiling time.Duration, attempt int) time.Duration {
 	if attempt < 1 {
 		attempt = 1

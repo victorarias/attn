@@ -651,7 +651,7 @@ func (d *Daemon) loadWorkspacesFromStore() []string {
 				// and the snapshot only reads the store and writes a file, so both are
 				// safe here with no runner. The final-narrate enqueue, however, needs
 				// the runner, so we DEFER it: collect the reaped id and return it for
-				// Start to enqueue once startCompactRunner has run, so a startup-reaped
+				// Start to enqueue once startJobQueue has run, so a startup-reaped
 				// workspace still gets its removal-boundary retrospective.
 				d.forgetWorkspaceContextCompaction(ws.ID)
 				d.snapshotWorkspaceContextOnRemove(ws.ID, ws.Title)

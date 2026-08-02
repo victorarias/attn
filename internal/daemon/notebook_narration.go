@@ -12,8 +12,8 @@ import (
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/notebook"
-	"github.com/victorarias/attn/internal/tasks"
 )
 
 // headlessScratchCwd returns a stable, attn-owned working directory used as the
@@ -79,23 +79,6 @@ const (
 	// stops into one digest run). The removal-boundary final narrate overrides this
 	// with ZeroDebounce.
 	notebookNarrationDebounce = 2 * time.Minute
-	// notebookSummarizeMetaTranscript and notebookSummarizeMetaWorkspace are the
-	// task.Meta keys carrying the summarize_session run's inputs onto the durable
-	// record at enqueue time (handleStop), where BOTH the session row and the
-	// workspace row still exist. They MUST be carried because the debounced run
-	// fires AFTER a single-session-workspace teardown has deleted both rows, so the
-	// executor can no longer re-derive the transcript path or the workspace bucket
-	// from a live row. The transcript file itself survives under ~/.claude/~/.codex.
-	notebookSummarizeMetaTranscript = "transcript"
-	notebookSummarizeMetaWorkspace  = "workspace"
-	// notebookNarrateMetaDailyPass marks a narrate_workspace task enqueued by the
-	// daily-narrate cron (the long-lived-workspace backstop) rather than by
-	// session-end or the removal boundary. It relaxes the executor's success gate so
-	// a no-op daily refresh (nothing new to narrate) is a CLEAN DONE instead of a
-	// retried failure (see narrateWorkspaceExecutor's dailyPass branch). Session-end
-	// and removal passes carry no daily flag and keep strict "must have written"
-	// gating.
-	notebookNarrateMetaDailyPass = "daily_pass"
 	// notebookSoloSessionBucket is the RawSessionsDir subdir holding digests for
 	// solo (non-workspace) sessions. It is a reserved name (leading underscore) so
 	// it can never collide with a real workspace id bucket, and rawTierSegment
@@ -104,6 +87,33 @@ const (
 	// visually distinct from a workspace dir.
 	notebookSoloSessionBucket = "_solo"
 )
+
+// summarizeSessionPayload carries the summarize_session run's inputs onto the
+// durable job at enqueue time (handleStop), where BOTH the session row and the
+// workspace row still exist. They MUST be carried because the debounced run
+// fires AFTER a single-session-workspace teardown has deleted both rows, so the
+// handler can no longer re-derive the transcript path or the workspace bucket
+// from a live row. The transcript file itself survives under ~/.claude/~/.codex.
+//
+// WorkspaceID is a pointer because "carried, and it is empty" is a genuinely
+// different fact from "carried nothing": an empty id means a solo session whose
+// digest belongs in the _solo bucket, while an absent one means fall back to the
+// live session row.
+type summarizeSessionPayload struct {
+	Transcript  string  `json:"transcript,omitempty"`
+	WorkspaceID *string `json:"workspace,omitempty"`
+}
+
+// narrateWorkspacePayload marks a narrate_workspace job enqueued by the
+// daily-narrate cron (the long-lived-workspace backstop) rather than by
+// session-end or the removal boundary. It relaxes the handler's success gate so
+// a no-op daily refresh (nothing new to narrate) is a CLEAN DONE instead of a
+// retried failure (see narrateWorkspaceHandler's dailyPass branch). Session-end
+// and removal passes carry no daily flag and keep strict "must have written"
+// gating.
+type narrateWorkspacePayload struct {
+	DailyPass bool `json:"daily_pass,omitempty"`
+}
 
 // notebookNarrationAllowedTools is the native tool set both narration agents get.
 // Unlike the keeper's compaction duty (file tools only), the narrate duty may run read-only shell to
@@ -127,52 +137,59 @@ var notebookNarrationAllowedTools = []string{"Read", "Write", "Edit", "Grep", "G
 // returns without writing it is an error so the runner backs off and retries. On
 // success, if the workspace has since been removed it re-enqueues the retrospective
 // narrate so the late digest lands in it (see the re-narrate hook below).
-func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task) error {
+func (d *Daemon) summarizeSessionHandler(ctx context.Context, job *jobs.Job) (any, error) {
 	// Master switch: a run queued before the keeper was disabled must not fire
 	// background work after the toggle is off. No-op success retires the record.
 	if !d.notebookTasksEnabled() {
-		return nil
+		return nil, nil
 	}
-	sessionID := strings.TrimSpace(task.Subject)
+	sessionID := strings.TrimSpace(jobSubject(job))
 	if sessionID == "" {
-		return errors.New("summarize_session requires a session id")
+		return nil, errors.New("summarize_session requires a session id")
+	}
+	var carried summarizeSessionPayload
+	if err := job.DecodePayload(&carried); err != nil {
+		return nil, err
 	}
 
 	root, err := d.notebookRoot()
 	if err != nil {
-		return fmt.Errorf("summarize_session: notebook root: %w", err)
+		return nil, fmt.Errorf("summarize_session: notebook root: %w", err)
 	}
 	if strings.TrimSpace(root) == "" {
-		return errors.New("summarize_session: notebook is disabled")
+		return nil, errors.New("summarize_session: notebook is disabled")
 	}
 
 	config, err := d.notebookNarrationConfigFor(notebookSummarizeSessionKind)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	provider, executablePath, err := d.resolveNotebookNarrationExecutable(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	// Resolve the transcript path and workspace id, PREFERRING the inputs carried on
-	// the task (stashed at enqueue time, where both the session row and workspace row
+	// the job (stashed at enqueue time, where both the session row and workspace row
 	// still existed) and falling back to the live session row. The carried inputs are
 	// what make this run correct AFTER a single-session-workspace teardown: by the
 	// time the debounced run fires both rows are gone, but the transcript file
 	// survives on disk and the carried workspace id still routes the digest to the
-	// right per-workspace bucket. The fallback covers a manually-enqueued/legacy task
-	// (no Meta) whose row still exists.
-	carriedTranscript := strings.TrimSpace(task.Meta[notebookSummarizeMetaTranscript])
-	carriedWorkspace := strings.TrimSpace(task.Meta[notebookSummarizeMetaWorkspace])
-	_, hasCarriedWorkspace := task.Meta[notebookSummarizeMetaWorkspace]
+	// right per-workspace bucket. The fallback covers a manually-enqueued job
+	// (no payload) whose row still exists.
+	carriedTranscript := strings.TrimSpace(carried.Transcript)
+	carriedWorkspace := ""
+	hasCarriedWorkspace := carried.WorkspaceID != nil
+	if hasCarriedWorkspace {
+		carriedWorkspace = strings.TrimSpace(*carried.WorkspaceID)
+	}
 
 	session := d.store.Get(sessionID)
 	if session == nil && carriedTranscript == "" {
 		// No row AND nothing carried: the session is genuinely gone with no transcript
 		// to summarize. That is a no-op success, not a failure (nothing to retry).
 		d.logf("summarize_session: session %s no longer present and no carried transcript, skipping", sessionID)
-		return nil
+		return nil, nil
 	}
 
 	transcriptPath := carriedTranscript
@@ -199,15 +216,15 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 	// the row's was, so it is guarded identically.
 	digestPath, err := notebookSessionDigestPath(root, workspaceID, sessionID)
 	if err != nil {
-		return fmt.Errorf("summarize_session: %w", err)
+		return nil, fmt.Errorf("summarize_session: %w", err)
 	}
 	if err := os.MkdirAll(filepath.Dir(digestPath), 0o755); err != nil {
-		return fmt.Errorf("summarize_session: create raw sessions dir: %w", err)
+		return nil, fmt.Errorf("summarize_session: create raw sessions dir: %w", err)
 	}
 
 	workDir, err := headlessScratchCwd()
 	if err != nil {
-		return fmt.Errorf("summarize_session: resolve scratch cwd: %w", err)
+		return nil, fmt.Errorf("summarize_session: resolve scratch cwd: %w", err)
 	}
 
 	// Snapshot the digest's pre-run identity so the success gate can require the run
@@ -236,7 +253,7 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 	}
 	result, err := run(ctx, provider, request)
 	if err != nil {
-		return fmt.Errorf("summarize_session: run agent: %w (%s)", err, result.Diagnostics)
+		return nil, fmt.Errorf("summarize_session: run agent: %w (%s)", err, result.Diagnostics)
 	}
 
 	// The file is the ledger: a run that returned without (re)writing the digest
@@ -245,10 +262,10 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 	// stale digest is a failure (requeued with backoff), not a false done.
 	after := fileFingerprintOf(digestPath)
 	if !after.exists {
-		return fmt.Errorf("summarize_session: agent did not write digest %s (%s)", digestPath, result.Diagnostics)
+		return nil, fmt.Errorf("summarize_session: agent did not write digest %s (%s)", digestPath, result.Diagnostics)
 	}
 	if before.exists && after.equal(before) {
-		return fmt.Errorf("summarize_session: agent left digest %s unchanged (%s)", digestPath, result.Diagnostics)
+		return nil, fmt.Errorf("summarize_session: agent left digest %s unchanged (%s)", digestPath, result.Diagnostics)
 	}
 	d.logf("summarize_session: session=%s agent=%s model=%s digest=%s", sessionID, config.Agent, config.Model, digestPath)
 
@@ -268,7 +285,7 @@ func (d *Daemon) summarizeSessionExecutor(ctx context.Context, task *tasks.Task)
 		d.logf("summarize_session: workspace %s removed, re-narrating retrospective with fresh digest", workspaceID)
 		d.enqueueFinalNarrateWorkspace(workspaceID)
 	}
-	return nil
+	return nil, nil
 }
 
 // notebookSessionDigestPath builds the absolute path of a session's raw digest,
@@ -309,53 +326,57 @@ func notebookWorkspaceSessionsDir(root, workspaceID string) (string, error) {
 
 // --- narrate_workspace ---
 
-// narrateWorkspaceExecutor is the runner-registered ExecutorFunc for
-// narrate_workspace. task.Subject is the workspace id. It derives IS_REMOVAL_PASS
+// narrateWorkspaceHandler is the runner-registered handler for
+// narrate_workspace. The job's subject is the workspace id. It derives IS_REMOVAL_PASS
 // at RUN TIME from whether the workspace row still exists (an absent row means the
 // workspace was removed and this is the final retrospective pass), gathers the
 // narrate duty's inputs, runs the agent, and verifies the journal now carries this
 // workspace's marker for today (the file is the ledger).
-func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task) error {
+func (d *Daemon) narrateWorkspaceHandler(ctx context.Context, job *jobs.Job) (any, error) {
 	// Master switch: a run queued before the keeper was disabled must not fire
 	// background work after the toggle is off. No-op success retires the record.
 	if !d.notebookTasksEnabled() {
-		return nil
+		return nil, nil
 	}
-	workspaceID := strings.TrimSpace(task.Subject)
+	workspaceID := strings.TrimSpace(jobSubject(job))
 	if workspaceID == "" {
-		return errors.New("narrate_workspace requires a workspace id")
+		return nil, errors.New("narrate_workspace requires a workspace id")
+	}
+	var carried narrateWorkspacePayload
+	if err := job.DecodePayload(&carried); err != nil {
+		return nil, err
 	}
 
 	root, err := d.notebookRoot()
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: notebook root: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: notebook root: %w", err)
 	}
 	if strings.TrimSpace(root) == "" {
-		return errors.New("narrate_workspace: notebook is disabled")
+		return nil, errors.New("narrate_workspace: notebook is disabled")
 	}
 
 	config, err := d.notebookNarrationConfigFor(notebookNarrateWorkspaceKind)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	provider, executablePath, err := d.resolveNotebookNarrationExecutable(config)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	inputs, err := d.gatherNarrateWorkspaceInputs(root, workspaceID)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	if err := os.MkdirAll(inputs.JournalDir, 0o755); err != nil {
-		return fmt.Errorf("narrate_workspace: create journal dir: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: create journal dir: %w", err)
 	}
 	// MkdirAll the per-workspace sessions bucket so the narrate agent's "Read every digest
 	// in RAW_SESSIONS_DIR" step does not fault on a missing dir when no member ever
 	// summarized (e.g. a workspace removed before any session stopped).
 	if err := os.MkdirAll(inputs.RawSessionsDir, 0o755); err != nil {
-		return fmt.Errorf("narrate_workspace: create raw sessions dir: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: create raw sessions dir: %w", err)
 	}
 
 	// Snapshot this workspace's marker block before the run so the success gate can
@@ -366,12 +387,12 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	// nothing for the workspace.
 	before, err := workspaceNarrationBlock(inputs.JournalPath, workspaceID)
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: read journal: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: read journal: %w", err)
 	}
 
 	workDir, err := headlessScratchCwd()
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: resolve scratch cwd: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: resolve scratch cwd: %w", err)
 	}
 
 	request := agentdriver.HeadlessTaskRequest{
@@ -396,7 +417,7 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	}
 	result, err := run(ctx, provider, request)
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: run agent: %w (%s)", err, result.Diagnostics)
+		return nil, fmt.Errorf("narrate_workspace: run agent: %w (%s)", err, result.Diagnostics)
 	}
 
 	// The file is the ledger: success means today's journal now carries THIS
@@ -406,7 +427,7 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	// fails and is retried, instead of being falsely marked done off stale content.
 	after, err := workspaceNarrationBlock(inputs.JournalPath, workspaceID)
 	if err != nil {
-		return fmt.Errorf("narrate_workspace: verify journal: %w", err)
+		return nil, fmt.Errorf("narrate_workspace: verify journal: %w", err)
 	}
 
 	// dailyPass relaxes the success gate for the daily-cron backstop ONLY. A daily
@@ -418,27 +439,27 @@ func (d *Daemon) narrateWorkspaceExecutor(ctx context.Context, task *tasks.Task)
 	// block unchanged" are both a CLEAN DONE. Removal passes (the full retrospective)
 	// and session-end routine passes (no daily flag) keep STRICT gating, which
 	// preserves the retry-until-the-digest-lands property they depend on.
-	dailyPass := !inputs.IsRemovalPass && strings.TrimSpace(task.Meta[notebookNarrateMetaDailyPass]) == "1"
+	dailyPass := !inputs.IsRemovalPass && carried.DailyPass
 
 	if !after.present {
 		if dailyPass {
 			d.logf("narrate_workspace: daily pass for %s found nothing new to narrate (no entry written); clean no-op", workspaceID)
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("narrate_workspace: agent did not write %s entry to %s (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
+		return nil, fmt.Errorf("narrate_workspace: agent did not write %s entry to %s (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
 	}
 	if before.present && after.body == before.body {
 		if dailyPass {
 			d.logf("narrate_workspace: daily pass for %s left the entry unchanged (nothing new to narrate); clean no-op", workspaceID)
-			return nil
+			return nil, nil
 		}
-		return fmt.Errorf("narrate_workspace: agent left %s entry in %s unchanged (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
+		return nil, fmt.Errorf("narrate_workspace: agent left %s entry in %s unchanged (%s)", workspaceNarrationMarker(workspaceID), inputs.JournalPath, result.Diagnostics)
 	}
 	d.logf(
 		"narrate_workspace: workspace=%s agent=%s model=%s removal=%t journal=%s",
 		workspaceID, config.Agent, config.Model, inputs.IsRemovalPass, inputs.JournalPath,
 	)
-	return nil
+	return nil, nil
 }
 
 // gatherNarrateWorkspaceInputs assembles the absolute-path inputs the narrate
@@ -611,17 +632,18 @@ func (d *Daemon) enqueueSummarizeSession(sessionID, transcriptPath, workspaceID 
 	if !d.notebookTasksEnabled() {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return
 	}
-	meta := map[string]string{
-		notebookSummarizeMetaTranscript: strings.TrimSpace(transcriptPath),
-		notebookSummarizeMetaWorkspace:  strings.TrimSpace(workspaceID),
-	}
-	if _, err := runner.Enqueue(notebookSummarizeSessionKind, sessionID, tasks.EnqueueOptions{
-		Debounce: notebookNarrationDebounce,
-		Meta:     meta,
+	carriedWorkspace := strings.TrimSpace(workspaceID)
+	if _, err := runner.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+		UniqueKey: sessionID,
+		Delay:     notebookNarrationDebounce,
+		Payload: summarizeSessionPayload{
+			Transcript:  strings.TrimSpace(transcriptPath),
+			WorkspaceID: &carriedWorkspace,
+		},
 	}); err != nil {
 		d.logf("summarize_session: enqueue %s: %v", sessionID, err)
 	}
@@ -638,12 +660,13 @@ func (d *Daemon) enqueueNarrateWorkspace(workspaceID string) {
 	if !d.notebookTasksEnabled() {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return
 	}
-	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, workspaceID, tasks.EnqueueOptions{
-		Debounce: notebookNarrationDebounce,
+	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: workspaceID,
+		Delay:     notebookNarrationDebounce,
 	}); err != nil {
 		d.logf("narrate_workspace: enqueue %s: %v", workspaceID, err)
 	}
@@ -694,13 +717,14 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 	if !d.notebookTasksEnabled() {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return
 	}
-	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, workspaceID, tasks.EnqueueOptions{
-		Debounce: notebookNarrationDebounce,
-		Meta:     map[string]string{notebookNarrateMetaDailyPass: "1"},
+	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: workspaceID,
+		Delay:     notebookNarrationDebounce,
+		Payload:   narrateWorkspacePayload{DailyPass: true},
 	}); err != nil {
 		d.logf("narrate_workspace: enqueue daily %s: %v", workspaceID, err)
 	}
@@ -712,7 +736,7 @@ func (d *Daemon) enqueueDailyNarrateWorkspace(workspaceID string) {
 // retrospective. It must be called AFTER the context snapshot is taken and the
 // workspace row is removed, so the executor derives IS_REMOVAL_PASS=true and the
 // snapshot is on disk for the narrate pass to read. Nil/Disabled-guarded: a caller
-// that runs before startCompactRunner constructs the runner is a safe no-op, which
+// that runs before startJobQueue constructs the runner is a safe no-op, which
 // is why the startup-reconciliation reaper defers its enqueue to Start (after the
 // runner exists) rather than calling this inline.
 func (d *Daemon) enqueueFinalNarrateWorkspace(workspaceID string) {
@@ -723,12 +747,13 @@ func (d *Daemon) enqueueFinalNarrateWorkspace(workspaceID string) {
 	if !d.notebookTasksEnabled() {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return
 	}
-	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, workspaceID, tasks.EnqueueOptions{
-		ZeroDebounce: true,
+	if _, err := runner.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+		UniqueKey: workspaceID,
+		RunNow:    true,
 	}); err != nil {
 		d.logf("narrate_workspace: enqueue final %s: %v", workspaceID, err)
 	}

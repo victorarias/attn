@@ -273,6 +273,8 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   `internal/pty`, not inside the daemon
 - `internal/store`: SQLite plus in-memory cache
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
+- `internal/jobs`: durable job queue (retry/backoff, coalescing, commit fence,
+  cron entries) — every background duty and every periodic tick runs on it
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`

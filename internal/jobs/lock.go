@@ -1,4 +1,4 @@
-package tasks
+package jobs
 
 import (
 	"errors"
@@ -13,13 +13,12 @@ import (
 // ErrAlreadyRunning is returned by Start when another live Runner already owns
 // the lock dir. The orphan-recovery and single-instance guarantees assume at most
 // one live Runner per store: two Runners would both claim the same record, both
-// save StateRunning (atomic rename = last-writer-wins, no torn file), and both
-// invoke the executor concurrently — double-applying the durable write (e.g.
-// double compaction). Per-kind concurrency bounds parallelism WITHIN one Runner;
-// it does nothing across processes. The CommitGuard is likewise a per-process
-// in-memory latch with no cross-process coordination, so nothing else can fence
-// that.
-var ErrAlreadyRunning = errors.New("tasks: another runner already owns this store")
+// save StateRunning (last-writer-wins, no torn row), and both invoke the handler
+// concurrently — double-applying the durable write. Per-kind concurrency bounds
+// parallelism WITHIN one Runner; it does nothing across processes. The
+// CommitGuard is likewise a per-process in-memory latch with no cross-process
+// coordination, so nothing else can fence that.
+var ErrAlreadyRunning = errors.New("jobs: another runner already owns this store")
 
 // lockFileName is the single-instance ownership marker inside the lock dir.
 const lockFileName = ".runner.lock"
@@ -30,9 +29,9 @@ const lockFileName = ".runner.lock"
 // (stale ⇒ steal it). The PID inside lets a restart after a crash reclaim the lock
 // instead of wedging forever. Returns the acquired lock path for ReleaseDirLock.
 //
-// It is a free function so both the file store (locking under the notebook tasks
-// dir) and the daemon's SQLite adapter (locking under the profile data dir) share
-// one implementation.
+// It is a free function so a Store implementation can reach it: the daemon's
+// SQLite-backed store locks under the profile data dir, one runner per profile
+// matching one daemon per profile.
 func AcquireDirLock(dir string, log LogFunc) (string, error) {
 	if log == nil {
 		log = func(string, ...interface{}) {}
@@ -66,7 +65,7 @@ func AcquireDirLock(dir string, log LogFunc) (string, error) {
 		if rmErr := os.Remove(path); rmErr != nil && !errors.Is(rmErr, os.ErrNotExist) {
 			return "", rmErr
 		}
-		log("tasks: reclaimed stale runner lock at %s", path)
+		log("jobs: reclaimed stale runner lock at %s", path)
 	}
 }
 
@@ -86,14 +85,9 @@ func ReleaseDirLock(path string, log LogFunc) {
 		return
 	}
 	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
-		log("tasks: release runner lock %s: %v", path, err)
+		log("jobs: release runner lock %s: %v", path, err)
 	}
 }
-
-// acquireLock / releaseLock keep the file store's method shape, delegating to the
-// shared dir-lock helpers. The file store locks under its own .attn/tasks dir.
-func (s *store) acquireLock() (string, error) { return AcquireDirLock(stateDir(s.root), s.log) }
-func (s *store) releaseLock(path string)      { ReleaseDirLock(path, s.log) }
 
 // lockHolderAlive reports the PID recorded in the lock file and whether that
 // process is still alive. An unreadable/garbage lock is treated as stale (alive
@@ -117,8 +111,8 @@ func lockHolderAlive(path string) (pid int, alive bool) {
 }
 
 // processAlive reports whether a process with the given pid currently exists.
-// On macOS (attn's only platform) signal 0 probes liveness without delivering a
-// signal: ESRCH ⇒ gone, EPERM ⇒ alive but not ours, nil ⇒ alive.
+// Signal 0 probes liveness without delivering a signal: ESRCH ⇒ gone, EPERM ⇒
+// alive but not ours, nil ⇒ alive.
 func processAlive(pid int) bool {
 	err := syscall.Kill(pid, 0)
 	if err == nil {

@@ -12,9 +12,9 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
-	"github.com/victorarias/attn/internal/tasks"
 	"github.com/victorarias/attn/internal/transcript"
 )
 
@@ -55,22 +55,15 @@ const (
 	ticketReconcileFailureDetailHead = 300
 	ticketReconcileFailureDetailTail = 700
 
-	// reconcileKind is the durable-runner task kind for orphaned-ticket
-	// reconciliation. Subject is the ticket id, so TaskID("reconcile", ticketID)
-	// coalesces every trigger for one ticket onto a single record.
+	// reconcileKind is the durable-queue job kind for orphaned-ticket
+	// reconciliation. The unique key is the ticket id, so every trigger for one
+	// ticket coalesces onto a single record.
 	reconcileKind = "reconcile"
-
-	// reconcileInputsMetaKey stashes the JSON-encoded ticketReconcileInputs on the
-	// task record (Task.Meta). The classifier inputs are captured at ENQUEUE time
-	// because the owning session row is deleted moments after the death seam; the
-	// executor, which may run much later, reads them back from here and never
-	// re-reads the (gone) session.
-	reconcileInputsMetaKey = "reconcile_inputs"
 
 	// ticketReconcileConcurrency bounds simultaneous classifier processes: a
 	// workspace teardown can kill several delegated sessions at once, and without
-	// a cap that is N parallel sonnet runs. It is the reconcile executor's per-kind
-	// MaxConcurrent in the durable runner (which now owns the cap the bespoke
+	// a cap that is N parallel sonnet runs. It is the reconcile handler's per-kind
+	// MaxConcurrent in the durable queue (which now owns the cap the bespoke
 	// semaphore used to enforce).
 	ticketReconcileConcurrency = 2
 
@@ -121,29 +114,18 @@ type ticketReconcileInputs struct {
 	CloseContext   string // human framing: how the session ended, for prompt + comment
 }
 
-// reconcileInputsToMeta encodes the captured inputs into a Task.Meta map for the
-// durable record. ticketReconcileInputs is all strings, so json.Marshal cannot
-// fail; a defensive nil return degrades to "no inputs" (the executor then logs
-// and retires the task rather than panicking).
-func reconcileInputsToMeta(in ticketReconcileInputs) map[string]string {
-	data, err := json.Marshal(in)
-	if err != nil {
-		return nil
-	}
-	return map[string]string{reconcileInputsMetaKey: string(data)}
-}
-
-// reconcileInputsFromMeta decodes the inputs the enqueue stashed. A missing or
-// undecodable blob is an error the executor treats as terminal (the task cannot
-// be run, and retrying would never fix a garbled record).
-func reconcileInputsFromMeta(meta map[string]string) (ticketReconcileInputs, error) {
+// reconcileInputsFromJob decodes the inputs the enqueue carried on the job
+// payload. A missing or undecodable payload is an error the handler treats as
+// terminal (the job cannot be run, and retrying would never fix a garbled
+// record). An empty ticket id means the payload was absent, which is the same
+// unrunnable record by another route.
+func reconcileInputsFromJob(job *jobs.Job) (ticketReconcileInputs, error) {
 	var in ticketReconcileInputs
-	raw, ok := meta[reconcileInputsMetaKey]
-	if !ok {
-		return in, fmt.Errorf("reconcile task missing %q meta", reconcileInputsMetaKey)
-	}
-	if err := json.Unmarshal([]byte(raw), &in); err != nil {
+	if err := job.DecodePayload(&in); err != nil {
 		return in, fmt.Errorf("decode reconcile inputs: %w", err)
+	}
+	if strings.TrimSpace(in.TicketID) == "" {
+		return in, errors.New("reconcile job carries no inputs")
 	}
 	return in, nil
 }
@@ -254,7 +236,7 @@ func (d *Daemon) reconcileTicketsOnSessionEnd(sessionID, state string) {
 	// the runner is unavailable (not expected in production, where the store is
 	// always present), the periodic sweep rediscovers the still-orphaned ticket and
 	// enqueues once the runner is up.
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 
 	// An intentional close (user close, delegate teardown, workspace close) is
 	// not a crash, whatever the last runtime state was: the ticket stays where
@@ -308,9 +290,10 @@ func (d *Daemon) reconcileTicketsOnSessionEnd(sessionID, state string) {
 			TranscriptPath: d.resolveReconcileTranscript(agentID, sessionID, cwd, anchor, ticket.Assignee),
 			CloseContext:   d.reconcileCloseContext(sessionID, state, ticket.Status),
 		}
-		if _, err := runner.Enqueue(reconcileKind, ticket.ID, tasks.EnqueueOptions{
-			ZeroDebounce: true,
-			Meta:         reconcileInputsToMeta(in),
+		if _, err := runner.Enqueue(reconcileKind, jobs.EnqueueOptions{
+			UniqueKey: ticket.ID,
+			RunNow:    true,
+			Payload:   in,
 		}); err != nil {
 			d.logf("ticket reconcile: enqueue %s: %v", ticket.ID, err)
 		}
@@ -401,17 +384,17 @@ func (d *Daemon) resolveReconcileTranscript(agentID, sessionID, cwd string, anch
 // so a classifier error becomes a posted failure note, not a runner retry. The
 // ONLY retryable error is a failure to POST the comment (a transient store
 // error): the verdict must eventually land, so the runner backs off and re-runs.
-func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) error {
+func (d *Daemon) reconcileJobHandler(ctx context.Context, job *jobs.Job) (any, error) {
 	if d.ticketReconcileDone != nil {
 		// Test observation hook: fire once the run reaches any terminal outcome.
-		defer d.ticketReconcileDone(task.Subject)
+		defer d.ticketReconcileDone(jobSubject(job))
 	}
-	in, err := reconcileInputsFromMeta(task.Meta)
+	in, err := reconcileInputsFromJob(job)
 	if err != nil {
 		// A record with no/garbled inputs can never be run into health; log and
 		// retire it (nil) so it doesn't hot-loop the dispatch queue.
-		d.logf("ticket reconcile %s: %v", task.Subject, err)
-		return nil
+		d.logf("ticket reconcile %s: %v", jobSubject(job), err)
+		return nil, nil
 	}
 	execFn := d.ticketReconcileExec
 	if execFn == nil {
@@ -419,7 +402,7 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 		// but no classifier runs and no comment lands. Production always wires the
 		// real exec in New().
 		d.logf("ticket reconcile %s: classifier not configured; skipping", in.TicketID)
-		return nil
+		return nil, nil
 	}
 
 	var verdict *ticketReconcileVerdict
@@ -465,12 +448,12 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	ticket, err := d.store.GetTicket(in.TicketID)
 	if err != nil || ticket == nil {
 		d.logf("ticket reconcile %s: ticket gone before verdict landed", in.TicketID)
-		return nil
+		return nil, nil
 	}
 	if ticket.Status != in.StatusAtClaim {
 		d.logf("ticket reconcile %s: dropped verdict — status moved %s -> %s during classification",
 			in.TicketID, in.StatusAtClaim, ticket.Status)
-		return nil
+		return nil, nil
 	}
 
 	comment := renderTicketReconcileComment(in, verdict, failReason)
@@ -484,13 +467,13 @@ func (d *Daemon) reconcileTaskExecutor(ctx context.Context, task *tasks.Task) er
 	if _, err := d.store.AddTicketComment(in.TicketID, store.TicketAuthorAttn, comment, time.Now()); err != nil {
 		// The only retryable path: the verdict must land, so ask the runner to back
 		// off and re-run rather than silently dropping the reconciliation.
-		return fmt.Errorf("post reconcile verdict comment: %w", err)
+		return nil, fmt.Errorf("post reconcile verdict comment: %w", err)
 	}
 	// The comment notifies participants (the chief is one via the created event);
 	// attn itself is an authoring identity, never an observer.
 	d.notifyTicketObservers(in.TicketID)
 	d.publishTicketFact(FactTicketCommented, in.TicketID)
-	return nil
+	return nil, nil
 }
 
 // truncateMiddleString keeps the first head and last tail bytes of s, marking
@@ -627,7 +610,7 @@ func (d *Daemon) ticketReconcileSweepPass(now time.Time) {
 	if d.store == nil {
 		return
 	}
-	runner := d.compactRunnerRef()
+	runner := d.jobQueueRef()
 	if runner == nil || runner.Disabled() {
 		return // no durable runner to enqueue onto; nothing the sweep can do
 	}
@@ -654,15 +637,15 @@ func (d *Daemon) ticketReconcileSweepPass(now time.Time) {
 			d.clearOrphanFirstSeen(ticket.ID)
 			continue
 		}
-		// The durable task record is the "already triggered" ledger: if one exists
+		// The durable job record is the "already triggered" ledger: if one exists
 		// for this ticket (in any state), the session-end seam or a prior sweep
-		// already enqueued it and the runner owns it from here — including
-		// re-running one whose daemon died mid-flight. Only a ticket with NO task is
+		// already enqueued it and the queue owns it from here — including
+		// re-running one whose daemon died mid-flight. Only a ticket with NO job is
 		// a genuine sweep discovery (pre-feature orphan, or a seam whose claim
 		// landed but whose enqueue was lost to a crash — the abandoned-claim case
 		// the old maybeRepair pass covered, now recovered by enqueuing for real).
-		if existing, err := runner.Get(tasks.TaskID(reconcileKind, ticket.ID)); err != nil {
-			d.logf("ticket reconcile sweep: lookup task for %s: %v", ticket.ID, err)
+		if existing, err := runner.GetByKey(reconcileKind, ticket.ID); err != nil {
+			d.logf("ticket reconcile sweep: lookup job for %s: %v", ticket.ID, err)
 			continue
 		} else if existing != nil {
 			d.clearOrphanFirstSeen(ticket.ID)
@@ -678,7 +661,7 @@ func (d *Daemon) ticketReconcileSweepPass(now time.Time) {
 		claims++
 		d.clearOrphanFirstSeen(ticket.ID)
 		// Light the board's orphan badge now (set-if-unset; a no-op if an abandoned
-		// session-end claim already set it), then enqueue the durable task.
+		// session-end claim already set it), then enqueue the durable job.
 		if _, err := d.store.ClaimTicketReconciliation(ticket.ID, now); err != nil {
 			d.logf("ticket reconcile sweep: claim %s: %v", ticket.ID, err)
 		}
@@ -703,9 +686,10 @@ func (d *Daemon) ticketReconcileSweepPass(now time.Time) {
 			CloseContext: fmt.Sprintf(
 				"found orphaned by the periodic sweep (owning session dead) while the ticket was %s", ticket.Status),
 		}
-		if _, err := runner.Enqueue(reconcileKind, ticket.ID, tasks.EnqueueOptions{
-			ZeroDebounce: true,
-			Meta:         reconcileInputsToMeta(in),
+		if _, err := runner.Enqueue(reconcileKind, jobs.EnqueueOptions{
+			UniqueKey: ticket.ID,
+			RunNow:    true,
+			Payload:   in,
 		}); err != nil {
 			d.logf("ticket reconcile sweep: enqueue %s: %v", ticket.ID, err)
 		}

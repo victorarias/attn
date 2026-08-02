@@ -14,7 +14,7 @@ var _ bus.Store = (*sqlBusStore)(nil)
 // sqlBusStore adapts the profile SQLite store to the bus.Store seam. It lives in
 // the daemon — which imports both internal/bus and internal/store — so neither of
 // those packages depends on the other, the same arrangement sqlTaskStore uses for
-// internal/tasks.
+// internal/jobs.
 //
 // The translation is mechanical: internal/store speaks BusEvent/BusConsumer rows,
 // internal/bus speaks Event/Consumer values. Payloads cross as JSON text one way
