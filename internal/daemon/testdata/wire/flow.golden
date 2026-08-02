@@ -1,0 +1,181 @@
+--- 01 workspace_registered
+{
+  "event": "workspace_registered",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": false,
+    "pinned": false,
+    "rank": "i",
+    "status": "idle",
+    "title": "One"
+  }
+}
+--- 02 workspace_layout_updated
+{
+  "event": "workspace_layout_updated",
+  "workspace_layout": {
+    "active_pane_id": "pane-1",
+    "layout_json": "{\"type\":\"pane\",\"pane_id\":\"pane-1\"}",
+    "panes": [
+      {
+        "kind": "agent",
+        "pane_id": "pane-1",
+        "runtime_id": "sess-1",
+        "session_id": "sess-1",
+        "status": "spawning",
+        "title": "one",
+        "workspace_id": ""
+      }
+    ],
+    "updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 03 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": false,
+    "pinned": false,
+    "rank": "i",
+    "status": "launching",
+    "title": "One"
+  }
+}
+--- 04 session_registered
+{
+  "event": "session_registered",
+  "session": {
+    "agent": "claude",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "one",
+    "last_seen": "<timestamp>",
+    "state": "launching",
+    "state_since": "<timestamp>",
+    "state_updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 05 workspace_layout
+{
+  "event": "workspace_layout",
+  "workspace_layout": {
+    "active_pane_id": "pane-1",
+    "layout_json": "{\"type\":\"pane\",\"pane_id\":\"pane-1\"}",
+    "panes": [
+      {
+        "kind": "agent",
+        "pane_id": "pane-1",
+        "runtime_id": "sess-1",
+        "session_id": "sess-1",
+        "status": "spawning",
+        "title": "one",
+        "workspace_id": ""
+      }
+    ],
+    "updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 06 session_todos_updated
+{
+  "event": "session_todos_updated",
+  "session": {
+    "agent": "claude",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "one",
+    "last_seen": "<timestamp>",
+    "state": "launching",
+    "state_since": "<timestamp>",
+    "state_updated_at": "<timestamp>",
+    "todos": [
+      "write the migration"
+    ],
+    "workspace_id": "workspace-1"
+  }
+}
+--- 07 session_state_changed
+{
+  "event": "session_state_changed",
+  "session": {
+    "agent": "claude",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "renamed",
+    "last_seen": "<timestamp>",
+    "state": "launching",
+    "state_since": "<timestamp>",
+    "state_updated_at": "<timestamp>",
+    "todos": [
+      "write the migration"
+    ],
+    "workspace_id": "workspace-1"
+  }
+}
+--- 08 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": false,
+    "pinned": false,
+    "rank": "i",
+    "status": "launching",
+    "title": "Renamed"
+  }
+}
+--- 09 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": true,
+    "pinned": false,
+    "rank": "i",
+    "status": "launching",
+    "title": "Renamed"
+  }
+}
+--- 10 session_unregistered
+{
+  "event": "session_unregistered",
+  "session": {
+    "agent": "claude",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "renamed",
+    "last_seen": "<timestamp>",
+    "state": "launching",
+    "state_since": "<timestamp>",
+    "state_updated_at": "<timestamp>",
+    "todos": [
+      "write the migration"
+    ],
+    "workspace_id": "workspace-1",
+    "workspace_muted": true
+  }
+}
+--- 11 workspace_unregistered
+{
+  "event": "workspace_unregistered",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": true,
+    "pinned": false,
+    "rank": "i",
+    "status": "launching",
+    "title": "Renamed"
+  }
+}
+--- 12 sessions_updated
+{
+  "event": "sessions_updated"
+}

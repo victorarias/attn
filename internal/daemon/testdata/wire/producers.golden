@@ -1,0 +1,272 @@
+--- 01 session_state_changed
+{
+  "event": "session_state_changed",
+  "session": {
+    "agent": "claude",
+    "directory": "<tmp>/workspace",
+    "id": "sess-1",
+    "label": "one",
+    "last_seen": "<timestamp>",
+    "state": "idle",
+    "state_since": "<timestamp>",
+    "state_updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 02 sessions_updated
+{
+  "event": "sessions_updated",
+  "sessions": [
+    {
+      "agent": "claude",
+      "directory": "<tmp>/workspace",
+      "id": "sess-1",
+      "label": "one",
+      "last_seen": "<timestamp>",
+      "state": "idle",
+      "state_since": "<timestamp>",
+      "state_updated_at": "<timestamp>",
+      "workspace_id": "workspace-1"
+    }
+  ]
+}
+--- 03 rate_limited
+{
+  "event": "rate_limited",
+  "rate_limit_reset_at": "<timestamp>",
+  "rate_limit_resource": "github"
+}
+--- 04 workspace_layout
+{
+  "event": "workspace_layout",
+  "workspace_layout": {
+    "active_pane_id": "pane-1",
+    "layout_json": "{\"type\":\"pane\",\"pane_id\":\"pane-1\"}",
+    "panes": [
+      {
+        "kind": "agent",
+        "pane_id": "pane-1",
+        "runtime_id": "sess-1",
+        "session_id": "sess-1",
+        "status": "spawning",
+        "title": "one",
+        "workspace_id": ""
+      }
+    ],
+    "updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 05 workspace_layout_updated
+{
+  "event": "workspace_layout_updated",
+  "workspace_layout": {
+    "active_pane_id": "pane-1",
+    "layout_json": "{\"type\":\"pane\",\"pane_id\":\"pane-1\"}",
+    "panes": [
+      {
+        "kind": "agent",
+        "pane_id": "pane-1",
+        "runtime_id": "sess-1",
+        "session_id": "sess-1",
+        "status": "spawning",
+        "title": "one",
+        "workspace_id": ""
+      }
+    ],
+    "updated_at": "<timestamp>",
+    "workspace_id": "workspace-1"
+  }
+}
+--- 06 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": true,
+    "pinned": false,
+    "rank": "i",
+    "status": "idle",
+    "title": "One"
+  }
+}
+--- 07 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": true,
+    "pinned": true,
+    "rank": "i",
+    "status": "idle",
+    "title": "One"
+  }
+}
+--- 08 workspace_state_changed
+{
+  "event": "workspace_state_changed",
+  "workspace": {
+    "directory": "<tmp>/workspace",
+    "id": "workspace-1",
+    "muted": false,
+    "pinned": true,
+    "rank": "i",
+    "status": "idle",
+    "title": "One"
+  }
+}
+--- 09 workspace_context_changed
+{
+  "event": "workspace_context_changed",
+  "revision": 3,
+  "updated_at": "<timestamp>",
+  "updated_by_session_id": "sess-1",
+  "workspace_id": "workspace-1"
+}
+--- 10 workflow_run_updated
+{
+  "event": "workflow_run_updated",
+  "run": {
+    "created_at": "<timestamp>",
+    "resumable": false,
+    "run_id": "run-1",
+    "script_hash": "hash-1",
+    "script_path": "<tmp>/workspace/flow.js",
+    "status": "running",
+    "updated_at": "<timestamp>"
+  }
+}
+--- 11 prs_updated
+{
+  "event": "prs_updated"
+}
+--- 12 repos_updated
+{
+  "event": "repos_updated"
+}
+--- 13 authors_updated
+{
+  "event": "authors_updated"
+}
+--- 14 github_hosts_updated
+{
+  "event": "github_hosts_updated",
+  "github_hosts": null
+}
+--- 15 automations_changed
+{
+  "definition_ids": [
+    "definition-1"
+  ],
+  "event": "automations_changed"
+}
+--- 16 plugins_updated
+{
+  "event": "plugins_updated",
+  "plugins": []
+}
+--- 17 settings_updated
+{
+  "changed_key": "claude_executable",
+  "event": "settings_updated",
+  "settings": {
+    "auto_approve_enabled": "false",
+    "auto_settle_arm_seconds": "30",
+    "auto_settle_countdown_seconds": "15",
+    "auto_settle_enabled": "false",
+    "chief_context_window_cap": "128000",
+    "claude_available": "<probed>",
+    "claude_cap_classifier": "true",
+    "claude_cap_headless_task": "true",
+    "claude_cap_hooks": "true",
+    "claude_cap_initial_prompt": "true",
+    "claude_cap_resume": "true",
+    "claude_cap_transcript": "true",
+    "claude_cap_transcript_watcher": "true",
+    "claude_cap_yolo": "true",
+    "codex_available": "<probed>",
+    "codex_cap_classifier": "true",
+    "codex_cap_headless_task": "true",
+    "codex_cap_hooks": "true",
+    "codex_cap_initial_prompt": "true",
+    "codex_cap_resume": "true",
+    "codex_cap_transcript": "true",
+    "codex_cap_transcript_watcher": "true",
+    "codex_cap_yolo": "true",
+    "copilot_available": "<probed>",
+    "copilot_cap_classifier": "true",
+    "copilot_cap_headless_task": "false",
+    "copilot_cap_hooks": "false",
+    "copilot_cap_initial_prompt": "true",
+    "copilot_cap_resume": "true",
+    "copilot_cap_transcript": "true",
+    "copilot_cap_transcript_watcher": "true",
+    "copilot_cap_yolo": "true",
+    "headless_context_window_cap": "128000",
+    "notebook.root.effective": "<home>/attn-notebook",
+    "notebook.tasks_enabled": "true",
+    "pty_backend_mode": "embedded",
+    "queue_mode_enabled": "false",
+    "tailscale_enabled": "false",
+    "tailscale_status": "disabled",
+    "workflows_enabled": "false"
+  }
+}
+--- 18 tasks_changed
+{
+  "event": "tasks_changed"
+}
+--- 19 notifications_updated
+{
+  "event": "notifications_updated",
+  "unread_count": 0
+}
+--- 20 notebook_changed
+{
+  "event": "notebook_changed",
+  "origin": "agent",
+  "paths": [
+    "<tmp>/workspace/journal.md"
+  ]
+}
+--- 21 endpoints_updated
+{
+  "endpoints": [],
+  "event": "endpoints_updated"
+}
+--- 22 endpoint_status_changed
+{
+  "endpoint": {
+    "id": "endpoint-1",
+    "name": "remote",
+    "ssh_target": "",
+    "status": ""
+  },
+  "event": "endpoint_status_changed"
+}
+--- 23 git_operation_started
+{
+  "event": "git_operation_started",
+  "operation": {
+    "id": "<uuid>",
+    "kind": "delete_worktree",
+    "path": "<tmp>/workspace",
+    "started_at": "<timestamp>",
+    "status": "running"
+  }
+}
+--- 24 git_operation_finished
+{
+  "event": "git_operation_finished",
+  "operation": {
+    "duration_ms": "<duration>",
+    "finished_at": "<timestamp>",
+    "id": "<uuid>",
+    "kind": "delete_worktree",
+    "path": "<tmp>/workspace",
+    "started_at": "<timestamp>",
+    "status": "succeeded"
+  }
+}
