@@ -214,3 +214,128 @@ daemon.
 - Operator surface end to end: `attn bus status` (table and `--json`),
   `disable`/`enable` against a lagging consumer row, and a non-zero exit for an
   unknown consumer name.
+
+---
+
+# Stage A2 — every state-change broadcast on the bus
+
+A1 put four ticket broadcasters and a handful of session ones on the bus to prove
+the shape. A2 finishes the job, against the exit criterion stated above: **every
+state-change broadcast goes through the bus; byte streams stay direct, by an
+enumerated and documented list of exceptions, and nothing else does.**
+
+## What the migration actually cost
+
+The surface was larger than the "about twenty-five broadcasters" the A1 gate
+assumed: roughly sixty functions reached the hub, across sessions, workspaces,
+PRs, worktrees, git operations, GitHub hosts, endpoints, plugins, settings,
+notifications, automations, workflow runs, background tasks, notebook files and
+presentations. Most were one-line publishes. Four were not, and those are the
+interesting ones, because each was a producer that could not name its subject:
+
+- **The PR list** is replaced wholesale on every poll (`store.SetPRs`), so the
+  call itself knows only "the list moved". The fix is a diff around the
+  replacement — `pr.appeared` / `pr.updated` / `pr.disappeared`, compared by
+  JSON equality, which is the right test because "changed" should mean the
+  client would see something different. GitHub host discovery got the same
+  treatment.
+- **The task runner's `OnChange`** took no arguments. It now reports which task
+  moved (`internal/tasks/runner.go`).
+- **The plugin supervisor's change callback** took no arguments. It now reports
+  which plugin moved.
+- **Marking all notifications read** knew only a count. It now collects the ids
+  it is about to mark.
+
+Two behaviors changed as a result, both reductions in redundant traffic: a PR
+poll that finds nothing new, and a host discovery that finds the same hosts, now
+publish nothing and therefore send nothing. Before, each re-sent an identical
+list to every client on every tick.
+
+## Three things the migration taught
+
+**A projection must not publish.** The bus holds its publish lock across the
+inline ephemeral fan-out, so a fact published from inside a projection
+deadlocks — which is exactly what happened when the workspace recompute at the
+tail of `broadcastSessionStateChanged` moved into the projection with the rest
+of the body. The rule is now written at the top of `internal/daemon/bus.go`: a
+projection writes to the wire and does nothing else. Anything the old
+broadcaster did beyond pushing bytes stays on the producer side, where it is a
+fact of its own.
+
+**One fact per entity, one push per operation.** A bulk operation genuinely
+changes N entities and must say so, but the wire has always seen one whole-list
+push. `coalesceSnapshots` reconciles the two: facts published inside the block
+collapse their snapshot pushes, keyed by wire message, flushed in first-touch
+order at the outer boundary. Notebook changes need a variant — the message
+carries a path list, so the projection accumulates paths per origin and emits
+one message.
+
+**Payload only when the entity is gone or underivable.** Store-backed entities
+(sessions, workspaces, PRs, presentations) publish subject-only and the
+projection re-reads: the store is mutated before the publish and the fan-out is
+synchronous, so the projection sees exactly what the producer wrote. Payloads
+are for the departing entity (`session.unregistered`, `workspace.unregistered`),
+for state the daemon does not keep (`git.operation.*`, `session.pty.exited`,
+`endpoint.status.changed`), and for a list the caller computed
+(`worktree.list.reconciled`).
+
+## How it is verified
+
+The instrument came first. `wsHub.wireTap` observes every text payload the hub
+puts on the wire, from all five send paths, after marshalling; the goldens
+render the whole trace with timestamps, UUIDs, temp paths and durations
+normalized. Every migration commit had to leave those bytes unchanged.
+
+- **`testdata/wire/producers.golden`** — each broadcaster invoked directly.
+  Answers "does this producer still emit the same message?"
+- **`testdata/wire/flow.golden`**, **`pr_flow.golden`** — handlers driven the way
+  the app drives them. Answers "does the call site still reach the producer, the
+  same number of times, in the same order?" Mutation-checking found this gap:
+  deleting the publish from the PR mute handler left every existing test green,
+  because the producer golden calls `publishFact` directly.
+- **`TestWireTrafficComesFromProjections`** — walks the package AST and fails
+  when a function outside a projection reaches the hub. It carries the
+  enumerated exception list, so adding one is a deliberate edit with a written
+  reason. This is what makes the exit criterion a property of the package rather
+  than a claim about a moment in time.
+- **Coalescing tests** — N facts collapse to one push per snapshot, distinct
+  snapshots stay separate and ordered, uncoalesced facts still push each, and a
+  nested block flushes only at the outer boundary.
+
+Mutation-verified: disabling coalescing, deleting a publish from a handler,
+dropping the notebook collapse, and adding a direct hub call each turn the suite
+red.
+
+## Known cost
+
+Every state change is now a durable row append on the mutating goroutine. Two
+places are worth watching: the task runner's `OnChange`, which may fire
+concurrently from the dispatch goroutine and each in-flight run, and the plugin
+supervisor's, which fires from its timers. Both were previously documented as
+non-blocking; the append is of the same order as the `store.Save` each one
+already does, and the projection is still a non-blocking broadcast that drops on
+a full channel, so neither can stall a run. It is still a new write on those
+paths.
+
+## A2 live verification
+
+Throwaway profile `busa2` (packaged app + daemon built from this branch),
+2026-08-02. Preflight PASS, 0 failed / 0 warnings; protocol 200 agreed across
+CLI, app and daemon.
+
+- **Every fact carried a subject.** 161 facts across a full app startup, a PR
+  poll cycle, a workspace/session lifecycle and a settings change; zero with an
+  empty subject.
+- **Coalescing held in production.** One poll produced 10 `pr.updated` facts and
+  a detail sweep produced 10 `pr.details.changed`; a WebSocket observer received
+  exactly 2 `prs_updated` — one per sweep, not one per PR.
+- **The app-level lifecycle is intact.** `real-app:scenario-workspace-shell-lifecycle`
+  passed against the branch build, producing `workspace.registered`,
+  `workspace.layout.changed`, `workspace.session.associated`,
+  `session.registered`, `session.state.changed`, `session.pty.resized`,
+  `session.pty.exited`, `session.unregistered` and
+  `workspace.session.dissociated`, each subjected by its workspace or session id.
+- **Settings kept their shape.** `set_setting auto_settle_enabled` produced one
+  `setting.changed` fact and one `settings_updated` carrying
+  `changed_key=auto_settle_enabled`, while the startup tailscale and backup
+  facts pushed settings with no changed key, as before.
