@@ -107,48 +107,108 @@ type sliceLine struct {
 	} `json:"data"`
 }
 
+// humanTurns is a bounded accumulator of human turns: the first one plus a
+// capped tail of the most recent later ones.
+type humanTurns struct {
+	maxTail int
+
+	haveFirst bool
+	first     string
+	lastText  string
+	tail      []string
+
+	count int
+}
+
+func (h *humanTurns) add(text string) {
+	if text == h.lastText {
+		// consecutive duplicate (e.g. a resent Codex user_message) - do not
+		// double-count or double-store it.
+		return
+	}
+	h.lastText = text
+	h.count++
+
+	if !h.haveFirst {
+		h.first = text
+		h.haveFirst = true
+		return
+	}
+
+	h.tail = append(h.tail, text)
+	if len(h.tail) > h.maxTail {
+		h.tail = h.tail[len(h.tail)-h.maxTail:]
+	}
+}
+
 // sliceBuilder accumulates a bounded ConversationSlice over a single
 // streaming pass. It never retains more than a small, capped amount of text
 // regardless of transcript size.
+//
+// Human turns are accumulated twice. `strict` takes only user-role lines whose
+// provenance is known to be a genuinely typed human message; `permissive` also
+// takes user-role lines with no provenance at all. Modern Claude transcripts
+// stamp `"origin":{"kind":"human"}` on typed turns and leave `origin` absent on
+// injected user-role content (`<local-command-caveat>` wrappers, slash-command
+// stdout blocks, tool results), so `strict` is the correct read for them.
+// Transcripts predating the `origin` field carry no stamp anywhere, so
+// `permissive` is used whenever `strict` saw nothing at all.
+//
+// Trade-off: a modern transcript whose user-role content is *entirely* injected
+// is indistinguishable from a legacy one by this rule, so it falls back and
+// reports the injected text. Provenance is per-line, so there is no signal that
+// separates "file written before the field existed" from "file where no human
+// turn has landed yet". The fallback only fires when the alternative is an
+// empty slice, which makes it the safer of the two errors.
 type sliceBuilder struct {
 	opts SliceOptions
 
-	haveFirst     bool
-	firstHuman    string
-	lastHumanText string
-	tailHuman     []string // bounded tail of human turns after the first
+	strict     humanTurns
+	permissive humanTurns
 
 	lastSummary string
 
 	tailAgent []string // bounded tail of agent turns
 
-	humanCount int
 	agentCount int
 }
 
+func newSliceBuilder(opts SliceOptions) *sliceBuilder {
+	return &sliceBuilder{
+		opts:       opts,
+		strict:     humanTurns{maxTail: opts.MaxRescopingTurns},
+		permissive: humanTurns{maxTail: opts.MaxRescopingTurns},
+	}
+}
+
+// addHuman records a turn whose human provenance is established (an
+// origin-stamped Claude turn, or a Codex/Copilot user message, where the
+// transcript format itself distinguishes user messages from tool output).
 func (b *sliceBuilder) addHuman(text string) {
 	text = strings.TrimSpace(text)
 	if text == "" {
 		return
 	}
-	if text == b.lastHumanText {
-		// consecutive duplicate (e.g. a resent Codex user_message) - do not
-		// double-count or double-store it.
+	b.strict.add(text)
+	b.permissive.add(text)
+}
+
+// addUnstampedHuman records user-role text with no provenance: a genuine human
+// turn in a legacy transcript, or injected content in a modern one.
+func (b *sliceBuilder) addUnstampedHuman(text string) {
+	text = strings.TrimSpace(text)
+	if text == "" {
 		return
 	}
-	b.lastHumanText = text
-	b.humanCount++
+	b.permissive.add(text)
+}
 
-	if !b.haveFirst {
-		b.firstHuman = text
-		b.haveFirst = true
-		return
+// humans returns the accumulator the slice should be built from.
+func (b *sliceBuilder) humans() *humanTurns {
+	if b.strict.count > 0 {
+		return &b.strict
 	}
-
-	b.tailHuman = append(b.tailHuman, text)
-	if len(b.tailHuman) > b.opts.MaxRescopingTurns {
-		b.tailHuman = b.tailHuman[len(b.tailHuman)-b.opts.MaxRescopingTurns:]
-	}
+	return &b.permissive
 }
 
 func (b *sliceBuilder) addAgent(text string) {
@@ -184,7 +244,10 @@ func (b *sliceBuilder) processLine(line []byte) {
 			b.setSummary(extractTextContent(e.Message.Content))
 			return
 		}
-		if e.Origin == nil || e.Origin.Kind == "human" {
+		switch {
+		case e.Origin == nil:
+			b.addUnstampedHuman(extractTextContent(e.Message.Content))
+		case e.Origin.Kind == "human":
 			b.addHuman(extractTextContent(e.Message.Content))
 		}
 		return
@@ -232,12 +295,13 @@ func capTexts(items []string, n int) []string {
 }
 
 func (b *sliceBuilder) toSlice(opts SliceOptions) ConversationSlice {
+	h := b.humans()
 	return ConversationSlice{
-		Brief:      capText(b.firstHuman, opts.TurnCharCap),
-		Rescoping:  capTexts(b.tailHuman, opts.TurnCharCap),
+		Brief:      capText(h.first, opts.TurnCharCap),
+		Rescoping:  capTexts(h.tail, opts.TurnCharCap),
 		Summary:    capText(b.lastSummary, opts.SummaryCharCap),
 		AgentTurns: capTexts(b.tailAgent, opts.TurnCharCap),
-		HumanCount: b.humanCount,
+		HumanCount: h.count,
 		AgentCount: b.agentCount,
 	}
 }
@@ -257,7 +321,7 @@ func ExtractConversationSlice(path string, opts SliceOptions) (ConversationSlice
 	}
 	defer file.Close()
 
-	b := &sliceBuilder{opts: opts}
+	b := newSliceBuilder(opts)
 
 	if err := readJSONLLines(file, b.processLine); err != nil {
 		return ConversationSlice{}, err
