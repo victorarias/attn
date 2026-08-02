@@ -271,10 +271,10 @@ type Daemon struct {
 	snoozeTimers   map[string]*snoozeTimer
 	snoozeWakeHook func(sessionID string) // tests only; nil in production
 
-	recoveryMu              sync.RWMutex
-	recovering              bool
-	notebookMu              sync.Mutex
-	notebookStore           *notebook.Store
+	recoveryMu    sync.RWMutex
+	recovering    bool
+	notebookMu    sync.Mutex
+	notebookStore *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
