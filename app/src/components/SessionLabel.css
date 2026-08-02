@@ -1,0 +1,91 @@
+/*
+  The hover reveal for a truncated session name. Typography, colour, and
+  position are set inline from the label it stands in for (see SessionLabel.tsx)
+  — everything here is the surface the text is painted on.
+
+  It is shaped as the hovered row breaking out of the rail: the left edge is
+  square and borderless so it welds to the sidebar's edge, and only the outer
+  three sides are rounded and lit. Sits below the sidebar's popovers and drag
+  ghost (z-index 1000), so a rename or actions popover opened over a row covers
+  the reveal, never the reverse.
+*/
+.session-label-reveal {
+  position: fixed;
+  z-index: 900;
+  /* Whatever sits beside the rail keeps its own hover and click. */
+  pointer-events: none;
+  width: max-content;
+  padding: 6px 14px 6px 10px;
+  border: 1px solid var(--color-border);
+  /* The seam back to the row it came from, in place of the border the other
+     three sides wear. */
+  border-left: 2px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background-color: var(--color-bg-elevated);
+  background-image:
+    /* Brand tint bleeding out of the rail, matching .sidebar-header's own. */
+    linear-gradient(90deg, rgba(255, 107, 53, 0.13), rgba(255, 107, 53, 0) 84px),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
+  box-shadow:
+    0 20px 44px rgba(0, 0, 0, 0.46),
+    0 2px 10px rgba(0, 0, 0, 0.32);
+  /* Undo the ellipsis recipe the label wears at rest. */
+  white-space: normal;
+  overflow-wrap: anywhere;
+  animation: session-label-unfurl 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* The name rides in behind its own surface — see the stagger note below. */
+.session-label-reveal-text {
+  display: block;
+  animation: session-label-reveal-text 220ms cubic-bezier(0.16, 1, 0.3, 1) 70ms backwards;
+}
+
+/*
+  The surface leaves the rail, then the name lands on it: two beats over ~290ms
+  rather than one instant appearance. A single fast wipe was the first cut and it
+  read as nothing happening at all — at 150ms across 340px there is no travel for
+  the eye to catch. The wipe now carries the panel bodily out of the rail (that
+  is the 12px of translate, which starts it overlapping the sidebar's edge and
+  slides it clear), and the text is held back 70ms so the arrival has an order to
+  it. Exit is deliberately instant: sweeping a list of rows must stay crisp.
+
+  The insets end negative, not at zero: clip-path clips to the border box, and
+  `inset(0)` would cut the shadow off entirely. Left stays at 0 throughout — that
+  edge is flush against the rail, where its shadow would not be seen anyway.
+
+  Harness note: WebKit pauses CSS animations while the window is in the
+  background, which strands both of these on their 0% frame — a mounted panel
+  that paints nothing. Screenshot the app focused, or a capture will show an
+  empty rail and read as a broken reveal.
+*/
+@keyframes session-label-unfurl {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+    clip-path: inset(-60px 100% -60px 0);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    clip-path: inset(-60px -80px -60px 0);
+  }
+}
+
+@keyframes session-label-reveal-text {
+  from {
+    opacity: 0;
+    transform: translateX(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-label-reveal,
+  .session-label-reveal-text {
+    animation: none;
+  }
+}

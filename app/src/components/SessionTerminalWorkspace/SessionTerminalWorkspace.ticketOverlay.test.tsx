@@ -114,20 +114,17 @@ describe('SessionTerminalWorkspace ticket overlay', () => {
     focusState.count = 0;
   });
 
-  it('renders the chip and an ambient header for a session with a bound ticket', () => {
+  it('renders the chip in the header for a session with a bound ticket', () => {
     const { container } = renderWorkspace({ ticket: makeTicket() });
-    // Single-pane workspace: the header is normally hidden, but a bound ticket
-    // makes it ambient.
     expect(container.querySelector('.workspace-pane-header')).not.toBeNull();
-    expect(container.querySelector('.workspace-pane-header-hidden')).toBeNull();
     expect(container.querySelector('[data-testid="ticket-chip-sess-1"]')).not.toBeNull();
   });
 
-  it('does not render the chip for a session without a bound ticket', () => {
+  it('keeps the header without a chip for a session with no bound ticket', () => {
     const { container } = renderWorkspace({ ticket: undefined });
     expect(container.querySelector('[data-testid="ticket-chip-sess-1"]')).toBeNull();
-    // Header stays hidden with nothing ambient to show.
-    expect(container.querySelector('.workspace-pane-header-hidden')).not.toBeNull();
+    // The header survives the chip: it still names the session.
+    expect(container.querySelector('.workspace-pane-header')).not.toBeNull();
   });
 
   it('opens the overlay on chip click and fetches the ticket once', async () => {

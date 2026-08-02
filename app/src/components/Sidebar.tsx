@@ -8,6 +8,7 @@ import { SessionActionsPopover } from './SessionActionsPopover';
 import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
+import { SessionLabel } from './SessionLabel';
 import { QueueBands, QueueSnoozedSection } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { SidebarSettlingBar } from './SettlingIndicator';
@@ -1151,7 +1152,7 @@ export function Sidebar({
                     title={session.state === 'recoverable' ? 'Session will be recovered when opened' : undefined}
                   >
                     <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
-                    <span className="session-label">{session.label}</span>
+                    <SessionLabel label={session.label} />
                     {session.endpointName && (
                       <span className={`session-endpoint-badge status-${session.endpointStatus || 'connected'}`}>
                         {session.endpointName}
@@ -1332,7 +1333,7 @@ export function Sidebar({
                           onClick={() => onSelectSession(session.id)}
                         >
                           <StateIndicator state={session.state} size="md" seed={session.id} reason={session.state_reason} />
-                          <span className="session-label">{session.label}</span>
+                          <SessionLabel label={session.label} />
                           {session.chiefOfStaff && <ChiefOfStaffBadge />}
                           {session.delegatedFromChief && <DelegatedFromChiefBadge />}
                           {session.endpointName && (
