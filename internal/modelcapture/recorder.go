@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -62,9 +63,8 @@ type sessionCursor struct {
 type Recorder struct {
 	dir string
 
-	mu          sync.Mutex
-	sessions    map[string]sessionCursor
-	lastPruneAt time.Time
+	mu       sync.Mutex
+	sessions map[string]sessionCursor
 }
 
 func New(dir string) *Recorder {
@@ -138,16 +138,6 @@ func (r *Recorder) Record(obs Observation, maxBytes int64) (bool, error) {
 	if err := ensurePrivateDir(r.dir); err != nil {
 		return false, err
 	}
-	path := r.hourlyPath(obs.CapturedAt)
-	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return false, fmt.Errorf("open model capture file: %w", err)
-	}
-	if err := f.Chmod(0o600); err != nil {
-		_ = f.Close()
-		return false, fmt.Errorf("secure model capture file: %w", err)
-	}
-
 	entry := record{
 		SchemaVersion:  schemaVersion,
 		CapturedAt:     obs.CapturedAt,
@@ -163,10 +153,32 @@ func (r *Recorder) Record(obs Observation, maxBytes int64) (bool, error) {
 		ViewportSHA256: viewportHash,
 		ViewportText:   obs.ViewportText,
 	}
-	encodeErr := json.NewEncoder(f).Encode(entry)
+	payload, err := json.Marshal(entry)
+	if err != nil {
+		return false, fmt.Errorf("encode model capture record: %w", err)
+	}
+	payload = append(payload, byte(10))
+
+	path := r.hourlyPath(obs.CapturedAt)
+	if maxBytes > 0 {
+		path, err = prepareAppendLocked(r.dir, obs.CapturedAt, maxBytes, int64(len(payload)))
+		if err != nil {
+			return false, err
+		}
+	}
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return false, fmt.Errorf("open model capture file: %w", err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		_ = f.Close()
+		return false, fmt.Errorf("secure model capture file: %w", err)
+	}
+
+	_, writeErr := f.Write(payload)
 	closeErr := f.Close()
-	if encodeErr != nil {
-		return false, fmt.Errorf("write model capture record: %w", encodeErr)
+	if writeErr != nil {
+		return false, fmt.Errorf("write model capture record: %w", writeErr)
 	}
 	if closeErr != nil {
 		return false, fmt.Errorf("close model capture file: %w", closeErr)
@@ -176,12 +188,6 @@ func (r *Recorder) Record(obs Observation, maxBytes int64) (bool, error) {
 		lastSampleAt: obs.CapturedAt,
 		lastState:    obs.DaemonState,
 		lastHash:     viewportHash,
-	}
-	if maxBytes > 0 && (r.lastPruneAt.IsZero() || obs.CapturedAt.Sub(r.lastPruneAt) >= time.Hour) {
-		if err := pruneLocked(r.dir, maxBytes, path); err != nil {
-			return true, err
-		}
-		r.lastPruneAt = obs.CapturedAt
 	}
 	return true, nil
 }
@@ -222,13 +228,47 @@ type captureFile struct {
 	size    int64
 }
 
-func pruneLocked(dir string, maxBytes int64, activePath string) error {
+func prepareAppendLocked(dir string, at time.Time, maxBytes, appendBytes int64) (string, error) {
+	if appendBytes > maxBytes {
+		return "", fmt.Errorf("model capture record is %d bytes, larger than the %d-byte storage cap", appendBytes, maxBytes)
+	}
+	files, total, err := captureFilesLocked(dir)
+	if err != nil {
+		return "", err
+	}
+
+	basePath := filepath.Join(dir, filePrefix+at.UTC().Format("20060102-15")+fileSuffix)
+	activePath, activeSize, nextPath := bucketAppendPaths(files, basePath)
+	if total+appendBytes <= maxBytes {
+		return activePath, nil
+	}
+
+	target := maxBytes - appendBytes
+	protectedPath := activePath
+	if activeSize+appendBytes > maxBytes {
+		// The current segment cannot accept this complete JSONL record while the
+		// corpus stays bounded. Close it by advancing to a sibling segment; it is
+		// then eligible for oldest-first pruning like every other capture file.
+		protectedPath = ""
+		activePath = nextPath
+	}
+	remaining, err := pruneFilesLocked(files, total, target, protectedPath)
+	if err != nil {
+		return "", err
+	}
+	if remaining > target {
+		return "", fmt.Errorf("model capture storage cannot reserve %d bytes under the %d-byte cap", appendBytes, maxBytes)
+	}
+	return activePath, nil
+}
+
+func captureFilesLocked(dir string) ([]captureFile, int64, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil
+			return nil, 0, nil
 		}
-		return fmt.Errorf("read model capture directory: %w", err)
+		return nil, 0, fmt.Errorf("read model capture directory: %w", err)
 	}
 	files := make([]captureFile, 0, len(entries))
 	var total int64
@@ -238,7 +278,7 @@ func pruneLocked(dir string, maxBytes int64, activePath string) error {
 		}
 		info, err := entry.Info()
 		if err != nil {
-			return fmt.Errorf("stat model capture file %s: %w", entry.Name(), err)
+			return nil, 0, fmt.Errorf("stat model capture file %s: %w", entry.Name(), err)
 		}
 		file := captureFile{
 			path:    filepath.Join(dir, entry.Name()),
@@ -255,19 +295,59 @@ func pruneLocked(dir string, maxBytes int64, activePath string) error {
 		}
 		return files[i].modTime.Before(files[j].modTime)
 	})
+	return files, total, nil
+}
+
+func bucketAppendPaths(files []captureFile, basePath string) (string, int64, string) {
+	baseName := filepath.Base(basePath)
+	activePath := basePath
+	var activeSize int64
+	maxIndex := -1
 	for _, file := range files {
-		if total <= maxBytes {
+		index, ok := captureSegmentIndex(file.name, baseName)
+		if !ok || index <= maxIndex {
+			continue
+		}
+		maxIndex = index
+		activePath = file.path
+		activeSize = file.size
+	}
+	nextIndex := maxIndex + 1
+	if nextIndex < 1 {
+		nextIndex = 1
+	}
+	stem := strings.TrimSuffix(basePath, fileSuffix)
+	nextPath := fmt.Sprintf("%s-%04d%s", stem, nextIndex, fileSuffix)
+	return activePath, activeSize, nextPath
+}
+
+func captureSegmentIndex(name, baseName string) (int, bool) {
+	if name == baseName {
+		return 0, true
+	}
+	stem := strings.TrimSuffix(baseName, fileSuffix)
+	if !strings.HasPrefix(name, stem+"-") || !strings.HasSuffix(name, fileSuffix) {
+		return 0, false
+	}
+	raw := strings.TrimSuffix(strings.TrimPrefix(name, stem+"-"), fileSuffix)
+	index, err := strconv.Atoi(raw)
+	return index, err == nil && index > 0
+}
+
+func pruneFilesLocked(files []captureFile, total, target int64, protectedPath string) (int64, error) {
+	for _, file := range files {
+		if total <= target {
 			break
 		}
-		if file.path == activePath {
+		if file.path == protectedPath {
 			continue
 		}
 		if err := os.Remove(file.path); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return fmt.Errorf("prune model capture file %s: %w", file.name, err)
+			return total, fmt.Errorf("prune model capture file %s: %w", file.name, err)
 		}
 		total -= file.size
 	}
-	return nil
+	return total, nil
 }
 
 func isCaptureFile(name string) bool {

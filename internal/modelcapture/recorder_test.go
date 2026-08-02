@@ -94,19 +94,23 @@ func TestRecorderPersistsPrivateDeduplicatedObservations(t *testing.T) {
 	}
 }
 
-func TestRecorderPrunesOldHourlyFilesButKeepsActiveFile(t *testing.T) {
-	recorder := New(filepath.Join(t.TempDir(), "model-captures"))
+func TestRecorderSegmentsActiveHourToKeepTotalUnderCap(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "model-captures")
+	recorder := New(dir)
 	start := time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC)
-	for i, sessionID := range []string{"old", "current"} {
-		at := start.Add(time.Duration(i) * time.Hour)
+	sessionIDs := []string{"one", "two", "six"}
+
+	recordObservation := func(index int, maxBytes int64) {
+		t.Helper()
+		sessionID := sessionIDs[index]
 		saved, err := recorder.Record(Observation{
-			CapturedAt:    at,
+			CapturedAt:    start.Add(time.Duration(index) * time.Second),
 			CaptureReason: "initial",
 			SessionID:     sessionID,
 			Agent:         "claude",
 			DaemonState:   "waiting_input",
 			ViewportText:  strings.Repeat(sessionID, 100),
-		}, 1)
+		}, maxBytes)
 		if err != nil {
 			t.Fatalf("Record(%s) error: %v", sessionID, err)
 		}
@@ -115,11 +119,70 @@ func TestRecorderPrunesOldHourlyFilesButKeepsActiveFile(t *testing.T) {
 		}
 	}
 
-	if _, err := os.Stat(recorder.hourlyPath(start)); !os.IsNotExist(err) {
-		t.Fatalf("old hourly file should be pruned, stat err=%v", err)
+	recordObservation(0, 1<<20)
+	firstInfo, err := os.Stat(recorder.hourlyPath(start))
+	if err != nil {
+		t.Fatalf("stat first capture segment: %v", err)
 	}
-	if _, err := os.Stat(recorder.hourlyPath(start.Add(time.Hour))); err != nil {
-		t.Fatalf("active hourly file should remain: %v", err)
+	maxBytes := firstInfo.Size() + 1
+
+	for index := 1; index < len(sessionIDs); index++ {
+		if index == 2 {
+			recorder = New(dir)
+		}
+		recordObservation(index, maxBytes)
+		total, err := SizeBytes(dir)
+		if err != nil {
+			t.Fatalf("SizeBytes() error: %v", err)
+		}
+		if total > maxBytes {
+			t.Fatalf("capture storage after record %d = %d, exceeds cap %d", index, total, maxBytes)
+		}
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read capture directory: %v", err)
+	}
+	var captureNames []string
+	for _, entry := range entries {
+		if isCaptureFile(entry.Name()) {
+			captureNames = append(captureNames, entry.Name())
+		}
+	}
+	wantPath := strings.TrimSuffix(recorder.hourlyPath(start), fileSuffix) + "-0002" + fileSuffix
+	if len(captureNames) != 1 || captureNames[0] != filepath.Base(wantPath) {
+		t.Fatalf("capture segments = %v, want only %s", captureNames, filepath.Base(wantPath))
+	}
+	entry := readOneRecord(t, wantPath)
+	if entry.ViewportText != strings.Repeat("six", 100) {
+		t.Fatalf("retained viewport = %q, want latest record", entry.ViewportText)
+	}
+}
+
+func TestRecorderRejectsRecordLargerThanStorageCap(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "model-captures")
+	recorder := New(dir)
+	saved, err := recorder.Record(Observation{
+		CapturedAt:    time.Date(2026, 7, 29, 12, 0, 0, 0, time.UTC),
+		CaptureReason: "initial",
+		SessionID:     "one",
+		Agent:         "codex",
+		DaemonState:   "working",
+		ViewportText:  "too large",
+	}, 1)
+	if err == nil {
+		t.Fatal("Record() should reject a record larger than the cap")
+	}
+	if saved {
+		t.Fatal("oversized record should not be saved")
+	}
+	total, sizeErr := SizeBytes(dir)
+	if sizeErr != nil {
+		t.Fatalf("SizeBytes() error: %v", sizeErr)
+	}
+	if total != 0 {
+		t.Fatalf("capture storage after rejected record = %d, want 0", total)
 	}
 }
 

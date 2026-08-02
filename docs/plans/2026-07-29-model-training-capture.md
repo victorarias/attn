@@ -99,7 +99,9 @@ Settings:
   redaction is neither a privacy guarantee nor faithful model input.
 - Treat daemon state as provenance, not a final training label; observed state
   can lag the terminal.
-- Rotate hourly so retention can prune incrementally without rewriting JSONL.
+- Rotate hourly, and segment the active hour before an append would exceed
+  the configured cap, so retention can prune complete JSONL files without
+  rewriting them.
 - Keep existing captures when disabled; deletion/export/review are separate,
   explicit operations.
 
