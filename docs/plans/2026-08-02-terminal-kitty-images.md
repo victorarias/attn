@@ -310,49 +310,88 @@ Layers around the gate:
       corpus stays honest without reddening the build.
       `FuzzKittySegmenterFraming` soaks the framing rules alone: 3 x 3 min
       clean, 16.9M / 9.6M / 10.3M execs.
-- [ ] **Stripping an APC desyncs the client on two independent axes.** Found by
-      `FuzzKittyWireMirrorShipping`, so both are defects in the SHIPPING
-      configuration, not deferred ones. The worker receives the APC and the wire
-      does not, and the bytes the client never sees were doing work.
 
-      **1. The UTF-8 abort.** The APC's leading ESC aborts a UTF-8 sequence the
-      client is still holding open. Reproduced by
-      `"0000000000000000000\xc5\x1b_G"` (and `\xe1`, a 3-byte lead). Measured,
-      holding the cursor at column 19:
+      `FuzzKittyWireMirrorShipping` is NOT yet clean, and its gate is the
+      unchecked pending-wrap item below. Latest run, from a warm 289-input
+      corpus after the ST fix: red at 6.3s, 225k execs, on the minimized input
+      `"00000000000000000000\xe1\x1b_G"` — the n=20 row of that item's table,
+      reproduced exactly. A2 is not done until this target soaks 3 x 3 min
+      clean.
+- [x] **Every extracted APC leaves an ST on the wire.** Found by
+      `FuzzKittyWireMirrorShipping`, so a defect in the SHIPPING configuration
+      rather than a deferred one, and fixed here.
 
-      | what follows the stripped APC | result |
-      | --- | --- |
-      | nothing (quiesced) | worker has U+FFFD, client has none — transient |
-      | an ASCII byte | heals |
-      | a valid continuation byte | **permanent**: worker `\uFFFD\uFFFD`, client `ť` |
-      | more text | heals |
+      **The design rule.** Extracting only from ground keeps the two VT PARSERS
+      in step, and that is the property the segmenter was built to give. It is
+      not the whole of the state ground implies: ground also contains a UTF-8
+      decoder, which may be holding an incomplete sequence. The APC's leading
+      ESC aborts that decode for the worker. Drop the APC from the wire and the
+      client never sees an ESC, keeps holding, and the next byte decides whether
+      the grids converge again. So the wire must carry an ESC-led no-op at the
+      same position, and `ESC \` — ST, always the 7-bit form — is the cheapest
+      one: two bytes, no cells, from ground a no-op on both parsers.
 
-      Emitting `ESC \` (ST) on the wire where the APC was fixes every one of
-      these: ST from ground is a no-op and its ESC aborts the client's pending
-      sequence exactly as the APC's did for the worker.
+      Measured at 20 columns with the cursor on the last column, feeding
+      `<19 zeros>\xe1` then a stripped APC then the tail, worker against client:
 
-      **2. The pending-wrap row.** Independent of the first, and NOT fixed by
-      ST. With the cursor at exactly the wrap column and an incomplete UTF-8
-      byte pending, worker and client end with identical text and cursor rows
-      one apart. Measured at 20 columns, feeding `<n zeros>\xe1\x1b_G`:
+      | what follows the stripped APC | baseline | with ST |
+      | --- | --- | --- |
+      | nothing (quiesced) | worker has U+FFFD, client has none — transient | agree |
+      | `X` (an ASCII byte) | heals on its own | agree |
+      | `\xa5` (a valid continuation) | **permanent**: worker two U+FFFD, client one character | agree |
+      | `\xa5rest` (continuation, then text) | **permanent**: the text lands, the character stays wrong | agree |
+
+      The permanent shape is the one that matters: both sides end holding
+      nothing pending, so no later byte heals it, and it survives into the next
+      restore. An earlier revision of this table recorded "more text | heals" —
+      re-measurement contradicts it, and the row above replaces it.
+
+      Three properties of the rule, each pinned by a test:
+
+      - **Unconditional.** Aborting a pending decode writes a replacement
+        character, which usually advances the cursor, which synthesis describes
+        with a CSI whose own ESC aborts the client's decode by accident. The
+        last column is where that cover disappears: the replacement character
+        fills the final cell and leaves the cursor put with a pending wrap, so
+        there is no movement to describe and no synthesis runs. Every corpus and
+        battery case named "…the last column" sits there deliberately; at any
+        other column the bug is invisible. The condition that would make the
+        emission conditional is exactly as subtle as the bug, so there is no
+        condition.
+      - **ST first, then synthesis**, so synthesized CSIs parse from ground.
+      - **Always the 7-bit form**, even when the APC the worker consumed ended
+        with C1 ST `0x9c`. On the wire the stream is UTF-8, where a raw `0x9c`
+        in ground is a stray continuation byte that decodes toward U+FFFD and
+        puts a cell on the grid. Pinned by the corpus entry "a c1-terminated apc
+        still leaves the seven-bit st".
+
+      Mutation receipt: deleting the append in `writeAPC` turns
+      `TestWireFeedStripsAPCsWithKittyDisabled` red on the exact bytes, the
+      mirror battery case red on grid equality at both the transient and the
+      permanent chunk (plus a cursor divergence), and — regenerating the corpus
+      under the mutation — exactly the two last-column entries red in
+      `kittyWireRewrite.parity.test.ts` against the real shipped wasm, with the
+      other 28 entries still passing. That last one is the receipt both that the
+      fix is needed by production's actual client and that the client treats a
+      bare ST as a no-op.
+
+- [ ] **The pending-wrap row.** Independent of the UTF-8 abort above, NOT fixed
+      by the ST, and still open. With the cursor at exactly the wrap column and
+      an incomplete UTF-8 byte pending, worker and client end with identical
+      text and cursor rows one apart. Measured at 20 columns, feeding
+      `<n zeros>\xe1\x1b_G`:
 
       | zeros | baseline | with ST on the wire |
       | --- | --- | --- |
       | 18 | agree | agree |
-      | 19 | diverge (class 1) | agree |
+      | 19 | diverge (the UTF-8 abort) | agree |
       | 20 | diverge: worker `(1,1)`, client `(1,2)`, same text | **still diverges** |
       | 21 | agree | agree |
 
-      Soak evidence: 3 x 3 min on the fixed harness is NOT clean. First run
-      found class 1 at 96s from a cold corpus; once the fuzz cache knows the
-      shape it reappears in ~2s, and with ST applied locally the wall moves to
-      26s and lands on class 2.
-
-      Neither fix is taken here. Class 1's changes the wire contract — whether
-      synthesis may emit bytes when the grid did not move, where `appendCSI`
-      deliberately emits nothing at zero. Class 2 is not yet root-caused, and a
-      cursor-row difference with matching text points at deferred-wrap state the
-      wire has no way to carry.
+      Not root-caused. A cursor-row difference with matching text points at
+      deferred-wrap state the wire has no way to carry: the worker's abort
+      consumes the pending wrap, and the synthesized `CUD`/`CHA` moves the
+      client's cursor without reproducing the wrap it never had.
 
 #### Pin skew: `OSC 133;A` is not grid-neutral, and the two ghosttys disagree
 

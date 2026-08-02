@@ -360,6 +360,46 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b\x1b]133;A\x1b\\00 done"},
 		},
 		{
+			// The reason every extracted APC leaves an ST behind, in its
+			// permanent form, on the ONE column where it bites. `\xe1` opens a
+			// three-byte character; the APC's ESC aborts that decode for the
+			// worker, which resolves it as a replacement character, and `\xa5`
+			// then arrives as a stray continuation and becomes a second one.
+			// Send nothing in the APC's place and the client never sees an ESC,
+			// so it holds `\xe1` and joins the continuation into a different
+			// character — permanently, with no later byte able to heal it.
+			//
+			// The cursor sits on the LAST column deliberately. Anywhere else the
+			// aborted character advances the cursor, the feeder observes that
+			// and synthesizes a CHA, and the CHA's own ESC aborts the client's
+			// decode by accident — so the bug is invisible. Here the replacement
+			// character lands in the last cell and leaves the cursor where it
+			// was, pending wrap, so the observed movement is zero and the ST is
+			// the only ESC on the wire.
+			name: "a character split around a stripped apc at the last column",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 19) + "\xe1", kittyDirectRGB, "\xa5 done"},
+		},
+		{
+			// The transient half of the same defect: nothing follows the APC,
+			// so the client is left holding an incomplete sequence the worker
+			// has already resolved. An attach would paper over this one — the
+			// dump is the worker's — but the wire should not need rescuing, and
+			// the same ST settles it.
+			name: "an incomplete character left pending by a stripped apc at the last column",
+			cols: 20, rows: 8,
+			chunks: []string{strings.Repeat("0", 19) + "\xe1", kittyDirectRGB},
+		},
+		{
+			// A C1-terminated APC. The worker consumes 0x9c as ST, but the wire
+			// replacement is always the 7-bit form: 0x9c alone on the wire is
+			// not an ST to the client, it is a stray UTF-8 continuation byte
+			// that would put a replacement character on the grid.
+			name: "a c1-terminated apc still leaves the seven-bit st",
+			cols: 20, rows: 8,
+			chunks: []string{"ab", kittyIntro + "a=T,f=24,s=2,v=2;QUJDRA==\x9c", " done"},
+		},
+		{
 			// A prompt drawn straight after output that did not end in a
 			// newline — the shape every shell produces when a command's last
 			// write has no trailing \n, and the one case where the worker's

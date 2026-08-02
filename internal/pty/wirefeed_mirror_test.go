@@ -187,8 +187,8 @@ var mirrorCases = []mirrorCase{
 		cols: 20, rows: 8,
 		chunks: []string{"\x1b[2;2Hkeep", kittyPlaceRGB(7, 16, 32, ""), "\x1b_Ga=d\x1b\\"},
 		check: func(t *testing.T, m *mirror) {
-			if len(m.lastWire) != 0 {
-				t.Errorf("the delete produced wire bytes %q, want none: it moved nothing on the grid", m.lastWire)
+			if got, want := string(m.lastWire), string(wireST); got != want {
+				t.Errorf("the delete produced wire bytes %q, want just the ST %q: it moved nothing on the grid, and the ST is not about the grid", got, want)
 			}
 			if len(m.feed.deltas) != 1 || len(m.feed.deltas[0].Removed) != 1 {
 				t.Fatalf("delete deltas = %+v, want one removed placement", m.feed.deltas)
@@ -200,6 +200,28 @@ var mirrorCases = []mirrorCase{
 				t.Errorf("observed placements after the delete = %+v, want none", m.feed.placements)
 			}
 		},
+	},
+	{
+		// The shape the ST on every strip exists for, on the one column where
+		// it bites. A partial character is pending when the APC arrives; the
+		// APC's ESC aborts the worker's decode into a replacement character and
+		// the continuation byte that follows lands alone as a second one.
+		// Without the ST the client still holds the lead byte, joins it to that
+		// continuation, and prints one character where the worker printed two —
+		// and since neither side then holds anything pending, nothing heals it.
+		//
+		// Two things have to line up for it to be reachable, and both are in
+		// this case on purpose. The APC must move nothing, or the feeder
+		// describes the movement with a CSI whose own ESC aborts the client's
+		// decode by accident — so this is a delete, not a placement. And the
+		// cursor must be on the last column, or the aborted character advances
+		// it and that movement gets described for the same accidental reason.
+		// Here the replacement character fills the final cell and leaves the
+		// cursor put with a pending wrap, so there is nothing to describe and
+		// the ST is the only ESC the client gets.
+		name: "a character split around an apc on the last column",
+		cols: 20, rows: 8,
+		chunks: []string{strings.Repeat("0", 19) + "\xe1", "\x1b_Ga=d\x1b\\", "\xa5 done"},
 	},
 	{
 		name: "osc 133 markers interleaved with images",
@@ -277,9 +299,15 @@ func TestWireFeedKeepsTheClientGridEqualToTheWorkerGrid(t *testing.T) {
 }
 
 // The shipping configuration. Ghostty refuses every transmission, so there is
-// nothing to observe and nothing to synthesize — and the wire is the input with
-// the APCs cut out, byte for byte, because bytes the client cannot parse are
-// bytes it should never receive.
+// nothing to observe and nothing to synthesize, and the wire is the input with
+// each APC replaced in position by an ST — one per APC, unconditionally, in the
+// 7-bit form. That ST is the entire wire contribution of an image here, and it
+// is there for the client's UTF-8 decoder rather than for its grid: the APC's
+// leading ESC aborted a partial multi-byte character in the worker, so the wire
+// must abort the same one at the same offset. See writeAPC.
+//
+// Deleting the append in writeAPC turns this red first and most legibly, which
+// is the point of asserting the exact bytes rather than a count.
 func TestWireFeedStripsAPCsWithKittyDisabled(t *testing.T) {
 	m := newMirror(t, 20, 8, ghosttyvt.Options{})
 
@@ -287,8 +315,9 @@ func TestWireFeedStripsAPCsWithKittyDisabled(t *testing.T) {
 	tail := " after"
 	m.write(head + kittyPlaceRGB(9, 16, 32, "") + kittyPlaceRGB(10, 8, 16, "") + tail)
 
-	if got, want := string(m.lastWire), head+tail; got != want {
-		t.Errorf("wire = %q, want the plain bytes only (%q)", got, want)
+	want := head + string(wireST) + string(wireST) + tail
+	if got := string(m.lastWire); got != want {
+		t.Errorf("wire = %q, want the plain bytes with an ST per stripped APC (%q)", got, want)
 	}
 	if m.lastResync != "" {
 		t.Errorf("resync = %q with the protocol disabled, want none", m.lastResync)
@@ -349,8 +378,10 @@ func TestWireFeedPassesAPlainChunkThroughByIdentity(t *testing.T) {
 // anchor reached the top of history is what turns a silent divergence into a
 // snapshot re-push.
 //
-// The grids are deliberately NOT asserted equal afterwards: the wire carries
-// nothing for this chunk and the re-push is what makes the client whole.
+// The grids are deliberately NOT asserted equal afterwards: the wire carries no
+// synthesis for this chunk and the re-push is what makes the client whole. The
+// ST still goes out, because it is unconditional — it costs nothing here and a
+// rule with an exception is a rule someone has to re-derive.
 func TestWireFeedResyncsWhenTheAnchorHitsTheTopOfHistory(t *testing.T) {
 	m := newMirror(t, 20, 6, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
 
@@ -364,8 +395,8 @@ func TestWireFeedResyncsWhenTheAnchorHitsTheTopOfHistory(t *testing.T) {
 		t.Fatalf("resync = %q, want %q: an 8-row image on a 6-row alternate screen destroys the anchor",
 			m.lastResync, kittyResyncAnchorClamped)
 	}
-	if len(m.lastWire) != 0 {
-		t.Errorf("wire = %q for an unsynthesizable chunk, want nothing: the snapshot re-push carries the truth", m.lastWire)
+	if got, want := string(m.lastWire), string(wireST); got != want {
+		t.Errorf("wire = %q for an unsynthesizable chunk, want just the ST %q: the snapshot re-push carries the truth", got, want)
 	}
 	if worker := m.worker.PlainText(); strings.TrimSpace(worker) != "" {
 		t.Errorf("worker screen = %q, want it scrolled clear: the case does not exercise a lost anchor otherwise", worker)
@@ -386,7 +417,7 @@ func TestWireFeedKeepsKittyResponsesFlowingToTheProgram(t *testing.T) {
 	if !strings.Contains(resp, "\x1b_Gi=31;OK") {
 		t.Errorf("support query response = %q, want ghostty's OK for image 31", resp)
 	}
-	if len(m.lastWire) != 0 {
-		t.Errorf("the query APC reached the wire as %q", m.lastWire)
+	if got, want := string(m.lastWire), string(wireST); got != want {
+		t.Errorf("wire = %q for the query APC, want just the ST %q: the query is answered to the program, never to the client", got, want)
 	}
 }

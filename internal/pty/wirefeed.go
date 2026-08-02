@@ -12,9 +12,11 @@ package pty
 //     133 marker goes through too — it is not inert, and blockfeed.go pins a
 //     block-table entry once the terminal has run it.
 //   - the WIRE bytes: the same stream with each APC replaced, in position, by
-//     bytes that leave a kitty-ignorant terminal on the same grid — the scroll
-//     and the cursor the placement caused, and nothing else. Usually that is no
-//     bytes at all. Markers go out untouched; the client parses its own.
+//     bytes that leave a kitty-ignorant terminal on the same grid — an ST, then
+//     the scroll and the cursor the placement caused. In the shipping
+//     configuration the ST is all of it, and it is there for the client's UTF-8
+//     decoder rather than for the grid (see writeAPC). Markers go out untouched;
+//     the client parses its own.
 //
 // Both are produced in one call, under the caller's replayMu, in the same
 // critical section that advances the seq watermark. That is what keeps the
@@ -225,6 +227,16 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	return f.wire, f.resync
 }
 
+// wireST is what the wire carries in place of every extracted APC: ST in its
+// 7-bit form, ESC then backslash.
+//
+// Always the 7-bit form, even when the APC the worker consumed was terminated by
+// C1 ST (0x9c). A raw 0x9c on the wire is not an ST to the client — in ground
+// the stream is UTF-8, where 0x9c is a stray continuation byte that decodes
+// toward U+FFFD and puts a cell on the grid. The two-byte form is the only one
+// that means "no-op" on both sides.
+var wireST = []byte{0x1b, '\\'}
+
 // writeAPC feeds one complete kitty APC to the terminal and appends whatever
 // the wire needs in its place. The ordering is the contract: pin the cursor
 // before the write, because a tracked ref is the only way to see afterwards how
@@ -235,6 +247,36 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	before := f.term.TrackCursor()
 
 	f.term.Write(apc)
+
+	// ST stands in for the APC, unconditionally and before anything synthesis
+	// adds below.
+	//
+	// Extracting only from ground keeps the two VT PARSERS in step, but ground
+	// has a sub-state the parser rules do not describe: the UTF-8 decoder may be
+	// holding an incomplete sequence. The APC's leading ESC aborts that decode
+	// for the worker. Drop the APC from the wire and the client never sees an
+	// ESC, so it keeps holding — and the next byte decides whether the two grids
+	// converge again or not. A valid continuation byte completes a character for
+	// the client that the worker already resolved as two replacement characters,
+	// and nothing later heals that.
+	//
+	// ST is the cheapest fix that carries a leading ESC: from ground ghostty
+	// treats it as a no-op, so it costs two bytes and no cells, and it aborts the
+	// client's pending decode exactly where the APC aborted the worker's. It goes
+	// first so anything synthesis appends parses from clean ground.
+	//
+	// Unconditional, though the case it saves is narrow. Aborting a pending
+	// decode writes a replacement character, which usually advances the cursor,
+	// which the synthesis below then describes with a CSI — and that CSI's own
+	// ESC aborts the client's decode by accident. The exception is the last
+	// column: there the replacement character fills the final cell and leaves the
+	// cursor where it was with a pending wrap, so there is no movement to
+	// describe, no synthesis, and without this ST no ESC on the wire at all. The
+	// corpus entries named "…at the last column" hold that shape, and they are
+	// the ones that fail against the real wasm client when this line is removed.
+	// The condition that would make this conditional is exactly as subtle as the
+	// bug, so there is no condition.
+	f.wire = append(f.wire, wireST...)
 
 	stamped := f.term.KittyGeneration()
 	// Claimed here rather than at each exit below: every branch from this point
