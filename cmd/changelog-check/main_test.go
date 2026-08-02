@@ -87,6 +87,36 @@ func TestValidateDir(t *testing.T) {
 	}
 }
 
+// TestValidateDirRejectsNonRegularFiles pins the symlink guard: a fragment
+// that is a symlink (even to a valid target, and even with a .yaml name) must
+// be rejected without following it, so the release-time compile step can never
+// be pointed at a file outside changelog.d/. Directories are rejected the same
+// way.
+func TestValidateDirRejectsNonRegularFiles(t *testing.T) {
+	dir := t.TempDir()
+
+	outside := filepath.Join(t.TempDir(), "outside.yaml")
+	if err := os.WriteFile(outside, []byte("kind: added\narea: x\nchange: valid target\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(outside, filepath.Join(dir, "sneaky.yaml")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Mkdir(filepath.Join(dir, "subdir.yaml"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	errs := validateDir(dir)
+	if len(errs) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %v", len(errs), errs)
+	}
+	for _, err := range errs {
+		if !strings.Contains(err.Error(), "regular files") {
+			t.Fatalf("expected a regular-file rejection, got: %v", err)
+		}
+	}
+}
+
 // TestRepoFragments validates the real changelog.d in this checkout, so a bad
 // fragment fails `make test` on the branch that introduced it, not just the CI
 // gate job.

@@ -66,8 +66,11 @@ func validateDir(dir string) []error {
 			continue
 		}
 		path := filepath.Join(dir, name)
-		if e.IsDir() {
-			errs = append(errs, fmt.Errorf("%s: unexpected directory", path))
+		// Type() comes from lstat: a symlink is reported as a symlink, not as
+		// its target. Anything but a regular file is rejected so the compile
+		// step can never be pointed at a file outside changelog.d/.
+		if !e.Type().IsRegular() {
+			errs = append(errs, fmt.Errorf("%s: fragments must be regular files (not directories, symlinks, or other special files)", path))
 			continue
 		}
 		if !strings.HasSuffix(name, ".yaml") {
