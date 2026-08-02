@@ -105,10 +105,57 @@ the Go and (soon) e2e suites concurrently with no cross-talk.
 | Step | How |
 |---|---|
 | Pick | `attn profile-env <name> \| source` |
-| Inspect | `attn profile` / `attn profile list` |
+| Inspect | `attn profile` / `attn profile list` / `attn profile list --json` |
 | Build + install app | `make install PROFILE=<name>` (opens it: `make run PROFILE=<name>`) |
 | Sign | uniform stable identity via `scripts/macos-codesign-identity.sh`; macOS grants persist per bundle id |
-| Clean | `attn profile clean <name>` — stop daemon, quit app, remove data dir + app, forget the bundle |
+| Clean | `attn profile clean <name>` — reap pty-workers, stop daemon, quit app, remove data dir + app, forget the bundle |
+
+### Cleaning up after yourself
+
+A profile costs nothing to create and is invisible once made: its daemon (~40MB)
+and each pty-worker (~15MB) keep running long after the branch that needed them
+is merged, and nothing ever reaps them on its own. Clean a throwaway profile as
+soon as the work is done.
+
+**Workers are reaped before the data dir goes.** Stopping a daemon deliberately
+leaves its workers running — they are built to outlive a restart and be
+re-adopted — so `clean` shuts them down explicitly first. It talks to each worker
+over the authenticated control socket recorded in the profile's worker registry,
+which is precise by construction: it cannot hit an unrelated process that
+inherited a recycled PID. A worker whose socket is unreachable is signalled only
+if its argv still identifies it as that registry entry's worker; anything less
+certain is left running and reported by PID, e.g.
+
+```
+  workers  3 registered (2 removed, 1 unidentified)
+           ! session 8f9fb98d: pid 19891 could not be confirmed as its worker
+             (dial unix …: connect: connection refused); left running — check it
+             with `ps -p 19891` and kill it yourself if it is stale
+```
+
+Removing the data dir before reaping is what strands a worker permanently: the
+registry it would be found through goes with the dir, so no daemon can ever adopt
+it again.
+
+### Provenance
+
+`make install PROFILE=<name>` and `make install-daemon PROFILE=<name>` record the
+worktree they ran from in `<data-dir>/origin.json`. Install is the only moment
+that link is known for certain — the build fingerprint identifies source
+*content*, not the checkout — and without it a throwaway profile is
+indistinguishable from a long-lived one once the agent that made it is gone.
+
+`attn profile list` shows the origin worktree; `attn profile list --json` adds
+the branch, whether the daemon is up, and how many workers are live. Cleaning a
+profile removes its origin record along with everything else, so provenance never
+outlives the profile.
+
+That record is what powers the repository's PR-milestone cleanup hook
+(`scripts/claude/attn-profile-nudge.sh`, wired in `.claude/settings.json`): after
+an agent creates or merges a PR, it reminds the agent to clean any profile
+installed from that worktree, and stays silent otherwise. Record an origin by
+hand with `attn profile set-origin <name> [--worktree <dir>]` if you created a
+profile outside `make install`.
 
 ## Rollout status
 

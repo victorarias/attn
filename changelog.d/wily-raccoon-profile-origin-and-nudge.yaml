@@ -1,0 +1,15 @@
+kind: added
+area: profiles
+change: >
+  Profiles now record the worktree they were installed from, `attn profile
+  list` shows it (with `--json` for tooling), and a repository Claude Code hook
+  reminds an agent to clean up its throwaway profile after it creates or merges
+  a PR.
+notes: >
+  `make install PROFILE=<name>` and `make install-daemon PROFILE=<name>` write
+  `origin.json` into the profile's data dir; install is the only moment the
+  worktree behind a profile is known for certain, since the build fingerprint
+  identifies source content rather than the checkout. The hook
+  (`scripts/claude/attn-profile-nudge.sh`, wired in `.claude/settings.json`)
+  stays silent unless the current worktree owns a profile that still has
+  something installed or running, so agents that never made one never see it.

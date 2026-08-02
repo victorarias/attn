@@ -1,0 +1,19 @@
+kind: fixed
+area: profiles
+change: >
+  `attn profile clean` now shuts down the profile's pty-workers before removing
+  its data dir, and reports what happened to each one. Cleaning a profile no
+  longer strands its workers.
+symptom: >
+  Cleaning a profile left its pty-workers running forever. Stopping the daemon
+  deliberately leaves workers alive so they can be re-adopted, but the clean
+  then deleted the worker registry they are found through — so nothing could
+  ever adopt or reap them. They accumulated invisibly, each holding 10-20MB,
+  until someone noticed them at the top of `ps` days later.
+notes: >
+  Workers are stopped over their own authenticated control socket (the registry
+  records socket path, owning daemon instance, and control token), so the reap
+  cannot hit an unrelated process that inherited a recycled PID. A worker whose
+  socket is unreachable is signalled only when its argv still identifies it as
+  that registry entry's worker; anything less certain is left running and
+  reported by PID rather than killed on a guess.
