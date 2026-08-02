@@ -447,11 +447,11 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		}
 	}
 	d.setWorkspacePaneStatusForSession(session.ID, workspacelayout.PaneStatusReady, "")
-	eventType := protocol.EventSessionRegistered
+	fact := FactSessionRegistered
 	if req.existingSession != nil {
-		eventType = protocol.EventSessionStateChanged
+		fact = FactSessionReregistered
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{Event: eventType, Session: d.sessionForBroadcast(session)})
+	d.publishFact(fact, session.ID, nil)
 	d.recomputeAndBroadcastWorkspaceForSession(session.ID)
 	if req.hasPluginDriver {
 		if exit := d.finishPluginSessionLaunch(msg.ID, true); exit != nil {

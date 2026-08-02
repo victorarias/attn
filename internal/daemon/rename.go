@@ -29,10 +29,7 @@ func (d *Daemon) handleRenameSession(client *wsClient, msg *protocol.RenameSessi
 	}
 	d.store.UpdateSessionLabel(sessionID, label)
 	session.Label = label
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   protocol.EventSessionStateChanged,
-		Session: d.sessionForBroadcast(session),
-	})
+	d.publishFact(FactSessionRenamed, sessionID, nil)
 	d.sendRenameResult(client, protocol.CmdRenameSession, sessionID, nil)
 }
 

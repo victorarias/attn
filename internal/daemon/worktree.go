@@ -325,10 +325,7 @@ func (d *Daemon) cleanupDeletedWorktreeSessions(path string) {
 		d.terminateSession(session.ID, syscall.SIGTERM)
 		d.dropSessionRecord(session.ID)
 		d.clearChiefOfStaffIfSession(session.ID)
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionUnregistered,
-			Session: d.sessionForBroadcast(session),
-		})
+		d.publishSessionUnregistered(session)
 		d.dissociateSessionFromWorkspace(session.ID)
 		d.removeWorkspaceLayoutPaneForSession(session.ID)
 	}
@@ -447,13 +444,9 @@ func (d *Daemon) handleCreateWorktreeWS(client *wsClient, msg *protocol.CreateWo
 
 func (d *Daemon) handleDeleteWorktreeWS(client *wsClient, msg *protocol.DeleteWorktreeMessage) {
 	go func() {
-		// Broadcast updated sessions list (doDeleteWorktree removes sessions internally)
-		defer func() {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:    protocol.EventSessionsUpdated,
-				Sessions: d.sessionsForBroadcast(d.store.List("")),
-			})
-		}()
+		// doDeleteWorktree removes the worktree's sessions internally, so the list
+		// is refreshed once the deletion settles either way.
+		defer d.publishFact(FactWorktreeSessionsRemoved, msg.Path, nil)
 
 		err := d.doDeleteWorktree(msg.Path, msg.EndpointID, deleteWorktreeOptions{
 			Force: protocol.Deref(msg.Force),

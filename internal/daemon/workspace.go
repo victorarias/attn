@@ -597,12 +597,7 @@ func (d *Daemon) handleUnregisterWorkspace(client *wsClient, msg *protocol.Unreg
 	memberIDs := d.workspaces.sessionIDs(id)
 	for _, sid := range memberIDs {
 		closed := d.unregisterSession(sid, syscall.SIGTERM)
-		if closed != nil {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionUnregistered,
-				Session: d.sessionForBroadcast(closed),
-			})
-		}
+		d.publishSessionUnregistered(closed)
 	}
 
 	snapshot, removed := d.workspaces.unregister(id)

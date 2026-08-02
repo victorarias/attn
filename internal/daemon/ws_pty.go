@@ -14,6 +14,7 @@ import (
 	"syscall"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
@@ -610,6 +611,26 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 	}
 }
 
+// ptyGeometry is the payload of FactSessionPTYResized. The new size is not
+// derivable from the store, so the fact carries it.
+type ptyGeometry struct {
+	Cols int `json:"cols"`
+	Rows int `json:"rows"`
+}
+
+func (d *Daemon) projectSessionPTYResized(ev bus.Event) {
+	geometry, ok := decodeFact[ptyGeometry](d, ev)
+	if !ok {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event: protocol.EventPtyResized,
+		ID:    protocol.Ptr(ev.Subject),
+		Cols:  protocol.Ptr(geometry.Cols),
+		Rows:  protocol.Ptr(geometry.Rows),
+	})
+}
+
 func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessage) {
 	if msg.Cols <= 0 || msg.Rows <= 0 || msg.Cols > maxPTYDimValue || msg.Rows > maxPTYDimValue {
 		d.sendCommandError(client, protocol.CmdPtyResize, fmt.Sprintf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue))
@@ -624,12 +645,7 @@ func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessag
 	}
 	// Broadcast the new geometry to all other attached clients so they can
 	// keep their local terminal models in sync.
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event: protocol.EventPtyResized,
-		ID:    protocol.Ptr(msg.ID),
-		Cols:  protocol.Ptr(msg.Cols),
-		Rows:  protocol.Ptr(msg.Rows),
-	})
+	d.publishFact(FactSessionPTYResized, msg.ID, ptyGeometry{Cols: msg.Cols, Rows: msg.Rows})
 }
 
 var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

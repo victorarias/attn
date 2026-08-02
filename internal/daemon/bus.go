@@ -1,6 +1,11 @@
 package daemon
 
-import "github.com/victorarias/attn/internal/bus"
+import (
+	"encoding/json"
+
+	"github.com/victorarias/attn/internal/bus"
+	"github.com/victorarias/attn/internal/protocol"
+)
 
 // The daemon's side of the event bus: the fact vocabulary, the lifecycle, and the
 // projection table that turns facts into what WebSocket clients see.
@@ -32,8 +37,41 @@ import "github.com/victorarias/attn/internal/bus"
 // Fact names are dotted `domain.verb`. `ext.<extension>.*` is reserved for facts
 // published by extensions.
 const (
-	// FactSessionStateChanged: subject is the session id.
+	// Session facts; subject is the session id.
+	//
+	// Registered and reregistered are separate facts rather than one fact with a
+	// flag, because they are separate things: a session appearing for the first
+	// time and a live session being re-announced by a reconnecting client. They
+	// project to different wire events, which is how the daemon has always
+	// treated them.
+	FactSessionRegistered   = "session.registered"
+	FactSessionReregistered = "session.reregistered"
 	FactSessionStateChanged = "session.state.changed"
+	FactSessionRenamed      = "session.renamed"
+	FactSessionUnregistered = "session.unregistered"
+	FactSessionTodosChanged = "session.todos.changed"
+	FactSessionRespawned    = "session.respawned"
+	FactSessionPTYResized   = "session.pty.resized"
+	// FactSessionTerminated is a session going away as part of a bulk operation
+	// (clear-all, a worktree deletion taking its sessions with it). It is not
+	// FactSessionUnregistered: unregistering announces the individual session to
+	// clients, while these paths have only ever re-pushed the list.
+	FactSessionTerminated = "session.terminated"
+	// FactSessionBranchChanged: the branch monitor saw this session's checkout move.
+	FactSessionBranchChanged = "session.branch.changed"
+	// FactSessionChiefRoleChanged: this session took or lost the chief-of-staff role.
+	FactSessionChiefRoleChanged = "session.chief_role.changed"
+	// FactSessionReconciled: startup/recovery reconciliation changed this session.
+	FactSessionReconciled = "session.reconciled"
+
+	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
+	// it. Subject is the worktree path.
+	FactWorktreeSessionsRemoved = "worktree.sessions.removed"
+
+	// FactEndpointSessionsChanged: a remote endpoint's session set changed.
+	// Subject is the endpoint id — the entity the hub manager knows about, and
+	// the one an extension watching a remote fleet would filter on.
+	FactEndpointSessionsChanged = "endpoint.sessions.changed"
 
 	// Ticket facts; subject is the ticket id.
 	FactTicketCreated       = "ticket.created"
@@ -60,6 +98,57 @@ var wireProjections = []projection{
 	{
 		filter: bus.Filter{FactSessionStateChanged},
 		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+	},
+	{
+		filter: bus.Filter{FactSessionRegistered},
+		apply: func(d *Daemon, ev bus.Event) {
+			d.projectSessionEvent(protocol.EventSessionRegistered, ev.Subject)
+		},
+	},
+	{
+		// A re-announced session and a renamed one both reach clients as a state
+		// change carrying the session; neither recomputes the workspace, which is
+		// what separates them from FactSessionStateChanged.
+		filter: bus.Filter{FactSessionReregistered, FactSessionRenamed},
+		apply: func(d *Daemon, ev bus.Event) {
+			d.projectSessionEvent(protocol.EventSessionStateChanged, ev.Subject)
+		},
+	},
+	{
+		filter: bus.Filter{FactSessionTodosChanged},
+		apply: func(d *Daemon, ev bus.Event) {
+			d.projectSessionEvent(protocol.EventSessionTodosUpdated, ev.Subject)
+		},
+	},
+	{
+		filter: bus.Filter{FactSessionUnregistered},
+		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionUnregistered(ev) },
+	},
+	{
+		filter: bus.Filter{FactSessionRespawned},
+		apply: func(d *Daemon, ev bus.Event) {
+			d.wsHub.Broadcast(&protocol.WebSocketEvent{
+				Event: protocol.EventRuntimeRespawned,
+				ID:    protocol.Ptr(ev.Subject),
+			})
+		},
+	},
+	{
+		filter: bus.Filter{FactSessionPTYResized},
+		apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYResized(ev) },
+	},
+	{
+		// Everything whose only client-visible effect is "the session list moved".
+		// Each is a real fact about one session; the wire sees one list push.
+		filter: bus.Filter{
+			FactSessionTerminated,
+			FactSessionBranchChanged,
+			FactSessionChiefRoleChanged,
+			FactSessionReconciled,
+			FactWorktreeSessionsRemoved,
+			FactEndpointSessionsChanged,
+		},
+		apply: func(d *Daemon, _ bus.Event) { d.projectSessionsUpdated() },
 	},
 	{
 		// Every ticket fact re-pushes the board. The board push is the wire
@@ -116,18 +205,110 @@ func (d *Daemon) projectToClients(ev bus.Event) {
 // publishFact is the producer half. It is nil-safe: a Daemon assembled in a test
 // without a bus still runs its projections directly, so migrating a broadcaster
 // does not silently disconnect the behavior every existing test asserts on.
+//
+// The bus-less path marshals the payload exactly as Publish would, because a
+// projection that reads its payload must behave the same either way — otherwise
+// a fact whose data lives in the payload rather than in the store would project
+// an empty message in every test that skips the bus.
 func (d *Daemon) publishFact(name, subject string, payload any) {
 	if d == nil {
 		return
 	}
 	if d.eventBus == nil {
-		d.projectToClients(bus.Event{Name: name, Subject: subject})
+		ev := bus.Event{Name: name, Subject: subject}
+		if payload != nil {
+			raw, err := json.Marshal(payload)
+			if err != nil {
+				d.logf("bus: marshaling payload for %s (%s): %v", name, subject, err)
+				return
+			}
+			ev.Payload = raw
+		}
+		d.projectToClients(ev)
 		return
 	}
 	if _, err := d.eventBus.Publish(name, subject, payload); err != nil {
 		d.logf("bus: publishing %s (%s): %v", name, subject, err)
 	}
 }
+
+// decodeFact reads a fact's payload, reporting a decode failure rather than
+// projecting a half-built message from it.
+func decodeFact[T any](d *Daemon, ev bus.Event) (T, bool) {
+	var out T
+	if err := ev.Decode(&out); err != nil {
+		d.logf("bus: decoding %s payload for %s: %v", ev.Name, ev.Subject, err)
+		return out, false
+	}
+	return out, true
+}
+
+// Snapshot projections re-push a whole list — every session, every ticket. A
+// bulk operation publishes one fact per entity, because that is what makes the
+// log worth subscribing to, but the wire must not carry one full list per
+// entity: clearing twenty sessions was one message before the bus and has to
+// stay one message after it.
+//
+// coalesceSnapshots runs fn with snapshot projections deferred and de-duplicated
+// by key, then flushes each one once, in first-request order. Per-entity
+// projections (the ones that name the entity on the wire) are unaffected and
+// still fire inline, in publish order.
+//
+// The window is process-wide rather than goroutine-scoped, so a snapshot pushed
+// by an unrelated goroutine during a bulk operation is deferred to the flush
+// too. That is a few microseconds of delay for one message, and it is still
+// delivered exactly once, in order relative to the batch.
+func (d *Daemon) coalesceSnapshots(fn func()) {
+	d.snapshotMu.Lock()
+	d.snapshotDepth++
+	d.snapshotMu.Unlock()
+
+	defer func() {
+		d.snapshotMu.Lock()
+		d.snapshotDepth--
+		if d.snapshotDepth > 0 {
+			d.snapshotMu.Unlock()
+			return
+		}
+		pending := d.pendingSnapshots
+		order := d.pendingSnapshotOrder
+		d.pendingSnapshots = nil
+		d.pendingSnapshotOrder = nil
+		d.snapshotMu.Unlock()
+
+		for _, key := range order {
+			pending[key]()
+		}
+	}()
+
+	fn()
+}
+
+// projectSnapshot runs a whole-list re-push, or records it for the end of the
+// enclosing coalesceSnapshots window. Every projection that re-pushes a list
+// goes through this rather than broadcasting directly.
+func (d *Daemon) projectSnapshot(key string, push func()) {
+	d.snapshotMu.Lock()
+	if d.snapshotDepth == 0 {
+		d.snapshotMu.Unlock()
+		push()
+		return
+	}
+	if d.pendingSnapshots == nil {
+		d.pendingSnapshots = map[string]func(){}
+	}
+	if _, seen := d.pendingSnapshots[key]; !seen {
+		d.pendingSnapshotOrder = append(d.pendingSnapshotOrder, key)
+	}
+	d.pendingSnapshots[key] = push
+	d.snapshotMu.Unlock()
+}
+
+// Snapshot keys. One per whole-list wire message.
+const (
+	snapshotSessions = "sessions_updated"
+	snapshotTickets  = "tickets_updated"
+)
 
 // BusStatus snapshots the bus for operator inspection.
 func (d *Daemon) BusStatus() (bus.Status, error) {

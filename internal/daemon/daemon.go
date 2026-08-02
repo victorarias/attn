@@ -60,6 +60,15 @@ type workerReconcileReport struct {
 	LivenessUnknown   int
 	MissingMetadata   int
 	Changed           bool
+	// ChangedSessionIDs names every session the pass actually touched. The
+	// counters above say how much moved; this says what, which is what the
+	// reconciliation fact needs as its subject.
+	ChangedSessionIDs []string
+}
+
+func (r *workerReconcileReport) markChanged(sessionID string) {
+	r.Changed = true
+	r.ChangedSessionIDs = append(r.ChangedSessionIDs, sessionID)
 }
 
 const (
@@ -381,6 +390,12 @@ type Daemon struct {
 	// that subscription on Stop.
 	eventBus       *bus.Bus
 	busUnsubscribe func()
+
+	// Snapshot coalescing for bulk operations: see coalesceSnapshots in bus.go.
+	snapshotMu           sync.Mutex
+	snapshotDepth        int
+	pendingSnapshots     map[string]func()
+	pendingSnapshotOrder []string
 
 	// compactRunner is the durable task runner that owns the keeper's
 	// workspace-context compaction duty (kind "compact_context") and the
@@ -825,7 +840,7 @@ func (d *Daemon) Start() error {
 		d.daemonInstanceID = instanceID
 	}
 	if d.hubManager == nil {
-		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.broadcastSessionsUpdated, d.broadcastRawWSMessage, d.logf)
+		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.publishEndpointSessionsChanged, d.broadcastRawWSMessage, d.logf)
 	}
 	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
 	if selectedBackend == "" {
@@ -1346,7 +1361,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 				LastSeen:       now,
 			})
 			report.Created++
-			report.Changed = true
+			report.markChanged(sessionID)
 			continue
 		}
 
@@ -1385,7 +1400,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 					cause:     startupRecovery{},
 				})
 				report.StateUpdated++
-				report.Changed = true
+				report.markChanged(sessionID)
 			}
 			continue
 		}
@@ -1400,7 +1415,7 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 					cause:     startupRecovery{},
 				})
 				report.StateUpdated++
-				report.Changed = true
+				report.markChanged(sessionID)
 			}
 		}
 	}
@@ -1440,11 +1455,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			})
 			report.StateUpdated++
 			report.MarkedRecoverable++
-			report.Changed = true
+			report.markChanged(session.ID)
 		} else {
 			d.removeReapedSession(session.ID)
 			report.Reaped++
-			report.Changed = true
+			report.markChanged(session.ID)
 		}
 	}
 
@@ -1489,9 +1504,7 @@ func (d *Daemon) runDeferredWorkerReconciliation(maxAttempts int, retryInterval 
 		}
 
 		reconcile := d.reconcileSessionsWithWorkerBackend(context.Background(), true, recoveryStartedAt)
-		if reconcile.Changed {
-			d.broadcastSessionsUpdated()
-		}
+		d.publishSessionsReconciled(reconcile)
 		if reconcile.MarkedRecoverable > 0 {
 			d.addWarning(
 				warnStaleSessionMissingWorker,
@@ -2427,17 +2440,52 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 
 	d.sendOK(conn)
 
-	// Broadcast session registration or update to WebSocket clients.
-	eventType := protocol.EventSessionRegistered
+	// Announce the registration. A session that was already known is a client
+	// re-announcing a live session, not a new one, and has always reached clients
+	// as a state change rather than a registration.
+	fact := FactSessionRegistered
 	if existing != nil {
-		eventType = protocol.EventSessionStateChanged
+		fact = FactSessionReregistered
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:   eventType,
-		Session: d.sessionForBroadcast(session),
-	})
+	d.publishFact(fact, session.ID, nil)
 	d.broadcastWorkspaceLayout(workspaceID)
 	d.recomputeAndBroadcastWorkspaceForSession(session.ID)
+}
+
+// projectSessionEvent is the shared body of every projection that pushes one
+// session to clients under a different event name.
+func (d *Daemon) projectSessionEvent(event, sessionID string) {
+	decorated := d.sessionForBroadcast(d.store.Get(sessionID))
+	if decorated == nil {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   event,
+		Session: decorated,
+	})
+}
+
+// projectSessionUnregistered reads the session from the fact's payload rather
+// than the store: by the time this runs the session is gone, which is the whole
+// point of the event.
+func (d *Daemon) projectSessionUnregistered(ev bus.Event) {
+	session, ok := decodeFact[*protocol.Session](d, ev)
+	if !ok || session == nil {
+		return
+	}
+	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+		Event:   protocol.EventSessionUnregistered,
+		Session: session,
+	})
+}
+
+// publishSessionUnregistered carries the departing session in the payload, since
+// the store no longer has it.
+func (d *Daemon) publishSessionUnregistered(session *protocol.Session) {
+	if session == nil {
+		return
+	}
+	d.publishFact(FactSessionUnregistered, session.ID, d.sessionForBroadcast(session))
 }
 
 func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage) {
@@ -2446,10 +2494,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 
 	// Broadcast to WebSocket clients
 	if session != nil {
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionUnregistered,
-			Session: d.sessionForBroadcast(session),
-		})
+		d.publishSessionUnregistered(session)
 		d.dissociateSessionFromWorkspace(session.ID)
 		d.removeWorkspaceLayoutPaneForSession(session.ID)
 	}
@@ -2933,13 +2978,9 @@ func (d *Daemon) handleTodos(conn net.Conn, msg *protocol.TodosMessage) {
 	d.sendOK(conn)
 
 	// Broadcast to WebSocket clients
-	sessions := d.store.List("")
-	for _, s := range sessions {
+	for _, s := range d.store.List("") {
 		if s.ID == msg.ID {
-			d.wsHub.Broadcast(&protocol.WebSocketEvent{
-				Event:   protocol.EventSessionTodosUpdated,
-				Session: d.sessionForBroadcast(s),
-			})
+			d.publishFact(FactSessionTodosChanged, s.ID, nil)
 			break
 		}
 	}
@@ -3647,35 +3688,66 @@ func (d *Daemon) monitorBranches() {
 	}
 }
 
+// checkAllBranches publishes one fact per session whose checkout moved, inside a
+// coalescing window so a sweep that moves several still produces the single
+// session-list push it always did.
 func (d *Daemon) checkAllBranches() {
 	sessions := d.store.List("")
-	changed := false
 
-	for _, session := range sessions {
-		info, err := git.GetBranchInfo(session.Directory)
-		if err != nil {
-			continue
+	d.coalesceSnapshots(func() {
+		for _, session := range sessions {
+			info, err := git.GetBranchInfo(session.Directory)
+			if err != nil {
+				continue
+			}
+
+			if info.Branch != protocol.Deref(session.Branch) || info.IsWorktree != protocol.Deref(session.IsWorktree) {
+				d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo)
+				d.logf("Branch changed: session=%s branch=%s isWorktree=%v", session.ID, info.Branch, info.IsWorktree)
+				d.publishFact(FactSessionBranchChanged, session.ID, nil)
+			}
 		}
-
-		if info.Branch != protocol.Deref(session.Branch) || info.IsWorktree != protocol.Deref(session.IsWorktree) {
-			d.store.UpdateBranch(session.ID, info.Branch, info.IsWorktree, info.MainRepo)
-			changed = true
-			d.logf("Branch changed: session=%s branch=%s isWorktree=%v", session.ID, info.Branch, info.IsWorktree)
-		}
-	}
-
-	if changed {
-		d.broadcastSessionsUpdated()
-	}
+	})
 }
 
-func (d *Daemon) broadcastSessionsUpdated() {
-	if d.wsHub == nil || d.store == nil {
+// publishSessionsReconciled reports a recovery pass as one fact per session it
+// touched, coalesced into the single list push the pass produced before.
+func (d *Daemon) publishSessionsReconciled(report workerReconcileReport) {
+	if !report.Changed {
 		return
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
-		Event:    protocol.EventSessionsUpdated,
-		Sessions: d.mergedSessionsForBroadcast(),
+	d.coalesceSnapshots(func() {
+		for _, sessionID := range report.ChangedSessionIDs {
+			d.publishFact(FactSessionReconciled, sessionID, nil)
+		}
+	})
+}
+
+// publishEndpointSessionsChanged is the hub manager's seam: the sessions a
+// remote endpoint reports have changed. The endpoint is the subject — it is the
+// entity the hub knows about, and it is what an extension watching remote fleets
+// would filter on.
+func (d *Daemon) publishEndpointSessionsChanged(endpointID string) {
+	d.publishFact(FactEndpointSessionsChanged, endpointID, nil)
+}
+
+// projectSessionsUpdated re-pushes the whole session list. It is a snapshot, so
+// it goes through projectSnapshot: inside a bulk operation it runs once at the
+// end rather than once per entity.
+//
+// One session list, one payload. The worktree-deletion path used to build its
+// own from local sessions only, which dropped every remote endpoint's sessions
+// from connected clients until the next refresh; routing it here fixes that as
+// a side effect of having a single projection.
+func (d *Daemon) projectSessionsUpdated() {
+	d.projectSnapshot(snapshotSessions, func() {
+		if d.wsHub == nil || d.store == nil {
+			return
+		}
+		d.wsHub.Broadcast(&protocol.WebSocketEvent{
+			Event:    protocol.EventSessionsUpdated,
+			Sessions: d.mergedSessionsForBroadcast(),
+		})
 	})
 }
 

@@ -61,7 +61,7 @@ func TestWireTraceProducerGolden(t *testing.T) {
 		run  func()
 	}{
 		{"session_state_changed", func() { d.broadcastSessionStateChanged("sess-1") }},
-		{"sessions_updated", func() { d.broadcastSessionsUpdated() }},
+		{"sessions_updated", func() { d.publishFact(FactSessionTerminated, "sess-1", nil) }},
 		{"rate_limited", func() {
 			d.broadcastRateLimited("github", time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC))
 		}},

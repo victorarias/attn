@@ -47,14 +47,14 @@ func (d *Daemon) handleUnregisterWS(client *wsClient, msg *protocol.UnregisterMe
 		}
 	}
 	if session != nil {
-		d.wsHub.Broadcast(&protocol.WebSocketEvent{
-			Event:   protocol.EventSessionUnregistered,
-			Session: d.sessionForBroadcast(session),
-		})
+		d.publishSessionUnregistered(session)
 		d.dissociateSessionFromWorkspace(session.ID)
 		d.removeWorkspaceLayoutPaneForSession(session.ID)
+		// Closing a session from the app terminates it, which is why this path
+		// also refreshes the list; the socket `unregister` command deregisters
+		// without killing and has never re-pushed.
+		d.publishFact(FactSessionTerminated, session.ID, nil)
 	}
-	d.broadcastSessionsUpdated()
 }
 
 func (d *Daemon) handleGetRecentLocationsWS(client *wsClient, msg *protocol.GetRecentLocationsMessage) {
@@ -117,10 +117,16 @@ func (d *Daemon) clearAllSessions() {
 		}
 	}
 
-	for sessionID := range sessionIDs {
-		d.terminateSession(sessionID, syscall.SIGTERM)
-	}
-	d.store.ClearSessions()
-	d.clearChiefOfStaffIfSession(d.chiefOfStaffSessionID())
-	d.broadcastSessionsUpdated()
+	d.coalesceSnapshots(func() {
+		for sessionID := range sessionIDs {
+			d.terminateSession(sessionID, syscall.SIGTERM)
+		}
+		d.store.ClearSessions()
+		d.clearChiefOfStaffIfSession(d.chiefOfStaffSessionID())
+		// One fact per session, one list push: clearing twenty sessions has
+		// always been a single message and stays one.
+		for sessionID := range sessionIDs {
+			d.publishFact(FactSessionTerminated, sessionID, nil)
+		}
+	})
 }
