@@ -2087,6 +2087,124 @@ model MarkdownAnnotation {
   created_at: safeint; // epoch ms (int64 would codegen as string)
 }
 
+// One assistant message from a session's transcript, as the markdown it was
+// written in — which is what annotations anchor their offsets to.
+model SessionMessage {
+  // Stable identity of this message. The transcript entry's own id when the
+  // agent's format carries one, otherwise a content hash. Annotations are
+  // persisted against it, so it must survive a re-read of the transcript.
+  key: string;
+  markdown: string;
+}
+
+// Fetch the recent assistant messages of a session, so any of them can be
+// annotated in place in the terminal — not just the newest, because a turn
+// scrolling past is not a reason to lose what the user marked on it. Read-only:
+// it resolves the session's transcript and reads it, touching no PTY and no
+// session state.
+model SessionMessagesGetMessage {
+  cmd: "session_messages_get";
+  session_id: string;
+  request_id: string;
+}
+
+// Result of session_messages_get.
+model SessionMessagesGetResultMessage {
+  event: "session_messages_get_result";
+  request_id: string;
+  session_id: string;
+  success: boolean;
+  error?: string;
+  // Oldest first, newest last. Empty when the transcript holds no annotatable
+  // prose (structured verdicts, or pure tool activity); that is a success, and
+  // the client is expected to say so rather than offer an empty surface.
+  messages: SessionMessage[];
+  // Messages were left out of the window: older ones beyond the count/byte
+  // budget, or one too large to hand back with offsets that still mean
+  // anything. The daemon logs which limit was hit and by how much.
+  truncated: boolean;
+}
+
+// One persisted terminal annotation. Offsets address `message_key`'s markdown,
+// so an annotation outlives the turn scrolling away, the pane unmounting, and
+// the app restarting.
+model SessionAnnotation {
+  // Client-generated and stable for the life of the annotation: it is what a
+  // later save addresses when the comment or label changes.
+  id: string;
+  message_key: string;
+  start: int32;
+  end: int32;
+  // The markdown the offsets covered when the annotation was made. Kept so the
+  // panel can list it, and the draft can be submitted, without the message.
+  quote: string;
+  emoji: string;
+  comment: string;
+}
+
+// Fetch a session's persisted annotations. The reply's generation is the
+// current floor — max(stored generation, tombstone) — so a re-mounting client
+// seeds its counter past any tombstone even when the list is empty.
+model SessionAnnotationsGetMessage {
+  cmd: "session_annotations_get";
+  session_id: string;
+  request_id: string;
+}
+
+// Result of session_annotations_get.
+model SessionAnnotationsGetResultMessage {
+  event: "session_annotations_get_result";
+  request_id: string;
+  session_id: string;
+  success: boolean;
+  error?: string;
+  annotations: SessionAnnotation[];
+  generation: int32;
+}
+
+// Persist the full annotation list for a session. Whole-list rather than
+// per-annotation edits: the list is small, one writer owns it, and a full save
+// cannot leave the store holding half of an edit.
+model SessionAnnotationsSaveMessage {
+  cmd: "session_annotations_save";
+  session_id: string;
+  annotations: SessionAnnotation[];
+  generation: int32;
+  request_id: string;
+}
+
+// Result of session_annotations_save.
+model SessionAnnotationsSaveResultMessage {
+  event: "session_annotations_save_result";
+  request_id: string;
+  session_id: string;
+  success: boolean;
+  error?: string;
+  // The save carried a generation at or below the stored one or the tombstone.
+  // Benign: the client drops what it was holding and re-hydrates.
+  stale?: boolean;
+  generation: int32;
+}
+
+// Tombstone a session's annotations — what sending them to the agent does.
+// Idempotent, and works on a session that never had a row.
+model SessionAnnotationsClearMessage {
+  cmd: "session_annotations_clear";
+  session_id: string;
+  generation: int32;
+  request_id: string;
+}
+
+// Result of session_annotations_clear.
+model SessionAnnotationsClearResultMessage {
+  event: "session_annotations_clear_result";
+  request_id: string;
+  session_id: string;
+  success: boolean;
+  error?: string;
+  generation: int32;
+}
+
 // Fetch the persisted annotation draft for an absolute markdown file path.
 // The reply's generation is the current generation floor —
 // max(stored generation, tombstone) — so a re-mounting client seeds its

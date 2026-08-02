@@ -64,6 +64,12 @@ import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
+  annotationToWire,
+  handleSessionAnnotationDaemonEvent,
+  type DaemonSessionAnnotation,
+  type DaemonSessionMessage,
+} from './daemonSessionAnnotationEvents';
+import {
   handleMarkdownAnnotationDaemonEvent,
   markdownAnnotationKey,
   type PendingMarkdownAnnotations,
@@ -91,6 +97,18 @@ export type WorkflowRunState = GeneratedWorkflowRun;
 export type DaemonSettings = Record<string, string>;
 export type DaemonWarning = GeneratedWarning;
 export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
+/** The assistant messages a session's terminal annotations can anchor to. */
+export interface SessionMessageWindow {
+  /** Oldest first. Empty when the transcript holds no annotatable prose. */
+  messages: DaemonSessionMessage[];
+  /** Older or oversized messages were left out; the daemon log says which. */
+  truncated: boolean;
+}
+/** A session's persisted annotations, with the generation floor to write past. */
+export interface SessionAnnotationSet {
+  annotations: DaemonSessionAnnotation[];
+  generation: number;
+}
 export interface DirectoryEntry {
   name: string;
   path: string;
@@ -177,7 +195,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '201';
+export const PROTOCOL_VERSION = '202';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2598,6 +2616,7 @@ export function useDaemonSocket({
             if (handleFsDaemonEvent(data, { pending, onFsChanged: callbacksRef.current.onFsChanged })) break;
             if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
             if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
+            if (handleSessionAnnotationDaemonEvent(data, pending)) break;
             break;
           }
         }
@@ -4148,6 +4167,74 @@ export function useDaemonSocket({
     });
   }, [nextRequestID]);
 
+  // One request/result round trip for the annotation commands. They differ only
+  // in what they send and what a result means, and writing that out four times
+  // is how the timeout on one of them ends up different from the others.
+  const sendAnnotationCommand = useCallback(<T,>(
+    cmd: string,
+    body: Record<string, unknown>,
+    timeoutMessage: string,
+  ): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      const requestId = nextRequestID(cmd);
+      const key = pendingRequestKey(cmd, requestId);
+      pendingActionsRef.current.set(key, { resolve: resolve as (value: unknown) => void, reject });
+      ws.send(JSON.stringify({ cmd, request_id: requestId, ...body }));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error(timeoutMessage));
+        }
+      }, 10000);
+    });
+  }, [nextRequestID]);
+
+  // Fetch the assistant messages terminal annotations can anchor to — recent
+  // ones, not only the newest, so a turn scrolling past stays annotatable. An
+  // empty list is a success: the transcript holds no annotatable prose (a
+  // structured verdict, or pure tool activity), and the caller says so rather
+  // than offering an empty annotation surface.
+  const sendSessionMessagesGet = useCallback((sessionId: string): Promise<SessionMessageWindow> => {
+    return sendAnnotationCommand('session_messages_get', { session_id: sessionId }, 'Session message fetch timed out');
+  }, [sendAnnotationCommand]);
+
+  // Read a session's persisted annotations. `generation` is the floor a save
+  // has to beat, which the caller seeds its counter from.
+  const sendSessionAnnotationsGet = useCallback((sessionId: string): Promise<SessionAnnotationSet> => {
+    return sendAnnotationCommand('session_annotations_get', { session_id: sessionId }, 'Session annotation fetch timed out');
+  }, [sendAnnotationCommand]);
+
+  // Persist the full annotation list. `stale: true` means a newer write won;
+  // that is an outcome to re-hydrate from, not an error.
+  const sendSessionAnnotationsSave = useCallback((
+    sessionId: string,
+    annotations: readonly DaemonSessionAnnotation[],
+    generation: number,
+  ): Promise<{ stale: boolean }> => {
+    return sendAnnotationCommand(
+      'session_annotations_save',
+      { session_id: sessionId, annotations: annotations.map(annotationToWire), generation },
+      'Session annotation save timed out',
+    );
+  }, [sendAnnotationCommand]);
+
+  // Tombstone a session's annotations, which is what sending them does.
+  const sendSessionAnnotationsClear = useCallback((
+    sessionId: string,
+    generation: number,
+  ): Promise<{ generation: number }> => {
+    return sendAnnotationCommand(
+      'session_annotations_clear',
+      { session_id: sessionId, generation },
+      'Session annotation clear timed out',
+    );
+  }, [sendAnnotationCommand]);
+
   // Fetch one ticket's full record (row + activity thread + current artifacts) for the
   // detail view. The board feed carries only bare rows, so the detail panel pulls
   // the full record by id, correlated by request_id against the ticket_result event.
@@ -5491,6 +5578,10 @@ export function useDaemonSocket({
     sendListWorkspaceContexts,
     sendNotebookList,
     sendNotebookRead,
+    sendSessionMessagesGet,
+    sendSessionAnnotationsGet,
+    sendSessionAnnotationsSave,
+    sendSessionAnnotationsClear,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,

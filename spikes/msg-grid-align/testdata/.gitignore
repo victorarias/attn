@@ -1,3 +1,0 @@
-# Spike fixtures are captured from real local sessions and contain real
-# conversation text. Keep them local; re-capture with ./capture instead.
-*.json

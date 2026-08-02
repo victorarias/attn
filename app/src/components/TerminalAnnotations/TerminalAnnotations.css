@@ -1,0 +1,252 @@
+/* The annotation surface floats over the pane rather than inside it: the
+   terminal's layout is driven by a fit() measured against its own container,
+   and anything added to that container's flow changes the grid. Fixed
+   positioning keeps the popup exactly where the pointer released. */
+
+.anno-popup {
+  position: fixed;
+  z-index: 60;
+  /* The pre-measurement position: centred above the pointer. Replaced the
+     moment placePopup() has a real size to fit into the window, which is
+     before the first paint. */
+  transform: translate(-50%, -100%) translateY(-8px);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+}
+
+.anno-popup--placed {
+  transform: none;
+}
+
+.anno-popup-labels {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.anno-popup-label {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.anno-popup-label:hover {
+  background: var(--color-bg-button);
+}
+
+.anno-popup-label--on {
+  background: var(--color-accent);
+}
+
+.anno-popup-label--delete:hover {
+  background: var(--color-error);
+}
+
+.anno-popup-divider {
+  width: 1px;
+  height: 18px;
+  margin: 0 4px;
+  background: var(--color-border);
+}
+
+.anno-popup-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 320px;
+  padding: 0 2px 2px;
+}
+
+.anno-popup-quote {
+  margin: 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--color-border-hover);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  /* Two lines of the highlight are enough to confirm what is being commented
+     on; more turns the popup into a second reading surface. */
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.anno-popup-text {
+  min-height: 64px;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.anno-popup-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.anno-popup-cancel,
+.anno-popup-save,
+.anno-panel-send {
+  padding: 4px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-button);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.anno-popup-save,
+.anno-panel-send {
+  border-color: transparent;
+  background: var(--color-accent);
+  color: #fff;
+}
+
+.anno-panel {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 55;
+  display: flex;
+  flex-direction: column;
+  width: 300px;
+  max-height: 52vh;
+  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-panel);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.4);
+}
+
+.anno-panel-head,
+.anno-panel-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.anno-panel-head {
+  border-bottom: 1px solid var(--color-border);
+  cursor: grab;
+  /* The header is a drag handle; a drag that selects its own label text reads
+     as a broken one. */
+  user-select: none;
+}
+
+.anno-panel--dragging {
+  /* Suppress the pointer entering the terminal underneath mid-drag, and hold
+     the grab cursor even when the pointer outruns the panel. */
+  cursor: grabbing;
+  user-select: none;
+}
+
+.anno-panel--dragging .anno-panel-head {
+  cursor: grabbing;
+}
+
+.anno-panel-grip {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+  letter-spacing: -0.1em;
+}
+
+.anno-panel-foot {
+  justify-content: space-between;
+  border-top: 1px solid var(--color-border);
+}
+
+.anno-panel-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.anno-panel-count {
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--color-bg-button);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.anno-panel-body {
+  overflow-y: auto;
+  padding: 6px;
+}
+
+.anno-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 4px 8px;
+  width: 100%;
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.anno-card:hover {
+  border-color: var(--color-border);
+  background: var(--color-bg-elevated);
+}
+
+.anno-card-chip {
+  font-size: var(--font-size-sm);
+}
+
+.anno-card-quote {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.anno-card-comment {
+  grid-column: 2 / 4;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+}
+
+.anno-card-remove {
+  padding: 0 4px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-dimmed);
+  cursor: pointer;
+}
+
+.anno-panel-n,
+.anno-panel-sent {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+}
+
+.anno-panel-sent {
+  color: var(--color-accent);
+}

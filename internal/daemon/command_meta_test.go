@@ -189,6 +189,39 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			msg:  &protocol.SettleTurnMessage{SessionID: "sess-settle"},
 			want: "sess-settle",
 		},
+		{
+			// Hub→remote regression: the transcript is read from the filesystem
+			// of the machine running the agent. A hub answering locally has no
+			// transcript and no session row, so a remote pane would offer
+			// nothing to annotate.
+			name: "session_messages_get",
+			cmd:  protocol.CmdSessionMessagesGet,
+			msg:  &protocol.SessionMessagesGetMessage{SessionID: "sess-messages"},
+			want: "sess-messages",
+		},
+		{
+			// Hub→remote regression: annotation drafts are keyed by session in
+			// the owning daemon's store. Read, written, or cleared on the hub
+			// instead, a remote pane would keep a second divergent set — and
+			// the generation ordering that makes two panes converge would be
+			// comparing against the wrong row entirely.
+			name: "session_annotations_get",
+			cmd:  protocol.CmdSessionAnnotationsGet,
+			msg:  &protocol.SessionAnnotationsGetMessage{SessionID: "sess-anno-get"},
+			want: "sess-anno-get",
+		},
+		{
+			name: "session_annotations_save",
+			cmd:  protocol.CmdSessionAnnotationsSave,
+			msg:  &protocol.SessionAnnotationsSaveMessage{SessionID: "sess-anno-save"},
+			want: "sess-anno-save",
+		},
+		{
+			name: "session_annotations_clear",
+			cmd:  protocol.CmdSessionAnnotationsClear,
+			msg:  &protocol.SessionAnnotationsClearMessage{SessionID: "sess-anno-clear"},
+			want: "sess-anno-clear",
+		},
 	}
 
 	for _, tc := range cases {

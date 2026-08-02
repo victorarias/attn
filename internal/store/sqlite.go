@@ -851,6 +851,17 @@ CREATE TABLE IF NOT EXISTS bus_consumers (
     updated_at TEXT NOT NULL DEFAULT ''
 );`},
 	{85, "add the snooze deadline to sessions", ""}, // see applyMigration85
+	// Never reuse a number, even one only claimed on another branch: the runner
+	// skips `version <= max(applied)`, so of two migrations sharing a number the
+	// one that lands second never runs on a database that saw the first — a
+	// table that silently never exists.
+	{86, "create session annotation drafts table", `CREATE TABLE IF NOT EXISTS session_annotation_drafts (
+		session_id TEXT PRIMARY KEY,
+		annotations_json TEXT NOT NULL,
+		generation INTEGER NOT NULL,
+		tombstone_generation INTEGER NOT NULL DEFAULT 0,
+		updated_at TEXT NOT NULL
+	)`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

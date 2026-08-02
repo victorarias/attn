@@ -951,6 +951,44 @@ function paneCellRect(
   };
 }
 
+// The annotation surface, read from the DOM. What a scenario needs to know is
+// what the user can see: whether an alt-drag resolved to something annotatable
+// (the popup opened), what each filed annotation quotes, and what the panel is
+// about to send. The wash itself is painted into the WebGL surface and is
+// verified by the projection's own tests, not from here.
+function annotationSurfaceState() {
+  const popup = document.querySelector('[data-testid="annotation-popup"]');
+  const panel = document.querySelector('[data-testid="annotation-panel"]');
+  const text = (root: Element | null | undefined, selector: string) =>
+    root?.querySelector(selector)?.textContent?.trim() ?? '';
+  // Reported so a driver can check the surface is actually reachable — a popup
+  // or panel hanging off an edge is present in the DOM and unusable on screen.
+  const box = (node: Element | null) => {
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    return { left: rect.left, top: rect.top, width: rect.width, height: rect.height };
+  };
+  return {
+    popupOpen: Boolean(popup),
+    popupRect: box(popup),
+    panelRect: box(panel),
+    viewport: { width: window.innerWidth, height: window.innerHeight },
+    popupQuote: text(popup, '.anno-popup-quote'),
+    // The comment box's current contents, so a driver can tell "reopened an
+    // annotation to edit it" from "opened an empty box beside it".
+    popupDraft: (popup?.querySelector('.anno-popup-text') as HTMLTextAreaElement | null)?.value ?? null,
+    labels: Array.from(popup?.querySelectorAll('.anno-popup-label') ?? [])
+      .map((button) => button.getAttribute('aria-label') ?? ''),
+    panelOpen: Boolean(panel),
+    annotations: Array.from(panel?.querySelectorAll('.anno-card') ?? []).map((card) => ({
+      emoji: text(card, '.anno-card-chip'),
+      quote: text(card, '.anno-card-quote'),
+      comment: text(card, '.anno-card-comment'),
+    })),
+    footer: text(panel, '.anno-panel-foot'),
+  };
+}
+
 function terminalContextMenuState() {
   const menu = document.querySelector('[data-testid="terminal-context-menu"]');
   if (!menu) {
@@ -974,16 +1012,27 @@ function hoverPaneCell(
   size: { cols: number; rows: number },
   cell: { col: number; row: number },
   meta: boolean,
-): string {
+  alt = false,
+): HTMLElement {
   const { terminal, gridRect } = paneTerminalGrid(sessionId, paneId);
+  if (alt) {
+    // The terminal also learns alt from the keyboard, because holding it over
+    // an already-parked pointer is how the annotation affordance is normally
+    // reached. Send both so either path is exercised.
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Alt', altKey: true, bubbles: true }));
+  }
   terminal.dispatchEvent(new MouseEvent('mousemove', {
     bubbles: true,
     cancelable: true,
     view: window,
     metaKey: meta,
+    altKey: alt,
     ...paneCellPoint(gridRect, size, cell),
   }));
-  return getComputedStyle(terminal).cursor;
+  // The element, not its cursor: hover state routes through React, so reading
+  // the computed style here returns the style from before this move. The caller
+  // reads it after settling.
+  return terminal;
 }
 
 function dragPaneSelection(
@@ -992,16 +1041,22 @@ function dragPaneSelection(
   size: { cols: number; rows: number },
   start: { col: number; row: number },
   end: { col: number; row: number },
+  // Held modifier. A TUI with mouse reporting on owns a plain drag; alt is the
+  // terminal's existing escape hatch back to local selection, and telling the
+  // two apart is the whole point of driving this from a scenario.
+  modifiers: { altKey?: boolean } = {},
 ) {
   const { terminal, gridRect } = paneTerminalGrid(sessionId, paneId);
   const startPoint = paneCellPoint(gridRect, size, start);
   const endPoint = paneCellPoint(gridRect, size, end);
+  const altKey = modifiers.altKey === true;
   terminal.dispatchEvent(new MouseEvent('mousedown', {
     bubbles: true,
     cancelable: true,
     view: window,
     button: 0,
     buttons: 1,
+    altKey,
     ...startPoint,
   }));
   terminal.dispatchEvent(new MouseEvent('mousemove', {
@@ -1009,6 +1064,7 @@ function dragPaneSelection(
     cancelable: true,
     view: window,
     buttons: 1,
+    altKey,
     ...endPoint,
   }));
   terminal.dispatchEvent(new MouseEvent('mouseup', {
@@ -1016,6 +1072,7 @@ function dragPaneSelection(
     cancelable: true,
     view: window,
     button: 0,
+    altKey,
     ...endPoint,
   }));
 }
@@ -1833,6 +1890,42 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { hovered: !leave, bounds: rectSnapshot(element) };
       }
+      case 'drag_dom': {
+        // A press-move-release on an arbitrary element. Drag handles that live
+        // outside the terminal (the annotation panel's header) have no
+        // pane-relative verb to reach them, and a click verb cannot express the
+        // movement that is the whole behavior.
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        const dx = typeof payload.dx === 'number' ? payload.dx : 0;
+        const dy = typeof payload.dy === 'number' ? payload.dy : 0;
+        if (!selector) throw new Error('drag_dom requires selector');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`drag_dom selector not found in DOM: ${selector}`);
+        }
+        const rect = element.getBoundingClientRect();
+        const from = { clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 };
+        element.dispatchEvent(new MouseEvent('mousedown', {
+          bubbles: true, cancelable: true, view: window, button: 0, buttons: 1, ...from,
+        }));
+        // Two moves: a drag implementation that arms on the first move and
+        // applies on subsequent ones would otherwise look like it worked.
+        for (const step of [0.5, 1]) {
+          window.dispatchEvent(new MouseEvent('mousemove', {
+            bubbles: true, cancelable: true, view: window, buttons: 1,
+            clientX: from.clientX + dx * step,
+            clientY: from.clientY + dy * step,
+          }));
+          await settleUi(1);
+        }
+        window.dispatchEvent(new MouseEvent('mouseup', {
+          bubbles: true, cancelable: true, view: window, button: 0,
+          clientX: from.clientX + dx,
+          clientY: from.clientY + dy,
+        }));
+        await settleUi(2);
+        return { dragged: selector, from, dx, dy, bounds: rectSnapshot(element) };
+      }
       case 'dom_type': {
         const selector = typeof payload.selector === 'string' ? payload.selector : null;
         const text = typeof payload.text === 'string' ? payload.text : null;
@@ -2480,15 +2573,16 @@ export function useUiAutomationBridge({
         }
         selectSession(sessionId);
         await settleUi(1);
-        const cursor = hoverPaneCell(
+        const hovered = hoverPaneCell(
           viewSessionId,
           paneId,
           size,
           { col: cell.col, row: cell.row },
           payload.meta === true,
+          payload.alt === true,
         );
         await settleUi(2);
-        return { sessionId, paneId, viewSessionId, cursor };
+        return { sessionId, paneId, viewSessionId, cursor: getComputedStyle(hovered).cursor };
       }
       case 'get_pane_cell_rect': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
@@ -2513,6 +2607,9 @@ export function useUiAutomationBridge({
       case 'get_terminal_context_menu_state': {
         return terminalContextMenuState();
       }
+      case 'get_annotation_state': {
+        return annotationSurfaceState();
+      }
       case 'drag_pane_selection': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
         const session = sessions.find((entry) => entry.id === sessionId);
@@ -2531,15 +2628,17 @@ export function useUiAutomationBridge({
         }
         selectSession(sessionId);
         await settleUi(1);
+        const altKey = payload.altKey === true;
         dragPaneSelection(
           viewSessionId,
           paneId,
           size,
           { col: start.col, row: start.row },
           { col: end.col, row: end.row },
+          { altKey },
         );
         await settleUi(2);
-        return { sessionId, paneId, viewSessionId, start, end };
+        return { sessionId, paneId, viewSessionId, start, end, altKey };
       }
       case 'drag_leaf': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';

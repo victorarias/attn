@@ -302,6 +302,11 @@ func (s *Store) Remove(id string) {
 	if err != nil {
 		log.Printf("[store] Remove: failed for session %s: %v", id, err)
 	}
+	// The session's annotation draft is keyed by an id that can never come
+	// back, so it is dropped outright rather than tombstoned.
+	if _, err := s.db.Exec("DELETE FROM session_annotation_drafts WHERE session_id = ?", id); err != nil {
+		log.Printf("[store] Remove: failed to drop annotation draft for session %s: %v", id, err)
+	}
 }
 
 // ClearSessions removes all sessions from the store
@@ -322,6 +327,9 @@ func (s *Store) ClearSessions() {
 	}
 	if _, err := s.db.Exec("DELETE FROM workspace_layouts"); err != nil {
 		log.Printf("[store] ClearSessions: failed to clear workspace layouts: %v", err)
+	}
+	if _, err := s.db.Exec("DELETE FROM session_annotation_drafts"); err != nil {
+		log.Printf("[store] ClearSessions: failed to clear annotation drafts: %v", err)
 	}
 	_, err := s.db.Exec("DELETE FROM sessions")
 	if err != nil {
