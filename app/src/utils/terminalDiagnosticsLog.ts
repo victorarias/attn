@@ -29,14 +29,20 @@
 //
 // Disable at runtime with localStorage['attn:terminal-diagnostics']='0'.
 import { isTauri } from '@tauri-apps/api/core';
+import type { ModelFaultCapture } from './ghosttyModelOpRing';
 
 const DEBUG_DIR = 'debug';
 const LIFECYCLE_FILE = `${DEBUG_DIR}/terminal-diagnostics.jsonl`;
+// App-local path of the lifecycle stream, so a record written elsewhere can
+// name the file that holds the rest of the evidence.
+export const TERMINAL_DIAGNOSTICS_FILE = `$APPLOCALDATA/${LIFECYCLE_FILE}`;
 const INCIDENT_FILE = `${DEBUG_DIR}/terminal-incidents.jsonl`;
 const STORAGE_KEY = 'attn:terminal-diagnostics';
 const RING_LIMIT = 3000;
 const INCIDENT_CONTEXT_EVENTS = 400;
-const FILE_SIZE_CAP_BYTES = 8 * 1024 * 1024;
+// Hard ceiling for each on-disk stream. Enforced against the projected size in
+// appendToFile, so it holds after every write, not eventually.
+export const FILE_SIZE_CAP_BYTES = 8 * 1024 * 1024;
 // A pane is only considered "should be showing something" once its model holds
 // at least this many printable cells; below it, an empty surface is expected.
 const MIN_CONTENT_CELLS = 40;
@@ -271,17 +277,29 @@ async function appendToFile(file: 'lifecycle' | 'incident', line: string) {
       }
       if (file === 'lifecycle') lifecycleSizeSeeded = true; else incidentSizeSeeded = true;
     }
-    // Truncate-and-restart when a file grows past the cap so prod usage over
-    // days stays bounded. A rotate marker keeps the stream self-describing.
+    // Truncate-and-restart so prod usage over days stays bounded. The decision
+    // is made against the size the file WOULD reach once this line is appended,
+    // never against the size it already has: a single record can be large (a
+    // model_fault carries a ~2MB input capture), so deciding after the fact
+    // would let one write overshoot the cap by that record's whole size and
+    // only rotate on some later, unrelated event.
+    //
+    // Invariant: after every write the file is at most the cap, as long as the
+    // rotate marker plus the line fit within it. A line too big for even a
+    // fresh file still lands whole — evidence is never truncated — and the next
+    // write rotates it away.
     const bytes = file === 'lifecycle' ? lifecycleBytes : incidentBytes;
-    const willReset = bytes > FILE_SIZE_CAP_BYTES;
-    const payload = willReset ? `${JSON.stringify({ at: Date.now(), kind: 'rotate' })}\n${line}` : line;
-    await writeTextFile(path, payload, {
+    const lineBytes = byteLength(line);
+    const willReset = bytes + lineBytes > FILE_SIZE_CAP_BYTES;
+    // A rotate marker keeps the stream self-describing, and its own bytes count
+    // toward the fresh file.
+    const marker = willReset ? `${JSON.stringify({ at: Date.now(), kind: 'rotate' })}\n` : '';
+    await writeTextFile(path, willReset ? `${marker}${line}` : line, {
       baseDir: BaseDirectory.AppLocalData,
       append: !willReset,
       create: true,
     });
-    const written = byteLength(payload);
+    const written = byteLength(marker) + lineBytes;
     if (file === 'lifecycle') {
       lifecycleBytes = willReset ? written : lifecycleBytes + written;
     } else {
@@ -313,6 +331,23 @@ function ringSnapshot(): DiagEvent[] {
   return [...ring.slice(ringNextIndex), ...ring.slice(0, ringNextIndex)];
 }
 
+// A model_fault's input capture is up to ~2MB, and the in-memory ring is copied
+// wholesale into the `context` of every incident record written afterwards — a
+// blank/clip incident right after a fault is common. Keeping the capture in the
+// ring would therefore duplicate it into terminal-incidents.jsonl once per
+// incident. The ring keeps this summary; the disk line keeps the real thing.
+function summarizeCapture(capture: ModelFaultCapture): Record<string, unknown> {
+  return {
+    inDiskRecordOnly: TERMINAL_DIAGNOSTICS_FILE,
+    opCount: capture.opCount,
+    retainedWriteBytes: capture.retainedWriteBytes,
+    snapshotBytes: capture.snapshot?.len ?? 0,
+    snapshotTruncated: capture.snapshotTruncated,
+    droppedOps: capture.droppedOps,
+    droppedForRecordBudget: capture.droppedForRecordBudget,
+  };
+}
+
 export function recordDiag(event: Omit<DiagEvent, 'at'>): void {
   if (typeof window === 'undefined') {
     return;
@@ -322,7 +357,11 @@ export function recordDiag(event: Omit<DiagEvent, 'at'>): void {
     return;
   }
   const entry = { ...event, at: Date.now() } as DiagEvent;
-  pushRing(entry);
+  pushRing(
+    entry.capture
+      ? { ...entry, capture: summarizeCapture(entry.capture as ModelFaultCapture) }
+      : entry,
+  );
   if (LIFECYCLE_KINDS.has(entry.kind)) {
     enqueueWrite('lifecycle', `${JSON.stringify(entry)}\n`);
   }
@@ -508,6 +547,11 @@ export function noteRecovery(
 // A Ghostty WASM model can become unusable while the renderer is asking it for
 // dirty cells. Persist the fault before the pane rebuilds: after recovery, the
 // replacement model has no knowledge of the invalid instance that triggered it.
+//
+// `capture` is the pane's bounded ring of raw model inputs (see
+// ghosttyModelOpRing.ts) — the restore snapshot the model was built from plus
+// every write/resize/reset since. It makes the record a replayable repro:
+//   node app/scripts/replay-ghostty-model-fault.mjs <terminal-diagnostics.jsonl>
 export function noteModelFault(
   pane: string,
   info: {
@@ -520,6 +564,7 @@ export function noteModelFault(
     cols?: number;
     rows?: number;
     rendererEpoch: number;
+    capture?: ModelFaultCapture;
   },
 ): void {
   recordDiag({ kind: 'model_fault', pane, ...info });

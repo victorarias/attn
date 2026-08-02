@@ -9,6 +9,7 @@ import {
   registerRenderProbe,
   type RenderProbe,
 } from './terminalDiagnosticsLog';
+import { createGhosttyModelOpRing } from './ghosttyModelOpRing';
 
 function ringEventsFor(pane: string) {
   return (window.__ATTN_TERMINAL_DIAG_DUMP?.() ?? []).filter((event) => event.pane === pane);
@@ -113,6 +114,28 @@ describe('noteModelFault', () => {
       cols: 307,
       rows: 77,
     }));
+  });
+
+  it('keeps the input capture out of the in-memory ring, so incident context cannot multiply it', () => {
+    const pane = 'pane-model-fault-capture';
+    const ring = createGhosttyModelOpRing();
+    ring.beginEpoch(80, 24);
+    ring.noteWrite(new Uint8Array(4096).fill(65));
+    noteModelFault(pane, {
+      operation: 'write',
+      error: 'Unreachable code should not be executed',
+      model: 1,
+      rendererEpoch: 0,
+      capture: ring.capture(),
+    });
+
+    const event = ringEventsFor(pane).find((entry) => entry.kind === 'model_fault');
+    const capture = event?.capture as Record<string, unknown>;
+    // The summary keeps the shape of the evidence without the evidence itself:
+    // an incident record written seconds later embeds the last 400 ring events.
+    expect(capture).toMatchObject({ opCount: 1, retainedWriteBytes: 4096, snapshotTruncated: false });
+    expect(capture.ops).toBeUndefined();
+    expect(JSON.stringify(event).length).toBeLessThan(1024);
   });
 });
 
