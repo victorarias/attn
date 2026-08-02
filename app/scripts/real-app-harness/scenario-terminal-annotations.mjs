@@ -192,7 +192,13 @@ function daemonAnnotations(wsUrl, sessionId, timeoutMs = 8_000) {
 // fragment of something else. Returns null until such a row exists.
 export function proseRow(lines) {
   let best = null;
-  let inBlock = false;
+  // Claude draws on the alternate screen, which has no scrollback, so an answer
+  // taller than the grid pushes its own "⏺ " marker off the top and leaves only
+  // continuations behind. Those rows are still the agent talking and still what
+  // a user would drag across, so the indented run before the first marker line
+  // counts as in-block; requiring a visible marker made the scenario depend on
+  // the answer being short enough to fit.
+  let inBlock = true;
   for (let row = 0; row < lines.length; row += 1) {
     const line = lines[row];
     if (line.startsWith('⏺ ')) {

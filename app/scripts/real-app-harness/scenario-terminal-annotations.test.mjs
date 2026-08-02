@@ -52,6 +52,19 @@ describe('proseRow', () => {
     expect(found).toBeNull();
   });
 
+  it('takes continuations whose marker scrolled off the alternate screen', () => {
+    // An answer taller than the grid leaves no "⏺ " on screen at all. Those rows
+    // are the whole point of the scenario's second half, so refusing them made
+    // the run depend on how much the agent chose to say.
+    const found = proseRow([
+      PROSE,
+      '  and the wrapper itself has no way at all to know which one of those it just made.',
+      '',
+      '❯ ',
+    ]);
+    expect(found?.row).toBe(1);
+  });
+
   it('returns null before the agent has said anything', () => {
     expect(proseRow(['❯ ', '──────────────'])).toBeNull();
   });
