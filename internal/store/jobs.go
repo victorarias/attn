@@ -48,12 +48,25 @@ type JobRecord struct {
 const jobColumns = `id, kind, unique_key, priority, payload, result, state, attempts,
 	max_attempts, scheduled_at, last_error, requeued, created_at, updated_at`
 
+// execer is satisfied by both *sql.DB and *sql.Tx, so a write helper serves a
+// standalone call and a step inside someone else's transaction.
+type execer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
 // UpsertJob inserts or fully replaces a job row by id.
 func (s *Store) UpsertJob(rec JobRecord) error {
 	if s.db == nil {
 		return fmt.Errorf("store: no database")
 	}
-	_, err := s.db.Exec(
+	return upsertJob(s.db, rec)
+}
+
+// upsertJob is UpsertJob's write, against whichever executor the caller has. The
+// legacy-task handover runs it inside its transaction so the old rows are
+// deleted in the same commit that writes their replacements.
+func upsertJob(ex execer, rec JobRecord) error {
+	_, err := ex.Exec(
 		`INSERT INTO jobs (`+jobColumns+`)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET

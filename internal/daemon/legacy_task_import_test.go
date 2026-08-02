@@ -23,18 +23,31 @@ func legacyRow(kind, subject, meta string) store.LegacyTaskRecord {
 	}
 }
 
+// translateAndWrite is what the handover does with each legacy row, minus the
+// transaction that owns it: the store's own tests cover the transaction, these
+// cover the translation. Keeping them apart is what lets the per-kind inputs be
+// checked without a fixture in the retired table.
+func translateAndWrite(t *testing.T, d *Daemon, rows ...store.LegacyTaskRecord) {
+	t.Helper()
+	for _, rec := range rows {
+		if err := d.store.UpsertJob(d.legacyTaskToJob(rec)); err != nil {
+			t.Fatalf("write translated job for %s: %v", rec.ID, err)
+		}
+	}
+}
+
 // The upgrade must not lose owed background work, and it must not lose the
 // inputs that work depends on — a summarize whose transcript path is dropped
 // runs against a session row a teardown already deleted.
 func TestImportCarriesEachKindsInputsOntoItsPayload(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
-	d.importDrainedTasks([]store.LegacyTaskRecord{
+	translateAndWrite(t, d,
 		legacyRow(notebookSummarizeSessionKind, "s-1", `{"transcript":"/tmp/turn.jsonl","workspace":"ws-1"}`),
 		legacyRow(notebookNarrateWorkspaceKind, "ws-2", `{"daily_pass":"1"}`),
 		legacyRow(reconcileKind, "t-3", `{"reconcile_inputs":"{\"TicketID\":\"t-3\",\"Title\":\"ship it\"}"}`),
 		legacyRow(compactContextKind, "ws-4", ""),
-	})
+	)
 
 	d.startJobQueue()
 	runner := d.jobQueueRef()
@@ -94,9 +107,7 @@ func TestImportCarriesEachKindsInputsOntoItsPayload(t *testing.T) {
 // reports as missing its inputs.
 func TestImportKeepsARowWithUnreadableMeta(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.importDrainedTasks([]store.LegacyTaskRecord{
-		legacyRow(notebookSummarizeSessionKind, "s-broken", `{not json`),
-	})
+	translateAndWrite(t, d, legacyRow(notebookSummarizeSessionKind, "s-broken", `{not json`))
 
 	job, ok, err := d.store.GetJob("summarize_session:s-broken")
 	if err != nil {

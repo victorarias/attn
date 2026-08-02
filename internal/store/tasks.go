@@ -6,13 +6,13 @@ import (
 )
 
 // The tasks table belonged to internal/tasks, the durable task runner the job
-// queue replaced. All that remains of it is the one-time drain below: the daemon
-// carries any work still owed onto the jobs table at startup and empties this
-// one, so the drain is a no-op on every boot after the first. The table itself is
-// dropped in a later migration, once the queue has run for a release.
+// queue replaced. All that remains of it is the one-time handover below: the
+// daemon carries any work still owed onto the jobs table at startup and empties
+// this one, so the handover is a no-op on every boot after the first. The table
+// itself is dropped in a later migration, once the queue has run for a release.
 
 // LegacyTaskRecord is one row of the retired task-runner table, in the shape the
-// import needs. Meta was an opaque JSON blob then and stays opaque here — the
+// handover needs. Meta was an opaque JSON blob then and stays opaque here — the
 // daemon owns turning it into a job payload, because only the kind that stashed
 // it knows what it means.
 type LegacyTaskRecord struct {
@@ -29,31 +29,46 @@ type LegacyTaskRecord struct {
 	UpdatedAt     time.Time
 }
 
-// DrainLegacyTasks returns every remaining task row and empties the table in one
-// transaction, so the rows are handed over exactly once even if the import that
-// follows fails partway: a crash before the commit leaves them to be drained
-// again, and a crash after it leaves nothing to re-import twice.
+// MigrateLegacyTasks moves every owed task row onto the jobs table and empties
+// the old one, and returns how many it moved.
 //
-// Rows in the terminal "done" state are dropped rather than returned. They
-// describe work that already happened, nothing re-runs them, and job retention
-// would delete them anyway.
-func (s *Store) DrainLegacyTasks() ([]LegacyTaskRecord, error) {
+// The whole handover is ONE transaction: reading the old rows, writing the
+// translated jobs, and deleting the old rows all commit together or not at all.
+// That is the entire point of this function's shape. Reading and deleting in one
+// transaction and writing the jobs in another looks equivalent and is not — a
+// crash between the two, or a single failed job write, would leave the old work
+// deleted and the new row never made, losing owed compaction, narration, or
+// reconcile work on the one upgrade that exists to preserve it. Any failure here
+// rolls back to a table that still holds everything, and the next start tries
+// the handover again.
+//
+// translate turns one legacy row into the job that replaces it. It runs inside
+// the transaction and cannot fail: a row it cannot make sense of still becomes a
+// job (an unreadable payload is a diagnosable job, a dropped row is lost work),
+// so the caller reports what it could not read and returns a record anyway.
+//
+// Rows in the terminal "done" state are dropped rather than moved. They describe
+// work that already happened, nothing re-runs them, and job retention would
+// delete them anyway.
+func (s *Store) MigrateLegacyTasks(translate func(LegacyTaskRecord) JobRecord) (int, error) {
 	if s.db == nil {
-		return nil, fmt.Errorf("store: no database")
+		return 0, fmt.Errorf("store: no database")
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return nil, fmt.Errorf("store: drain legacy tasks: %w", err)
+		return 0, fmt.Errorf("store: migrate legacy tasks: %w", err)
 	}
 	defer tx.Rollback()
 
+	// The rows are collected before anything is written: SQLite will not accept a
+	// write on a connection with an open cursor on the same transaction.
 	rows, err := tx.Query(
 		`SELECT id, kind, subject, state, attempts, next_attempt_at, last_error, meta_json, requeued, created_at, updated_at
 		 FROM tasks WHERE state <> 'done'`)
 	if err != nil {
-		return nil, fmt.Errorf("store: drain legacy tasks: %w", err)
+		return 0, fmt.Errorf("store: migrate legacy tasks: %w", err)
 	}
-	var out []LegacyTaskRecord
+	var owed []LegacyTaskRecord
 	for rows.Next() {
 		var (
 			rec                             LegacyTaskRecord
@@ -63,24 +78,29 @@ func (s *Store) DrainLegacyTasks() ([]LegacyTaskRecord, error) {
 		if err := rows.Scan(&rec.ID, &rec.Kind, &rec.Subject, &rec.State, &rec.Attempts,
 			&nextStr, &rec.LastError, &rec.MetaJSON, &requeued, &createdStr, &updatedStr); err != nil {
 			rows.Close()
-			return nil, fmt.Errorf("store: scan legacy task: %w", err)
+			return 0, fmt.Errorf("store: scan legacy task: %w", err)
 		}
 		rec.Requeued = requeued != 0
 		rec.NextAttemptAt = parseJobTime(nextStr)
 		rec.CreatedAt = parseJobTime(createdStr)
 		rec.UpdatedAt = parseJobTime(updatedStr)
-		out = append(out, rec)
+		owed = append(owed, rec)
 	}
 	rows.Close()
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("store: drain legacy tasks: %w", err)
+		return 0, fmt.Errorf("store: migrate legacy tasks: %w", err)
 	}
 
+	for _, rec := range owed {
+		if err := upsertJob(tx, translate(rec)); err != nil {
+			return 0, fmt.Errorf("store: migrate legacy task %s: %w", rec.ID, err)
+		}
+	}
 	if _, err := tx.Exec(`DELETE FROM tasks`); err != nil {
-		return nil, fmt.Errorf("store: clear legacy tasks: %w", err)
+		return 0, fmt.Errorf("store: clear legacy tasks: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
-		return nil, fmt.Errorf("store: commit legacy task drain: %w", err)
+		return 0, fmt.Errorf("store: commit legacy task handover: %w", err)
 	}
-	return out, nil
+	return len(owed), nil
 }

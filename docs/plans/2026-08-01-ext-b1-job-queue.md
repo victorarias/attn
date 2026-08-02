@@ -353,3 +353,33 @@ is theoretical. And `Retry` on a job that no longer exists reports success and
 does nothing; that is the retired runner's behavior carried across unchanged,
 and a dead job is never trimmed, so the notification deep-link always has its
 record.
+
+### Review: the handover into the queue is one transaction
+
+The first version of the handover read the owed rows and deleted them in one
+transaction, then wrote the translated jobs in another. That is not equivalent
+to doing both together, and the difference is lost work: a crash between the two
+commits, or a single failing job write, left the old rows deleted and their
+replacements never made. This path runs exactly once per installation and the
+work it carries — pending compaction, narration, reconcile — has no other copy,
+so a partial handover is unrecoverable.
+
+`Store.MigrateLegacyTasks` now does the whole handover in one transaction: read,
+translate, write every job, delete the old rows, commit. Translation moved into
+a callback (`Daemon.legacyTaskToJob`) so it can run inside that transaction
+while the store stays a leaf package. The callback cannot fail — a row it cannot
+read still becomes a job, because an unreadable payload is diagnosable and a
+dropped row is not.
+
+Any failure rolls back to a table that still holds everything, and the daemon
+logs that nothing moved and the next start will retry.
+`TestAFailedJobWriteLeavesEveryLegacyRowIntact` proves it: three owed rows, a
+translation that collides two of them on one coalescing key, and afterwards all
+three legacy rows are still there, zero job rows were written, and a second
+handover moves all three. Mutation-checked against the two-phase version, which
+fails that test with "0 legacy rows left after a failed handover".
+
+Live on a throwaway profile seeded with a copy of the production database
+(schema 85, 150 legacy task rows): migrated to 86, moved the 3 owed rows
+(2 queued, 1 dead) with their ids, dropped the 147 completed ones, and emptied
+the old table.

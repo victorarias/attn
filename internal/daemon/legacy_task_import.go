@@ -26,66 +26,63 @@ const (
 	legacyMetaReconcileInputs = "reconcile_inputs"
 )
 
-// importLegacyTasks drains the task table and writes each remaining row to the
-// jobs table. It runs before the queue is constructed, so nothing races it.
+// importLegacyTasks hands the task table's remaining rows to the jobs table. It
+// runs before the queue is constructed, so nothing races it.
+//
+// The move is atomic in the store (see MigrateLegacyTasks): a failure anywhere
+// leaves every old row where it was, and the next start tries again. That
+// matters more here than anywhere else in the queue — this path runs exactly
+// once per installation, and the work it carries has no other copy.
+func (d *Daemon) importLegacyTasks() {
+	if d.store == nil {
+		return
+	}
+	imported, err := d.store.MigrateLegacyTasks(d.legacyTaskToJob)
+	if err != nil {
+		d.logf("jobs: hand over the retired task runner's records: %v "+
+			"— nothing was moved and the old rows are intact; the next daemon start retries it", err)
+		return
+	}
+	if imported > 0 {
+		d.logf("jobs: imported %d task record(s) from the retired task runner", imported)
+	}
+}
+
+// legacyTaskToJob is the job one legacy row becomes. It runs inside the
+// handover's transaction and always returns a record, because a row it cannot
+// fully read is still owed work.
 //
 // The legacy id is PRESERVED as the job id. A dead task's failure notification
 // records that id as its SourceID, and the panel's Retry deep-links through it —
 // minting a fresh uuid would leave every pre-upgrade failure notification
 // pointing at nothing.
 //
-// A row whose meta cannot be translated is imported without a payload rather
-// than dropped: the record stays visible in the panel and its handler reports
-// the missing inputs, which is a diagnosable outcome. Silently discarding owed
-// work is not.
-func (d *Daemon) importLegacyTasks() {
-	if d.store == nil {
-		return
-	}
-	legacy, err := d.store.DrainLegacyTasks()
+// A row whose meta cannot be translated becomes a job without a payload rather
+// than being dropped: the record stays visible in the panel and its handler
+// reports the missing inputs, which is a diagnosable outcome. Silently
+// discarding owed work is not.
+func (d *Daemon) legacyTaskToJob(rec store.LegacyTaskRecord) store.JobRecord {
+	payload, err := legacyTaskPayload(rec)
 	if err != nil {
-		d.logf("jobs: drain legacy tasks: %v", err)
-		return
+		d.logf("jobs: import legacy task %s (%s): %v", rec.ID, rec.Kind, err)
 	}
-	d.importDrainedTasks(legacy)
-}
-
-// importDrainedTasks writes the drained rows to the jobs table. It is split from
-// the drain so the translation — which is the part that can silently lose a
-// kind's inputs — is exercised without a fixture in the retired table.
-func (d *Daemon) importDrainedTasks(legacy []store.LegacyTaskRecord) {
-	if len(legacy) == 0 {
-		return
+	job := store.JobRecord{
+		ID:          rec.ID,
+		Kind:        rec.Kind,
+		UniqueKey:   rec.Subject,
+		Payload:     payload,
+		State:       rec.State,
+		Attempts:    rec.Attempts,
+		ScheduledAt: rec.NextAttemptAt,
+		LastError:   rec.LastError,
+		Requeued:    rec.Requeued,
+		CreatedAt:   rec.CreatedAt,
+		UpdatedAt:   rec.UpdatedAt,
 	}
-	imported := 0
-	for _, rec := range legacy {
-		payload, err := legacyTaskPayload(rec)
-		if err != nil {
-			d.logf("jobs: import legacy task %s (%s): %v", rec.ID, rec.Kind, err)
-		}
-		job := store.JobRecord{
-			ID:          rec.ID,
-			Kind:        rec.Kind,
-			UniqueKey:   rec.Subject,
-			Payload:     payload,
-			State:       rec.State,
-			Attempts:    rec.Attempts,
-			ScheduledAt: rec.NextAttemptAt,
-			LastError:   rec.LastError,
-			Requeued:    rec.Requeued,
-			CreatedAt:   rec.CreatedAt,
-			UpdatedAt:   rec.UpdatedAt,
-		}
-		if job.State == "" {
-			job.State = string(jobs.StateQueued)
-		}
-		if err := d.store.UpsertJob(job); err != nil {
-			d.logf("jobs: import legacy task %s: %v", rec.ID, err)
-			continue
-		}
-		imported++
+	if job.State == "" {
+		job.State = string(jobs.StateQueued)
 	}
-	d.logf("jobs: imported %d task record(s) from the retired task runner", imported)
+	return job
 }
 
 // legacyTaskPayload translates one legacy meta blob into the payload its kind's
