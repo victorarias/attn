@@ -68,6 +68,7 @@
     "real-app:scenario-agent-queue": "node scripts/real-app-harness/scenario-agent-queue.mjs",
     "real-app:scenario-agent-queue-snooze": "node scripts/real-app-harness/scenario-agent-queue-snooze.mjs",
     "real-app:scenario-nudge-trigger": "node scripts/real-app-harness/scenario-nudge-trigger.mjs",
+    "real-app:scenario-countdown-cancel": "node scripts/real-app-harness/scenario-countdown-cancel.mjs",
     "real-app:scenario-terminal-block-copy": "node scripts/real-app-harness/scenario-terminal-block-copy.mjs",
     "real-app:scenario-terminal-context-menu": "node scripts/real-app-harness/scenario-terminal-context-menu.mjs",
     "real-app:scenario-terminal-osc8-link": "node scripts/real-app-harness/scenario-terminal-osc8-link.mjs",

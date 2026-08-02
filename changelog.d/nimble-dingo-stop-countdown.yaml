@@ -1,0 +1,18 @@
+kind: added
+area: queue
+change: >
+  Cmd+. stops whatever countdown is on screen. attn counts down to two things
+  it does without being asked — closing a turn you steered, and doorbelling an
+  agent with pending ticket activity — and both now answer to one key. The
+  indicator that announces a countdown says which key that is, instead of
+  hiding it in a tooltip, and clicking the indicator does the same thing. A
+  cancel sticks: keeping a turn survives the agent simply carrying on working,
+  and stopping a nudge survives you looking at another session, but ticket
+  activity that arrives afterwards is new and asks again. Stopping a nudge
+  leaves the ticket unread and still deliverable on demand — it calls off the
+  interruption, not the message. Only countdowns you can actually see are
+  affected; one running on an off-screen session is left alone. Cmd+. reaches
+  attn through a new Stop Countdown item in the File menu, because macOS
+  reserves Command-period system-wide and never delivers it to the app window
+  — which is why the shortcut, advertised on the settling indicator since it
+  shipped, had in fact never worked.

@@ -1,5 +1,6 @@
 import './NudgeIndicator.css';
 import { CountdownFill } from './CountdownFill';
+import { CountdownCancelHint } from './CountdownCancelHint';
 import type { UISessionState } from '../types/sessionState';
 
 // The visual mode for a session's incoming-ticket indicator, derived from the two
@@ -102,18 +103,35 @@ export function HeaderNudgeIndicator({
   mode,
   firesAt,
   onTrigger,
+  onCancel,
 }: {
   mode: NudgeMode;
   firesAt?: string;
   onTrigger?: () => void;
+  onCancel?: () => void;
 }) {
   if (mode === 'counting' && firesAt) {
+    // Counting is a button because the countdown is now something the user can
+    // call off, and the chip announcing it is where they will reach for that. It
+    // carries the same key the settling chip does — one countdown-cancel verb,
+    // whichever countdown is on screen — and clicking is the pointer equivalent,
+    // exactly as it is on the settling chip.
     return (
       <>
-        <div className="nudge-header nudge-header--counting" aria-hidden="true">
+        <button
+          type="button"
+          className="nudge-header nudge-header--counting nudge-header-trigger"
+          // Same guard as the paused variant: in a split the pane header is a
+          // leaf-drag handle, so a sloppy click that drifts would relocate the
+          // pane instead of stopping the nudge.
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={triggerHandler(onCancel)}
+          title="Stop this nudge — the ticket stays unread"
+        >
           <span className="nudge-dot" aria-hidden="true" />
           <span className="nudge-header-label">Incoming ticket nudge…</span>
-        </div>
+          <CountdownCancelHint verb="stop" />
+        </button>
         <div className="nudge-header-track" aria-hidden="true">
           <CountdownFill firesAt={firesAt} className="nudge-header-track-fill" />
         </div>

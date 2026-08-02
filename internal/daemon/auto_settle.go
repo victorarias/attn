@@ -324,19 +324,13 @@ func (d *Daemon) runAutoSettle(sessionID string, phase autoSettlePhase) string {
 	return "settled"
 }
 
-// handleCancelAutoSettle is the user pressing the cancel shortcut: keep this
-// turn. It stops the countdown and does not re-arm — see CancelAutoSettleMessage
-// for why a cancel has to survive the session simply continuing to work.
-func (d *Daemon) handleCancelAutoSettle(msg *protocol.CancelAutoSettleMessage) {
-	if d == nil || msg == nil {
-		return
-	}
-	sessionID := strings.TrimSpace(msg.SessionID)
-	if sessionID == "" {
-		return
-	}
+// cancelAutoSettleByUser is the user calling off a pending settle: keep this
+// turn. It stops the countdown and does not re-arm — see CancelCountdownMessage
+// for why a cancel has to survive the session simply continuing to work. Reports
+// whether anything was pending, so the caller can log what the cancel reached.
+func (d *Daemon) cancelAutoSettleByUser(sessionID string) bool {
 	d.autoSettleMu.Lock()
-	removed, wasVisible := d.stopAutoSettleLocked(sessionID)
+	removed, _ := d.stopAutoSettleLocked(sessionID)
 	if removed {
 		// The suppression is what makes the cancel stick. Without it the very
 		// next `working` transition — or the resolver re-reporting the state the
@@ -353,9 +347,10 @@ func (d *Daemon) handleCancelAutoSettle(msg *protocol.CancelAutoSettleMessage) {
 	if d.debugLogging {
 		d.logf("auto-settle canceled by user: session=%s had_pending=%v", sessionID, removed)
 	}
-	if wasVisible {
-		d.broadcastSessionStateChanged(sessionID)
-	}
+	// No broadcast here: handleCancelCountdown makes exactly one, after every
+	// countdown on the session has been called off, so a cancel that reaches both
+	// does not push two snapshots.
+	return removed
 }
 
 // decorateSessionWithAutoSettle stamps the broadcast clone with the countdown

@@ -15,7 +15,7 @@ interface KeyboardShortcutsConfig {
   /** Undefined while the queue arrangement is off; the keystroke is then unbound. */
   onSettleTurn?: () => void;
   onSnoozeTurn?: () => void;
-  onCancelAutoSettle?: () => void;
+  onCancelCountdown?: () => void;
   onSelectWorkspaceByIndex: (index: number) => void;
   onPrevSession: () => void;
   onNextSession: () => void;
@@ -46,7 +46,7 @@ export function useKeyboardShortcuts({
   onJumpToWaiting,
   onSettleTurn,
   onSnoozeTurn,
-  onCancelAutoSettle,
+  onCancelCountdown,
   onSelectWorkspaceByIndex,
   onPrevSession,
   onNextSession,
@@ -84,7 +84,11 @@ export function useKeyboardShortcuts({
   // Same gate: snooze defers a turn, and there is no queue to defer out of while
   // the arrangement is off.
   useShortcut('session.snooze', onSnoozeTurn ?? (() => {}), enabled && !!onSnoozeTurn);
-  useShortcut('session.cancelAutoSettle', onCancelAutoSettle ?? (() => {}), enabled && !!onCancelAutoSettle);
+  // Delivered by a native menu item, not by the page's keydown listener — AppKit
+  // eats ⌘. before the WebView sees it. The registration is identical either way:
+  // `dispatch_native_shortcut` calls the same triggerShortcut(id), so an id with no
+  // registered handler is still a no-op and the `enabled` gates still apply.
+  useShortcut('session.cancelCountdown', onCancelCountdown ?? (() => {}), enabled && !!onCancelCountdown);
   useShortcut('session.toggleSidebar', onToggleSidebar ?? (() => {}), enabled && !!onToggleSidebar);
   useShortcut('session.refreshPRs', onRefreshPRs ?? (() => {}), enabled && !!onRefreshPRs);
   useShortcut('workspace.select1', () => onSelectWorkspaceByIndex(0), enabled);

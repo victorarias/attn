@@ -13,6 +13,7 @@ import {
   SHORTCUT_CATEGORY_ORDER,
   SHORTCUT_CATEGORY_LABELS,
   ShortcutCategory,
+  isNativeDeliveryShortcut,
 } from '../shortcuts/metadata';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import { useKeybindings } from '../contexts/KeybindingsContext';
@@ -265,6 +266,9 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                     const binding = kb.resolve(id);
                     const customized = kb.isCustomized(id);
                     const isProtected = kb.isProtected(id);
+                    // The macOS menu bar owns this key, so there is no rebind to
+                    // offer: a combo recorded here would never reach the action.
+                    const isNative = isNativeDeliveryShortcut(id);
                     const isPending = pending?.id === id;
                     return (
                       <div className="shortcut-editor-row" key={id}>
@@ -276,6 +280,14 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                           {isProtected && (
                             <span className="shortcut-editor-badge shortcut-editor-badge--locked">
                               Required
+                            </span>
+                          )}
+                          {isNative && (
+                            <span
+                              className="shortcut-editor-badge shortcut-editor-badge--scope"
+                              title="macOS reserves this key, so attn claims it from the menu bar instead of the app window. That makes it fixed — it cannot be rebound here."
+                            >
+                              Menu bar
                             </span>
                           )}
                           {SHORTCUT_META[id].requiresTerminal && (
@@ -313,6 +325,11 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                             {rowError?.id === id && (
                               <span className="shortcut-editor-row-error">{rowError.message}</span>
                             )}
+                            {isNative ? (
+                              <span className="shortcut-editor-fixed-binding">
+                                {formatShortcut(binding ?? SHORTCUTS[id])}
+                              </span>
+                            ) : (
                             <KeyCaptureInput
                               binding={binding}
                               recording={recordingId === id}
@@ -333,6 +350,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                               onCaptureChord={(chord) => applyBinding(id, chord)}
                               onCancel={() => setRecordingId(null)}
                             />
+                            )}
                             <button
                               type="button"
                               className={`shortcut-editor-icon-btn ${kb.isInDock(id) ? 'shortcut-editor-icon-btn--on' : ''}`.trim()}
@@ -353,7 +371,7 @@ export function ShortcutEditorModal({ isOpen, onClose }: ShortcutEditorModalProp
                                 ↺
                               </button>
                             )}
-                            {!isProtected && binding && (
+                            {!isProtected && !isNative && binding && (
                               <button
                                 type="button"
                                 className="shortcut-editor-icon-btn"

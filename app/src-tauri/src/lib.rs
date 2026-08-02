@@ -508,6 +508,23 @@ fn quit_app(app: tauri::AppHandle) {
 }
 
 const CLOSE_ACTIVE_PANE_MENU_ID: &str = "attn-close-active-pane";
+// ⌘. calls off whatever countdown is on screen. It exists as a menu item because
+// that is the only way the keystroke can reach attn at all: macOS claims
+// Command-period as the system cancel gesture (`cancelOperation:`) and consumes it
+// before the WebView dispatches any DOM keydown, so the page's shortcut listener —
+// which owns every other key in the app — never sees it. A menu item gets first
+// look at key equivalents, so it does. Verified against the packaged app: an
+// always-enabled action rebound to ⌘. never fired, and the same action behind this
+// menu item does.
+//
+// The item only carries the keystroke. The behavior stays in the page, reached
+// through the same `attn:native-shortcut` dispatch ⌘W uses, so there is one
+// implementation of "cancel the countdown" and it is the one the pill's click
+// calls too. Because the accelerator is fixed here rather than resolved from the
+// user's keybindings, `session.cancelCountdown` is marked `nativeDelivery` in the
+// frontend's shortcut metadata and the editor shows it as fixed instead of
+// offering a rebind that would silently not apply.
+const CANCEL_COUNTDOWN_MENU_ID: &str = "attn-cancel-countdown";
 const NATIVE_SHORTCUT_EVENT: &str = "attn:native-shortcut";
 const NATIVE_BROWSER_CLOSE_EVENT: &str = "attn:native-browser-close";
 
@@ -523,6 +540,18 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         Some("CmdOrCtrl+W"),
     )?;
     let mut inserted_close_active_pane = false;
+    let cancel_countdown = MenuItem::with_id(
+        app,
+        CANCEL_COUNTDOWN_MENU_ID,
+        "Stop Countdown",
+        true,
+        Some("CmdOrCtrl+."),
+    )?;
+    // Always enabled. A disabled NSMenuItem stops responding to its key
+    // equivalent, so gating this on "a countdown is running" would need the menu
+    // to track session state — and the press is already a no-op when nothing is
+    // counting down, because the page registers no handler for the id then.
+    let mut inserted_cancel_countdown = false;
 
     for item in menu.items()? {
         let MenuItemKind::Submenu(submenu) = item else {
@@ -580,6 +609,13 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
         if is_file_menu && !inserted_close_active_pane {
             submenu.append(&close_active_pane)?;
             inserted_close_active_pane = true;
+        }
+
+        // Sits beside Close Pane: both are verbs about the session in front of
+        // you, and File is where attn already puts them.
+        if is_file_menu && !inserted_cancel_countdown {
+            submenu.insert(&cancel_countdown, 0)?;
+            inserted_cancel_countdown = true;
         }
     }
 
@@ -1056,6 +1092,11 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
         .menu(app_menu)
         .on_menu_event(|app, event| {
             use tauri::Manager;
+
+            if event.id() == CANCEL_COUNTDOWN_MENU_ID {
+                dispatch_native_shortcut(app, "session.cancelCountdown");
+                return;
+            }
 
             if event.id() == CLOSE_ACTIVE_PANE_MENU_ID {
                 if let Some(present) = app.get_webview_window(PRESENT_WINDOW_LABEL) {

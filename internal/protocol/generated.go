@@ -679,7 +679,7 @@ type BrowserControlResultMessage struct {
 	Success bool `json:"success"`
 }
 
-type CancelAutoSettleMessage struct {
+type CancelCountdownMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 

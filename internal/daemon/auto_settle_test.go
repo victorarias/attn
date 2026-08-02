@@ -185,7 +185,7 @@ func TestAutoSettle_CancelKeepsTheTurnAndDoesNotReArm(t *testing.T) {
 	}
 	fireAutoSettleNow(t, d, id)
 
-	d.handleCancelAutoSettle(&protocol.CancelAutoSettleMessage{SessionID: id})
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
 
 	if _, ok := autoSettlePending(d, id); ok {
 		t.Fatal("countdown survived the cancel")

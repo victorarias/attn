@@ -188,6 +188,22 @@
   gap: 6px;
 }
 
+/* Stands in for KeyCaptureInput on a key the macOS menu bar owns. Same footprint
+   as the capture control it replaces, so the rows stay aligned, but visibly inert
+   — there is nothing to record here. */
+.shortcut-editor-fixed-binding {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 96px;
+  padding: 4px 8px;
+  border: 1px dashed var(--color-border);
+  border-radius: 5px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-dimmed);
+}
+
 .shortcut-editor-row-error {
   font-size: 11px;
   color: #ff6b35;

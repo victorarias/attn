@@ -60,6 +60,25 @@ func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	}
 	active := d.currentlySelectedSession() == sessionID
 
+	// A standing user cancel is checked before the lock because clearing it needs
+	// a store read, and nudgeMu must never be held across one.
+	if d.nudgeSuppressedFor(sessionID) {
+		if d.nudgeSuppressionStillStands(sessionID) {
+			// The user said "not now" to everything pending, and nothing newer has
+			// arrived. Keep the unread marker — the activity is still there, and
+			// the indicator is how they get back to it — but arm nothing.
+			d.nudgeMu.Lock()
+			changed := d.setUnreadLocked(sessionID, true)
+			changed = d.stopCountdownLocked(sessionID) || changed
+			d.nudgeMu.Unlock()
+			if changed {
+				d.broadcastSessionStateChanged(sessionID)
+			}
+			return
+		}
+		d.clearNudgeSuppression(sessionID)
+	}
+
 	d.nudgeMu.Lock()
 	changed := d.setUnreadLocked(sessionID, true)
 	if active {
@@ -147,6 +166,9 @@ func (d *Daemon) markTicketUnread(sessionID string, unread bool) {
 	changed := d.setUnreadLocked(sessionID, unread)
 	if !unread {
 		changed = d.stopCountdownLocked(sessionID) || changed
+		// The queue this cancel was an answer about is drained, so the answer has
+		// nothing left to apply to. Anything arriving now is new and gets to ask.
+		delete(d.nudgeSuppressedThrough, sessionID)
 	}
 	d.nudgeMu.Unlock()
 	if changed {
@@ -168,12 +190,112 @@ func (d *Daemon) cancelNudgeCountdown(sessionID, reason string) {
 	}
 }
 
+// cancelNudgeCountdownByUser is the user calling off an incoming ticket nudge.
+//
+// It differs from cancelNudgeCountdown in one way that matters: it also records a
+// standing cancel, so the countdown does not simply come back. Without that it
+// would, and quickly — merely selecting another session runs the resume in
+// updateNudgeSelection, and the nudge the user just called off would re-arm a
+// beat later.
+//
+// The cancel is recorded as the newest unread ticket event seq at cancel time,
+// which is what makes it expire on its own. "Not now" is an answer about the
+// activity that is pending; a later event is new information and gets to ask
+// again. Nothing is marked read, so the unread indicator survives and clicking it
+// still delivers the doorbell on demand — the cancel removes the automatic
+// interruption, not the user's way in.
+func (d *Daemon) cancelNudgeCountdownByUser(sessionID string) bool {
+	// Read before taking nudgeMu: a store read must never happen under it.
+	newest, err := d.newestUnreadTicketSeq(sessionID)
+	if err != nil {
+		d.logf("nudge cancel unread scan %s: %v", sessionID, err)
+		// Fall back to suppressing everything currently pending. Failing open
+		// here would re-arm the countdown the user just cancelled.
+		newest = nudgeSuppressAllSeq
+	}
+
+	d.nudgeMu.Lock()
+	stopped := d.stopCountdownLocked(sessionID)
+	if d.nudgeSuppressedThrough == nil {
+		d.nudgeSuppressedThrough = make(map[string]int64)
+	}
+	// Only ever widen. Two cancels in a row must not narrow the standing answer.
+	if existing, ok := d.nudgeSuppressedThrough[sessionID]; !ok || newest > existing {
+		d.nudgeSuppressedThrough[sessionID] = newest
+	}
+	d.nudgeMu.Unlock()
+
+	if d.debugLogging {
+		d.logf("nudge countdown canceled by user: session=%s had_countdown=%v through_seq=%d", sessionID, stopped, newest)
+	}
+	return stopped
+}
+
+// nudgeSuppressAllSeq stands in for "every event that could be pending", used
+// when the unread scan fails and the safe reading is that the cancel covers
+// everything already queued.
+const nudgeSuppressAllSeq = int64(1<<63 - 1)
+
+// nudgeSuppressedFor reports whether a user cancel is still on record.
+func (d *Daemon) nudgeSuppressedFor(sessionID string) bool {
+	d.nudgeMu.Lock()
+	defer d.nudgeMu.Unlock()
+	_, ok := d.nudgeSuppressedThrough[sessionID]
+	return ok
+}
+
+// nudgeSuppressionStillStands reports whether everything currently unread was
+// already pending when the user cancelled. A scan error keeps the cancel — the
+// same fail-closed reading as recording it.
+func (d *Daemon) nudgeSuppressionStillStands(sessionID string) bool {
+	newest, err := d.newestUnreadTicketSeq(sessionID)
+	if err != nil {
+		d.logf("nudge suppression scan %s: %v", sessionID, err)
+		return true
+	}
+	d.nudgeMu.Lock()
+	defer d.nudgeMu.Unlock()
+	through, ok := d.nudgeSuppressedThrough[sessionID]
+	return ok && newest <= through
+}
+
+// clearNudgeSuppression lifts a standing cancel, so the next arm is honored.
+func (d *Daemon) clearNudgeSuppression(sessionID string) {
+	d.nudgeMu.Lock()
+	delete(d.nudgeSuppressedThrough, sessionID)
+	d.nudgeMu.Unlock()
+}
+
+// newestUnreadTicketSeq is the highest seq among the ticket events this session's
+// observers have not read. Zero when nothing is unread — which makes an empty
+// queue suppress nothing, so a cancel recorded against no activity expires the
+// moment any event arrives.
+func (d *Daemon) newestUnreadTicketSeq(sessionID string) (int64, error) {
+	if d.store == nil {
+		return 0, nil
+	}
+	var newest int64
+	for _, observer := range d.ticketObserversForSession(sessionID) {
+		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
+		if err != nil {
+			return 0, err
+		}
+		for _, event := range events {
+			if event.Seq > newest {
+				newest = event.Seq
+			}
+		}
+	}
+	return newest, nil
+}
+
 // clearNudgeState drops all per-session nudge bookkeeping when a session is removed.
 // No broadcast: a sessions-updated for the removal follows on its own.
 func (d *Daemon) clearNudgeState(sessionID string) {
 	d.nudgeMu.Lock()
 	d.stopCountdownLocked(sessionID)
 	delete(d.unreadCache, sessionID)
+	delete(d.nudgeSuppressedThrough, sessionID)
 	d.nudgeMu.Unlock()
 	d.lastInputMu.Lock()
 	delete(d.lastUserInputAt, sessionID)

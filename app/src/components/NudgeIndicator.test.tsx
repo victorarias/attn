@@ -106,12 +106,51 @@ describe('SidebarNudgeBar', () => {
 });
 
 describe('HeaderNudgeIndicator', () => {
-  it('shows an incoming-nudge chip when counting', () => {
+  it('shows an incoming-nudge chip when counting, carrying the key that stops it', () => {
     const { container } = render(<HeaderNudgeIndicator mode="counting" firesAt={FIRES_AT} />);
     expect(container.querySelector('.nudge-header--counting')).not.toBeNull();
     expect(container.querySelector('.nudge-header-track')).not.toBeNull();
     expect(screen.getByText('Incoming ticket nudge…')).toBeTruthy();
-    expect(container.querySelector('button')).toBeNull();
+    // A countdown announcing itself must also say how to call it off, on the chip
+    // rather than in a tooltip nobody hovers.
+    expect(container.querySelector('.countdown-cancel-hint-key')?.textContent).toBe('⌘.');
+    expect(screen.getByText('stop')).toBeTruthy();
+  });
+
+  it('cancels the countdown on click without bubbling to the pane header', () => {
+    const onCancel = vi.fn();
+    const onPaneClick = vi.fn();
+    const onPanePointerDown = vi.fn();
+    render(
+      <div onClick={onPaneClick} onPointerDown={onPanePointerDown}>
+        <HeaderNudgeIndicator mode="counting" firesAt={FIRES_AT} onCancel={onCancel} />
+      </div>,
+    );
+    const button = screen.getByRole('button', { name: /incoming ticket nudge/i });
+    // Same drag guard as the deliver-now variant: the header is a leaf-drag handle.
+    fireEvent.pointerDown(button);
+    expect(onPanePointerDown).not.toHaveBeenCalled();
+    fireEvent.click(button);
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onPaneClick).not.toHaveBeenCalled();
+  });
+
+  it('keeps counting and paused apart: a counting chip never delivers the nudge', () => {
+    // The two chips sit in the same slot and both are clickable, so the one that
+    // stops a doorbell must never be the one that rings it.
+    const onTrigger = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <HeaderNudgeIndicator
+        mode="counting"
+        firesAt={FIRES_AT}
+        onTrigger={onTrigger}
+        onCancel={onCancel}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: /incoming ticket nudge/i }));
+    expect(onTrigger).not.toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('shows an unread-activity marker', () => {

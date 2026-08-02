@@ -32,6 +32,19 @@ export interface ShortcutMeta {
    * `terminal.collapse` has no handler at all).
    */
   requiresTerminal?: boolean;
+  /**
+   * The keystroke is delivered by a native macOS menu item rather than by the
+   * page's keydown listener, because AppKit consumes the combo before the
+   * WebView sees it (⌘. — `cancelOperation:`). The accelerator lives in
+   * `app_menu` (src-tauri/src/lib.rs) and the menu re-dispatches this id into
+   * the page.
+   *
+   * The editor reads this to show the key as fixed instead of offering a rebind
+   * it cannot honor: a new combo would be recorded here and never reach the
+   * action, while ⌘. kept working from the menu. Better to say the key is not
+   * yours to move than to accept a rebind that silently does nothing.
+   */
+  nativeDelivery?: boolean;
 }
 
 export const SHORTCUT_CATEGORY_LABELS: Record<ShortcutCategory, string> = {
@@ -64,7 +77,7 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
   'session.jumpToWaiting': { label: 'Jump to next waiting session', category: 'sessions' },
   'session.settle': { label: 'Settle turn, go to next', category: 'sessions' },
   'session.snooze': { label: 'Snooze this agent', category: 'sessions' },
-  'session.cancelAutoSettle': { label: 'Keep this turn (stop auto-settle)', category: 'sessions' },
+  'session.cancelCountdown': { label: 'Stop the countdown you can see', category: 'sessions', nativeDelivery: true },
   'session.toggleSidebar': { label: 'Toggle sidebar', category: 'sessions', dockLabel: 'sidebar' },
   'workspace.select1': { label: 'Jump to workspace 1', category: 'sessions' },
   'workspace.select2': { label: 'Jump to workspace 2', category: 'sessions' },
@@ -113,6 +126,11 @@ export const SHORTCUT_META: Record<ShortcutId, ShortcutMeta> = {
 
 export function isProtectedShortcut(id: ShortcutId): boolean {
   return SHORTCUT_META[id].protected === true;
+}
+
+/** Whether the key is owned by a native menu item and so cannot be rebound here. */
+export function isNativeDeliveryShortcut(id: ShortcutId): boolean {
+  return SHORTCUT_META[id].nativeDelivery === true;
 }
 
 /** Terse text shown on a dock chip; falls back to the full editor label. */

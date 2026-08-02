@@ -14,6 +14,14 @@ describe('HeaderSettlingIndicator', () => {
     expect(screen.getByTestId('settling-indicator').textContent).not.toMatch(/\d/);
   });
 
+  it('names the key that stops it, on the chip itself', () => {
+    // The whole point of the pill is that a settle is never silent; a user who
+    // reads it must not then have to go hunting for how to stop it.
+    const { container } = render(<HeaderSettlingIndicator firesAt={FIRES_AT} />);
+    expect(container.querySelector('.countdown-cancel-hint-key')?.textContent).toBe('⌘.');
+    expect(screen.getByText('keep')).toBeTruthy();
+  });
+
   it('cancels on click, and does not let the click reach the row underneath', () => {
     const onCancel = vi.fn();
     const onRowClick = vi.fn();

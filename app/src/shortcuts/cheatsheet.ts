@@ -46,7 +46,7 @@ export function buildCheatsheet(): CheatsheetCategory[] {
         { label: 'Jump to next waiting session', combos: [fromId('session.jumpToWaiting')] },
         { label: 'Settle turn, go to next', combos: [fromId('session.settle')] },
         { label: 'Snooze this agent', combos: [fromId('session.snooze')] },
-        { label: 'Keep this turn (stop auto-settle)', combos: [fromId('session.cancelAutoSettle')] },
+        { label: 'Stop the countdown you can see', combos: [fromId('session.cancelCountdown')] },
         { label: 'Toggle sidebar', combos: [fromId('session.toggleSidebar')] },
       ],
     },
