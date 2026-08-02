@@ -310,12 +310,15 @@ Layers around the gate:
       corpus stays honest without reddening the build.
       `FuzzKittySegmenterFraming` soaks the framing rules alone: 3 x 3 min
       clean, 16.9M / 9.6M / 10.3M execs.
-- [ ] **Stripping an APC can desync the two UTF-8 decoders.** Found by
-      `FuzzKittyWireMirrorShipping` at 96s on
-      `"0000000000000000000\xc5\x1b_G"`, so it is a defect in the SHIPPING
-      configuration, not a deferred one. The worker receives the APC and the
-      wire does not, and the APC's leading ESC aborts a UTF-8 sequence the
-      client is still holding open. Measured, four shapes:
+- [ ] **Stripping an APC desyncs the client on two independent axes.** Found by
+      `FuzzKittyWireMirrorShipping`, so both are defects in the SHIPPING
+      configuration, not deferred ones. The worker receives the APC and the wire
+      does not, and the bytes the client never sees were doing work.
+
+      **1. The UTF-8 abort.** The APC's leading ESC aborts a UTF-8 sequence the
+      client is still holding open. Reproduced by
+      `"0000000000000000000\xc5\x1b_G"` (and `\xe1`, a 3-byte lead). Measured,
+      holding the cursor at column 19:
 
       | what follows the stripped APC | result |
       | --- | --- |
@@ -324,19 +327,32 @@ Layers around the gate:
       | a valid continuation byte | **permanent**: worker `\uFFFD\uFFFD`, client `ť` |
       | more text | heals |
 
-      The permanent case needs an emitter to split a multi-byte character
-      around an APC, which is pathological but silent, and silent grid
-      divergence is the bug class this phase exists to remove. The transient
-      case is harmless: an attach serves the worker's dump, which corrects the
-      client.
+      Emitting `ESC \` (ST) on the wire where the APC was fixes every one of
+      these: ST from ground is a no-op and its ESC aborts the client's pending
+      sequence exactly as the APC's did for the worker.
 
-      A fix is measured and works on all four shapes: emit `ESC \` (ST) on the
-      wire where the APC was. ST from ground is a no-op for ghostty, and its
-      leading ESC aborts the client's pending sequence exactly as the APC's did
-      for the worker. Cost is two wire bytes per stripped APC and a decision
-      about whether synthesis is allowed to emit bytes when the grid did not
-      move — today `appendCSI` deliberately emits nothing at zero. Not taken
-      unilaterally; it changes the wire contract.
+      **2. The pending-wrap row.** Independent of the first, and NOT fixed by
+      ST. With the cursor at exactly the wrap column and an incomplete UTF-8
+      byte pending, worker and client end with identical text and cursor rows
+      one apart. Measured at 20 columns, feeding `<n zeros>\xe1\x1b_G`:
+
+      | zeros | baseline | with ST on the wire |
+      | --- | --- | --- |
+      | 18 | agree | agree |
+      | 19 | diverge (class 1) | agree |
+      | 20 | diverge: worker `(1,1)`, client `(1,2)`, same text | **still diverges** |
+      | 21 | agree | agree |
+
+      Soak evidence: 3 x 3 min on the fixed harness is NOT clean. First run
+      found class 1 at 96s from a cold corpus; once the fuzz cache knows the
+      shape it reappears in ~2s, and with ST applied locally the wall moves to
+      26s and lands on class 2.
+
+      Neither fix is taken here. Class 1's changes the wire contract — whether
+      synthesis may emit bytes when the grid did not move, where `appendCSI`
+      deliberately emits nothing at zero. Class 2 is not yet root-caused, and a
+      cursor-row difference with matching text points at deferred-wrap state the
+      wire has no way to carry.
 
 #### Pin skew: `OSC 133;A` is not grid-neutral, and the two ghosttys disagree
 
