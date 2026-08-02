@@ -1,0 +1,22 @@
+kind: fixed
+area: transcript
+change: >
+  The conversation slice now counts a Claude user-role line as a human turn only
+  when it carries origin.kind == "human". Injected user-role content — the
+  local-command caveat, the command-name and command-output blocks around a
+  slash command, tool results — is no longer read as something the user typed.
+  A transcript with no origin stamp anywhere falls back to the previous
+  permissive behaviour, so transcripts predating the field, and the Codex and
+  Copilot formats (which distinguish user messages by line type), are unchanged.
+symptom: >
+  A session that opened with a slash command had that boilerplate treated as its
+  opening request. Everything reading the slice saw it: the auto-generated
+  session title and ticket classification described the command wrapper instead
+  of the work, and the message the user actually typed was demoted into the
+  re-scoping tail.
+notes: >
+  Provenance-based rather than a denylist of marker strings, so it cannot drop a
+  genuine message that happens to quote one. The fallback fires only when the
+  strict pass found nothing at all, which means a modern transcript whose
+  user-role content is entirely injected still reports that injected text —
+  accepted, since the alternative there is an empty slice.
