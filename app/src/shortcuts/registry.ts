@@ -82,12 +82,23 @@ export const SHORTCUTS = {
   // Menu::default accelerator (the default menu claims no S at all) and, being a
   // Cmd chord, never reaches the PTY.
   'session.snooze': { key: 's', meta: true, shift: true },
-  // Keep the turn auto-settle is counting down to close. ⌘. is the macOS cancel
-  // idiom, carries no Menu::default accelerator, and — being a Cmd chord — never
-  // reaches the PTY, so it is safe to claim globally. Like session.settle it is
-  // only bound while the queue arrangement is on: with no turns there is nothing
-  // to keep.
-  'session.cancelAutoSettle': { key: '.', meta: true },
+  // Call off whatever countdown is on screen — the auto-settle about to close a
+  // turn, an incoming ticket nudge, or both at once.
+  //
+  // ⌘. is the macOS cancel idiom, and it is the one key in this table the WebView
+  // never sees: AppKit claims Command-period as `cancelOperation:` and consumes
+  // it before any DOM keydown is dispatched. Verified against the packaged app —
+  // an always-enabled action rebound to ⌘. does not fire, while the same action
+  // on its default key does. So this entry is NOT what delivers the keystroke; a
+  // native menu item carrying the ⌘. accelerator does (see `app_menu` in
+  // src-tauri/src/lib.rs), and it re-dispatches this id into the page through the
+  // same `attn:native-shortcut` path ⌘W uses.
+  //
+  // The entry stays here because it is what the cheatsheet, the shortcut editor,
+  // and the countdown indicators render from — the key a user is told to press
+  // must come from one table. It is marked `nativeDelivery` in metadata.ts, which
+  // is what stops the editor from offering a rebind it could not honor.
+  'session.cancelCountdown': { key: '.', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
 

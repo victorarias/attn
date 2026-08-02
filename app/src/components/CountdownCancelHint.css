@@ -1,0 +1,34 @@
+/* The "⌘. keep" hint carried inside a countdown indicator.
+
+   Deliberately quieter than the label it sits beside: the pill's job is to say
+   what is about to happen, and the key is the answer you reach for only once you
+   have read that. It inherits the host indicator's color so the same markup sits
+   correctly in the violet settling chip and the sky-blue nudge chip without
+   either owning a copy of these rules. */
+
+.countdown-cancel-hint {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: none;
+  opacity: 0.8;
+}
+
+.countdown-cancel-hint-key {
+  font-family: inherit;
+  font-size: inherit;
+  font-weight: 700;
+  line-height: 1;
+  padding: 2px 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  /* The border already reads as a keycap; a filled background would compete with
+     the chip's own fill. */
+  background: transparent;
+  color: inherit;
+  white-space: nowrap;
+}
+
+.countdown-cancel-hint-verb {
+  white-space: nowrap;
+}

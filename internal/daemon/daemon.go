@@ -239,6 +239,7 @@ type Daemon struct {
 	nudgeMu                    sync.Mutex
 	nudgeCountdowns            map[string]*nudgeCountdown                 // presence == a running (unpaused) countdown
 	unreadCache                map[string]bool                            // per-session unread ticket activity, for cheap broadcast decoration
+	nudgeSuppressedThrough     map[string]int64                           // sessions whose countdown the user cancelled, up to that unread event seq
 	deliveryMu                 sync.Mutex                                 // serializes consumes, catch-up, deadline rebuilds, and nudge fire-time checks
 	watchLeaseUntil            map[string]time.Time                       // ephemeral live-watch lease per session
 	nudgeWindowOverride        time.Duration                              // 0 => defaultNudgeCountdownWindow; a short test override otherwise

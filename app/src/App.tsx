@@ -795,7 +795,7 @@ function AppContent({
     sendSettleTurn,
     sendSnoozeTurn,
     sendWakeTurn,
-    sendCancelAutoSettle,
+    sendCancelCountdown,
     sendWorkspaceSelected,
     sendWorkspaceAddSessionPane,
     sendWorkspaceClosePane,
@@ -2729,24 +2729,6 @@ function AppContent({
     }
   }, [queueBands, queueModeEnabled, view, activeSessionId, handleSelectSession, goToDashboard]);
 
-  // Keep the selected session's turn, cancelling the auto-settle countdown that
-  // is about to close it. Undefined while the queue arrangement is off, so — like
-  // session.settle — the shortcut is not registered at all.
-  //
-  // Scoped to the selected session on purpose. An auto-settle happening on a
-  // session you are not looking at must not move your selection, so the cancel
-  // acts where you already are rather than hunting for whichever countdown is
-  // running.
-  const activeSessionSettling = Boolean(
-    enrichedLocalSessions.find((session) => session.id === activeSessionId)?.autoSettleFiresAt,
-  );
-  const handleCancelAutoSettle = useMemo(
-    () => (activeSessionSettling && activeSessionId
-      ? () => sendCancelAutoSettle(activeSessionId)
-      : undefined),
-    [activeSessionSettling, activeSessionId, sendCancelAutoSettle],
-  );
-
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
     const waiting = oldestWantedTurn(unmutedEnrichedSessions, wantsAttention);
@@ -2867,6 +2849,37 @@ function AppContent({
     const workspace = workspaceViews.find((w) => w.id === activeWorkspaceId);
     return new Set((workspace?.sessions ?? []).map((session) => session.id));
   }, [view, visibleGridSessionIds, activeWorkspaceId, workspaceViews]);
+
+  // Every session whose tile is on screen and counting down to something — a turn
+  // about to auto-settle, a ticket nudge about to doorbell, or both.
+  //
+  // Scoped to what is rendered rather than to the selected session, because that
+  // is what the keystroke is answering: each of these tiles is showing a pill
+  // that says which key stops it, and a pill that lies is worse than no pill. It
+  // also makes the nudge half reachable at all — the daemon pauses an incoming
+  // nudge on the *selected* session, so the only nudge countdown a user can ever
+  // watch run is on a split's other pane.
+  //
+  // Off-screen countdowns are deliberately out. They are carried by a thin
+  // sidebar bar with no key on it, and cancelling something you cannot see is
+  // exactly the silent action this feature exists to undo.
+  const visibleCountdownSessionIds = useMemo(() => {
+    const ids: string[] = [];
+    for (const session of enrichedLocalSessions) {
+      if (!onScreenSessionIds.has(session.id)) continue;
+      if (session.autoSettleFiresAt || session.nudgeFiresAt) ids.push(session.id);
+    }
+    return ids;
+  }, [enrichedLocalSessions, onScreenSessionIds]);
+  // Undefined when nothing visible is counting down, which unregisters the
+  // shortcut entirely: pressing it then falls through as a no-op rather than
+  // firing at a session picked by guesswork.
+  const handleCancelCountdown = useMemo(
+    () => (visibleCountdownSessionIds.length > 0
+      ? () => visibleCountdownSessionIds.forEach(sendCancelCountdown)
+      : undefined),
+    [visibleCountdownSessionIds, sendCancelCountdown],
+  );
 
   const warmWorkspaceIds = useMemo(
     () => computeWarmWorkspaceIds(
@@ -3413,7 +3426,7 @@ function AppContent({
     onJumpToWaiting: handleJumpToWaiting,
     onSettleTurn: handleSettleActiveTurn,
     onSnoozeTurn: handleSnoozeActiveSession,
-    onCancelAutoSettle: handleCancelAutoSettle,
+    onCancelCountdown: handleCancelCountdown,
     onSelectWorkspaceByIndex: handleSelectWorkspaceByIndex,
     onPrevSession: handlePrevWorkspace,
     onNextSession: handleNextWorkspace,
@@ -3691,7 +3704,7 @@ function AppContent({
                     ticketActions={ticketActions}
                     annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
-                    onCancelAutoSettle={sendCancelAutoSettle}
+                    onCancelCountdown={sendCancelCountdown}
                     onOpenPresentation={handleOpenPresentationWindow}
                     onOpenMarkdown={(path, sessionId) => {
                       void sendOpenMarkdown(path, sessionId).catch((error) => {

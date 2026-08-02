@@ -195,7 +195,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '202';
+export const PROTOCOL_VERSION = '203';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -4505,14 +4505,16 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'wake_turn', session_id: sessionId }));
   }, []);
 
-  // Keep a turn auto-settle is about to close. Stops the countdown and leaves the
-  // turn owed; the daemon also suppresses re-arming until the session next leaves
-  // `working`, so the cancel survives the agent simply carrying on. Fire and
-  // forget — the daemon re-broadcasts the session without its deadline.
-  const sendCancelAutoSettle = useCallback((sessionId: string) => {
+  // Call off whatever attn is counting down to on this session — the auto-settle
+  // about to close a turn, the ticket nudge about to doorbell the agent, or both.
+  // The daemon cancels every countdown the session has and keeps each cancelled
+  // until something genuinely new happens, so it survives the agent simply
+  // carrying on. Fire and forget — the daemon re-broadcasts the session without
+  // its deadlines.
+  const sendCancelCountdown = useCallback((sessionId: string) => {
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return;
-    ws.send(JSON.stringify({ cmd: 'cancel_auto_settle', session_id: sessionId }));
+    ws.send(JSON.stringify({ cmd: 'cancel_countdown', session_id: sessionId }));
   }, []);
 
   // Get file diff
@@ -4951,7 +4953,7 @@ export function useDaemonSocket({
     sendSettleTurn,
     sendSnoozeTurn,
     sendWakeTurn,
-    sendCancelAutoSettle,
+    sendCancelCountdown,
     sendWorkspaceSelected,
     sendWorkspaceGet,
     sendWorkspaceAddSessionPane,

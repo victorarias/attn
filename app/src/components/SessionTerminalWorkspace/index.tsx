@@ -168,7 +168,7 @@ interface SessionTerminalWorkspaceProps {
   onTriggerNudge?: (sessionId: string) => void;
   // Keep the turn an auto-settle countdown is about to close. Clicking the chip
   // is the pointer equivalent of the ⌘. shortcut.
-  onCancelAutoSettle?: (sessionId: string) => void;
+  onCancelCountdown?: (sessionId: string) => void;
   onOpenPresentation?: (presentationId: string) => void;
   // Cmd+click on a markdown path inside a pane's terminal: dock it as a
   // markdown tile bound to that pane's session (empty sessionId = let the
@@ -224,7 +224,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onFocusPane,
     onRenameSession,
     onTriggerNudge,
-    onCancelAutoSettle,
+    onCancelCountdown,
     onOpenPresentation,
     onOpenMarkdown,
     onTerminalModelRecovered,
@@ -966,7 +966,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
               {autoSettleFiresAt ? (
                 <HeaderSettlingIndicator
                   firesAt={autoSettleFiresAt}
-                  onCancel={() => onCancelAutoSettle?.(agentPane.sessionId)}
+                  onCancel={() => onCancelCountdown?.(agentPane.sessionId)}
                 />
               ) : null}
               {nudgeMode ? (
@@ -974,6 +974,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   mode={nudgeMode}
                   firesAt={paneSession?.nudgeFiresAt}
                   onTrigger={() => onTriggerNudge?.(agentPane.sessionId)}
+                  onCancel={() => onCancelCountdown?.(agentPane.sessionId)}
                 />
               ) : null}
               {paneTicket && ticketActions ? (
@@ -1146,6 +1147,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       ticketActions,
       annotationApi,
       closeTicketOverlay,
+      onCancelCountdown,
     ]);
 
     const focusModeTitle = useMemo(() => {

@@ -95,6 +95,14 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'countdown-cancel',
+    label: 'Countdown cancel: a real Cmd+. stops the auto-settle and nudge countdowns on screen',
+    command: ['pnpm', 'run', 'real-app:scenario-countdown-cancel'],
+    // Boots a real Claude agent, waits out an auto-settle arm window, and drives
+    // a ticket nudge through a split; more than the default budget.
+    timeoutMs: 420_000,
+  },
+  {
     id: 'agent-queue',
     label: 'Agent queue: a turn opens on a state and closes only when the user settles it',
     command: ['pnpm', 'run', 'real-app:scenario-agent-queue'],

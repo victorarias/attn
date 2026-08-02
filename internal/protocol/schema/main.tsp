@@ -1404,15 +1404,24 @@ model WakeTurnMessage {
   session_id: string;
 }
 
-// CancelAutoSettleMessage is the user saying they want to keep a turn that
-// auto-settle was about to close. It stops the running countdown (and any arm
-// delay behind it) and leaves the turn owed. The countdown does not re-arm on the
-// state the session is already in: the user has said this one is theirs, and
-// re-arming three seconds later would make the cancel meaningless. A later
-// transition back into `working` arms a fresh one, which is the agent being
-// steered again. Fire-and-forget.
-model CancelAutoSettleMessage {
-  cmd: "cancel_auto_settle";
+// CancelCountdownMessage is the user calling off whatever attn is counting down
+// to on this session. attn runs two such countdowns and both are things about to
+// happen *to* an agent without being asked for, so one verb calls off either:
+//
+//   - auto-settle, about to close a turn the user still wants;
+//   - the ticket nudge, about to doorbell the agent with pending ticket activity.
+//
+// The daemon cancels every countdown the session has, because the sender is
+// acting on what it can see and both indicators live in the same pane header. A
+// session with neither is a no-op.
+//
+// Neither cancel re-arms on the state the session is already in — re-arming
+// seconds later would make the cancel meaningless — and each stays cancelled
+// until something genuinely new happens: for auto-settle, the session leaving
+// `working` and being steered again; for the nudge, ticket activity newer than
+// what was pending when the user said no. Fire-and-forget.
+model CancelCountdownMessage {
+  cmd: "cancel_countdown";
   session_id: string;
 }
 

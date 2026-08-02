@@ -1017,8 +1017,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSnoozeTurn(msg.(*protocol.SnoozeTurnMessage))
 	case protocol.CmdWakeTurn: // wire: wake_turn
 		d.handleWakeTurn(msg.(*protocol.WakeTurnMessage))
-	case protocol.CmdCancelAutoSettle: // wire: cancel_auto_settle
-		d.handleCancelAutoSettle(msg.(*protocol.CancelAutoSettleMessage))
+	case protocol.CmdCancelCountdown: // wire: cancel_countdown
+		d.handleCancelCountdown(msg.(*protocol.CancelCountdownMessage))
 	case protocol.CmdTriggerNudge: // wire: trigger_nudge
 		go d.handleTriggerNudge(msg.(*protocol.TriggerNudgeMessage))
 	case protocol.CmdPRVisited: // wire: pr_visited
@@ -1339,10 +1339,10 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.SettleTurnMessage); ok {
 			return typed.SessionID
 		}
-	case protocol.CmdCancelAutoSettle: // wire: cancel_auto_settle
-		// Same reasoning as settle_turn: the countdown that would close the turn
-		// runs in the daemon that owns the session, so the cancel has to reach it.
-		if typed, ok := msg.(*protocol.CancelAutoSettleMessage); ok {
+	case protocol.CmdCancelCountdown: // wire: cancel_countdown
+		// Same reasoning as settle_turn: the countdowns runs in the daemon that
+		// owns the session, so the cancel has to reach it.
+		if typed, ok := msg.(*protocol.CancelCountdownMessage); ok {
 			return typed.SessionID
 		}
 	case protocol.CmdSnoozeTurn: // wire: snooze_turn

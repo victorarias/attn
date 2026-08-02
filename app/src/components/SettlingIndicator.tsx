@@ -1,5 +1,6 @@
 import './SettlingIndicator.css';
 import { CountdownFill } from './CountdownFill';
+import { CountdownCancelHint } from './CountdownCancelHint';
 
 /**
  * The auto-settle countdown: attn is about to close this session's turn because
@@ -43,12 +44,13 @@ export function HeaderSettlingIndicator({
           event.stopPropagation();
           onCancel?.();
         }}
-        title="Keep this turn (⌘.)"
+        title="Keep this turn"
         aria-label="Keep this turn"
         data-testid="settling-indicator"
       >
         <span className="settling-dot" aria-hidden="true" />
         <span className="settling-header-label">Settling…</span>
+        <CountdownCancelHint verb="keep" />
       </button>
       <div className="settling-header-track" aria-hidden="true">
         <CountdownFill firesAt={firesAt} className="settling-header-track-fill" direction="drain" />
