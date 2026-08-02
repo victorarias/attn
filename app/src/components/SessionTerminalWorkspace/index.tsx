@@ -1,7 +1,8 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { GhosttyTerminal, type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
 import { RenamePopover } from '../RenamePopover';
-import { useShortcut } from '../../shortcuts';
+import { StateIndicator } from '../StateIndicator';
+import { useShortcut } from '../../shortcuts/useShortcut';
 import {
   getNormalizedPaneBounds,
   getSplitDividers,
@@ -886,23 +887,17 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           : null;
         const paneTicket = paneSession?.ticket;
         const ticketOverlayOpen = ticketOverlayPaneId === agentPane.id;
-        // The pane header is the home for the nudge indicator, the presentation
-        // chip, and the bound-ticket chip. It is normally shown only when the
-        // workspace is split; surface it on a lone tile too whenever the session
-        // has any of these to show, so they have their rectangle — a bound ticket
-        // makes the header ambient (always there) so steering is one click. Drag/
-        // rename stay split-only — a nudge/presentation/ticket-only header is a
-        // status bar, not a move handle.
-        // A running auto-settle countdown surfaces the header on a lone tile the
-        // same way a nudge does: the countdown needs its rectangle, and a turn
-        // about to be closed for you is exactly the thing that must not be
-        // invisible.
+        // The pane header is always on for an agent pane. It carries the
+        // session's name — generated from the conversation, so it says what this
+        // agent is actually doing — alongside the presentation chip, the
+        // auto-settle countdown, the nudge indicator, and the bound-ticket chip.
+        // Which agent you are looking at is not something to hide behind a split,
+        // and the chips it hosts (a turn about to be closed for you, an unread
+        // ticket) are exactly the things that must never be invisible.
+        //
+        // Only dragging stays split-only: a lone tile has nowhere to move to, so
+        // it gets the non-draggable variant.
         const autoSettleFiresAt = paneSession?.autoSettleFiresAt;
-        const headerVisible = showPaneHeader
-          || nudgeMode != null
-          || paneSession?.presentation != null
-          || paneTicket != null
-          || autoSettleFiresAt != null;
         return (
           <div
             key={agentPane.id}
@@ -916,18 +911,25 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           >
             <div
               className={`workspace-pane-header ${
-                headerVisible
-                  ? showPaneHeader
-                    ? 'workspace-pane-header--draggable'
-                    : 'workspace-pane-header--nudge'
-                  : 'workspace-pane-header-hidden'
+                showPaneHeader
+                  ? 'workspace-pane-header--draggable'
+                  : 'workspace-pane-header--static'
               }`.trim()}
-              aria-hidden={headerVisible ? undefined : true}
               onPointerDown={showPaneHeader ? (event) => beginLeafDrag(agentPane.id, event) : undefined}
               title={showPaneHeader ? 'Drag to move' : undefined}
             >
-              {headerVisible ? <span className="workspace-pane-title">{paneTitle}</span> : null}
-              {showPaneHeader && onRenameSession ? (
+              {/* The same dot the sidebar puts beside this session, so the header
+                  reads as that row's counterpart rather than a second, unrelated
+                  naming of the pane. */}
+              {paneSession?.state ? (
+                <StateIndicator
+                  state={paneSession.state}
+                  size="sm"
+                  seed={agentPane.sessionId}
+                />
+              ) : null}
+              <span className="workspace-pane-title">{paneTitle}</span>
+              {onRenameSession ? (
                 <button
                   type="button"
                   className="workspace-pane-rename-btn"

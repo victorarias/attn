@@ -295,19 +295,28 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 28px;
+  min-height: 30px;
   padding: 4px 8px;
   border-bottom: 1px solid var(--color-border);
-  background: rgba(255, 107, 53, 0.06);
+  /* Lit from the top like a title bar rather than flooded with a flat tint: the
+     header is permanent now and names the session, so it reads as the pane's
+     own chrome instead of a highlight laid over the terminal. */
+  background:
+    linear-gradient(180deg, rgba(255, 107, 53, 0.11), rgba(255, 107, 53, 0.03)),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
 
-/* Shown on a lone tile only to host the incoming-nudge chip — not a drag handle. */
-.workspace-pane-header--nudge {
+/* The header's dot is a label for the name beside it, not a control — keep it
+   from stretching in the header's flex row. */
+.workspace-pane-header .state-indicator {
+  flex-shrink: 0;
+}
+
+/* A lone tile's header: a status bar naming the session and hosting its chips,
+   with nowhere to be dragged to. */
+.workspace-pane-header--static {
   cursor: default;
-}
-
-.workspace-pane-header-hidden {
-  display: none;
 }
 
 /* The header doubles as the drag-to-move handle when the workspace has more than
@@ -326,14 +335,21 @@
   opacity: 0.5;
 }
 
+/* Set in sentence case, not the small-caps heading this used to be: the title is
+   now a generated sentence of up to 48 characters describing what the agent is
+   working on, and caps would both shout it and cost roughly a word of width
+   before the ellipsis.
+
+   Set at the primary text colour and one step up in size: this is the pane's
+   headline, and inactive panes are already dimmed wholesale by
+   `.workspace-pane`'s opacity, so the title does not need to whisper to show
+   which leaf is unfocused. */
 .workspace-pane-title {
   flex: 1;
   min-width: 0;
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-xs);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

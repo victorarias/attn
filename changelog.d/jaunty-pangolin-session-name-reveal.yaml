@@ -1,0 +1,14 @@
+kind: added
+area: sidebar
+change: >
+  Hovering a sidebar row whose session name is truncated reveals the full name
+  immediately, with no dwell delay. The panel starts at the sidebar's right edge
+  on that row's own baseline and runs outward into the pane area, wrapping if
+  needed; it never covers the row itself, so the row's ••• actions — revealed by
+  the same hover — stay visible and clickable. Rows whose name already fits are
+  left alone, and nothing in the list moves. It appears with a short two-beat
+  entrance (surface, then name) that is dropped under prefers-reduced-motion.
+notes: >
+  Session names are generated from the conversation, so they are routinely
+  wider than the rail; the reveal is what makes them readable without a rename.
+  Covers the sidebar rows and the queue bands, which share one row renderer.

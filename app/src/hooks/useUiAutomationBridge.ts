@@ -1793,6 +1793,46 @@ export function useUiAutomationBridge({
         }
         return { focused: true, tag: element.tagName };
       }
+      case 'dom_hover': {
+        // Pointer-over without a click, for affordances that only exist while
+        // hovered — the sidebar's session-name reveal, hover-revealed row
+        // controls. Victor's rule is no CGEvent HID takeover, so this is the
+        // synthetic-DOM equivalent.
+        //
+        // Both the pointer and mouse families are dispatched because handlers in
+        // this app come from either (React's onMouseEnter and native
+        // pointerenter listeners both appear). enter/leave do not bubble by
+        // spec, so this fires them on the element itself: the selector has to
+        // name the element that actually listens, not an ancestor.
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        if (!selector) throw new Error('dom_hover requires selector');
+        const leave = payload.leave === true;
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLElement)) {
+          throw new Error(`dom_hover selector not found in DOM: ${selector}`);
+        }
+        const rect = element.getBoundingClientRect();
+        const init: PointerEventInit = {
+          bubbles: false,
+          cancelable: true,
+          composed: true,
+          pointerId: 1,
+          pointerType: 'mouse',
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+        };
+        if (leave) {
+          element.dispatchEvent(new PointerEvent('pointerleave', init));
+          element.dispatchEvent(new MouseEvent('mouseleave', init));
+          element.dispatchEvent(new PointerEvent('pointerout', { ...init, bubbles: true }));
+        } else {
+          element.dispatchEvent(new PointerEvent('pointerover', { ...init, bubbles: true }));
+          element.dispatchEvent(new PointerEvent('pointerenter', init));
+          element.dispatchEvent(new MouseEvent('mouseenter', init));
+        }
+        await settleUi(2);
+        return { hovered: !leave, bounds: rectSnapshot(element) };
+      }
       case 'dom_type': {
         const selector = typeof payload.selector === 'string' ? payload.selector : null;
         const text = typeof payload.text === 'string' ? payload.text : null;

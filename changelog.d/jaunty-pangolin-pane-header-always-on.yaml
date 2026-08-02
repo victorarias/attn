@@ -1,0 +1,11 @@
+kind: changed
+area: workspace
+change: >
+  The agent pane header is now always shown and always carries the session's
+  name. It used to appear only in a split view, or when a nudge, ticket,
+  presentation, or auto-settle countdown needed somewhere to sit, so a single
+  agent on screen showed no name at all — and those chips came and went with the
+  header. The name is set in sentence case instead of the previous small-caps
+  heading and sits beside the same state dot the sidebar shows for that session.
+  Rename is reachable from the header whether or not the view is split; only
+  drag-to-move stays split-only, since a lone tile has nowhere to move to.

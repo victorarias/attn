@@ -1,5 +1,6 @@
 import { type MouseEvent as ReactMouseEvent } from 'react';
 import { StateIndicator } from './StateIndicator';
+import { SessionLabel } from './SessionLabel';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
@@ -116,7 +117,7 @@ function QueueRowView({
         controls) rather than reserving row width for buttons that are usually
         invisible.
       */}
-      <span className="session-label">{session.label}</span>
+      <SessionLabel label={session.label} />
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       {age && <span className="queue-row-age">{age}</span>}
       {wake && <span className="queue-row-wake-at">{wake}</span>}

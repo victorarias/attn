@@ -39,11 +39,10 @@ function makePresentation(overrides: Partial<Presentation> = {}): Presentation {
 }
 
 describe('SessionTerminalWorkspace presentation chip', () => {
-  // A lone (unsplit) pane normally hides its header entirely (it's not a
-  // drag handle when there's nothing to drag against). A session with an
-  // open, unsubmitted presentation must still get its header rectangle to
-  // host the chip, same as the nudge indicator does.
-  it('forces the header visible and renders the chip when the pane session has a presentation', () => {
+  // The header is always present now (see SessionTerminalWorkspace.paneHeader
+  // .test.tsx); what this spec owns is that an open, unsubmitted presentation
+  // puts its chip inside it, on a lone pane as much as a split one.
+  it('renders the chip in the header when the pane session has a presentation', () => {
     const onOpenPresentation = vi.fn();
     render(
       <SessionTerminalWorkspace
@@ -78,7 +77,7 @@ describe('SessionTerminalWorkspace presentation chip', () => {
     expect(onOpenPresentation).toHaveBeenCalledWith('pres-1');
   });
 
-  it('hides the header when the pane session has no presentation and no nudge', () => {
+  it('keeps the header and its session name on a lone tile with no presentation and no nudge', () => {
     render(
       <SessionTerminalWorkspace
         workspaceId="workspace-1"
@@ -96,8 +95,11 @@ describe('SessionTerminalWorkspace presentation chip', () => {
       />,
     );
 
+    // The header is unconditional now: it names the session even with no chip
+    // to host. On a lone tile it is the non-draggable variant.
     const header = document.querySelector('.workspace-pane-header');
-    expect(header?.className).toContain('workspace-pane-header-hidden');
+    expect(header?.className).toContain('workspace-pane-header--static');
+    expect(document.querySelector('.workspace-pane-title')?.textContent).toBe('shell');
     expect(screen.queryByRole('button', { name: /review/i })).not.toBeInTheDocument();
   });
 });

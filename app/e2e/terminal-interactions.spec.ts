@@ -115,6 +115,31 @@ async function expectTerminalInputCount(
     .toBe(count);
 }
 
+/**
+ * The vertical centre of the grid's bottom row, in page coordinates.
+ *
+ * The rendered grid is `rows * cellHeight`, which almost never equals the
+ * container's height, so the container carries a leftover strip below the last
+ * row whose size shifts with anything that changes pane height — a permanent
+ * pane header, for one. Deriving the row from the canvas and the model's row
+ * count keeps a click on the last line a click on the last line.
+ */
+async function lastRowCenterY(
+  page: import('@playwright/test').Page,
+  terminal: import('@playwright/test').Locator,
+  sessionId: string,
+) {
+  const canvas = await terminal.locator('canvas').first().boundingBox();
+  expect(canvas).not.toBeNull();
+  const size = await page.evaluate(
+    (id) => window.__TEST_GET_SESSION_PANE_SIZE?.(id) ?? null,
+    sessionId,
+  );
+  expect(size).not.toBeNull();
+  const cellHeight = canvas!.height / size!.rows;
+  return canvas!.y + canvas!.height - cellHeight / 2;
+}
+
 async function openTerminalSession(
   page: import('@playwright/test').Page,
   daemon: { injectSession: (session: { id: string; label: string; state: string; directory?: string; workspace_id?: string }) => Promise<void> },
@@ -787,7 +812,12 @@ test.describe('Ghostty terminal interactions', () => {
 
     const terminalBounds = await terminal.boundingBox();
     expect(terminalBounds).not.toBeNull();
-    const rowY = terminalBounds!.y + terminalBounds!.height - 12;
+    // Aim at the middle of the grid's last row, measured off the canvas rather
+    // than off the container. A whole number of rows rarely fills the container
+    // exactly, so the leftover strip below the grid is dead space of a height
+    // nothing here controls — any fixed offset from the container's bottom edge
+    // is a bet on that leftover staying small.
+    const rowY = await lastRowCenterY(page, terminal, 's-selection-scroll');
     await page.mouse.move(terminalBounds!.x + 2, rowY);
     await page.mouse.down();
     await page.mouse.move(terminalBounds!.x + 220, rowY);

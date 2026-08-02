@@ -139,6 +139,10 @@ vi.mock('./GhosttyTerminal', () => ({
   }),
 }));
 
+// Shortcuts are recorded rather than dispatched, so a test can invoke one by
+// id. Both entry points carry it — the barrel for modules that import it, and
+// the direct path the workspace itself uses. The bodies are duplicated because
+// vi.mock factories are hoisted above any shared helper.
 vi.mock('../shortcuts', () => ({
   useShortcut: vi.fn((id: string, handler: () => void, enabled?: boolean) => {
     if (enabled) {
@@ -150,6 +154,13 @@ vi.mock('../shortcuts', () => ({
 }));
 
 vi.mock('../shortcuts/useShortcut', () => ({
+  useShortcut: vi.fn((id: string, handler: () => void, enabled?: boolean) => {
+    if (enabled) {
+      registeredShortcuts.set(id, handler);
+      return;
+    }
+    registeredShortcuts.delete(id);
+  }),
   triggerShortcut: vi.fn(() => false),
 }));
 
