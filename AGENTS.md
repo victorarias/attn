@@ -282,10 +282,15 @@ this is where daemon traffic lands:
 
 - `hooks/useDaemonSocket.ts`: the socket. Connection, reconnect/circuit breaker,
   the event switch, and every `send*` command. Its return value is the frontend's
-  entire daemon API, threaded through `App` → `AppContent` → `DaemonProvider`.
+  entire daemon API. `App` is its only caller and publishes it through
+  `contexts/DaemonApiContext.tsx`; everything below reads it with `useDaemonApi()`
+  rather than receiving it as props.
 - `hooks/daemonPendingRequests.ts`: request/result correlation. A fallible
-  command parks its promise under `<kind>:<requestId>` until the matching
-  `*_result` event lands. `settlePendingRequest` is the typed way in.
+  command parks its promise under a key until the matching `*_result` event
+  lands. `settlePendingRequest` is the typed way in. `sendRequest` (fresh request
+  id per call) and `sendKeyedRequest` (caller's key, for the deliberately
+  last-writer-wins commands) are the two ways out; both reject when the socket is
+  down and time out on a daemon that never answers.
 - `hooks/daemon<Domain>Events.ts` (`Fs`, `Notebook`, `MarkdownAnnotation`):
   per-domain event bodies lifted out of the switch, reached from its `default`.
   Grep a wire name (`fs_write_result`) to find the module that owns it. Adding a

@@ -1,0 +1,16 @@
+kind: internal
+area: app
+change: >
+  The frontend's daemon surface lost most of its boilerplate. Forty-five request
+  senders in useDaemonSocket each spelled out the same offline guard, pending-key
+  registration, send, and timeout; they now share sendRequest/sendKeyedRequest.
+  App no longer threads 104 daemon functions through AppContent as props — it
+  publishes the whole API through DaemonApiProvider and components read it with
+  useDaemonApi, so adding a daemon command no longer means editing four places in
+  App.tsx that have to agree. On the daemon side, two new guards make command
+  classification and session routing self-enforcing: every protocol command must
+  have a CommandMeta entry, and every session-scoped command must either route to
+  the daemon that owns the session or name the reason it is answered locally.
+  That second guard is what caught session_messages_get and the three
+  session_annotations_* commands being answered by a hub for sessions it does not
+  own.

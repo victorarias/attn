@@ -712,6 +712,12 @@ function requestTileContentsForWorkspaces(ws: WebSocket, workspaces: DaemonWorks
 
 const ATTACH_RETRY_TIMEOUT_MS = 3_000;
 const ATTACH_RETRY_DELAY_MS = 150;
+// A daemon round trip that only touches local state — the store, a file under a
+// scoped root — answers in single-digit milliseconds. This is the tripwire for
+// one that never answers at all, not a budget any healthy call approaches; the
+// git and GitHub commands below, which wait on the network or a subprocess, set
+// their own in minutes.
+const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
 const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
 const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
@@ -1109,6 +1115,61 @@ export function useDaemonSocket({
     }
     pendingOutboundCommandsRef.current.push(serialized);
   }, []);
+
+  // One request/result round trip, parked under `key` until the matching result
+  // event settles it: reject if the socket is down, and give up after a timeout
+  // so a caller awaiting a daemon that never answers is not stuck forever.
+  //
+  // Every fallible command that returns a promise wants exactly this, and each
+  // one used to spell it out. Identical copies is how one of them ends up with
+  // a different timeout, or forgets to delete its pending entry on the way out
+  // and leaks the closure.
+  //
+  // `key` is the caller's, not derived here, because the two correlation
+  // schemes disagree on what a second in-flight call means. A request-id key
+  // (sendRequest below) lets calls queue independently; a fixed one like
+  // 'refresh_prs' is deliberately last-writer-wins. Deriving the key would pick
+  // one of those for everybody.
+  const sendKeyedRequest = useCallback(<T,>(
+    key: string,
+    payload: Record<string, unknown>,
+    timeoutMessage: string,
+    timeoutMs: number = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<T> => {
+    return new Promise<T>((resolve, reject) => {
+      const ws = wsRef.current;
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        reject(new Error('WebSocket not connected'));
+        return;
+      }
+      pendingActionsRef.current.set(key, { resolve: resolve as (value: unknown) => void, reject });
+      ws.send(JSON.stringify(payload));
+      setTimeout(() => {
+        if (pendingActionsRef.current.has(key)) {
+          pendingActionsRef.current.delete(key);
+          reject(new Error(timeoutMessage));
+        }
+      }, timeoutMs);
+    });
+  }, []);
+
+  // The same round trip, correlated by a fresh request id — what a command
+  // wants when two of its calls may be in flight at once and each needs its own
+  // answer.
+  const sendRequest = useCallback(<T,>(
+    cmd: string,
+    body: Record<string, unknown>,
+    timeoutMessage: string,
+    timeoutMs?: number,
+  ): Promise<T> => {
+    const requestId = nextRequestID(cmd);
+    return sendKeyedRequest<T>(
+      pendingRequestKey(cmd, requestId),
+      { cmd, request_id: requestId, ...body },
+      timeoutMessage,
+      timeoutMs,
+    );
+  }, [nextRequestID, sendKeyedRequest]);
 
   const connect = useCallback(async () => {
     if (wsRef.current?.readyState === WebSocket.OPEN || wsRef.current?.readyState === WebSocket.CONNECTING) return;
@@ -2707,65 +2768,32 @@ export function useDaemonSocket({
   }, [connect]);
 
   const sendSpawnSession = useCallback((args: PtySpawnArgs): Promise<SpawnResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = `pty_spawn_${args.id}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'spawn_session',
-        id: args.id,
-        cwd: args.cwd,
-        workspace_id: args.workspace_id,
-        ...(args.endpoint_id && { endpoint_id: args.endpoint_id }),
-        agent: args.shell ? 'shell' : (args.agent || 'codex'),
-        cols: args.cols,
-        rows: args.rows,
-        ...(args.label && { label: args.label }),
-        ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
-        ...(args.resume_picker && { resume_picker: args.resume_picker }),
-        ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
-        ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
-        ...(args.executable && { executable: args.executable }),
-        ...(args.claude_executable && { claude_executable: args.claude_executable }),
-        ...(args.codex_executable && { codex_executable: args.codex_executable }),
-        ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Spawn session timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `pty_spawn_${args.id}`;
+    return sendKeyedRequest<SpawnResult>(key, {
+      cmd: 'spawn_session',
+      id: args.id,
+      cwd: args.cwd,
+      workspace_id: args.workspace_id,
+      ...(args.endpoint_id && { endpoint_id: args.endpoint_id }),
+      agent: args.shell ? 'shell' : (args.agent || 'codex'),
+      cols: args.cols,
+      rows: args.rows,
+      ...(args.label && { label: args.label }),
+      ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
+      ...(args.resume_picker && { resume_picker: args.resume_picker }),
+      ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
+      ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
+      ...(args.executable && { executable: args.executable }),
+      ...(args.claude_executable && { claude_executable: args.claude_executable }),
+      ...(args.codex_executable && { codex_executable: args.codex_executable }),
+      ...(args.copilot_executable && { copilot_executable: args.copilot_executable }),
+    }, 'Spawn session timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendReloadSession = useCallback((id: string, cols: number, rows: number): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = `reload_session:${id}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'reload_session', id, cols, rows }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Reload session timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `reload_session:${id}`;
+    return sendKeyedRequest<void>(key, { cmd: 'reload_session', id, cols, rows }, 'Reload session timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendAttachSessionNow = useCallback((id: string, context?: AttachRequestContext): Promise<AttachResult> => {
     return new Promise((resolve, reject) => {
@@ -3560,49 +3588,15 @@ export function useDaemonSocket({
 
   // Request daemon to refresh PRs from GitHub
   const sendRefreshPRs = useCallback((): Promise<PRActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'refresh_prs';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'refresh_prs' }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Refresh timed out'));
-        }
-      }, GITHUB_REFRESH_TIMEOUT_MS);
-    });
-  }, []);
+    const key = 'refresh_prs';
+    return sendKeyedRequest<PRActionResult>(key, { cmd: 'refresh_prs' }, 'Refresh timed out', GITHUB_REFRESH_TIMEOUT_MS);
+  }, [sendKeyedRequest]);
 
   // Fetch PR details (branch, status) for a repo
   const sendFetchPRDetails = useCallback((id: string): Promise<FetchPRDetailsResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'fetch_pr_details';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'fetch_pr_details', id }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Fetch PR details timed out'));
-        }
-      }, GITHUB_REFRESH_TIMEOUT_MS);
-    });
-  }, []);
+    const key = 'fetch_pr_details';
+    return sendKeyedRequest<FetchPRDetailsResult>(key, { cmd: 'fetch_pr_details', id }, 'Fetch PR details timed out', GITHUB_REFRESH_TIMEOUT_MS);
+  }, [sendKeyedRequest]);
 
   // Clear all sessions from daemon
   const sendClearSessions = useCallback(() => {
@@ -3850,118 +3844,34 @@ export function useDaemonSocket({
   }, []);
 
   const sendListPlugins = useCallback((): Promise<PluginListResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = 'list_plugins';
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'list_plugins' }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('List plugins timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
+    const key = 'list_plugins';
+    return sendKeyedRequest<PluginListResult>(key, { cmd: 'list_plugins' }, 'List plugins timed out');
+  }, [sendKeyedRequest]);
 
   const sendInstallPlugin = useCallback((source: string): Promise<PluginActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = 'plugin_action:install:pending';
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'install_plugin', source }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Install plugin timed out'));
-        }
-      }, 60000);
-    });
-  }, []);
+    const key = 'plugin_action:install:pending';
+    return sendKeyedRequest<PluginActionResult>(key, { cmd: 'install_plugin', source }, 'Install plugin timed out', 60000);
+  }, [sendKeyedRequest]);
 
   const sendInstallBundledPlugin = useCallback((name: string): Promise<PluginActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `plugin_action:install_bundled:${name}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'install_bundled_plugin', name }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Install bundled plugin timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `plugin_action:install_bundled:${name}`;
+    return sendKeyedRequest<PluginActionResult>(key, { cmd: 'install_bundled_plugin', name }, 'Install bundled plugin timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendUninstallPlugin = useCallback((name: string): Promise<PluginActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `plugin_action:uninstall:${name}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'uninstall_plugin', name }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Uninstall plugin timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `plugin_action:uninstall:${name}`;
+    return sendKeyedRequest<PluginActionResult>(key, { cmd: 'uninstall_plugin', name }, 'Uninstall plugin timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendRemovePlugin = useCallback((name: string): Promise<PluginActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `plugin_action:remove:${name}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'remove_plugin', name }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Remove plugin timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `plugin_action:remove:${name}`;
+    return sendKeyedRequest<PluginActionResult>(key, { cmd: 'remove_plugin', name }, 'Remove plugin timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendSetPluginPriority = useCallback((name: string, priority: number): Promise<PluginActionResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `plugin_action:set_priority:${name}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'set_plugin_priority', name, priority }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Set plugin priority timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = `plugin_action:set_priority:${name}`;
+    return sendKeyedRequest<PluginActionResult>(key, { cmd: 'set_plugin_priority', name, priority }, 'Set plugin priority timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const sendAddEndpoint = useCallback((name: string, sshTarget: string, profile?: string): Promise<EndpointActionResult> => {
     return new Promise((resolve, reject) => {
@@ -4087,112 +3997,23 @@ export function useDaemonSocket({
   }, [hasPendingEndpointAction]);
 
   const sendListEndpoints = useCallback((): Promise<DaemonEndpoint[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = 'list_endpoints';
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'list_endpoints' }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('List endpoints timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
+    const key = 'list_endpoints';
+    return sendKeyedRequest<DaemonEndpoint[]>(key, { cmd: 'list_endpoints' }, 'List endpoints timed out');
+  }, [sendKeyedRequest]);
 
   const sendListWorkspaceContexts = useCallback((): Promise<DaemonWorkspaceContext[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('workspace_context_list');
-      const key = `workspace_context_list:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'workspace_context_list', request_id: requestId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Workspace context list timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('workspace_context_list');
+    const key = `workspace_context_list:${requestId}`;
+    return sendKeyedRequest<DaemonWorkspaceContext[]>(key, { cmd: 'workspace_context_list', request_id: requestId }, 'Workspace context list timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   // List Notebook notes (metadata only). Optional prefix scopes a subtree.
-  const sendNotebookList = useCallback((prefix?: string): Promise<NotebookEntry[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notebook_list');
-      const key = pendingRequestKey('notebook_list', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_list', request_id: requestId, ...(prefix ? { prefix } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook list timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendNotebookList = useCallback((prefix?: string): Promise<NotebookEntry[]> =>
+    sendRequest<NotebookEntry[]>('notebook_list', { ...(prefix ? { prefix } : {}) }, 'Notebook list timed out'), [sendRequest]);
 
   // Read one Notebook note's full bytes + content hash.
-  const sendNotebookRead = useCallback((path: string): Promise<NotebookReadResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notebook_read');
-      const key = pendingRequestKey('notebook_read', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_read', request_id: requestId, path }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook read timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
-
-  // One request/result round trip for the annotation commands. They differ only
-  // in what they send and what a result means, and writing that out four times
-  // is how the timeout on one of them ends up different from the others.
-  const sendAnnotationCommand = useCallback(<T,>(
-    cmd: string,
-    body: Record<string, unknown>,
-    timeoutMessage: string,
-  ): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID(cmd);
-      const key = pendingRequestKey(cmd, requestId);
-      pendingActionsRef.current.set(key, { resolve: resolve as (value: unknown) => void, reject });
-      ws.send(JSON.stringify({ cmd, request_id: requestId, ...body }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error(timeoutMessage));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendNotebookRead = useCallback((path: string): Promise<NotebookReadResult> =>
+    sendRequest<NotebookReadResult>('notebook_read', { path }, 'Notebook read timed out'), [sendRequest]);
 
   // Fetch the assistant messages terminal annotations can anchor to — recent
   // ones, not only the newest, so a turn scrolling past stays annotatable. An
@@ -4200,14 +4021,14 @@ export function useDaemonSocket({
   // structured verdict, or pure tool activity), and the caller says so rather
   // than offering an empty annotation surface.
   const sendSessionMessagesGet = useCallback((sessionId: string): Promise<SessionMessageWindow> => {
-    return sendAnnotationCommand('session_messages_get', { session_id: sessionId }, 'Session message fetch timed out');
-  }, [sendAnnotationCommand]);
+    return sendRequest('session_messages_get', { session_id: sessionId }, 'Session message fetch timed out');
+  }, [sendRequest]);
 
   // Read a session's persisted annotations. `generation` is the floor a save
   // has to beat, which the caller seeds its counter from.
   const sendSessionAnnotationsGet = useCallback((sessionId: string): Promise<SessionAnnotationSet> => {
-    return sendAnnotationCommand('session_annotations_get', { session_id: sessionId }, 'Session annotation fetch timed out');
-  }, [sendAnnotationCommand]);
+    return sendRequest('session_annotations_get', { session_id: sessionId }, 'Session annotation fetch timed out');
+  }, [sendRequest]);
 
   // Persist the full annotation list. `stale: true` means a newer write won;
   // that is an outcome to re-hydrate from, not an error.
@@ -4216,70 +4037,46 @@ export function useDaemonSocket({
     annotations: readonly DaemonSessionAnnotation[],
     generation: number,
   ): Promise<{ stale: boolean }> => {
-    return sendAnnotationCommand(
+    return sendRequest(
       'session_annotations_save',
       { session_id: sessionId, annotations: annotations.map(annotationToWire), generation },
       'Session annotation save timed out',
     );
-  }, [sendAnnotationCommand]);
+  }, [sendRequest]);
 
   // Tombstone a session's annotations, which is what sending them does.
   const sendSessionAnnotationsClear = useCallback((
     sessionId: string,
     generation: number,
   ): Promise<{ generation: number }> => {
-    return sendAnnotationCommand(
+    return sendRequest(
       'session_annotations_clear',
       { session_id: sessionId, generation },
       'Session annotation clear timed out',
     );
-  }, [sendAnnotationCommand]);
+  }, [sendRequest]);
 
   // Fetch one ticket's full record (row + activity thread + current artifacts) for the
   // detail view. The board feed carries only bare rows, so the detail panel pulls
   // the full record by id, correlated by request_id against the ticket_result event.
   const fetchTicket = useCallback((ticketId: string): Promise<Ticket> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('get_ticket');
-      const key = `get_ticket:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'get_ticket', request_id: requestId, ticket_id: ticketId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Ticket fetch timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('get_ticket');
+    const key = `get_ticket:${requestId}`;
+    return sendKeyedRequest<Ticket>(key, {
+      cmd: 'get_ticket',
+      request_id: requestId,
+      ticket_id: ticketId,
+    }, 'Ticket fetch timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   // Shared sender for a chief/user ticket action (change status, comment,
   // re-brief). Resolves on a successful ticket_action_result and rejects on its
   // error; the mutated data arrives separately via the tickets_updated broadcast.
   const sendTicketAction = useCallback((cmd: string, payload: Record<string, unknown>): Promise<void> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('ticket_action');
-      const key = `ticket_action:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd, request_id: requestId, ...payload }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Ticket action timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('ticket_action');
+    const key = `ticket_action:${requestId}`;
+    return sendKeyedRequest<void>(key, { cmd, request_id: requestId, ...payload }, 'Ticket action timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   const sendTicketChangeStatus = useCallback(
     (ticketId: string, status: Ticket['status'], expectedEventSeq?: number, comment?: string): Promise<void> =>
@@ -4379,47 +4176,23 @@ export function useDaemonSocket({
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('task_list');
-      const key = `task_list:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'task_list', request_id: requestId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook task list timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('task_list');
+    const key = `task_list:${requestId}`;
+    return sendKeyedRequest<Task[]>(key, { cmd: 'task_list', request_id: requestId }, 'Notebook task list timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   // Force a failed|dead task back to queued (runs immediately). Resolves with the
   // requeued task, or null when the task was non-terminal (a no-op retry). The
   // tasks_changed broadcast then drives the panel's refetch.
   const sendTaskRetry = useCallback((taskId: string): Promise<Task | null> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('task_retry');
-      const key = `task_retry:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'task_retry', request_id: requestId, task_id: taskId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook task retry timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('task_retry');
+    const key = `task_retry:${requestId}`;
+    return sendKeyedRequest<Task | null>(key, {
+      cmd: 'task_retry',
+      request_id: requestId,
+      task_id: taskId,
+    }, 'Notebook task retry timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   // List the global notification feed (newest first) with the current unread
   // count. The notifications_updated broadcast drives live refreshes; this is the
@@ -4428,24 +4201,13 @@ export function useDaemonSocket({
     notifications: DaemonNotification[];
     unreadCount: number;
   }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notification_list');
-      const key = `notification_list:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notification_list', request_id: requestId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notification list timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('notification_list');
+    const key = `notification_list:${requestId}`;
+    return sendKeyedRequest<{
+    notifications: DaemonNotification[];
+    unreadCount: number;
+  }>(key, { cmd: 'notification_list', request_id: requestId }, 'Notification list timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   // Mark a notification read (notificationId set) or every unread one (undefined).
   // Resolves with the post-mark unread count; the notifications_updated broadcast
@@ -4477,298 +4239,76 @@ export function useDaemonSocket({
   }, [nextRequestID]);
 
   // List the notes whose body links to `path` (root-absolute markdown links).
-  const sendNotebookBacklinks = useCallback((path: string): Promise<NotebookEntry[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notebook_backlinks');
-      const key = pendingRequestKey('notebook_backlinks', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_backlinks', request_id: requestId, path }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook backlinks timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendNotebookBacklinks = useCallback((path: string): Promise<NotebookEntry[]> =>
+    sendRequest<NotebookEntry[]>('notebook_backlinks', { path }, 'Notebook backlinks timed out'), [sendRequest]);
 
   // Save one Notebook note via the daemon (hash-CAS). Omit baseHash to create-only;
   // pass the note's loaded hash to edit. Resolves with the outcome — including a
   // conflict (resolve, not reject) the editor reconciles; rejects only on a
   // transport/daemon error.
-  const sendNotebookWrite = useCallback((path: string, content: string, baseHash?: string): Promise<NotebookWriteResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notebook_write');
-      const key = pendingRequestKey('notebook_write', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Notebook save timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendNotebookWrite = useCallback((path: string, content: string, baseHash?: string): Promise<NotebookWriteResult> =>
+    sendRequest<NotebookWriteResult>('notebook_write', { path, content, ...(baseHash ? { base_hash: baseHash } : {}) }, 'Notebook save timed out'), [sendRequest]);
 
   // Hand a Notebook selection to the daemon to deliver to the chief of staff. The
   // daemon appends it to the chief inbox note and (if a chief is live and idle)
   // nudges its PTY. The UI never messages the chief directly. Resolves with the
   // inbox path + whether a live nudge fired; rejects on a transport/daemon error.
-  const sendNotebookToChief = useCallback((selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('notebook_send_to_chief');
-      const key = pendingRequestKey('notebook_send_to_chief', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'notebook_send_to_chief', request_id: requestId, selection, ...(sourcePath ? { source_path: sourcePath } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Send to chief timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendNotebookToChief = useCallback((selection: string, sourcePath?: string): Promise<NotebookSendToChiefResult> =>
+    sendRequest<NotebookSendToChiefResult>('notebook_send_to_chief', { selection, ...(sourcePath ? { source_path: sourcePath } : {}) }, 'Send to chief timed out'), [sendRequest]);
 
   // List one directory's immediate children over the generic filesystem surface.
   // Omit/empty path = the root directory. Shallow: a tree expands lazily, one call
   // per node.
-  const sendFsList = useCallback((path?: string, root?: string): Promise<FsEntry[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_list');
-      const key = pendingRequestKey('fs_list', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_list', request_id: requestId, ...(path ? { path } : {}), ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem list timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsList = useCallback((path?: string, root?: string): Promise<FsEntry[]> =>
+    sendRequest<FsEntry[]>('fs_list', { ...(path ? { path } : {}), ...(root ? { root } : {}) }, 'Filesystem list timed out'), [sendRequest]);
 
   // Read one file's full bytes + content hash.
-  const sendFsRead = useCallback((path: string, root?: string): Promise<FsReadResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_read');
-      const key = pendingRequestKey('fs_read', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_read', request_id: requestId, path, ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem read timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsRead = useCallback((path: string, root?: string): Promise<FsReadResult> =>
+    sendRequest<FsReadResult>('fs_read', { path, ...(root ? { root } : {}) }, 'Filesystem read timed out'), [sendRequest]);
 
   // Read one image asset's bytes as base64, for rendering ![alt](path) images in
   // the notebook editor without widening Tauri's fs permissions.
-  const sendFsReadAsset = useCallback((path: string, root?: string): Promise<FsReadAssetResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_read_asset');
-      const key = pendingRequestKey('fs_read_asset', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_read_asset', request_id: requestId, path, ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem asset read timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsReadAsset = useCallback((path: string, root?: string): Promise<FsReadAssetResult> =>
+    sendRequest<FsReadAssetResult>('fs_read_asset', { path, ...(root ? { root } : {}) }, 'Filesystem asset read timed out'), [sendRequest]);
 
   // Save one file via the daemon (hash-CAS). Omit baseHash to create-only; pass the
   // file's loaded hash to edit. Resolves with the outcome — including a conflict
   // (resolve, not reject) the editor reconciles; rejects only on a transport error.
-  const sendFsWrite = useCallback((path: string, content: string, baseHash?: string, root?: string): Promise<FsWriteResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_write');
-      const key = pendingRequestKey('fs_write', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_write', request_id: requestId, path, content, ...(baseHash ? { base_hash: baseHash } : {}), ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem save timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsWrite = useCallback((path: string, content: string, baseHash?: string, root?: string): Promise<FsWriteResult> =>
+    sendRequest<FsWriteResult>('fs_write', { path, content, ...(baseHash ? { base_hash: baseHash } : {}), ...(root ? { root } : {}) }, 'Filesystem save timed out'), [sendRequest]);
 
-  const sendFsRename = useCallback((path: string, newPath: string, root?: string): Promise<FsRenameResult> => new Promise((resolve, reject) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error('WebSocket not connected'));
-      return;
-    }
-    const requestId = nextRequestID('fs_rename');
-    const key = pendingRequestKey('fs_rename', requestId);
-    pendingActionsRef.current.set(key, { resolve, reject });
-    ws.send(JSON.stringify({ cmd: 'fs_rename', request_id: requestId, path, new_path: newPath, ...(root ? { root } : {}) }));
-    setTimeout(() => {
-      if (pendingActionsRef.current.has(key)) {
-        pendingActionsRef.current.delete(key);
-        reject(new Error('Filesystem rename timed out'));
-      }
-    }, 10000);
-  }), [nextRequestID]);
+  const sendFsRename = useCallback((path: string, newPath: string, root?: string): Promise<FsRenameResult> =>
+    sendRequest<FsRenameResult>('fs_rename', { path, new_path: newPath, ...(root ? { root } : {}) }, 'Filesystem rename timed out'), [sendRequest]);
 
-  const sendFsDelete = useCallback((path: string, root?: string): Promise<FsDeleteResult> => new Promise((resolve, reject) => {
-    const ws = wsRef.current;
-    if (!ws || ws.readyState !== WebSocket.OPEN) {
-      reject(new Error('WebSocket not connected'));
-      return;
-    }
-    const requestId = nextRequestID('fs_delete');
-    const key = pendingRequestKey('fs_delete', requestId);
-    pendingActionsRef.current.set(key, { resolve, reject });
-    ws.send(JSON.stringify({ cmd: 'fs_delete', request_id: requestId, path, ...(root ? { root } : {}) }));
-    setTimeout(() => {
-      if (pendingActionsRef.current.has(key)) {
-        pendingActionsRef.current.delete(key);
-        reject(new Error('Filesystem delete timed out'));
-      }
-    }, 10000);
-  }), [nextRequestID]);
+  const sendFsDelete = useCallback((path: string, root?: string): Promise<FsDeleteResult> =>
+    sendRequest<FsDeleteResult>('fs_delete', { path, ...(root ? { root } : {}) }, 'Filesystem delete timed out'), [sendRequest]);
 
   // Check whether a path exists under the notebook root, without reading it. Used
   // to flag in-notebook markdown links whose target note is missing. Rejects on a
   // transport/daemon error (the caller leaves the link unflagged in that case).
-  const sendFsExists = useCallback((path: string, root?: string): Promise<FsExistsResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_exists');
-      const key = pendingRequestKey('fs_exists', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_exists', request_id: requestId, path, ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem exists check timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsExists = useCallback((path: string, root?: string): Promise<FsExistsResult> =>
+    sendRequest<FsExistsResult>('fs_exists', { path, ...(root ? { root } : {}) }, 'Filesystem exists check timed out'), [sendRequest]);
 
   // Subscribe this client to fs_changed broadcasts for root (undefined/empty =
   // the notebook root, which is always watched already). Refcounted on the
   // daemon side, so repeat calls and multiple subscribers share one watcher; pair
   // with sendFsUnwatch when live updates are no longer needed.
-  const sendFsWatch = useCallback((root?: string): Promise<FsWatchResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_watch');
-      const key = pendingRequestKey('fs_watch', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_watch', request_id: requestId, ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem watch timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsWatch = useCallback((root?: string): Promise<FsWatchResult> =>
+    sendRequest<FsWatchResult>('fs_watch', { ...(root ? { root } : {}) }, 'Filesystem watch timed out'), [sendRequest]);
 
   // Drop this client's subscription from sendFsWatch. A success no-op if this
   // client never watched root, or root is the notebook root (always watched
   // independent of subscriptions).
-  const sendFsUnwatch = useCallback((root?: string): Promise<FsWatchResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_unwatch');
-      const key = pendingRequestKey('fs_unwatch', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'fs_unwatch', request_id: requestId, ...(root ? { root } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem unwatch timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsUnwatch = useCallback((root?: string): Promise<FsWatchResult> =>
+    sendRequest<FsWatchResult>('fs_unwatch', { ...(root ? { root } : {}) }, 'Filesystem unwatch timed out'), [sendRequest]);
 
   // Bounded recursive file index of root (undefined/empty = the notebook
   // root), for the ⌘P finder. No client-controlled limit — the daemon caps
   // entries server-side and reports truncated=true if the walk was cut short.
   // extensions (dotless, case-insensitive) filter server-side, before the cap,
   // so asking for markdown cannot be truncated away by files nobody wanted.
-  const sendFsIndex = useCallback((root?: string, extensions?: string[]): Promise<FsIndexResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('fs_index');
-      const key = pendingRequestKey('fs_index', requestId);
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({
-        cmd: 'fs_index',
-        request_id: requestId,
-        ...(root ? { root } : {}),
-        ...(extensions && extensions.length > 0 ? { extensions } : {}),
-      }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Filesystem index timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+  const sendFsIndex = useCallback((root?: string, extensions?: string[]): Promise<FsIndexResult> =>
+    sendRequest<FsIndexResult>('fs_index', { ...(root ? { root } : {}), ...(extensions && extensions.length > 0 ? { extensions } : {}) }, 'Filesystem index timed out'), [sendRequest]);
 
   // Get recent locations from daemon
   // Files recently opened as reader tiles or written by an agent, frecency-ranked
@@ -4776,29 +4316,15 @@ export function useDaemonSocket({
   // plus the tool-use hook — so this list needs no client bookkeeping. root is the
   // caller's workspace, which ranks its own files above equally-scored strangers.
   const sendRecentFiles = useCallback((limit?: number, root?: string): Promise<RecentFile[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const requestId = nextRequestID('recent_files');
-      const key = `recent_files:${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({
-        cmd: 'recent_files',
-        request_id: requestId,
-        ...(limit ? { limit } : {}),
-        ...(root ? { root } : {}),
-      }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Recent files timed out'));
-        }
-      }, 10000);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('recent_files');
+    const key = `recent_files:${requestId}`;
+    return sendKeyedRequest<RecentFile[]>(key, {
+      cmd: 'recent_files',
+      request_id: requestId,
+      ...(limit ? { limit } : {}),
+      ...(root ? { root } : {}),
+    }, 'Recent files timed out');
+  }, [nextRequestID, sendKeyedRequest]);
 
   const sendGetRecentLocations = useCallback((endpointId?: string, limit?: number): Promise<RecentLocationsResult> => {
     return new Promise((resolve, reject) => {
@@ -4833,61 +4359,27 @@ export function useDaemonSocket({
   // to directories plus matching files. The daemon gates that variant on this
   // client's app identity, since file names are documents rather than tree shape.
   const sendBrowseDirectory = useCallback((inputPath: string, endpointId?: string, extensions?: string[]): Promise<BrowseDirectoryResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const requestId = nextRequestID('browse_directory');
-      const key = `browse_directory_${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'browse_directory',
-        input_path: inputPath,
-        ...(extensions && extensions.length > 0 ? { extensions } : {}),
-        ...(endpointId && { endpoint_id: endpointId }),
-        request_id: requestId,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Browse directory timed out'));
-        }
-      }, GIT_METADATA_TIMEOUT_MS);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('browse_directory');
+    const key = `browse_directory_${requestId}`;
+    return sendKeyedRequest<BrowseDirectoryResult>(key, {
+      cmd: 'browse_directory',
+      input_path: inputPath,
+      ...(extensions && extensions.length > 0 ? { extensions } : {}),
+      ...(endpointId && { endpoint_id: endpointId }),
+      request_id: requestId,
+    }, 'Browse directory timed out', GIT_METADATA_TIMEOUT_MS);
+  }, [nextRequestID, sendKeyedRequest]);
 
   const sendInspectPath = useCallback((path: string, endpointId?: string): Promise<InspectPathResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const requestId = nextRequestID('inspect_path');
-      const key = `inspect_path_${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'inspect_path',
-        path,
-        ...(endpointId && { endpoint_id: endpointId }),
-        request_id: requestId,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Inspect path timed out'));
-        }
-      }, GIT_METADATA_TIMEOUT_MS);
-    });
-  }, [nextRequestID]);
+    const requestId = nextRequestID('inspect_path');
+    const key = `inspect_path_${requestId}`;
+    return sendKeyedRequest<InspectPathResult>(key, {
+      cmd: 'inspect_path',
+      path,
+      ...(endpointId && { endpoint_id: endpointId }),
+      request_id: requestId,
+    }, 'Inspect path timed out', GIT_METADATA_TIMEOUT_MS);
+  }, [nextRequestID, sendKeyedRequest]);
 
   // Create worktree from existing branch
   const sendCreateWorktreeFromBranch = useCallback((mainRepo: string, branch: string, path?: string): Promise<WorktreeActionResult> => {
@@ -4919,53 +4411,19 @@ export function useDaemonSocket({
 
   // Fetch all remotes
   const sendFetchRemotes = useCallback((repo: string): Promise<FetchRemotesResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'fetch_remotes';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'fetch_remotes', repo }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Fetch remotes timed out'));
-        }
-      }, GIT_NETWORK_TIMEOUT_MS);
-    });
-  }, []);
+    const key = 'fetch_remotes';
+    return sendKeyedRequest<FetchRemotesResult>(key, { cmd: 'fetch_remotes', repo }, 'Fetch remotes timed out', GIT_NETWORK_TIMEOUT_MS);
+  }, [sendKeyedRequest]);
 
   // Ensure repo exists (clone if needed) and fetch remotes
   const sendEnsureRepo = useCallback((targetPath: string, cloneUrl: string): Promise<EnsureRepoResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'ensure_repo';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'ensure_repo',
-        target_path: targetPath,
-        clone_url: cloneUrl,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Ensure repo timed out'));
-        }
-      }, GIT_CLONE_TIMEOUT_MS);
-    });
-  }, []);
+    const key = 'ensure_repo';
+    return sendKeyedRequest<EnsureRepoResult>(key, {
+      cmd: 'ensure_repo',
+      target_path: targetPath,
+      clone_url: cloneUrl,
+    }, 'Ensure repo timed out', GIT_CLONE_TIMEOUT_MS);
+  }, [sendKeyedRequest]);
 
   // Subscribe to git status updates for a directory
   const sendSubscribeGitStatus = useCallback((directory: string) => {
@@ -5066,99 +4524,44 @@ export function useDaemonSocket({
     path: string,
     options?: { staged?: boolean; baseRef?: string; headRef?: string }
   ): Promise<FileDiffResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      // Key by request id, not path: two in-flight requests for the same path
-      // (e.g. a stale round's late reply racing a new round's request) must not
-      // clobber each other's pending promise.
-      const requestId = nextRequestID('get_file_diff');
-      const key = `get_file_diff_${requestId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'get_file_diff',
-        directory,
-        path,
-        request_id: requestId,
-        ...(options?.staged !== undefined && { staged: options.staged }),
-        ...(options?.baseRef && { base_ref: options.baseRef }),
-        ...(options?.headRef && { head_ref: options.headRef }),
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get file diff timed out'));
-        }
-      }, GIT_DIFF_TIMEOUT_MS);
-    });
-  }, [nextRequestID]);
+    // Key by request id, not path: two in-flight requests for the same path
+    // (e.g. a stale round's late reply racing a new round's request) must not
+    // clobber each other's pending promise.
+    const requestId = nextRequestID('get_file_diff');
+    const key = `get_file_diff_${requestId}`;
+    return sendKeyedRequest<FileDiffResult>(key, {
+      cmd: 'get_file_diff',
+      directory,
+      path,
+      request_id: requestId,
+      ...(options?.staged !== undefined && { staged: options.staged }),
+      ...(options?.baseRef && { base_ref: options.baseRef }),
+      ...(options?.headRef && { head_ref: options.headRef }),
+    }, 'Get file diff timed out', GIT_DIFF_TIMEOUT_MS);
+  }, [nextRequestID, sendKeyedRequest]);
 
   // Get repo info
   const getRepoInfo = useCallback((repo: string, endpointId?: string): Promise<RepoInfoResult> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = `repo_info_${endpointId || 'local'}_${repo}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'get_repo_info', repo, ...(endpointId && { endpoint_id: endpointId }) }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('get_repo_info timeout'));
-        }
-      }, GIT_METADATA_TIMEOUT_MS);
-    });
-  }, []);
+    const key = `repo_info_${endpointId || 'local'}_${repo}`;
+    return sendKeyedRequest<RepoInfoResult>(key, {
+      cmd: 'get_repo_info',
+      repo,
+      ...(endpointId && { endpoint_id: endpointId }),
+    }, 'get_repo_info timeout', GIT_METADATA_TIMEOUT_MS);
+  }, [sendKeyedRequest]);
 
   const getWorkflowRun = useCallback((runId: string): Promise<{ success: boolean; run: WorkflowRunState | null }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = `workflow_run_get_${runId}`;
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'workflow_run_get', run_id: runId }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get workflow run timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
+    const key = `workflow_run_get_${runId}`;
+    return sendKeyedRequest<{ success: boolean; run: WorkflowRunState | null }>(key, { cmd: 'workflow_run_get', run_id: runId }, 'Get workflow run timed out');
+  }, [sendKeyedRequest]);
 
   const listWorkflowRuns = useCallback((sessionId?: string): Promise<{ success: boolean; runs: WorkflowRunState[] }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      const key = 'workflow_run_list';
-      pendingActionsRef.current.set(key, { resolve, reject });
-      ws.send(JSON.stringify({ cmd: 'workflow_run_list', ...(sessionId ? { session_id: sessionId } : {}) }));
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('List workflow runs timed out'));
-        }
-      }, 10000);
-    });
-  }, []);
+    const key = 'workflow_run_list';
+    return sendKeyedRequest<{ success: boolean; runs: WorkflowRunState[] }>(key, {
+      cmd: 'workflow_run_list',
+      ...(sessionId ? { session_id: sessionId } : {}),
+    }, 'List workflow runs timed out');
+  }, [sendKeyedRequest]);
 
   const listAutomationDefinitions = useCallback((): Promise<AutomationDefinitionSummary[]> => {
     return new Promise((resolve, reject) => {
@@ -5404,56 +4807,22 @@ export function useDaemonSocket({
 
   // Fetch the current open/closed presentations (for the main-window banner).
   const getPresentations = useCallback((): Promise<Presentation[]> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'get_presentations';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({ cmd: 'get_presentations' }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get presentations timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = 'get_presentations';
+    return sendKeyedRequest<Presentation[]>(key, { cmd: 'get_presentations' }, 'Get presentations timed out', 30000);
+  }, [sendKeyedRequest]);
 
   // Fetch a presentation's round (defaults to latest) for the PresentRoot window.
   const getPresentationRound = useCallback((
     presentationId: string,
     seq?: number,
   ): Promise<{ presentation: Presentation; round: PresentationRound; comments: PresentationComment[]; repoHeadSha?: string }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'get_presentation_round';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'get_presentation_round',
-        presentation_id: presentationId,
-        ...(seq !== undefined && { seq }),
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Get presentation round timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = 'get_presentation_round';
+    return sendKeyedRequest<{ presentation: Presentation; round: PresentationRound; comments: PresentationComment[]; repoHeadSha?: string }>(key, {
+      cmd: 'get_presentation_round',
+      presentation_id: presentationId,
+      ...(seq !== undefined && { seq }),
+    }, 'Get presentation round timed out', 30000);
+  }, [sendKeyedRequest]);
 
   // Hand a round's review back to the authoring agent (presentation reader).
   // verdict is "approved" (comments allowed alongside — approve-with-nits) or
@@ -5464,59 +4833,22 @@ export function useDaemonSocket({
     comments: PresentCommentInput[];
     handback: boolean;
   }): Promise<{ roundId: string }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'present_submit_round';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'present_submit_round',
-        round_id: input.roundId,
-        verdict: input.verdict,
-        comments: input.comments,
-        handback: input.handback,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Submit presentation round timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = 'present_submit_round';
+    return sendKeyedRequest<{ roundId: string }>(key, {
+      cmd: 'present_submit_round',
+      round_id: input.roundId,
+      verdict: input.verdict,
+      comments: input.comments,
+      handback: input.handback,
+    }, 'Submit presentation round timed out', 30000);
+  }, [sendKeyedRequest]);
 
   // Dismiss a presentation without a review: no round submission, no
   // handback — the presentation's status moves straight to "closed".
   const closePresentation = useCallback((presentationId: string): Promise<{ presentationId: string }> => {
-    return new Promise((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-
-      const key = 'present_close';
-      pendingActionsRef.current.set(key, { resolve, reject });
-
-      ws.send(JSON.stringify({
-        cmd: 'present_close',
-        presentation_id: presentationId,
-      }));
-
-      setTimeout(() => {
-        if (pendingActionsRef.current.has(key)) {
-          pendingActionsRef.current.delete(key);
-          reject(new Error('Close presentation timed out'));
-        }
-      }, 30000);
-    });
-  }, []);
+    const key = 'present_close';
+    return sendKeyedRequest<{ presentationId: string }>(key, { cmd: 'present_close', presentation_id: presentationId, }, 'Close presentation timed out', 30000);
+  }, [sendKeyedRequest]);
 
   const clearWarnings = useCallback(() => {
     setWarnings([]);
