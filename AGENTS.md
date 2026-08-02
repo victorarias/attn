@@ -350,5 +350,7 @@ Packaged-app default menu accelerators can consume shortcuts before DOM keydown.
 - Diagnose root cause. Do not remove requested behavior without explicit
   approval. For refactors, list and verify behaviors that must survive.
 - Do not copy production code into tests or test compile-time guarantees.
-- Update `CHANGELOG.md` only for meaningful user-visible changes. Use dated
-  sections; describe the PR's net behavior in concise user-facing bullets.
+- Every PR adds a changelog fragment under `changelog.d/` — CI enforces it.
+  Do not edit `CHANGELOG.md` directly; it is compiled from fragments at
+  release time. Format and release process:
+  [docs/making-a-release.md](docs/making-a-release.md).

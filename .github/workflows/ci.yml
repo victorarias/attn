@@ -48,6 +48,23 @@ jobs:
             tauri:
               - 'app/src-tauri/**'
               - '.github/workflows/ci.yml'
+  changelog:
+    name: Changelog
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Gate
+        run: ./scripts/changelog-gate.sh "${{ github.base_ref }}" "${{ github.head_ref }}"
+
   backend:
     name: Daemon
     needs: changes
