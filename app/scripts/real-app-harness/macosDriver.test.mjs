@@ -1,5 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { withWindowTitleArgs } from './macosDriver.mjs';
+import { describeInputDriverFailure, withWindowTitleArgs } from './macosDriver.mjs';
+
+describe('describeInputDriverFailure', () => {
+  it('names a dark display as the cause, and says it is not the product', () => {
+    const hint = describeInputDriverFailure(
+      '[RealAppHarness] Input cannot be delivered: the screen is locked or the display is off. Wake the display (and unlock the screen) before running packaged-app scenarios.',
+    );
+    expect(hint).toContain('display was off');
+    expect(hint).toContain('not a product failure');
+  });
+
+  it('still names the accessibility grant when that is what failed', () => {
+    expect(
+      describeInputDriverFailure('[RealAppHarness] Accessibility permission is required for the real app harness input driver.'),
+    ).toContain('Grant Accessibility access');
+  });
+
+  it('falls back to the generic hint for anything else', () => {
+    expect(describeInputDriverFailure('[RealAppHarness] App is not running for bundle id x')).toBe('macOS automation failed.');
+    expect(describeInputDriverFailure()).toBe('macOS automation failed.');
+  });
+});
 
 describe('withWindowTitleArgs', () => {
   it('returns the input args unchanged when no windowTitle is given', () => {

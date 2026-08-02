@@ -21,6 +21,19 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// First line of a driver failure: names the condition a human has to fix, so
+// the fix is visible without reading the driver's own message underneath.
+// Pure so it can be unit-tested without spawning the compiled driver binary.
+export function describeInputDriverFailure(stderr = '') {
+  if (stderr.includes('Accessibility permission is required')) {
+    return 'Grant Accessibility access to the attn real-app input driver when macOS prompts, then rerun the harness.';
+  }
+  if (stderr.includes('Input cannot be delivered')) {
+    return 'The display was off or the screen was locked, so input could not be delivered. This is not a product failure — wake the display and rerun.';
+  }
+  return 'macOS automation failed.';
+}
+
 // Appends `--window-title <substring>` when opts.windowTitle is set, so
 // callers can target a secondary Tauri window (e.g. "attn — present") that
 // Accessibility never enumerates. Pure so it can be unit-tested without
@@ -83,6 +96,15 @@ export class MacOSDriver {
 
   async frontmostBundleId() {
     return this.runInputDriverCapture(['frontmost']);
+  }
+
+  // Whether a scenario's synthetic input can actually be delivered right now:
+  // `{ screenLocked, displayCount, asleepCount, blockReason }`, where a
+  // non-null blockReason is the same sentence the driver refuses input with.
+  // Observation-only — reading it never activates the app and works fine while
+  // the display is off, which is the point.
+  async displayState() {
+    return JSON.parse(await this.runInputDriverCapture(['display_state']));
   }
 
   // Returns the CGWindowID of the driver's bundle's largest layer-0 onscreen
@@ -323,9 +345,7 @@ export class MacOSDriver {
       });
     } catch (error) {
       const stderr = error?.stderr?.toString?.() || '';
-      const hint = stderr.includes('Accessibility permission is required')
-        ? 'Grant Accessibility access to the attn real-app input driver when macOS prompts, then rerun the harness.'
-        : 'macOS automation failed.';
+      const hint = describeInputDriverFailure(stderr);
       throw new Error(`${hint}\n${stderr || error.message}`);
     }
   }

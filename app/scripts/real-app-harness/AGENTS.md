@@ -2,6 +2,25 @@
 
 This policy applies to packaged-app scenarios in this directory.
 
+## The Display Must Be Awake
+
+Scenarios that drive input need a live display. Against a dark display or a
+locked screen the input still reaches the app, but the window-server work the
+app's handling depends on — menu-bar key equivalents, first responder,
+rendering — does not run, so some keystrokes take effect and others silently do
+nothing, and the run fails on a product assertion instead of on the display.
+
+`InputDriver.swift` refuses every input-posting command in that state and names
+which condition it found, so the failure describes itself. Read the same
+findings without touching the app via `driver.displayState()` (the driver's
+observation-only `display_state` command): `{ screenLocked, displayCount,
+asleepCount, blockReason }`.
+
+If a run fails on an assertion that looks like a product regression, check
+whether the display was awake before believing it — `pmset -g log | grep
+"Display is turned"` gives the history. A failed window screenshot in the
+failure artifacts is the same symptom wearing another hat.
+
 ## Profiles (which world a run targets)
 
 The harness honors the **one knob**, `ATTN_PROFILE`, like every other entrypoint
