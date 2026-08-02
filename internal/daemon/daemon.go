@@ -162,6 +162,16 @@ type Daemon struct {
 	// lookup seam: nil in production (reconcileGroundTruth derives the fetcher
 	// from ghRegistry per-host); tests set it to a fake so no network runs.
 	ticketReconcilePRFetch prStateFetcher
+	// sessionTitleExec is the Stop-time auto-title classifier spawn (see
+	// session_title.go) — New() wires the real per-agent headless run
+	// (execSessionTitle); it stays nil on test daemons so unit tests never shell
+	// out (maybeGenerateSessionTitle logs and skips). sessionTitleAttempted
+	// marks sessions that already had one LLM title attempt this daemon
+	// lifetime, success or failure, so a Stop storm never re-bills the same
+	// session; lazily allocated under sessionTitleMu.
+	sessionTitleMu        sync.Mutex
+	sessionTitleExec      func(ctx context.Context, session *protocol.Session, slice transcript.ConversationSlice) (string, error)
+	sessionTitleAttempted map[string]struct{}
 	// ticketArtifactMu serializes attach installation with its durable ticket
 	// receipt so concurrent submissions cannot race on destination names.
 	ticketArtifactMu  sync.Mutex
@@ -670,6 +680,9 @@ func New(socketPath string) *Daemon {
 	// constructors leave this nil so unit tests never shell out to a real CLI.
 	d.ticketReconcileExec = d.execTicketReconcileClassifier
 	d.ensureEventBus()
+	// Production wiring for Stop-time session auto-titling (session_title.go).
+	// Test constructors leave this nil so unit tests never shell out.
+	d.sessionTitleExec = d.execSessionTitle
 	return d
 }
 
@@ -2600,6 +2613,7 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 
 	// Async classification
 	go d.classifySessionState(msg.ID, msg.TranscriptPath)
+	go d.maybeGenerateSessionTitle(msg.ID, msg.TranscriptPath)
 }
 
 // resolveTranscriptPathForSession resolves a session's transcript by the
