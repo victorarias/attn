@@ -675,9 +675,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Carries a lone trailing ESC across output chunks so a RIS split on the
     // chunk boundary still re-enables grapheme clustering (see terminalGraphemeMode).
     const graphemeResetCarryRef = useRef(false);
-    const blockStoreRef = useRef(new TerminalBlockStore());
+    // Both stores are built once, by useState's lazy initializer, and carried by
+    // a ref: `useRef(new Store())` constructs a store on every render and throws
+    // it away, which is waste on a component that re-renders per repaint. Same
+    // shape as modelOpRing below.
+    const [blockStore] = useState(() => new TerminalBlockStore());
+    const blockStoreRef = useRef(blockStore);
     const selectedBlockIdRef = useRef<number | null>(null);
-    const placementStoreRef = useRef(new KittyPlacementStore());
+    const [placementStore] = useState(() => new KittyPlacementStore());
+    const placementStoreRef = useRef(placementStore);
     // The session id the placements were described for. The blob cache is
     // app-level and keyed by it, and it arrives on the description rather than
     // from props: a pane's own runtime id is the same id, but the description is
