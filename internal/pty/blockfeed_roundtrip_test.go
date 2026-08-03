@@ -51,7 +51,7 @@ func TestBlockFeedRoundTrip(t *testing.T) {
 	}
 	// Through the production feed path: the real segmenter decides where each
 	// marker begins and ends, and the real block table records it.
-	feeder := newWireFeeder(term)
+	feeder := newWireFeeder(term, 0)
 	if feeder == nil {
 		t.Fatal("newWireFeeder returned nil for a live terminal")
 	}

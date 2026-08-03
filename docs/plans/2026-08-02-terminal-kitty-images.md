@@ -631,6 +631,23 @@ session and back preserved the placement; a full app restart against the live
 daemon restored it from the attach snapshot with the blob re-pulled; `a=d`
 emptied the set.
 
+**Identity epoch (review fix).** Image identities are per terminal INSTANCE, not
+per process: `internal/pty` mints a random epoch when a session's ghostty
+terminal is built and folds it into every generation that leaves the worker (the
+placement read and the image serve, the only two exits). Ghostty's own stamps
+restart with each worker process while a session id does not — `runtime_respawned`
+replaces the worker, and so do a daemon restart and a revive — so raw stamps
+would let a replacement worker describe (same session, same image id, same
+generation) for different pixels, and the app's blob cache and GPU textures key
+on exactly that. With the epoch, a respawned worker can never mint an identity a
+client still holds pixels for. The window is `[2^32, 2^52)`: generations ride
+JSON into JS Numbers, exact only to 2^53 and dropped outright past
+`Number.MAX_SAFE_INTEGER` by the binary-frame decoder, so starting below 2^52
+leaves 2^52 of stamp headroom (a stamp moves by one per storage mutation), while
+the 2^32 floor keeps every epoched identity disjoint from a raw one. No protocol
+change and no frontend change — the frontend already treats a generation as
+opaque, so a fresh epoch is a new cache key by construction.
+
 **Geometry gap (A4 input, measured not guessed).** chafa asked for a 30x14
 cell area and emitted a 240x160 px image, i.e. it assumed roughly 8 x 11.4 px
 cells, because the PTY reports no `ws_xpixel`/`ws_ypixel`. The real cell is

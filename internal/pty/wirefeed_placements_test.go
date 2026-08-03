@@ -30,7 +30,7 @@ type placementRecorder struct {
 func newPlacementRecorder(t *testing.T, cols, rows int, limit uint64) *placementRecorder {
 	t.Helper()
 	term := newKittyTerminal(t, cols, rows, ghosttyvt.Options{KittyImageStorageLimit: limit})
-	feed := newWireFeeder(term)
+	feed := newWireFeeder(term, 0)
 	if feed == nil {
 		t.Fatal("newWireFeeder returned nil for a live terminal")
 	}

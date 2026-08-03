@@ -121,7 +121,16 @@ type wireFeeder struct {
 	// describes it on the wire, or is one the wire cannot describe — and the
 	// difference between this and the terminal's own stamp at the end of a feed
 	// is exactly the second kind.
+	//
+	// Raw, and deliberately: this is an internal change detector that never
+	// leaves the process, so folding the epoch into it would buy nothing and
+	// invite the two to be confused.
 	generation uint64
+
+	// epoch is the terminal-instance offset folded into every generation this
+	// feeder hands out; see mintKittyEpoch. Session.kittyEpoch carries the same
+	// value for the image half, and the two must match.
+	epoch uint64
 
 	// placements is the placement set as of the last observation, the left side
 	// of the next diff.
@@ -139,12 +148,15 @@ type wireFeeder struct {
 // newWireFeeder wires the feed path for a session's ghostty terminal. Returns
 // nil when the terminal is absent, exactly like newBlockFeeder: callers
 // nil-guard, and a session without a terminal fans out its raw bytes unchanged.
-func newWireFeeder(term *ghosttyvt.Terminal) *wireFeeder {
+//
+// epoch is the session's kitty identity offset (mintKittyEpoch), which the
+// caller must also hold on the Session so the image serve folds the same one.
+func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64) *wireFeeder {
 	blocks := newBlockFeeder(term)
 	if blocks == nil {
 		return nil
 	}
-	return &wireFeeder{term: term, blocks: blocks, generation: term.KittyGeneration()}
+	return &wireFeeder{term: term, blocks: blocks, epoch: epoch, generation: term.KittyGeneration()}
 }
 
 // feed writes one PTY chunk into the terminal and returns the bytes the wire
@@ -428,11 +440,22 @@ var placementReadHook func()
 
 // readPlacements is the only place the placement set is read out of ghostty —
 // the cgo crossing every caller here is gated to avoid. Callers hold replayMu.
+//
+// Being the only read is also what makes it the only place a generation crosses
+// out of ghostty's process-local numbering into the session's: every placement
+// exit (the live fan-out, the resize re-describe, the attach snapshot) draws
+// from here, so one fold covers all three. The set is freshly copied out per
+// call, so stamping it mutates nothing shared, and the offset is constant, so
+// the diff against the last observation is untouched.
 func (f *wireFeeder) readPlacements() []ghosttyvt.KittyPlacement {
 	if placementReadHook != nil {
 		placementReadHook()
 	}
-	return f.term.KittyPlacements()
+	placements := f.term.KittyPlacements()
+	for i := range placements {
+		placements[i].ImageGeneration += f.epoch
+	}
+	return placements
 }
 
 // observe diffs ghostty's placement set against the last observation. Called

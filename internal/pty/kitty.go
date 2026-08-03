@@ -12,10 +12,13 @@ package pty
 // stores an image never reaches any of it.
 
 import (
+	"crypto/rand"
+	"encoding/binary"
 	"errors"
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/ghosttyvt"
 )
@@ -101,4 +104,43 @@ func kittyStorageLimit(logf LogFunc) uint64 {
 		return 0
 	}
 	return limit
+}
+
+// mintKittyEpoch draws the per-terminal-instance offset folded into every kitty
+// generation this session reports. There are exactly two folds — the placement
+// read (wireFeeder.readPlacements) and the image serve (Session.kittyImage) —
+// and they must use the same value, or a placement stops naming the blob behind
+// it and no client can correlate the two again.
+//
+// Ghostty numbers its stamps per process, starting over with every terminal,
+// while a session id outlives its worker: runtime_respawned replaces the worker
+// process, and so do a daemon restart and a revive. Raw, a replacement worker
+// would describe (same session, same image id, same generation) for entirely
+// different pixels — and the app caches by exactly that triple, blobs and GPU
+// textures both, so it would redraw the dead worker's image and never pull the
+// new one. A fresh epoch per terminal makes every identity minted after a
+// respawn a new cache key by construction, which is one mechanism for all three
+// lifecycles and no wire change.
+//
+// The window is [2^32, 2^52). Ceiling receipt: generations ride JSON
+// (kitty_placements, the attach snapshot, kitty_image_result) into JS Numbers,
+// which are exact only to 2^53 — the binary frame decoder drops any generation
+// past Number.MAX_SAFE_INTEGER outright (app/src/pty/binaryPtyFrame.ts). An
+// epoch below 2^52 leaves 2^52 of stamp headroom above it, and a stamp moves by
+// one per storage mutation, so nothing a person sits in front of approaches it.
+// Floor receipt: 2^32 is past any stamp a real process reaches, so an epoched
+// identity is disjoint from a raw one.
+func mintKittyEpoch() uint64 {
+	const floor = uint64(1) << 32
+	const span = uint64(1)<<52 - floor
+	var b [8]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// Effectively unreachable — crypto/rand does not fail on a platform the
+		// worker runs on. What the fallback protects is the invariant rather
+		// than the randomness: the epoch stays inside the window and is never
+		// zero, because a zero epoch is the defect above and a spawn that fails
+		// over entropy is worse than a predictable identity.
+		return floor + uint64(time.Now().UnixNano())%span
+	}
+	return floor + binary.BigEndian.Uint64(b[:])%span
 }

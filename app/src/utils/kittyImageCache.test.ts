@@ -88,6 +88,29 @@ describe('KittyImageCache requests', () => {
     expect(cache.get('sess', 7, 11)).toBeNull();
   });
 
+  // A respawn keeps the session id and replaces the worker, so the image id can
+  // come back attached to entirely different pixels. The worker mints a fresh
+  // generation for its whole terminal (mintKittyEpoch in internal/pty/kitty.go),
+  // and this is the half of that contract the app owes: a generation it has
+  // never seen is a miss, whatever it holds for that image already, and filling
+  // it must not disturb what the previous worker's identity still points at.
+  it('pulls and keeps both sets of pixels when a respawned worker re-describes an image', () => {
+    const { cache, sent } = cacheWithSender();
+    const beforeRespawn = new Uint8Array([1, 1, 1]);
+    const afterRespawn = new Uint8Array([2, 2, 2]);
+    cache.fill(blob({ imageId: 1, generation: 10, pixels: beforeRespawn }));
+
+    // The replacement worker describes image 1 under its own identity.
+    expect(cache.status('sess', 1, 4_300_000_000)).toBe('absent');
+    cache.ensure('sess', 1, 4_300_000_000);
+    expect(sent).toEqual([['sess', 1]]);
+
+    cache.fill(blob({ imageId: 1, generation: 4_300_000_000, pixels: afterRespawn }));
+
+    expect(Array.from(cache.get('sess', 1, 4_300_000_000)!.pixels)).toEqual([2, 2, 2]);
+    expect(Array.from(cache.get('sess', 1, 10)!.pixels)).toEqual([1, 1, 1]);
+  });
+
   it('keeps sessions apart under the same image id', () => {
     const { cache, sent } = cacheWithSender();
     cache.fill(blob({ sessionId: 'a', imageId: 7 }));

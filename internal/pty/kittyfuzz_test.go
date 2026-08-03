@@ -108,7 +108,7 @@ func fuzzKittyWireMirror(f *testing.F, storageLimit uint64) {
 		baseline := ghosttyvt.LiveTrackedRefs()
 		worker := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{KittyImageStorageLimit: storageLimit})
 		client := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{})
-		feeder := newWireFeeder(worker)
+		feeder := newWireFeeder(worker, 0)
 		if feeder == nil {
 			t.Fatalf("newWireFeeder returned nil for a live terminal")
 		}

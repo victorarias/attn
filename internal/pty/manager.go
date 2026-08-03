@@ -329,7 +329,12 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		return fmt.Errorf("ghostty terminal construction failed: %w", err)
 	}
 	session.ghostty = gt
-	session.wireFeed = newWireFeeder(gt)
+	// One epoch per terminal, held by both halves that hand a generation out:
+	// the placement read and the image serve. A worker that replaces another
+	// under the same session id gets a different one, which is what keeps a
+	// client from redrawing the dead worker's pixels (see mintKittyEpoch).
+	session.kittyEpoch = mintKittyEpoch()
+	session.wireFeed = newWireFeeder(gt, session.kittyEpoch)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session

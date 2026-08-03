@@ -73,7 +73,7 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 	// The client stands in for the frontend's model: same size, no kitty.
 	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{MaxScrollback: opts.MaxScrollback})
 
-	feed := newWireFeeder(worker)
+	feed := newWireFeeder(worker, 0)
 	if feed == nil {
 		t.Fatalf("newWireFeeder returned nil for a live terminal")
 	}

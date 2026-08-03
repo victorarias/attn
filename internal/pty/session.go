@@ -107,7 +107,14 @@ type Session struct {
 	// the worker-side command-block table (Phase 3a), and returns the bytes the
 	// wire carries in place of what it fed. nil exactly when ghostty is nil;
 	// every use is nil-guarded like ghostty's.
-	wireFeed   *wireFeeder
+	wireFeed *wireFeeder
+	// kittyEpoch is the offset folded into every kitty generation that leaves
+	// this session, so a worker that replaces another under the same session id
+	// can never mint an identity a client already holds pixels for. Set where
+	// ghostty is constructed and never after; wireFeed holds the same value for
+	// the placement half, this field serves the image half (kittyImage). See
+	// mintKittyEpoch.
+	kittyEpoch uint64
 	seqCounter atomic.Uint32
 
 	// replayMu makes Ghostty feeds and lastReplaySeq atomic for snapshots, so a
@@ -733,6 +740,12 @@ func (s *Session) kittyImage(imageID uint32) (KittyImage, error) {
 	if !ok {
 		return KittyImage{}, fmt.Errorf("%w: image %d", ErrKittyImageNotFound, imageID)
 	}
+	// The second and last fold of the session's epoch (the placement read is the
+	// other). A client asks for pixels because a placement named a generation it
+	// has none for, and it stores what comes back under the generation the
+	// answer carries — so the two halves have to speak the same numbering or the
+	// pull repeats forever. See mintKittyEpoch.
+	img.Generation += s.kittyEpoch
 	return img, nil
 }
 
