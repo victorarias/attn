@@ -25,6 +25,7 @@ import {
   relaunchAppAndConnect,
 } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import {
   captureSessionArtifacts,
@@ -254,6 +255,10 @@ async function main() {
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
+  // ⌘Enter is delivered by the page's keydown listener, and whether it reaches
+  // that listener at all — rather than being eaten by AppKit or handed to the
+  // PTY — is the part only a real keystroke into the packaged app can show.
+  const driver = new MacOSDriver({ appPath: options.appPath });
   let sessionId = null;
   let paneId = null;
   // What the agent said, and where it sits on the grid. Carried through the
@@ -439,13 +444,71 @@ async function main() {
       );
     });
 
-    await runner.step('send_types_it_and_tombstones_it', async () => {
+    // The panel is the list of what you wrote, so a row in it is clicked to
+    // change what it says — and once it says something, the control that
+    // removes it has to still be on the row rather than pushed below it.
+    await runner.step('a_panel_row_opens_its_editor_and_keeps_its_remove_control', async () => {
       // Close the popup the previous step opened; a press outside is how a
       // user dismisses it, and it must not disturb a labelled annotation.
       await client.request('dom_click', { selector: '[data-testid="annotation-panel"] .anno-panel-title' });
       await sleep(300);
 
-      await client.request('dom_click', { selector: '.anno-panel-send' });
+      await client.request('dom_click', { selector: '.anno-card-open' });
+      const opened = await pollFor(
+        async () => {
+          const state = await client.request('get_annotation_state', {});
+          return state.popupOpen && state.popupDraft !== null ? state : null;
+        },
+        'the panel row to open its comment editor',
+        5_000,
+      );
+      runner.assert(
+        opened.commentFocused,
+        'The editor opened without the caret in its comment box, so the next sentence typed goes to the PTY',
+      );
+
+      const comment = 'checked against the real behaviour';
+      await client.request('dom_type', { selector: '.anno-popup-text', text: comment });
+      await client.request('dom_click', { selector: '.anno-popup-save' });
+
+      const withComment = await pollFor(
+        async () => {
+          const state = await client.request('get_annotation_state', {});
+          return state.annotations?.[0]?.comment === comment ? state : null;
+        },
+        'the comment to land on the panel row',
+        5_000,
+      );
+      const [row] = withComment.annotations;
+      runner.assert(
+        row.rect && row.removeRect,
+        `Panel row reported no geometry: ${JSON.stringify(row)}`,
+      );
+      // A comment wraps inside the row. The remove control must still start on
+      // the row's first line — it used to be auto-placed after the comment,
+      // which put it on a line of its own exactly when there was text to
+      // remove. 12px is a tripwire, not a measurement of the real 5px offset.
+      const offset = row.removeRect.top - row.rect.top;
+      runner.assert(
+        offset <= 12,
+        `The remove control starts ${offset}px below the row's top, so a commented row pushed it onto its own line `
+        + `(row ${JSON.stringify(row.rect)}, control ${JSON.stringify(row.removeRect)})`,
+      );
+      runner.assert(
+        row.removeRect.left + row.removeRect.width <= row.rect.left + row.rect.width + 1,
+        `The remove control overflows its row: ${JSON.stringify(row.removeRect)} vs ${JSON.stringify(row.rect)}`,
+      );
+      // Leave the surface as the user would: nothing open over the panel.
+      await client.request('dom_click', { selector: '[data-testid="annotation-panel"] .anno-panel-title' });
+      await sleep(300);
+    });
+
+    await runner.step('send_shortcut_types_it_and_tombstones_it', async () => {
+      // A real ⌘Return, not the button: the button is a click handler any unit
+      // test can drive, while the keystroke has to survive AppKit, reach the
+      // page's capture-phase listener, and be claimed by this pane instead of
+      // going to the PTY.
+      await driver.pressKeyCode(36, { command: true });
       const sent = await pollFor(
         async () => {
           const state = await client.request('get_annotation_state', {});

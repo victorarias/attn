@@ -74,6 +74,11 @@ export function buildCheatsheet(): CheatsheetCategory[] {
           combos: [fromId('markdown.sendAnnotations')],
           note: 'When a markdown tile has focus and annotations exist.',
         },
+        {
+          label: 'Send terminal annotations to session',
+          combos: [fromId('terminal.sendAnnotations')],
+          note: 'When the annotated pane has focus and marks are waiting.',
+        },
       ],
     },
     {

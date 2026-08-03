@@ -1011,6 +1011,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   sessionId={agentPane.sessionId}
                   sessionState={paneSession?.state}
                   annotationApi={annotationApi}
+                  // Gates the annotation send shortcut. The focused leaf of the
+                  // visible session, so ⌘Enter belongs to at most one pane and
+                  // stays with the PTY everywhere else.
+                  paneActive={isActiveSession && sessionVisible && activeLeafId === agentPane.id}
                   onSubmitAnnotations={(text) => {
                     // Bracketed paste, not a plain write: the payload is
                     // multi-line, and without the guard every newline submits

@@ -7,7 +7,9 @@ import {
   matchesShortcut,
   bindingsConflict,
   combosConflict,
+  isAllowedConflict,
   isChord,
+  type ShortcutId,
 } from './registry';
 
 function withNavigatorPlatform<T>(platform: string, fn: () => T): T {
@@ -22,10 +24,6 @@ function withNavigatorPlatform<T>(platform: string, fn: () => T): T {
 }
 
 describe('shortcut registry', () => {
-  const isAllowedConflict = (a: string, b: string) => (
-    [a, b].sort().join('|') === 'session.close|terminal.close'
-  );
-
   describe('matchesShortcut', () => {
     it('matches cmd+key shortcut on macOS', () => {
       withNavigatorPlatform('MacIntel', () => {
@@ -199,7 +197,9 @@ describe('shortcut registry', () => {
 
         const existing = seen.get(key);
         if (existing) {
-          if (isAllowedConflict(existing, id)) {
+          // The registry's own exemption list, not a copy of it: a pair added
+          // there must not need this test edited to stay honest.
+          if (isAllowedConflict(existing as ShortcutId, id as ShortcutId)) {
             continue;
           }
           throw new Error(`Duplicate shortcut: "${id}" and "${existing}" both use ${key}`);

@@ -977,6 +977,14 @@ function annotationSurfaceState() {
     // The comment box's current contents, so a driver can tell "reopened an
     // annotation to edit it" from "opened an empty box beside it".
     popupDraft: (popup?.querySelector('.anno-popup-text') as HTMLTextAreaElement | null)?.value ?? null,
+    // Whether the box the editor opened for is the one taking keystrokes. An
+    // editor that opens without the caret in it sends the next sentence to the
+    // PTY, and nothing else on this surface would show that.
+    commentFocused: Boolean(
+      popup
+      && popup.querySelector('.anno-popup-text')
+      && document.activeElement === popup.querySelector('.anno-popup-text'),
+    ),
     labels: Array.from(popup?.querySelectorAll('.anno-popup-label') ?? [])
       .map((button) => button.getAttribute('aria-label') ?? ''),
     panelOpen: Boolean(panel),
@@ -984,6 +992,12 @@ function annotationSurfaceState() {
       emoji: text(card, '.anno-card-chip'),
       quote: text(card, '.anno-card-quote'),
       comment: text(card, '.anno-card-comment'),
+      // The row and its remove control, so a driver can see the control is
+      // still on the row's first line. A comment that spans the row used to
+      // push it onto a line of its own, which is invisible to every
+      // text-only assertion.
+      rect: box(card),
+      removeRect: box(card.querySelector('.anno-card-remove')),
     })),
     footer: text(panel, '.anno-panel-foot'),
   };
