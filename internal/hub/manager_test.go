@@ -619,6 +619,26 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 	}
 }
 
+// The remote image pipeline crosses the hub in two messages and dies if either
+// is dropped here: the placement description that tells the app an image exists,
+// and the blob answer carrying the pixels it then asks for.
+//
+// Worth its own test because the failure is silent and looks like it is covered.
+// The remote daemon fans both out correctly, the daemon's routing for relayed
+// kitty events is in place, and every unit test of that routing stays green —
+// while consumeRemote drops the messages before any of it runs, and a remote
+// session simply shows no images.
+func TestForwardsRawEventIncludesKittyRelayTraffic(t *testing.T) {
+	for _, event := range []string{
+		protocol.EventKittyPlacements,
+		protocol.EventKittyImageResult,
+	} {
+		if !forwardsRawEvent(event) {
+			t.Fatalf("forwardsRawEvent(%q) = false, want true", event)
+		}
+	}
+}
+
 // The remote daemon rejects every capability-gated command (register_workspace,
 // spawn_session, forwarded client payloads, ...) from a connection that never
 // sent client_hello. The hub's persistent endpoint connection must therefore

@@ -807,6 +807,12 @@ func forwardsRawEvent(event string) bool {
 		protocol.EventAttachResult,
 		protocol.EventPtyOutput,
 		protocol.EventPtyDesync,
+		// The same class as the pty stream above: per-session attach traffic a
+		// remote runtime produces for the app. A placement description and the
+		// blob answer it provokes both have to cross the hub, or a remote
+		// session's images never draw.
+		protocol.EventKittyPlacements,
+		protocol.EventKittyImageResult,
 		protocol.EventSessionExited,
 		protocol.EventWorkspaceLayoutActionResult,
 		protocol.EventWorkspaceTileContent,
