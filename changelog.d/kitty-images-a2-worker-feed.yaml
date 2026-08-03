@@ -1,0 +1,39 @@
+kind: internal
+area: terminal
+change: >
+  Worker-side groundwork for kitty graphics: the PTY feed path now splits the
+  stream into plain runs and complete kitty APC escapes, feeds the APCs to the
+  worker's ghostty terminal (the system's only kitty parser) and everything else
+  through the existing OSC 133 scanner, and returns the bytes the wire carries
+  in their place. Those bytes are read back off the terminal rather than derived
+  from the protocol: the scroll and cursor a placement caused, reproduced so a
+  client that cannot parse kitty lands on the same grid. Placement-set changes
+  are diffed into add/remove/update records for the rendering phase, and a chunk
+  whose grid effect cannot be expressed on the wire drops subscribers with a
+  named reason so the client re-attaches and is served a fresh snapshot instead
+  of quietly diverging. ghosttyvt gains read-only kitty observation and a PNG
+  decode hook.
+notes: >
+  Phase A2 of docs/plans/2026-08-02-terminal-kitty-images.md, feature-dark: the
+  production terminal keeps the zero kitty storage limit from A1, so ghostty
+  refuses every transmission and the only observable effect is that kitty escape
+  bytes stop reaching clients that could never render them. No protocol change.
+  A generated parity corpus records the substituted bytes and the grid the
+  worker ended up with for each case, and is replayed twice — into a native
+  ghostty that cannot parse kitty, and into the shipped wasm model the app
+  actually renders — so the substitution is proven to mean the same thing in
+  both runtimes; a Go fuzzer searches the same property over arbitrary streams.
+  Which bytes belong to a kitty escape is decided by tracking where ghostty's
+  own parser stands, so an escape pattern that appears inside another sequence
+  is left alone instead of being cut out of the middle of it. The shell's OSC
+  133 prompt markers are now framed by that same tracker rather than by a second
+  byte-pattern scan, so a marker pattern appearing inside another sequence, or a
+  real marker cut short by a control byte, is no longer mistaken for one.
+  Wherever the two streams differ, both sides now get a two-byte do-nothing
+  escape in place of what the other one saw: an escape also ends any
+  half-received character, so a side that loses the bytes must be given an escape
+  or the two terminals resolve that character differently and stay wrong. The
+  worker's copy also takes its substitute before the feed measures anything,
+  because ending a half-received character writes a cell and can move the cursor
+  to the next row — measured after, that movement was being described to the
+  client, which had already made the same move itself.

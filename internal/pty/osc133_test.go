@@ -58,13 +58,18 @@ func markerToSeg(m *osc133Marker) segMarker {
 	return sm
 }
 
-func feedSegmenter(seg *osc133ScanSegmenter, chunks []string) (markers []segMarker, plain []byte) {
+// collectMarkers feeds chunks to one segmenter and returns the markers it
+// extracted plus the bytes it would have written to the TERMINAL — plain runs
+// only, which is what makes the stripping assertion below meaningful.
+func collectMarkers(seg *feedSegmenter, chunks []string) (markers []segMarker, plain []byte) {
 	var buf bytes.Buffer
 	for _, chunk := range chunks {
-		seg.Feed([]byte(chunk), func(segment []byte, marker *osc133Marker) {
-			buf.Write(segment)
-			if marker != nil {
-				markers = append(markers, markerToSeg(marker))
+		seg.Feed([]byte(chunk), func(s feedSegment) {
+			if s.Kind == feedSegPlain {
+				buf.Write(s.Bytes)
+			}
+			if s.Marker != nil {
+				markers = append(markers, markerToSeg(s.Marker))
 			}
 		})
 	}
@@ -111,8 +116,8 @@ func mustJSON(v any) string {
 func TestOsc133SegmenterCorpus(t *testing.T) {
 	for _, c := range loadSegCorpus(t) {
 		t.Run(c.Name, func(t *testing.T) {
-			seg := &osc133ScanSegmenter{}
-			got, plain := feedSegmenter(seg, c.Chunks)
+			seg := &feedSegmenter{}
+			got, plain := collectMarkers(seg, c.Chunks)
 			if !markersEqual(got, c.Markers) {
 				t.Fatalf("markers mismatch\n got: %s\nwant: %s", mustJSON(got), mustJSON(c.Markers))
 			}
@@ -136,7 +141,7 @@ func TestOsc133SegmenterByteSplitting(t *testing.T) {
 					singleByte = append(singleByte, chunk[i:i+1])
 				}
 			}
-			got, plain := feedSegmenter(&osc133ScanSegmenter{}, singleByte)
+			got, plain := collectMarkers(&feedSegmenter{}, singleByte)
 			if !markersEqual(got, c.Markers) {
 				t.Fatalf("byte-split markers mismatch\n got: %s\nwant: %s", mustJSON(got), mustJSON(c.Markers))
 			}
@@ -148,18 +153,18 @@ func TestOsc133SegmenterByteSplitting(t *testing.T) {
 }
 
 // TestOsc133SegmenterBrokenMarkerPassesThrough verifies the runaway-marker
-// guard: an introducer that never terminates within osc133MaxPendingBytes is
-// abandoned and its bytes flushed rather than buffered forever.
+// guard: an introducer that never terminates within osc133MarkerMaxPendingBytes
+// is abandoned and its bytes flushed rather than buffered forever.
 func TestOsc133SegmenterBrokenMarkerPassesThrough(t *testing.T) {
-	seg := &osc133ScanSegmenter{}
+	seg := &feedSegmenter{}
 	broken := append([]byte{oscESC}, []byte("]133;C;cmdline_url=")...)
-	broken = append(broken, bytes.Repeat([]byte("x"), osc133MaxPendingBytes+16)...)
+	broken = append(broken, bytes.Repeat([]byte("x"), osc133MarkerMaxPendingBytes+16)...)
 
 	var markers int
 	var plain bytes.Buffer
-	seg.Feed(broken, func(segment []byte, marker *osc133Marker) {
-		plain.Write(segment)
-		if marker != nil {
+	seg.Feed(broken, func(s feedSegment) {
+		plain.Write(s.Bytes)
+		if s.Marker != nil {
 			markers++
 		}
 	})

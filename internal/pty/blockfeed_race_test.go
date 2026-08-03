@@ -3,7 +3,6 @@
 package pty
 
 import (
-	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,27 +13,10 @@ import (
 	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
-// markerScanSegmenter is a deliberately minimal stand-in for the real OSC 133
-// segmenter: it only recognizes the complete prompt-start sequence the test
-// writes (findSafeBoundary keeps escape sequences unsplit across read-loop
-// chunks, so the test never sees a partial marker). The real segmenter's
-// partial-marker handling is corpus-tested separately; THIS test exists to
-// prove the skeleton's locking contract, not parsing.
-type markerScanSegmenter struct{}
-
+// testPromptMark is the one marker these tests write. They exist to prove the
+// skeleton's locking contract, not parsing, and the real segmenter handles a
+// well-formed prompt-start under any chunking (corpus-tested next door).
 var testPromptMark = []byte("\x1b]133;A\x07")
-
-func (markerScanSegmenter) Feed(chunk []byte, emit func([]byte, *osc133Marker)) {
-	for {
-		i := bytes.Index(chunk, testPromptMark)
-		if i < 0 {
-			emit(chunk, nil)
-			return
-		}
-		emit(chunk[:i], &osc133Marker{Kind: osc133PromptStart})
-		chunk = chunk[i+len(testPromptMark):]
-	}
-}
 
 // pinningBlockTable keeps every successfully pinned primary-screen ref and
 // resolves them at snapshot time — the smallest table that exercises the
@@ -108,7 +90,7 @@ func TestBlockSnapshotAtomicity(t *testing.T) {
 		startedAt:   time.Now(),
 	}
 	s.ghostty = gt
-	s.blockFeed = &blockFeeder{term: gt, seg: markerScanSegmenter{}, table: table}
+	s.wireFeed = &wireFeeder{term: gt, blocks: &blockFeeder{term: gt, table: table}}
 	go s.readLoop(nil, func(string, ...any) {})
 
 	// Writer: each iteration opens a "block" (marker pins the cursor row, then

@@ -103,13 +103,13 @@ func blocksFromStream(t *testing.T, stream []byte) []AttachBlockData {
 	row := 0
 	table := newBlockTable()
 	t.Cleanup(table.Close)
-	seg := &osc133ScanSegmenter{}
-	seg.Feed(stream, func(_ []byte, marker *osc133Marker) {
-		if marker == nil {
+	seg := &feedSegmenter{}
+	seg.Feed(stream, func(e feedSegment) {
+		if e.Marker == nil {
 			return
 		}
 		row++
-		table.ApplyMarker(*marker, &fakeBlockRef{x: 0, y: row, freed: &freed}, false)
+		table.ApplyMarker(*e.Marker, &fakeBlockRef{x: 0, y: row, freed: &freed}, false)
 	})
 	return table.SnapshotBlocks()
 }

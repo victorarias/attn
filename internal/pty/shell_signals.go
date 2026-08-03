@@ -67,7 +67,11 @@ type shellSignalArbiter struct {
 	// PTY's session leader and never changes group.
 	shellPgid int
 
-	seg osc133ScanSegmenter
+	// seg is this arbiter's own instance of the feed segmenter. It runs over
+	// the RAW chunk from the read loop, independently of the one in wireFeeder,
+	// and takes only the marker emissions — the same machine, so the same
+	// framing, without the heartbeat depending on the wire path's state.
+	seg feedSegmenter
 
 	// markerAtPrompt says the most recent marker verdict was a prompt; ownerPgid
 	// is the foreground program that verdict arrived from (0 when it arrived
@@ -124,11 +128,11 @@ func (a *shellSignalArbiter) ObserveOutput(chunk []byte, now time.Time) []Observ
 	// shares claim state with the poller, so take the lock across the feed.
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	a.seg.Feed(chunk, func(_ []byte, m *osc133Marker) {
-		if m == nil {
+	a.seg.Feed(chunk, func(seg feedSegment) {
+		if seg.Marker == nil {
 			return
 		}
-		if obs, ok := a.observeMarker(m, now); ok {
+		if obs, ok := a.observeMarker(seg.Marker, now); ok {
 			out = append(out, obs)
 		}
 	})

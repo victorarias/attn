@@ -97,10 +97,12 @@ type Session struct {
 	// the complete query answerer and a snapshot-restored client can suppress
 	// every response.
 	ghostty *ghosttyvt.Terminal
-	// blockFeed owns writes into ghostty, splitting at OSC 133 markers to
-	// maintain the worker-side command-block table (Phase 3a). nil exactly
-	// when ghostty is nil; every use is nil-guarded like ghostty's.
-	blockFeed  *blockFeeder
+	// wireFeed owns writes into ghostty: it splits kitty APCs out of the
+	// stream, runs everything else through the OSC 133 scanner that maintains
+	// the worker-side command-block table (Phase 3a), and returns the bytes the
+	// wire carries in place of what it fed. nil exactly when ghostty is nil;
+	// every use is nil-guarded like ghostty's.
+	wireFeed   *wireFeeder
 	seqCounter atomic.Uint32
 
 	// replayMu makes Ghostty feeds and lastReplaySeq atomic for snapshots, so a
@@ -193,6 +195,31 @@ func (s *Session) fanOut(data []byte, seq uint32) {
 			delete(s.subscribers, id)
 		}
 		s.subMu.Unlock()
+	}
+}
+
+// forceResync drops every subscriber with reason, which reaches each client as
+// a pty_desync: the frontend resets its terminal and immediately re-attaches,
+// and that attach serves a fresh server-authoritative snapshot. It is the same
+// round trip an overflowing client buffer already takes, reused as the escape
+// hatch for a chunk whose grid effect the wire could not express (wireFeeder) —
+// re-syncing by construction beats guessing at bytes.
+//
+// Must be called with replayMu released; the subscriber callbacks take their
+// own locks, exactly like fanOut.
+func (s *Session) forceResync(reason string) {
+	s.subMu.Lock()
+	subs := make([]*sessionSubscriber, 0, len(s.subscribers))
+	for id, sub := range s.subscribers {
+		subs = append(subs, sub)
+		delete(s.subscribers, id)
+	}
+	s.subMu.Unlock()
+
+	for _, sub := range subs {
+		if sub.onDrop != nil {
+			sub.onDrop(reason)
+		}
 	}
 }
 
@@ -310,12 +337,15 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if readLoopSeqGapHook != nil {
 					readLoopSeqGapHook()
 				}
+				wire, resync := data, ""
 				s.replayMu.Lock()
-				if s.blockFeed != nil {
+				if s.wireFeed != nil {
 					// Feed the server-authoritative terminal under the same lock
-					// as the seq watermark so a snapshot stays atomic with it;
-					// the feeder splits at OSC 133 markers to pin block positions.
-					s.blockFeed.feed(data)
+					// as the seq watermark so a snapshot stays atomic with it.
+					// The feeder pins block positions at OSC 133 markers and
+					// hands back the wire bytes for this chunk, which differ
+					// from the raw ones only when it extracted a kitty APC.
+					wire, resync = s.wireFeed.feed(data)
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
@@ -345,7 +375,22 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 						s.writeDeviceAttributesResponse(logf)
 					}
 				}
-				s.fanOut(data, seq)
+				// An empty wire chunk means the feeder is holding an
+				// unterminated escape: there is nothing for this seq to carry,
+				// and downstream dedup is `seq > last_seq`, which does not
+				// require the numbers to be dense.
+				if len(wire) > 0 {
+					s.fanOut(wire, seq)
+				}
+				if resync != "" {
+					if logf != nil {
+						logf("pty layout resync: session=%s reason=%s", s.id, resync)
+					}
+					s.forceResync(resync)
+				}
+				// The signal observers read the RAW chunk, not the wire: they
+				// look for the agent's own OSC state signals, which the feeder
+				// never touches.
 				if s.harnessSignals != nil && s.onState != nil {
 					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
 						s.onState(obs)
@@ -370,14 +415,23 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
+		wire, resync := carryover, ""
 		s.replayMu.Lock()
-		if s.blockFeed != nil {
-			s.blockFeed.feed(carryover)
+		if s.wireFeed != nil {
+			wire, resync = s.wireFeed.feed(carryover)
 		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
 		s.drainGhosttyResponses(logf)
-		s.fanOut(carryover, seq)
+		if len(wire) > 0 {
+			s.fanOut(wire, seq)
+		}
+		if resync != "" {
+			if logf != nil {
+				logf("pty layout resync: session=%s reason=%s", s.id, resync)
+			}
+			s.forceResync(resync)
+		}
 	}
 
 	waitErr := s.cmd.Wait()
@@ -574,8 +628,8 @@ func (s *Session) info() AttachInfo {
 	// the attach snapshot is an atomic {dump, blocks, watermark} triple, so a
 	// block row always indexes the dump it shipped with (Phase 3a contract).
 	var ghosttyBlocks []AttachBlockData
-	if s.blockFeed != nil {
-		ghosttyBlocks = s.blockFeed.snapshotBlocks()
+	if s.wireFeed != nil {
+		ghosttyBlocks = s.wireFeed.snapshotBlocks()
 	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
@@ -758,7 +812,7 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 
 // closePTY releases the pty and the native terminal state behind it.
 //
-// The block feed and the Ghostty terminal own native refs that info() resolves
+// The wire feed and the Ghostty terminal own native refs that info() resolves
 // and resize() reflows, so their teardown takes replayMu — the same lock those
 // readers hold. Manager.Remove can hand an already-looked-up session to an
 // in-flight attach before closing it; without this hold that attach could read
@@ -769,10 +823,10 @@ func (s *Session) closePTY() {
 	s.closePTMX()
 
 	s.replayMu.Lock()
-	blockFeed, ghostty := s.blockFeed, s.ghostty
-	s.blockFeed, s.ghostty = nil, nil
-	if blockFeed != nil {
-		blockFeed.close()
+	wireFeed, ghostty := s.wireFeed, s.ghostty
+	s.wireFeed, s.ghostty = nil, nil
+	if wireFeed != nil {
+		wireFeed.close()
 	}
 	if ghostty != nil {
 		ghostty.Close()
