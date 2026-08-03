@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "203"
+const ProtocolVersion = "204"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -203,6 +203,7 @@ const (
 	CmdSessionAnnotationsGet                 = "session_annotations_get"
 	CmdSessionAnnotationsSave                = "session_annotations_save"
 	CmdSessionAnnotationsClear               = "session_annotations_clear"
+	CmdSessionAnnotationsSubmit              = "session_annotations_submit"
 	CmdMarkdownAnnotationsGet                = "markdown_annotations_get"
 	CmdMarkdownAnnotationsSave               = "markdown_annotations_save"
 	CmdMarkdownAnnotationsClear              = "markdown_annotations_clear"
@@ -343,6 +344,7 @@ const (
 	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
 	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
 	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
+	EventSessionAnnotationsSubmitResult  = "session_annotations_submit_result"
 	EventMarkdownAnnotationsGetResult    = "markdown_annotations_get_result"
 	EventMarkdownAnnotationsSaveResult   = "markdown_annotations_save_result"
 	EventMarkdownAnnotationsClearResult  = "markdown_annotations_clear_result"
@@ -1562,6 +1564,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg SessionAnnotationsClearMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal session_annotations_clear: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSessionAnnotationsSubmit:
+		var msg SessionAnnotationsSubmitMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal session_annotations_submit: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

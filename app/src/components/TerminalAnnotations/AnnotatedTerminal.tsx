@@ -46,8 +46,15 @@ export interface SessionAnnotationsResult {
   generation: number;
 }
 
+// What a send did. `delivered` is the only one that spent the marks; every
+// other outcome leaves them on the screen to send again.
+export type SessionAnnotationsSubmitStatus =
+  | 'delivered'
+  | 'skipped_pending_approval'
+  | (string & {});
+
 // The daemon calls this surface needs. Bundled rather than threaded one by one:
-// annotations are useless without all four, and a partial set would silently
+// annotations are useless without all five, and a partial set would silently
 // degrade to the in-memory behaviour this exists to replace.
 export interface SessionAnnotationApi {
   fetchMessages: (sessionId: string) => Promise<SessionMessagesResult>;
@@ -58,6 +65,14 @@ export interface SessionAnnotationApi {
     generation: number,
   ) => Promise<{ stale: boolean }>;
   clearAnnotations: (sessionId: string, generation: number) => Promise<{ generation: number }>;
+  // Type the composed feedback into the session AND submit it. Daemon-side, so
+  // it can refuse while an approval prompt is up — where the submitting Enter
+  // would answer the prompt — and so the Enter lands as a keypress rather than
+  // as part of the pasted text.
+  submitAnnotations: (
+    sessionId: string,
+    text: string,
+  ) => Promise<{ status: SessionAnnotationsSubmitStatus }>;
 }
 
 type TerminalProps = Omit<
@@ -69,10 +84,9 @@ export interface AnnotatedTerminalProps extends TerminalProps {
   sessionId: string;
   // Drives when the message window is (re)fetched. Absent disables annotation.
   sessionState?: UISessionState;
+  // Absent disables annotation, so the surface is never offered when there is
+  // nowhere for it to go.
   annotationApi?: SessionAnnotationApi;
-  // Types the composed feedback into the session. Absent disables sending, so
-  // the surface is never offered when there is nowhere for it to go.
-  onSubmitAnnotations?: (text: string) => void;
   // Whether this pane is the focused leaf of the visible session. Gates the
   // send shortcut's *registration*: the dispatcher consumes ⌘Enter whenever a
   // handler exists for it, so registering from every mounted pane would eat the
@@ -90,6 +104,19 @@ interface Notice {
   seq: number;
 }
 
+// The footer's whole vocabulary. `sending` exists because the delivery is a
+// round trip with a deliberate pause in it (the daemon's gap between the paste
+// and its Enter), and a button that looks idle for a fifth of a second is a
+// button people press twice.
+type SendOutcome =
+  | { kind: 'sending' }
+  // `kept` is what was annotated while the send was in flight and therefore
+  // was not part of it. Reported rather than assumed to be zero: a panel that
+  // does not empty after a successful send otherwise reads as a failed one.
+  | { kind: 'sent'; count: number; kept: number }
+  | { kind: 'skipped' }
+  | { kind: 'error'; message: string };
+
 interface Composer {
   annotationId: string;
   clientX: number;
@@ -102,7 +129,7 @@ interface Composer {
 
 export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerminalProps>(
   function AnnotatedTerminal(
-    { sessionId, sessionState, annotationApi, onSubmitAnnotations, paneActive = false, ...terminalProps },
+    { sessionId, sessionState, annotationApi, paneActive = false, ...terminalProps },
     ref,
   ) {
     // Built once. A `useRef(new TerminalAnnotationStore())` would construct a
@@ -113,7 +140,12 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // panel and tells the terminal to repaint.
     const [version, setVersion] = useState(0);
     const [composer, setComposer] = useState<Composer | null>(null);
-    const [sentCount, setSentCount] = useState(0);
+    // What the last send did, shown in the panel's footer. Null between sends.
+    const [outcome, setOutcome] = useState<SendOutcome | null>(null);
+    // Guards the round trip. The send is reachable from both the button and
+    // ⌘Enter, and a second one landing mid-flight would deliver the same
+    // feedback twice — the marks are not cleared until the first answers.
+    const sendingRef = useRef(false);
     // What an annotate gesture that resolved to nothing has to say for itself,
     // and where it was made. Null the rest of the time — this is not a status
     // line, it answers a question the user just asked with the pointer.
@@ -140,7 +172,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // hydrate, raised by every save, and re-seeded whenever the daemon refuses
     // one as stale.
     const generationRef = useRef(0);
-    const enabled = Boolean(annotationApi && onSubmitAnnotations);
+    const enabled = Boolean(annotationApi);
 
     // The surface borrows the keyboard from the terminal and has to give it
     // back, so it keeps its own handle on the terminal alongside whatever the
@@ -433,8 +465,13 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       event.preventDefault();
     };
 
+    // Delivers the set into the session and submits it. The marks are spent
+    // only on a `delivered` answer: a send that was refused — the session is on
+    // an approval prompt, the socket is down — leaves every annotation where it
+    // is, because clearing work that was never delivered is the one failure the
+    // user cannot undo.
     const send = () => {
-      if (annotations.length === 0 || !onSubmitAnnotations) return;
+      if (annotations.length === 0 || !annotationApi || sendingRef.current) return;
       // A comment being typed when the send fires is part of what the user
       // means to say, so commit it rather than dropping it on the floor.
       if (composed && composer?.writing) {
@@ -445,11 +482,17 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       // Re-read after that commit rather than reusing the render's list, which
       // predates it. Committing an emptied comment can leave nothing to send;
       // that is still a mutation the daemon has to hear about.
-      const sending = store.list();
+      //
+      // Copied, not referenced: `list()` hands back the store's own array (it
+      // is read once per repaint, so it does not allocate), and this one is
+      // held across the delivery round trip. A mark made mid-flight would
+      // otherwise appear in a payload that was composed before it existed, and
+      // be spent by a send it was never part of.
+      const sending = store.list().map((entry) => ({ ...entry }));
+      closeComposer();
+      bump();
       if (sending.length === 0) {
         persist();
-        closeComposer();
-        bump();
         return;
       }
       const payload = buildAnnotationPayload(sending.map((entry) => ({
@@ -458,24 +501,61 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
         comment: entry.comment,
         start: entry.start,
       })));
-      onSubmitAnnotations(payload);
-      setSentCount(sending.length);
-      store.clear();
-      closeComposer();
-      bump();
-      // A tombstone rather than a save of the empty list: it also refuses any
-      // save that was already in flight, so sent marks cannot reappear.
-      if (annotationApi) {
-        generationRef.current += 1;
-        void annotationApi.clearAnnotations(sessionId, generationRef.current)
-          .then((result) => {
-            generationRef.current = Math.max(generationRef.current, result.generation);
-          })
-          .catch(() => {
-            // The marks are typed into the session either way; the next
-            // mutation's save re-establishes the row.
+      sendingRef.current = true;
+      setOutcome({ kind: 'sending' });
+      void annotationApi.submitAnnotations(sessionId, payload)
+        .then((result) => {
+          if (result.status !== 'delivered') {
+            setOutcome(result.status === 'skipped_pending_approval'
+              ? { kind: 'skipped' }
+              : { kind: 'error', message: 'The session did not take the feedback. Nothing was sent.' });
+            return;
+          }
+          // Spend what was actually delivered, and only that. The round trip
+          // has a deliberate pause in it and the surface stays live throughout,
+          // so by the time it answers the store can hold marks the payload
+          // never contained: one made since, and one whose label or comment was
+          // changed since. An entry is spent only if it still reads exactly as
+          // it did when it was composed — otherwise the agent got the old text
+          // and the newer version has yet to be sent.
+          const current = new Map(store.list().map((entry) => [entry.id, entry]));
+          sending.forEach((entry) => {
+            const now = current.get(entry.id);
+            if (!now) return;
+            if (now.emoji !== entry.emoji || now.comment !== entry.comment) return;
+            store.remove(entry.id);
           });
-      }
+          const kept = store.list().length;
+          setOutcome({ kind: 'sent', count: sending.length, kept });
+          bump();
+          // Either way the generation is raised, which is what refuses a save
+          // that was already in flight and keeps sent marks from reappearing.
+          // A tombstone when nothing survived; an ordinary write-through of the
+          // survivors when something did, because a tombstone would take them
+          // with it.
+          if (kept > 0) {
+            persist();
+            return;
+          }
+          generationRef.current += 1;
+          return annotationApi.clearAnnotations(sessionId, generationRef.current)
+            .then((cleared) => {
+              generationRef.current = Math.max(generationRef.current, cleared.generation);
+            })
+            .catch(() => {
+              // The feedback is in the session either way; the next mutation's
+              // save re-establishes the row.
+            });
+        })
+        .catch((error: unknown) => {
+          setOutcome({
+            kind: 'error',
+            message: error instanceof Error ? error.message : 'Send failed',
+          });
+        })
+        .finally(() => {
+          sendingRef.current = false;
+        });
     };
 
     // ⌘Enter sends the set without reaching for the panel — the gesture that
@@ -492,13 +572,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       enabled && paneActive && annotations.length > 0,
     );
 
-    // The confirmation replaces the panel's footer rather than a toast, and only
-    // for as long as it takes to read: the panel is where the user was looking.
+    // The confirmation lives in the panel's footer rather than in a toast: the
+    // panel is where the user was looking. It expires on its own — it reports
+    // something that already finished. A refusal does not: it is the reason the
+    // marks are still on the screen, and it stays until the retry it is asking
+    // for succeeds.
     useEffect(() => {
-      if (sentCount === 0) return;
-      const timer = window.setTimeout(() => setSentCount(0), 2200);
+      if (outcome?.kind !== 'sent') return;
+      const timer = window.setTimeout(() => setOutcome(null), 2200);
       return () => window.clearTimeout(timer);
-    }, [sentCount]);
+    }, [outcome]);
 
     // Same measure-then-clamp as the popup, for the same reason: the pointer is
     // routinely near an edge, and a sentence is wider than the popup is.
@@ -568,7 +651,18 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       return () => window.removeEventListener('resize', onResize);
     }, [panelAt]);
 
-    const panelOpen = annotations.length > 0 || sentCount > 0;
+    const panelOpen = annotations.length > 0 || outcome?.kind === 'sent';
+
+    // The sentence above the footer. A refusal explains why the marks are still
+    // there; a send that left some behind explains why the panel did not empty.
+    // Both are the answer to "I pressed Send and the list is still here".
+    const noteText = outcome?.kind === 'skipped'
+      ? 'Not sent — the session is waiting on an approval, where the sending Enter would answer it. Send again once you have answered.'
+      : outcome?.kind === 'error'
+        ? outcome.message
+        : outcome?.kind === 'sent' && outcome.kept > 0
+          ? `✓ sent ${outcome.count} to the session. ${outcome.kept} still here — annotated or changed while it was sending, so not part of what went.`
+          : null;
 
     return (
       <>
@@ -733,20 +827,33 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 </div>
               ))}
             </div>
+            {/* A refusal sits above the footer rather than replacing it: it is
+                asking to be retried, and the button that retries has to stay
+                where the eye already is. */}
+            {noteText ? (
+              <div className="anno-panel-note" data-testid="annotation-send-note" role="status">
+                {noteText}
+              </div>
+            ) : null}
             <div className="anno-panel-foot">
-              {sentCount > 0 ? (
-                <span className="anno-panel-sent">✓ typed {sentCount} into the session</span>
+              {outcome?.kind === 'sent' && outcome.kept === 0 ? (
+                <span className="anno-panel-sent">✓ sent {outcome.count} to the session</span>
               ) : (
                 <>
                   <span className="anno-panel-n">
                     {annotations.length} annotation{annotations.length === 1 ? '' : 's'}
                   </span>
-                  <button type="button" className="anno-panel-send" onClick={send}>
-                    Send all
+                  <button
+                    type="button"
+                    className="anno-panel-send"
+                    onClick={send}
+                    disabled={outcome?.kind === 'sending'}
+                  >
+                    {outcome?.kind === 'sending' ? 'Sending…' : 'Send all'}
                     {/* The key is only live while this pane holds focus, so the
                         hint is only shown then — a printed shortcut that does
                         nothing where it is printed is worse than none. */}
-                    {paneActive ? (
+                    {paneActive && outcome?.kind !== 'sending' ? (
                       <span className="anno-panel-send-key">{formatShortcut('terminal.sendAnnotations')}</span>
                     ) : null}
                   </button>

@@ -195,7 +195,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '203';
+export const PROTOCOL_VERSION = '204';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -4056,6 +4056,21 @@ export function useDaemonSocket({
     );
   }, [sendRequest]);
 
+  // Deliver the composed annotation feedback into the session — typed as one
+  // pasted block and then submitted, both daemon-side. Resolves with the status
+  // for `delivered` and `skipped_pending_approval` alike; rejects on error. Only
+  // `delivered` means the marks were spent.
+  const sendSessionAnnotationsSubmit = useCallback((
+    sessionId: string,
+    text: string,
+  ): Promise<{ status: string }> => {
+    return sendRequest(
+      'session_annotations_submit',
+      { session_id: sessionId, text },
+      'Session annotation send timed out',
+    );
+  }, [sendRequest]);
+
   // Fetch one ticket's full record (row + activity thread + current artifacts) for the
   // detail view. The board feed carries only bare rows, so the detail panel pulls
   // the full record by id, correlated by request_id against the ticket_result event.
@@ -4916,6 +4931,7 @@ export function useDaemonSocket({
     sendSessionAnnotationsGet,
     sendSessionAnnotationsSave,
     sendSessionAnnotationsClear,
+    sendSessionAnnotationsSubmit,
     fetchTicket,
     sendTicketChangeStatus,
     sendTicketAddComment,

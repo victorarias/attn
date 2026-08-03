@@ -22,6 +22,7 @@ type SessionAnnotationEvent = {
   success?: boolean;
   error?: string;
   stale?: unknown;
+  status?: unknown;
   messages?: unknown;
   truncated?: unknown;
   annotations?: unknown;
@@ -149,6 +150,22 @@ export function handleSessionAnnotationDaemonEvent(
         'Session annotation clear failed',
       );
       return true;
+
+    case 'session_annotations_submit_result': {
+      // A skip is an outcome to show, not a failure to report: the session is
+      // sitting on an approval prompt where the submit's Enter would answer it,
+      // so nothing was typed and the marks are still there to retry with.
+      // Rejecting would file that alongside a dead socket and lose the reason.
+      const skipped = !event.success && event.status === 'skipped_pending_approval';
+      settlePendingRequest(
+        pending,
+        'session_annotations_submit',
+        skipped ? { ...event, success: true } : event,
+        (e) => ({ status: String(e.status ?? 'error') }),
+        'Session annotation send failed',
+      );
+      return true;
+    }
 
     default:
       return false;

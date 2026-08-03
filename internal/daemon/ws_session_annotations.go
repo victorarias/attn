@@ -136,6 +136,67 @@ func (d *Daemon) handleSessionAnnotationsClear(client *wsClient, msg *protocol.S
 	d.sendToClient(client, result)
 }
 
+// handleSessionAnnotationsSubmit delivers composed annotation feedback into a
+// session through typeDoorbell — bracketed paste, the measured gap, then Enter
+// — so "Send all" both types and submits.
+//
+// The delivery is the daemon's business even though the text is the client's.
+// Three things only reachable here make the difference between a submit and a
+// paste that happens to end in a carriage return:
+//
+//   - The approval guard. pending_approval is an annotatable state (an approval
+//     prompt is exactly when a user wants to push back), but it is also a state
+//     where Enter answers the prompt. typeDoorbell refuses, and the client is
+//     told to keep the marks and retry rather than having them spent on a
+//     y/n it never meant to answer.
+//   - The PTY write fence, which keeps a keystroke racing the gap from landing
+//     between the paste and its Enter.
+//   - The gap itself. An Enter arriving in the same PTY read as the paste
+//     terminator is folded into the pasted text, so the payload sits in the
+//     composer and never submits — see doorbellSubmitDelay's receipt.
+//
+// The annotations are not cleared here. Unlike a markdown draft, whose payload
+// the daemon composes from what it stores, the client composed this one and
+// clears its own list on a delivered result.
+func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.SessionAnnotationsSubmitMessage) {
+	sessionID := strings.TrimSpace(msg.SessionID)
+	result := protocol.SessionAnnotationsSubmitResultMessage{
+		Event:     protocol.EventSessionAnnotationsSubmitResult,
+		RequestID: msg.RequestID,
+		SessionID: sessionID,
+		Status:    markdownSubmitStatusError,
+	}
+	fail := func(errText string) {
+		result.Error = protocol.Ptr(errText)
+		d.sendToClient(client, result)
+	}
+	if sessionID == "" {
+		fail("session_annotations_submit: session_id is required")
+		return
+	}
+	if strings.TrimSpace(msg.Text) == "" {
+		fail("session_annotations_submit: text is required")
+		return
+	}
+	if d.store.Get(sessionID) == nil {
+		fail("session_annotations_submit: unknown session " + sessionID)
+		return
+	}
+	if err := d.typeDoorbell(sessionID, msg.Text); err != nil {
+		if errors.Is(err, errDoorbellBlockedByApproval) {
+			result.Status = markdownSubmitStatusSkipped
+			d.sendToClient(client, result)
+			return
+		}
+		d.logf("session_annotations_submit: %s: delivery failed: %v", sessionID, err)
+		fail(err.Error())
+		return
+	}
+	result.Success = true
+	result.Status = markdownSubmitStatusDelivered
+	d.sendToClient(client, result)
+}
+
 // decodeSessionAnnotations unmarshals a stored draft blob into protocol values,
 // treating empty as an empty list.
 func decodeSessionAnnotations(raw string) ([]protocol.SessionAnnotation, error) {

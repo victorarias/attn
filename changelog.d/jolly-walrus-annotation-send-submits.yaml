@@ -1,0 +1,13 @@
+kind: changed
+area: terminal
+change: >
+  "Send all" in the terminal annotation panel now submits the feedback instead
+  of leaving it in the agent's prompt to send by hand. The delivery moved to the
+  daemon, which types the payload as one pasted block and follows it with Enter
+  as a separate keypress. Two things follow from that: while the session is
+  waiting on an approval prompt — where that Enter would answer the prompt — the
+  send is refused and the panel says so with the annotations still there to
+  retry, and annotations are now cleared only once the daemon confirms delivery,
+  so a send that fails no longer takes the marks with it. A send clears only
+  what it actually sent: anything annotated while it was in flight stays, and
+  the panel says why it did not empty.

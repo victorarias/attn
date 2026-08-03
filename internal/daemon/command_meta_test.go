@@ -118,6 +118,15 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			want: "sess-messages",
 		},
 		{
+			// Hub→remote regression: the submit types into the session's PTY,
+			// which only the daemon running that PTY can do. Handled locally, a
+			// remote pane's Send all would report success and deliver nothing.
+			name: "session_annotations_submit",
+			cmd:  protocol.CmdSessionAnnotationsSubmit,
+			msg:  &protocol.SessionAnnotationsSubmitMessage{SessionID: "sess-anno-submit", Text: "feedback"},
+			want: "sess-anno-submit",
+		},
+		{
 			// Hub→remote regression: annotation drafts are keyed by session in
 			// the owning daemon's store. Read, written, or cleared on the hub
 			// instead, a remote pane would keep a second divergent set — and
