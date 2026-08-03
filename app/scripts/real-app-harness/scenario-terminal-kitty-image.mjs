@@ -28,6 +28,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
   createSessionAndWaitForInitialPane,
@@ -40,7 +41,6 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile, resolveHarnessResources } from './harnessProfile.mjs';
 import { ensureFreshWorld } from './freshWorld.mjs';
-import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
 import {
   captureSessionArtifacts,
   sleep,
@@ -70,6 +70,15 @@ const IMAGE_ID = 8801;
 
 const BLOB_TIMEOUT_MS = 20_000;
 const PLACEMENT_TIMEOUT_MS = 20_000;
+
+// A capture smaller than this is not a picture of the app. Receipt, measured
+// 2026-08-03 on this scenario's own artifacts: a screen-region grab of a parked
+// window returned a 40x1200px sliver of chrome at 14,201 bytes, while every real
+// full-window capture of the same app ran 155,065-493,022 bytes (the low end
+// being a near-empty pane). 60KB sits ~4x above every broken observation and
+// ~2.5x below the smallest healthy one, so only a capture that failed to see the
+// window touches it.
+const MIN_CAPTURE_BYTES = 60_000;
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -145,6 +154,46 @@ function findPlacement(state, imageId) {
   return (state?.placements || []).find((entry) => entry.imageId === imageId) || null;
 }
 
+/**
+ * Evidence-grade screenshot: the app photographs its OWN window.
+ *
+ * The obvious route, captureFrontWindowScreenshot, resolves the window's bounds
+ * and then grabs that RECTANGLE OF THE SCREEN. The harness parks the app window
+ * mostly off-screen, so the rect clips at the screen edge and yields a sliver of
+ * window chrome that looks identical in every leg — which is exactly how this
+ * scenario once filed three byte-identical PNGs of nothing as proof. The bridge
+ * action instead captures by CGWindowID (`screencapture -l <id> -o`), reading
+ * the window's own surface whatever sits on top of it, and it re-resolves that
+ * id on every call, which matters because a relaunch mints a new one.
+ *
+ * Two tripwires so a capture that saw nothing fails the leg instead of being
+ * filed: the app must report it captured the window rather than falling back to
+ * a region grab, and the file must be large enough to be a window.
+ */
+async function captureWindowEvidence(client, runner, name) {
+  const outputPath = path.join(runner.runDir, name);
+  const result = await client.request('capture_native_window_screenshot', { path: outputPath });
+  runner.assert(
+    result?.source === 'native_window',
+    `capture ${name} reported source ${JSON.stringify(result?.source ?? null)}, want "native_window" — a screen-region fallback photographs whatever occupies the window's rect, not the window (${result?.windowCaptureError ?? 'no window-capture error reported'})`,
+    result,
+  );
+  const bytes = fs.statSync(outputPath).size;
+  runner.assert(
+    bytes >= MIN_CAPTURE_BYTES,
+    `capture ${name} is ${bytes} bytes, under the ${MIN_CAPTURE_BYTES}-byte floor every real window capture clears — the window was not in the frame`,
+    { path: outputPath, bytes, windowId: result?.windowId ?? null, bounds: result?.bounds ?? null },
+  );
+  return {
+    name,
+    path: outputPath,
+    bytes,
+    sha256: createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex'),
+    windowId: result?.windowId ?? null,
+    bounds: result?.bounds ?? null,
+  };
+}
+
 async function poll(fn, description, timeoutMs) {
   const started = Date.now();
   let last = null;
@@ -207,6 +256,7 @@ async function main() {
   let scrolled = null;
   let cleared = null;
   let darkState = null;
+  const captures = {};
 
   runner.log('run context', {
     runDir: runner.runDir, sessionDir: runner.sessionDir, wsUrl: options.wsUrl, profile,
@@ -313,7 +363,7 @@ async function main() {
         placed.state,
       );
       runner.writeJson('placement-placed.json', placed.state);
-      await captureFrontWindowScreenshot(path.join(runner.runDir, 'image-drawn.png'), { client });
+      captures.drawn = await captureWindowEvidence(client, runner, 'image-drawn.png');
     });
 
     await runner.step('placement_rides_the_scroll', async () => {
@@ -392,7 +442,18 @@ async function main() {
         cleared,
       );
       runner.writeJson('placement-cleared.json', cleared);
-      await captureFrontWindowScreenshot(path.join(runner.runDir, 'image-deleted.png'), { client });
+      captures.deleted = await captureWindowEvidence(client, runner, 'image-deleted.png');
+      // Liveness, not rendering: the pane has scrolled and run two more commands
+      // since image-drawn.png, so these two frames cannot legitimately match.
+      // Identical bytes mean the camera is pointed at something that does not
+      // change — a parked window's chrome, a stale file — and every screenshot
+      // this run files is worthless. What the image itself did is the placement
+      // state's job, above; this only certifies the pictures are of the app.
+      runner.assert(
+        captures.deleted.sha256 !== captures.drawn.sha256,
+        `image-deleted.png is byte-identical to image-drawn.png (sha256 ${captures.drawn.sha256}), though the pane scrolled and ran two commands between them — the captures are not showing live window content`,
+        captures,
+      );
     });
 
     await runner.step('dark_without_the_override', async () => {
@@ -433,7 +494,11 @@ async function main() {
         darkState,
       );
       runner.writeJson('placement-dark.json', darkState);
-      await captureFrontWindowScreenshot(path.join(runner.runDir, 'dark-no-image.png'), { client });
+      // Captured after a relaunch, so its windowId is a different number from
+      // the two above — recorded in captures.json, which is how a reader can see
+      // for themselves that each capture resolved the window it ran against.
+      captures.dark = await captureWindowEvidence(client, runner, 'dark-no-image.png');
+      runner.writeJson('captures.json', captures);
     });
 
     const result = runner.finishSuccess({
@@ -444,6 +509,7 @@ async function main() {
       clearedCount: cleared.placements.length,
       darkCount: darkState.placements.length,
       grid: { cols: placed.state.cols, rows: placed.state.rows },
+      captures,
     });
     console.log('[verify] PASS — kitty image described, drawn, scrolled, deleted; dark without the override.');
     console.log(JSON.stringify(result, null, 2));
@@ -451,7 +517,11 @@ async function main() {
     for (const id of [sessionId, darkSessionId].filter(Boolean)) {
       await captureSessionArtifacts(client, runner.runDir, `kitty-image-failure-${id}`, id).catch(() => {});
     }
-    await captureFrontWindowScreenshot(path.join(runner.runDir, 'failure.png'), { client }).catch(() => {});
+    // Diagnostic, not evidence: no tripwires here, because a failing run wants
+    // whatever picture is obtainable, including a fallback region grab.
+    await client.request('capture_native_window_screenshot', {
+      path: path.join(runner.runDir, 'failure.png'),
+    }).catch(() => {});
     const result = runner.finishFailure(error, { sessionId, darkSessionId });
     console.error(result.error);
     process.exitCode = 1;
