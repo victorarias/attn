@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  New vision doc, docs/vision/friendly-home-for-agents.md: the north star for
+  making attn a home for agents — seats (durable identities generalizing the
+  chief), consented handoffs replacing keeper narration and workspace context,
+  seeds (a fine-grained attn-native work graph tickets become views over), and
+  intentful recognition (laurels) routed through a minimal central server.
