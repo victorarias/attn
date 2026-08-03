@@ -83,9 +83,8 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 // A4 flip is the SHIPPING configuration: a session's terminal is built with
 // kittyStorageLimitDefault unless the environment says otherwise. It exercises
 // synthesis — the observed scroll and cursor written in an APC's place — and it
-// has no knowingly-red class left.
-// All six recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md
-// are closed:
+// has one open class, recorded next to the closed ones in the plan.
+// All six classes A4 set out to close are closed:
 //
 //   - an image that appeared and died inside one chunk, and the `Updated`-blind
 //     end-of-feed check, both settled by unaccountedResync;
@@ -98,7 +97,16 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 //     both answered with a tripwire resync (kittyResyncScrollClamped,
 //     kittyResyncMarginMode) instead of cleverer synthesis.
 //
-// Last measured 15m / 38.1M execs green on the pin in ghostty-vt-native.pin.
+// Still open, and the reason this target is knowingly red: a placement on a row
+// that is already full. The pending wrap the last column carries is not part of
+// a cursor position, so a placement that consumes it measures as no movement at
+// all and the client keeps a wrap the worker no longer has. It predates the A4
+// flip — reproduced at 17540431 and 28d360cd — and the answer is undecided
+// between measuring the bit and resyncing on it, so no corpus entry pins it: a
+// pinned entry would pin the wrong grid.
+//
+// Last measured on the pin in ghostty-vt-native.pin: 15m / 38.1M execs green,
+// then the deferred-wrap counterexample above 97s into the next 2m soak.
 //
 // Both targets are gated the same way, which is the way every fuzz target in
 // this repo is gated: their seeds run on every `go test ./internal/pty`, in CI

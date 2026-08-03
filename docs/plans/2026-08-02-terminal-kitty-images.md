@@ -1084,6 +1084,33 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       names the 320MB limit and the `=0` hatch, keeps the reasons the client
       never parses kitty and the relay never advertises `binary_pty_output`, and
       keeps sixel's absence. One user-facing fragment covers the PR.
+- [ ] **A placement on a row that is already full: the deferred wrap synthesis
+      cannot measure.** Found by `FuzzKittyWireMirror` after the A4 work landed,
+      as `62f19a45d7a5c8c7`: on a 20x8 grid, print exactly 20 characters, place
+      an image, print one more. The worker ends at (19,0) and the client at
+      (1,1) with no resync between them.
+
+      **Root cause, measured.** Printing the twentieth character leaves the
+      cursor at the last column with a wrap PENDING — the next printable byte
+      wraps before it lands. The placement consumes that pending wrap. But
+      `CursorPos()` reports column 19 both before and after, because the pending
+      bit is not part of a position, so the measured delta is zero and the wire
+      carries no movement at all. The client, which never sees the APC, keeps
+      its pending wrap; its next character wraps and the worker's does not. The
+      same stream with the cursor mid-row is correct — `CSI 1 C`, both grids
+      agree — which is what isolates the pending bit as the whole cause.
+
+      **It predates this phase's flip.** Reproduced unchanged at `17540431`
+      (kitty still dark by default) and at `28d360cd` (before the pixel-geometry
+      commit joined the branch), so neither the flip nor the geometry merge
+      introduced it; the earlier 15m soak simply never reached the input. No
+      corpus entry was added, because a corpus entry would pin the wrong grid.
+
+      **Shape of the answer, not yet decided.** Either the measurement grows to
+      see the pending bit — which needs a native accessor ghostty does not
+      expose today — or `writeAPC` treats an anchor sitting at the last column
+      with a wrap pending as another thing it cannot measure and resyncs, the
+      same answer the margin box and the over-tall `SU` got.
 
 ## Open questions
 
