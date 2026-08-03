@@ -276,9 +276,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // on screen, and each has a different thing the user can do about it, so
     // the notice names the one that actually applies rather than a generic
     // "cannot annotate here".
-    // Read at miss time, not render time, so the handler can stay stable.
-    const sessionStateRef = useRef(sessionState);
-    sessionStateRef.current = sessionState;
+    // The terminal holds its callbacks in refs, so this changing identity with
+    // the session's state costs a prop write rather than a re-subscription —
+    // which is why `sessionState` is a dependency here instead of a ref read.
     const missSeqRef = useRef(0);
     const handleMiss = useCallback(
       (reason: 'no-messages' | 'outside-messages', at: { clientX: number; clientY: number }) => {
@@ -286,13 +286,13 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           ? 'Only what the agent wrote can be annotated. This text is the TUI’s own, your own, or from a turn that has scrolled out of the window.'
           : windowErrorRef.current
             ? 'No transcript could be read for this session, so there is nothing to annotate. The daemon log names the lookup that failed.'
-            : !sessionStateRef.current || !SETTLED_STATES.includes(sessionStateRef.current)
+            : !sessionState || !SETTLED_STATES.includes(sessionState)
               ? 'Annotations open once the agent stops talking. Nothing is anchored while a turn is still running.'
               : 'The agent has not written a message to annotate yet.';
         setNoticeAt(null);
         setNotice({ text, ...at, seq: missSeqRef.current++ });
       },
-      [],
+      [sessionState],
     );
 
     // Reopening an annotation already made. Its comment becomes the draft, and
