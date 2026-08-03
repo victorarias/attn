@@ -115,10 +115,12 @@ PTY read loop (worker, per chunk, under replayMu):
     │                            │    the cursor before the APC; both it and a ref
     │                            │    at the new cursor resolved after, so the pair
     │                            │    shares one coordinate frame)
-    │                            └─ synthesize: SU×scroll + CUU/CUD + CHA into the
-    │                                 wire chunk (relative and column-only: absolute
-    │                                 row addressing is measured from the scroll
-    │                                 region under origin mode)
+    │                            └─ synthesize: SU×scroll + CUU/CUD + CUF/CUB into
+    │                                 the wire chunk (relative on both axes:
+    │                                 absolute addressing is measured from a frame
+    │                                 the worker cannot see — rows from the scroll
+    │                                 region under origin mode, columns from the
+    │                                 left margin under DECLRMM)
     ├─ lastReplaySeq = seq   (unchanged)
   outside the lock: drain/forward ghostty's `_G` ACKs to the program (unchanged)
   fanOut(wireChunk, seq)     ← rewritten bytes, same seq
@@ -373,9 +375,11 @@ until the storage limit flips in A4.
       row. Pinned before the abort, that movement lands inside the measured
       window and is attributed to the image; the client then performs the same
       abort itself off the wire's ST **and** applies the synthesized movement,
-      landing a row low. It surfaces only in the row because the column is
+      landing a row low. It surfaced only in the row because the column was
       described absolutely (`CHA`, idempotent) and the row relatively (`CUD`,
-      which double-applies).
+      which double-applies). A4 made the column relative too, for the margin
+      reason recorded there, so both axes double-apply now — which is exactly
+      what pinning after the abort keeps correct.
 
       Doing the abort on the worker first leaves the measured window holding
       only what the image did. Measured, worker delta against what the client
@@ -724,26 +728,33 @@ split's whole point: placements and blobs cross the relay as JSON.
 
 ### A4 — enable, restore, remote, receipts
 
-Four synthesis defects are known and deliberately deferred to here. All are
+Synthesis defects are known and deliberately deferred to here. All are
 unreachable while the storage limit is 0 — nothing dispatches, so the grid never
 moves and `writeAPC` returns early — and all become live the moment the limit is
 flipped. None may ship with the flip.
 
 `FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
-property with kitty live. The placement-diff items below are decided and fixed,
-as is the stamp-claim item its soak turned up; what it stays red on is the
-CHA-under-margins item and the over-tall-scroll item. Soaking it is part of this
-phase's work, not A2's.
+property with kitty live. Four are decided and fixed — the two placement-diff
+items, the CHA-under-margins item, and the stamp-claim item the first soak turned
+up. Two are open, both found by soaking after those fixes and both in what
+`writeAPC` MEASURES rather than in how it describes it: the over-tall scroll and
+the margin-box scroll. Soaking is part of this phase's work, not A2's.
 (The pin skew noted under A2 is NOT one of these — it is a live limit today,
 and gated on the two ghostty pins converging rather than on the storage flip.)
 
-- [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
+- [x] **CHA is wrong under DECLRMM + origin mode.** Synthesis ended with an
       absolute column move, and a client with left/right margins enabled
       measures `CHA` from the left MARGIN while the worker reports a column
       from the screen edge. `\x1b[?69h\x1b[4;14s\x1b[?6h\x1b[3;2Hxy` plus a
-      placement puts the worker at column 11 and the client at 13. Fix by
-      making the column move relative (`CUF`/`CUB` from the pre-APC column) or
-      by resyncing when margins are on; either way it needs a corpus entry.
+      placement puts the worker at column 11 and the client at 13.
+      **Decided: relative moves, the same doctrine the rows already followed** —
+      `CUF`/`CUB` by `movedCol - col`, so the column is expressed as a distance
+      from a position both terminals already hold rather than against a frame
+      the worker cannot see. Corpus entries: the repro above, the same margins
+      with origin mode OFF (measured NOT to displace an absolute column at this
+      ghostty pin — margins alone are not enough — kept so the two modes are
+      pinned apart), and a wide placement pushing the cursor right inside
+      margins.
 - [ ] **An undescribed image forces a snapshot on every occurrence.** A kitty
       APC introduced from inside another sequence reaches the terminal whole
       and places an image the wire cannot describe, so the feeder resyncs
@@ -820,6 +831,33 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       measured scroll exceeds the screen — and it needs a corpus entry either
       way. None is recorded yet on purpose: the stream diverges silently today,
       so an entry would pin a wrong grid as correct.
+- [ ] **A scroll confined to the left/right margin box is measured as zero.**
+      With DECLRMM on (`\x1b[?69h` plus `DECSLRM`), a placement at the bottom of
+      the margin box scrolls only the columns inside it, and the tracked-ref
+      measurement does not see that as movement: `scrolled` comes out 0, the
+      wire carries no `SU` at all, and the client's text stays where it was.
+      Measured on a 20x8 screen, margins `\x1b[4;14s`, `top` written at column 1
+      and `xy` at the bottom row inside the box, then a 2x2 placement:
+
+      | modes | wire | worker | client |
+      | --- | --- | --- | --- |
+      | margins + origin | `ESC\ CSI 1 A CSI 5 C` | `xy` at row 5 | row 7 |
+      | margins, no origin | `ESC\ CSI 1 A CSI 2 C` | `xy` at row 5 | row 7 |
+      | origin, no margins | `ESC\ CSI 2 S CSI 1 A CSI 2 C` | row 5 | row 5 |
+      | neither | `ESC\ CSI 2 S CSI 1 A CSI 2 C` | row 5 | row 5 |
+
+      DECLRMM alone is the trigger; origin mode has nothing to do with it. The
+      cursor agrees in every row — this is the TEXT moving under an agreed
+      cursor, which is what separates it from the two cursor defects above. In
+      the margin rows `top` survives at row 0 on the worker, outside the box:
+      proof the scroll is confined to the margin columns rather than missing.
+      Found by `FuzzKittyWireMirror` at ~1m48s once A4's margin corpus entries
+      gave it margins to mutate. Predates the relative-column fix — measured by
+      restoring the absolute `CHA` and re-running the same probe, which shows
+      the identical text divergence with the column defect stacked on top. Fix
+      by measuring the scroll in a frame that includes a margin-box scroll, or
+      by resyncing while DECLRMM is on; no corpus entry yet, for the same reason
+      as the item above.
 
 **Decision record — what an unaccounted kitty mutation costs.** A resync exists
 for grid SCROLL the wire never expressed, never for knowledge of the placement

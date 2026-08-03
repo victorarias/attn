@@ -410,19 +410,27 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	}
 
 	// SU scrolls the active scroll region and leaves the cursor's viewport
-	// position alone, so the row move that follows is a plain relative step from
-	// where the pre-APC bytes already left the client's cursor. Everything here
-	// is relative or column-only on purpose: absolute row addressing (CUP, VPA)
-	// is measured from the scroll region under origin mode, which the worker
-	// cannot see and must not have to.
+	// position alone, so the moves that follow are plain relative steps from
+	// where the pre-APC bytes already left the client's cursor.
+	//
+	// Every one of them is relative, and on both axes, for the same reason:
+	// absolute addressing is measured from a frame the worker cannot see. A row
+	// (CUP, VPA) is counted from the scroll region under origin mode; a column
+	// (CHA) is counted from the LEFT MARGIN when DECLRMM is on (`\x1b[?69h`), so
+	// an absolute column measured at the screen edge lands somewhere else on a
+	// client with margins set. The worker reports viewport coordinates and has
+	// no business knowing which modes the program turned on — a relative step is
+	// the same step in every frame.
 	f.wire = appendCSI(f.wire, scrolled, 'S')
 	if movedRow > row {
 		f.wire = appendCSI(f.wire, movedRow-row, 'B')
 	} else {
 		f.wire = appendCSI(f.wire, row-movedRow, 'A')
 	}
-	if movedCol != col {
-		f.wire = appendCSI(f.wire, movedCol+1, 'G')
+	if movedCol > col {
+		f.wire = appendCSI(f.wire, movedCol-col, 'C')
+	} else {
+		f.wire = appendCSI(f.wire, col-movedCol, 'D')
 	}
 }
 

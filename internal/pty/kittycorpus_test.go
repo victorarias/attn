@@ -418,6 +418,47 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			},
 		},
 		{
+			// Left/right margins plus origin mode, which is where an absolute
+			// column move went wrong: the worker reports a column counted from
+			// the screen edge and a client with DECLRMM on reads `CHA` from the
+			// LEFT MARGIN, so the same number means two places. Recorded at
+			// worker column 11 against a client at 13 before synthesis went
+			// relative. Margins 4..14 with the cursor inside them.
+			name: "placement inside left and right margins under origin mode",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[4;14s\x1b[?6h\x1b[3;2Hxy",
+				kittyPlaceRGB(62, 16, 32, ""),
+			},
+		},
+		{
+			// The same margins with origin mode OFF, and measured rather than
+			// assumed: this one does NOT displace an absolute column — under
+			// the absolute CHA synthesis used to emit, its replay landed on the
+			// worker's column. Margins alone are not enough; it takes origin
+			// mode with them. Kept so the two modes are pinned apart instead of
+			// only ever tested together, and so the day ghostty makes DECLRMM
+			// bite on its own the corpus says so.
+			name: "placement inside margins with origin mode off",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[4;14s\x1b[6;6Hxy",
+				kittyPlaceRGB(63, 16, 32, ""),
+			},
+		},
+		{
+			// A placement wide enough to push the cursor toward the right
+			// margin, which is the case a relative move has to carry as far as
+			// an absolute one did: the step is measured from where the client's
+			// own cursor already stands, not from either edge.
+			name: "wide placement pushing the cursor right inside margins",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[2;18s\x1b[?6h\x1b[2;2Hxy",
+				kittyPlaceRGB(64, 48, 32, ""),
+			},
+		},
+		{
 			// The mode has to survive a chunk boundary in every one of these
 			// states, which is the whole reason it is carried on the segmenter
 			// rather than recomputed per call. The APC pattern inside the OSC is
