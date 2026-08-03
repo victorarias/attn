@@ -37,6 +37,14 @@ extensions would share one namespace pool — a collision waiting for A4.
 
 ### 3. Index design: declared fields as the contract, scan-first as the implementation
 
+> **Superseded 2026-08-03 by
+> [A3.1](2026-08-03-ext-a3.1-doc-store-physical-schema.md)** before anything
+> wrote to the store. Measurement showed the 50ms tripwire could never fire at
+> realistic sizes while the real cost — live-query re-runs, per write × per
+> subscription — grew invisibly. The declaration-as-contract half of this
+> answer stands; the scan-first half does not. The paragraphs below record the
+> gate as it was decided.
+
 A collection declares the fields that may be filtered and sorted on. That
 declaration is the API contract and is what keeps the query surface honest.
 Physically, v1 executes with a scan inside `(namespace, collection)` — no
@@ -234,7 +242,10 @@ traffic reaches the WebSocket in this stage.
 ### Deliberately not built
 
 - **Indexes.** Scan-first was the gate's answer; the working set above is the
-  receipt. The declaration is what makes adding them later invisible to callers.
+  receipt. The declaration is what makes adding them later invisible to
+  callers. *Later arrived immediately:*
+  [A3.1](2026-08-03-ext-a3.1-doc-store-physical-schema.md) rebuilds the
+  physical schema with indexes before the store gains its first writer.
 - **Grants.** Namespaces are `owner/name` and enforced as a shape; *who* may
   claim one is A4's registry, which is the thing that knows about authors.
 - **A frontend surface.** A5 owns the UI host. The store's consumers today are

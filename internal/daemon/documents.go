@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"sync/atomic"
 	"time"
 
 	"github.com/victorarias/attn/internal/bus"
@@ -34,15 +35,23 @@ import (
 // See docs/plans/2026-08-03-ext-a3-doc-store.md.
 
 // docSubscription is one caller watching one query.
+// It deliberately holds no declaration: the delivery loop re-reads it, because
+// a captured one goes stale exactly when it matters — when the collection is
+// undefined or redeclared out from under the query.
 type docSubscription struct {
 	id     string
 	query  docstore.Query
-	schema docstore.CollectionSchema
 	target string
 	// wake holds at most one pending nudge. A full channel means "already told,
 	// not yet served", and dropping the extra is correct because the delivery it
 	// would have caused is the same delivery the pending one will cause.
 	wake chan struct{}
+	// siblings is how many subscriptions the last write woke on this collection,
+	// stamped by the fan-out because that is the one place already counting them.
+	// The delivery goroutine reads it to price the write, and reading it from
+	// here rather than counting again keeps a log line that almost never fires
+	// off the delivery path's lock.
+	siblings atomic.Int64
 }
 
 // documentChanged is the fact's payload. It carries the address in parts so a
@@ -100,6 +109,7 @@ func (d *Daemon) wakeDocumentSubscriptions(ev bus.Event) {
 	d.docSubsMu.Unlock()
 
 	for _, sub := range woken {
+		sub.siblings.Store(int64(len(woken)))
 		select {
 		case sub.wake <- struct{}{}:
 		default:
@@ -107,7 +117,7 @@ func (d *Daemon) wakeDocumentSubscriptions(ev bus.Event) {
 	}
 }
 
-func (d *Daemon) addDocSubscription(q docstore.Query, schema docstore.CollectionSchema) *docSubscription {
+func (d *Daemon) addDocSubscription(q docstore.Query) *docSubscription {
 	d.docSubsMu.Lock()
 	defer d.docSubsMu.Unlock()
 	if d.docSubs == nil {
@@ -117,7 +127,6 @@ func (d *Daemon) addDocSubscription(q docstore.Query, schema docstore.Collection
 	sub := &docSubscription{
 		id:     fmt.Sprintf("docsub-%d", d.docSubsSeq),
 		query:  q,
-		schema: schema,
 		target: q.Target(),
 		wake:   make(chan struct{}, 1),
 	}
@@ -147,7 +156,7 @@ func (d *Daemon) documentSubscriptionCount() int {
 func (d *Daemon) compileDocQuery(q docstore.Query, schema docstore.CollectionSchema) (docstore.Compiled, error) {
 	var anchor *docstore.Document
 	if q.After != "" {
-		doc, found, err := d.store.GetDocument(q.Namespace, q.Collection, q.After)
+		doc, found, err := d.store.GetDocument(schema, q.After)
 		if err != nil {
 			return docstore.Compiled{}, err
 		}
@@ -158,41 +167,79 @@ func (d *Daemon) compileDocQuery(q docstore.Query, schema docstore.CollectionSch
 	return q.Compile(schema, anchor)
 }
 
-// runDocQuery compiles and runs a query, returning its documents on the wire.
-func (d *Daemon) runDocQuery(q docstore.Query, schema docstore.CollectionSchema) ([]protocol.StoredDocument, error) {
+// runDocQuery compiles and runs a query, returning its documents on the wire
+// and how long the statement took. The caller decides what a slow one means:
+// once for a one-shot query, per write for a live one.
+func (d *Daemon) runDocQuery(q docstore.Query, schema docstore.CollectionSchema) ([]protocol.StoredDocument, time.Duration, error) {
 	if d.store == nil {
-		return nil, fmt.Errorf("no database")
+		return nil, 0, fmt.Errorf("no database")
 	}
 	compiled, err := d.compileDocQuery(q, schema)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
 	started := time.Now()
 	docs, err := d.store.QueryDocuments(compiled)
 	if err != nil {
-		return nil, err
+		return nil, 0, err
 	}
-	d.logSlowDocQuery(q, time.Since(started))
-	return storedDocumentsToProtocol(docs), nil
+	return storedDocumentsToProtocol(docs), time.Since(started), nil
 }
 
-// slowDocQuery is the point past which a query's duration is worth a line in the
-// log. v1 answers queries by scanning a collection, deliberately, because
-// nothing has measured a need for secondary indexes. This is the tripwire that
-// produces that measurement: it names the collection and how many documents were
-// scanned, so the case for an index arrives with its receipt instead of a hunch.
-const slowDocQuery = 50 * time.Millisecond
+// Two tripwires, because a document query has two costs and only one of them is
+// visible in a single query's duration.
+//
+// slowDocQuery is the coarse one: a one-shot query that takes this long is
+// pathological now that every declared field is indexed, and the log names the
+// collection size so the diagnosis starts with the receipt.
+//
+// slowDocFanOut is the one that matters. A live query re-runs on every committed
+// write to its collection, so the daemon's real cost is one query multiplied by
+// the number of subscriptions watching — a term no per-query threshold can see,
+// because each of those queries is individually fast. The budget is one 60Hz
+// frame: attn renders GPU terminals beside agents that run all day, so a single
+// document write quietly costing a frame's worth of CPU in background query work
+// is a defect worth a line in the log. A healthy fan-out is microseconds, which
+// makes this a tripwire rather than a threshold — only something broken, or
+// something that has outgrown this design, ever feels it.
+const (
+	slowDocQuery  = 50 * time.Millisecond
+	slowDocFanOut = 16 * time.Millisecond
+)
 
-func (d *Daemon) logSlowDocQuery(q docstore.Query, took time.Duration) {
+func (d *Daemon) logSlowDocQuery(schema docstore.CollectionSchema, took time.Duration) {
 	if took < slowDocQuery {
 		return
 	}
-	count, err := d.store.CountDocuments(q.Namespace, q.Collection)
-	if err != nil {
-		count = -1
+	d.logf("docstore: %s/%s query took %s over %d documents (slow past %s)",
+		schema.Namespace, schema.Collection, took.Round(time.Millisecond),
+		d.documentCountFor(schema), slowDocQuery)
+}
+
+// logSlowDocFanOut reports what one write to this collection costs across every
+// subscription watching it, which is the number that grows as extensions arrive.
+func (d *Daemon) logSlowDocFanOut(sub *docSubscription, schema docstore.CollectionSchema, took time.Duration) {
+	// The first delivery answers the subscribe rather than a write, so it has
+	// woken nobody and prices as one.
+	subs := sub.siblings.Load()
+	if subs < 1 {
+		subs = 1
 	}
-	d.logf("docstore: %s/%s query took %s over %d documents (slow past %s) — a collection this size may want an index",
-		q.Namespace, q.Collection, took.Round(time.Millisecond), count, slowDocQuery)
+	perWrite := took * time.Duration(subs)
+	if perWrite < slowDocFanOut {
+		return
+	}
+	d.logf("docstore: %s/%s live query took %s over %d documents; %d subscription(s) make one write to this collection cost about %s (slow past %s)",
+		schema.Namespace, schema.Collection, took.Round(time.Millisecond),
+		d.documentCountFor(schema), subs, perWrite.Round(time.Millisecond), slowDocFanOut)
+}
+
+func (d *Daemon) documentCountFor(schema docstore.CollectionSchema) int {
+	count, err := d.store.CountDocuments(schema)
+	if err != nil {
+		return -1
+	}
+	return count
 }
 
 // collectionFor reads a collection's declaration, turning "never declared" into
@@ -286,7 +333,8 @@ func (d *Daemon) handleDocCollections(conn net.Conn, _ *protocol.DocCollectionsM
 }
 
 func (d *Daemon) handleDocPut(conn net.Conn, msg *protocol.DocPutMessage) {
-	if _, err := d.collectionFor(msg.Namespace, msg.Collection); err != nil {
+	schema, err := d.collectionFor(msg.Namespace, msg.Collection)
+	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
@@ -298,7 +346,7 @@ func (d *Daemon) handleDocPut(conn net.Conn, msg *protocol.DocPutMessage) {
 		d.sendError(conn, err.Error())
 		return
 	}
-	if err := d.store.PutDocument(msg.Namespace, msg.Collection, msg.ID, []byte(msg.Body), time.Now()); err != nil {
+	if err := d.store.PutDocument(*schema, msg.ID, []byte(msg.Body), time.Now()); err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
@@ -310,11 +358,12 @@ func (d *Daemon) handleDocPut(conn net.Conn, msg *protocol.DocPutMessage) {
 }
 
 func (d *Daemon) handleDocGet(conn net.Conn, msg *protocol.DocGetMessage) {
-	if _, err := d.collectionFor(msg.Namespace, msg.Collection); err != nil {
+	schema, err := d.collectionFor(msg.Namespace, msg.Collection)
+	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
-	doc, found, err := d.store.GetDocument(msg.Namespace, msg.Collection, msg.ID)
+	doc, found, err := d.store.GetDocument(*schema, msg.ID)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
@@ -328,11 +377,12 @@ func (d *Daemon) handleDocGet(conn net.Conn, msg *protocol.DocGetMessage) {
 }
 
 func (d *Daemon) handleDocDelete(conn net.Conn, msg *protocol.DocDeleteMessage) {
-	if _, err := d.collectionFor(msg.Namespace, msg.Collection); err != nil {
+	schema, err := d.collectionFor(msg.Namespace, msg.Collection)
+	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
-	existed, err := d.store.DeleteDocument(msg.Namespace, msg.Collection, msg.ID)
+	existed, err := d.store.DeleteDocument(*schema, msg.ID)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
@@ -361,18 +411,21 @@ func (d *Daemon) handleDocQuery(conn net.Conn, msg *protocol.DocQueryMessage) {
 		d.sendError(conn, err.Error())
 		return
 	}
-	docs, err := d.runDocQuery(q, *schema)
+	docs, took, err := d.runDocQuery(q, *schema)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
+	d.logSlowDocQuery(*schema, took)
 	d.sendDocResponse(conn, protocol.Response{Ok: true, DocQueryResult: &protocol.DocQueryResult{Documents: docs}})
 }
 
 // handleDocSubscribe is the only handler that keeps its connection. It writes
 // the current result set immediately — a subscriber must be able to render from
 // one round trip, which is what makes an extension UI's remount cheap — and then
-// a fresh one every time a write to the collection could have changed it.
+// a fresh one every time a write to the collection could have changed it. It
+// ends when the caller disconnects, or when the collection stops being able to
+// answer the query at all.
 func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMessage) {
 	q, err := documentQueryFromProtocol(msg.Query)
 	if err != nil {
@@ -394,7 +447,7 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 	// Registered before the first query runs. The other order drops a write that
 	// lands in between; this order can only cause one redundant delivery, and a
 	// delivery is the whole result set, so a redundant one costs nothing.
-	sub := d.addDocSubscription(q, *schema)
+	sub := d.addDocSubscription(q)
 	defer d.removeDocSubscription(sub.id)
 
 	// The caller never speaks again after subscribing, so anything the read
@@ -407,11 +460,26 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 
 	encoder := json.NewEncoder(conn)
 	for revision := 1; ; revision++ {
-		docs, err := d.runDocQuery(q, *schema)
+		// The declaration is re-read per delivery rather than captured, because
+		// it can go out from under a subscription in two ways and both have to
+		// end the subscription rather than mislead it. Undefining drops the
+		// collection's table, and an empty result set would tell a watcher the
+		// collection is still there holding nothing; redeclaring without a field
+		// this query uses drops that field's column, and the query stops meaning
+		// what the caller asked. Either way the caller is told which, and the
+		// subscription ends instead of hanging on a collection it can never
+		// serve again.
+		live, err := d.collectionFor(q.Namespace, q.Collection)
 		if err != nil {
 			d.sendError(conn, err.Error())
 			return
 		}
+		docs, took, err := d.runDocQuery(q, *live)
+		if err != nil {
+			d.sendError(conn, err.Error())
+			return
+		}
+		d.logSlowDocFanOut(sub, *live, took)
 		resp := protocol.Response{
 			Ok:                 true,
 			DocSubscribeResult: &protocol.DocSubscribeResult{Revision: revision, Documents: docs},

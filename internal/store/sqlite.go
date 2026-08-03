@@ -905,6 +905,33 @@ CREATE TABLE IF NOT EXISTS document_collections (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (namespace, collection)
 );`},
+	// Migration 88's shared table is replaced by a table per collection: the
+	// measurement that overturned it, and the shape that replaces it, are in
+	// docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md. This is a
+	// replace and not a data migration because the store shipped with no
+	// writers — no attn feature and no extension had reached it, so there is
+	// nothing stored to carry across. The per-collection tables are created by
+	// DefineDocumentCollection rather than here; this migration only leaves
+	// behind the registry they are minted from.
+	{89, "rebuild the document store as a table per collection", `DROP TABLE IF EXISTS documents;
+DROP TABLE IF EXISTS document_collections;
+-- id is the mint: a collection's table is doc_<id>, so no identifier the store
+-- executes is ever a function of a namespace or collection name.
+--
+-- AUTOINCREMENT, so an id is never reused. A plain rowid hands the next
+-- declaration the id a dropped one just freed, which would point a table name
+-- that is still held somewhere — an in-flight subscription's schema, a compiled
+-- query — at a different collection's documents. Undefine then define is a
+-- normal thing to do, so that has to be impossible rather than unlikely.
+CREATE TABLE document_collections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace   TEXT NOT NULL,
+    collection  TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX idx_document_collections_address
+    ON document_collections(namespace, collection);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

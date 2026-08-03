@@ -1,0 +1,18 @@
+kind: changed
+area: daemon
+change: >
+  The document store now keeps each collection in its own table, with an
+  indexed column per declared field, so filtering and sorting read an index
+  instead of every document in the collection. Declaring a field still rewrites
+  nothing — the index is built from the bodies already stored — and the query
+  surface, the CLI, and the wire are unchanged. Two behaviours do change: a
+  field's declared type now decides how stored values compare, so a body
+  holding "5" in a number field sorts as the number 5 rather than as text; and
+  a live query whose collection is removed, or redeclared without a field the
+  query uses, now ends with an error saying so instead of quietly reporting an
+  empty result set.
+notes: >
+  The store shipped with no writers, so this replaces its storage rather than
+  migrating it. The measurement that overturned the original scan-first design,
+  and the rejected alternatives including a database file per namespace, are in
+  docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
