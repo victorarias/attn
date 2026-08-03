@@ -211,7 +211,7 @@ func runDocGet(args []string) {
 		os.Exit(1)
 	}
 	if hasFlag(rest, "--json") {
-		writeJSON(result.Document)
+		writeJSON(docsForJSON([]protocol.StoredDocument{*result.Document})[0])
 		return
 	}
 	fmt.Println(result.Document.Body)
@@ -248,7 +248,10 @@ func runDocWatch(args []string) {
 	query, asJSON := parseDocQueryFlags("watch", namespace, collection, rest)
 	err := docClient().DocSubscribe(query, func(result *protocol.DocSubscribeResult) bool {
 		if asJSON {
-			writeJSON(result)
+			writeJSON(struct {
+				Revision  int            `json:"revision"`
+				Documents []jsonDocument `json:"documents"`
+			}{result.Revision, docsForJSON(result.Documents)})
 		} else {
 			fmt.Printf("--- revision %d (%d document(s)) ---\n", result.Revision, len(result.Documents))
 			printDocuments(result.Documents, false)
@@ -353,9 +356,32 @@ func docBoundAsJSON(raw string) string {
 	return string(encoded)
 }
 
+// jsonDocument is what --json prints. The wire carries a body as a string
+// because the protocol has no "arbitrary JSON" type, but a caller piping this
+// into jq wants `.body.status`, not a string it has to decode a second time.
+type jsonDocument struct {
+	ID        string          `json:"id"`
+	Body      json.RawMessage `json:"body"`
+	CreatedAt string          `json:"created_at"`
+	UpdatedAt string          `json:"updated_at"`
+}
+
+func docsForJSON(docs []protocol.StoredDocument) []jsonDocument {
+	out := make([]jsonDocument, 0, len(docs))
+	for _, doc := range docs {
+		out = append(out, jsonDocument{
+			ID:        doc.ID,
+			Body:      json.RawMessage(doc.Body),
+			CreatedAt: doc.CreatedAt,
+			UpdatedAt: doc.UpdatedAt,
+		})
+	}
+	return out
+}
+
 func printDocuments(docs []protocol.StoredDocument, asJSON bool) {
 	if asJSON {
-		writeJSON(docs)
+		writeJSON(docsForJSON(docs))
 		return
 	}
 	if len(docs) == 0 {
