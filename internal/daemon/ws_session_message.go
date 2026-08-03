@@ -60,6 +60,13 @@ func (d *Daemon) handleSessionMessagesGet(client *wsClient, msg *protocol.Sessio
 
 	path := strings.TrimSpace(d.resolveTranscriptPathForSession(session, ""))
 	if path == "" {
+		// Logged, not only returned: this is the one outcome a user reads as "the
+		// feature is broken", and the identity ladder that produced it (no
+		// hook-reported path, no resume id, no find by session id) is invisible
+		// from the app. Naming the session and its directory is what makes the
+		// next question answerable — whether a transcript exists at all.
+		d.logf("session_messages_get: %s: no transcript resolved (agent=%s dir=%s); nothing is annotatable in this session",
+			sessionID, session.Agent, session.Directory)
 		result.Error = protocol.Ptr("session_messages_get: no transcript for session " + sessionID)
 		d.sendToClient(client, result)
 		return

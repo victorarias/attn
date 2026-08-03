@@ -11,7 +11,7 @@
 // unmount, a crash, or a quit costs nothing. See
 // docs/decisions/2026-08-02-terminal-annotations-anchor-to-the-transcript.md.
 
-import { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   GhosttyTerminal,
   type GhosttyTerminalHandle,
@@ -23,7 +23,7 @@ import {
   type MessageAnchor,
   type TerminalAnnotation,
 } from '../../utils/terminalAnnotations';
-import { QUICK_LABELS, buildAnnotationPayload } from './quickLabels';
+import { QUICK_LABEL_GROUPS, buildAnnotationPayload } from './quickLabels';
 import { clampToViewport, placePopup, type Placement } from './placement';
 import { useShortcut } from '../../shortcuts/useShortcut';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
@@ -80,6 +80,16 @@ export interface AnnotatedTerminalProps extends TerminalProps {
   paneActive?: boolean;
 }
 
+interface Notice {
+  text: string;
+  clientX: number;
+  clientY: number;
+  // Distinguishes one miss from the next at the same spot, so a repeated
+  // gesture restarts the dismiss timer instead of letting the first one expire
+  // under the second.
+  seq: number;
+}
+
 interface Composer {
   annotationId: string;
   clientX: number;
@@ -104,6 +114,17 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     const [version, setVersion] = useState(0);
     const [composer, setComposer] = useState<Composer | null>(null);
     const [sentCount, setSentCount] = useState(0);
+    // What an annotate gesture that resolved to nothing has to say for itself,
+    // and where it was made. Null the rest of the time — this is not a status
+    // line, it answers a question the user just asked with the pointer.
+    const [notice, setNotice] = useState<Notice | null>(null);
+    const noticeRef = useRef<HTMLDivElement>(null);
+    const [noticeAt, setNoticeAt] = useState<Placement | null>(null);
+    // Why the last window fetch produced nothing, in the daemon's own words.
+    // A ref because nothing renders from it directly: it is read at the moment
+    // a miss needs explaining, and re-rendering the terminal to record a failed
+    // background fetch would be a repaint for no one.
+    const windowErrorRef = useRef<string | null>(null);
     const [draft, setDraft] = useState('');
     const commentRef = useRef<HTMLTextAreaElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
@@ -184,6 +205,11 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // Fetch the annotatable window when the agent settles. Messages already in
     // the window come back unchanged, so this neither disturbs the store nor
     // repaints unless a new turn actually arrived.
+    //
+    // A failure is remembered rather than swallowed. It is the difference
+    // between "this session has no transcript" and "the agent has not spoken
+    // yet", which the user can only be told apart if the reason survives the
+    // fetch that discovered it.
     useEffect(() => {
       if (!enabled || !sessionId) return;
       if (!sessionState || !SETTLED_STATES.includes(sessionState)) return;
@@ -191,11 +217,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       void annotationApi!.fetchMessages(sessionId)
         .then((result) => {
           if (cancelled) return;
+          windowErrorRef.current = null;
           if (store.setMessages(result.messages)) bump();
         })
-        .catch(() => {
-          // A session with no readable transcript simply has nothing to
-          // annotate. Leave whatever is already anchored alone.
+        .catch((error: unknown) => {
+          if (cancelled) return;
+          const detail = error instanceof Error ? error.message : String(error);
+          windowErrorRef.current = detail;
+          // Logged as well as shown: the notice is a sentence a person reads,
+          // and the daemon's own wording is what makes the cause searchable.
+          console.warn(`[annotations] ${sessionId}: message window unavailable: ${detail}`);
         });
       return () => {
         cancelled = true;
@@ -239,6 +270,29 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
         bump();
       },
       [bump],
+    );
+
+    // An annotate gesture that resolved to nothing. Four causes look identical
+    // on screen, and each has a different thing the user can do about it, so
+    // the notice names the one that actually applies rather than a generic
+    // "cannot annotate here".
+    // The terminal holds its callbacks in refs, so this changing identity with
+    // the session's state costs a prop write rather than a re-subscription —
+    // which is why `sessionState` is a dependency here instead of a ref read.
+    const missSeqRef = useRef(0);
+    const handleMiss = useCallback(
+      (reason: 'no-messages' | 'outside-messages', at: { clientX: number; clientY: number }) => {
+        const text = reason === 'outside-messages'
+          ? 'Only what the agent wrote can be annotated. This text is the TUI’s own, your own, or from a turn that has scrolled out of the window.'
+          : windowErrorRef.current
+            ? 'No transcript could be read for this session, so there is nothing to annotate. The daemon log names the lookup that failed.'
+            : !sessionState || !SETTLED_STATES.includes(sessionState)
+              ? 'Annotations open once the agent stops talking. Nothing is anchored while a turn is still running.'
+              : 'The agent has not written a message to annotate yet.';
+        setNoticeAt(null);
+        setNotice({ text, ...at, seq: missSeqRef.current++ });
+      },
+      [sessionState],
     );
 
     // Reopening an annotation already made. Its comment becomes the draft, and
@@ -446,6 +500,32 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       return () => window.clearTimeout(timer);
     }, [sentCount]);
 
+    // Same measure-then-clamp as the popup, for the same reason: the pointer is
+    // routinely near an edge, and a sentence is wider than the popup is.
+    useLayoutEffect(() => {
+      const node = noticeRef.current;
+      if (!notice || !node) return;
+      const rect = node.getBoundingClientRect();
+      setNoticeAt(placePopup(
+        { x: notice.clientX, y: notice.clientY },
+        { width: rect.width, height: rect.height },
+        { width: window.innerWidth, height: window.innerHeight },
+      ));
+    }, [notice]);
+
+    // Long enough to read a sentence, then gone. It explains a gesture that has
+    // already finished, so it must not become something to dismiss.
+    useEffect(() => {
+      if (!notice) return;
+      const timer = window.setTimeout(() => setNotice(null), 5000);
+      return () => window.clearTimeout(timer);
+    }, [notice]);
+
+    // A successful annotation answers the question the notice was asking.
+    useEffect(() => {
+      if (composer) setNotice(null);
+    }, [composer]);
+
     // The drag runs on the window, not the header: the pointer routinely leaves
     // a 300px panel mid-drag, and a header-bound listener would drop it there.
     useEffect(() => {
@@ -498,8 +578,22 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           annotations={enabled ? store : undefined}
           annotationsVersion={version}
           onAnnotationAnchor={enabled ? handleAnchor : undefined}
+          onAnnotationMiss={enabled ? handleMiss : undefined}
           onAnnotationActivate={enabled ? openAnnotation : undefined}
         />
+        {notice ? (
+          <div
+            ref={noticeRef}
+            className={`anno-notice${noticeAt ? ' anno-notice--placed' : ''}`}
+            data-testid="annotation-notice"
+            role="status"
+            style={noticeAt
+              ? { left: noticeAt.left, top: noticeAt.top }
+              : { left: notice.clientX, top: notice.clientY }}
+          >
+            {notice.text}
+          </div>
+        ) : null}
         {composed && composer ? (
           <div
             ref={popupRef}
@@ -511,17 +605,22 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
             onMouseDown={(event) => event.preventDefault()}
           >
             <div className="anno-popup-labels">
-              {QUICK_LABELS.map((label) => (
-                <button
-                  key={label.id}
-                  type="button"
-                  className={`anno-popup-label${composed.emoji === label.emoji ? ' anno-popup-label--on' : ''}`}
-                  title={label.text}
-                  aria-label={label.text}
-                  onClick={() => applyLabel(label.emoji)}
-                >
-                  {label.emoji}
-                </button>
+              {QUICK_LABEL_GROUPS.map((group, groupIndex) => (
+                <React.Fragment key={group[0].id}>
+                  {groupIndex > 0 ? <span className="anno-popup-divider" /> : null}
+                  {group.map((label) => (
+                    <button
+                      key={label.id}
+                      type="button"
+                      className={`anno-popup-label${composed.emoji === label.emoji ? ' anno-popup-label--on' : ''}`}
+                      title={label.text}
+                      aria-label={label.text}
+                      onClick={() => applyLabel(label.emoji)}
+                    >
+                      {label.emoji}
+                    </button>
+                  ))}
+                </React.Fragment>
               ))}
               <span className="anno-popup-divider" />
               <button

@@ -173,6 +173,15 @@ export interface GhosttyTerminalProps {
     anchor: MessageAnchor,
     at: { clientX: number; clientY: number },
   ) => void;
+  // An alt-drag asked to annotate and resolved to nothing — the store has no
+  // window to align against, or the dragged text is not in one of its messages.
+  // Reported rather than swallowed: the gesture was deliberate, and silence is
+  // indistinguishable from a broken feature. The drag still behaves as an
+  // ordinary selection; the owner only supplies the explanation.
+  onAnnotationMiss?: (
+    reason: 'no-messages' | 'outside-messages',
+    at: { clientX: number; clientY: number },
+  ) => void;
   // An alt-click landed on an existing wash. The owner reopens that annotation
   // for editing; the terminal only says which one was pointed at.
   onAnnotationActivate?: (
@@ -565,7 +574,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered, annotations, annotationsVersion = 0, onAnnotationAnchor, onAnnotationActivate }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered, annotations, annotationsVersion = 0, onAnnotationAnchor, onAnnotationMiss, onAnnotationActivate }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -656,6 +665,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const onTerminalModelRecoveredRef = useRef(onTerminalModelRecovered);
     const annotationsRef = useRef(annotations);
     const onAnnotationAnchorRef = useRef(onAnnotationAnchor);
+    const onAnnotationMissRef = useRef(onAnnotationMiss);
     const onAnnotationActivateRef = useRef(onAnnotationActivate);
     // Set on mousedown when alt was held over a pane that has a message under
     // annotation, so the release knows to resolve an anchor instead of just
@@ -717,6 +727,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     onTerminalModelRecoveredRef.current = onTerminalModelRecovered;
     annotationsRef.current = annotations;
     onAnnotationAnchorRef.current = onAnnotationAnchor;
+    onAnnotationMissRef.current = onAnnotationMiss;
     onAnnotationActivateRef.current = onAnnotationActivate;
     runtimeMetaRef.current = runtimeLogMeta;
     debugNameRef.current = debugName;
@@ -2966,6 +2977,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       // answers with markdown offsets or refuses — a drag over the TUI's own
       // chrome, a user turn, or a message outside the annotatable window
       // resolves to nothing, and then this is an ordinary selection.
+      //
+      // A refusal is still reported. The two ways to get here look identical on
+      // screen — nothing happens — but mean opposite things: no window to align
+      // against at all, versus a window that does not contain this text.
       if (annotationDrag && selectionRef.current) {
         const store = annotationsRef.current;
         const access = messageRowAccess();
@@ -2979,6 +2994,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           onAnnotationAnchorRef.current?.(anchor, { clientX: event.clientX, clientY: event.clientY });
           return;
         }
+        onAnnotationMissRef.current?.(
+          store?.hasMessages() ? 'outside-messages' : 'no-messages',
+          { clientX: event.clientX, clientY: event.clientY },
+        );
       }
       const text = textForSelectionRange(selectionRef.current);
       selectedTextRef.current = text || null;
@@ -3323,9 +3342,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           selectedTextRef.current = null;
           applicationSelectionAnchorRef.current = null;
           selectedBlockIdRef.current = null;
-          // Alt claims the drag for annotation only when there is a message to
-          // annotate; otherwise it stays the plain selection it has always been.
-          annotationDragRef.current = event.altKey && Boolean(annotationsRef.current?.hasMessages());
+          // Alt claims the drag for annotation in a pane that has an annotation
+          // surface at all, whether or not there is currently a message to
+          // anchor to. Arming it only when a window exists made "nothing to
+          // annotate" the one case that could not explain itself: the release
+          // saw an ordinary selection and had nothing to report. The drag still
+          // falls through to a plain copy when it resolves to nothing — the
+          // only thing being claimed here is the right to say why.
+          annotationDragRef.current = event.altKey && Boolean(annotationsRef.current);
           annotationClickRef.current = event.altKey ? annotationAtCell(cell) : null;
           selectingRef.current = true;
           selectionPointerStartRef.current = { clientX: event.clientX, clientY: event.clientY };

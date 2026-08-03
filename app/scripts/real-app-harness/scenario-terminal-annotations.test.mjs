@@ -4,7 +4,7 @@
 // report a product regression that is really a parsing bug here.
 
 import { describe, expect, it } from 'vitest';
-import { proseRow, wordSpan } from './scenario-terminal-annotations.mjs';
+import { anyTextRow, proseRow, wordSpan } from './scenario-terminal-annotations.mjs';
 
 const PROSE = '  A retry wrapper should only retry operations that are idempotent, since';
 const SHORT_PROSE = '  Yes, exactly.';
@@ -67,6 +67,22 @@ describe('proseRow', () => {
 
   it('returns null before the agent has said anything', () => {
     expect(proseRow(['❯ ', '──────────────'])).toBeNull();
+  });
+});
+
+// The scenario drags over this row before the first turn, to prove a refused
+// annotation says why. Nothing on the grid is annotatable at that point, so any
+// row will do — what matters is that one wide enough to span is found at all.
+describe('anyTextRow', () => {
+  it('takes the widest row carrying real text, whatever it is', () => {
+    // Before the first turn nothing on the grid belongs to a transcript
+    // message, so which row is dragged over does not matter — only that one
+    // wide enough to span exists.
+    expect(anyTextRow(['❯ ', PROSE, SHORT_PROSE])?.row).toBe(1);
+  });
+
+  it('returns null on a grid with nothing to drag across', () => {
+    expect(anyTextRow(['❯ ', '──────', SHORT_PROSE])).toBeNull();
   });
 });
 

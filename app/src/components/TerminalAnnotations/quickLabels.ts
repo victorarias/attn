@@ -15,46 +15,71 @@ export interface QuickLabel {
   tip?: string;
 }
 
-export const QUICK_LABELS: QuickLabel[] = [
-  { id: 'clarify-this', emoji: '❓', text: 'Clarify this' },
-  {
-    id: 'verify-this',
-    emoji: '🔍',
-    text: 'Verify this',
-    tip: 'This seems like an assumption. Verify by reading the actual code before proceeding.',
-  },
-  {
-    id: 'give-me-an-example',
-    emoji: '🔬',
-    text: 'Give me an example',
-    tip: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario.',
-  },
-  {
-    id: 'match-existing-patterns',
-    emoji: '🧬',
-    text: 'Match existing patterns',
-    tip: 'Search the codebase for existing patterns that already solve this. Reuse what exists.',
-  },
-  {
-    id: 'consider-alternatives',
-    emoji: '🔄',
-    text: 'Consider alternatives',
-    tip: 'Propose 2-3 alternative approaches with trade-offs based on the actual codebase.',
-  },
-  {
-    id: 'ensure-no-regression',
-    emoji: '📉',
-    text: 'Ensure no regression',
-    tip: 'Verify this will not break existing behavior. Identify what could regress.',
-  },
-  {
-    id: 'out-of-scope',
-    emoji: '🚫',
-    text: 'Out of scope',
-    tip: 'This is not part of the current task. Remove it and stay focused on what was requested.',
-  },
-  { id: 'needs-tests', emoji: '🧪', text: 'Needs tests' },
+// The label row, in the groups it is drawn in. A group is what a divider
+// separates, so the grouping lives here as data rather than as an index the
+// popup counts to — reordering a label cannot silently move the divider.
+//
+// Agreement is its own group because it is the only mark that says "keep
+// going". Ninth in a run of seven corrections it reads as one more complaint,
+// and a reviewer with no quick way to say "this part is right" only ever files
+// the objections.
+export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
+  [
+    // Its tip is the longest here on purpose: "good" alone tells an agent
+    // nothing to do, and the point of marking a thing right is that it
+    // survives the next revision.
+    {
+      id: 'exactly-this',
+      emoji: '💯',
+      text: 'Exactly this',
+      tip: 'This is right and it matters. Preserve this decision and the reasoning behind it — do not revisit or trade it away, and apply the same reasoning where it belongs elsewhere.',
+    },
+  ],
+  [
+    { id: 'clarify-this', emoji: '❓', text: 'Clarify this' },
+    {
+      id: 'verify-this',
+      emoji: '🔍',
+      text: 'Verify this',
+      tip: 'This seems like an assumption. Verify by reading the actual code before proceeding.',
+    },
+    {
+      id: 'give-me-an-example',
+      emoji: '🔬',
+      text: 'Give me an example',
+      tip: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario.',
+    },
+    {
+      id: 'match-existing-patterns',
+      emoji: '🧬',
+      text: 'Match existing patterns',
+      tip: 'Search the codebase for existing patterns that already solve this. Reuse what exists.',
+    },
+    {
+      id: 'consider-alternatives',
+      emoji: '🔄',
+      text: 'Consider alternatives',
+      tip: 'Propose 2-3 alternative approaches with trade-offs based on the actual codebase.',
+    },
+    {
+      id: 'ensure-no-regression',
+      emoji: '📉',
+      text: 'Ensure no regression',
+      tip: 'Verify this will not break existing behavior. Identify what could regress.',
+    },
+    {
+      id: 'out-of-scope',
+      emoji: '🚫',
+      text: 'Out of scope',
+      tip: 'This is not part of the current task. Remove it and stay focused on what was requested.',
+    },
+    { id: 'needs-tests', emoji: '🧪', text: 'Needs tests' },
+  ],
 ];
+
+// Every label, in row order. What the payload resolves against; the grouping
+// above is only how the row is drawn.
+export const QUICK_LABELS: QuickLabel[] = QUICK_LABEL_GROUPS.flat();
 
 export function labelByEmoji(emoji: string): QuickLabel | undefined {
   return QUICK_LABELS.find((label) => label.emoji === emoji);
@@ -79,7 +104,7 @@ export interface PayloadAnnotation {
 export function buildAnnotationPayload(annotations: readonly PayloadAnnotation[]): string {
   if (annotations.length === 0) return '';
   const ordered = [...annotations].sort((a, b) => a.start - b.start);
-  const lines: string[] = ['Feedback on your last message. Address each annotation.', ''];
+  const lines: string[] = ['Feedback on your last message.', ''];
   ordered.forEach((annotation, index) => {
     const label = annotation.emoji ? labelByEmoji(annotation.emoji) : undefined;
     const heading = label

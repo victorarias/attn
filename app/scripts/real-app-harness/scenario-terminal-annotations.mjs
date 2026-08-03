@@ -24,6 +24,7 @@ import {
   printCommonHelp,
   relaunchAppAndConnect,
 } from './common.mjs';
+import { dataDirForProfile } from './harnessProfile.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
@@ -220,6 +221,21 @@ export function proseRow(lines) {
   return best;
 }
 
+// The widest row carrying real text, whatever it is. Used before the agent has
+// said anything, when the point is not which row is dragged over but that a
+// drag over any of them is refused out loud — nothing on the grid at that
+// moment belongs to a transcript message.
+export function anyTextRow(lines) {
+  let best = null;
+  for (let row = 0; row < lines.length; row += 1) {
+    const line = lines[row];
+    const words = line.trim().split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]*[.,;:]?$/.test(word));
+    if (words.length < 5) continue;
+    if (!best || line.trim().length > best.text.trim().length) best = { row, text: line, words };
+  }
+  return best;
+}
+
 // A whole-word column span inside a row, away from both edges so the drag
 // cannot pick up the indent or a wrapped word.
 export function wordSpan(rowText) {
@@ -301,6 +317,86 @@ async function main() {
       await client.request('select_session', { sessionId });
       const pane = await waitForFirstWorkspacePane(client, sessionId, 'agent pane', 20_000);
       paneId = pane.paneId;
+    });
+
+    // Before the agent has said anything there is nothing to annotate, and the
+    // whole failure mode this covers is that the gesture used to do exactly
+    // nothing about it — no popup, no message, no log line, indistinguishable
+    // from the feature being broken. Runs first because "no window yet" is only
+    // deterministic before the first turn.
+    await runner.step('a_refused_drag_says_why', async () => {
+      // Settle first. A session still coming up is refused for a different and
+      // equally correct reason ("annotations open once the agent stops
+      // talking"), and pinning whichever one the timing produced would make
+      // this step a race rather than a check.
+      await pollFor(
+        () => (SETTLED_STATES.has(observer.getSession(sessionId)?.state) ? true : null),
+        'the new session to settle at its prompt',
+        60_000,
+      );
+
+      const refused = await pollFor(
+        async () => {
+          const target = anyTextRow(await readLines(client, sessionId, paneId));
+          if (!target) return null;
+          const span = wordSpan(target.text);
+          if (!span) return null;
+          await client.request('drag_pane_selection', {
+            sessionId,
+            paneId,
+            start: { col: span.startCol, row: target.row },
+            end: { col: span.endCol, row: target.row },
+            altKey: true,
+          });
+          // Read straight away: the notice retires itself after a few seconds,
+          // and polling around this request would race its own dismissal.
+          const state = await client.request('get_annotation_state', {});
+          return state.notice ? { state, target } : null;
+        },
+        'an alt-drag before the first turn to be refused out loud',
+        20_000,
+      );
+
+      runner.assert(
+        !refused.state.popupOpen,
+        `A drag before the agent said anything opened an annotation editor: ${JSON.stringify(refused.state)}`,
+      );
+      // A session that has never taken a turn has no transcript on disk yet, so
+      // the identity ladder resolves nothing — the same outcome as a session
+      // whose transcript was cleaned up, which is what this is standing in for.
+      runner.assert(
+        /No transcript could be read/.test(refused.state.notice),
+        `The refusal did not name its reason: ${JSON.stringify(refused.state.notice)}`,
+      );
+      const { noticeRect: box, viewport } = refused.state;
+      runner.assert(
+        box && box.left >= 0 && box.top >= 0
+        && box.left + box.width <= viewport.width && box.top + box.height <= viewport.height,
+        `The refusal was drawn off-screen, where it explains nothing: `
+        + `${JSON.stringify(box)} in ${JSON.stringify(viewport)}`,
+      );
+      runner.log('refused', { row: refused.target.row, notice: refused.state.notice });
+
+      // The other half of the fix: the daemon used to return this outcome and
+      // log nothing, so a user reporting "I cannot annotate" left no trace to
+      // diagnose from. The line names the session and where it was running.
+      const logPath = path.join(dataDirForProfile(), 'daemon.log');
+      const logged = fs.existsSync(logPath)
+        ? fs.readFileSync(logPath, 'utf8').split('\n').filter((line) => line.includes(sessionId) && line.includes('no transcript resolved'))
+        : [];
+      runner.assert(
+        logged.length > 0,
+        `The daemon refused the message window without logging it, so the cause is invisible outside the app (${logPath})`,
+      );
+
+      // It must retire on its own — it explains a finished gesture, and one
+      // that lingers becomes a thing in the way of the next drag.
+      await sleep(6_000);
+      const after = await client.request('get_annotation_state', {});
+      runner.assert(
+        after.notice === null,
+        `The refusal was still on screen 6s later: ${JSON.stringify(after.notice)}`,
+      );
     });
 
     await runner.step('first_turn_and_annotate', async () => {
