@@ -3644,6 +3644,8 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"ticketBoardScale not a number", "ticketBoardScale", "big", true},
 		{"valid tailscale_enabled true", "tailscale_enabled", "true", false},
 		{"valid tailscale_enabled false", "tailscale_enabled", "false", false},
+		{"valid summarize enabled false", "notebook.summarize_session.enabled", "false", false},
+		{"invalid summarize enabled", "notebook.summarize_session.enabled", "maybe", true},
 		{"empty keybindings_config", "keybindings_config", "", false},
 		{"valid keybindings_config", "keybindings_config", `{"version":1,"overrides":{"session.new":{"key":"m","meta":true}}}`, false},
 		{"invalid keybindings_config json", "keybindings_config", "{not json", true},

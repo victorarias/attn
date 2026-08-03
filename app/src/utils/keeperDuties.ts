@@ -8,7 +8,8 @@ import {
 // The keeper runs three async background duties off one durable runner. They share
 // the same {agent, model} config shape (parsed/serialized by workspaceContextKeeper)
 // and differ only in their persisted settings key, their model presets, and whether
-// a blank config means "use a built-in default" (always-on) or "disabled" (opt-in).
+// a blank config means "use a built-in default" (default-configured) or "disabled"
+// (opt-in).
 // This module is the single source of truth the Settings UI reads to render one row
 // per duty.
 
@@ -34,13 +35,14 @@ export interface KeeperDutyDescriptor {
   testIdPrefix: string;
   /**
    * opt-in duties (compaction) treat a blank config as DISABLED and expose a
-   * "Disabled" agent option plus a Disable button. always-on duties (summarize,
-   * narrate) fall back to a built-in tier default when blank, so they offer no
-   * Disabled option and a "Use default" reset instead.
+   * "Disabled" agent option plus a Disable button. Default-configured duties
+   * (summarize, narrate) fall back to a built-in tier default when blank, so
+   * they offer no Disabled agent and a "Use default" reset instead. Runtime
+   * enable switches are separate from this agent/model config behavior.
    */
   optInOnly: boolean;
   /**
-   * Human label for the built-in default an always-on duty resolves to when unset,
+   * Human label for the built-in default a default-configured duty resolves to when unset,
    * shown in the row hint. Empty for opt-in duties (blank means off, not a default).
    */
   defaultLabel: string;

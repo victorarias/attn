@@ -927,7 +927,40 @@ describe('SettingsModal keeper', () => {
     expect(onSetSetting).toHaveBeenCalledWith('notebook.tasks_enabled', 'true');
   });
 
-  it('seeds always-on duties with their tier default and saves an override', async () => {
+  it('toggles session summaries independently and defaults them on', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-keeper-summarize-toggle');
+    expect(toggle).toHaveTextContent('Disable');
+    expect(toggle).toHaveAccessibleName('Disable session summaries');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'notebook.summarize_session.enabled',
+      'false',
+    );
+  });
+
+  it('re-enables session summaries without losing their model configuration', async () => {
+    const onSetSetting = renderModal({
+      'notebook.summarize_session.enabled': 'false',
+      'notebook.summarize_session': '{"agent":"codex","model":"gpt-5.4-mini"}',
+    });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-keeper-summarize-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    expect(toggle).toHaveAccessibleName('Enable session summaries');
+    expect(screen.getByTestId('settings-keeper-summarize-agent')).toHaveValue('codex');
+    expect(screen.getByTestId('settings-keeper-summarize-model')).toHaveValue('gpt-5.4-mini');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'notebook.summarize_session.enabled',
+      'true',
+    );
+  });
+
+  it('seeds default-configured duties with their tier default and saves an override', async () => {
     const onSetSetting = renderModal({});
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
 
@@ -949,7 +982,7 @@ describe('SettingsModal keeper', () => {
     );
   });
 
-  it('offers no Disabled agent for always-on duties but does for compaction', async () => {
+  it('offers no Disabled agent for default-configured duties but does for compaction', async () => {
     renderModal({});
     fireEvent.click(screen.getByTestId('settings-nav-agents'));
 
@@ -964,7 +997,7 @@ describe('SettingsModal keeper', () => {
     ).toContain('Disabled');
   });
 
-  it('reverts an always-on duty to its default by clearing the override', async () => {
+  it('reverts a default-configured duty to its default by clearing the override', async () => {
     const onSetSetting = renderModal({
       'notebook.narrate_workspace': '{"agent":"claude","model":"opus"}',
     });

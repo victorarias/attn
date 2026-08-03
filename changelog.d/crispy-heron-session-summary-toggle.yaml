@@ -1,0 +1,7 @@
+kind: changed
+area: notebook
+change: >
+  Session summaries can now be switched off independently in Settings. Disabling
+  them stops new transcript-summary jobs and prevents already queued jobs from
+  launching their agent, without turning off journal narration or context
+  compaction; the selected summary agent and model stay ready for re-enabling.

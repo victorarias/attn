@@ -537,7 +537,16 @@
 
 .settings-keeper-duty-head {
   display: grid;
-  gap: 4px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+}
+
+/* A duty can be independently off while its model remains editable, just like
+   the master switch leaves all duty configuration reachable. */
+.settings-keeper-duty.is-disabled > :not(.settings-keeper-duty-head),
+.settings-keeper-duty.is-disabled .settings-keeper-duty-head > div {
+  opacity: 0.6;
 }
 
 .settings-token-list {

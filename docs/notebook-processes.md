@@ -141,7 +141,11 @@ narrative.
     — a mechanical, literal whole-line match tidy-up; promotion into `areas/`
     stays the chief's higher-judgment call.
 - **Settings**: `notebook.summarize_session` / `notebook.narrate_workspace`
-  (`{agent,model}` JSON; blank uses the tier default). Narration is always on.
+  (`{agent,model}` JSON; blank uses the tier default). Session summaries are
+  default-on and can be disabled independently with
+  `notebook.summarize_session.enabled`; queued summaries retire without launching
+  an agent after it is disabled. Workspace narration remains on unless the keeper
+  master switch (`notebook.tasks_enabled`) is disabled.
 
 ## The notebook cron (`internal/daemon/notebook_cron.go`)
 

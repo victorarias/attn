@@ -115,6 +115,11 @@ const (
 	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
 	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
 	SettingNotebookSummarizeSession = "notebook.summarize_session"
+	// SettingNotebookSummarizeSessionEnabled independently gates the per-session
+	// summarize pass. Default ON preserves existing installs; only an explicit
+	// "false" stops new summaries and retires queued summaries without launching
+	// their agent. The keeper master switch still takes precedence over every duty.
+	SettingNotebookSummarizeSessionEnabled = "notebook.summarize_session.enabled"
 	// SettingNotebookNarrateWorkspace configures the curated-journal narrate pass (the
 	// STRONG tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty => the
 	// built-in strong default (Claude Sonnet). Claude is the default narrate agent
@@ -343,6 +348,10 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	// reflects the default-ON semantics (blank/unset => "true") rather than an
 	// absent key the frontend would read as off.
 	settings[SettingNotebookTasksEnabled] = strconv.FormatBool(d.notebookTasksEnabled())
+	// The summary duty is independently opt-out while remaining default-on for
+	// existing profiles. Surface its effective value for the same reason as the
+	// keeper master switch: the app should never mistake an absent key for off.
+	settings[SettingNotebookSummarizeSessionEnabled] = strconv.FormatBool(d.notebookSummariesEnabled())
 	// Surface the EFFECTIVE token caps so the UI shows the concrete default
 	// (128000) rather than an absent key when the operator has not set one.
 	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
@@ -490,7 +499,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
 		return validateBooleanSetting(value)
 	case SettingModelCaptureIntervalSeconds:
 		return validateModelCaptureInterval(value)

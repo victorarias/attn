@@ -17,10 +17,11 @@ const (
 	notebookNarrateWorkspaceKind = "narrate_workspace"
 )
 
-// Tier-default model ids. Narration ALWAYS runs (unlike the keeper's compaction
-// duty, which disables on a blank setting): when a setting is unset/blank we fall back to a
+// Tier-default model ids. Narration model configuration never disables on a blank
+// value (unlike the keeper's compaction duty): an unset setting falls back to a
 // built-in default so session-end and removal-boundary narration work out of the
-// box. Claude is the default agent for BOTH tiers because its native
+// box. The summary duty has a separate boolean runtime switch. Claude is the
+// default agent for BOTH tiers because its native
 // Write/Edit enforce read-before-write CAS, which the shared-journal concurrency
 // story depends on (Codex apply-patch CAS is unverified for the installed
 // version — see notebook_narration.go).
@@ -37,8 +38,9 @@ const (
 )
 
 // notebookNarrationConfig is the resolved {agent, model} for a narration kind. It
-// is never "disabled": parseNotebookNarrationConfig substitutes the tier default
-// for a blank setting, so Agent/Model are always populated for a valid config.
+// is never "disabled" by its model config: parseNotebookNarrationConfig
+// substitutes the tier default for a blank setting, so Agent/Model are always
+// populated for a valid config. Runtime enablement is checked separately.
 type notebookNarrationConfig struct {
 	Agent string `json:"agent"`
 	Model string `json:"model"`
@@ -60,7 +62,7 @@ func narrationTierDefault(kind string) (agent, model string) {
 // resolves the provider, validating at config/enqueue time so a misconfigured
 // agent/model fails fast into failed->dead with a surfaced last_error rather than
 // hanging an executor mid-run. Unlike parseKeeperCompactConfig, a BLANK
-// value yields the tier DEFAULT (narration is always-on), not a disabled config.
+// value yields the tier DEFAULT, not a disabled config.
 // A non-blank value must specify both agent and model.
 func parseNotebookNarrationConfig(kind, raw string) (notebookNarrationConfig, error) {
 	raw = strings.TrimSpace(raw)
