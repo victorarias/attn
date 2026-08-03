@@ -730,9 +730,10 @@ moves and `writeAPC` returns early — and all become live the moment the limit 
 flipped. None may ship with the flip.
 
 `FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
-property with kitty live. The two placement-diff items below are decided and
-fixed; what it stays red on is the CHA-under-margins item and the stamp-claim
-item its soak turned up. Soaking it is part of this phase's work, not A2's.
+property with kitty live. The placement-diff items below are decided and fixed,
+as is the stamp-claim item its soak turned up; what it stays red on is the
+CHA-under-margins item and the over-tall-scroll item. Soaking it is part of this
+phase's work, not A2's.
 (The pin skew noted under A2 is NOT one of these — it is a live limit today,
 and gated on the two ghostty pins converging rather than on the storage flip.)
 
@@ -775,23 +776,50 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       in one read. **Decided: resync when the stamp moved and the diff found
       nothing at all** — the stamp is the only witness such a chunk leaves. See
       the decision record below; this and the item above were one choice.
-- [ ] **An extractable APC erases an earlier undescribed one in the same
-      chunk.** `writeAPC` claims the stamp wholesale (`f.generation = stamped`)
-      and reads its own "before" stamp AFTER the chunk's earlier plain bytes
-      have already reached the terminal. So an undescribed APC followed by ANY
-      extractable APC in the same chunk leaves the end-of-feed check nothing to
-      see: the stamp reads as accounted for, `writeAPC` observed nothing
-      (its own before and after are equal when the second APC is a no-op), and
-      no resync fires. Found by `FuzzKittyWireMirror` at ~8m on a placement APC
+- [x] **An extractable APC erased an earlier undescribed one in the same
+      chunk.** `writeAPC` claimed the stamp wholesale (`f.generation = stamped`)
+      and read its own "before" stamp AFTER the chunk's earlier plain bytes had
+      already reached the terminal. So an undescribed APC followed by ANY
+      extractable APC in the same chunk left the end-of-feed check nothing to
+      see: the stamp read as accounted for, `writeAPC` observed nothing (its
+      own before and after are equal when the second APC is a no-op), and no
+      resync fired. Found by `FuzzKittyWireMirror` at ~8m on a placement APC
       terminated by a stray ESC — which ghostty DISPATCHES, so the image lands
       while the segmenter replays the bytes as plain — followed by `\x1bi` and
-      an empty `\x1b_G\x1b\\`; the worker ends at `(2,1)` against the client's
-      `(0,0)`. Reproduces identically with the old `Added`-only predicate, so
-      it is a third blind spot rather than a consequence of the rule below: the
-      ACCOUNTING is wrong, not the predicate. The fix belongs where the stamp
-      is claimed — `writeAPC` may claim only the move it made — and needs a
-      corpus entry. No entry is recorded for it yet on purpose: the stream is
-      silently divergent today, so an entry would pin a wrong grid as correct.
+      an empty `\x1b_G\x1b\\`; the worker ended at `(2,1)` against the client's
+      `(0,0)`. It reproduced identically with the old `Added`-only predicate: a
+      blind spot in the ACCOUNTING, not in the predicate.
+      **Decided: settle before every described dispatch.**
+      `settleUnaccounted` — read the stamp, and when it moved, claim it,
+      observe, and charge the result through `unaccountedResync` — now runs
+      both at the end of a feed and at `writeAPC`'s ENTRY, before the pre-ST
+      and the cursor pin. A stamp is one number for the whole terminal, so the
+      only way a dispatch can claim just its own move is for everything earlier
+      to be settled first. `writeAPC` then reads its pre-dispatch generation
+      from `f.generation` instead of crossing into ghostty again, so the dark
+      path pays no extra cgo. Corpus entries: "an undescribed image, then an
+      extractable apc in the same chunk" (the fuzz stream) and "an undescribed
+      placement and a described one in the same chunk"; the second is also
+      pinned byte-for-byte by
+      `TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne`, because a
+      resync must not stop the settling APC from being described.
+- [ ] **A synthesized scroll taller than the screen loses history.** Synthesis
+      expresses the measured scroll as `CSI n S`, and ghostty CLAMPS `SU` to the
+      height of the scroll region: on an 8-row screen, `CSI 47 S` pushes 8 rows
+      into scrollback, while the placement that caused it pushed 47. The
+      viewport and the cursor still agree — only the client's history comes out
+      short, by exactly `scroll - rows` rows, which the user meets as missing
+      scrollback rather than as a wrong screen. Measured on
+      `\x1b[2;2Hkeep` + a 2x2 image placed with `r=53` + `\r\ntail`: worker
+      history 55 rows, client 16. Bisected on the same shape — `SU 6` agrees,
+      `SU 14` diverges — so the threshold is exactly the screen height. Cheap to
+      reach because kitty's `r=` lets a small image claim any number of rows.
+      Found by `FuzzKittyWireMirror` at ~1m30s after the settle fix; it predates
+      both this phase's fixes, which never touch `writeAPC`'s measurement. Fix
+      by splitting the scroll into region-height `SU`s, or by resyncing when the
+      measured scroll exceeds the screen — and it needs a corpus entry either
+      way. None is recorded yet on purpose: the stream diverges silently today,
+      so an entry would pin a wrong grid as correct.
 
 **Decision record — what an unaccounted kitty mutation costs.** A resync exists
 for grid SCROLL the wire never expressed, never for knowledge of the placement

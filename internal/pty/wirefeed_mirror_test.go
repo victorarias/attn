@@ -554,6 +554,16 @@ func TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval(t *testing.T) 
 			shape:  onlyAdditions,
 		},
 		{
+			// The settle runs at every described dispatch too, and it must not
+			// turn an ordinary one into a re-push: writeAPC accounts for its own
+			// move, so by the time the next settle looks there is nothing left
+			// unaccounted. This row is the guard on that.
+			name:   "a placement created by a described apc",
+			chunks: []string{"\x1b[2;2Hkeep", kittyPlaceRGB(60, 16, 32, "")},
+			want:   "",
+			shape:  onlyAdditions,
+		},
+		{
 			name: "a live placement deleted by an undescribed apc",
 			chunks: []string{
 				"\x1b[2;2Hkeep",
@@ -605,6 +615,49 @@ func TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval(t *testing.T) 
 			}
 			m.agree(t, "after a chunk that only retired placements")
 		})
+	}
+}
+
+// The accounting rule, at the shape that used to break it: an undescribed
+// dispatch followed by a described one in the SAME chunk.
+//
+// writeAPC ends by taking the terminal's kitty stamp as its own, and the stamp
+// is one number for the whole terminal — so a described APC used to absorb the
+// undescribed dispatch that ran before it, leaving the end-of-feed check a
+// stamp that already looked accounted for and the image on the worker's grid
+// alone. Settling at writeAPC's entry is what splits the two.
+//
+// Two claims, and the second is the one a naive fix would miss. The chunk must
+// resync for the image the wire could not carry, AND the APC that settled it
+// must still be described in full: a resync says what the wire could not
+// express, it is never a reason to stop expressing what it can. Pinned against
+// a control that runs the same placement alone from the same cursor — the
+// undescribed one carries C=1 so it moves nothing — which makes the expected
+// wire exact rather than a shape.
+func TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne(t *testing.T) {
+	const prefix = "\x1b[2;2Hkeep"
+	described := kittyPlaceRGB(59, 16, 32, "")
+	silent := undescribed(kittyPlaceRGB(58, 16, 32, ",C=1"))
+
+	control := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write(prefix)
+	control.write(described)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s); it places one ordinary image", control.lastResync)
+	}
+	control.agree(t, "with one described placement")
+	describedWire := string(control.lastWire)
+
+	m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	m.write(prefix)
+	m.write(silent + described)
+
+	if m.lastResync != kittyResyncUndescribedImage {
+		t.Fatalf("resync = %q, want %q: the first placement reached the terminal on bytes the wire carried verbatim",
+			m.lastResync, kittyResyncUndescribedImage)
+	}
+	if got, want := string(m.lastWire), silent+describedWire; got != want {
+		t.Errorf("wire = %q,\nwant the undescribed bytes verbatim followed by exactly the description that placement gets on its own (%q)", got, want)
 	}
 }
 

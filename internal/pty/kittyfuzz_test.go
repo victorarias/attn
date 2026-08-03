@@ -81,17 +81,20 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 
 // FuzzKittyWireMirror runs the same property with kitty LIVE, which is the
 // configuration A4 flips on. It exercises synthesis — the observed scroll and
-// cursor written in an APC's place — and it is knowingly red on two defects
-// recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md:
-// synthesis ends with an absolute column move that a client with left/right
-// margins enabled (`\x1b[?69h`) measures from the MARGIN, and writeAPC claims
-// ghostty's kitty stamp wholesale, so an extractable APC erases an undescribed
-// one earlier in the same chunk.
+// cursor written in an APC's place — and it is knowingly red on two synthesis
+// defects recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md.
+// Synthesis ends with an absolute column move, and a client with left/right
+// margins enabled (`\x1b[?69h`) measures that column from the MARGIN while the
+// worker reports one from the screen edge. And it expresses the measured scroll
+// as one `SU`, which ghostty clamps to the screen height, so a placement taller
+// than the screen (kitty's `r=` reaches it cheaply) leaves the client's history
+// short while its viewport and cursor still agree.
 //
-// The two placement-diff blind spots this target used to reach are closed: an
-// image that appeared and died inside one chunk, and the `Updated`-blind
-// end-of-feed check. Both were the same choice and it is made — see
-// unaccountedResync in wirefeed.go, and the decision record in the plan.
+// The three blind spots this target used to reach are closed: an image that
+// appeared and died inside one chunk, the `Updated`-blind end-of-feed check
+// (both settled by unaccountedResync), and a described APC absorbing an
+// undescribed one's stamp move (settleUnaccounted, which now runs before every
+// described dispatch as well as at the end of a feed).
 //
 // So this target is not a gate yet and is not run with -fuzz in CI. Its seeds
 // still run on every `go test`, which is what keeps the recorded corpus honest

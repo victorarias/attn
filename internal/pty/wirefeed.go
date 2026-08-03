@@ -128,9 +128,11 @@ type wireFeeder struct {
 
 	// generation is ghostty's kitty stamp as of the last change this feeder
 	// ACCOUNTED for. Every dispatch either goes through writeAPC, which
-	// describes it on the wire, or is one the wire cannot describe — and the
-	// difference between this and the terminal's own stamp at the end of a feed
-	// is exactly the second kind.
+	// describes it on the wire, or is one the wire cannot describe — and a
+	// difference between this and the terminal's own stamp is exactly the
+	// second kind. settleUnaccounted is where that difference is read, and it
+	// runs both at the end of a feed and before every described dispatch, so
+	// the two kinds can never be folded into one number.
 	//
 	// Raw, and deliberately: this is an internal change detector that never
 	// leaves the process, so folding the epoch into it would buy nothing and
@@ -246,24 +248,10 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 		first = false
 	})
 
-	// Anything the terminal's kitty state did that writeAPC did not account for
-	// happened on bytes the wire carries verbatim, and the client ignores them.
-	// One cheap read per chunk buys the guarantee that no image ever lands on
-	// the worker's grid alone.
-	//
-	// Only the observations from HERE on are the unaccounted ones: writeAPC's
-	// own dispatches appended their deltas earlier in this same call, and every
-	// one of those was either described on the wire or resynced over already.
-	observed := false
-	if stamped := f.term.KittyGeneration(); stamped != f.generation {
-		f.generation = stamped
-		before := len(f.deltas)
-		f.observe()
-		observed = true
-		if reason, ok := unaccountedResync(f.deltas[before:]); ok {
-			f.failResync(reason)
-		}
-	}
+	// Whatever the chunk's last bytes did to the terminal's kitty state, settled
+	// against what the wire carried for them. One cheap read per chunk buys the
+	// guarantee that no image ever lands on the worker's grid alone.
+	settled := f.settleUnaccounted()
 
 	// A live placement moves on bytes that touch no kitty state at all — a
 	// scroll is the common one — and ghostty's stamp does not move with it, so
@@ -277,7 +265,7 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	// every chunk of every session while the feature is dark — this costs one
 	// comparison and never crosses into cgo, and nothing except a placement's
 	// own dispatch can create the first one.
-	if !observed && len(f.placements) > 0 {
+	if !settled && len(f.placements) > 0 {
 		f.observe()
 	}
 
@@ -320,6 +308,13 @@ var wireST = []byte{0x1b, '\\'}
 // pin the cursor before the write, because a tracked ref is the only way to see
 // afterwards how far the grid moved under it.
 func (f *wireFeeder) writeAPC(apc []byte) {
+	// Settle the chunk's earlier bytes before anything here is measured or
+	// claimed. Plain bytes ahead of this APC can carry a kitty escape ghostty
+	// dispatches and the segmenter could not extract; the stamp move that
+	// leaves is this feeder's only record of it, and the claim at the end of
+	// this function would take it as its own. See settleUnaccounted.
+	f.settleUnaccounted()
+
 	// The abort, given to both sides, ahead of every measurement below.
 	//
 	// On the WIRE it stands in for the APC's own leading ESC, which the client
@@ -345,7 +340,9 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	f.term.Write(wireST)
 	f.wire = append(f.wire, wireST...)
 
-	generation := f.term.KittyGeneration()
+	// The settle above left f.generation equal to the terminal's stamp, so this
+	// is the pre-dispatch generation without a second crossing into ghostty.
+	generation := f.generation
 	col, row := f.term.CursorPos()
 	before := f.term.TrackCursor()
 
@@ -353,8 +350,9 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 
 	stamped := f.term.KittyGeneration()
 	// Claimed here rather than at each exit below: every branch from this point
-	// on has either described the dispatch or resynced over it, so the
-	// end-of-feed check must not see it a second time.
+	// on has either described the dispatch or resynced over it, so no later
+	// settle may see it again. The settle at entry is what makes the claim
+	// honest — it covers this dispatch's move and nothing that ran before it.
 	f.generation = stamped
 	movedCol, movedRow := f.term.CursorPos()
 	// An unchanged generation means the storage did not change, so no placement
@@ -477,6 +475,41 @@ func (f *wireFeeder) observe() {
 	if !delta.empty() {
 		f.deltas = append(f.deltas, delta)
 	}
+}
+
+// settleUnaccounted closes the books on everything the terminal's kitty state
+// has done that no dispatch through writeAPC accounted for, and reports whether
+// there was any. Whatever it finds happened on bytes the wire carried verbatim,
+// and the client ignores those, so the cost is decided by unaccountedResync.
+//
+// Called at two moments, and the pair is the whole accounting rule: at the end
+// of every feed, and at the ENTRY of every writeAPC, before that dispatch is
+// measured. The second is what keeps the claim honest. writeAPC ends by taking
+// the terminal's stamp as its own, and a stamp is a single number for the whole
+// terminal — so without a settle first, a described APC silently absorbs an
+// undescribed one that ran earlier in the same chunk, and the end-of-feed check
+// finds a stamp that already looks accounted for. Settling first means writeAPC
+// can only ever claim the move it made itself.
+//
+// After it returns, f.generation IS the terminal's current stamp, which is why
+// writeAPC reads its pre-dispatch generation from the field rather than from
+// ghostty: the settle already paid for that crossing.
+func (f *wireFeeder) settleUnaccounted() bool {
+	stamped := f.term.KittyGeneration()
+	if stamped == f.generation {
+		return false
+	}
+	f.generation = stamped
+
+	// Scoped to the observations THIS settle records: the deltas already in the
+	// slice belong to dispatches that were described on the wire or resynced
+	// over at the time, and must not be judged a second time.
+	before := len(f.deltas)
+	f.observe()
+	if reason, ok := unaccountedResync(f.deltas[before:]); ok {
+		f.failResync(reason)
+	}
+	return true
 }
 
 // unaccountedResync names what a generation move on bytes the wire carried

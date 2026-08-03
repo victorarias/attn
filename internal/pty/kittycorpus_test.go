@@ -376,6 +376,33 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			},
 		},
 		{
+			// The stamp is claimed per dispatch, not per chunk. Ghostty
+			// DISPATCHES a kitty command when a stray ESC ends the APC, so the
+			// image here lands from bytes the segmenter had to replay as plain
+			// — and the extractable, empty APC that follows in the same chunk
+			// would take the whole stamp move as its own if it did not settle
+			// the books first. Found by FuzzKittyWireMirror, where it left the
+			// worker at (2,1) against a client that never moved.
+			name: "an undescribed image, then an extractable apc in the same chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				strings.TrimSuffix(kittyPlaceRGB(57, 16, 32, ""), "\x1b\\") + "\x1bi" + "\x1b_G\x1b\\",
+			},
+		},
+		{
+			// The general shape: one undescribed placement and one described
+			// placement in a single chunk. The chunk resyncs for the first, and
+			// the second is still described on the wire — a resync is a
+			// statement about what the wire could not carry, never a reason to
+			// stop carrying what it can.
+			name: "an undescribed placement and a described one in the same chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(58, 16, 32, ",C=1")) + kittyPlaceRGB(59, 16, 32, ""),
+			},
+		},
+		{
 			// The exemption, pinned green. An undescribed DELETE moves the stamp
 			// too, and its diff is nothing but a removal: retiring a placement
 			// gives back no rows, so nothing scrolled, and the client learns the
