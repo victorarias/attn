@@ -1,0 +1,18 @@
+kind: fixed
+area: daemon
+change: >
+  The daemon now refuses to start when something else already holds its
+  WebSocket port, and says so — naming the address, the profile, the likely
+  owner, and how to get out of it — instead of running on anyway.
+symptom: >
+  A daemon whose WebSocket port was already taken started normally and looked
+  healthy, but was split in two: the app routes by WebSocket port and attached
+  to the foreign listener, while the CLI routes by the unix socket and talked
+  to the local daemon. Commands sent from the app silently went to the wrong
+  daemon and did nothing. The only trace was one line in the daemon log.
+notes: >
+  The port is derived from the profile name, so the realistic way to hit this
+  is the same profile running on a VM whose listener is forwarded onto host
+  localhost — OrbStack does that automatically whenever the host port is free.
+  Diagnosed live after it cost hours; the bind failure had been logged at INFO
+  and ignored since the HTTP server was introduced.

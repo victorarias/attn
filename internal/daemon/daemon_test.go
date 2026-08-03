@@ -359,6 +359,45 @@ func TestDaemon_SocketCleanup(t *testing.T) {
 	}
 }
 
+// The WebSocket port is derived from the profile name, so a daemon for the same
+// profile running elsewhere — on a VM whose listener is forwarded onto host
+// localhost, say — can already own it. Binding it has to be fatal: a daemon that
+// owns the unix socket but not the port answers the CLI from this process while
+// the app talks to the foreign listener. Fails if the bind ever goes back to a
+// fire-and-forget goroutine that only logs the failure.
+func TestDaemon_Start_FailsWhenWebSocketPortIsAlreadyBound(t *testing.T) {
+	t.Setenv("ATTN_PROFILE", "bindclash")
+	addr := net.JoinHostPort(config.WSBindAddress(), useFreeWSPort(t))
+
+	foreign, err := net.Listen("tcp", addr)
+	if err != nil {
+		t.Fatalf("occupy %s: %v", addr, err)
+	}
+	defer foreign.Close()
+
+	d := NewForTesting(filepath.Join(shortTempDir(t), "test.sock"))
+	t.Cleanup(d.Stop)
+
+	// Start() blocks on its accept loop once it reaches a running daemon, so race
+	// its return against the daemon's own started signal rather than a deadline.
+	startErr := make(chan error, 1)
+	go func() { startErr <- d.Start() }()
+
+	select {
+	case err := <-startErr:
+		if err == nil {
+			t.Fatal("Start() returned nil while another process held the WebSocket port; a split-brained daemon must be refused")
+		}
+		for _, want := range []string{addr, "bindclash"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("Start() error = %q, want it to name %q", err, want)
+			}
+		}
+	case <-d.startedCh:
+		t.Fatal("daemon reported itself started while another process held the WebSocket port; the bind failure must be fatal, not logged")
+	}
+}
+
 func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	useFreeWSPort(t)
 	t.Setenv("ATTN_PTY_BACKEND", "embedded")

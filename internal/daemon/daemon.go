@@ -122,6 +122,7 @@ type Daemon struct {
 	automationDeliveryHook func(*store.AutomationRun) error
 	listener               net.Listener
 	httpServer             *http.Server
+	httpListener           net.Listener // bound synchronously in Start(); a failure there is fatal
 	httpHandler            http.Handler
 	diagServer             *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
 	wsHub                  *wsHub
@@ -942,6 +943,12 @@ func (d *Daemon) Start() error {
 			_ = d.httpServer.Shutdown(ctx)
 			cancel()
 		}
+		// Shutdown only closes listeners the server is already serving, so a
+		// failure between the bind and Serve() would otherwise leak the port.
+		if d.httpListener != nil {
+			_ = d.httpListener.Close()
+			d.httpListener = nil
+		}
 		if d.listener != nil {
 			_ = d.listener.Close()
 			d.listener = nil
@@ -978,6 +985,12 @@ func (d *Daemon) Start() error {
 
 	// Create HTTP server for WebSocket (must be created synchronously to avoid race with Stop())
 	d.initHTTPServer()
+	if err := d.listenHTTP(); err != nil {
+		// The daemon is usually spawned detached, where stderr goes nowhere;
+		// the log is the only surface that survives.
+		d.logf("%v", err)
+		return err
+	}
 	go d.runHTTPServer()
 	d.maybeStartDiagServer()
 	d.removeLegacyEmbeddedTailscaleState()
@@ -1636,6 +1649,9 @@ func (d *Daemon) Stop() {
 		defer cancel()
 		d.httpServer.Shutdown(ctx)
 	}
+	if d.httpListener != nil {
+		d.httpListener.Close()
+	}
 	if d.diagServer != nil {
 		_ = d.diagServer.Close()
 	}
@@ -1955,10 +1971,33 @@ func (d *Daemon) initHTTPServer() {
 	}
 }
 
-// runHTTPServer starts listening. Must be called after initHTTPServer().
+// listenHTTP binds the WebSocket address before the daemon reports itself
+// started. Must be called after initHTTPServer(), and its error is fatal: the
+// app finds a daemon by its WebSocket port while the CLI finds one by the unix
+// socket, so a daemon that owns the socket but not the port serves two
+// different daemons to its two clients.
+func (d *Daemon) listenHTTP() error {
+	addr := d.httpServer.Addr
+	listener, err := net.Listen("tcp", addr)
+	if err != nil {
+		return fmt.Errorf(
+			"refusing to start: cannot bind the WebSocket address %s for profile %q: %w. "+
+				"attn derives that port from the profile name, so the usual owner is a daemon for the same profile running somewhere else — "+
+				"notably on a VM whose listener OrbStack forwards onto host localhost while the host port is free. "+
+				"Starting anyway would leave this daemon split-brained: the app routes by WebSocket port and would attach to the foreign listener, "+
+				"the CLI routes by the unix socket and would talk to this process, and every command sent from the app would silently miss these sessions. "+
+				"Free %s (stop whatever holds it, including a forwarding VM) or run this daemon under another profile with ATTN_PROFILE",
+			addr, config.ProfileLabel(), err, addr,
+		)
+	}
+	d.httpListener = listener
+	return nil
+}
+
+// runHTTPServer serves the listener bound by listenHTTP().
 func (d *Daemon) runHTTPServer() {
 	d.logf("WebSocket server starting on ws://%s/ws", d.httpServer.Addr)
-	if err := d.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+	if err := d.httpServer.Serve(d.httpListener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		d.logf("HTTP server error: %v", err)
 	}
 }
