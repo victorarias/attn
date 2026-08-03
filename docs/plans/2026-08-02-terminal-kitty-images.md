@@ -673,7 +673,12 @@ the blob it has no pixels for, and the image draws — a checkerboard, confirmed
 in a native window capture rather than from state alone. The program's own
 `a=d` then empties the set over the same relay, so the way out is proven too.
 The generation on the wire was epoch-folded (2762831881943625), which is the
-identity epoch above working on a freshly spawned remote session.
+identity epoch above working on a freshly spawned remote session. Images were
+on for that run only because the VM's daemon was started by hand with
+`ATTN_KITTY_STORAGE_LIMIT` in its environment — the unsupported route, and the
+reason this leg proves the pipeline rather than the switch: the hub forwards a
+fixed env allowlist, so a remote daemon has no supported way to be told to
+store images at all. Supplying one is what A4's remote item owes.
 
 **The A3 defect it found.** The hub dropped every relayed kitty event. Its
 `forwardsRawEvent` allowlist (`internal/hub/manager.go`) never listed
