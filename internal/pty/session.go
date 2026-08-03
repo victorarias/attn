@@ -87,6 +87,14 @@ type Session struct {
 	metaMu sync.RWMutex
 	cols   uint16
 	rows   uint16
+	// Cell size in device pixels, derived from the total pane pixels a client
+	// last reported. Zero until some client reports geometry — a session spawns
+	// pixel-less and stays that way until the first fit. It is the cell size
+	// rather than the total that is remembered, because the total only means
+	// anything paired with the grid it was measured at: a later pixel-less
+	// resize re-derives its total from these.
+	cellW uint16
+	cellH uint16
 
 	ptmx *os.File
 	cmd  *exec.Cmd
@@ -812,10 +820,30 @@ func (s *Session) input(data []byte) error {
 	return err
 }
 
-func (s *Session) resize(cols, rows uint16) error {
+// resize applies a client's geometry to the grid, the worker terminal and the
+// kernel's winsize. xpixel/ypixel are the pane's TOTAL size in device pixels;
+// zero means the client has no pixel geometry, and the session then reports the
+// totals its remembered cell size implies rather than reporting zeros — an
+// attach-time reconcile must not blank out what a fit already measured.
+func (s *Session) resize(cols, rows, xpixel, ypixel uint16) error {
+	// The pane total is what a client can measure, but the cell is what an
+	// emitter and the terminal's own size reports are built from, so the
+	// derivation happens once, here, and everything downstream speaks cells.
+	cellW, cellH := uint16(0), uint16(0)
+	if xpixel > 0 && ypixel > 0 && cols > 0 && rows > 0 {
+		cellW, cellH = xpixel/cols, ypixel/rows
+	}
 	s.metaMu.Lock()
 	s.cols = cols
 	s.rows = rows
+	if cellW > 0 && cellH > 0 {
+		s.cellW, s.cellH = cellW, cellH
+	} else {
+		cellW, cellH = s.cellW, s.cellH
+		if cellW > 0 && cellH > 0 {
+			xpixel, ypixel = cols*cellW, rows*cellH
+		}
+	}
 	s.metaMu.Unlock()
 	// The resize mutates the same terminal info() serializes and the block feed
 	// resolves rows against, so it belongs in that critical section.
@@ -827,6 +855,11 @@ func (s *Session) resize(cols, rows uint16) error {
 	// mapping across the wire — placements above all — rides on them being equal.
 	s.replayMu.Lock()
 	if s.ghostty != nil {
+		// Before the grid resize so the terminal never answers a size report
+		// from the old cell against the new grid.
+		if cellW > 0 && cellH > 0 {
+			s.ghostty.SetCellPixelSize(int(cellW), int(cellH))
+		}
 		s.ghostty.ResizeNoReflow(int(cols), int(rows))
 	}
 	// A resize moves images without producing a byte of output, so no chunk
@@ -859,7 +892,9 @@ func (s *Session) resize(cols, rows uint16) error {
 	if s.ptmxClosed {
 		return nil
 	}
-	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows})
+	// X/Y are ws_xpixel/ws_ypixel: the pane's total pixel size, which is what an
+	// image emitter reads through TIOCGWINSZ to decide how large to draw.
+	return creackpty.Setsize(s.ptmx, &creackpty.Winsize{Cols: cols, Rows: rows, X: xpixel, Y: ypixel})
 }
 
 // closePTMX closes the pty exactly once, shutting out the writers and the

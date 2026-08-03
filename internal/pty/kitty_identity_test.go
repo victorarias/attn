@@ -61,7 +61,7 @@ func TestKittyIdentityIsTheSameAtEveryExit(t *testing.T) {
 		t.Errorf("attach snapshot generation = %d, want the %d the live description carried", got, live)
 	}
 
-	if err := spawn.manager.Resize(spawn.id, 40, 4); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 	var resized PlacementUpdate

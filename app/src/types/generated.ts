@@ -3903,10 +3903,12 @@ export enum PtyOutputMessageEvent {
 }
 
 export interface PtyResizedMessage {
-    cols:  number;
-    event: PtyResizedMessageEvent;
-    id:    string;
-    rows:  number;
+    cols:    number;
+    event:   PtyResizedMessageEvent;
+    id:      string;
+    rows:    number;
+    xpixel?: number;
+    ypixel?: number;
     [property: string]: any;
 }
 
@@ -3915,10 +3917,12 @@ export enum PtyResizedMessageEvent {
 }
 
 export interface PtyResizeMessage {
-    cmd:  PtyResizeMessageCmd;
-    cols: number;
-    id:   string;
-    rows: number;
+    cmd:     PtyResizeMessageCmd;
+    cols:    number;
+    id:      string;
+    rows:    number;
+    xpixel?: number;
+    ypixel?: number;
     [property: string]: any;
 }
 
@@ -5707,6 +5711,8 @@ export interface WebSocketEvent {
     workspace_layout?:         Layout;
     workspaces?:               WorkspaceElement[];
     worktrees?:                WorktreeElement[];
+    xpixel?:                   number;
+    ypixel?:                   number;
     [property: string]: any;
 }
 
@@ -12035,12 +12041,16 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("PtyResizedMessageEvent") },
         { json: "id", js: "id", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
+        { json: "xpixel", js: "xpixel", typ: u(undefined, 0) },
+        { json: "ypixel", js: "ypixel", typ: u(undefined, 0) },
     ], "any"),
     "PtyResizeMessage": o([
         { json: "cmd", js: "cmd", typ: r("PtyResizeMessageCmd") },
         { json: "cols", js: "cols", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "rows", js: "rows", typ: 0 },
+        { json: "xpixel", js: "xpixel", typ: u(undefined, 0) },
+        { json: "ypixel", js: "ypixel", typ: u(undefined, 0) },
     ], "any"),
     "QueryAuthorsMessage": o([
         { json: "cmd", js: "cmd", typ: r("QueryAuthorsMessageCmd") },
@@ -13128,6 +13138,8 @@ const typeMap: any = {
         { json: "workspace_layout", js: "workspace_layout", typ: u(undefined, r("Layout")) },
         { json: "workspaces", js: "workspaces", typ: u(undefined, a(r("WorkspaceElement"))) },
         { json: "worktrees", js: "worktrees", typ: u(undefined, a(r("WorktreeElement"))) },
+        { json: "xpixel", js: "xpixel", typ: u(undefined, 0) },
+        { json: "ypixel", js: "ypixel", typ: u(undefined, 0) },
     ], "any"),
     "WorkflowActionResultMessage": o([
         { json: "action", js: "action", typ: "" },

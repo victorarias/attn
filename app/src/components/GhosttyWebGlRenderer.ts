@@ -289,6 +289,11 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
 }
 
 export class WebGlTerminalRenderer {
+  // CSS pixels, not device pixels: the canvas is sized `cols * cellWidth` in
+  // style and `cols * cellWidth * dpr` in backing store, and every draw scales
+  // by dpr on its way to the GPU. Anything talking to the outside world in
+  // device pixels — the PTY's ws_xpixel, a kitty placement's rendered size —
+  // has to cross that boundary explicitly.
   cellWidth: number;
   cellHeight: number;
 
@@ -302,7 +307,11 @@ export class WebGlTerminalRenderer {
   private readonly glyphs = new Map<string, AtlasGlyph>();
   // Insertion order is LRU order; a texture is re-inserted when it is drawn.
   private readonly imageTextures = new Map<string, WebGLTexture>();
-  private readonly dpr: number;
+  // Device pixels per CSS pixel, captured once at construction. Read by
+  // everything that has to cross the CSS/device boundary this renderer sits on:
+  // the backing store, the pixel geometry reported to the PTY, and the CSS size
+  // a kitty placement's device-pixel box draws at.
+  readonly dpr: number;
   private baseline: number;
   private fontSize: number;
   private readonly fontFamily: string;

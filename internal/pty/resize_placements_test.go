@@ -70,7 +70,7 @@ func TestResizeDescribesPlacementsAfterTheResize(t *testing.T) {
 
 	// 12 rows down to 4, with the image at row 6: the grid has to scroll it up
 	// to keep the cursor on screen.
-	if err := spawn.manager.Resize(spawn.id, 40, 4); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 
@@ -125,10 +125,10 @@ func TestResizeCostsNothingWithoutPlacements(t *testing.T) {
 	if err := spawn.manager.Input(spawn.id, []byte("\n")); err != nil {
 		t.Fatalf("Input() error: %v", err)
 	}
-	if err := spawn.manager.Resize(spawn.id, 40, 4); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
-	if err := spawn.manager.Resize(spawn.id, 100, 30); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 100, 30, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 

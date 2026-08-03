@@ -971,9 +971,60 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       session can occupy is 2x the number above. Nothing tracks or reports total
       image memory across sessions today. If image memory ever shows up in a
       profile, that is the measurement to take first.
-- [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
-      images from it; without it chafa guesses ~8 x 11.4 px cells against a real
-      9 x 22.6 CSS px cell. Measured in A3's live tier.
+- [x] **Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`).** Emitters
+      size images from it; without it chafa guessed ~8 x 11.4 px cells against a
+      real 9 x 22.6 CSS px cell (measured in A3's live tier), and the worker
+      terminal reported its own pixel size from a hardcoded 8x16 placeholder.
+      Protocol 207.
+
+      **The wire carries the pane TOTAL in device pixels, optional, 0 == absent
+      == unknown.** `pty_resize` and its `pty_resized` echo each gained
+      `xpixel?`/`ypixel?`. Total rather than per-cell because the total is what
+      a client can actually measure and what `TIOCGWINSZ` speaks; device rather
+      than CSS pixels because that is the unit an image is made of. A resize
+      that measured nothing omits the fields rather than sending zeros, and the
+      echo leaves them off rather than echoing zeros — a receiving client that
+      read 0 as a real pane would size images against a degenerate cell. The
+      daemon drops a pair it cannot represent (the kernel's winsize fields are
+      uint16) and names it in the log, because a silently ignored geometry looks
+      exactly like a client that never sent one.
+
+      **Two conversions, each in one place.** Total → cell happens once, in
+      `Session.resize` (`xpixel/cols`, `ypixel/rows`), and everything below it
+      speaks cells: the new `ghosttyvt.Terminal.SetCellPixelSize` pushes the
+      cell into the native terminal immediately at the current grid, and the
+      winsize ioctl carries the total through unchanged. Device → CSS happens
+      once, in `placementQuad`, before any clipping arithmetic mixes a
+      placement's device-pixel box with the renderer's CSS-pixel cell metrics.
+      Measured, not assumed: `WebGlTerminalRenderer.cellWidth/cellHeight` are
+      **CSS** pixels — the canvas is styled `cols * cellWidth` and backed by
+      that times `dpr` — so a fit multiplies by `dpr` on the way out and the
+      draw path divides by it on the way in.
+
+      **The session remembers the cell, not the total.** Only a fit measures a
+      pane; the attach-time reconcile and the remount hydrate resize carry no
+      pixels and arrive *after* a fit on every remount. A total is meaningless
+      without the grid it was measured at, so the session keeps the derived cell
+      and re-derives the total for a pixel-less resize. Spawn stays pixel-less
+      by design — nothing has measured a pane yet, and the first fit always
+      follows.
+
+      **XTWINOPS is not the surface, and this was measured rather than
+      assumed.** ghostty's VT core answers no `CSI 14/16/18 t` at all — the
+      embedder is expected to encode those itself (`ghostty_size_report_encode`)
+      — so nothing in attn answers them today and this change does not add one.
+      What the library *does* emit is the in-band size report (DEC mode 2048),
+      `ESC[48;rows;cols;height;width t`, whenever either factor moves; that
+      report used to carry the 8x16 lie and now carries the truth, and it is
+      what the Go tests assert against. Emitters that only know XTWINOPS fall
+      back to `TIOCGWINSZ`, which is the half this change fixes for them.
+
+      **v1 limitations, both deliberate.** Mixed-DPR multi-client is last-resize
+      wins: the session holds one cell size, so two clients on displays with
+      different ratios overwrite each other rather than each getting their own
+      geometry. And a genuine cell change emits two mode-2048 reports for one
+      resize (`SetCellPixelSize` then the grid resize); the steady state emits
+      one, because setting an unchanged cell is a no-op.
 - [x] **Fix the one-row anchoring drift on a wrapped prompt row. Root cause:
       resize reflow asymmetry.** The worker reflowed on resize
       (`ghosttyvt.Terminal.Resize`) while every client frame deliberately does

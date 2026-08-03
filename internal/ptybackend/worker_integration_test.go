@@ -122,7 +122,7 @@ func TestWorkerBackend_SpawnAttachInputResizeRemove(t *testing.T) {
 	if err := backend.Input(context.Background(), sessionID, []byte("printf '__ATTN_WORKER__\\n'\n")); err != nil {
 		t.Fatalf("Input() error: %v", err)
 	}
-	if err := backend.Resize(context.Background(), sessionID, 100, 30); err != nil {
+	if err := backend.Resize(context.Background(), sessionID, 100, 30, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 

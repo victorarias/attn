@@ -362,8 +362,10 @@ type wsHub struct {
 }
 
 const (
-	maxSlowCount                     = 3 // disconnect after this many consecutive failed sends
-	maxPTYDimValue                   = 65535
+	maxSlowCount   = 3 // disconnect after this many consecutive failed sends
+	maxPTYDimValue = 65535
+	// The kernel's winsize fields are all uint16, pixels included.
+	maxPTYPixelValue                 = 65535
 	defaultWebSocketReadBytes        = 1 << 20
 	maxBrowserHostWebSocketReadBytes = 32 << 20
 	ptyOutputSendWait                = 1 * time.Second

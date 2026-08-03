@@ -36,6 +36,7 @@ import {
   setPtyBackend,
   type PtyAttachArgs,
   type PtyAttachPolicy,
+  type PtyPixelGeometry,
   type PtySpawnArgs,
 } from '../pty/bridge';
 import {
@@ -196,7 +197,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '206';
+export const PROTOCOL_VERSION = '207';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2988,14 +2989,27 @@ export function useDaemonSocket({
     );
   }, [sendOrQueueCommand]);
 
-  const sendPtyResize = useCallback((id: string, cols: number, rows: number, reason?: string) => {
+  // pixels is the pane's total size in device pixels, known only to a fit. It is
+  // left off the command entirely when absent: an explicit 0 and an omitted
+  // field mean the same thing to the daemon ("no pixel geometry"), and omitting
+  // keeps the wire honest about which resizes actually measured the pane.
+  const sendPtyResize = useCallback((
+    id: string,
+    cols: number,
+    rows: number,
+    reason?: string,
+    pixels?: PtyPixelGeometry,
+  ) => {
     const suspiciousResize = isSuspiciousTerminalSize(cols, rows);
     if (suspiciousResize) {
       console.warn('[DaemonSocket] Sending suspicious PTY resize', { id, cols, rows, reason: reason || null });
     }
     recordPtyCommand('pty_resize', id, 0, null);
+    const geometry = pixels && pixels.xpixel && pixels.ypixel
+      ? { xpixel: Math.round(pixels.xpixel), ypixel: Math.round(pixels.ypixel) }
+      : {};
     sendOrQueueCommand(
-      { cmd: 'pty_resize', id, cols, rows },
+      { cmd: 'pty_resize', id, cols, rows, ...geometry },
       { waitForInitialState: true },
     );
   }, [sendOrQueueCommand]);
@@ -3417,8 +3431,8 @@ export function useDaemonSocket({
       write: async (id: string, data: string, source?: string) => {
         sendPtyInput(id, data, source);
       },
-      resize: async (id: string, cols: number, rows: number, reason?: string) => {
-        sendPtyResize(id, cols, rows, reason);
+      resize: async (id: string, cols: number, rows: number, reason?: string, pixels?: PtyPixelGeometry) => {
+        sendPtyResize(id, cols, rows, reason, pixels);
       },
       detach: async (id: string) => {
         sendDetachSession(id);

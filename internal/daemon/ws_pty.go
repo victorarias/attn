@@ -641,10 +641,13 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 }
 
 // ptyGeometry is the payload of FactSessionPTYResized. The new size is not
-// derivable from the store, so the fact carries it.
+// derivable from the store, so the fact carries it. XPixel/YPixel are the
+// pane's total size in device pixels, 0 when the resizing client reported none.
 type ptyGeometry struct {
-	Cols int `json:"cols"`
-	Rows int `json:"rows"`
+	Cols   int `json:"cols"`
+	Rows   int `json:"rows"`
+	XPixel int `json:"xpixel,omitempty"`
+	YPixel int `json:"ypixel,omitempty"`
 }
 
 func (d *Daemon) projectSessionPTYResized(ev bus.Event) {
@@ -652,12 +655,19 @@ func (d *Daemon) projectSessionPTYResized(ev bus.Event) {
 	if !ok {
 		return
 	}
-	d.wsHub.Broadcast(&protocol.WebSocketEvent{
+	event := &protocol.WebSocketEvent{
 		Event: protocol.EventPtyResized,
 		ID:    protocol.Ptr(ev.Subject),
 		Cols:  protocol.Ptr(geometry.Cols),
 		Rows:  protocol.Ptr(geometry.Rows),
-	})
+	}
+	// Left absent rather than zeroed: a client that reads 0 as "the pane has no
+	// pixels" would draw images against a degenerate cell.
+	if geometry.XPixel > 0 && geometry.YPixel > 0 {
+		event.Xpixel = protocol.Ptr(geometry.XPixel)
+		event.Ypixel = protocol.Ptr(geometry.YPixel)
+	}
+	d.wsHub.Broadcast(event)
 }
 
 func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessage) {
@@ -665,8 +675,23 @@ func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessag
 		d.sendCommandError(client, protocol.CmdPtyResize, fmt.Sprintf("invalid terminal size cols=%d rows=%d (expected 1..%d)", msg.Cols, msg.Rows, maxPTYDimValue))
 		return
 	}
-	d.logf("pty_resize: id=%s cols=%d rows=%d", msg.ID, msg.Cols, msg.Rows)
-	if err := d.ptyBackend.Resize(context.Background(), msg.ID, uint16(msg.Cols), uint16(msg.Rows)); err != nil {
+	// Pixel geometry is optional, so an unusable pair is dropped rather than
+	// refused — the resize itself is still valid. It is named in the log
+	// because a silently ignored geometry looks exactly like a client that
+	// never sent one. The bound is the kernel's own: ws_xpixel/ws_ypixel are
+	// uint16, so anything past it cannot be reported without truncating into a
+	// plausible-looking lie. A single axis is not geometry either; the cell
+	// derivation needs both.
+	xpixel, ypixel := protocol.Deref(msg.Xpixel), protocol.Deref(msg.Ypixel)
+	if xpixel < 0 || ypixel < 0 || xpixel > maxPTYPixelValue || ypixel > maxPTYPixelValue {
+		d.logf("pty_resize: id=%s ignoring pixel geometry xpixel=%d ypixel=%d (expected 0..%d)", msg.ID, xpixel, ypixel, maxPTYPixelValue)
+		xpixel, ypixel = 0, 0
+	}
+	if xpixel == 0 || ypixel == 0 {
+		xpixel, ypixel = 0, 0
+	}
+	d.logf("pty_resize: id=%s cols=%d rows=%d xpixel=%d ypixel=%d", msg.ID, msg.Cols, msg.Rows, xpixel, ypixel)
+	if err := d.ptyBackend.Resize(context.Background(), msg.ID, uint16(msg.Cols), uint16(msg.Rows), uint16(xpixel), uint16(ypixel)); err != nil {
 		if shouldLogPtyCommandError(err) {
 			d.logf("pty_resize failed for %s: %v", msg.ID, err)
 		}
@@ -674,7 +699,9 @@ func (d *Daemon) handlePtyResize(client *wsClient, msg *protocol.PtyResizeMessag
 	}
 	// Broadcast the new geometry to all other attached clients so they can
 	// keep their local terminal models in sync.
-	d.publishFact(FactSessionPTYResized, msg.ID, ptyGeometry{Cols: msg.Cols, Rows: msg.Rows})
+	d.publishFact(FactSessionPTYResized, msg.ID, ptyGeometry{
+		Cols: msg.Cols, Rows: msg.Rows, XPixel: xpixel, YPixel: ypixel,
+	})
 }
 
 var hexColorPattern = regexp.MustCompile(`^#[0-9a-fA-F]{6}$`)

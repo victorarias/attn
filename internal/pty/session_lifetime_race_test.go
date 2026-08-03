@@ -157,7 +157,7 @@ func TestResizeRacesSnapshot(t *testing.T) {
 				<-start
 				widths := []uint16{40, 120, 60, 100, 30, 80}
 				for _, cw := range widths {
-					_ = s.resize(cw, rows)
+					_ = s.resize(cw, rows, 0, 0)
 				}
 			}()
 

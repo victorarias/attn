@@ -45,7 +45,7 @@ func sessionTerminal(t *testing.T, spawn *kittySpawn) *ghosttyvt.Terminal {
 func newQuietSpawn(t *testing.T, id string, cols, rows uint16) *kittySpawn {
 	t.Helper()
 	spawn := newKittySpawnCmd(t, id, "", "read hold # %s")
-	if err := spawn.manager.Resize(id, cols, rows); err != nil {
+	if err := spawn.manager.Resize(id, cols, rows, 0, 0); err != nil {
 		t.Fatalf("Resize() to the starting geometry: %v", err)
 	}
 	return spawn
@@ -157,7 +157,7 @@ func TestSessionResizeKeepsTheWorkerFrameEqualToAClientFrame(t *testing.T) {
 			}
 			framesAgree(t, worker, control, "after the output, before the resize")
 
-			if err := spawn.manager.Resize(spawn.id, tc.toCols, tc.toRows); err != nil {
+			if err := spawn.manager.Resize(spawn.id, tc.toCols, tc.toRows, 0, 0); err != nil {
 				t.Fatalf("Resize() error: %v", err)
 			}
 			if tc.wraparoundOff {
@@ -223,7 +223,7 @@ func TestResizeKeepsAPlacementsBufferRow(t *testing.T) {
 
 	// 40 -> 24 columns: the 69-char prompt is two rows wide at 40 and three at
 	// 24, so a reflow inserts a row above the image and moves it down one.
-	if err := spawn.manager.Resize(spawn.id, 24, 12); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 24, 12, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 	if got := bufferRow("after the width change"); got != placed {

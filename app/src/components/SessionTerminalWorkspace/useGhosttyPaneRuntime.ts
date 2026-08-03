@@ -15,6 +15,10 @@ const REPLAY_INTERRUPTED_RETRY_MS = 250;
 
 interface TerminalResizeOptions {
   reason?: string;
+  // Pane total in device pixels, carried through to the PTY's winsize. Absent
+  // from any resize that is not a fit — nothing else measures the pane.
+  xpixel?: number;
+  ypixel?: number;
 }
 
 export interface PaneRuntimeSpec {
@@ -82,6 +86,8 @@ export function useGhosttyPaneRuntime(
     cols: number;
     rows: number;
     reason: string;
+    xpixel?: number;
+    ypixel?: number;
   }>());
   const terminalsLiveRef = useRef(terminalsLive);
   const replayRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
@@ -296,6 +302,8 @@ export function useGhosttyPaneRuntime(
           cols: pendingResize.cols,
           rows: pendingResize.rows,
           reason: pendingResize.reason,
+          xpixel: pendingResize.xpixel,
+          ypixel: pendingResize.ypixel,
         });
       }
     } catch (error) {
@@ -355,7 +363,9 @@ export function useGhosttyPaneRuntime(
     if (!Number.isFinite(cols) || !Number.isFinite(rows) || cols < 1 || rows < 1) return;
     const reason = options?.reason ?? 'ghostty_fit';
     if (!readyRuntimesRef.current.has(pane.runtimeId)) {
-      pendingResizeRef.current.set(pane.runtimeId, { cols, rows, reason });
+      pendingResizeRef.current.set(pane.runtimeId, {
+        cols, rows, reason, xpixel: options?.xpixel, ypixel: options?.ypixel,
+      });
       return;
     }
     void ptyResize({
@@ -363,6 +373,8 @@ export function useGhosttyPaneRuntime(
       cols,
       rows,
       reason,
+      xpixel: options?.xpixel,
+      ypixel: options?.ypixel,
     });
   }, [isActiveSessionRef, paneFor]);
 

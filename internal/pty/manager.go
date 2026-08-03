@@ -444,7 +444,9 @@ func (m *Manager) Input(sessionID string, data []byte) error {
 	return session.input(data)
 }
 
-func (m *Manager) Resize(sessionID string, cols, rows uint16) error {
+// Resize applies a new grid to a session. xpixel/ypixel are the pane's total
+// size in device pixels, or 0 when the caller has no pixel geometry to report.
+func (m *Manager) Resize(sessionID string, cols, rows, xpixel, ypixel uint16) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
@@ -456,8 +458,8 @@ func (m *Manager) Resize(sessionID string, cols, rows uint16) error {
 	if session.cmd != nil && session.cmd.Process != nil {
 		pid = session.cmd.Process.Pid
 	}
-	resizeErr := session.resize(cols, rows)
-	m.logf("pty resize: id=%s prev=%dx%d new=%dx%d pid=%d err=%v", sessionID, prevCols, prevRows, cols, rows, pid, resizeErr)
+	resizeErr := session.resize(cols, rows, xpixel, ypixel)
+	m.logf("pty resize: id=%s prev=%dx%d new=%dx%d px=%dx%d pid=%d err=%v", sessionID, prevCols, prevRows, cols, rows, xpixel, ypixel, pid, resizeErr)
 	return resizeErr
 }
 

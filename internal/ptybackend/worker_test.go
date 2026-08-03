@@ -413,7 +413,7 @@ func TestWorkerBackend_CallSimple_ReusesPersistentControlConnection(t *testing.T
 	if err := backend.Input(context.Background(), sessionID, []byte("b")); err != nil {
 		t.Fatalf("second Input() error: %v", err)
 	}
-	if err := backend.Resize(context.Background(), sessionID, 120, 40); err != nil {
+	if err := backend.Resize(context.Background(), sessionID, 120, 40, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
 
@@ -529,7 +529,7 @@ func TestWorkerBackend_CallSimple_RetriesAfterPersistentConnectionDrops(t *testi
 	if err := backend.Input(context.Background(), sessionID, []byte("x")); err != nil {
 		t.Fatalf("Input() error: %v", err)
 	}
-	if err := backend.Resize(context.Background(), sessionID, 120, 40); err != nil {
+	if err := backend.Resize(context.Background(), sessionID, 120, 40, 0, 0); err != nil {
 		t.Fatalf("Resize() after dropped control connection error: %v", err)
 	}
 

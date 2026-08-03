@@ -148,6 +148,12 @@ export interface PlacementQuad {
  * viewport at all. Size comes from the rendered pixel size: grid_cols/grid_rows
  * are 0 on a fresh placement (kitty "natural size" — ghostty resolves cell
  * counts only on reflow) and are advisory even when set.
+ *
+ * This is the unit boundary. A placement is measured in DEVICE pixels — the
+ * emitter sized it against the pixel geometry the PTY reports — while the cell
+ * metrics and the grid box are CSS pixels, so the placement's box is divided by
+ * devicePixelRatio here, once, before any of the clipping arithmetic mixes the
+ * two. Drawn without it, an image lands devicePixelRatio times too large.
  */
 export function placementQuad(
   placement: PlacedKittyImage,
@@ -156,11 +162,13 @@ export function placementQuad(
   cellHeight: number,
   gridWidth: number,
   gridHeight: number,
+  devicePixelRatio: number,
 ): PlacementQuad | null {
+  const scale = devicePixelRatio > 0 ? devicePixelRatio : 1;
   const x = placement.col * cellWidth;
   const y = (placement.bufferRow - firstVisibleBufferRow) * cellHeight;
-  const width = placement.pixelWidth;
-  const height = placement.pixelHeight;
+  const width = placement.pixelWidth / scale;
+  const height = placement.pixelHeight / scale;
   const left = Math.max(x, 0);
   const top = Math.max(y, 0);
   const right = Math.min(x + width, gridWidth);

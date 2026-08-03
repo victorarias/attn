@@ -748,12 +748,14 @@ func (b *WorkerBackend) Input(ctx context.Context, sessionID string, data []byte
 	return err
 }
 
-func (b *WorkerBackend) Resize(ctx context.Context, sessionID string, cols, rows uint16) error {
+func (b *WorkerBackend) Resize(ctx context.Context, sessionID string, cols, rows, xpixel, ypixel uint16) error {
 	session, err := b.getSession(sessionID)
 	if err != nil {
 		return err
 	}
-	return b.callSimple(ctx, session, ptyworker.MethodResize, ptyworker.ResizeParams{Cols: cols, Rows: rows})
+	return b.callSimple(ctx, session, ptyworker.MethodResize, ptyworker.ResizeParams{
+		Cols: cols, Rows: rows, XPixel: xpixel, YPixel: ypixel,
+	})
 }
 
 // SetTheme is best-effort: a worker that predates the set_theme method

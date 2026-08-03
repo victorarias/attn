@@ -172,12 +172,14 @@ import (
 	"unsafe"
 )
 
-// Nominal cell pixel size. We never render, but resize + XTWINOPS size reports
-// need non-zero pixel dimensions. The exact values are immaterial to grid
-// reflow; they only scale pixel-unit size reports.
+// Placeholder cell pixel size, used until a client reports the real one.
+// We never render, but resize + XTWINOPS size reports need non-zero pixel
+// dimensions. The values are immaterial to grid reflow; they only scale
+// pixel-unit size reports, which is exactly why they must be replaced — an
+// image emitter sizes its output from them.
 const (
-	cellWidthPx  = 8
-	cellHeightPx = 16
+	defaultCellWidthPx  = 8
+	defaultCellHeightPx = 16
 )
 
 // DefaultMaxScrollback is the scrollback cap (lines). ~0.8MB RSS measured for a
@@ -234,6 +236,12 @@ type Terminal struct {
 	pinner runtime.Pinner // pins &sink.handle for C to retain as userdata
 	cols   int
 	rows   int
+	// Cell size in device pixels. The durable half of pixel geometry: a total
+	// pane size is only meaningful with the grid it was measured at, so the
+	// terminal keeps the per-cell number and every resize re-derives the total
+	// from it.
+	cellW int
+	cellH int
 
 	closed bool
 }
@@ -250,7 +258,13 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	// Process-global and idempotent; without it ghostty rejects every f=100
 	// (PNG) kitty transmission, which is most of what real emitters send.
 	installPNGDecoder()
-	t := &Terminal{cols: cols, rows: rows, sink: &respSink{}}
+	t := &Terminal{
+		cols:  cols,
+		rows:  rows,
+		cellW: defaultCellWidthPx,
+		cellH: defaultCellHeightPx,
+		sink:  &respSink{},
+	}
 	copts := C.GhosttyTerminalOptions{
 		cols:           C.uint16_t(cols),
 		rows:           C.uint16_t(rows),
@@ -347,13 +361,36 @@ func (t *Terminal) writeLocked(p []byte) {
 	C.ghostty_terminal_vt_write(t.term, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
 }
 
+// SetCellPixelSize sets the cell size in device pixels used for pixel-unit
+// size reports (XTWINOPS, kitty cell metrics), and pushes it to the native
+// terminal immediately at the current grid size. Non-positive dimensions are
+// ignored. Construction keeps the 8x16 placeholder until real geometry arrives.
+//
+// "Immediately" is load-bearing: a program that has enabled in-band size
+// reports (DEC mode 2048) is told the new pixel size by this call, and a
+// program that has not still reads it out of the terminal the next time
+// anything asks. Waiting for the next grid resize would leave a session sized
+// from the placeholder for as long as its window sits still.
+func (t *Terminal) SetCellPixelSize(w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || (t.cellW == w && t.cellH == h) {
+		return
+	}
+	t.cellW, t.cellH = w, h
+	t.resizeLocked(t.cols, t.rows)
+}
+
 // resizeLocked resizes the native terminal and records the new size. Caller
 // holds t.mu and has validated cols/rows.
 func (t *Terminal) resizeLocked(cols, rows int) {
 	if t.closed {
 		return
 	}
-	C.ghostty_terminal_resize(t.term, C.uint16_t(cols), C.uint16_t(rows), cellWidthPx, cellHeightPx)
+	C.ghostty_terminal_resize(t.term, C.uint16_t(cols), C.uint16_t(rows), C.uint32_t(t.cellW), C.uint32_t(t.cellH))
 	t.cols, t.rows = cols, rows
 }
 

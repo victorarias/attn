@@ -1884,11 +1884,18 @@ model PtyInputMessage {
   source?: string;
 }
 
+// xpixel/ypixel are the pane's TOTAL size in device pixels, the units
+// TIOCGWINSZ's ws_xpixel/ws_ypixel and XTWINOPS speak, so image emitters can
+// size an image to the space they were given. Absent or 0 means the client has
+// no pixel geometry to report; the session then keeps the cell size it already
+// derived rather than reporting a lie.
 model PtyResizeMessage {
   cmd: "pty_resize";
   id: string;
   cols: int32;
   rows: int32;
+  xpixel?: int32;
+  ypixel?: int32;
 }
 
 // Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
@@ -3365,11 +3372,16 @@ model RuntimeRespawnedMessage {
   id: string;
 }
 
+// Echoes the geometry the resizing client sent, pixels included, so the other
+// attached clients converge on the same frame. Same unit and same "0 means
+// unknown" rule as PtyResizeMessage.
 model PtyResizedMessage {
   event: "pty_resized";
   id: string;
   cols: integer;
   rows: integer;
+  xpixel?: int32;
+  ypixel?: int32;
 }
 
 model CommandErrorMessage {
@@ -4185,6 +4197,9 @@ model WebSocketEvent {
   last_seq?: int32;
   cols?: int32;
   rows?: int32;
+  // Pane total in device pixels; see PtyResizedMessage.
+  xpixel?: int32;
+  ypixel?: int32;
   pid?: int32;
   running?: boolean;
   exit_code?: int32;

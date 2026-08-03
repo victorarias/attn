@@ -119,8 +119,10 @@ func (b *fakeReloadBackend) Spawn(_ context.Context, opts ptybackend.SpawnOption
 func (b *fakeReloadBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
 	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil
 }
-func (b *fakeReloadBackend) Input(context.Context, string, []byte) error          { return nil }
-func (b *fakeReloadBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeReloadBackend) Input(context.Context, string, []byte) error { return nil }
+func (b *fakeReloadBackend) Resize(context.Context, string, uint16, uint16, uint16, uint16) error {
+	return nil
+}
 func (b *fakeReloadBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
 	return nil
 }

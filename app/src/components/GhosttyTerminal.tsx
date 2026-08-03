@@ -155,7 +155,11 @@ export interface GhosttyTerminalProps {
   // selected session). Absent = markdown paths open like any other path.
   onOpenMarkdown?: (path: string, sessionId: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
-  onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
+  // xpixel/ypixel are the pane's total size in DEVICE pixels, which is what the
+  // PTY's ws_xpixel/ws_ypixel and XTWINOPS report and what an image emitter
+  // sizes its output from. Only a fit knows them (it is the one place holding
+  // the renderer's cell metrics); every other resize path omits them.
+  onResize: (cols: number, rows: number, options?: { reason?: string; xpixel?: number; ypixel?: number }) => void;
   // A live geometry change cancelled queued historical replay (the model
   // would otherwise interleave history parsed at the wrong width). The
   // history is gone from the model; the owner should re-request the attach
@@ -1063,6 +1067,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             renderer.cellHeight,
             gridWidth,
             gridHeight,
+            renderer.dpr,
           );
           if (!quad) continue;
           const blob = kittyImageCache.get(
@@ -1914,6 +1919,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             renderer.cellHeight,
             terminal.cols * renderer.cellWidth,
             terminal.rows * renderer.cellHeight,
+            renderer.dpr,
           )
           : null;
         return {
@@ -2208,7 +2214,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
         });
         if (!renderSurface(true)) return;
-        onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
+        // Cell metrics are CSS pixels; the PTY speaks device pixels.
+        onResizeRef.current(dims.cols, dims.rows, {
+          reason: 'ghostty_fit',
+          xpixel: Math.round(dims.cols * renderer.cellWidth * renderer.dpr),
+          ypixel: Math.round(dims.rows * renderer.cellHeight * renderer.dpr),
+        });
       } catch (reason) {
         recoverFromModelFault('fit', reason);
       }

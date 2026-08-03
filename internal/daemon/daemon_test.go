@@ -622,7 +622,7 @@ func (b *fakeWorkerReconcileBackend) Attach(context.Context, string, string) (pt
 	return ptybackend.AttachInfo{}, nil, nil
 }
 func (b *fakeWorkerReconcileBackend) Input(context.Context, string, []byte) error { return nil }
-func (b *fakeWorkerReconcileBackend) Resize(context.Context, string, uint16, uint16) error {
+func (b *fakeWorkerReconcileBackend) Resize(context.Context, string, uint16, uint16, uint16, uint16) error {
 	return nil
 }
 func (b *fakeWorkerReconcileBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
@@ -686,7 +686,7 @@ func (b *fakeClearSessionsBackend) Attach(context.Context, string, string) (ptyb
 	return ptybackend.AttachInfo{}, nil, nil
 }
 func (b *fakeClearSessionsBackend) Input(context.Context, string, []byte) error { return nil }
-func (b *fakeClearSessionsBackend) Resize(context.Context, string, uint16, uint16) error {
+func (b *fakeClearSessionsBackend) Resize(context.Context, string, uint16, uint16, uint16, uint16) error {
 	return nil
 }
 func (b *fakeClearSessionsBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
@@ -1657,7 +1657,7 @@ func (b *fakeAttachBackend) Attach(context.Context, string, string) (ptybackend.
 	return info, stream, nil
 }
 func (b *fakeAttachBackend) Input(context.Context, string, []byte) error { return nil }
-func (b *fakeAttachBackend) Resize(context.Context, string, uint16, uint16) error {
+func (b *fakeAttachBackend) Resize(context.Context, string, uint16, uint16, uint16, uint16) error {
 	return nil
 }
 func (b *fakeAttachBackend) SetTheme(context.Context, string, pty.TerminalTheme) error {
@@ -1729,7 +1729,9 @@ func (b *fakeSpawnBackend) Input(_ context.Context, id string, data []byte) erro
 	}
 	return nil
 }
-func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16) error { return nil }
+func (b *fakeSpawnBackend) Resize(context.Context, string, uint16, uint16, uint16, uint16) error {
+	return nil
+}
 func (b *fakeSpawnBackend) SetTheme(_ context.Context, id string, theme pty.TerminalTheme) error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

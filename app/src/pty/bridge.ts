@@ -70,6 +70,17 @@ export type PtyEventPayload =
 
 type PtyEventHandler = (event: { payload: PtyEventPayload }) => void;
 
+/**
+ * A pane's total size in DEVICE pixels — the units the PTY's ws_xpixel/ws_ypixel
+ * and XTWINOPS reports speak, and what an image emitter divides by the grid to
+ * decide how large to draw. Either field absent means the caller has not
+ * measured the pane; the daemon then keeps the cell size it already has.
+ */
+export interface PtyPixelGeometry {
+  xpixel?: number;
+  ypixel?: number;
+}
+
 export interface PtyBackend {
   spawn: (args: PtySpawnArgs) => Promise<void>;
   attach: (
@@ -77,7 +88,13 @@ export interface PtyBackend {
     options?: { forceResizeBeforeAttach?: boolean }
   ) => Promise<void>;
   write: (id: string, data: string, source?: string) => Promise<void>;
-  resize: (id: string, cols: number, rows: number, reason?: string) => Promise<void>;
+  resize: (
+    id: string,
+    cols: number,
+    rows: number,
+    reason?: string,
+    pixels?: PtyPixelGeometry,
+  ) => Promise<void>;
   detach: (id: string) => Promise<void>;
   kill: (id: string) => Promise<void>;
   reload: (id: string, cols: number, rows: number) => Promise<void>;
@@ -196,7 +213,16 @@ export async function ptyAttach(request: {
   });
 }
 
-export async function ptyResize(request: { id: string; cols: number; rows: number; reason?: string }) {
+// xpixel/ypixel are the pane's total size in device pixels, omitted by any
+// caller that has not measured the pane.
+export async function ptyResize(request: {
+  id: string;
+  cols: number;
+  rows: number;
+  reason?: string;
+  xpixel?: number;
+  ypixel?: number;
+}) {
   if (mockEnabled()) {
     if (!mockSessions.has(request.id)) {
       return;
@@ -206,7 +232,10 @@ export async function ptyResize(request: { id: string; cols: number; rows: numbe
   if (!backend) {
     throw new Error('PTY backend is not configured');
   }
-  await backend.resize(request.id, request.cols, request.rows, request.reason);
+  await backend.resize(request.id, request.cols, request.rows, request.reason, {
+    xpixel: request.xpixel,
+    ypixel: request.ypixel,
+  });
 }
 
 export async function ptyDetach(request: { id: string }) {
