@@ -101,6 +101,24 @@ static bool ghosttyvt_cursor_visible(GhosttyTerminal t) {
 	return visible;
 }
 
+// DEC wraparound (mode 7, DECAWM). False on a failed read is the safe answer:
+// the caller then resizes plainly instead of toggling a mode it could not read,
+// so a failure can never leave wraparound enabled behind the program's back.
+static bool ghosttyvt_wraparound(GhosttyTerminal t) {
+	bool enabled = false;
+	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_WRAPAROUND, &enabled) != GHOSTTY_SUCCESS) return false;
+	return enabled;
+}
+
+// Left/right margin mode (DECLRMM, DEC private mode 69). False on a failed read
+// leaves the caller trusting its own scroll measurement, which is what a
+// terminal without margins earns anyway.
+static bool ghosttyvt_left_right_margin_mode(GhosttyTerminal t) {
+	bool enabled = false;
+	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN, &enabled) != GHOSTTY_SUCCESS) return false;
+	return enabled;
+}
+
 static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
 	GhosttyPoint p;
 	memset(&p, 0, sizeof(p));
@@ -154,12 +172,14 @@ import (
 	"unsafe"
 )
 
-// Nominal cell pixel size. We never render, but resize + XTWINOPS size reports
-// need non-zero pixel dimensions. The exact values are immaterial to grid
-// reflow; they only scale pixel-unit size reports.
+// Placeholder cell pixel size, used until a client reports the real one.
+// We never render, but resize + XTWINOPS size reports need non-zero pixel
+// dimensions. The values are immaterial to grid reflow; they only scale
+// pixel-unit size reports, which is exactly why they must be replaced — an
+// image emitter sizes its output from them.
 const (
-	cellWidthPx  = 8
-	cellHeightPx = 16
+	defaultCellWidthPx  = 8
+	defaultCellHeightPx = 16
 )
 
 // DefaultMaxScrollback is the scrollback cap (lines). ~0.8MB RSS measured for a
@@ -216,6 +236,12 @@ type Terminal struct {
 	pinner runtime.Pinner // pins &sink.handle for C to retain as userdata
 	cols   int
 	rows   int
+	// Cell size in device pixels. The durable half of pixel geometry: a total
+	// pane size is only meaningful with the grid it was measured at, so the
+	// terminal keeps the per-cell number and every resize re-derives the total
+	// from it.
+	cellW int
+	cellH int
 
 	closed bool
 }
@@ -232,7 +258,13 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	// Process-global and idempotent; without it ghostty rejects every f=100
 	// (PNG) kitty transmission, which is most of what real emitters send.
 	installPNGDecoder()
-	t := &Terminal{cols: cols, rows: rows, sink: &respSink{}}
+	t := &Terminal{
+		cols:  cols,
+		rows:  rows,
+		cellW: defaultCellWidthPx,
+		cellH: defaultCellHeightPx,
+		sink:  &respSink{},
+	}
 	copts := C.GhosttyTerminalOptions{
 		cols:           C.uint16_t(cols),
 		rows:           C.uint16_t(rows),
@@ -267,15 +299,9 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 // malformed input is safe by design. Query responses produced during the write
 // are appended to the response buffer (see DrainResponses).
 func (t *Terminal) Write(p []byte) {
-	if len(p) == 0 {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return
-	}
-	C.ghostty_terminal_vt_write(t.term, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
+	t.writeLocked(p)
 }
 
 // Resize changes the terminal dimensions; the primary screen reflows when
@@ -286,10 +312,85 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.resizeLocked(cols, rows)
+}
+
+// The DECAWM toggle that selects ghostty's no-reflow resize. Same bytes the
+// client writes around its own resize.
+var (
+	disableWraparound = []byte("\x1b[?7l")
+	enableWraparound  = []byte("\x1b[?7h")
+)
+
+// ResizeNoReflow changes the terminal dimensions on ghostty's no-reflow resize
+// path, selected by temporarily disabling DEC wraparound (mode 7) when it is
+// enabled. It mirrors the client's resizeGhosttyWithoutReflow
+// (app/src/utils/ghosttyResize.ts) so the worker's grid stays frame-equal with
+// the client's across a resize: the same bytes then occupy the same rows on
+// both, which is what every row-indexed mapping between them rides on. The
+// toggle bytes are internal to this model and never reach any wire.
+//
+// With wraparound already disabled ghostty does not reflow, so the plain resize
+// is the same path — and writing the mode back on would enable a mode the
+// program had off.
+func (t *Terminal) ResizeNoReflow(cols, rows int) {
+	if cols <= 0 || rows <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
 	if t.closed {
 		return
 	}
-	C.ghostty_terminal_resize(t.term, C.uint16_t(cols), C.uint16_t(rows), cellWidthPx, cellHeightPx)
+	if !bool(C.ghosttyvt_wraparound(t.term)) {
+		t.resizeLocked(cols, rows)
+		return
+	}
+	// Held across all three steps: an interleaved write would be parsed with
+	// wraparound off and wrap where the program meant it to.
+	t.writeLocked(disableWraparound)
+	defer t.writeLocked(enableWraparound)
+	t.resizeLocked(cols, rows)
+}
+
+// writeLocked feeds bytes through the parser. Caller holds t.mu.
+func (t *Terminal) writeLocked(p []byte) {
+	if len(p) == 0 || t.closed {
+		return
+	}
+	C.ghostty_terminal_vt_write(t.term, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
+}
+
+// SetCellPixelSize sets the cell size in device pixels used for pixel-unit
+// size reports (XTWINOPS, kitty cell metrics), and pushes it to the native
+// terminal immediately at the current grid size. Non-positive dimensions are
+// ignored. Construction keeps the 8x16 placeholder until real geometry arrives.
+//
+// "Immediately" is load-bearing: a program that has enabled in-band size
+// reports (DEC mode 2048) is told the new pixel size by this call, and a
+// program that has not still reads it out of the terminal the next time
+// anything asks. Waiting for the next grid resize would leave a session sized
+// from the placeholder for as long as its window sits still.
+func (t *Terminal) SetCellPixelSize(w, h int) {
+	if w <= 0 || h <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed || (t.cellW == w && t.cellH == h) {
+		return
+	}
+	t.cellW, t.cellH = w, h
+	t.resizeLocked(t.cols, t.rows)
+}
+
+// resizeLocked resizes the native terminal and records the new size. Caller
+// holds t.mu and has validated cols/rows.
+func (t *Terminal) resizeLocked(cols, rows int) {
+	if t.closed {
+		return
+	}
+	C.ghostty_terminal_resize(t.term, C.uint16_t(cols), C.uint16_t(rows), C.uint32_t(t.cellW), C.uint32_t(t.cellH))
 	t.cols, t.rows = cols, rows
 }
 
@@ -343,6 +444,15 @@ func (t *Terminal) CursorVisible() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return !t.closed && bool(C.ghosttyvt_cursor_visible(t.term))
+}
+
+// LeftRightMarginMode reports whether DECLRMM (DEC private mode 69) is enabled.
+// False on a failed read: the caller then trusts its scroll measurement, which
+// is the behavior a terminal without margins earns.
+func (t *Terminal) LeftRightMarginMode() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.closed && bool(C.ghosttyvt_left_right_margin_mode(t.term))
 }
 
 // ViewportText returns the visible screen as plain text: one line per viewport

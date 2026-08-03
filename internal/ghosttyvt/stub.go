@@ -48,6 +48,14 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 }
 
+// ResizeNoReflow mirrors the real build's no-reflow resize. The stub parses
+// nothing, so there is no grid to reflow and no mode to toggle.
+func (t *Terminal) ResizeNoReflow(cols, rows int) { t.Resize(cols, rows) }
+
+// SetCellPixelSize mirrors the real build's cell-geometry setter. The stub
+// answers no size report, so there is nothing for a cell size to scale.
+func (t *Terminal) SetCellPixelSize(_, _ int) {}
+
 func (t *Terminal) DrainResponses() []byte { return nil }
 
 func (t *Terminal) Size() (cols, rows int) { return t.cols, t.rows }
@@ -59,6 +67,8 @@ func (t *Terminal) Serialize() Snapshot { return Snapshot{Cols: t.cols, Rows: t.
 func (t *Terminal) CursorPos() (x, y int) { return 0, 0 }
 
 func (t *Terminal) CursorVisible() bool { return false }
+
+func (t *Terminal) LeftRightMarginMode() bool { return false }
 
 func (t *Terminal) ViewportText() string { return "" }
 

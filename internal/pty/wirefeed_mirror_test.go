@@ -40,6 +40,22 @@ func kittyPlaceRGB(id uint32, w, h int, extra string) string {
 		id, w, h, extra, base64.StdEncoding.EncodeToString(pix))
 }
 
+// kittyTransmitRGB carries pixels and places nothing: a=t replaces the image
+// stored under an id, so a placement already showing that id keeps its key and
+// its position while its content — and its cell footprint — moves under it.
+func kittyTransmitRGB(id uint32, w, h int) string {
+	return fmt.Sprintf("\x1b_Ga=t,i=%d,f=24,t=d,s=%d,v=%d;%s\x1b\\",
+		id, w, h, base64.StdEncoding.EncodeToString(kittyCorpusPixels(w, h)))
+}
+
+// undescribed puts an APC where the segmenter must not cut it out: an
+// unfinished CSI in front of it makes the APC's leading ESC that CSI's exit
+// too, so removing the APC would remove the exit with it. The bytes therefore
+// go to the wire verbatim while ghostty still dispatches the command — an image
+// on the worker's grid that the client, which cannot parse kitty, never sees.
+// See kittyseg.go, and the corpus entry "an apc that cancels an unfinished csi".
+func undescribed(apc string) string { return "\x1b[1" + apc }
+
 // mirror holds the two terminals and the feeder under test.
 type mirror struct {
 	worker *ghosttyvt.Terminal
@@ -73,7 +89,7 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 	// The client stands in for the frontend's model: same size, no kitty.
 	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{MaxScrollback: opts.MaxScrollback})
 
-	feed := newWireFeeder(worker, 0)
+	feed := newWireFeeder(worker, 0, nil, 0)
 	if feed == nil {
 		t.Fatalf("newWireFeeder returned nil for a live terminal")
 	}
@@ -154,6 +170,12 @@ var mirrorCases = []mirrorCase{
 		},
 	},
 	{
+		// Leaving the alternate screen prunes the placements it held, which
+		// moves ghostty's stamp on bytes no APC accounted for. The check runs;
+		// the delta is a pure removal; nothing resyncs. That exemption is the
+		// case's point, so it is asserted rather than left implied — the mode
+		// switch is on the wire already, the client never drew the image, and no
+		// row came back when it went away.
 		name: "image placed on the alternate screen, then back",
 		cols: 20, rows: 8,
 		chunks: []string{
@@ -161,6 +183,32 @@ var mirrorCases = []mirrorCase{
 			"\x1b[?1049h\x1b[3;3Halt",
 			kittyPlaceRGB(5, 16, 32, ""),
 			"\x1b[?1049l",
+		},
+		check: func(t *testing.T, m *mirror) {
+			if len(m.feed.deltas) != 1 || !onlyRemovals(m.feed.deltas[0]) {
+				t.Fatalf("leaving the alternate screen produced deltas %+v, want one pure removal: the exemption is not the thing being exercised", m.feed.deltas)
+			}
+		},
+	},
+	{
+		// The same exemption reached the other way: a delete the wire could not
+		// describe. The bytes go out verbatim, ghostty retires the placement,
+		// and the grids stay equal — so the chunk is silent even though the
+		// stamp moved on bytes nothing accounted for.
+		name: "an undescribed delete of a live placement",
+		cols: 20, rows: 8,
+		chunks: []string{
+			"\x1b[2;2Hkeep",
+			kittyPlaceRGB(54, 16, 32, ""),
+			undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+		},
+		check: func(t *testing.T, m *mirror) {
+			if len(m.feed.deltas) != 1 || !onlyRemovals(m.feed.deltas[0]) {
+				t.Fatalf("the undescribed delete produced deltas %+v, want one pure removal", m.feed.deltas)
+			}
+			if len(m.feed.placements) != 0 {
+				t.Errorf("observed placements after the delete = %+v, want none", m.feed.placements)
+			}
 		},
 	},
 	{
@@ -267,6 +315,21 @@ var mirrorCases = []mirrorCase{
 			}
 		},
 	},
+}
+
+// The three delta shapes the end-of-feed check distinguishes. onlyRemovals is
+// the one it lets pass in silence: a placement retired and nothing created,
+// re-placed, or retransmitted.
+func onlyRemovals(delta kittyPlacementDelta) bool {
+	return len(delta.Removed) > 0 && len(delta.Added) == 0 && len(delta.Updated) == 0
+}
+
+func onlyAdditions(delta kittyPlacementDelta) bool {
+	return len(delta.Added) > 0 && len(delta.Removed) == 0 && len(delta.Updated) == 0
+}
+
+func onlyUpdates(delta kittyPlacementDelta) bool {
+	return len(delta.Updated) > 0 && len(delta.Added) == 0 && len(delta.Removed) == 0
 }
 
 // halfOf and restOf cut an escape in two at a fixed point well inside its
@@ -416,6 +479,423 @@ func TestWireFeedResyncsWhenTheAnchorHitsTheTopOfHistory(t *testing.T) {
 	}
 	if worker := m.worker.PlainText(); strings.TrimSpace(worker) != "" {
 		t.Errorf("worker screen = %q, want it scrolled clear: the case does not exercise a lost anchor otherwise", worker)
+	}
+}
+
+// The end-of-feed check's whole truth table, on streams that reach every row of
+// it. It runs only when ghostty's kitty stamp moved on bytes the wire carried
+// verbatim, and from there the question is not whether an image APPEARED but
+// whether anything happened that could have scrolled the grid: creating or
+// re-placing a placement can, retiring one cannot. So a delta that is nothing
+// but removals is silent and everything else — an empty diff under a moved
+// stamp included — is a snapshot re-push.
+//
+// Asserted on the reason and not only on the grids, because the grids cannot
+// tell the two failures apart and one of the silent rows is silent by DESIGN.
+// Where nothing should resync the grids are asserted too, which is the whole
+// claim those rows make.
+//
+// Every row also states the delta shape it means to exercise. Without that a
+// row passes for the wrong reason the day ghostty reports one of these
+// differently — a re-place that came back as an Added placement would still
+// resync, and would stop being the Updated case the row is named for.
+func TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval(t *testing.T) {
+	cases := []struct {
+		name   string
+		chunks []string
+		want   string
+		// shape names what the last chunk's observations must have found, so a
+		// row cannot pass while exercising a different branch of the rule.
+		shape func(kittyPlacementDelta) bool
+	}{
+		{
+			// Placed and deleted inside one chunk: the sets on both sides of the
+			// diff are empty, so no observation can name what moved and the
+			// stamp is the only witness. The cursor is two columns and one row
+			// apart by the end.
+			name: "a placement that appears and dies inside one chunk",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(47, 16, 32, "")) + undescribed("\x1b_Ga=d\x1b\\"),
+			},
+			want: kittyResyncStampWithoutDelta,
+			// No shape: the point of the row is that there is no delta at all.
+		},
+		{
+			// A live key put somewhere new. Nothing is added; the diff reports
+			// Updated, and the placement moved the cursor on the worker alone.
+			name: "a live placement re-placed at a new position",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(52, 16, 32, ",p=7"),
+				"\x1b[6;9Hmove" + undescribed("\x1b_Ga=p,i=52,p=7\x1b\\"),
+			},
+			want:  kittyResyncUndescribedImage,
+			shape: onlyUpdates,
+		},
+		{
+			// New pixels under a live key: ImageGeneration moves and the key
+			// does not, which is Updated again.
+			name: "an image retransmitted under a live placement id",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(53, 16, 32, ""),
+				undescribed(kittyTransmitRGB(53, 8, 16)),
+			},
+			want:  kittyResyncUndescribedImage,
+			shape: onlyUpdates,
+		},
+		{
+			// The original shape, kept in the table so widening the rule cannot
+			// drop it: a placement created by an APC the wire carried verbatim.
+			name:   "a placement created by an undescribed apc",
+			chunks: []string{"\x1b[2;2Hkeep", undescribed(kittyPlaceRGB(55, 16, 32, ""))},
+			want:   kittyResyncUndescribedImage,
+			shape:  onlyAdditions,
+		},
+		{
+			// The settle runs at every described dispatch too, and it must not
+			// turn an ordinary one into a re-push: writeAPC accounts for its own
+			// move, so by the time the next settle looks there is nothing left
+			// unaccounted. This row is the guard on that.
+			name:   "a placement created by a described apc",
+			chunks: []string{"\x1b[2;2Hkeep", kittyPlaceRGB(60, 16, 32, "")},
+			want:   "",
+			shape:  onlyAdditions,
+		},
+		{
+			name: "a live placement deleted by an undescribed apc",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(54, 16, 32, ""),
+				undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+			},
+			want:  "",
+			shape: onlyRemovals,
+		},
+		{
+			name: "live placements pruned by leaving the alternate screen",
+			chunks: []string{
+				"primary line\r\n",
+				"\x1b[?1049h\x1b[3;3Halt",
+				kittyPlaceRGB(56, 16, 32, ""),
+				"\x1b[?1049l",
+			},
+			want:  "",
+			shape: onlyRemovals,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+			for i, chunk := range tc.chunks[:len(tc.chunks)-1] {
+				m.write(chunk)
+				if m.lastResync != "" {
+					t.Fatalf("chunk %d resynced (%s) before the chunk under test", i, m.lastResync)
+				}
+			}
+			m.write(tc.chunks[len(tc.chunks)-1])
+
+			if m.lastResync != tc.want {
+				t.Fatalf("resync = %q, want %q", m.lastResync, tc.want)
+			}
+			if tc.shape == nil {
+				if len(m.feed.deltas) != 0 {
+					t.Fatalf("deltas = %+v, want none: the diff has to be blind here, or the stamp is not what fired", m.feed.deltas)
+				}
+			} else if len(m.feed.deltas) != 1 || !tc.shape(m.feed.deltas[0]) {
+				t.Fatalf("deltas = %+v: not the shape this row is named for", m.feed.deltas)
+			}
+			if tc.want != "" {
+				// The wire deliberately carries no synthesis for the chunk, so
+				// the grids are allowed to differ; the snapshot re-push is what
+				// makes the client whole.
+				return
+			}
+			m.agree(t, "after a chunk that only retired placements")
+		})
+	}
+}
+
+// The accounting rule, at the shape that used to break it: an undescribed
+// dispatch followed by a described one in the SAME chunk.
+//
+// writeAPC ends by taking the terminal's kitty stamp as its own, and the stamp
+// is one number for the whole terminal — so a described APC used to absorb the
+// undescribed dispatch that ran before it, leaving the end-of-feed check a
+// stamp that already looked accounted for and the image on the worker's grid
+// alone. Settling at writeAPC's entry is what splits the two.
+//
+// Two claims, and the second is the one a naive fix would miss. The chunk must
+// resync for the image the wire could not carry, AND the APC that settled it
+// must still be described in full: a resync says what the wire could not
+// express, it is never a reason to stop expressing what it can. Pinned against
+// a control that runs the same placement alone from the same cursor — the
+// undescribed one carries C=1 so it moves nothing — which makes the expected
+// wire exact rather than a shape.
+func TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne(t *testing.T) {
+	const prefix = "\x1b[2;2Hkeep"
+	described := kittyPlaceRGB(59, 16, 32, "")
+	silent := undescribed(kittyPlaceRGB(58, 16, 32, ",C=1"))
+
+	control := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write(prefix)
+	control.write(described)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s); it places one ordinary image", control.lastResync)
+	}
+	control.agree(t, "with one described placement")
+	describedWire := string(control.lastWire)
+
+	m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	m.write(prefix)
+	m.write(silent + described)
+
+	if m.lastResync != kittyResyncUndescribedImage {
+		t.Fatalf("resync = %q, want %q: the first placement reached the terminal on bytes the wire carried verbatim",
+			m.lastResync, kittyResyncUndescribedImage)
+	}
+	if got, want := string(m.lastWire), silent+describedWire; got != want {
+		t.Errorf("wire = %q,\nwant the undescribed bytes verbatim followed by exactly the description that placement gets on its own (%q)", got, want)
+	}
+}
+
+// The receipt behind the kittyResyncScrollClamped threshold, and the reason it
+// is the screen height rather than a guess. `r=N` makes a 2x2 image claim N
+// rows, so the scroll a placement causes is dialable one row at a time; the
+// tallest scroll a single SU still reproduces is the number the tripwire is set
+// at.
+//
+// Measured on this ghostty pin, cursor on row 1, image placed there:
+//
+//	8-row screen:  r=14 -> SU 8 agrees,  r=15 -> SU 9 lost a row of history
+//	12-row screen: r=22 -> SU 12 agrees, r=23 -> SU 13 lost a row of history
+//
+// Both sides are pinned because both are wrong to move. One row tighter and the
+// wire would resync over a scroll it could have carried; one row looser and it
+// would emit a clamped SU and diverge in silence, which is what this used to do.
+func TestWireFeedSynthesizesTheLargestScrollOneSUCarries(t *testing.T) {
+	for _, tc := range []struct {
+		rows int
+		// carried is the tallest image whose scroll one SU reproduces; overflow
+		// is the next row up, where SU would be clamped.
+		carried, overflow int
+	}{
+		{rows: 8, carried: 14, overflow: 15},
+		{rows: 12, carried: 22, overflow: 23},
+	} {
+		t.Run(fmt.Sprintf("%d rows", tc.rows), func(t *testing.T) {
+			// The resync is the placement chunk's; the trailing text after it is
+			// only what makes the scroll reach history where it can be compared.
+			place := func(rowCount int) (*mirror, string) {
+				m := newMirror(t, 20, tc.rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+				m.write("\x1b[2;2Hkeep")
+				m.write(kittyPlaceRGB(uint32(80+rowCount), 16, 32, fmt.Sprintf(",r=%d", rowCount)))
+				resync := m.lastResync
+				m.write("\r\ntail")
+				return m, resync
+			}
+
+			at, resync := place(tc.carried)
+			if resync != "" {
+				t.Fatalf("r=%d resynced (%s) on a %d-row screen: one SU still carries that scroll",
+					tc.carried, resync, tc.rows)
+			}
+			at.agree(t, fmt.Sprintf("after an r=%d placement", tc.carried))
+
+			if _, resync := place(tc.overflow); resync != kittyResyncScrollClamped {
+				t.Errorf("r=%d resync = %q, want %q: SU cannot carry a scroll taller than the %d-row screen",
+					tc.overflow, resync, kittyResyncScrollClamped, tc.rows)
+			}
+		})
+	}
+}
+
+// DECLRMM is the tripwire, and the same stream without it is the control. A
+// scroll confined to the margin box moves text between rows without moving the
+// rows, so the tracked pair reports nothing and the wire carries no SU for it —
+// the client's text stays put under a cursor that agrees, which is a divergence
+// no assertion on the cursor would catch.
+//
+// The control is what keeps this honest: it is the identical stream on a
+// terminal with no margins set, and it must stay silent AND byte-equal. A
+// tripwire that fired on every placement would pass the first half of this test
+// and fail the second.
+func TestWireFeedResyncsWhileLeftRightMarginsAreSet(t *testing.T) {
+	const bottom = "\x1b[32;5Hxy"
+	place := kittyPlaceRGB(65, 16, 32, "")
+
+	control := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write("\x1b[1;1Htop" + bottom)
+	control.write(place)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s): without margins this is an ordinary bottom-row placement", control.lastResync)
+	}
+	control.agree(t, "with no margins set")
+
+	m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	m.write("\x1b[1;1Htop\x1b[?69h\x1b[4;14s" + bottom)
+	m.write(place)
+	if m.lastResync != kittyResyncMarginMode {
+		t.Fatalf("resync = %q, want %q: the placement scrolled the margin box and nothing measured it",
+			m.lastResync, kittyResyncMarginMode)
+	}
+	// Described in full anyway: the cursor moves are the part of the measurement
+	// margins do not spoil, and they are worth having until the snapshot lands.
+	// The one thing missing against the control is its SU — the scroll that
+	// happened inside the margin box and that nothing on this side could see,
+	// which is the whole reason the reason string exists.
+	if got, want := string(control.lastWire), string(wireST)+"\x1b[2S\x1b[1A\x1b[2C"; got != want {
+		t.Fatalf("control wire = %q, want %q: without margins the same placement scrolls two rows and says so", got, want)
+	}
+	if got, want := string(m.lastWire), string(wireST)+"\x1b[1A\x1b[2C"; got != want {
+		t.Errorf("wire = %q, want the control's cursor moves without its SU (%q): a resync is not a stop order",
+			got, want)
+	}
+	if worker, client := m.worker.ViewportText(), m.client.ViewportText(); worker == client {
+		t.Errorf("the grids agree, so the case no longer exercises an unmeasurable margin scroll:\n%s", worker)
+	}
+}
+
+// The last column is the one place a cursor position hides state: a cell there
+// can be written with the wrap DEFERRED, so the cursor still reads as column
+// cols-1 while the next printable byte will wrap before it lands. A dispatch
+// consumes that bit on the worker and the wire's bytes do not consume it on the
+// client, and no accessor exposes it to compare — so the column is the tripwire.
+//
+// The control is the isolation: the identical stream with the cursor mid-row
+// carries no pending wrap, stays silent, and its grids agree. Without it this
+// test would pass for a tripwire that fired on every placement.
+func TestWireFeedResyncsWithACursorInTheLastColumn(t *testing.T) {
+	const cols, rows = 20, 8
+	// 8x16 px is one cell, so the placement itself scrolls nothing and moves the
+	// cursor by a single column — everything this case shows comes from the wrap.
+	place := kittyPlaceRGB(70, 8, 16, "")
+
+	control := newMirror(t, cols, rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write(strings.Repeat("x", 5))
+	control.write(place)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s): mid-row this is an ordinary one-cell placement", control.lastResync)
+	}
+	if got, want := string(control.lastWire), string(wireST)+"\x1b[1C"; got != want {
+		t.Fatalf("control wire = %q, want %q: mid-row the placement is described by its cursor move alone", got, want)
+	}
+	control.write("y")
+	control.agree(t, "with the cursor mid-row")
+
+	m := newMirror(t, cols, rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	// Exactly a screen width fills the row and leaves the wrap pending.
+	m.write(strings.Repeat("x", cols))
+	m.write(place)
+	if m.lastResync != kittyResyncPendingWrap {
+		t.Fatalf("resync = %q, want %q: the placement consumed a pending wrap nothing could measure",
+			m.lastResync, kittyResyncPendingWrap)
+	}
+	// Described in full, same as the margin tripwire: the measurement read the
+	// same column and row on both sides of the dispatch, so there is no movement
+	// to describe and the wire carries the abort alone. A resync is not a stop
+	// order — it is what repairs what the description could not say.
+	if got, want := string(m.lastWire), string(wireST); got != want {
+		t.Errorf("wire = %q, want %q: the dispatch is still described, and it measured no movement", got, want)
+	}
+
+	m.write("y")
+	wx, wy := m.worker.CursorPos()
+	cx, cy := m.client.CursorPos()
+	if wx == cx && wy == cy {
+		t.Errorf("the cursors agree at (%d,%d), so the case no longer exercises a consumed pending wrap", wx, wy)
+	}
+}
+
+// A limit someone can hit is a limit they must see. Ghostty refuses an image
+// larger than the whole storage limit and says nothing — kitty's own response is
+// suppressed by the `q=2` every measured emitter sends — so the worker is the
+// only place the refusal is visible at all.
+//
+// The pair is the point. The same transmission that is refused under a small
+// limit is accepted under a large one, and the accepted case must be silent:
+// a log on every image would be noise nobody reads, and eviction (an older image
+// dropped to admit a new one) is normal and reaches this same path.
+func TestWireFeedLogsATransmissionTheStorageLimitRefused(t *testing.T) {
+	// 64x64 RGBA is 16,384 bytes stored; the refusing limit is under it and the
+	// accepting one is over.
+	const refuses, accepts = 4096, 1 << 20
+
+	feedUnder := func(limit uint64, apc string) []string {
+		term := newKittyTerminal(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: limit})
+		var logs []string
+		feeder := newWireFeeder(term, 0, func(format string, args ...interface{}) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		}, limit)
+		if feeder == nil {
+			t.Fatalf("newWireFeeder returned nil for a live terminal")
+		}
+		t.Cleanup(feeder.close)
+		feeder.feed([]byte(apc))
+		return logs
+	}
+
+	oversized := kittyPlaceRGB(90, 64, 64, "")
+	logs := feedUnder(refuses, oversized)
+	if len(logs) != 1 {
+		t.Fatalf("logs = %q, want exactly one line for a refused transmission", logs)
+	}
+	// Name the limit, its value, and the ask: an agent can act on all three.
+	for _, want := range []string{kittyStorageLimitEnv, fmt.Sprint(refuses), fmt.Sprint(64 * 64 * 4)} {
+		if !strings.Contains(logs[0], want) {
+			t.Errorf("refusal log %q does not name %q", logs[0], want)
+		}
+	}
+
+	if logs := feedUnder(accepts, oversized); len(logs) != 0 {
+		t.Errorf("logs = %q for a transmission that was stored, want silence", logs)
+	}
+}
+
+// Every APC shape that is NOT a refused transmission, on the path that judges
+// one. Each row is a measured way to reach "the kitty generation did not move",
+// and mistaking any of them for a refusal would put a line in the daemon log for
+// ordinary output — the chunked rows especially, where kitty stores nothing
+// until the last escape and an emitter sends dozens of them per image.
+func TestWireFeedKeepsQuietForEverythingThatIsNotARefusal(t *testing.T) {
+	const limit = 1 << 20
+	place := kittyPlaceRGB(91, 16, 32, ",p=7")
+
+	for _, tc := range []struct {
+		name   string
+		chunks []string
+	}{
+		{name: "a transmission split across m=1 escapes", chunks: []string{kittyPlaceRGBChunked(92, 16, 32, 64)}},
+		{name: "a support query", chunks: []string{"\x1b_Ga=q,i=31,f=24,t=d,s=1,v=1;AAAA\x1b\\"}},
+		{name: "a re-place of a live placement", chunks: []string{place, "\x1b_Ga=p,i=91,p=8\x1b\\"}},
+		{name: "a delete of an image that is not there", chunks: []string{"\x1b_Ga=d,d=i,i=404\x1b\\"}},
+		{name: "an eviction under a limit that holds one image", chunks: []string{
+			kittyTransmitRGB(93, 32, 32), kittyTransmitRGB(94, 32, 32), kittyTransmitRGB(95, 32, 32),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := uint64(limit)
+			if tc.name == "an eviction under a limit that holds one image" {
+				storage = 8192
+			}
+			term := newKittyTerminal(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: storage})
+			var logs []string
+			feeder := newWireFeeder(term, 0, func(format string, args ...interface{}) {
+				logs = append(logs, fmt.Sprintf(format, args...))
+			}, storage)
+			if feeder == nil {
+				t.Fatalf("newWireFeeder returned nil for a live terminal")
+			}
+			t.Cleanup(feeder.close)
+			for _, chunk := range tc.chunks {
+				feeder.feed([]byte(chunk))
+			}
+			if len(logs) != 0 {
+				t.Errorf("logs = %q, want silence", logs)
+			}
+		})
 	}
 }
 

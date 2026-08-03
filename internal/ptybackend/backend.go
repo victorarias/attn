@@ -185,7 +185,9 @@ type Backend interface {
 	Spawn(ctx context.Context, opts SpawnOptions) error
 	Attach(ctx context.Context, sessionID, subscriberID string) (AttachInfo, Stream, error)
 	Input(ctx context.Context, sessionID string, data []byte) error
-	Resize(ctx context.Context, sessionID string, cols, rows uint16) error
+	// Resize applies a new grid. xpixel/ypixel are the pane's total size in
+	// device pixels, or 0 when the caller has none to report.
+	Resize(ctx context.Context, sessionID string, cols, rows, xpixel, ypixel uint16) error
 	// SetTheme updates the colors the session answers OSC 10/11/12 color
 	// queries with. Best-effort: a worker predating the method returns nil.
 	SetTheme(ctx context.Context, sessionID string, theme pty.TerminalTheme) error

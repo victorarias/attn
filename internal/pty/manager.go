@@ -312,8 +312,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	// The Ghostty terminal backs the classifier, CPR, tiles, and attach restore;
 	// a session without it is not viable.
+	kittyLimit := kittyStorageLimit(m.logf)
 	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{
-		KittyImageStorageLimit: kittyStorageLimit(m.logf),
+		KittyImageStorageLimit: kittyLimit,
 	})
 	if err != nil {
 		if ptmx != nil {
@@ -334,7 +335,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	// under the same session id gets a different one, which is what keeps a
 	// client from redrawing the dead worker's pixels (see mintKittyEpoch).
 	session.kittyEpoch = mintKittyEpoch()
-	session.wireFeed = newWireFeeder(gt, session.kittyEpoch)
+	session.wireFeed = newWireFeeder(gt, session.kittyEpoch, m.logf, kittyLimit)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session
@@ -443,7 +444,9 @@ func (m *Manager) Input(sessionID string, data []byte) error {
 	return session.input(data)
 }
 
-func (m *Manager) Resize(sessionID string, cols, rows uint16) error {
+// Resize applies a new grid to a session. xpixel/ypixel are the pane's total
+// size in device pixels, or 0 when the caller has no pixel geometry to report.
+func (m *Manager) Resize(sessionID string, cols, rows, xpixel, ypixel uint16) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
@@ -455,8 +458,8 @@ func (m *Manager) Resize(sessionID string, cols, rows uint16) error {
 	if session.cmd != nil && session.cmd.Process != nil {
 		pid = session.cmd.Process.Pid
 	}
-	resizeErr := session.resize(cols, rows)
-	m.logf("pty resize: id=%s prev=%dx%d new=%dx%d pid=%d err=%v", sessionID, prevCols, prevRows, cols, rows, pid, resizeErr)
+	resizeErr := session.resize(cols, rows, xpixel, ypixel)
+	m.logf("pty resize: id=%s prev=%dx%d new=%dx%d px=%dx%d pid=%d err=%v", sessionID, prevCols, prevRows, cols, rows, xpixel, ypixel, pid, resizeErr)
 	return resizeErr
 }
 

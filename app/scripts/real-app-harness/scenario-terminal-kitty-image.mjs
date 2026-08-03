@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 
 /**
- * Packaged-app proof for worker-authoritative kitty images: a program writes a
- * kitty graphics escape into a real session PTY, the worker (the system's only
- * kitty parser) describes the placement to the app, the app pulls the pixels
- * and draws them, the placement rides the scroll of the text it sits in, and
- * the program's delete empties the set.
+ * Packaged-app proof for worker-authoritative kitty images, which are ON by
+ * default: with NOTHING injected into the environment, a program writes a kitty
+ * graphics escape into a real session PTY, the worker (the system's only kitty
+ * parser) describes the placement to the app, the app pulls the pixels and draws
+ * them, the placement rides the scroll of the text it sits in, and the program's
+ * delete empties the set.
  *
- * And the property that matters most while the feature is dark: with no
- * ATTN_KITTY_STORAGE_LIMIT in the daemon's environment, the very same escape
- * produces NOTHING — no stored image, no placement, no wire traffic. Leg 5
- * re-proves that on a restarted daemon, so a future default flipped by accident
- * fails here rather than in someone's terminal.
+ * And the escape hatch: with ATTN_KITTY_STORAGE_LIMIT=0 in the daemon's
+ * environment, the very same escape produces NOTHING — no stored image, no
+ * placement, no wire traffic. Leg 5 proves that on a restarted daemon, so a hatch
+ * broken by accident fails here rather than in someone's terminal.
  *
  * Why this scenario is not in the serial matrix (scenarioCatalog.mjs): it stops
  * and re-ensures the profile daemon twice to move ATTN_KITTY_STORAGE_LIMIT in
@@ -50,13 +50,10 @@ import {
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 
-// Storage cap for the legs that want images, in bytes. The receipt behind the
-// number: the largest image any measured real emitter stored was 6.48MB (kitten
-// icat, a 3000x2000 photo fitted to a 1800x1200 window box; see the A3 design's
-// measurement receipts). 320MB is ~50x that — a tripwire this scenario's 9KB
-// image and any hand-run emitter stay far clear of, so a leg that fails here
-// failed on the pipeline, never on the cap.
-const STORAGE_LIMIT_BYTES = '320000000';
+// The escape hatch: a storage limit of zero disables the kitty protocol
+// entirely. Unset means the default limit, which is why the image legs inject
+// nothing at all.
+const STORAGE_OFF = '0';
 
 // The image: 64x48 RGB, a coarse checkerboard with a white frame. Small enough
 // to send in a couple of escapes, loud enough to find by eye in the screenshot.
@@ -225,8 +222,8 @@ async function main() {
     prefix: 'terminal-kitty-image',
     metadata: {
       profile,
-      storageLimitBytes: STORAGE_LIMIT_BYTES,
-      focus: 'worker-described kitty placement renders, scrolls, deletes — and stays dark without the override',
+      darkLimit: STORAGE_OFF,
+      focus: 'worker-described kitty placement renders, scrolls, deletes by default — and stays dark with the escape hatch',
     },
   });
 
@@ -237,17 +234,15 @@ async function main() {
   fs.writeFileSync(imageFile, `\n${kittyTransmitAndDisplay(IMAGE_ID, IMAGE_WIDTH, IMAGE_HEIGHT)}\n`, 'binary');
   fs.writeFileSync(deleteFile, '\x1b_Ga=d,q=2\x1b\\\n', 'binary');
 
-  const brightEnv = profileEnv(profile, { ATTN_KITTY_STORAGE_LIMIT: STORAGE_LIMIT_BYTES });
-  const darkEnv = profileEnv(profile);
+  const defaultEnv = profileEnv(profile);
+  const offEnv = profileEnv(profile, { ATTN_KITTY_STORAGE_LIMIT: STORAGE_OFF });
 
-  // The app spawns the daemon only when none is running, and the worker
-  // inherits the DAEMON's environment — so the override has to be in place
-  // before the app launches, and it rides launchEnv too in case the app is the
-  // one that ends up spawning it.
-  const client = new UiAutomationClient({
-    appPath: options.appPath,
-    launchEnv: { ATTN_KITTY_STORAGE_LIMIT: STORAGE_LIMIT_BYTES },
-  });
+  // Nothing to inject for the image legs: images are on by default, so the app
+  // launches with the environment it would have in the field. The app spawns the
+  // daemon only when none is running, and the worker inherits the DAEMON's
+  // environment — which is why the dark leg ensures a daemon with the hatch set
+  // BEFORE relaunching the app, so the app never spawns one without it.
+  const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
 
   let sessionId = null;
@@ -271,10 +266,11 @@ async function main() {
   };
 
   // Cleanups run in reverse registration order: leave the profile daemon as the
-  // world expects to find it (no image storage) LAST, after the app is gone.
-  runner.registerCleanup('restore_dark_daemon', () => {
-    try { run(binary, ['daemon', 'stop'], darkEnv); } catch {}
-    try { run(binary, ['daemon', 'ensure'], darkEnv); } catch {}
+  // world expects to find it (nothing injected, images on by default) LAST,
+  // after the app is gone.
+  runner.registerCleanup('restore_default_daemon', () => {
+    try { run(binary, ['daemon', 'stop'], defaultEnv); } catch {}
+    try { run(binary, ['daemon', 'ensure'], defaultEnv); } catch {}
   });
   runner.registerCleanup('close_observer', () => observer.close());
   runner.registerCleanup('quit_app', () => client.quitApp());
@@ -312,10 +308,12 @@ async function main() {
   let darkPane = null;
 
   try {
-    await runner.step('start_daemon_with_image_storage', async () => {
+    // Nothing injected: whatever this daemon does with kitty escapes is the
+    // default every user gets.
+    await runner.step('start_daemon_default', async () => {
       await ensureFreshWorld({ profile, appPath: resources.appPath });
-      try { run(binary, ['daemon', 'stop'], brightEnv); } catch {}
-      run(binary, ['daemon', 'ensure'], brightEnv);
+      try { run(binary, ['daemon', 'stop'], defaultEnv); } catch {}
+      run(binary, ['daemon', 'ensure'], defaultEnv);
     });
 
     await runner.step('launch_app', async () => {
@@ -371,16 +369,6 @@ async function main() {
       // viewport and then keeps going. The invariant needs no line counting:
       // the image keeps its absolute buffer row, and its screen row falls by
       // exactly the number of rows that moved into scrollback.
-      //
-      // The first burst is measured with one row of slack, and only the first.
-      // Known gap (A4 input, isolated 2026-08-03): when soft-wrapped content
-      // above the image scrolls from the screen into history, the client's
-      // scrollback count and the worker's viewport row disagree by exactly one
-      // row, once. It does not accumulate — every later scroll is exact, which
-      // is what the second burst pins down — and it does not appear at all when
-      // nothing above the image wrapped. Tighten this to zero when the wrap
-      // accounting is fixed; until then a scenario asserting zero here would be
-      // asserting something the product does not do.
       const lines = placed.state.rows + 5;
       const settledAfterBurst = async (previousScrollback, description) => poll(async () => {
         const state = await client.request('get_pane_placement_state', { sessionId, paneId: pane.paneId });
@@ -401,8 +389,8 @@ async function main() {
 
       const firstRows = first.state.scrollback - placed.state.scrollback;
       runner.assert(
-        Math.abs(first.placement.bufferRow - placed.placement.bufferRow) <= 1,
-        `buffer row moved from ${placed.placement.bufferRow} to ${first.placement.bufferRow}; the image may lose at most the one known wrap row`,
+        first.placement.bufferRow === placed.placement.bufferRow,
+        `buffer row moved from ${placed.placement.bufferRow} to ${first.placement.bufferRow}; scrolling moves an image between history and screen, never off its row`,
         { before: placed.placement, after: first.placement, scrolledRows: firstRows },
       );
       runner.assert(
@@ -456,15 +444,15 @@ async function main() {
       );
     });
 
-    await runner.step('dark_without_the_override', async () => {
-      // The shipping truth. Same app, same escape, same everything — only the
-      // daemon's environment differs, and a session spawned from it must store
-      // no image at all, so nothing is ever described to describe.
+    await runner.step('dark_with_the_escape_hatch', async () => {
+      // The way out. Same app, same escape, same everything — only the daemon's
+      // environment differs, and a session spawned from it must store no image
+      // at all, so there is never anything to describe.
       await closeSessionPanes(sessionId);
       sessionId = null;
       await client.quitApp();
-      run(binary, ['daemon', 'stop'], darkEnv);
-      run(binary, ['daemon', 'ensure'], darkEnv);
+      run(binary, ['daemon', 'stop'], offEnv);
+      run(binary, ['daemon', 'ensure'], offEnv);
       await launchFreshAppAndConnect(client, observer);
 
       darkPane = await openShellPane(`kitty-dark-${runner.runId}`);
@@ -480,7 +468,7 @@ async function main() {
         'image emitter command echoed on the dark daemon',
         20_000,
       );
-      // Give the whole pipeline the same budget the bright leg needed to
+      // Give the whole pipeline the same budget the default leg needed to
       // produce a placement, so "nothing arrived" means nothing arrives, not
       // that we looked too early.
       await sleep(BLOB_TIMEOUT_MS);
@@ -490,7 +478,7 @@ async function main() {
       runner.assert(darkState.available === true, 'dark pane reported no live terminal handle', darkState);
       runner.assert(
         darkState.placements.length === 0,
-        `a daemon without ATTN_KITTY_STORAGE_LIMIT still produced ${darkState.placements.length} placement(s)`,
+        `a daemon with ATTN_KITTY_STORAGE_LIMIT=0 still produced ${darkState.placements.length} placement(s)`,
         darkState,
       );
       runner.writeJson('placement-dark.json', darkState);
@@ -503,7 +491,7 @@ async function main() {
 
     const result = runner.finishSuccess({
       sessionId: darkSessionId,
-      storageLimitBytes: STORAGE_LIMIT_BYTES,
+      darkLimit: STORAGE_OFF,
       placed: placed.placement,
       scrolled: scrolled.placement,
       clearedCount: cleared.placements.length,
@@ -511,7 +499,7 @@ async function main() {
       grid: { cols: placed.state.cols, rows: placed.state.rows },
       captures,
     });
-    console.log('[verify] PASS — kitty image described, drawn, scrolled, deleted; dark without the override.');
+    console.log('[verify] PASS — kitty image described, drawn, scrolled, deleted by default; nothing with the escape hatch.');
     console.log(JSON.stringify(result, null, 2));
   } catch (error) {
     for (const id of [sessionId, darkSessionId].filter(Boolean)) {
@@ -530,8 +518,8 @@ async function main() {
     await closeSessionPanes(darkSessionId);
     await client.quitApp().catch(() => {});
     await observer.close();
-    try { run(binary, ['daemon', 'stop'], darkEnv); } catch {}
-    try { run(binary, ['daemon', 'ensure'], darkEnv); } catch {}
+    try { run(binary, ['daemon', 'stop'], defaultEnv); } catch {}
+    try { run(binary, ['daemon', 'ensure'], defaultEnv); } catch {}
   }
 }
 

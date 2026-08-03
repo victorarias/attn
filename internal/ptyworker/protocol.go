@@ -310,9 +310,13 @@ type InputParams struct {
 	Data string `json:"data"`
 }
 
+// XPixel/YPixel are the pane's total size in device pixels. Omitted (0) by a
+// caller with no pixel geometry, and by every worker predating them.
 type ResizeParams struct {
-	Cols uint16 `json:"cols"`
-	Rows uint16 `json:"rows"`
+	Cols   uint16 `json:"cols"`
+	Rows   uint16 `json:"rows"`
+	XPixel uint16 `json:"xpixel,omitempty"`
+	YPixel uint16 `json:"ypixel,omitempty"`
 }
 
 type SignalParams struct {

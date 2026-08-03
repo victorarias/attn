@@ -332,6 +332,185 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b[1" + kittyPlaceRGB(44, 8, 16, "") + " done"},
 		},
 		{
+			// A placement that appears and DIES inside one chunk. Both APCs are
+			// undescribed, so the wire carries their bytes verbatim and the
+			// client does nothing with either; ghostty places the image, moves
+			// the cursor past it, and then deletes it. The set before the chunk
+			// and the set after are both empty, so the placement diff sees
+			// nothing at all — the generation stamp, which moved four times, is
+			// the only witness that anything happened.
+			name: "an undescribed image displayed and deleted in one chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(47, 16, 32, "")) + undescribed("\x1b_Ga=d\x1b\\"),
+			},
+		},
+		{
+			// A live placement PUT somewhere new by an undescribed APC. The
+			// {ImageID, PlacementID} key does not move, so the diff reports it
+			// as Updated and nothing as Added — the shape a check keyed on
+			// appearance alone is blind to, while the placement advances the
+			// worker's cursor two columns and a row past the client's.
+			name: "an undescribed re-place of a live placement at a new position",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(52, 16, 32, ",p=7"),
+				"\x1b[6;9Hmove" + undescribed("\x1b_Ga=p,i=52,p=7\x1b\\"),
+			},
+		},
+		{
+			// New pixels under a live placement id: ImageGeneration moves and
+			// the key does not, so this is Updated as well — and the placement's
+			// footprint shrinks from 2x2 cells to 1x1 with the image. Nothing
+			// scrolls here and the resync is charged anyway: the end-of-feed
+			// check cannot tell a retransmission from a re-place, and an
+			// undescribed APC is rare enough to pay for the difference.
+			name: "an undescribed retransmission under a live placement id",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(53, 16, 32, ""),
+				undescribed(kittyTransmitRGB(53, 8, 16)),
+			},
+		},
+		{
+			// The stamp is claimed per dispatch, not per chunk. Ghostty
+			// DISPATCHES a kitty command when a stray ESC ends the APC, so the
+			// image here lands from bytes the segmenter had to replay as plain
+			// — and the extractable, empty APC that follows in the same chunk
+			// would take the whole stamp move as its own if it did not settle
+			// the books first. Found by FuzzKittyWireMirror, where it left the
+			// worker at (2,1) against a client that never moved.
+			name: "an undescribed image, then an extractable apc in the same chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				strings.TrimSuffix(kittyPlaceRGB(57, 16, 32, ""), "\x1b\\") + "\x1bi" + "\x1b_G\x1b\\",
+			},
+		},
+		{
+			// The general shape: one undescribed placement and one described
+			// placement in a single chunk. The chunk resyncs for the first, and
+			// the second is still described on the wire — a resync is a
+			// statement about what the wire could not carry, never a reason to
+			// stop carrying what it can.
+			name: "an undescribed placement and a described one in the same chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(58, 16, 32, ",C=1")) + kittyPlaceRGB(59, 16, 32, ""),
+			},
+		},
+		{
+			// The exemption, pinned green. An undescribed DELETE moves the stamp
+			// too, and its diff is nothing but a removal: retiring a placement
+			// gives back no rows, so nothing scrolled, and the client learns the
+			// set emptied from the placement fan-out rather than from the wire.
+			// The grids agree, so this entry is replayed rather than exempt —
+			// which is what makes a rule that resyncs on prunes fail here.
+			name: "an undescribed delete of a live placement",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(54, 16, 32, ""),
+				undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+			},
+		},
+		{
+			// Left/right margins plus origin mode, which is where an absolute
+			// column move went wrong: the worker reports a column counted from
+			// the screen edge and a client with DECLRMM on reads `CHA` from the
+			// LEFT MARGIN, so the same number means two places. Recorded at
+			// worker column 11 against a client at 13 before synthesis went
+			// relative. Margins 4..14 with the cursor inside them.
+			//
+			// These three now record a resync rather than a replayed grid: the
+			// margin tripwire fires on any described dispatch while DECLRMM is
+			// on, and it does not ask whether this particular one scrolled the
+			// box. What they pin is that the tripwire covers the mode wherever
+			// it appears — inside margins, outside them, with origin mode and
+			// without. The relative column move they were written for is pinned
+			// by every non-margin entry in this file, and it still governs a
+			// client whose mode read fails.
+			name: "placement inside left and right margins under origin mode",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[4;14s\x1b[?6h\x1b[3;2Hxy",
+				kittyPlaceRGB(62, 16, 32, ""),
+			},
+		},
+		{
+			// The same margins with origin mode OFF, and measured rather than
+			// assumed: this one does NOT displace an absolute column — under
+			// the absolute CHA synthesis used to emit, its replay landed on the
+			// worker's column. Margins alone are not enough; it takes origin
+			// mode with them. Kept so the two modes are pinned apart instead of
+			// only ever tested together, and so the day ghostty makes DECLRMM
+			// bite on its own the corpus says so.
+			name: "placement inside margins with origin mode off",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[4;14s\x1b[6;6Hxy",
+				kittyPlaceRGB(63, 16, 32, ""),
+			},
+		},
+		{
+			// A placement wide enough to push the cursor toward the right
+			// margin, which is the case a relative move has to carry as far as
+			// an absolute one did: the step is measured from where the client's
+			// own cursor already stands, not from either edge.
+			name: "wide placement pushing the cursor right inside margins",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[?69h\x1b[2;18s\x1b[?6h\x1b[2;2Hxy",
+				kittyPlaceRGB(64, 48, 32, ""),
+			},
+		},
+		{
+			// The margin tripwire on the stream that exposed the class: a
+			// placement at the bottom of the margin box scrolls the columns
+			// inside it, which the row-based measurement cannot see. `top`
+			// outside the box is the tell — it stays put on the worker while
+			// the text inside the box climbs. Resync-exempt from replay, which
+			// is what the resync is for.
+			name: "placement scrolling the box while left and right margins are set",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[1;1Htop\x1b[?69h\x1b[4;14s\x1b[32;5Hxy",
+				kittyPlaceRGB(65, 16, 32, ""),
+			},
+		},
+		{
+			// A scroll one SU cannot carry: kitty's `r=` makes a 2x2 image claim
+			// 15 rows on an 8-row screen, and ghostty clamps SU to the scroll
+			// region, so the wire would have pushed 8 rows into history where
+			// the worker pushed 9. The trailing text is what makes the lost row
+			// reach history at all.
+			name: "placement scrolling further than one su can carry",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(66, 16, 32, ",r=15"),
+				"\r\ntail",
+			},
+		},
+		{
+			// The pending-wrap tripwire, on the shape FuzzKittyWireMirror found
+			// (62f19a45d7a5c8c7): exactly a screen width fills the row and leaves
+			// the wrap deferred, and the placement consumes it on the worker
+			// alone. The trailing character is what makes the difference visible
+			// — it wraps on the client and overwrites the last column on the
+			// worker. Resync-exempt from replay, which is what the resync is for.
+			name: "placement on a row that is already full",
+			cols: 20, rows: 8,
+			chunks: []string{
+				strings.Repeat("0", 20),
+				kittyPlaceRGB(67, 8, 16, ""),
+				"0",
+			},
+		},
+		{
 			// The mode has to survive a chunk boundary in every one of these
 			// states, which is the whole reason it is carried on the segmenter
 			// rather than recomputed per call. The APC pattern inside the OSC is
@@ -524,7 +703,7 @@ func runKittyCorpusEntry(t *testing.T, in kittyCorpusInput) kittyCorpusEntry {
 	baseline := ghosttyvt.LiveTrackedRefs()
 
 	worker := newKittyTerminal(t, in.cols, in.rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
-	feeder := newWireFeeder(worker, 0)
+	feeder := newWireFeeder(worker, 0, nil, 0)
 	if feeder == nil {
 		t.Fatalf("newWireFeeder returned nil for a live terminal")
 	}

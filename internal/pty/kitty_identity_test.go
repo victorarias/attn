@@ -32,7 +32,7 @@ const (
 //
 // Every placement exit is taken, because they are separate calls and only one
 // fold site is shared: the live fan-out, the attach snapshot a re-attaching
-// client restores from, and the re-describe a reflow produces.
+// client restores from, and the re-describe a resize produces.
 func TestKittyIdentityIsTheSameAtEveryExit(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real PTY spawn in short mode")
@@ -61,20 +61,20 @@ func TestKittyIdentityIsTheSameAtEveryExit(t *testing.T) {
 		t.Errorf("attach snapshot generation = %d, want the %d the live description carried", got, live)
 	}
 
-	if err := spawn.manager.Resize(spawn.id, 40, 4); err != nil {
+	if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
 		t.Fatalf("Resize() error: %v", err)
 	}
-	var reflowed PlacementUpdate
+	var resized PlacementUpdate
 	select {
-	case reflowed = <-spawn.updates:
+	case resized = <-spawn.updates:
 	default:
-		t.Fatal("the reflow described nothing")
+		t.Fatal("the resize described nothing")
 	}
-	if len(reflowed.Placements) != 1 {
-		t.Fatalf("placements after the reflow = %+v, want the image still described", reflowed.Placements)
+	if len(resized.Placements) != 1 {
+		t.Fatalf("placements after the resize = %+v, want the image still described", resized.Placements)
 	}
-	if got := reflowed.Placements[0].ImageGeneration; got != live {
-		t.Errorf("reflow generation = %d, want the %d the live description carried", got, live)
+	if got := resized.Placements[0].ImageGeneration; got != live {
+		t.Errorf("resize generation = %d, want the %d the live description carried", got, live)
 	}
 
 	img, err := spawn.manager.KittyImage(spawn.id, 84)

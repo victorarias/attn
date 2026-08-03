@@ -139,10 +139,10 @@ func (k *kittySpawn) release(t *testing.T) {
 	}
 }
 
-// The default is dark, and it is dark on the real spawn path rather than only
-// in a hand-built terminal: no override, no storage, no placement, whatever the
-// program emits.
-func TestSpawnedSessionDescribesNoImagesByDefault(t *testing.T) {
+// The default is images ON, and on over the real spawn path rather than only in
+// a hand-built terminal: nothing in the environment, and a program that draws an
+// image gets it stored and described.
+func TestSpawnedSessionDescribesImagesByDefault(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real PTY spawn in short mode")
 	}
@@ -153,10 +153,35 @@ func TestSpawnedSessionDescribesNoImagesByDefault(t *testing.T) {
 
 	select {
 	case update := <-spawn.updates:
+		if len(update.Placements) != 1 || update.Placements[0].ImageID != 80 {
+			t.Fatalf("placements = %+v, want the one image the program drew", update.Placements)
+		}
+	default:
+		t.Fatal("no placement was described for an image the program emitted")
+	}
+	if _, err := spawn.manager.KittyImage(spawn.id, 80); err != nil {
+		t.Errorf("KittyImage() error = %v, want the stored pixels", err)
+	}
+}
+
+// The escape hatch, over the same path: an explicit zero is the one value that
+// turns the protocol off, and it must reach ghostty rather than being read as
+// "unset".
+func TestSpawnedSessionDescribesNoImagesWhenTheLimitIsZero(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping real PTY spawn in short mode")
+	}
+	t.Setenv(kittyStorageLimitEnv, "0")
+
+	spawn := newKittySpawn(t, "kitty-disabled", kittyPlaceRGB(82, 16, 32, ""))
+	spawn.release(t)
+
+	select {
+	case update := <-spawn.updates:
 		t.Fatalf("a placement was described with images disabled: %+v", update)
 	default:
 	}
-	if _, err := spawn.manager.KittyImage(spawn.id, 80); !errors.Is(err, ErrKittyImageNotFound) {
+	if _, err := spawn.manager.KittyImage(spawn.id, 82); !errors.Is(err, ErrKittyImageNotFound) {
 		t.Errorf("KittyImage() error = %v, want ErrKittyImageNotFound: nothing was stored", err)
 	}
 }

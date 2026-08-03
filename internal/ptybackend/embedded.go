@@ -138,8 +138,8 @@ func (b *EmbeddedBackend) Input(_ context.Context, sessionID string, data []byte
 	return b.manager.Input(sessionID, data)
 }
 
-func (b *EmbeddedBackend) Resize(_ context.Context, sessionID string, cols, rows uint16) error {
-	return b.manager.Resize(sessionID, cols, rows)
+func (b *EmbeddedBackend) Resize(_ context.Context, sessionID string, cols, rows, xpixel, ypixel uint16) error {
+	return b.manager.Resize(sessionID, cols, rows, xpixel, ypixel)
 }
 
 func (b *EmbeddedBackend) SetTheme(_ context.Context, sessionID string, theme pty.TerminalTheme) error {

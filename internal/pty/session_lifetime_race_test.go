@@ -14,13 +14,13 @@ import (
 )
 
 // The block feed and the Ghostty terminal are native memory. info() resolves
-// tracked refs against them and resize() reflows them, while closePTY frees
+// tracked refs against them and resize() moves them, while closePTY frees
 // both. Manager.Remove hands an already-looked-up session to an in-flight
 // attach before closing it, so those two can genuinely overlap in production.
 //
 // These tests drive that overlap directly. They are the regression for the
 // unlocked teardown: with closePTY freeing outside replayMu, a concurrent
-// info() or resize() reads or reflows a freed handle, which -race reports (or
+// info() or resize() reads or resizes a freed handle, which -race reports (or
 // which crashes the process outright in the native allocator). Run them under
 // `go test -race ./internal/pty` for the full signal.
 
@@ -127,9 +127,9 @@ func TestAttachRacesRemove(t *testing.T) {
 	}
 }
 
-// TestResizeRacesSnapshot drives resize() against info(). The reflow mutates
+// TestResizeRacesSnapshot drives resize() against info(). The resize mutates
 // the same grid the snapshot serializes and the block refs resolve against, so
-// the two must not overlap; teardown joins the race to cover reflow-vs-free.
+// the two must not overlap; teardown joins the race to cover resize-vs-free.
 func TestResizeRacesSnapshot(t *testing.T) {
 	const cols, rows = 80, 24
 	refBase := ghosttyvt.LiveTrackedRefs()
@@ -149,7 +149,7 @@ func TestResizeRacesSnapshot(t *testing.T) {
 			var wg sync.WaitGroup
 			start := make(chan struct{})
 
-			// Reflow across a range of widths: narrowing is what actually moves
+			// Resize across a range of widths: narrowing is what actually moves
 			// tracked refs, so it is the case that exposes an unlocked resize.
 			wg.Add(1)
 			go func() {
@@ -157,7 +157,7 @@ func TestResizeRacesSnapshot(t *testing.T) {
 				<-start
 				widths := []uint16{40, 120, 60, 100, 30, 80}
 				for _, cw := range widths {
-					_ = s.resize(cw, rows)
+					_ = s.resize(cw, rows, 0, 0)
 				}
 			}()
 
@@ -169,7 +169,7 @@ func TestResizeRacesSnapshot(t *testing.T) {
 					info := s.info()
 					// Every block row must fall inside the grid the same
 					// snapshot reports — a row resolved against a
-					// concurrently-reflowed terminal would not.
+					// concurrently-resized terminal would not.
 					for _, b := range info.GhosttyBlocks {
 						if b.PromptRow < 0 || b.PromptRow >= int32(info.Rows) {
 							t.Errorf("block %d row %d outside its own snapshot grid (%dx%d)",

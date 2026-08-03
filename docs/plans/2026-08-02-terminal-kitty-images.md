@@ -115,10 +115,12 @@ PTY read loop (worker, per chunk, under replayMu):
     │                            │    the cursor before the APC; both it and a ref
     │                            │    at the new cursor resolved after, so the pair
     │                            │    shares one coordinate frame)
-    │                            └─ synthesize: SU×scroll + CUU/CUD + CHA into the
-    │                                 wire chunk (relative and column-only: absolute
-    │                                 row addressing is measured from the scroll
-    │                                 region under origin mode)
+    │                            └─ synthesize: SU×scroll + CUU/CUD + CUF/CUB into
+    │                                 the wire chunk (relative on both axes:
+    │                                 absolute addressing is measured from a frame
+    │                                 the worker cannot see — rows from the scroll
+    │                                 region under origin mode, columns from the
+    │                                 left margin under DECLRMM)
     ├─ lastReplaySeq = seq   (unchanged)
   outside the lock: drain/forward ghostty's `_G` ACKs to the program (unchanged)
   fanOut(wireChunk, seq)     ← rewritten bytes, same seq
@@ -258,16 +260,27 @@ Layers around the gate:
 
 ### A1 — stop the lie (small PR, ships first)
 
-- [ ] Set the worker terminal's kitty image storage limit to 0
+Shipped as PR #727 (`e1577ea5`). All four items are done; the boxes below were
+ticked afterwards, in A4, when an audit caught the ledger still claiming images
+do not render on the branch that turns them on.
+
+- [x] Set the worker terminal's kitty image storage limit to 0
       (`GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT`, plumbed through
-      `ghosttyvt.Options`).
-- [ ] Verify limit-0 silences the `a=q` OK reply; if ghostty still ACKs,
-      filter `_G` responses in the worker's response drain instead. Test:
-      no support reply reaches the program, no cursor movement from a
-      direct-RGB write — the probe scenario, kept this time.
-- [ ] Correct the AGENTS.md terminal section (images do not render today;
-      sixel does not exist in ghostty).
-- [ ] Changelog fragment.
+      `ghosttyvt.Options`). Shipped in `e1577ea5`. A4 kept the plumbing and
+      changed only the number it carries.
+- [x] Verify limit-0 silences the `a=q` OK reply; if ghostty still ACKs,
+      filter `_G` responses in the worker's response drain instead. **No filter
+      was needed, and this was measured rather than assumed:** at limit 0 an
+      `a=q` query returns no bytes at all, and an `a=q` followed by a DA1
+      returns the DA1 alone — ghostty short-circuits the whole graphics
+      protocol when storage is disabled (`graphics_exec.zig`), so nothing
+      reaches the response drain to filter. Re-measured in A4 against the
+      current pin.
+- [x] Correct the AGENTS.md terminal section (images do not render today;
+      sixel does not exist in ghostty). Written in A1; A4's flip rewrote the
+      same paragraph to the new truth — on by default, the 320MB limit, the
+      `=0` hatch — and kept sixel's absence.
+- [x] Changelog fragment. Carried by #727; CI enforces one per PR.
 
 ### A2 — worker: segmenter, observation, synthesis (feature dark, one live fix)
 
@@ -373,9 +386,11 @@ until the storage limit flips in A4.
       row. Pinned before the abort, that movement lands inside the measured
       window and is attributed to the image; the client then performs the same
       abort itself off the wire's ST **and** applies the synthesized movement,
-      landing a row low. It surfaces only in the row because the column is
+      landing a row low. It surfaced only in the row because the column was
       described absolutely (`CHA`, idempotent) and the row relatively (`CUD`,
-      which double-applies).
+      which double-applies). A4 made the column relative too, for the margin
+      reason recorded there, so both axes double-apply now — which is exactly
+      what pinning after the abort keeps correct.
 
       Doing the abort on the worker first leaves the measured window holding
       only what the image did. Measured, worker delta against what the client
@@ -619,9 +634,12 @@ the `get_pane_placement_state` bridge action. It covers: the placement appears
 with its blob resident and visible; it rides the text it sits in across two
 scroll bursts; the program's own `a=d` empties the set; and — with the
 override absent — an identical session produces no placements at all, which is
-the shipping default. The first APC and the delete carry `q=2`: without it the
-terminal answers `\x1b_Gi=<id>;OK\x1b\\` on the PTY, and at a shell prompt with
-nobody reading, that reply is typed into the next command line. Real emitters
+the shipping default. (A4 inverted the scenario when the default flipped: the
+image legs now inject nothing — proving the on-by-default world — and the dark
+leg pins the `ATTN_KITTY_STORAGE_LIMIT=0` escape hatch.) The first APC and the
+delete carry `q=2`: without it the terminal answers `\x1b_Gi=<id>;OK\x1b\\` on
+the PTY, and at a shell prompt with nobody reading, that reply is typed into
+the next command line. Real emitters
 either set `q` or read the reply; kitty behaves the same way.
 
 **Live tier (real emitters, throwaway profile).** chafa 1.18.2 and timg 1.6.3
@@ -660,10 +678,9 @@ with the flip.
 **Wrap anchoring gap (A4 input).** In a pane whose prompt wraps (a long cwd),
 the first scroll after a placement moves its mapped buffer row by one; every
 later scroll holds. Short-prompt panes never drift. It is not a race — two
-reads 500 ms apart agree — so it is a real off-by-one in how a wrapped row is
-counted when the placement's screen row is converted to a buffer row. The
-harness scenario tolerates one row on the first burst and asserts the strict
-invariant on the second, so accumulation would fail the scenario.
+reads 500 ms apart agree. Root-caused and fixed in A4 (resize reflow
+asymmetry; see the decision record there), and the harness scenario now asserts
+the strict invariant on both bursts.
 
 **Remote leg: passes end to end.** Against a real OrbStack VM daemon
 (`attn-remote@orb`), the whole chain runs: the app opens a shell session on the
@@ -724,76 +741,456 @@ split's whole point: placements and blobs cross the relay as JSON.
 
 ### A4 — enable, restore, remote, receipts
 
-Four synthesis defects are known and deliberately deferred to here. All are
+Synthesis defects are known and deliberately deferred to here. All are
 unreachable while the storage limit is 0 — nothing dispatches, so the grid never
 moves and `writeAPC` returns early — and all become live the moment the limit is
 flipped. None may ship with the flip.
 
 `FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
-property with kitty live, and it is knowingly red until the last two below are
-decided. Soaking it is part of this phase's work, not A2's. (The pin skew noted
-under A2 is NOT one of these — it is a live limit today, and gated on the two
-ghostty pins converging rather than on the storage flip.)
+property with kitty live. All of them are now closed — the two placement-diff
+items and the stamp-claim item by fixing the accounting, the CHA-under-margins
+item by describing the column relatively, and the two MEASUREMENT items the later
+soaks turned up (the over-tall scroll and the margin-box scroll) by tripwire
+resyncs rather than cleverer synthesis. Soaking is part of this phase's work, not
+A2's.
+(The pin skew noted under A2 is NOT one of these — it is a live limit today,
+and gated on the two ghostty pins converging rather than on the storage flip.)
 
-- [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
+- [x] **CHA is wrong under DECLRMM + origin mode.** Synthesis ended with an
       absolute column move, and a client with left/right margins enabled
       measures `CHA` from the left MARGIN while the worker reports a column
       from the screen edge. `\x1b[?69h\x1b[4;14s\x1b[?6h\x1b[3;2Hxy` plus a
-      placement puts the worker at column 11 and the client at 13. Fix by
-      making the column move relative (`CUF`/`CUB` from the pre-APC column) or
-      by resyncing when margins are on; either way it needs a corpus entry.
-- [ ] **An undescribed image forces a snapshot on every occurrence.** A kitty
+      placement puts the worker at column 11 and the client at 13.
+      **Decided: relative moves, the same doctrine the rows already followed** —
+      `CUF`/`CUB` by `movedCol - col`, so the column is expressed as a distance
+      from a position both terminals already hold rather than against a frame
+      the worker cannot see. Corpus entries: the repro above, the same margins
+      with origin mode OFF (measured NOT to displace an absolute column at this
+      ghostty pin — margins alone are not enough — kept so the two modes are
+      pinned apart), and a wide placement pushing the cursor right inside
+      margins.
+- [x] **An undescribed image forces a snapshot on every occurrence.** A kitty
       APC introduced from inside another sequence reaches the terminal whole
       and places an image the wire cannot describe, so the feeder resyncs
       (`kitty_undescribed_image`). Correct but blunt: a producer that emits
       images from a non-ground state would re-push a snapshot per image.
-      Measure real emitters before deciding whether that needs a cheaper
-      repair (a wire-side sequence-abort byte was sketched and rejected as
-      unproven; see the segmenter's header).
-- [ ] **The undescribed-image check only sees images APPEAR.** The end-of-feed
-      comparison resyncs on `delta.Added` alone, because `Updated` is scroll
-      noise: `ViewportCol`/`ViewportRow` are viewport-relative, and observation
-      happens only on APC writes, so ordinary scrolling between two of them
-      moves every live placement and would resync constantly. The cost is two
-      divergences that stay silent on a verbatim APC — a re-place of an
+      **Decided by measurement, not by code: the blunt resync is the accepted
+      cost.** The emitter sweep (chafa, timg, kitten icat; ~600MB of captured
+      output) found ZERO unextracted APCs in any default configuration — every
+      emitter starts its APC from ground, which is the state the segmenter can
+      cut from. The one exception is `chafa --passthrough`, auto-triggered by a
+      stale `$TMUX` or `TERM=screen*`, which costs one snapshot per still image;
+      attn sets `TERM=xterm-256color`, so the default path is ground. The
+      wire-side sequence-abort byte that was sketched for this stays rejected —
+      it would buy nothing measurable (see the segmenter's header).
+- [x] **The undescribed-image check only sees images APPEAR.** The end-of-feed
+      comparison resynced on `delta.Added` alone, because `Updated` looked like
+      scroll noise: `ViewportCol`/`ViewportRow` are viewport-relative, so
+      ordinary scrolling moves every live placement. The cost was two
+      divergences that stayed silent on a verbatim APC — a re-place of an
       existing `{ImageID, PlacementID}` at a new spot, and a retransmission
       that changes the image content under a live id (`ImageGeneration` moves,
-      the placement key does not). Decide at the flip: include `Updated` and
-      accept the re-pushes, or key the diff on the fields a scroll cannot move.
-- [ ] **A placement that appears and dies inside one chunk is invisible.** The
+      the placement key does not). **Decided: include `Updated`.** The
+      scroll-noise worry does not apply, because a plain scroll does not move
+      ghostty's kitty stamp and this check runs only when the stamp moved on
+      bytes nothing accounted for. See the decision record below.
+- [x] **A placement that appears and dies inside one chunk is invisible.** The
       end-of-feed check runs ONE diff per feed call, against the placement set
       from before it. An image that is displayed and then deleted in the same
-      PTY chunk leaves that set unchanged, so `Added` is empty and no resync
-      fires — while the scroll the placement caused is still on the worker's
+      PTY chunk left that set unchanged, so `Added` was empty and no resync
+      fired — while the scroll the placement caused was still on the worker's
       grid and never reached the wire. Found by `FuzzKittyWireMirror` at ~30s
       on a transmit-and-display followed by `\x1b_Ga=d\x1b\\`, which reports
       `gen 0->4, added=0 removed=0 updated=0` and leaves the worker at `(3,1)`
       against the client's `(1,0)`. It needs no exotic stream: PTY reads are
       4 KiB and up, so an emitter that draws an image and clears it lands both
-      in one read. The generation stamp is the honest signal here — it moved
-      four times while the diff saw nothing — but keying purely on the stamp
-      resyncs on prunes too, which is what the `Added`-only rule was avoiding.
-      Decide with the item above; they are the same choice seen twice.
+      in one read. **Decided: resync when the stamp moved and the diff found
+      nothing at all** — the stamp is the only witness such a chunk leaves. See
+      the decision record below; this and the item above were one choice.
+- [x] **An extractable APC erased an earlier undescribed one in the same
+      chunk.** `writeAPC` claimed the stamp wholesale (`f.generation = stamped`)
+      and read its own "before" stamp AFTER the chunk's earlier plain bytes had
+      already reached the terminal. So an undescribed APC followed by ANY
+      extractable APC in the same chunk left the end-of-feed check nothing to
+      see: the stamp read as accounted for, `writeAPC` observed nothing (its
+      own before and after are equal when the second APC is a no-op), and no
+      resync fired. Found by `FuzzKittyWireMirror` at ~8m on a placement APC
+      terminated by a stray ESC — which ghostty DISPATCHES, so the image lands
+      while the segmenter replays the bytes as plain — followed by `\x1bi` and
+      an empty `\x1b_G\x1b\\`; the worker ended at `(2,1)` against the client's
+      `(0,0)`. It reproduced identically with the old `Added`-only predicate: a
+      blind spot in the ACCOUNTING, not in the predicate.
+      **Decided: settle before every described dispatch.**
+      `settleUnaccounted` — read the stamp, and when it moved, claim it,
+      observe, and charge the result through `unaccountedResync` — now runs
+      both at the end of a feed and at `writeAPC`'s ENTRY, before the pre-ST
+      and the cursor pin. A stamp is one number for the whole terminal, so the
+      only way a dispatch can claim just its own move is for everything earlier
+      to be settled first. `writeAPC` then reads its pre-dispatch generation
+      from `f.generation` instead of crossing into ghostty again, so the dark
+      path pays no extra cgo. Corpus entries: "an undescribed image, then an
+      extractable apc in the same chunk" (the fuzz stream) and "an undescribed
+      placement and a described one in the same chunk"; the second is also
+      pinned byte-for-byte by
+      `TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne`, because a
+      resync must not stop the settling APC from being described.
+- [x] **A synthesized scroll taller than the screen loses history.** Synthesis
+      expresses the measured scroll as `CSI n S`, and ghostty CLAMPS `SU` to the
+      height of the scroll region: on an 8-row screen, `CSI 47 S` pushes 8 rows
+      into scrollback, while the placement that caused it pushed 47. The
+      viewport and the cursor still agree — only the client's history comes out
+      short, by exactly `scroll - rows` rows, which the user meets as missing
+      scrollback rather than as a wrong screen. Measured on
+      `\x1b[2;2Hkeep` + a 2x2 image placed with `r=53` + `\r\ntail`: worker
+      history 55 rows, client 16. Bisected on the same shape — `SU 6` agrees,
+      `SU 14` diverges — so the threshold is exactly the screen height. Cheap to
+      reach because kitty's `r=` lets a small image claim any number of rows.
+      Found by `FuzzKittyWireMirror` at ~1m30s after the settle fix; it predates
+      both this phase's fixes, which never touch `writeAPC`'s measurement.
+      **Decided: resync past the boundary, measured rather than assumed.** The
+      boundary is the screen height exactly — the largest scroll one `SU`
+      reproduces byte for byte, pinned on both sides by
+      `TestWireFeedSynthesizesTheLargestScrollOneSUCarries`:
 
-- [ ] Flip the storage limit on (measured number, named limit errors surfaced
-      through kitty's own response channel and the daemon log).
-- [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
-      images from it; without it chafa guesses ~8 x 11.4 px cells against a real
-      9 x 22.6 CSS px cell. Measured in A3's live tier.
-- [ ] Fix the one-row anchoring drift on a wrapped prompt row. Measured in A3's
-      live tier; the packaged scenario tolerates one row on the first scroll and
-      would fail if it ever accumulated.
-- [ ] A supported way to turn images on for a remote daemon. A3 ran the remote
-      leg end to end (see its verification record), so what is left here is the
-      switch rather than the pipeline: the hub forwards a fixed env allowlist,
-      so the storage-limit override has no supported route to a remote daemon.
-      Stops mattering once the limit ships as a default; needs an
-      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated at
-      the flip.
-- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Done in
-      A3 — the terminal section now states that kitty images are worker
-      authoritative and dark by default, and why the relay never advertises
-      `binary_pty_output`.
+      | screen | last agreeing | first diverging |
+      | --- | --- | --- |
+      | 8 rows | `r=14` → `SU 8` | `r=15` → `SU 9`, a row of history lost |
+      | 12 rows | `r=22` → `SU 12` | `r=23` → `SU 13`, a row of history lost |
+
+      A DECSTBM region does not shrink it: measured on a 12-row screen with a
+      4-row region, a placement inside it never scrolls more than one row no
+      matter how tall `r=` makes it, so the region case cannot reach the clamp.
+      Past the boundary `writeAPC` now emits `kitty_layout_scroll_clamped`
+      instead of the clamped `SU`. Splitting the scroll into region-height
+      `SU`s was rejected: no measured emitter draws an image taller than the
+      screen, so the split would be unexercised cleverness on a path a resync
+      already covers. Corpus entry: "placement scrolling further than one su
+      can carry", resync-exempt from replay.
+- [x] **A scroll confined to the left/right margin box is measured as zero.**
+      With DECLRMM on (`\x1b[?69h` plus `DECSLRM`), a placement at the bottom of
+      the margin box scrolls only the columns inside it, and the tracked-ref
+      measurement does not see that as movement: `scrolled` comes out 0, the
+      wire carries no `SU` at all, and the client's text stays where it was.
+      Measured on a 20x8 screen, margins `\x1b[4;14s`, `top` written at column 1
+      and `xy` at the bottom row inside the box, then a 2x2 placement:
+
+      | modes | wire | worker | client |
+      | --- | --- | --- | --- |
+      | margins + origin | `ESC\ CSI 1 A CSI 5 C` | `xy` at row 5 | row 7 |
+      | margins, no origin | `ESC\ CSI 1 A CSI 2 C` | `xy` at row 5 | row 7 |
+      | origin, no margins | `ESC\ CSI 2 S CSI 1 A CSI 2 C` | row 5 | row 5 |
+      | neither | `ESC\ CSI 2 S CSI 1 A CSI 2 C` | row 5 | row 5 |
+
+      DECLRMM alone is the trigger; origin mode has nothing to do with it. The
+      cursor agrees in every row — this is the TEXT moving under an agreed
+      cursor, which is what separates it from the two cursor defects above. In
+      the margin rows `top` survives at row 0 on the worker, outside the box:
+      proof the scroll is confined to the margin columns rather than missing.
+      Found by `FuzzKittyWireMirror` at ~1m48s once A4's margin corpus entries
+      gave it margins to mutate. Predates the relative-column fix — measured by
+      restoring the absolute `CHA` and re-running the same probe, which shows
+      the identical text divergence with the column defect stacked on top.
+      **Decided: resync while the mode is on.** `writeAPC` reads DECLRMM through
+      the new `ghosttyvt.Terminal.LeftRightMarginMode` and emits
+      `kitty_layout_margin_mode` on every described dispatch while the mode is
+      set, without asking whether that dispatch scrolled the box — nothing can
+      tell those apart from this side, which is the defect itself. Measuring the
+      scroll in a frame that includes a margin-box scroll was rejected on the
+      same ground as the `SU` split above: no measured emitter enables DECLRMM,
+      so the blunt tripwire costs nothing real, and a margin-aware measurement
+      would be unexercised machinery. The dispatch is still described in full —
+      the cursor moves are the part margins do not spoil, and they keep a client
+      that has not re-attached yet closer to the truth.
+      Cost if some future emitter does set the mode: one snapshot per image,
+      the same bill the undescribed-image item accepts.
+      `TestWireFeedResyncsWhileLeftRightMarginsAreSet` pins it against a
+      no-margins control that must stay silent and byte-equal; corpus entry
+      "placement scrolling the box while left and right margins are set". The
+      three margin entries from the CHA fix now record this resync instead of a
+      replayed grid — the mode is covered wherever it appears, and the relative
+      column they were written for is pinned by every non-margin entry and still
+      governs a client whose mode read fails.
+
+**Decision record — what an unaccounted kitty mutation costs.** A resync exists
+for grid SCROLL the wire never expressed, never for knowledge of the placement
+set: the set reaches the client on its own through the placement fan-out,
+whatever happened here. And only bringing a placement into existence or putting
+a live one somewhere new can scroll the grid — retiring one gives back no rows.
+So when ghostty's stamp moves on bytes the wire carried verbatim:
+
+- no delta at all → resync, `kitty_stamp_without_delta`. The sets on both sides
+  of the diff are equal, so nothing but the stamp can witness the placement that
+  appeared and died.
+- any `Added` or `Updated` → resync, `kitty_undescribed_image`. A retransmission
+  that scrolls nothing is charged with it too: this check cannot tell one from a
+  re-place, and it does not need to.
+- nothing but `Removed` → silent. That is the alternate-screen prune and the
+  undescribed delete, and it is the ONLY exemption.
+
+Accepted cost: plain bytes that scroll a live placement BEFORE an undescribed
+APC in the same chunk read as `Updated` and resync. It takes an undescribed APC
+to reach at all — one introduced from a non-ground parser state — and how rare
+those are in real emitters is the measurement the item above owes.
+`unaccountedResync` in `internal/pty/wirefeed.go` is the rule; the corpus
+entries named "an undescribed …" and
+`TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval` are its truth
+table, red in both directions (measured: reverting to `Added`-only reddens the
+three resync rows, resyncing on every delta reddens the two silent ones).
+
+- [x] **Flip the storage limit on.** `kittyStorageLimit` returns 320,000,000
+      bytes with nothing in the environment. **Receipt:** that is ghostty app's
+      own default and within 5% of kitty's, and the failure past it is total
+      rather than gradual — ghostty refuses a single image larger than the WHOLE
+      limit outright (`addImage` → `error.OutOfMemory`), and every emitter in the
+      sweep transmits with `q=2`, which suppresses kitty's response, so an
+      over-limit image does not degrade, it silently does not appear. The largest
+      legitimate single image the sweep produced is ~81.4MB (a full-screen Pro
+      Display XDR capture at 2x), so the default clears the biggest real image by
+      about 4x. Under the limit, hitting it is ordinary: ghostty evicts the
+      oldest image to admit a new one, which is what an animation does all day.
+      `ATTN_KITTY_STORAGE_LIMIT` is now a tuning override rather than a feature
+      flag, and an unparseable value falls back to the DEFAULT rather than to
+      zero — a typo in a tuning variable must not silently turn the feature off.
+      `=0` remains the escape hatch, and `FuzzKittyWireMirrorShipping` still
+      guards it.
+      **Named refusal logging.** A limit someone can hit is a limit they must
+      see, and this one is invisible everywhere else: kitty's own error goes
+      nowhere under `q=2`. The worker is the only witness, so `writeAPC` judges
+      one thing — a transmission that COMPLETED and moved no kitty generation —
+      and logs the variable, its value, and the ask (`s`×`v`×4 for a raw format,
+      payload bytes for PNG), saying in the same breath that eviction is not
+      this case. Measured first, because most of the shapes that reach this path
+      also fail to move the generation:
+
+      | APC | generation |
+      | --- | --- |
+      | single transmission that fits | moves |
+      | single transmission over the limit | **unchanged** — the one true positive |
+      | chunked `m=1` that fits | unchanged on every intermediate, moves only on the completing `m=0` |
+      | chunked over the limit | unchanged throughout, `m=0` included |
+      | `a=q` query | unchanged |
+      | `a=p` re-place, `a=d` of a live id | moves |
+      | `a=d` of an id that is not there | unchanged |
+      | eviction (a third image into a one-image store) | moves |
+
+      So intermediate escapes are accumulated and never judged — an emitter
+      sends dozens per image, and judging them would put a line in the log for
+      ordinary output — queries and deletes are never judged at all, and
+      eviction is invisible because admitting the new image moves the stamp like
+      any other store. Pinned by
+      `TestWireFeedLogsATransmissionTheStorageLimitRefused` and
+      `TestWireFeedKeepsQuietForEverythingThatIsNotARefusal`.
+      **A test the flip quietly emptied, caught by a later audit.**
+      `TestResizeCostsNothingWithoutPlacements` set `ATTN_KITTY_STORAGE_LIMIT`
+      to the empty string to mean images off, so the day empty started meaning
+      320MB it began spawning a session that really did place the image, and
+      only passed because it read the update channel before the read loop had
+      delivered it (measured: a two-second wait turns it red). A test whose
+      meaning is read from an unset variable changes meaning with the default.
+      It now pins the limit explicitly and covers both ways a session ends up
+      with nothing to draw: images live and the program emitting none, and
+      storage off with an image-emitting program refused.
+
+      **Recorded observability gap, no machinery:** the limit is per TERMINAL,
+      and a session holds a primary and an alternate screen, so the worst case a
+      session can occupy is 2x the number above. Nothing tracks or reports total
+      image memory across sessions today. If image memory ever shows up in a
+      profile, that is the measurement to take first.
+- [x] **Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`).** Emitters
+      size images from it; without it chafa guessed ~8 x 11.4 px cells against a
+      real 9 x 22.6 CSS px cell (measured in A3's live tier), and the worker
+      terminal reported its own pixel size from a hardcoded 8x16 placeholder.
+      Protocol 207.
+
+      **The wire carries the pane TOTAL in device pixels, optional, 0 == absent
+      == unknown.** `pty_resize` and its `pty_resized` echo each gained
+      `xpixel?`/`ypixel?`. Total rather than per-cell because the total is what
+      a client can actually measure and what `TIOCGWINSZ` speaks; device rather
+      than CSS pixels because that is the unit an image is made of. A resize
+      that measured nothing omits the fields rather than sending zeros, and the
+      echo leaves them off rather than echoing zeros — a receiving client that
+      read 0 as a real pane would size images against a degenerate cell. The
+      daemon drops a pair it cannot represent (the kernel's winsize fields are
+      uint16) and names it in the log, because a silently ignored geometry looks
+      exactly like a client that never sent one.
+
+      **Two conversions, each in one place.** Total → cell happens once, in
+      `Session.resize` (`xpixel/cols`, `ypixel/rows`), and everything below it
+      speaks cells: the new `ghosttyvt.Terminal.SetCellPixelSize` pushes the
+      cell into the native terminal immediately at the current grid, and the
+      winsize ioctl carries the total through unchanged. Device → CSS happens
+      once, in `placementQuad`, before any clipping arithmetic mixes a
+      placement's device-pixel box with the renderer's CSS-pixel cell metrics.
+      Measured, not assumed: `WebGlTerminalRenderer.cellWidth/cellHeight` are
+      **CSS** pixels — the canvas is styled `cols * cellWidth` and backed by
+      that times `dpr` — so a fit multiplies by `dpr` on the way out and the
+      draw path divides by it on the way in.
+
+      **The session remembers the cell, not the total.** Only a fit measures a
+      pane; the attach-time reconcile and the remount hydrate resize carry no
+      pixels and arrive *after* a fit on every remount. A total is meaningless
+      without the grid it was measured at, so the session keeps the derived cell
+      and re-derives the total for a pixel-less resize. Spawn stays pixel-less
+      by design — nothing has measured a pane yet, and the first fit always
+      follows.
+
+      **XTWINOPS is not the surface, and this was measured rather than
+      assumed.** ghostty's VT core answers no `CSI 14/16/18 t` at all — the
+      embedder is expected to encode those itself (`ghostty_size_report_encode`)
+      — so nothing in attn answers them today and this change does not add one.
+      What the library *does* emit is the in-band size report (DEC mode 2048),
+      `ESC[48;rows;cols;height;width t`, whenever either factor moves; that
+      report used to carry the 8x16 lie and now carries the truth, and it is
+      what the Go tests assert against. Emitters that only know XTWINOPS fall
+      back to `TIOCGWINSZ`, which is the half this change fixes for them.
+
+      **v1 limitations, both deliberate.** Mixed-DPR multi-client is last-resize
+      wins: the session holds one cell size, so two clients on displays with
+      different ratios overwrite each other rather than each getting their own
+      geometry. And a genuine cell change emits two mode-2048 reports for one
+      resize (`SetCellPixelSize` then the grid resize); the steady state emits
+      one, because setting an unchanged cell is a no-op.
+- [x] **Fix the one-row anchoring drift on a wrapped prompt row. Root cause:
+      resize reflow asymmetry.** The worker reflowed on resize
+      (`ghosttyvt.Terminal.Resize`) while every client frame deliberately does
+      not — the app's fit and its historical replay both write `ESC[?7l`,
+      resize, `ESC[?7h` (`resizeGhosttyWithoutReflow`), load-bearing since
+      PR #306 for the block store and replay at historical geometry. After any
+      width-changing fit with wrapped content on screen, the same bytes then
+      occupied a different number of rows on the two grids, and the client's
+      mapping mixes the two frames: `bufferRow = clientScrollback +
+      workerViewportRow`. That is also why block anchoring and annotation
+      alignment clear on a width change.
+
+      **Fixed by making every frame take the no-reflow path.**
+      `ghosttyvt.ResizeNoReflow` runs the client's own recipe inside the worker
+      terminal — read DEC mode 7, and only when it is on write `ESC[?7l`,
+      resize, `ESC[?7h` — and `Session.resize` calls it. The frontend's
+      `resizeLocal` joins them: its live branch (the daemon's `pty_resized`
+      echo, the only resize a non-owner hub mirror ever sees) still resized
+      plainly, so a mirror would have held a third frame.
+
+      **Measured.** A 36-character wrapped prompt across a 20→40 column resize
+      occupies one row on a reflowing worker and two on a client; δ reached 2
+      rows with more wrapped lines and flips sign on narrowing. It self-corrects
+      once enough rows scroll into history — the reported "drift" was the
+      correction, not the error. `TestResizeKeepsAPlacementsBufferRow` pins the
+      repro (buffer row 3→4 before the fix);
+      `TestSessionResizeKeepsTheWorkerFrameEqualToAClientFrame` pins the grids
+      themselves against a control terminal driven by the client's recipe,
+      including alt screen and a program that turned DECAWM off.
+
+      **Rejected.** Making the client's fit reflow instead: the no-reflow path
+      is load-bearing for the block store. A wire-side absolute anchor: an
+      absolute row is meaningless while the two frames disagree, which is the
+      actual defect. Reattaching on every resize: a full dump per drag, and a
+      visible reset.
+
+      **Cost, honestly.** Ghostty's no-reflow resize was already the client's
+      path but is newly exercised on the worker, where the restore dump and
+      approval classification read from. The frame-parity test is what covers
+      it, on a real spawned session rather than a hand-built terminal.
+- [x] **A supported way to turn images on — now off — for a remote daemon.** A3
+      ran the remote leg end to end, so what was left was the switch rather than
+      the pipeline: the hub forwards a fixed env allowlist and the storage-limit
+      override had no route through it. **Decided: forward
+      `ATTN_KITTY_STORAGE_LIMIT` under its own name** (`remoteShellEnvScript` in
+      `internal/hub/ssh.go`), not as an `ATTN_REMOTE_`-prefixed twin like the
+      socket and port overrides — the hub and its remotes should run the same
+      image budget, so one variable governs both ends. The flip inverts what
+      this is for: the default now travels by being the default on both sides,
+      and what needs a route is the way OUT. `=0` is non-empty, so it exports
+      and disables the remote exactly as it disables the hub. Pinned by
+      `TestRemoteShellCommandCarriesTheKittyDisableToTheRemote` and its
+      unset-stays-silent twin.
+- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Written
+      in A3 for the dark default and rewritten at the flip: the terminal section
+      now states that kitty images are worker-authoritative and ON by default,
+      names the 320MB limit and the `=0` hatch, keeps the reasons the client
+      never parses kitty and the relay never advertises `binary_pty_output`, and
+      keeps sixel's absence. One user-facing fragment covers the PR.
+- [x] **A placement on a row that is already full: the deferred wrap synthesis
+      cannot measure.** Found by `FuzzKittyWireMirror` after the A4 work landed,
+      as `62f19a45d7a5c8c7`: on a 20x8 grid, print exactly 20 characters, place
+      an image, print one more. The worker ends at (19,0) and the client at
+      (1,1) with no resync between them.
+
+      **Root cause, measured.** Printing the twentieth character leaves the
+      cursor at the last column with a wrap PENDING — the next printable byte
+      wraps before it lands. The placement consumes that pending wrap. But
+      `CursorPos()` reports column 19 both before and after, because the pending
+      bit is not part of a position, so the measured delta is zero and the wire
+      carries no movement at all. The client, which never sees the APC, keeps
+      its pending wrap; its next character wraps and the worker's does not. The
+      same stream with the cursor mid-row is correct — `CSI 1 C`, both grids
+      agree — which is what isolates the pending bit as the whole cause.
+
+      **It predates this phase's flip.** Reproduced unchanged at `17540431`
+      (kitty still dark by default) and at `28d360cd` (before the pixel-geometry
+      commit joined the branch), so neither the flip nor the geometry merge
+      introduced it; the earlier 15m soak simply never reached the input. No
+      corpus entry was added, because a corpus entry would pin the wrong grid.
+
+      **Fixed with a tripwire resync**, the same doctrine the margin box and the
+      over-tall `SU` got: `writeAPC` fires `kittyResyncPendingWrap`
+      (`kitty_layout_pending_wrap`) whenever the PRE-dispatch cursor sat in the
+      last column, whether or not a wrap was actually pending — the measurement
+      cannot tell, which is what makes the column itself the tripwire — and the
+      dispatch is still described in full. DECAWM off makes the bit moot and the
+      resync fires anyway, harmlessly, rather than growing a mode read.
+
+      **Rejected: normalizing the bit on the wire.** A net-zero `CUB 1` / `CUF 1`
+      would clear the client's pending wrap to match, but its correctness rests
+      on every dispatch shape consuming the worker's bit, which would need
+      measuring across `a=q`, `a=d`, and `m=1` — all to save a resync in a case
+      no real emitter reaches, since emitters position the cursor before
+      transmitting.
+
+      **Placed on measurement, not faith.** The check sits after the early
+      return for a dispatch that changed nothing, because a query and a delete
+      of an id that is not there, both sent with the cursor in the last column,
+      leave the worker's pending wrap alone and their grids agree.
+
+      Pinned by `TestWireFeedResyncsWithACursorInTheLastColumn` — which carries
+      the mid-row control that keeps the tripwire from firing on every placement
+      — and by the resync-exempt corpus entry "placement on a row that is
+      already full". The saved fuzz input `62f19a45d7a5c8c7` replays green, and
+      `FuzzKittyWireMirror` soaked 15m / 42.5M execs green with the tripwire in
+      (the class had been reached 97s into the previous soak).
+
+#### A4 verification record
+
+Evidence from the live ladder on throwaway profile `kimg1` (darwin/arm64,
+retina), full app + daemon built from this branch.
+
+**Packaged harness.** `real-app:scenario-terminal-kitty-image`, inverted this
+phase to match the flip, ran green end to end: the default-daemon leg (nothing
+injected into any environment) described the placement with its blob resident,
+held its buffer row across two scroll bursts, and emptied the set on the
+program's `a=d`; the escape-hatch leg (`ATTN_KITTY_STORAGE_LIMIT=0`) produced
+zero placements after the same budget the default leg needed to succeed. Window
+captures passed the native-window and byte-floor tripwires, byte-distinct
+across legs.
+
+**Live tier, local.** A real shell pane's `TIOCGWINSZ` answered 1116x1050 px for
+a 62x25 grid — 18x42 device pixels per cell, exactly 2x the CSS cell, so the
+frontend's fit-time `xpixel`/`ypixel` reached the worker terminal and the kernel
+winsize. chafa 1.18.2, given no size flags, placed a 522x546 px image = 29x13
+cells — sized from the real pixel geometry, drawn at device scale (sharp on
+retina, not 2x-blown). The placement survived a full app quit and relaunch: the
+restore snapshot re-described it and the blob was re-pulled.
+
+**Live tier, remote (OrbStack VM `attn-remote@orb`, hub relay).** Endpoint
+bootstrap cross-compiled and deployed the daemon at this branch's fingerprint
+(protocol 207) and connected. A remote shell session's `TIOCGWINSZ` answered the
+same 1116x1050 — pixel geometry crosses the relay to the VM PTY. The
+checkerboard escape written on the VM produced a placement described through the
+relay with its blob pulled over the base64 JSON path; the delete emptied the
+set. The passthrough witness: with the HOST daemon restarted under
+`ATTN_KITTY_STORAGE_LIMIT=0`, the relay-ensured VM daemon's
+`/proc/<pid>/environ` carried `ATTN_KITTY_STORAGE_LIMIT=0` (the hub's remote env
+script exports it), and a remote session under it stayed dark — zero placements
+inside the success-path budget.
 
 ## Open questions
 
@@ -809,5 +1206,7 @@ ghostty pins converging rather than on the storage flip.)
 - Unicode-placeholder (virtual) placements: rendered via placeholder cells,
   not cursor placements. Likely excluded from v1 as a named limitation —
   confirm what the diff exposes for them.
-- Does limit-0 actually silence `a=q`? A1's first verification step; the
-  response-drain filter is the fallback.
+- ~~Does limit-0 actually silence `a=q`?~~ Answered in A1: yes, measured. At
+  limit 0 ghostty short-circuits the whole graphics protocol and no `a=q` reply
+  is emitted at all — no response-drain filter needed. That is what made the
+  pre-flip announcement honest (PR #727), and the escape hatch relies on it now.

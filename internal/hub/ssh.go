@@ -51,6 +51,13 @@ func remoteShellEnvScript(profile string) string {
 	if value := strings.TrimSpace(os.Getenv("ATTN_REMOTE_DB_PATH")); value != "" {
 		assignments = append(assignments, "export ATTN_DB_PATH="+shellQuote(value))
 	}
+	// Kitty image storage carries its own name rather than an ATTN_REMOTE_ one:
+	// the hub and its remotes should run the same limit, so one export governs
+	// both ends — including the way out, since "0" is non-empty and disables the
+	// protocol on the remote exactly as it does locally.
+	if value := strings.TrimSpace(os.Getenv("ATTN_KITTY_STORAGE_LIMIT")); value != "" {
+		assignments = append(assignments, "export ATTN_KITTY_STORAGE_LIMIT="+shellQuote(value))
+	}
 	if len(assignments) == 0 {
 		return ""
 	}

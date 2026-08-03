@@ -3798,6 +3798,12 @@ type PtyResizeMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+
+	// Xpixel corresponds to the JSON schema field "xpixel".
+	Xpixel *int `json:"xpixel,omitempty,omitzero"`
+
+	// Ypixel corresponds to the JSON schema field "ypixel".
+	Ypixel *int `json:"ypixel,omitempty,omitzero"`
 }
 
 type PtyResizedMessage struct {
@@ -3812,6 +3818,12 @@ type PtyResizedMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+
+	// Xpixel corresponds to the JSON schema field "xpixel".
+	Xpixel *int `json:"xpixel,omitempty,omitzero"`
+
+	// Ypixel corresponds to the JSON schema field "ypixel".
+	Ypixel *int `json:"ypixel,omitempty,omitzero"`
 }
 
 type QueryAuthorsMessage struct {
@@ -5949,6 +5961,12 @@ type WebSocketEvent struct {
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
+
+	// Xpixel corresponds to the JSON schema field "xpixel".
+	Xpixel *int `json:"xpixel,omitempty,omitzero"`
+
+	// Ypixel corresponds to the JSON schema field "ypixel".
+	Ypixel *int `json:"ypixel,omitempty,omitzero"`
 }
 
 type WorkflowActionResultMessage struct {

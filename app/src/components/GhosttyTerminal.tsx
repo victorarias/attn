@@ -155,7 +155,11 @@ export interface GhosttyTerminalProps {
   // selected session). Absent = markdown paths open like any other path.
   onOpenMarkdown?: (path: string, sessionId: string) => void;
   onReady: (terminal: GhosttyTerminalHandle) => void;
-  onResize: (cols: number, rows: number, options?: { reason?: string }) => void;
+  // xpixel/ypixel are the pane's total size in DEVICE pixels, which is what the
+  // PTY's ws_xpixel/ws_ypixel and XTWINOPS report and what an image emitter
+  // sizes its output from. Only a fit knows them (it is the one place holding
+  // the renderer's cell metrics); every other resize path omits them.
+  onResize: (cols: number, rows: number, options?: { reason?: string; xpixel?: number; ypixel?: number }) => void;
   // A live geometry change cancelled queued historical replay (the model
   // would otherwise interleave history parsed at the wrong width). The
   // history is gone from the model; the owner should re-request the attach
@@ -1063,6 +1067,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             renderer.cellHeight,
             gridWidth,
             gridHeight,
+            renderer.dpr,
           );
           if (!quad) continue;
           const blob = kittyImageCache.get(
@@ -1914,6 +1919,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             renderer.cellHeight,
             terminal.cols * renderer.cellWidth,
             terminal.rows * renderer.cellHeight,
+            renderer.dpr,
           )
           : null;
         return {
@@ -1950,27 +1956,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     // Reconcile the block store with the model's new geometry after a resize.
     //
-    // A WIDTH change invalidates stored rows: a reflowing resize (live
-    // resizeLocal) re-wraps the scrollback and renumbers every absolute row
-    // NON-uniformly, and even the wraparound-off no-reflow path used by fit
-    // and replay can truncate or pad rows — clear the store (correct-or-absent;
-    // new commands rebuild it). Now that fits resize without reflow, a future
-    // improvement can turn this clear into a reanchor for the no-reflow paths.
+    // A WIDTH change invalidates stored rows: the no-reflow path every resize
+    // now takes can still truncate or pad the rows it keeps — clear the store
+    // (correct-or-absent; new commands rebuild it). Now that no resize reflows,
+    // a future improvement can turn this clear into a reanchor.
     //
     // A HEIGHT-only change shifts rows uniformly (rows move between scrollback
     // and screen) — re-anchor each block and keep it.
     const reconcileBlocksAfterResize = useCallback((widthChanged: boolean) => {
       if (widthChanged) {
-        // Blocks are stored as rows, so a reflow destroys them. Annotations are
-        // stored as message offsets and survive — but the alignment that maps
-        // them onto rows does not, and its bounded search window is seeded from
-        // rows that no longer hold the same text.
+        // Blocks are stored as rows, so a width change destroys them.
+        // Annotations are stored as message offsets and survive — but the
+        // alignment that maps them onto rows does not, and its bounded search
+        // window is seeded from rows that no longer hold the same text.
         annotationsRef.current?.noteGeometryChange();
         blockStoreRef.current.clear();
-        // Placements are stored as buffer rows too, and a reflow renumbers
-        // every one of them. The worker re-describes its whole set after a
-        // resize, so this is a gap of one description rather than a loss —
-        // absent until then beats drawing an image over the wrong text.
+        // Placements are stored as buffer rows too. The worker re-describes its
+        // whole set after a resize, so this is a gap of one description rather
+        // than a loss — absent until then beats drawing an image over the wrong
+        // text.
         placementStoreRef.current.clear();
         selectedBlockIdRef.current = null;
         return;
@@ -2096,12 +2100,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           });
           return;
         }
-        modelOpRingRef.current.noteResize(cols, rows, Boolean(options?.historicalReplay));
-        if (options?.historicalReplay) {
-          resizeGhosttyWithoutReflow(terminal, cols, rows);
-        } else {
-          terminal.resize(cols, rows);
-        }
+        // No-reflow, whichever call site this is. The daemon's resize echo
+        // reaches a non-owner client (a hub mirror) through here, and the worker
+        // resizes without reflow too — a client that re-wrapped its history
+        // would hold a different frame from every other client and from the
+        // worker whose rows the wire's placements and blocks are numbered in.
+        modelOpRingRef.current.noteResize(cols, rows, true);
+        resizeGhosttyWithoutReflow(terminal, cols, rows);
         reconcileBlocksAfterResize(cols !== fromCols);
         modelSizeRef.current = { cols, rows };
         renderer.resize(cols, rows);
@@ -2209,7 +2214,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           session, paneKind, source: 'fit', fromCols, fromRows, toCols: dims.cols, toRows: dims.rows,
         });
         if (!renderSurface(true)) return;
-        onResizeRef.current(dims.cols, dims.rows, { reason: 'ghostty_fit' });
+        // Cell metrics are CSS pixels; the PTY speaks device pixels.
+        onResizeRef.current(dims.cols, dims.rows, {
+          reason: 'ghostty_fit',
+          xpixel: Math.round(dims.cols * renderer.cellWidth * renderer.dpr),
+          ypixel: Math.round(dims.rows * renderer.cellHeight * renderer.dpr),
+        });
       } catch (reason) {
         recoverFromModelFault('fit', reason);
       }

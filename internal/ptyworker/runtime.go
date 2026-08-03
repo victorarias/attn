@@ -989,7 +989,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			c.sendError(req.ID, ErrBadRequest, "cols and rows must be > 0")
 			return
 		}
-		if err := c.runtime.manager.Resize(c.runtime.cfg.SessionID, params.Cols, params.Rows); err != nil {
+		if err := c.runtime.manager.Resize(c.runtime.cfg.SessionID, params.Cols, params.Rows, params.XPixel, params.YPixel); err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) {
 				c.sendError(req.ID, ErrSessionNotFound, err.Error())
 				return

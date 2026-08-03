@@ -38,14 +38,16 @@ package pty
 // forces a snapshot re-push instead of guessing: a resync nobody notices beats
 // a silent divergence between the worker grid and the client's.
 //
-// Feature-dark today. Production terminals run with a zero kitty storage limit
-// (ghosttyvt.Options; ATTN_KITTY_STORAGE_LIMIT overrides it for non-production
-// verification), so ghostty refuses every transmission, the generation stamp
-// never moves, and the only visible effect is that APC bytes are dropped from
-// the wire instead of being sent to a client that cannot parse them.
+// Live by default: a session's terminal is built with kittyStorageLimitDefault,
+// so this path runs for real and its synthesis is what keeps the two grids
+// equal. ATTN_KITTY_STORAGE_LIMIT=0 turns the protocol off again — ghostty then
+// refuses every transmission, the generation stamp never moves, and the only
+// visible effect is that APC bytes are dropped from the wire instead of being
+// sent to a client that cannot parse them.
 // Design: docs/plans/2026-08-02-terminal-kitty-images.md.
 
 import (
+	"bytes"
 	"strconv"
 
 	"github.com/victorarias/attn/internal/ghosttyvt"
@@ -68,7 +70,8 @@ const (
 	// placement does looks like that, and synthesis does not express it.
 	kittyResyncReverseScroll = "kitty_layout_reverse_scroll"
 	// kittyResyncUndescribedImage: ghostty's kitty state moved on bytes that
-	// went to the wire verbatim rather than through synthesis. That happens when
+	// went to the wire verbatim rather than through synthesis, and the diff
+	// found a placement created, re-placed, or retransmitted. That happens when
 	// an APC is one ghostty parses as kitty but the segmenter cannot cut out —
 	// an APC introduced from inside another sequence, whose leading ESC is also
 	// that sequence's exit (see kittyseg.go). Replaying those bytes keeps the
@@ -76,6 +79,44 @@ const (
 	// client cannot parse kitty, so the image the worker just placed moved its
 	// grid and not the client's. Only a snapshot can settle that.
 	kittyResyncUndescribedImage = "kitty_undescribed_image"
+	// kittyResyncStampWithoutDelta: the same verbatim bytes moved ghostty's
+	// kitty stamp and the diff that followed found NOTHING — the set before and
+	// the set after are equal. That is a placement created and destroyed inside
+	// one chunk, which an emitter reaches by drawing an image and clearing it in
+	// one 4 KiB PTY read. Whatever it scrolled is on the worker's grid, no wire
+	// byte described it, and the two sets being equal means no observation can
+	// ever name what moved. The stamp is the only witness there is.
+	kittyResyncStampWithoutDelta = "kitty_stamp_without_delta"
+	// kittyResyncMarginMode: DECLRMM (DEC private mode 69) was on when a
+	// described dispatch landed. A scroll confined to the left/right margin box
+	// moves the text inside those columns without moving the rows, and the
+	// tracked pair below measures rows — so a margin-box scroll reads as no
+	// scroll at all and the wire carries no SU for it. Measured: with margins
+	// `\x1b[4;14s` and a placement at the bottom of the box, the worker's text
+	// climbs two rows and the client's stays put under a cursor that agrees.
+	// This is a tripwire, not a repair: it fires on every described dispatch
+	// while margins are on, whether or not that dispatch actually scrolled the
+	// box, because the measurement cannot tell those apart. Nothing pays for it
+	// in practice — no emitter in the A4 sweep enables DECLRMM.
+	kittyResyncMarginMode = "kitty_layout_margin_mode"
+	// kittyResyncScrollClamped: the placement scrolled the grid further than one
+	// SU can express. ghostty clamps SU to the height of the scroll region, so a
+	// taller scroll would push the client's oldest rows nowhere and leave its
+	// history short of the worker's while the viewport still agreed. Reachable
+	// because kitty's `r=` lets a 2x2 image claim any number of rows.
+	kittyResyncScrollClamped = "kitty_layout_scroll_clamped"
+	// kittyResyncPendingWrap: the cursor sat in the LAST COLUMN when a described
+	// dispatch landed. A cursor there may carry a pending wrap — the cell is
+	// written, the cursor has not moved, and the next printable byte wraps before
+	// it lands — and a dispatch consumes that bit on the worker while the wire's
+	// bytes leave the client's set. CursorPos reports the same column either way,
+	// so the measurement cannot tell a consumed wrap from an untouched one and the
+	// last column itself is the tripwire. Measured: print exactly a screen's width,
+	// place an image, print one more character — the worker stays on row 0 and the
+	// client wraps to row 1. DECAWM off makes the bit moot and this fires anyway,
+	// harmlessly, rather than growing a mode read for a case no emitter reaches
+	// (every emitter in the A4 sweep positions the cursor before transmitting).
+	kittyResyncPendingWrap = "kitty_layout_pending_wrap"
 )
 
 // kittyPlacementKey identifies a placement across observations: kitty's own
@@ -87,9 +128,10 @@ type kittyPlacementKey struct {
 
 // kittyPlacementDelta is what one observation found changed in the active
 // screen's placement set. It answers two questions and neither is the wire's:
-// whether an image APPEARED on bytes the wire could not describe (a resync),
-// and whether anything at all moved (an update for the client, which carries
-// the whole set rather than this).
+// whether bytes the wire could not describe did anything but RETIRE a
+// placement (a resync — see unaccountedResync), and whether anything at all
+// moved (an update for the client, which carries the whole set rather than
+// this).
 //
 // Updated carries placements whose fields moved for ANY reason, a viewport
 // position that changed because the screen scrolled included.
@@ -118,9 +160,11 @@ type wireFeeder struct {
 
 	// generation is ghostty's kitty stamp as of the last change this feeder
 	// ACCOUNTED for. Every dispatch either goes through writeAPC, which
-	// describes it on the wire, or is one the wire cannot describe — and the
-	// difference between this and the terminal's own stamp at the end of a feed
-	// is exactly the second kind.
+	// describes it on the wire, or is one the wire cannot describe — and a
+	// difference between this and the terminal's own stamp is exactly the
+	// second kind. settleUnaccounted is where that difference is read, and it
+	// runs both at the end of a feed and before every described dispatch, so
+	// the two kinds can never be folded into one number.
 	//
 	// Raw, and deliberately: this is an internal change detector that never
 	// leaves the process, so folding the epoch into it would buy nothing and
@@ -136,13 +180,27 @@ type wireFeeder struct {
 	// of the next diff.
 	placements []ghosttyvt.KittyPlacement
 	// deltas holds what the observations in the MOST RECENT feed call found, so
-	// it stays bounded by one chunk. It is never handed out: appeared() reads it
-	// for the resync decision, and changedPlacements() reads its emptiness as
-	// the whole test for "this chunk moved something".
+	// it stays bounded by one chunk. It is never handed out: unaccountedResync
+	// reads the tail of it for the resync decision, and changedPlacements()
+	// reads its emptiness as the whole test for "this chunk moved something".
 	deltas []kittyPlacementDelta
 
 	// resync names the observation that failed during this feed, "" when none.
 	resync string
+
+	// logf reports a refused transmission, and nothing else. nil in tests that
+	// do not care.
+	logf LogFunc
+
+	// kittyLimit is the storage cap this session's terminal was BUILT with,
+	// carried rather than re-read so the log names the number in force here
+	// even if the environment moved after the spawn.
+	kittyLimit uint64
+
+	// pending is the transmission being assembled across m=1 escapes, so a
+	// refusal is judged once, where a completed transmission should have
+	// stored. Zero between transmissions.
+	pending kittyTransmission
 }
 
 // newWireFeeder wires the feed path for a session's ghostty terminal. Returns
@@ -151,12 +209,20 @@ type wireFeeder struct {
 //
 // epoch is the session's kitty identity offset (mintKittyEpoch), which the
 // caller must also hold on the Session so the image serve folds the same one.
-func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64) *wireFeeder {
+// kittyLimit is the cap the terminal was built with, for the refusal log.
+func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64, logf LogFunc, kittyLimit uint64) *wireFeeder {
 	blocks := newBlockFeeder(term)
 	if blocks == nil {
 		return nil
 	}
-	return &wireFeeder{term: term, blocks: blocks, epoch: epoch, generation: term.KittyGeneration()}
+	return &wireFeeder{
+		term:       term,
+		blocks:     blocks,
+		epoch:      epoch,
+		logf:       logf,
+		kittyLimit: kittyLimit,
+		generation: term.KittyGeneration(),
+	}
 }
 
 // feed writes one PTY chunk into the terminal and returns the bytes the wire
@@ -236,26 +302,10 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 		first = false
 	})
 
-	// Anything the terminal's kitty state did that writeAPC did not account for
-	// happened on bytes the wire carries verbatim, and the client ignores them.
-	// One cheap read per chunk buys the guarantee that no image ever lands on
-	// the worker's grid alone.
-	//
-	// Only an APPEARING placement is a divergence. The stamp also moves when
-	// ghostty prunes placements the screen no longer holds — leaving the
-	// alternate screen is the common one — and a placement going away costs the
-	// client nothing: it never drew the image, and the mode switch that pruned
-	// it is on the wire already.
-	observed := false
-	if stamped := f.term.KittyGeneration(); stamped != f.generation {
-		f.generation = stamped
-		before := len(f.deltas)
-		f.observe()
-		observed = true
-		if f.appeared(before) {
-			f.failResync(kittyResyncUndescribedImage)
-		}
-	}
+	// Whatever the chunk's last bytes did to the terminal's kitty state, settled
+	// against what the wire carried for them. One cheap read per chunk buys the
+	// guarantee that no image ever lands on the worker's grid alone.
+	settled := f.settleUnaccounted()
 
 	// A live placement moves on bytes that touch no kitty state at all — a
 	// scroll is the common one — and ghostty's stamp does not move with it, so
@@ -269,7 +319,7 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	// every chunk of every session while the feature is dark — this costs one
 	// comparison and never crosses into cgo, and nothing except a placement's
 	// own dispatch can create the first one.
-	if !observed && len(f.placements) > 0 {
+	if !settled && len(f.placements) > 0 {
 		f.observe()
 	}
 
@@ -312,6 +362,13 @@ var wireST = []byte{0x1b, '\\'}
 // pin the cursor before the write, because a tracked ref is the only way to see
 // afterwards how far the grid moved under it.
 func (f *wireFeeder) writeAPC(apc []byte) {
+	// Settle the chunk's earlier bytes before anything here is measured or
+	// claimed. Plain bytes ahead of this APC can carry a kitty escape ghostty
+	// dispatches and the segmenter could not extract; the stamp move that
+	// leaves is this feeder's only record of it, and the claim at the end of
+	// this function would take it as its own. See settleUnaccounted.
+	f.settleUnaccounted()
+
 	// The abort, given to both sides, ahead of every measurement below.
 	//
 	// On the WIRE it stands in for the APC's own leading ESC, which the client
@@ -337,7 +394,9 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	f.term.Write(wireST)
 	f.wire = append(f.wire, wireST...)
 
-	generation := f.term.KittyGeneration()
+	// The settle above left f.generation equal to the terminal's stamp, so this
+	// is the pre-dispatch generation without a second crossing into ghostty.
+	generation := f.generation
 	col, row := f.term.CursorPos()
 	before := f.term.TrackCursor()
 
@@ -345,9 +404,11 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 
 	stamped := f.term.KittyGeneration()
 	// Claimed here rather than at each exit below: every branch from this point
-	// on has either described the dispatch or resynced over it, so the
-	// end-of-feed check must not see it a second time.
+	// on has either described the dispatch or resynced over it, so no later
+	// settle may see it again. The settle at entry is what makes the claim
+	// honest — it covers this dispatch's move and nothing that ran before it.
 	f.generation = stamped
+	f.noteTransmission(apc, stamped != generation)
 	movedCol, movedRow := f.term.CursorPos()
 	// An unchanged generation means the storage did not change, so no placement
 	// appeared, so nothing scrolled the grid on an image's behalf — which is
@@ -403,21 +464,179 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 		return
 	}
 
+	// One SU carries at most a screen's worth of rows into history: ghostty
+	// clamps it to the scroll region, and a region is never taller than the
+	// screen. Past that the client's history comes out short by exactly the
+	// overflow while its viewport still agrees, so the tripwire is set at the
+	// largest scroll a single SU reproduces. Receipt:
+	// TestWireFeedSynthesizesTheLargestScrollOneSUCarries, which pins both sides
+	// of the boundary on an 8-row and a 12-row screen.
+	if _, screenRows := f.term.Size(); scrolled > screenRows {
+		f.failResync(kittyResyncScrollClamped)
+		return
+	}
+
+	// A margin-confined scroll is movement this measurement cannot see, so while
+	// DECLRMM is on the numbers below are not trustworthy on their own. The
+	// cursor moves still are — they agreed in every measured margin case — so the
+	// dispatch is described in full and the resync repairs the text: a resync is
+	// never a stop order, and a client that has not re-attached yet is better off
+	// with its cursor where the worker's is.
+	if f.term.LeftRightMarginMode() {
+		f.failResync(kittyResyncMarginMode)
+	}
+
+	// The same shape as the margin tripwire: state the dispatch changed and the
+	// measurement cannot read, answered by a resync while the dispatch is still
+	// described in full. It sits after the early return above on measurement,
+	// not on faith — a query and a delete of an id that is not there, both sent
+	// with the cursor in the last column, leave the worker's pending wrap alone
+	// and their grids agree, so a dispatch that changed nothing needs no resync.
+	if screenCols, _ := f.term.Size(); col == screenCols-1 {
+		f.failResync(kittyResyncPendingWrap)
+	}
+
 	// SU scrolls the active scroll region and leaves the cursor's viewport
-	// position alone, so the row move that follows is a plain relative step from
-	// where the pre-APC bytes already left the client's cursor. Everything here
-	// is relative or column-only on purpose: absolute row addressing (CUP, VPA)
-	// is measured from the scroll region under origin mode, which the worker
-	// cannot see and must not have to.
+	// position alone, so the moves that follow are plain relative steps from
+	// where the pre-APC bytes already left the client's cursor.
+	//
+	// Every one of them is relative, and on both axes, for the same reason:
+	// absolute addressing is measured from a frame the worker cannot see. A row
+	// (CUP, VPA) is counted from the scroll region under origin mode; a column
+	// (CHA) is counted from the LEFT MARGIN when DECLRMM is on (`\x1b[?69h`), so
+	// an absolute column measured at the screen edge lands somewhere else on a
+	// client with margins set. The worker reports viewport coordinates and has
+	// no business knowing which modes the program turned on — a relative step is
+	// the same step in every frame.
 	f.wire = appendCSI(f.wire, scrolled, 'S')
 	if movedRow > row {
 		f.wire = appendCSI(f.wire, movedRow-row, 'B')
 	} else {
 		f.wire = appendCSI(f.wire, row-movedRow, 'A')
 	}
-	if movedCol != col {
-		f.wire = appendCSI(f.wire, movedCol+1, 'G')
+	if movedCol > col {
+		f.wire = appendCSI(f.wire, movedCol-col, 'C')
+	} else {
+		f.wire = appendCSI(f.wire, col-movedCol, 'D')
 	}
+}
+
+// kittyTransmission is a transmission being assembled: kitty splits a large
+// image across several escapes, each carrying `m=1` until the last, and nothing
+// is stored until that last one lands.
+type kittyTransmission struct {
+	// ask is the storage the image will occupy once decoded, from the geometry
+	// the first escape declared. Zero when it declared none (f=100, a PNG whose
+	// decoded size only ghostty knows), and then payload stands in.
+	ask uint64
+	// payload counts the base64 bytes seen across every escape so far.
+	payload uint64
+}
+
+// noteTransmission logs the one failure ghostty has no way to report: an image
+// refused for exceeding the storage limit. Every emitter measured in the A4
+// sweep transmits with `q=2`, which suppresses kitty's own response, so the
+// program is not told and neither is anyone else — the image simply never
+// appears. The worker is the only place that can see it, which is why this file
+// interprets an APC here and nowhere else.
+//
+// stored says whether ghostty's kitty generation moved on this escape, which is
+// the whole signal. Measured, and every row of it is a case this must not
+// mistake for a refusal:
+//
+//	single transmission that fits      generation moves
+//	single transmission over the limit  UNCHANGED — the one true positive
+//	chunked (m=1 …) that fits           unchanged on every intermediate escape,
+//	                                    moves only on the completing m=0
+//	chunked over the limit              unchanged throughout, m=0 included
+//	a=q query                           unchanged — never a transmission
+//	a=p re-place, a=d delete of a live id   moves
+//	a=d delete of an id that is not there   unchanged — never a transmission
+//	eviction (a third image into a store that holds one)   moves
+//
+// So intermediate escapes are accumulated and never judged, and eviction — the
+// ordinary way an animation reuses its budget — is invisible here because
+// admitting the new image moves the stamp like any other store.
+func (f *wireFeeder) noteTransmission(apc []byte, stored bool) {
+	ask, more, ok := parseKittyTransmission(apc)
+	if !ok {
+		return
+	}
+	f.pending.payload += ask.payload
+	if ask.ask > 0 {
+		f.pending.ask = ask.ask
+	}
+	if more {
+		return
+	}
+
+	want := f.pending.ask
+	if want == 0 {
+		want = f.pending.payload
+	}
+	f.pending = kittyTransmission{}
+	if stored || f.logf == nil {
+		return
+	}
+	f.logf(
+		"pty kitty storage: an image transmission stored nothing — %s=%d bytes, this image asks for about %d. "+
+			"An image larger than the whole limit is refused outright; raise the limit or have the program send a smaller one. "+
+			"(Evicting an older image to fit a new one is not this, and is never logged.)",
+		kittyStorageLimitEnv,
+		f.kittyLimit,
+		want,
+	)
+}
+
+// parseKittyTransmission reads the four keys a refusal check needs out of one
+// complete APC — the action, `m`, and the declared geometry — plus the payload
+// length. It reports ok only for a transmission: kitty's default action is `t`,
+// so an escape with no `a=` at all is one, which is exactly what a continuation
+// escape looks like.
+//
+// Deliberately not a kitty parser. It reads what it recognizes and treats the
+// rest as absent, because the worst a misread can do here is drop a log line.
+func parseKittyTransmission(apc []byte) (t kittyTransmission, more bool, ok bool) {
+	body := apc
+	body = bytes.TrimPrefix(body, []byte("\x1b_G"))
+	if len(body) == len(apc) {
+		return t, false, false
+	}
+	body = bytes.TrimSuffix(bytes.TrimSuffix(body, []byte("\x1b\\")), []byte{0x9c})
+
+	control := body
+	if i := bytes.IndexByte(body, ';'); i >= 0 {
+		control = body[:i]
+		// Base64 in, raw bytes out: 4 encoded characters carry 3.
+		t.payload = uint64(len(body)-i-1) * 3 / 4
+	}
+
+	action := byte('t')
+	var width, height uint64
+	for _, pair := range bytes.Split(control, []byte(",")) {
+		key, value, found := bytes.Cut(pair, []byte("="))
+		if !found || len(key) != 1 || len(value) == 0 {
+			continue
+		}
+		switch key[0] {
+		case 'a':
+			action = value[0]
+		case 'm':
+			more = value[0] == '1'
+		case 's':
+			width, _ = strconv.ParseUint(string(value), 10, 64)
+		case 'v':
+			height, _ = strconv.ParseUint(string(value), 10, 64)
+		}
+	}
+	if action != 't' && action != 'T' {
+		return kittyTransmission{}, false, false
+	}
+	// Ghostty stores decoded RGBA whatever the wire format was, so declared
+	// pixels are the honest ask; a format that declares none (PNG) leaves this
+	// zero and the payload stands in.
+	t.ask = width * height * 4
+	return t, more, true
 }
 
 // appendCSI writes `ESC [ n <final>`, or nothing when n is zero — every
@@ -471,16 +690,75 @@ func (f *wireFeeder) observe() {
 	}
 }
 
-// appeared reports whether the observations recorded past index from brought
-// any placement into existence, as opposed to only retiring or moving ones the
-// wire has already accounted for.
-func (f *wireFeeder) appeared(from int) bool {
-	for _, delta := range f.deltas[from:] {
-		if len(delta.Added) > 0 {
-			return true
+// settleUnaccounted closes the books on everything the terminal's kitty state
+// has done that no dispatch through writeAPC accounted for, and reports whether
+// there was any. Whatever it finds happened on bytes the wire carried verbatim,
+// and the client ignores those, so the cost is decided by unaccountedResync.
+//
+// Called at two moments, and the pair is the whole accounting rule: at the end
+// of every feed, and at the ENTRY of every writeAPC, before that dispatch is
+// measured. The second is what keeps the claim honest. writeAPC ends by taking
+// the terminal's stamp as its own, and a stamp is a single number for the whole
+// terminal — so without a settle first, a described APC silently absorbs an
+// undescribed one that ran earlier in the same chunk, and the end-of-feed check
+// finds a stamp that already looks accounted for. Settling first means writeAPC
+// can only ever claim the move it made itself.
+//
+// After it returns, f.generation IS the terminal's current stamp, which is why
+// writeAPC reads its pre-dispatch generation from the field rather than from
+// ghostty: the settle already paid for that crossing.
+func (f *wireFeeder) settleUnaccounted() bool {
+	stamped := f.term.KittyGeneration()
+	if stamped == f.generation {
+		return false
+	}
+	f.generation = stamped
+
+	// Scoped to the observations THIS settle records: the deltas already in the
+	// slice belong to dispatches that were described on the wire or resynced
+	// over at the time, and must not be judged a second time.
+	before := len(f.deltas)
+	f.observe()
+	if reason, ok := unaccountedResync(f.deltas[before:]); ok {
+		f.failResync(reason)
+	}
+	return true
+}
+
+// unaccountedResync names what a generation move on bytes the wire carried
+// VERBATIM costs the client, given the observations that move produced. Reports
+// false when it costs nothing.
+//
+// The rule rests on one distinction: a resync exists for grid SCROLL the wire
+// never expressed, never for knowledge of the placement set. The set reaches
+// the client on its own, through changedPlacements' fan-out, whatever happened
+// here. And only bringing a placement into existence or putting a live one
+// somewhere new can scroll the grid — retiring one moves nothing, because
+// ghostty does not give back the rows an image took. So the exemption is
+// exactly a delta that is nothing but removals, and everything else resyncs:
+//
+//   - no delta at all, with the stamp moved: a placement that appeared and died
+//     inside this chunk. It left the before and after sets equal while its
+//     scroll stayed on the worker's grid, so nothing but the stamp can see it.
+//   - Added: a placement the wire never described came into existence.
+//   - Updated: a live {ImageID, PlacementID} put at a new spot, or an image
+//     retransmitted under one (ImageGeneration moves, the key does not). The
+//     first can scroll; the second is charged with it because this check cannot
+//     tell them apart, and an undescribed APC is rare enough to pay for that.
+//
+// Scroll noise cannot reach here: an ordinary scroll moves every live placement
+// but leaves ghostty's stamp alone, so this runs only when the terminal itself
+// says its kitty state changed on bytes nothing accounted for.
+func unaccountedResync(deltas []kittyPlacementDelta) (string, bool) {
+	if len(deltas) == 0 {
+		return kittyResyncStampWithoutDelta, true
+	}
+	for _, delta := range deltas {
+		if len(delta.Added) > 0 || len(delta.Updated) > 0 {
+			return kittyResyncUndescribedImage, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // failResync records the first observation failure of this chunk. The APC's
@@ -529,8 +807,8 @@ func (f *wireFeeder) snapshotBlocks() []AttachBlockData {
 // without images off cgo here too.
 //
 // The stored set is deliberately left alone. It is the left side of the next
-// diff, and writing it from outside feed() would let a reflow absorb an
-// appearance that appeared() has to see.
+// diff, and writing it from outside feed() would let a reflow absorb a mutation
+// the end-of-feed check has to see.
 func (f *wireFeeder) snapshotPlacements() ([]ghosttyvt.KittyPlacement, bool) {
 	if len(f.placements) == 0 {
 		return nil, false

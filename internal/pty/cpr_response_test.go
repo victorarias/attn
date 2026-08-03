@@ -41,7 +41,7 @@ func TestDaemonAnswersCPRAndDA1FromReadLoop(t *testing.T) {
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		ghostty:     gt,
-		wireFeed:    newWireFeeder(gt, 0),
+		wireFeed:    newWireFeeder(gt, 0, nil, 0),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
@@ -102,7 +102,7 @@ func TestTerminalQueryRepliesPreserveChunkOrder(t *testing.T) {
 		ptmx:        ptmx,
 		cmd:         &exec.Cmd{}, // unstarted: readLoop's Wait() returns an error, never panics
 		ghostty:     gt,
-		wireFeed:    newWireFeeder(gt, 0),
+		wireFeed:    newWireFeeder(gt, 0, nil, 0),
 		subscribers: make(map[string]*sessionSubscriber),
 		running:     true,
 		exited:      make(chan struct{}),
