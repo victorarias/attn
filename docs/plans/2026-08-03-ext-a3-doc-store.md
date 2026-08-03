@@ -194,9 +194,19 @@ NULL first ascending and last descending, and the cursor agrees in both
 directions. A cursor naming a document that no longer exists is an error, not an
 empty page, because an empty page reads as the end of the walk.
 
-The daemon resolves the anchor document before compiling — `docstore` holds no
-database handle and needs the anchor's sort value. There is no offset and no
-opaque page token.
+The anchor's sort value is not bound from Go: the cursor reads it back out of
+the table through the same expression the `ORDER BY` uses, as an uncorrelated
+scalar subquery. A field declared `number` may hold an array or an object —
+the declaration is not a storage schema — and those have no bindable Go
+equivalent; the driver rejects the statement outright. Reading the value through
+`json_extract` makes the cursor compare exactly what the ordering compares, for
+every JSON shape and for values that disagree with the declared type, with no
+Go-side reconstruction that could disagree with SQLite's rendering or its type
+ordering. The daemon still reads the anchor document before compiling, because
+whether the sort value is absent is a structural question about the body and
+decides which branch compiles.
+
+There is no offset and no opaque page token.
 
 ### Live queries
 

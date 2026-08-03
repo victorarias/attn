@@ -569,3 +569,113 @@ func TestDocumentsSurviveReopeningTheDatabase(t *testing.T) {
 		t.Fatalf("created_at after reopen = %s, want %s", doc.CreatedAt, base)
 	}
 }
+
+// A declaration says what may be queried, not what a document must hold, so a
+// field declared `number` may legitimately contain an array or an object.
+// json_extract yields those as JSON text and orders them with everything else,
+// and the cursor has to walk them the same way — binding such a value from Go
+// has no bindable equivalent and fails the statement outright.
+func TestPagingOverCompoundValuesInADeclaredField(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":[1]}`,
+		"b": `{"status":"pending","attempts":[1]}`,
+		"c": `{"status":"pending","attempts":{"tries":2}}`,
+		"d": `{"status":"pending","attempts":3}`,
+	})
+	for _, desc := range []bool{false, true} {
+		name := "ascending"
+		if desc {
+			name = "descending"
+		}
+		t.Run(name, func(t *testing.T) {
+			q := docstore.Query{
+				Namespace: "ext/approval-gate", Collection: "requests",
+				Sort: &docstore.Sort{Field: "attempts", Desc: desc}, Limit: 1,
+			}
+			// Whatever order SQLite gives these four, the walk has to visit each
+			// exactly once and then stop — the ordering is SQLite's, the
+			// completeness is the cursor's.
+			seen := map[string]bool{}
+			for i := 0; i < 4; i++ {
+				page := queryIDs(t, s, q)
+				if len(page) != 1 {
+					t.Fatalf("page after %q = %v, want exactly one document", q.After, page)
+				}
+				if seen[page[0]] {
+					t.Fatalf("page after %q returned %q again", q.After, page[0])
+				}
+				seen[page[0]] = true
+				q.After = page[0]
+			}
+			if len(seen) != 4 {
+				t.Fatalf("walked %v, want all four documents", seen)
+			}
+			if rest := queryIDs(t, s, q); len(rest) != 0 {
+				t.Fatalf("page past the last document = %v, want none", rest)
+			}
+		})
+	}
+}
+
+// The same for the tie: two documents holding the identical compound value are
+// separated by the id half of the tuple, which is the branch a bound value made
+// unreachable by failing the statement first.
+func TestPagingBetweenTwoIdenticalCompoundValues(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":[1,2]}`,
+		"b": `{"status":"pending","attempts":[1,2]}`,
+	})
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"}, Limit: 1, After: "a",
+	}
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"b"}) {
+		t.Fatalf("page after the first of an identical pair = %v, want [b]", got)
+	}
+}
+
+// A stored value that disagrees with the declared type is also ordinary: the
+// declaration is not a storage schema. The cursor compares whatever json_extract
+// yields, so the walk is complete regardless of how SQLite orders the mix.
+func TestPagingWhenStoredValuesDisagreeWithTheDeclaredType(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":"seven"}`,
+		"b": `{"status":"pending","attempts":7}`,
+		"c": `{"status":"pending","attempts":true}`,
+	})
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"}, Limit: 1,
+	}
+	seen := map[string]bool{}
+	for i := 0; i < 3; i++ {
+		page := queryIDs(t, s, q)
+		if len(page) != 1 {
+			t.Fatalf("page after %q = %v, want exactly one document", q.After, page)
+		}
+		if seen[page[0]] {
+			t.Fatalf("page after %q returned %q again", q.After, page[0])
+		}
+		seen[page[0]] = true
+		q.After = page[0]
+	}
+	if rest := queryIDs(t, s, q); len(rest) != 0 {
+		t.Fatalf("page past the last document = %v, want none", rest)
+	}
+}
+
+// A JSON null is the same absence as a missing key: json_extract yields SQL NULL
+// for both, so the cursor's NULL branch has to cover it.
+func TestPagingOverAnExplicitJSONNull(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":null}`,
+		"b": `{"status":"pending","attempts":2}`,
+	})
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"}, Limit: 1, After: "a",
+	}
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"b"}) {
+		t.Fatalf("page after a null-valued document = %v, want [b]", got)
+	}
+}

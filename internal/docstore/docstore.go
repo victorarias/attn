@@ -157,6 +157,12 @@ type Compiled struct {
 	Limit int
 }
 
+// documentsTable is the table the compiled fragments belong to. Compile already
+// names that table's columns — body, id, namespace, collection — and the after
+// cursor additionally reads one row back out of it, so the name lives here
+// beside them rather than being threaded in from the store.
+const documentsTable = "documents"
+
 var (
 	// A namespace is `owner/name`: the owner segment is the isolation class a
 	// grant hands out (`ext`, `core`), the name segment identifies the holder.
@@ -330,7 +336,7 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 	}
 
 	if q.After != "" || anchor != nil {
-		clause, cursorArgs, err := q.afterTuple(schema, sortExpr, desc, anchor)
+		clause, cursorArgs, err := q.afterTuple(sortExpr, desc, anchor)
 		if err != nil {
 			return Compiled{}, err
 		}
@@ -366,7 +372,7 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 // may be queried, not what a document must contain — and NULL compares as
 // nothing at all, so it is branched on rather than bound. SQLite sorts NULL
 // first, so in ASC every non-NULL row is past a NULL anchor and in DESC none is.
-func (q Query) afterTuple(schema CollectionSchema, sortExpr string, desc bool, anchor *Document) (string, []any, error) {
+func (q Query) afterTuple(sortExpr string, desc bool, anchor *Document) (string, []any, error) {
 	if q.After == "" {
 		return "", nil, fmt.Errorf("docstore: %s/%s was compiled with a cursor document but no after id", q.Namespace, q.Collection)
 	}
@@ -390,62 +396,63 @@ func (q Query) afterTuple(schema CollectionSchema, sortExpr string, desc bool, a
 		return "id " + cmp + " ?", []any{q.After}, nil
 	}
 
-	value, err := q.anchorSortValue(schema, anchor)
+	isNull, err := q.anchorSortIsNull(anchor)
 	if err != nil {
 		return "", nil, err
 	}
-	if value == nil {
+	if isNull {
 		if desc {
 			return "(" + sortExpr + " IS NULL AND id < ?)", []any{q.After}, nil
 		}
 		return "(" + sortExpr + " IS NOT NULL OR id > ?)", []any{q.After}, nil
 	}
-	clause := "(" + sortExpr + " " + cmp + " ? OR (" + sortExpr + " = ? AND id " + cmp + " ?))"
+
+	// The anchor's sort value is read back out of the table rather than bound
+	// from Go. A declared field says what may be queried, not what a document
+	// must hold, so a "number" field may legitimately contain an array or an
+	// object — values that have no bindable Go equivalent, and that json_extract
+	// yields as JSON text. Reading the value through the same expression the
+	// ORDER BY uses makes the cursor compare exactly what the ordering compares,
+	// for every JSON shape, with no Go-side reconstruction to disagree with
+	// SQLite's own rendering or type ordering. The subquery is uncorrelated, so
+	// it is evaluated once per statement.
+	value := "(SELECT " + sortExpr + " FROM " + documentsTable + " WHERE namespace = ? AND collection = ? AND id = ?)"
+	valueArgs := []any{q.Namespace, q.Collection, q.After}
+
+	clause := "(" + sortExpr + " > " + value + " OR (" + sortExpr + " = " + value + " AND id > ?))"
 	if desc {
 		// Descending puts NULLs last, so they are past any non-NULL anchor.
-		clause = "(" + sortExpr + " IS NULL OR " + sortExpr + " < ? OR (" + sortExpr + " = ? AND id < ?))"
+		clause = "(" + sortExpr + " IS NULL OR " + sortExpr + " < " + value + " OR (" + sortExpr + " = " + value + " AND id < ?))"
 	}
-	return clause, []any{value, value, q.After}, nil
+	args := make([]any, 0, len(valueArgs)*2+1)
+	args = append(args, valueArgs...)
+	args = append(args, valueArgs...)
+	args = append(args, q.After)
+	return clause, args, nil
 }
 
-// anchorSortValue reads the cursor document's value for the sort field, bound
-// the way the compiled expression compares. It returns nil for a document that
-// does not carry the field, which is the NULL branch above.
-func (q Query) anchorSortValue(schema CollectionSchema, anchor *Document) (any, error) {
-	field := q.Sort.Field
-	switch field {
-	case FieldCreatedAt:
-		return anchor.CreatedAt.UTC().Format(TimeFormat), nil
-	case FieldUpdatedAt:
-		return anchor.UpdatedAt.UTC().Format(TimeFormat), nil
+// anchorSortIsNull reports whether the cursor document has no value for the sort
+// field — the field is absent, or is JSON null — which is what json_extract
+// yields as SQL NULL and what the branches above handle separately. It is a
+// structural question about the body, so it needs no type mapping.
+func (q Query) anchorSortIsNull(anchor *Document) (bool, error) {
+	if reservedField[q.Sort.Field] {
+		// Both are stamped columns and are never NULL.
+		return false, nil
 	}
 	var body map[string]json.RawMessage
 	if err := json.Unmarshal(anchor.Body, &body); err != nil {
-		return nil, fmt.Errorf("docstore: %s/%s cannot page after %q: its body is not a JSON object (%w)", q.Namespace, q.Collection, anchor.ID, err)
+		return false, fmt.Errorf("docstore: %s/%s cannot page after %q: its body is not a JSON object (%w)", q.Namespace, q.Collection, anchor.ID, err)
 	}
-	raw, ok := body[field]
+	raw, ok := body[q.Sort.Field]
 	if !ok {
-		return nil, nil
+		return true, nil
 	}
 	var value any
 	if err := json.Unmarshal(raw, &value); err != nil {
-		return nil, fmt.Errorf("docstore: %s/%s cannot page after %q: its %q is not valid JSON (%w)", q.Namespace, q.Collection, anchor.ID, field, err)
+		return false, fmt.Errorf("docstore: %s/%s cannot page after %q: its %q is not valid JSON (%w)", q.Namespace, q.Collection, anchor.ID, q.Sort.Field, err)
 	}
-	// Bound the way json_extract yields it, so the comparison and the ORDER BY
-	// agree: booleans come back as 1/0, everything else as itself. The stored
-	// value is bound whatever its type, even if it disagrees with the
-	// declaration — the ordering it participates in is the stored one.
-	switch v := value.(type) {
-	case nil:
-		return nil, nil
-	case bool:
-		if v {
-			return 1, nil
-		}
-		return 0, nil
-	default:
-		return v, nil
-	}
+	return value == nil, nil
 }
 
 // fieldExpr resolves a field reference to SQL. A reserved name is a real column;

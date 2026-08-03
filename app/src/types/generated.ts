@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocumentCollectionSchema, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentSort, DocUndefineMessage, DocUndefineResult, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SettleTurnMessage, SetWorkspaceRankMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, AddEndpointMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocumentCollectionSchema, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentSort, DocUndefineMessage, DocUndefineResult, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SettleTurnMessage, SetWorkspaceRankMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
@@ -133,6 +133,7 @@
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
+//   const getKittyImageMessage = Convert.toGetKittyImageMessage(json);
 //   const getPresentationRoundMessage = Convert.toGetPresentationRoundMessage(json);
 //   const getPresentationRoundResultMessage = Convert.toGetPresentationRoundResultMessage(json);
 //   const getPresentationsMessage = Convert.toGetPresentationsMessage(json);
@@ -167,6 +168,9 @@
 //   const journalAppendMessage = Convert.toJournalAppendMessage(json);
 //   const journalAppendResult = Convert.toJournalAppendResult(json);
 //   const killSessionMessage = Convert.toKillSessionMessage(json);
+//   const kittyImageResultMessage = Convert.toKittyImageResultMessage(json);
+//   const kittyPlacement = Convert.toKittyPlacement(json);
+//   const kittyPlacementsMessage = Convert.toKittyPlacementsMessage(json);
 //   const listBranchesMessage = Convert.toListBranchesMessage(json);
 //   const listEndpointsMessage = Convert.toListEndpointsMessage(json);
 //   const listPluginsMessage = Convert.toListPluginsMessage(json);
@@ -490,6 +494,7 @@ export enum AttachResultMessageEvent {
 export interface Snapshot {
     blocks?:              BlockElement[];
     cols:                 number;
+    placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
     vt_dump_b64:          string;
@@ -506,6 +511,26 @@ export interface BlockElement {
     output_start_row?: number;
     pending:           boolean;
     prompt_row:        number;
+    [property: string]: any;
+}
+
+export interface PlacementElement {
+    grid_cols:        number;
+    grid_rows:        number;
+    image_generation: number;
+    image_id:         number;
+    pixel_height:     number;
+    pixel_width:      number;
+    placement_id:     number;
+    source_height:    number;
+    source_width:     number;
+    source_x:         number;
+    source_y:         number;
+    viewport_col:     number;
+    viewport_row:     number;
+    viewport_visible: boolean;
+    virtual:          boolean;
+    z:                number;
     [property: string]: any;
 }
 
@@ -532,6 +557,7 @@ export enum AttachSessionMessageCmd {
 export interface AttachSnapshot {
     blocks?:              BlockElement[];
     cols:                 number;
+    placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
     vt_dump_b64:          string;
@@ -2199,6 +2225,17 @@ export enum GetFileDiffMessageCmd {
     GetFileDiff = "get_file_diff",
 }
 
+export interface GetKittyImageMessage {
+    cmd:      GetKittyImageMessageCmd;
+    id:       string;
+    image_id: number;
+    [property: string]: any;
+}
+
+export enum GetKittyImageMessageCmd {
+    GetKittyImage = "get_kitty_image",
+}
+
 export interface GetPresentationRoundMessage {
     cmd:             GetPresentationRoundMessageCmd;
     presentation_id: string;
@@ -2806,6 +2843,56 @@ export interface KillSessionMessage {
 
 export enum KillSessionMessageCmd {
     KillSession = "kill_session",
+}
+
+export interface KittyImageResultMessage {
+    data_b64?:   string;
+    error?:      string;
+    event:       KittyImageResultMessageEvent;
+    format?:     string;
+    generation?: number;
+    height?:     number;
+    id:          string;
+    image_id:    number;
+    success:     boolean;
+    width?:      number;
+    [property: string]: any;
+}
+
+export enum KittyImageResultMessageEvent {
+    KittyImageResult = "kitty_image_result",
+}
+
+export interface KittyPlacement {
+    grid_cols:        number;
+    grid_rows:        number;
+    image_generation: number;
+    image_id:         number;
+    pixel_height:     number;
+    pixel_width:      number;
+    placement_id:     number;
+    source_height:    number;
+    source_width:     number;
+    source_x:         number;
+    source_y:         number;
+    viewport_col:     number;
+    viewport_row:     number;
+    viewport_visible: boolean;
+    virtual:          boolean;
+    z:                number;
+    [property: string]: any;
+}
+
+export interface KittyPlacementsMessage {
+    event:      KittyPlacementsMessageEvent;
+    id:         string;
+    placements: PlacementElement[];
+    seq:        number;
+    [property: string]: any;
+}
+
+export enum KittyPlacementsMessageEvent {
+    KittyPlacements = "kitty_placements",
 }
 
 export interface ListBranchesMessage {
@@ -7323,6 +7410,14 @@ export class Convert {
         return JSON.stringify(uncast(value, r("GetFileDiffMessage")), null, 2);
     }
 
+    public static toGetKittyImageMessage(json: string): GetKittyImageMessage {
+        return cast(JSON.parse(json), r("GetKittyImageMessage"));
+    }
+
+    public static getKittyImageMessageToJson(value: GetKittyImageMessage): string {
+        return JSON.stringify(uncast(value, r("GetKittyImageMessage")), null, 2);
+    }
+
     public static toGetPresentationRoundMessage(json: string): GetPresentationRoundMessage {
         return cast(JSON.parse(json), r("GetPresentationRoundMessage"));
     }
@@ -7593,6 +7688,30 @@ export class Convert {
 
     public static killSessionMessageToJson(value: KillSessionMessage): string {
         return JSON.stringify(uncast(value, r("KillSessionMessage")), null, 2);
+    }
+
+    public static toKittyImageResultMessage(json: string): KittyImageResultMessage {
+        return cast(JSON.parse(json), r("KittyImageResultMessage"));
+    }
+
+    public static kittyImageResultMessageToJson(value: KittyImageResultMessage): string {
+        return JSON.stringify(uncast(value, r("KittyImageResultMessage")), null, 2);
+    }
+
+    public static toKittyPlacement(json: string): KittyPlacement {
+        return cast(JSON.parse(json), r("KittyPlacement"));
+    }
+
+    public static kittyPlacementToJson(value: KittyPlacement): string {
+        return JSON.stringify(uncast(value, r("KittyPlacement")), null, 2);
+    }
+
+    public static toKittyPlacementsMessage(json: string): KittyPlacementsMessage {
+        return cast(JSON.parse(json), r("KittyPlacementsMessage"));
+    }
+
+    public static kittyPlacementsMessageToJson(value: KittyPlacementsMessage): string {
+        return JSON.stringify(uncast(value, r("KittyPlacementsMessage")), null, 2);
     }
 
     public static toListBranchesMessage(json: string): ListBranchesMessage {
@@ -9882,6 +10001,7 @@ const typeMap: any = {
     "Snapshot": o([
         { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
         { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
@@ -9897,6 +10017,24 @@ const typeMap: any = {
         { json: "pending", js: "pending", typ: true },
         { json: "prompt_row", js: "prompt_row", typ: 0 },
     ], "any"),
+    "PlacementElement": o([
+        { json: "grid_cols", js: "grid_cols", typ: 0 },
+        { json: "grid_rows", js: "grid_rows", typ: 0 },
+        { json: "image_generation", js: "image_generation", typ: 0 },
+        { json: "image_id", js: "image_id", typ: 0 },
+        { json: "pixel_height", js: "pixel_height", typ: 0 },
+        { json: "pixel_width", js: "pixel_width", typ: 0 },
+        { json: "placement_id", js: "placement_id", typ: 0 },
+        { json: "source_height", js: "source_height", typ: 0 },
+        { json: "source_width", js: "source_width", typ: 0 },
+        { json: "source_x", js: "source_x", typ: 0 },
+        { json: "source_y", js: "source_y", typ: 0 },
+        { json: "viewport_col", js: "viewport_col", typ: 0 },
+        { json: "viewport_row", js: "viewport_row", typ: 0 },
+        { json: "viewport_visible", js: "viewport_visible", typ: true },
+        { json: "virtual", js: "virtual", typ: true },
+        { json: "z", js: "z", typ: 0 },
+    ], "any"),
     "AttachSessionMessage": o([
         { json: "attach_policy", js: "attach_policy", typ: u(undefined, r("AttachPolicy")) },
         { json: "cmd", js: "cmd", typ: r("AttachSessionMessageCmd") },
@@ -9907,6 +10045,7 @@ const typeMap: any = {
     "AttachSnapshot": o([
         { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
         { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
@@ -10886,6 +11025,11 @@ const typeMap: any = {
         { json: "request_id", js: "request_id", typ: u(undefined, "") },
         { json: "staged", js: "staged", typ: u(undefined, true) },
     ], "any"),
+    "GetKittyImageMessage": o([
+        { json: "cmd", js: "cmd", typ: r("GetKittyImageMessageCmd") },
+        { json: "id", js: "id", typ: "" },
+        { json: "image_id", js: "image_id", typ: 0 },
+    ], "any"),
     "GetPresentationRoundMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetPresentationRoundMessageCmd") },
         { json: "presentation_id", js: "presentation_id", typ: "" },
@@ -11240,6 +11384,42 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("KillSessionMessageCmd") },
         { json: "id", js: "id", typ: "" },
         { json: "signal", js: "signal", typ: u(undefined, "") },
+    ], "any"),
+    "KittyImageResultMessage": o([
+        { json: "data_b64", js: "data_b64", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("KittyImageResultMessageEvent") },
+        { json: "format", js: "format", typ: u(undefined, "") },
+        { json: "generation", js: "generation", typ: u(undefined, 0) },
+        { json: "height", js: "height", typ: u(undefined, 0) },
+        { json: "id", js: "id", typ: "" },
+        { json: "image_id", js: "image_id", typ: 0 },
+        { json: "success", js: "success", typ: true },
+        { json: "width", js: "width", typ: u(undefined, 0) },
+    ], "any"),
+    "KittyPlacement": o([
+        { json: "grid_cols", js: "grid_cols", typ: 0 },
+        { json: "grid_rows", js: "grid_rows", typ: 0 },
+        { json: "image_generation", js: "image_generation", typ: 0 },
+        { json: "image_id", js: "image_id", typ: 0 },
+        { json: "pixel_height", js: "pixel_height", typ: 0 },
+        { json: "pixel_width", js: "pixel_width", typ: 0 },
+        { json: "placement_id", js: "placement_id", typ: 0 },
+        { json: "source_height", js: "source_height", typ: 0 },
+        { json: "source_width", js: "source_width", typ: 0 },
+        { json: "source_x", js: "source_x", typ: 0 },
+        { json: "source_y", js: "source_y", typ: 0 },
+        { json: "viewport_col", js: "viewport_col", typ: 0 },
+        { json: "viewport_row", js: "viewport_row", typ: 0 },
+        { json: "viewport_visible", js: "viewport_visible", typ: true },
+        { json: "virtual", js: "virtual", typ: true },
+        { json: "z", js: "z", typ: 0 },
+    ], "any"),
+    "KittyPlacementsMessage": o([
+        { json: "event", js: "event", typ: r("KittyPlacementsMessageEvent") },
+        { json: "id", js: "id", typ: "" },
+        { json: "placements", js: "placements", typ: a(r("PlacementElement")) },
+        { json: "seq", js: "seq", typ: 0 },
     ], "any"),
     "ListBranchesMessage": o([
         { json: "cmd", js: "cmd", typ: r("ListBranchesMessageCmd") },
@@ -13626,6 +13806,9 @@ const typeMap: any = {
     "GetFileDiffMessageCmd": [
         "get_file_diff",
     ],
+    "GetKittyImageMessageCmd": [
+        "get_kitty_image",
+    ],
     "GetPresentationRoundMessageCmd": [
         "get_presentation_round",
     ],
@@ -13745,6 +13928,12 @@ const typeMap: any = {
     ],
     "KillSessionMessageCmd": [
         "kill_session",
+    ],
+    "KittyImageResultMessageEvent": [
+        "kitty_image_result",
+    ],
+    "KittyPlacementsMessageEvent": [
+        "kitty_placements",
     ],
     "ListBranchesMessageCmd": [
         "list_branches",

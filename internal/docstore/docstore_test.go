@@ -299,11 +299,14 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 		Sort:       &Sort{Field: "attempts"},
 		After:      "b",
 	}, anchor)
-	want := "(json_extract(body, '$.attempts') > ? OR (json_extract(body, '$.attempts') = ? AND id > ?))"
+	value := "(SELECT json_extract(body, '$.attempts') FROM documents WHERE namespace = ? AND collection = ? AND id = ?)"
+	want := "(json_extract(body, '$.attempts') > " + value + " OR (json_extract(body, '$.attempts') = " + value + " AND id > ?))"
 	if !strings.HasSuffix(c.Where, want) {
 		t.Fatalf("where = %q, want it to end with %q", c.Where, want)
 	}
-	if got := c.Args[len(c.Args)-3:]; !equalArgs(got, []any{float64(7), float64(7), "b"}) {
+	// The anchor's value is read back through the same expression the ORDER BY
+	// uses, so the only cursor arguments are the anchor's address.
+	if got := c.Args[len(c.Args)-7:]; !equalArgs(got, []any{"ext/approval-gate", "requests", "b", "ext/approval-gate", "requests", "b", "b"}) {
 		t.Fatalf("cursor args = %v", got)
 	}
 
@@ -315,7 +318,7 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 		Sort:       &Sort{Field: "attempts", Desc: true},
 		After:      "b",
 	}, anchor)
-	want = "(json_extract(body, '$.attempts') IS NULL OR json_extract(body, '$.attempts') < ? OR (json_extract(body, '$.attempts') = ? AND id < ?))"
+	want = "(json_extract(body, '$.attempts') IS NULL OR json_extract(body, '$.attempts') < " + value + " OR (json_extract(body, '$.attempts') = " + value + " AND id < ?))"
 	if !strings.HasSuffix(c.Where, want) {
 		t.Fatalf("descending where = %q, want it to end with %q", c.Where, want)
 	}
