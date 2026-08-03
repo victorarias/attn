@@ -8,6 +8,10 @@ import {
   isColorGlyphBitmap,
 } from './terminalGlyphProgram';
 import { terminalGlyphFont } from './terminalGlyphFont';
+import {
+  KITTY_FORMAT_BYTES_PER_PIXEL,
+  type KittyPixelFormat,
+} from '../utils/kittyImageFormat';
 
 interface RendererTheme {
   background: string;
@@ -55,6 +59,41 @@ export function visibleOutlineEdges(
     drawBottom: endRow >= 0 && endRow < rows,
   };
 }
+
+// One kitty image's pixels, as the blob cache holds them. Identity is
+// (imageId, generation): a retransmission of the same id mints a new
+// generation, so a texture is never stale content under a live key.
+export interface WebGlImageSource {
+  imageId: number;
+  generation: number;
+  width: number;
+  height: number;
+  format: KittyPixelFormat;
+  pixels: Uint8Array;
+}
+
+// One image to draw this frame, already clipped to the grid by the caller.
+// Destination is CSS pixels relative to the grid's top-left; the source rect is
+// texels of the image.
+export interface WebGlImageQuad {
+  source: WebGlImageSource;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+}
+
+// Live GPU textures per renderer. Receipt: a stored image measured 1.9-6.5MB of
+// decoded pixels, so 16 textures is ~100MB of VRAM worst case and holds every
+// image a real session has on screen several times over — a tripwire, not a
+// budget. Textures die with the pane's GL context; the app-level blob cache is
+// what survives a pane being virtualized away, and rebuilding one from it is a
+// single upload.
+export const IMAGE_TEXTURE_LIMIT = 16;
 
 interface AtlasGlyph {
   u0: number;
@@ -181,6 +220,30 @@ const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
   ],
 };
 
+// The WebGL format and byte view one stored image uploads with. RGB and RGBA go
+// up untouched (the common real layouts); the two grayscale layouts are widened
+// to RGBA on the CPU rather than leaning on WebGL2's legacy LUMINANCE formats —
+// ghostty only produces them from a grayscale PNG, so the copy is on a path no
+// measured emitter takes.
+function imageUpload(
+  gl: WebGL2RenderingContext,
+  source: WebGlImageSource,
+): { format: number; pixels: Uint8Array } {
+  if (source.format === 'rgba') return { format: gl.RGBA, pixels: source.pixels };
+  if (source.format === 'rgb') return { format: gl.RGB, pixels: source.pixels };
+  const stride = KITTY_FORMAT_BYTES_PER_PIXEL[source.format];
+  const pixelCount = source.width * source.height;
+  const rgba = new Uint8Array(pixelCount * 4);
+  for (let i = 0; i < pixelCount; i += 1) {
+    const gray = source.pixels[i * stride];
+    rgba[i * 4] = gray;
+    rgba[i * 4 + 1] = gray;
+    rgba[i * 4 + 2] = gray;
+    rgba[i * 4 + 3] = stride === 2 ? source.pixels[i * stride + 1] : 255;
+  }
+  return { format: gl.RGBA, pixels: rgba };
+}
+
 function parseColor(value: string): Rgb {
   const normalized = value.replace('#', '');
   return {
@@ -237,6 +300,8 @@ export class WebGlTerminalRenderer {
   private readonly atlas: HTMLCanvasElement;
   private readonly atlasContext: CanvasRenderingContext2D;
   private readonly glyphs = new Map<string, AtlasGlyph>();
+  // Insertion order is LRU order; a texture is re-inserted when it is drawn.
+  private readonly imageTextures = new Map<string, WebGLTexture>();
   private readonly dpr: number;
   private baseline: number;
   private fontSize: number;
@@ -354,6 +419,7 @@ export class WebGlTerminalRenderer {
     viewportCells?: GhosttyCell[],
     overlays?: readonly WebGlOverlay[] | null,
     viewportOffset = 0,
+    images?: readonly WebGlImageQuad[] | null,
   ): WebGlRenderSample | null {
     const startedAt = performance.now();
     const dirty = terminal.update();
@@ -465,6 +531,15 @@ export class WebGlTerminalRenderer {
       }
     }
 
+    // Images draw between the cells and the outlines, so a selected block's
+    // border stays legible over one. That ordering is the only reason the two
+    // are ever separate arrays: with no images the outlines go straight into
+    // the cell vertices and the frame is the same single draw call it has
+    // always been.
+    const imageQuads = images ?? [];
+    const outlineVertices: number[] = [];
+    const outlineTarget = imageQuads.length > 0 ? outlineVertices : vertices;
+
     for (const outline of outlines) {
       const top = Math.max(0, outline.startRow) * this.cellHeight * scale;
       const bottom = (Math.min(terminal.rows - 1, outline.endRow) + 1) * this.cellHeight * scale;
@@ -478,19 +553,19 @@ export class WebGlTerminalRenderer {
       // look like a box wrapping the whole terminal.
       const { drawTop, drawBottom } = visibleOutlineEdges(outline.startRow, outline.endRow, terminal.rows);
       if (drawTop) {
-        this.pushSolidQuad(vertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
+        this.pushSolidQuad(outlineTarget, left, top, right - left, thickness, outline.rgb, outline.alpha);
       }
       if (drawBottom) {
-        this.pushSolidQuad(vertices, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
+        this.pushSolidQuad(outlineTarget, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
       }
-      this.pushSolidQuad(vertices, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
-      this.pushSolidQuad(vertices, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
+      this.pushSolidQuad(outlineTarget, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
+      this.pushSolidQuad(outlineTarget, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
     }
 
     if (this.atlasGeneration !== atlasGenerationBefore && !this.retryingAtlasFrame) {
       this.retryingAtlasFrame = true;
       try {
-        return this.render(terminal, true, viewportCells, overlays, viewportOffset);
+        return this.render(terminal, true, viewportCells, overlays, viewportOffset, images);
       } finally {
         this.retryingAtlasFrame = false;
       }
@@ -502,11 +577,17 @@ export class WebGlTerminalRenderer {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_resolution'), this.canvas.width, this.canvas.height);
     gl.drawArrays(gl.TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
+    let imageQuadsDrawn = 0;
+    if (imageQuads.length > 0) {
+      imageQuadsDrawn = this.drawImages(imageQuads, scale);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(outlineVertices), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / FLOATS_PER_VERTEX);
+    }
     terminal.markClean();
     return {
       cpuSubmitMs: performance.now() - startedAt,
       cells: terminal.cols * terminal.rows,
-      quads: vertices.length / FLOATS_PER_VERTEX / 6,
+      quads: (vertices.length + outlineVertices.length) / FLOATS_PER_VERTEX / 6 + imageQuadsDrawn,
       glyphUploads: this.glyphs.size - glyphCountBefore,
       cellsArrayLen: cells.length,
       printableSkippedNull,
@@ -517,8 +598,117 @@ export class WebGlTerminalRenderer {
   dispose(): void {
     this.gl.deleteBuffer(this.buffer);
     this.gl.deleteTexture(this.texture);
+    for (const texture of this.imageTextures.values()) {
+      this.gl.deleteTexture(texture);
+    }
+    this.imageTextures.clear();
     this.gl.deleteProgram(this.program);
     this.glyphs.clear();
+  }
+
+  // One textured quad per image, each with its own texture, drawn after the
+  // single cell call. Placements are rare (0 to a handful), so a few extra tiny
+  // draw calls cost less than threading a second sampler through the shader the
+  // grid renderer shares. Returns how many actually drew.
+  //
+  // The image pass composites with STRAIGHT alpha: the glyph pipeline is
+  // premultiplied, but UNPACK_PREMULTIPLY_ALPHA_WEBGL only applies to uploads
+  // from DOM elements, and these pixels arrive as a raw byte view. The blend is
+  // restored before returning so the outline pass that follows is unaffected.
+  private drawImages(quads: readonly WebGlImageQuad[], scale: number): number {
+    const gl = this.gl;
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    let drawn = 0;
+    for (const quad of quads) {
+      const texture = this.imageTexture(quad.source);
+      if (!texture) continue;
+      const { width, height } = quad.source;
+      if (width <= 0 || height <= 0) continue;
+      const vertices: number[] = [];
+      this.pushQuad(
+        vertices,
+        quad.x * scale,
+        quad.y * scale,
+        quad.width * scale,
+        quad.height * scale,
+        quad.sourceX / width,
+        quad.sourceY / height,
+        (quad.sourceX + quad.sourceWidth) / width,
+        (quad.sourceY + quad.sourceHeight) / height,
+        // The color-glyph path passes the texel through, scaled by quad alpha:
+        // exactly "draw this texture" once the alpha is 1.
+        { r: 255, g: 255, b: 255 },
+        1,
+        GLYPH_MODE_COLOR,
+      );
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
+      drawn += 1;
+    }
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // The outline pass samples the glyph atlas's solid texel, so hand the unit
+    // back before returning.
+    gl.bindTexture(gl.TEXTURE_2D, this.texture);
+    return drawn;
+  }
+
+  // The GPU texture for one image, uploaded on first use. Null when the blob
+  // cannot be drawn — it says why rather than uploading a texture whose stride
+  // is wrong, which renders as plausible garbage instead of failing.
+  private imageTexture(source: WebGlImageSource): WebGLTexture | null {
+    const key = `${source.imageId}:${source.generation}`;
+    const existing = this.imageTextures.get(key);
+    if (existing) {
+      this.imageTextures.delete(key);
+      this.imageTextures.set(key, existing);
+      return existing;
+    }
+    const expected = source.width * source.height * KITTY_FORMAT_BYTES_PER_PIXEL[source.format];
+    if (source.pixels.byteLength < expected) {
+      console.error(
+        `[kitty] image ${source.imageId} generation ${source.generation} carries ${source.pixels.byteLength} bytes for a ${source.width}x${source.height} ${source.format} image needing ${expected}`,
+      );
+      return null;
+    }
+    const gl = this.gl;
+    const texture = gl.createTexture();
+    if (!texture) {
+      console.error(`[kitty] no GPU texture available for image ${source.imageId}`);
+      return null;
+    }
+    const upload = imageUpload(gl, source);
+    gl.bindTexture(gl.TEXTURE_2D, texture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    // Rows of an RGB image are 3 bytes per pixel and land on any byte boundary;
+    // the default 4-byte unpack alignment would shear every odd-width image.
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      upload.format,
+      source.width,
+      source.height,
+      0,
+      upload.format,
+      gl.UNSIGNED_BYTE,
+      upload.pixels,
+    );
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    while (this.imageTextures.size >= IMAGE_TEXTURE_LIMIT) {
+      const oldest = this.imageTextures.keys().next().value as string;
+      const evicted = this.imageTextures.get(oldest);
+      this.imageTextures.delete(oldest);
+      if (evicted) gl.deleteTexture(evicted);
+      console.warn(
+        `[kitty] texture limit ${IMAGE_TEXTURE_LIMIT} reached (asked for image ${source.imageId} generation ${source.generation}) — evicted ${oldest}`,
+      );
+    }
+    this.imageTextures.set(key, texture);
+    return texture;
   }
 
   // Drop every cached glyph so the next render re-rasterizes against the current

@@ -28,7 +28,7 @@ import { boundTicketForSession } from '../utils/tickets';
 import { collectWorkspaceLayoutDiagnostics, projectWorkspaceBounds } from '../utils/workspaceDiagnostics';
 import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../utils/terminalStyleSummary';
-import type { BlockStateSnapshot } from '../components/GhosttyTerminal';
+import type { BlockStateSnapshot, PlacementStateSnapshot } from '../components/GhosttyTerminal';
 import { isPresentWindowAction } from './usePresentAutomationBridge';
 
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
@@ -94,6 +94,7 @@ interface UseUiAutomationBridgeArgs {
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
   getPaneBlockState: (sessionId: string, paneId: string) => BlockStateSnapshot | null;
+  getPanePlacementState: (sessionId: string, paneId: string) => PlacementStateSnapshot | null;
   fitSessionActivePane: (sessionId: string) => void;
   sendRuntimeInput: (runtimeId: string, data: string, source?: string) => void;
   isRuntimeAttached: (runtimeId: string) => boolean;
@@ -1745,6 +1746,7 @@ export function useUiAutomationBridge({
   getPaneVisibleContent,
   getPaneVisibleStyleSummary,
   getPaneBlockState,
+  getPanePlacementState,
   fitSessionActivePane,
   sendRuntimeInput,
   isRuntimeAttached,
@@ -2818,6 +2820,26 @@ export function useUiAutomationBridge({
           ...(blockState ?? {}),
         };
       }
+      case 'get_pane_placement_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const session = sessions.find((entry) => entry.id === sessionId);
+        if (!session) {
+          throw new Error('Session not found');
+        }
+        const paneId = resolvePaneId(session, getActivePaneIdForSession, payload.paneId);
+        const viewSessionId = resolveWorkspaceViewSessionId(session, sessions, activeSessionId);
+        const placementState = getPanePlacementState(viewSessionId, paneId);
+        // Same shape rule as get_pane_block_state: available=false is "this pane
+        // has no live terminal handle", which is not the same answer as "this
+        // pane is showing no images".
+        return {
+          sessionId,
+          paneId,
+          viewSessionId,
+          available: placementState !== null,
+          ...(placementState ?? {}),
+        };
+      }
       case 'get_pane_state': {
         const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
         const session = sessions.find((entry) => entry.id === sessionId);
@@ -3304,6 +3326,7 @@ export function useUiAutomationBridge({
     getPaneSize,
     getPaneText,
     getPaneBlockState,
+    getPanePlacementState,
     openDockPanel,
     openShortcutEditor,
     presentationNotices,

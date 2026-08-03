@@ -1,5 +1,5 @@
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { type BlockStateSnapshot, type GhosttyTerminalHandle } from '../GhosttyTerminal';
+import { type BlockStateSnapshot, type GhosttyTerminalHandle, type PlacementStateSnapshot } from '../GhosttyTerminal';
 import { AnnotatedTerminal, type SessionAnnotationApi } from '../TerminalAnnotations/AnnotatedTerminal';
 import { RenamePopover } from '../RenamePopover';
 import { StateIndicator } from '../StateIndicator';
@@ -99,6 +99,7 @@ export interface SessionTerminalWorkspaceHandle {
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
   getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
+  getPanePlacementState: (paneId: string) => PlacementStateSnapshot | null;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, payload: string) => Promise<boolean>;
@@ -545,6 +546,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       getPaneVisibleContent: runtime.getPaneVisibleContent,
       getPaneVisibleStyleSummary: runtime.getPaneVisibleStyleSummary,
       getPaneBlockState: runtime.getPaneBlockState,
+      getPanePlacementState: runtime.getPanePlacementState,
       resetPaneTerminal: runtime.resetPaneTerminal,
       injectPaneBytes: runtime.injectPaneBytes,
       injectPaneBase64: runtime.injectPaneBase64,

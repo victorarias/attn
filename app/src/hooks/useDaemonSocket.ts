@@ -59,7 +59,8 @@ import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
 import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
-import { decodeBinaryPtyFrame } from '../pty/binaryPtyFrame';
+import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
+import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
@@ -727,6 +728,10 @@ const GITHUB_REFRESH_TIMEOUT_MS = 5 * 60_000;
 const WORKSPACE_SESSIONS_CAPABILITY = 'workspace_sessions';
 const BROWSER_HOST_CAPABILITY = 'browser_host';
 const BINARY_PTY_OUTPUT_CAPABILITY = 'binary_pty_output';
+// "Describe images to me": gates the kitty_placements feed. Deliberately not the
+// same bit as binary_pty_output, which decides only how a blob TRAVELS — the hub
+// relay wants the descriptions over a text pipe and takes its pixels as base64.
+const KITTY_IMAGES_CAPABILITY = 'kitty_images';
 
 export function isTransientAttachError(error: unknown): boolean {
   const message = error instanceof Error ? error.message.toLowerCase() : String(error).toLowerCase();
@@ -1273,11 +1278,22 @@ export function useDaemonSocket({
           capabilities: [
             WORKSPACE_SESSIONS_CAPABILITY,
             BINARY_PTY_OUTPUT_CAPABILITY,
+            KITTY_IMAGES_CAPABILITY,
             ...(browserHostToken ? [BROWSER_HOST_CAPABILITY] : []),
           ],
           browser_host_token: browserHostToken || undefined,
         }),
       );
+
+      // The blob cache pulls pixels on miss; this is the socket it pulls over.
+      // Set on every connect and never cleared: a sender left over from a closed
+      // socket reports failure, and the key it was asked about stays absent so
+      // the next description asks again over the new one.
+      kittyImageCache.setSender((sessionId, imageId) => {
+        if (ws.readyState !== WebSocket.OPEN) return false;
+        ws.send(JSON.stringify({ cmd: 'get_kitty_image', id: sessionId, image_id: imageId }));
+        return true;
+      });
 
       if (gitStatusSubscriptionRef.current) {
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
@@ -1295,9 +1311,24 @@ export function useDaemonSocket({
       try {
         if (event.data instanceof ArrayBuffer) {
           const decodeStartedAt = performance.now();
-          const frame = decodeBinaryPtyFrame(event.data);
+          const frame = decodeBinaryFrame(event.data);
           if (!frame) {
             console.error('[Daemon] Dropping undecodable binary frame', event.data.byteLength);
+            return;
+          }
+          if (frame.kind === 'kitty_image') {
+            // The pixels alias the frame's own buffer — the whole point of the
+            // binary path is that a multi-megabyte image never becomes a base64
+            // string and then a second copy on its way to a texture.
+            kittyImageCache.fill({
+              sessionId: frame.id,
+              imageId: frame.imageId,
+              generation: frame.generation,
+              width: frame.width,
+              height: frame.height,
+              format: frame.format,
+              pixels: frame.pixels,
+            });
             return;
           }
           recordWsBinaryPtyOutput(
@@ -2044,6 +2075,17 @@ export function useDaemonSocket({
                       })),
                     });
                   }
+                  // Seed kitty placements from the same snapshot, after the
+                  // blocks. Always emitted, including with no placements: a
+                  // restore resets the model, so absence here means "this
+                  // session is showing no images" — and without saying so, an
+                  // image the pane drew before the reattach would survive it
+                  // with nothing left on screen underneath.
+                  emitPtyEvent({
+                    event: 'seed_placements',
+                    id: data.id,
+                    placements: data.snapshot?.placements ?? [],
+                  });
                 }
                 if (attachEffects.queuedOutputsToEmit.length > 0) {
                   ptyTransportRef.current.clearQueuedAttachOutputs(data.id);
@@ -2092,6 +2134,40 @@ export function useDaemonSocket({
             // relayed remote-endpoint sessions.
             if (data.id && data.data) {
               handleLivePtyOutput(data.id, data.seq, data.data);
+            }
+            break;
+          }
+
+          case 'kitty_placements': {
+            // The whole placement set of a session's active screen, measured on
+            // the chunk stamped `seq`. It rides the pty event chain so it lands
+            // behind that chunk's bytes: the positions only mean anything
+            // against the grid those bytes produce.
+            if (data.id) {
+              emitPtyEvent({
+                event: 'placements',
+                id: data.id,
+                seq: typeof data.seq === 'number' ? data.seq : 0,
+                placements: data.placements ?? [],
+              });
+            }
+            break;
+          }
+
+          case 'kitty_image_result': {
+            // The JSON half of the blob transport. A capable client still gets
+            // here: every failure is JSON (it has no pixels and so no frame),
+            // and so is every answer relayed from a remote daemon.
+            if (!data.id || typeof data.image_id !== 'number') break;
+            const blob = kittyImageBlobFromResult(data);
+            if (blob) {
+              kittyImageCache.fill(blob);
+            } else {
+              kittyImageCache.markFailed(
+                data.id,
+                data.image_id,
+                data.error || 'answer carried no pixels',
+              );
             }
             break;
           }

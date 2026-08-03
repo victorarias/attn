@@ -1,6 +1,7 @@
 import { isTauri } from '@tauri-apps/api/core';
 import { recordPtyListenerError } from '../utils/ptyPerf';
 import type { SeededBlock } from '../utils/terminalBlocks';
+import type { PlacementElement } from '../types/generated';
 
 export interface PtySpawnArgs {
   id: string;
@@ -53,6 +54,15 @@ export type PtyEventPayload =
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'replay_complete'; id: string }
   | { event: 'seed_blocks'; id: string; blocks: SeededBlock[] }
+  // The session's whole kitty placement set, as the worker measured it on the
+  // chunk stamped `seq`. Routed through this chain rather than straight to the
+  // pane so it lands behind the bytes of that same seq.
+  | { event: 'placements'; id: string; seq: number; placements: PlacementElement[] }
+  // A restore's placements. The VT dump carries no images (the APC bytes were
+  // stripped long before it was serialized), so this is the only path that
+  // carries them across an attach — and an empty set is meaningful: it is what
+  // clears an image the pane was showing before the reattach.
+  | { event: 'seed_placements'; id: string; placements: PlacementElement[] }
   | { event: 'exit'; id: string; code: number; signal?: string }
   | { event: 'error'; id: string; error: string }
   | { event: 'transcript'; id: string; matched: boolean }
