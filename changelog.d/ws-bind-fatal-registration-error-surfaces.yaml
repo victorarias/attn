@@ -1,0 +1,11 @@
+kind: fixed
+area: workspaces
+change: >
+  A workspace registration the daemon refuses now fails immediately with the
+  daemon's own reason, instead of waiting ten seconds and reporting a timeout.
+symptom: >
+  Opening a workspace the daemon rejected — a registration forwarded to a
+  remote endpoint that failed, for instance — sat for ten seconds and then said
+  it had timed out. The daemon had answered right away and said why; the app
+  ignored the answer, so the real reason never reached the screen and the
+  failure looked like the daemon was unreachable.
