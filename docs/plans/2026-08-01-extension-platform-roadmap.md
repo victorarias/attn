@@ -86,13 +86,17 @@ tracked stage.
 
 ### A3. Document store + live queries
 
-Per-extension namespaced JSON document store with secondary indexes. Writes
-emit change events on the bus. Live-query subscription surface: a client (or
-extension UI) subscribes to a query and receives updates on change.
+Per-extension namespaced JSON document store. Writes emit change events on the
+bus. Live-query subscription surface: a client (or extension UI) subscribes to
+a query and receives updates on change.
 
 - Depends on: A1 (change events ride the bus).
 - Exit: write → change event → subscribed query update, durable across
   restart; namespace isolation enforced.
+- Plan: [2026-08-03-ext-a3-doc-store.md](2026-08-03-ext-a3-doc-store.md). The
+  gate answered indexes with **declared fields, scanned** — a collection
+  declares what is queryable, and indexes become an invisible optimization
+  later rather than part of the surface.
 
 ### A4. Extension registry + shared runtime
 

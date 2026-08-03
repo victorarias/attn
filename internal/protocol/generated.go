@@ -1050,6 +1050,216 @@ const DispatchWorkStateInProgress DispatchWorkState = "in_progress"
 const DispatchWorkStateNeedsInput DispatchWorkState = "needs_input"
 const DispatchWorkStateReadyForReview DispatchWorkState = "ready_for_review"
 
+type DocCollectionsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type DocCollectionsResult struct {
+	// Collections corresponds to the JSON schema field "collections".
+	Collections []DocumentCollectionSchema `json:"collections"`
+}
+
+type DocDefineMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Schema corresponds to the JSON schema field "schema".
+	Schema DocumentCollectionSchema `json:"schema"`
+}
+
+type DocDefineResult struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocDeleteMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocDeleteResult struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Existed corresponds to the JSON schema field "existed".
+	Existed bool `json:"existed"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocGetResult struct {
+	// Document corresponds to the JSON schema field "document".
+	Document *StoredDocument `json:"document,omitempty,omitzero"`
+
+	// Found corresponds to the JSON schema field "found".
+	Found bool `json:"found"`
+}
+
+type DocPutMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocPutResult struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocQueryMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Query corresponds to the JSON schema field "query".
+	Query DocumentQuery `json:"query"`
+}
+
+type DocQueryResult struct {
+	// Documents corresponds to the JSON schema field "documents".
+	Documents []StoredDocument `json:"documents"`
+}
+
+type DocSubscribeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Query corresponds to the JSON schema field "query".
+	Query DocumentQuery `json:"query"`
+}
+
+type DocSubscribeResult struct {
+	// Documents corresponds to the JSON schema field "documents".
+	Documents []StoredDocument `json:"documents"`
+
+	// Revision corresponds to the JSON schema field "revision".
+	Revision int `json:"revision"`
+}
+
+type DocUndefineMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocUndefineResult struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// DocumentsRemoved corresponds to the JSON schema field "documents_removed".
+	DocumentsRemoved int `json:"documents_removed"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocumentCollectionSchema struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Fields corresponds to the JSON schema field "fields".
+	Fields []DocumentFieldSpec `json:"fields"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocumentFieldSpec struct {
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Type corresponds to the JSON schema field "type".
+	Type string `json:"type"`
+}
+
+type DocumentFilter struct {
+	// Field corresponds to the JSON schema field "field".
+	Field string `json:"field"`
+
+	// Op corresponds to the JSON schema field "op".
+	Op string `json:"op"`
+
+	// ValueJson corresponds to the JSON schema field "value_json".
+	ValueJson string `json:"value_json"`
+}
+
+type DocumentQuery struct {
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Filters corresponds to the JSON schema field "filters".
+	Filters []DocumentFilter `json:"filters,omitempty,omitzero"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+
+	// Sort corresponds to the JSON schema field "sort".
+	Sort *DocumentSort `json:"sort,omitempty,omitzero"`
+}
+
+type DocumentSort struct {
+	// Desc corresponds to the JSON schema field "desc".
+	Desc *bool `json:"desc,omitempty,omitzero"`
+
+	// Field corresponds to the JSON schema field "field".
+	Field string `json:"field"`
+}
+
 type EndpointActionResultMessage struct {
 	// Action corresponds to the JSON schema field "action".
 	Action string `json:"action"`
@@ -3903,6 +4113,31 @@ type Response struct {
 	// "delegation_operation".
 	DelegationOperation *DelegationOperation `json:"delegation_operation,omitempty,omitzero"`
 
+	// DocCollectionsResult corresponds to the JSON schema field
+	// "doc_collections_result".
+	DocCollectionsResult *DocCollectionsResult `json:"doc_collections_result,omitempty,omitzero"`
+
+	// DocDefineResult corresponds to the JSON schema field "doc_define_result".
+	DocDefineResult *DocDefineResult `json:"doc_define_result,omitempty,omitzero"`
+
+	// DocDeleteResult corresponds to the JSON schema field "doc_delete_result".
+	DocDeleteResult *DocDeleteResult `json:"doc_delete_result,omitempty,omitzero"`
+
+	// DocGetResult corresponds to the JSON schema field "doc_get_result".
+	DocGetResult *DocGetResult `json:"doc_get_result,omitempty,omitzero"`
+
+	// DocPutResult corresponds to the JSON schema field "doc_put_result".
+	DocPutResult *DocPutResult `json:"doc_put_result,omitempty,omitzero"`
+
+	// DocQueryResult corresponds to the JSON schema field "doc_query_result".
+	DocQueryResult *DocQueryResult `json:"doc_query_result,omitempty,omitzero"`
+
+	// DocSubscribeResult corresponds to the JSON schema field "doc_subscribe_result".
+	DocSubscribeResult *DocSubscribeResult `json:"doc_subscribe_result,omitempty,omitzero"`
+
+	// DocUndefineResult corresponds to the JSON schema field "doc_undefine_result".
+	DocUndefineResult *DocUndefineResult `json:"doc_undefine_result,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -4783,6 +5018,20 @@ type StopMessage struct {
 
 	// TranscriptPath corresponds to the JSON schema field "transcript_path".
 	TranscriptPath string `json:"transcript_path"`
+}
+
+type StoredDocument struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
 }
 
 type SubscribeGitStatusMessage struct {

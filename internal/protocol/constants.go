@@ -71,6 +71,14 @@ const (
 	CmdTicketAttach                          = "ticket_attach"
 	CmdTicketCreate                          = "ticket_create"
 	CmdTicketComment                         = "ticket_comment"
+	CmdDocDefine                             = "doc_define"
+	CmdDocUndefine                           = "doc_undefine"
+	CmdDocCollections                        = "doc_collections"
+	CmdDocPut                                = "doc_put"
+	CmdDocGet                                = "doc_get"
+	CmdDocDelete                             = "doc_delete"
+	CmdDocQuery                              = "doc_query"
+	CmdDocSubscribe                          = "doc_subscribe"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -588,6 +596,62 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdTicketAttach:
 		var msg TicketAttachMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocDefine:
+		var msg DocDefineMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocUndefine:
+		var msg DocUndefineMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocCollections:
+		var msg DocCollectionsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocPut:
+		var msg DocPutMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocGet:
+		var msg DocGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocDelete:
+		var msg DocDeleteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocQuery:
+		var msg DocQueryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocSubscribe:
+		var msg DocSubscribeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

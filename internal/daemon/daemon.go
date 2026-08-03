@@ -403,6 +403,15 @@ type Daemon struct {
 	eventBus       *bus.Bus
 	busUnsubscribe func()
 
+	// Live document-store queries. Each entry is one caller subscribed to one
+	// query; a document write wakes every subscription whose collection it
+	// touched, and the subscription re-runs its query and delivers the current
+	// result set. See documents.go.
+	docSubsMu     sync.Mutex
+	docSubs       map[string]*docSubscription
+	docSubsSeq    int64
+	docUnsubHooks func()
+
 	// Paths accumulated by the notebook_changed projection while a bulk change
 	// is coalescing, keyed by origin. See projectNotebookChanged.
 	notebookPendingMu    sync.Mutex
@@ -2316,6 +2325,24 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketUnsubscribe(conn, msg.(*protocol.TicketUnsubscribeMessage))
 	case protocol.CmdTicketAttach: // wire: ticket_attach
 		d.handleTicketAttach(conn, msg.(*protocol.TicketAttachMessage))
+	case protocol.CmdDocDefine: // wire: doc_define
+		d.handleDocDefine(conn, msg.(*protocol.DocDefineMessage))
+	case protocol.CmdDocUndefine: // wire: doc_undefine
+		d.handleDocUndefine(conn, msg.(*protocol.DocUndefineMessage))
+	case protocol.CmdDocCollections: // wire: doc_collections
+		d.handleDocCollections(conn, msg.(*protocol.DocCollectionsMessage))
+	case protocol.CmdDocPut: // wire: doc_put
+		d.handleDocPut(conn, msg.(*protocol.DocPutMessage))
+	case protocol.CmdDocGet: // wire: doc_get
+		d.handleDocGet(conn, msg.(*protocol.DocGetMessage))
+	case protocol.CmdDocDelete: // wire: doc_delete
+		d.handleDocDelete(conn, msg.(*protocol.DocDeleteMessage))
+	case protocol.CmdDocQuery: // wire: doc_query
+		d.handleDocQuery(conn, msg.(*protocol.DocQueryMessage))
+	// doc_subscribe keeps the connection: it streams result sets until the
+	// caller disconnects, rather than answering once.
+	case protocol.CmdDocSubscribe: // wire: doc_subscribe
+		d.handleDocSubscribe(conn, msg.(*protocol.DocSubscribeMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

@@ -15,7 +15,7 @@ import (
 // daemon owns the mapping to the protocol shape — keeping this package a leaf.
 //
 // read_at is persisted as '' while unread and as a timestamp once read. Timestamps
-// reuse the jobs table's RFC3339Nano encoding and parseJobTime decoder (same
+// reuse the jobs table's RFC3339Nano encoding and parseStoreTime decoder (same
 // package), so a blank/garbage value decodes to the zero time.
 
 // NotificationRecord is one durable notification row. ReadAt is the zero time
@@ -139,7 +139,7 @@ func scanNotificationRow(sc rowScanner) (*NotificationRecord, error) {
 		&rec.SourceKind, &rec.SourceID, &createdStr, &readStr); err != nil {
 		return nil, err
 	}
-	rec.CreatedAt = parseJobTime(createdStr)
-	rec.ReadAt = parseJobTime(readStr)
+	rec.CreatedAt = parseStoreTime(createdStr)
+	rec.ReadAt = parseStoreTime(readStr)
 	return &rec, nil
 }
