@@ -588,14 +588,101 @@ Three consequences worth carrying forward:
 
 ### A3 — protocol + frontend rendering
 
-- [ ] Protocol: placement/blob events + snapshot placements
+- [x] Protocol: placement/blob events + snapshot placements
       (`main.tsp` → `make generate-types` → `constants.go` ProtocolVersion →
-      `useDaemonSocket.ts` — all three lockstep spots).
-- [ ] Frontend: placement store with block-style anchoring/reanchor, blob
+      `useDaemonSocket.ts` — all three lockstep spots). ProtocolVersion 204.
+- [x] Frontend: placement store with block-style anchoring/reanchor, blob
       cache, textured-quad pass in `GhosttyWebGlRenderer`.
-- [ ] Blob transport decision with measured emitter sizes (the receipt for
+- [x] Blob transport decision with measured emitter sizes (the receipt for
       the cap and for frame-vs-event).
-- [ ] Packaged harness scenario.
+- [x] Packaged harness scenario — `real-app:scenario-terminal-kitty-image`.
+      Deliberately out of `scenarioCatalog.mjs`: it restarts the profile daemon
+      twice to move `ATTN_KITTY_STORAGE_LIMIT` in and out of the worker's
+      environment, the same reason `scenario-automation-scheduled-cleanup` sits
+      outside the catalog.
+- [x] Restore path: snapshot placements seed the store after the dump write
+      (blocks precedent), verified live across detach/reattach and a full app
+      restart against a live daemon. Moved up from A4 — the work landed here.
+- [ ] Remote-session verification via the OrbStack VM. Blocked on a remote
+      workspace-registration failure that is not specific to images; see
+      "A3 verification record" below.
+
+#### A3 verification record
+
+Evidence behind the boxes above, so a later reader can tell what was actually
+observed from what was assumed.
+
+**Packaged harness (`real-app:scenario-terminal-kitty-image`).** Writes a
+raw-bytes kitty APC into a shell pane from a file (never through `write_pane`
+JS strings — an escape does not survive shell quoting), then asserts through
+the `get_pane_placement_state` bridge action. It covers: the placement appears
+with its blob resident and visible; it rides the text it sits in across two
+scroll bursts; the program's own `a=d` empties the set; and — with the
+override absent — an identical session produces no placements at all, which is
+the shipping default. The first APC and the delete carry `q=2`: without it the
+terminal answers `\x1b_Gi=<id>;OK\x1b\\` on the PTY, and at a shell prompt with
+nobody reading, that reply is typed into the next command line. Real emitters
+either set `q` or read the reply; kitty behaves the same way.
+
+**Live tier (real emitters, throwaway profile).** chafa 1.18.2 and timg 1.6.3
+against a 3000x2000 photo both produced resident, visible placements
+(240x160 px and 270x180 px). Scrolling held the anchor; switching to another
+session and back preserved the placement; a full app restart against the live
+daemon restored it from the attach snapshot with the blob re-pulled; `a=d`
+emptied the set.
+
+**Geometry gap (A4 input, measured not guessed).** chafa asked for a 30x14
+cell area and emitted a 240x160 px image, i.e. it assumed roughly 8 x 11.4 px
+cells, because the PTY reports no `ws_xpixel`/`ws_ypixel`. The real cell is
+about 9 x 22.6 CSS px, and the client draws image pixels as CSS px, so on a 2x
+display the image lands at about half its intended row height and twice its
+native size in device pixels. Plausible, not pixel-perfect — exactly what the
+design predicted. Reporting pixel geometry on the PTY is the fix and belongs
+with the flip.
+
+**Wrap anchoring gap (A4 input).** In a pane whose prompt wraps (a long cwd),
+the first scroll after a placement moves its mapped buffer row by one; every
+later scroll holds. Short-prompt panes never drift. It is not a race — two
+reads 500 ms apart agree — so it is a real off-by-one in how a wrapped row is
+counted when the placement's screen row is converted to a buffer row. The
+harness scenario tolerates one row on the first burst and asserts the strict
+invariant on the second, so accumulation would fail the scenario.
+
+**Remote leg: blocked, and not on images.** A remote session cannot be created
+at all on this branch's base: `create_session` with an `endpoint_id` times out
+in `register_workspace`. The repo's own `real-app:scenario-tr402` fails
+identically at `create_remote_session`, with a dark hub-started remote daemon
+and a single freshly added endpoint, so it is neither the harness driver nor
+the storage-limit override. The daemon's answer is `endpoint not found: <id>`
+for an endpoint it simultaneously reports as `connected` — misleading, since
+the same text also covers "the hub is holding this endpoint back". One state
+that produces it was confirmed: when the local and remote binaries differ, the
+endpoint parks in `binary_mismatch` ("remote binary (tree:…) differs from this
+client (tree:…) — click Sync to update") and every forwarded command is refused
+with the not-found text. The remedy is a user action the harness has no path
+to trigger, and the mismatch happens on any local edit that moves the source
+fingerprint while a remote daemon is already running (the hub only reinstalls
+the remote binary when it starts one).
+
+Two remote-side gaps found on the way and worth fixing independently:
+
+- `attn daemon stop` cannot run on a stock Debian remote: its lock check shells
+  out to `lsof`, which is not installed, so it refuses with
+  `could not verify pid N holds the daemon lock`. The hub's own stop script
+  uses `ss` and works.
+- A remote daemon on an OrbStack VM republishes its WebSocket port on the
+  host's localhost, and a same-named profile hashes to the same port on both
+  machines. If the local daemon is not holding the port when the VM daemon
+  binds it, the local daemon loses the bind — logged as `HTTP server error:
+  listen tcp …: bind: address already in use` and then ignored — and the app
+  silently attaches to the Linux daemon instead. A bind failure on the daemon's
+  own port should be fatal, not a log line.
+
+**What the remote leg did establish.** The remote daemon's log records the
+hub's hello verbatim: `client hello: kind="hub" version="protocol-204"
+capabilities=[workspace_sessions kitty_images]`. The relay asks for image
+descriptions and never claims `binary_pty_output`, which is the capability
+split's whole point — placements and blobs cross the relay as JSON.
 
 ### A4 — enable, restore, remote, receipts
 
@@ -652,16 +739,32 @@ ghostty pins converging rather than on the storage flip.)
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
-- [ ] Restore path: snapshot placements seed the store after the dump write
-      (blocks precedent); live verification of detach/reattach and revive.
-- [ ] Remote-session verification via the OrbStack VM.
-- [ ] AGENTS.md: write the new truth; changelog fragment (user-visible).
+- [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
+      images from it; without it chafa guesses ~8 x 11.4 px cells against a real
+      9 x 22.6 CSS px cell. Measured in A3's live tier.
+- [ ] Fix the one-row anchoring drift on a wrapped prompt row. Measured in A3's
+      live tier; the packaged scenario tolerates one row on the first scroll and
+      would fail if it ever accumulated.
+- [ ] Remote-session verification via the OrbStack VM. A3 could not run it: see
+      A3's verification record for the registration failure that blocks every
+      remote session today, and for the two remote-side gaps found with it.
+      The remote daemon also has no supported way to receive the storage-limit
+      override — the hub forwards a fixed env allowlist — which stops mattering
+      once the limit ships as a default, and needs an
+      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated.
+- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Done in
+      A3 — the terminal section now states that kitty images are worker
+      authoritative and dark by default, and why the relay never advertises
+      `binary_pty_output`.
 
 ## Open questions
 
-- Alt-screen snapshot semantics: the dump serializes the active screen; do
-  snapshot placements carry a screen flag (blocks are primary-only, images
-  are not)? Decide in A3 with the restore work.
+- ~~Alt-screen snapshot semantics: do snapshot placements carry a screen
+  flag?~~ Answered in A3: no flag, and none is needed. The dump and the
+  placement set are taken from the same terminal at the same instant and both
+  describe whatever screen is active, so a client that writes the dump and
+  seeds placements from the same `attach_result` cannot disagree with itself.
+  Blocks needed a flag because they are primary-only; images are not.
 - Animations (`a=a`): the diff would emit a blob update per frame — a wire
   flood. V1 declares them out of scope; decide whether to coalesce or drop,
   with an event-volume tripwire either way.
