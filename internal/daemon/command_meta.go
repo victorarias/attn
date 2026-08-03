@@ -142,6 +142,17 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdRenameSession:            commandMetadata(ScopeSession, false, true),
 	protocol.CmdRenameWorkspace:          commandMetadata(ScopeEndpoint, false, true),
 	protocol.CmdSetChiefOfStaff:          commandMetadata(ScopeHubLocal, false, true),
+	// The document store is the daemon's own database, so a hub answers these
+	// itself rather than routing them to the endpoint owning some session. None
+	// of them touches a PTY, so none blocks during recovery.
+	protocol.CmdDocDefine:      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocUndefine:    commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocCollections: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocPut:         commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocGet:         commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocDelete:      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocQuery:       commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocSubscribe:   commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

@@ -885,6 +885,26 @@ CREATE TABLE IF NOT EXISTS bus_consumers (
 CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_unique_key ON jobs(kind, unique_key) WHERE unique_key <> '';
 -- The dispatch selection: claimable rows in the order they are claimed.
 CREATE INDEX IF NOT EXISTS idx_jobs_eligible ON jobs(state, scheduled_at, priority DESC);`},
+	{88, "create the document store", `CREATE TABLE IF NOT EXISTS documents (
+    namespace  TEXT NOT NULL,
+    collection TEXT NOT NULL,
+    id         TEXT NOT NULL,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (namespace, collection, id)
+);
+-- Every query is scoped to one collection, so the primary key is also the
+-- access path: a query scans the (namespace, collection) prefix and no further.
+-- Declared fields carry no index of their own in v1 (see the A3 plan) — the
+-- declaration is the contract, and the physical index waits for a measurement.
+CREATE TABLE IF NOT EXISTS document_collections (
+    namespace   TEXT NOT NULL,
+    collection  TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    updated_at  TEXT NOT NULL,
+    PRIMARY KEY (namespace, collection)
+);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

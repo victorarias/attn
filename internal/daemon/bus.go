@@ -211,6 +211,16 @@ const (
 	// between a fact and an invalidation — but a sharper name is preferred
 	// wherever the producer knows one.
 	FactTicketChanged = "ticket.changed"
+
+	// FactDocumentChanged: a document store record was written or removed.
+	// Subject is the document's address (namespace/collection/id); the payload
+	// carries the address in parts plus whether it was a removal.
+	//
+	// This fact has no entry in wireProjections, and that is not an omission: it
+	// produces no WebSocket traffic. Its consumer is the live-query fan-out in
+	// documents.go, an ephemeral subscriber beside the hub that delivers result
+	// sets to IPC callers over their own connections.
+	FactDocumentChanged = "document.changed"
 )
 
 // projection maps facts to the wire traffic they produce.
@@ -455,6 +465,7 @@ func (d *Daemon) ensureEventBus() {
 	}
 	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
+	d.subscribeDocumentFacts()
 }
 
 // startEventBus begins durable delivery. It runs early in Start, before any
@@ -465,6 +476,7 @@ func (d *Daemon) startEventBus() error {
 }
 
 func (d *Daemon) stopEventBus() {
+	d.unsubscribeDocumentFacts()
 	if d.busUnsubscribe != nil {
 		d.busUnsubscribe()
 		d.busUnsubscribe = nil

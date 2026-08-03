@@ -163,3 +163,36 @@ The raw tier is physically unreachable through the user-facing notebook APIs
 (`CleanPath` rejects dotdir segments). Capture into it is deterministic and always
 happens; the keeper's narration is best-effort on top of it, so nothing is lost if
 narration never runs.
+
+## The document store
+
+attn's **document store** is where an extension keeps its own data. Three names
+locate every record:
+
+- **Namespace** — `owner/name`, e.g. `ext/approval-gate`. A namespace is granted
+  to exactly one author and is the isolation boundary: nothing an extension does
+  can read or write another namespace, and two namespaces may use the same
+  collection name without meeting.
+- **Collection** — a named set of documents inside a namespace, e.g. `requests`.
+- **Document** — one JSON object with a caller-chosen **id**, unique within its
+  collection. The body is stored byte for byte and nothing ever rewrites it, so
+  an author never writes a migration.
+
+A collection carries a **declaration**: the fields it promises are queryable,
+each with a type. Declaring a field does not constrain what a document may
+contain — undeclared keys are stored and returned untouched — it only says what a
+query may name. `created_at` and `updated_at` are always queryable and are never
+declared.
+
+A **query** is one JSON object: namespace, collection, filters, sort, limit, and
+an optional **after cursor** — the id of the last document of the previous page.
+The cursor is part of the query rather than a filter a caller writes, because the
+visible order is (sort field, id) and a filter can only constrain one of those:
+with documents tied on the sort field, `sort > value` skips the tied ones and
+`sort >= value` returns the anchor again.
+
+A **live query** is that same query left open. Every delivery is the whole
+current result set, so a subscriber renders what it is handed and never
+accumulates state across deliveries; the daemon re-runs the query when a write to
+the collection says the answer may have moved. A skipped delivery is not a lost
+update — the next one supersedes it.

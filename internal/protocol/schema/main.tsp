@@ -3391,6 +3391,177 @@ model BrowserControlRequestMessage {
 }
 
 // ============================================================================
+// Document store
+// ============================================================================
+//
+// The document store's IPC surface. The query's STRUCTURE is typed here and is
+// as rigid as the rest of the protocol; only a filter's bound travels as JSON
+// text, because it is the one genuinely polymorphic leaf (a string, a number, or
+// a boolean, decided by the field's declared type). Typing it as a union here
+// would still not express the rule that matters — a bound must match the type
+// the collection declared for its field — which is checked in internal/docstore
+// where the declaration lives.
+
+// One queryable field of a collection. `type` is string, number or bool.
+model DocumentFieldSpec {
+  "name": string;
+  "type": string;
+}
+
+// A collection's declaration: which fields may be filtered and sorted on. It is
+// a query contract, not a storage schema — document bodies are arbitrary JSON
+// and an undeclared field is stored and read back untouched.
+model DocumentCollectionSchema {
+  "namespace": string;
+  "collection": string;
+  "fields": DocumentFieldSpec[];
+}
+
+// One comparison. `op` is eq, lt, lte, gt or gte. `value_json` is the bound
+// encoded as JSON ("\"pending\"", "5", "true").
+model DocumentFilter {
+  "field": string;
+  "op": string;
+  "value_json": string;
+}
+
+model DocumentSort {
+  "field": string;
+  "desc"?: boolean;
+}
+
+// A query. `created_at` and `updated_at` are always available to filter and sort
+// on; every other field must be declared. An absent limit means the store's
+// default rather than "unbounded".
+model DocumentQuery {
+  "namespace": string;
+  "collection": string;
+  "filters"?: DocumentFilter[];
+  "sort"?: DocumentSort;
+  "limit"?: int32;
+  // The id of the last document of the previous page. The visible order is
+  // (sort field, id), and a filter can only constrain one of those, so a tie on
+  // the sort field makes range-filter paging skip or repeat. This compares
+  // against the whole tuple.
+  "after"?: string;
+}
+
+// One stored document. `body` is the document's JSON as written, byte for byte.
+model StoredDocument {
+  "id": string;
+  "body": string;
+  "created_at": string;
+  "updated_at": string;
+}
+
+// Declare a collection, replacing any previous declaration. Redeclaring is how a
+// collection gains a queryable field; documents are never rewritten.
+model DocDefineMessage {
+  "cmd": "doc_define";
+  "schema": DocumentCollectionSchema;
+}
+
+model DocDefineResult {
+  "namespace": string;
+  "collection": string;
+}
+
+// Remove a collection's declaration and every document under it.
+model DocUndefineMessage {
+  "cmd": "doc_undefine";
+  "namespace": string;
+  "collection": string;
+}
+
+model DocUndefineResult {
+  "namespace": string;
+  "collection": string;
+  "documents_removed": int32;
+}
+
+// Every declared collection — the operator's index of what exists.
+model DocCollectionsMessage {
+  "cmd": "doc_collections";
+}
+
+model DocCollectionsResult {
+  "collections": DocumentCollectionSchema[];
+}
+
+// Write a document, creating or fully replacing it. `body` is JSON object text.
+model DocPutMessage {
+  "cmd": "doc_put";
+  "namespace": string;
+  "collection": string;
+  "id": string;
+  "body": string;
+}
+
+model DocPutResult {
+  "namespace": string;
+  "collection": string;
+  "id": string;
+}
+
+model DocGetMessage {
+  "cmd": "doc_get";
+  "namespace": string;
+  "collection": string;
+  "id": string;
+}
+
+// `found` separates an absent document from a failed read; `document` is present
+// only when found.
+model DocGetResult {
+  "found": boolean;
+  "document"?: StoredDocument;
+}
+
+model DocDeleteMessage {
+  "cmd": "doc_delete";
+  "namespace": string;
+  "collection": string;
+  "id": string;
+}
+
+// `existed` is false when the delete removed nothing, so a caller does not
+// report a change that did not happen.
+model DocDeleteResult {
+  "namespace": string;
+  "collection": string;
+  "id": string;
+  "existed": boolean;
+}
+
+model DocQueryMessage {
+  "cmd": "doc_query";
+  "query": DocumentQuery;
+}
+
+model DocQueryResult {
+  "documents": StoredDocument[];
+}
+
+// Subscribe to a live query. Unlike every other command here, this one keeps the
+// connection open: the daemon writes a DocSubscribeResult immediately carrying
+// the current result set, then writes a fresh one every time a write to the
+// collection changes what the query returns. The subscription ends when the
+// caller closes the connection.
+model DocSubscribeMessage {
+  "cmd": "doc_subscribe";
+  "query": DocumentQuery;
+}
+
+// One delivery of a live query's results. `documents` is always the CURRENT full
+// result set, never a patch — a subscriber renders what it is given and never
+// reconstructs state from a sequence of deliveries. `revision` counts deliveries
+// on this subscription, starting at 1 for the initial one.
+model DocSubscribeResult {
+  "revision": int32;
+  "documents": StoredDocument[];
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -3428,6 +3599,14 @@ model Response {
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
   state_explain_result?: StateExplainResult;
+  doc_define_result?: DocDefineResult;
+  doc_undefine_result?: DocUndefineResult;
+  doc_collections_result?: DocCollectionsResult;
+  doc_put_result?: DocPutResult;
+  doc_get_result?: DocGetResult;
+  doc_delete_result?: DocDeleteResult;
+  doc_query_result?: DocQueryResult;
+  doc_subscribe_result?: DocSubscribeResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an

@@ -81,9 +81,9 @@ func (s *Store) MigrateLegacyTasks(translate func(LegacyTaskRecord) JobRecord) (
 			return 0, fmt.Errorf("store: scan legacy task: %w", err)
 		}
 		rec.Requeued = requeued != 0
-		rec.NextAttemptAt = parseJobTime(nextStr)
-		rec.CreatedAt = parseJobTime(createdStr)
-		rec.UpdatedAt = parseJobTime(updatedStr)
+		rec.NextAttemptAt = parseStoreTime(nextStr)
+		rec.CreatedAt = parseStoreTime(createdStr)
+		rec.UpdatedAt = parseStoreTime(updatedStr)
 		owed = append(owed, rec)
 	}
 	rows.Close()

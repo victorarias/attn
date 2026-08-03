@@ -243,17 +243,17 @@ func scanJobRow(sc rowScanner) (*JobRecord, error) {
 		return nil, err
 	}
 	rec.Requeued = requeued != 0
-	rec.ScheduledAt = parseJobTime(scheduledStr)
-	rec.CreatedAt = parseJobTime(createdStr)
-	rec.UpdatedAt = parseJobTime(updateStr)
+	rec.ScheduledAt = parseStoreTime(scheduledStr)
+	rec.CreatedAt = parseStoreTime(createdStr)
+	rec.UpdatedAt = parseStoreTime(updateStr)
 	return &rec, nil
 }
 
-// parseJobTime decodes a stored timestamp, tolerating the plain RFC3339 form as
+// parseStoreTime decodes a stored timestamp, tolerating the plain RFC3339 form as
 // well as RFC3339Nano. A blank/garbage value yields the zero time rather than an
 // error — a job with an unreadable timestamp is still a real record, and the
 // queue treats a zero scheduled_at as "eligible now".
-func parseJobTime(s string) time.Time {
+func parseStoreTime(s string) time.Time {
 	if s == "" {
 		return time.Time{}
 	}
