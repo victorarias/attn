@@ -34,6 +34,11 @@ export function isChord(b: Binding | null | undefined): b is Chord {
 
 const ALLOWED_CONFLICT_PAIRS = new Set([
   'session.close|terminal.close',
+  // One verb — send the annotations you just made to the session — on one key,
+  // reached from two surfaces. Both registrations are gated on their own
+  // surface having focus, and a focused markdown tile and a focused terminal
+  // pane are mutually exclusive, so only one handler is ever registered.
+  'markdown.sendAnnotations|terminal.sendAnnotations',
 ]);
 
 export const SHORTCUTS = {
@@ -157,6 +162,12 @@ export const SHORTCUTS = {
   // handler is additionally registration-gated on tile focus-within so ⌘Enter
   // still reaches the PTY when a terminal pane is focused.
   'markdown.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
+
+  // The same ⌘Enter for the annotations made on an agent's message in the
+  // terminal. Registered only while the annotated pane is the focused leaf and
+  // the panel is holding at least one mark, so ⌘Enter still reaches the PTY
+  // everywhere else — including in a pane with nothing to send.
+  'terminal.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
 } as const;
 
 export type ShortcutId = keyof typeof SHORTCUTS;

@@ -53,8 +53,18 @@
   background: var(--color-accent);
 }
 
+/* Held apart from the reactions it sits beside: eight emoji in a row train the
+   eye to read every glyph in it as a label to apply, and the one that undoes
+   the annotation cannot be found by looking harder. */
+.anno-popup-label--delete {
+  margin-left: 2px;
+  background: color-mix(in srgb, var(--color-error) 16%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--color-error) 40%, transparent);
+}
+
 .anno-popup-label--delete:hover {
   background: var(--color-error);
+  box-shadow: none;
 }
 
 .anno-popup-divider {
@@ -100,12 +110,20 @@
 
 .anno-popup-actions {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
   gap: 6px;
+}
+
+/* Pushes Cancel/Comment to the trailing edge, leaving Remove on its own at the
+   leading one — the usual read for a destructive action that must be reachable
+   without being the button a fast hand lands on. */
+.anno-popup-actions-gap {
+  flex: 1;
 }
 
 .anno-popup-cancel,
 .anno-popup-save,
+.anno-popup-remove,
 .anno-panel-send {
   padding: 4px 10px;
   border-radius: 6px;
@@ -116,11 +134,31 @@
   cursor: pointer;
 }
 
+.anno-popup-remove {
+  border-color: transparent;
+  background: transparent;
+  color: var(--color-error);
+}
+
+.anno-popup-remove:hover {
+  background: color-mix(in srgb, var(--color-error) 18%, transparent);
+}
+
 .anno-popup-save,
 .anno-panel-send {
   border-color: transparent;
   background: var(--color-accent);
   color: #fff;
+}
+
+.anno-panel-send {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.anno-panel-send-key {
+  opacity: 0.75;
 }
 
 .anno-panel {
@@ -196,22 +234,38 @@
   padding: 6px;
 }
 
+/* The row splits into "open it" and "remove it", each its own control. The
+   remove button lives in the row's second track, so a comment wrapping to a
+   second line inside the first track can never displace it: the earlier layout
+   auto-placed it after a row-spanning comment, which pushed it to a line of its
+   own exactly when an annotation had text. */
 .anno-card {
   display: grid;
-  grid-template-columns: auto 1fr auto;
-  gap: 4px 8px;
-  width: 100%;
-  padding: 6px 8px;
+  grid-template-columns: 1fr auto;
+  align-items: start;
+  gap: 4px;
   border-radius: 8px;
   border: 1px solid transparent;
-  background: transparent;
-  text-align: left;
-  cursor: pointer;
 }
 
-.anno-card:hover {
+.anno-card:hover,
+.anno-card:focus-within {
   border-color: var(--color-border);
   background: var(--color-bg-elevated);
+}
+
+.anno-card-open {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px 8px;
+  min-width: 0;
+  padding: 6px 2px 6px 8px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
 }
 
 .anno-card-chip {
@@ -228,17 +282,34 @@
 }
 
 .anno-card-comment {
-  grid-column: 2 / 4;
+  grid-column: 2;
   color: var(--color-text-primary);
   font-size: var(--font-size-xs);
 }
 
+/* Dimmed enough to sit behind the text it belongs to, lit enough to be found
+   without hovering for it. A 22px square gives it a hit target the pointer does
+   not have to be precise about. */
 .anno-card-remove {
-  padding: 0 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  margin: 5px 5px 0 0;
+  padding: 0;
   border: none;
+  border-radius: 6px;
   background: transparent;
-  color: var(--color-text-dimmed);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  line-height: 1;
   cursor: pointer;
+}
+
+.anno-card-remove:hover {
+  background: color-mix(in srgb, var(--color-error) 20%, transparent);
+  color: var(--color-error);
 }
 
 .anno-panel-n,

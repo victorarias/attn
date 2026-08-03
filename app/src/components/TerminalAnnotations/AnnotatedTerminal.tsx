@@ -25,6 +25,8 @@ import {
 } from '../../utils/terminalAnnotations';
 import { QUICK_LABELS, buildAnnotationPayload } from './quickLabels';
 import { clampToViewport, placePopup, type Placement } from './placement';
+import { useShortcut } from '../../shortcuts/useShortcut';
+import { formatShortcut } from '../../shortcuts/formatShortcut';
 import type { UISessionState } from '../../types/sessionState';
 import './TerminalAnnotations.css';
 
@@ -71,21 +73,26 @@ export interface AnnotatedTerminalProps extends TerminalProps {
   // Types the composed feedback into the session. Absent disables sending, so
   // the surface is never offered when there is nowhere for it to go.
   onSubmitAnnotations?: (text: string) => void;
+  // Whether this pane is the focused leaf of the visible session. Gates the
+  // send shortcut's *registration*: the dispatcher consumes ⌘Enter whenever a
+  // handler exists for it, so registering from every mounted pane would eat the
+  // keystroke in whichever pane the user is actually typing in.
+  paneActive?: boolean;
 }
 
 interface Composer {
   annotationId: string;
   clientX: number;
   clientY: number;
-  // The comment box only opens on 💬 or on reopening an annotation that has
-  // one; the label row alone is a one-click gesture and must not be buried
-  // under a textarea.
+  // The comment box only opens on 💬, on reopening an annotation that has one,
+  // or on a click in the panel; the label row alone is a one-click gesture and
+  // must not be buried under a textarea.
   writing: boolean;
 }
 
 export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerminalProps>(
   function AnnotatedTerminal(
-    { sessionId, sessionState, annotationApi, onSubmitAnnotations, ...terminalProps },
+    { sessionId, sessionState, annotationApi, onSubmitAnnotations, paneActive = false, ...terminalProps },
     ref,
   ) {
     // Built once. A `useRef(new TerminalAnnotationStore())` would construct a
@@ -113,6 +120,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // one as stale.
     const generationRef = useRef(0);
     const enabled = Boolean(annotationApi && onSubmitAnnotations);
+
+    // The surface borrows the keyboard from the terminal and has to give it
+    // back, so it keeps its own handle on the terminal alongside whatever the
+    // owner asked for.
+    const terminalRef = useRef<GhosttyTerminalHandle | null>(null);
+    const attachTerminal = useCallback((handle: GhosttyTerminalHandle | null) => {
+      terminalRef.current = handle;
+      if (typeof ref === 'function') ref(handle);
+      else if (ref) (ref as React.MutableRefObject<GhosttyTerminalHandle | null>).current = handle;
+    }, [ref]);
 
     const bump = useCallback(() => setVersion((value) => value + 1), []);
 
@@ -185,16 +202,21 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       };
     }, [annotationApi, bump, enabled, sessionId, sessionState, store]);
 
-    const closeComposer = useCallback(() => {
+    // Closing the popup hands the keyboard back to the terminal: the user came
+    // from the grid, and the next thing they type is meant for the agent. The
+    // one exception is a press that deliberately lands somewhere else — that
+    // press owns where focus goes, and yanking it back would fight the click.
+    const closeComposer = useCallback((restoreFocus = true) => {
       setComposer(null);
       setPopupAt(null);
       setDraft('');
+      if (restoreFocus) terminalRef.current?.focus();
     }, []);
 
     // A highlight with neither a label nor a comment says nothing, so dismissing
     // the popup without choosing either removes it rather than leaving a blank
     // wash on the message.
-    const dismissComposer = useCallback(() => {
+    const dismissComposer = useCallback((restoreFocus = true) => {
       const current = composer;
       if (current) {
         const annotation = store.list().find((entry) => entry.id === current.annotationId);
@@ -204,7 +226,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           bump();
         }
       }
-      closeComposer();
+      closeComposer(restoreFocus);
     }, [bump, closeComposer, composer, persist, store]);
 
     const handleAnchor = useCallback(
@@ -222,8 +244,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // Reopening an annotation already made. Its comment becomes the draft, and
     // a comment-carrying annotation opens straight into the editor: the user
     // clicked it to change what it says, not to hunt for the box.
+    //
+    // `writing` forces the editor open regardless. The panel passes it: a row in
+    // a list of what you wrote is clicked to edit it, and offering a bare row of
+    // reaction emoji there answers a question nobody asked.
     const openAnnotation = useCallback(
-      (annotationId: string, at: { clientX: number; clientY: number }) => {
+      (
+        annotationId: string,
+        at: { clientX: number; clientY: number },
+        options?: { writing?: boolean },
+      ) => {
         const annotation = store.list().find((entry) => entry.id === annotationId);
         if (!annotation) return;
         setDraft(annotation.comment);
@@ -232,10 +262,10 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           annotationId,
           clientX: at.clientX,
           clientY: at.clientY,
-          writing: Boolean(annotation.comment),
+          writing: options?.writing || Boolean(annotation.comment),
         });
       },
-      [],
+      [store],
     );
 
     useEffect(() => {
@@ -257,7 +287,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       if (!composer) return;
       const onDown = (event: MouseEvent) => {
         if (popupRef.current?.contains(event.target as Node)) return;
-        dismissComposer();
+        // The press decides where focus lands — including a press in the panel
+        // that is about to open this popup again on another annotation.
+        dismissComposer(false);
       };
       window.addEventListener('mousedown', onDown, true);
       return () => window.removeEventListener('mousedown', onDown, true);
@@ -277,8 +309,15 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       ));
     }, [composer]);
 
+    // The box is the only reason the editor opened, so it takes the keyboard as
+    // it appears. The caret goes to the end: reopening a comment is for adding
+    // to what is there, and a focus() alone would leave it at the top.
     useEffect(() => {
-      if (composer?.writing) commentRef.current?.focus();
+      if (!composer?.writing) return;
+      const box = commentRef.current;
+      if (!box) return;
+      box.focus();
+      box.setSelectionRange(box.value.length, box.value.length);
     }, [composer?.writing, composer?.annotationId]);
 
     const annotations = store.list();
@@ -307,15 +346,25 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       closeComposer();
     };
 
-    const removeAnnotation = (id: string) => {
+    // `restoreFocus` false for the panel's own remove: the user is working down
+    // a list and the next click is another row, not the terminal.
+    const removeAnnotation = (id: string, restoreFocus = true) => {
       store.remove(id);
-      if (composer?.annotationId === id) closeComposer();
+      if (composer?.annotationId === id) closeComposer(restoreFocus);
       persist();
       bump();
     };
 
-    const reopen = (annotation: TerminalAnnotation, event: React.MouseEvent) => {
-      openAnnotation(annotation.id, { clientX: event.clientX, clientY: event.clientY });
+    const reopen = (annotation: TerminalAnnotation, at: { clientX: number; clientY: number }) => {
+      openAnnotation(annotation.id, at, { writing: true });
+    };
+
+    // Where a popup opened from the panel points. The card's own top edge, not
+    // the pointer: a row is clicked anywhere along its width, and an editor that
+    // lands in a different place each time reads as a different thing.
+    const reopenFromCard = (annotation: TerminalAnnotation, event: React.MouseEvent) => {
+      const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+      reopen(annotation, { clientX: rect.left + rect.width / 2, clientY: rect.top });
     };
 
     // The panel is dragged by its header. It starts pinned to a corner and only
@@ -332,14 +381,31 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
 
     const send = () => {
       if (annotations.length === 0 || !onSubmitAnnotations) return;
-      const payload = buildAnnotationPayload(annotations.map((entry) => ({
+      // A comment being typed when the send fires is part of what the user
+      // means to say, so commit it rather than dropping it on the floor.
+      if (composed && composer?.writing) {
+        const comment = draft.trim();
+        store.update(composed.id, { comment });
+        if (!comment && !composed.emoji) store.remove(composed.id);
+      }
+      // Re-read after that commit rather than reusing the render's list, which
+      // predates it. Committing an emptied comment can leave nothing to send;
+      // that is still a mutation the daemon has to hear about.
+      const sending = store.list();
+      if (sending.length === 0) {
+        persist();
+        closeComposer();
+        bump();
+        return;
+      }
+      const payload = buildAnnotationPayload(sending.map((entry) => ({
         quote: entry.quote,
         emoji: entry.emoji,
         comment: entry.comment,
         start: entry.start,
       })));
       onSubmitAnnotations(payload);
-      setSentCount(annotations.length);
+      setSentCount(sending.length);
       store.clear();
       closeComposer();
       bump();
@@ -357,6 +423,20 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           });
       }
     };
+
+    // ⌘Enter sends the set without reaching for the panel — the gesture that
+    // made the marks was keyboard-adjacent and so is the one that spends them.
+    //
+    // Registration-gated, not handler-gated: the dispatcher consumes the
+    // keystroke whenever a handler is registered, so an always-on no-op would
+    // swallow the terminal's ⌘Enter in every pane that has none waiting. The
+    // def's `editableTarget: 'native'` additionally keeps it out of the comment
+    // box, where ⌘Enter already means "commit this comment".
+    useShortcut(
+      'terminal.sendAnnotations',
+      send,
+      enabled && paneActive && annotations.length > 0,
+    );
 
     // The confirmation replaces the panel's footer rather than a toast, and only
     // for as long as it takes to read: the panel is where the user was looking.
@@ -414,7 +494,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       <>
         <GhosttyTerminal
           {...terminalProps}
-          ref={ref}
+          ref={attachTerminal}
           annotations={enabled ? store : undefined}
           annotationsVersion={version}
           onAnnotationAnchor={enabled ? handleAnchor : undefined}
@@ -453,6 +533,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               >
                 💬
               </button>
+              {/* Tinted at rest rather than only on hover: sat among eight
+                  reaction emoji, an untinted glyph reads as a ninth reaction
+                  and the way back out of an annotation stays unfindable. */}
               <button
                 type="button"
                 className="anno-popup-label anno-popup-label--delete"
@@ -483,7 +566,18 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                   }}
                 />
                 <div className="anno-popup-actions">
-                  <button type="button" className="anno-popup-cancel" onClick={dismissComposer}>
+                  {/* Named, not a glyph. Removing what you wrote is the second
+                      thing anyone wants from an open comment, and it should not
+                      cost a hunt through the icon row above. */}
+                  <button
+                    type="button"
+                    className="anno-popup-remove"
+                    onClick={() => removeAnnotation(composed.id)}
+                  >
+                    Remove
+                  </button>
+                  <span className="anno-popup-actions-gap" />
+                  <button type="button" className="anno-popup-cancel" onClick={() => dismissComposer()}>
                     Cancel
                   </button>
                   <button type="button" className="anno-popup-save" onClick={saveComment}>
@@ -507,29 +601,33 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               <span className="anno-panel-count">{annotations.length}</span>
             </div>
             <div className="anno-panel-body">
+              {/* The row is two buttons side by side rather than a button
+                  nested in a clickable div: the remove control then sits in its
+                  own grid track instead of being auto-placed after a
+                  comment that spans the row — which is what pushed it onto a
+                  line of its own whenever an annotation carried text. */}
               {annotations.map((annotation) => (
-                <div
-                  key={annotation.id}
-                  className="anno-card"
-                  role="button"
-                  tabIndex={0}
-                  onClick={(event) => reopen(annotation, event)}
-                >
-                  <span className="anno-card-chip">
-                    {annotation.emoji || '💬'}
-                  </span>
-                  <span className="anno-card-quote">{annotation.quote}</span>
-                  {annotation.comment ? (
-                    <span className="anno-card-comment">{annotation.comment}</span>
-                  ) : null}
+                <div key={annotation.id} className="anno-card">
+                  <button
+                    type="button"
+                    className="anno-card-open"
+                    title="Edit this annotation"
+                    onClick={(event) => reopenFromCard(annotation, event)}
+                  >
+                    <span className="anno-card-chip">
+                      {annotation.emoji || '💬'}
+                    </span>
+                    <span className="anno-card-quote">{annotation.quote}</span>
+                    {annotation.comment ? (
+                      <span className="anno-card-comment">{annotation.comment}</span>
+                    ) : null}
+                  </button>
                   <button
                     type="button"
                     className="anno-card-remove"
+                    title="Remove annotation"
                     aria-label="Remove annotation"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      removeAnnotation(annotation.id);
-                    }}
+                    onClick={() => removeAnnotation(annotation.id, false)}
                   >
                     ✕
                   </button>
@@ -546,6 +644,12 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                   </span>
                   <button type="button" className="anno-panel-send" onClick={send}>
                     Send all
+                    {/* The key is only live while this pane holds focus, so the
+                        hint is only shown then — a printed shortcut that does
+                        nothing where it is printed is worse than none. */}
+                    {paneActive ? (
+                      <span className="anno-panel-send-key">{formatShortcut('terminal.sendAnnotations')}</span>
+                    ) : null}
                   </button>
                 </>
               )}

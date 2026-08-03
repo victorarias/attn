@@ -28,10 +28,21 @@ interface CapturedProps {
 }
 
 let terminal: CapturedProps = {};
+// The surface calls focus() on the terminal handle to hand the keyboard back.
+// A real handle rather than a spy on the DOM node: that is the seam the
+// component uses, and the count is what proves focus was returned exactly when
+// it should be.
+let terminalFocusCalls = 0;
 
 vi.mock('../GhosttyTerminal', () => ({
-  GhosttyTerminal: React.forwardRef(function MockTerminal(props: CapturedProps, _ref: React.Ref<unknown>) {
+  GhosttyTerminal: React.forwardRef(function MockTerminal(props: CapturedProps, ref: React.Ref<unknown>) {
     terminal = props;
+    React.useImperativeHandle(ref, () => ({
+      focus: () => {
+        terminalFocusCalls += 1;
+        return true;
+      },
+    }), []);
     return <div data-testid="terminal" />;
   }),
 }));
@@ -102,12 +113,14 @@ function props(overrides: {
   state?: UISessionState;
   api?: SessionAnnotationApi;
   submit?: (text: string) => void;
+  paneActive?: boolean;
 }) {
   return {
     sessionId: 'session-1',
     sessionState: overrides.state ?? ('idle' as UISessionState),
     annotationApi: overrides.api,
     onSubmitAnnotations: overrides.submit,
+    paneActive: overrides.paneActive ?? false,
     fontSize: 13,
     debugName: 'test',
     onInput: () => {},
@@ -120,13 +133,19 @@ function renderTerminal(overrides: {
   state?: UISessionState;
   api?: FakeAnnotationDaemon;
   submit?: (text: string) => void;
+  paneActive?: boolean;
 } = {}) {
   const daemon = overrides.api ?? new FakeAnnotationDaemon();
   const submit = overrides.submit ?? vi.fn();
   const view = render(<AnnotatedTerminal {...props({ ...overrides, api: daemon, submit })} />);
-  const rerender = (next: { state?: UISessionState } = {}) =>
+  const rerender = (next: { state?: UISessionState; paneActive?: boolean } = {}) =>
     view.rerender(
-      <AnnotatedTerminal {...props({ state: next.state ?? overrides.state, api: daemon, submit })} />,
+      <AnnotatedTerminal {...props({
+        state: next.state ?? overrides.state,
+        paneActive: next.paneActive ?? overrides.paneActive,
+        api: daemon,
+        submit,
+      })} />,
     );
   return { ...view, rerender, daemon, submit };
 }
@@ -155,8 +174,20 @@ function stored() {
   return terminal.annotations?.list() ?? [];
 }
 
+/** The panel row for the nth annotation, and its two controls. */
+function card(index = 0) {
+  const cards = document.querySelectorAll('.anno-card');
+  const node = cards[index] as HTMLElement;
+  return {
+    node,
+    open: node.querySelector('.anno-card-open') as HTMLElement,
+    remove: node.querySelector('.anno-card-remove') as HTMLElement,
+  };
+}
+
 beforeEach(() => {
   terminal = {};
+  terminalFocusCalls = 0;
 });
 
 afterEach(() => {
@@ -432,6 +463,185 @@ describe('AnnotatedTerminal', () => {
 
     expect(stored()).toHaveLength(0);
     expect(screen.queryByTestId('annotation-panel')).toBeNull();
+  });
+
+  it('keeps the panel row\'s remove control beside the row, not below it', async () => {
+    // A row is two controls side by side. The earlier layout nested the remove
+    // button inside the clickable row and let the grid auto-place it after a
+    // comment that spanned the row, which dropped it onto a line of its own the
+    // moment an annotation carried text.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Write a comment'));
+    fireEvent.change(screen.getByPlaceholderText('What should change here?'), {
+      target: { value: 'long enough to wrap onto its own line in the row' },
+    });
+    fireEvent.click(screen.getByText('Comment'));
+
+    const { node, open, remove } = card();
+    expect(open).toBeTruthy();
+    expect(remove.parentElement).toBe(node);
+    // The comment lives inside the row's own control, so it can never be a
+    // sibling the remove button has to be placed around.
+    expect(open.querySelector('.anno-card-comment')).toBeTruthy();
+  });
+
+  it('opens the editor when a panel row is clicked, even for a bare reaction', async () => {
+    // A row in a list of what you wrote is clicked to change what it says. A
+    // reaction-only annotation used to reopen into the icon row alone, which
+    // answers a question nobody asked at that moment.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+
+    fireEvent.click(card().open);
+
+    const box = screen.getByPlaceholderText('What should change here?') as HTMLTextAreaElement;
+    expect(box.value).toBe('');
+    expect(document.activeElement).toBe(box);
+  });
+
+  it('puts the caret after a prefilled comment rather than at its start', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Write a comment'));
+    fireEvent.change(screen.getByPlaceholderText('What should change here?'), {
+      target: { value: 'first take' },
+    });
+    fireEvent.click(screen.getByText('Comment'));
+
+    fireEvent.click(card().open);
+
+    const box = screen.getByPlaceholderText('What should change here?') as HTMLTextAreaElement;
+    expect(document.activeElement).toBe(box);
+    expect(box.selectionStart).toBe('first take'.length);
+  });
+
+  it('removes the annotation from the open editor by name', async () => {
+    // The way out of a comment cannot be an emoji in a row of eight other
+    // emoji; from the editor it is a named button.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Write a comment'));
+    fireEvent.change(screen.getByPlaceholderText('What should change here?'), {
+      target: { value: 'wrong on reflection' },
+    });
+    fireEvent.click(screen.getByText('Comment'));
+
+    fireEvent.click(card().open);
+    fireEvent.click(screen.getByText('Remove'));
+
+    expect(stored()).toHaveLength(0);
+    expect(screen.queryByTestId('annotation-popup')).toBeNull();
+  });
+
+  it('hands the keyboard back to the terminal when the editor closes', async () => {
+    // The surface borrowed focus from the grid; leaving it typing into nothing
+    // is what makes an overlay feel like a trap.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Write a comment'));
+    const box = screen.getByPlaceholderText('What should change here?');
+    expect(document.activeElement).toBe(box);
+    fireEvent.change(box, { target: { value: 'say this' } });
+
+    terminalFocusCalls = 0;
+    fireEvent.click(screen.getByText('Comment'));
+    expect(terminalFocusCalls).toBe(1);
+
+    fireEvent.click(card().open);
+    terminalFocusCalls = 0;
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(terminalFocusCalls).toBe(1);
+  });
+
+  it('leaves focus alone when the press that closed the popup landed elsewhere', async () => {
+    // That press decides where focus goes — including a press on another row of
+    // the panel, which is about to open this same popup on a different mark.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    anchor('turn-1', 31, 55);
+    fireEvent.click(screen.getByLabelText('Needs tests'));
+
+    fireEvent.click(card(0).open);
+    terminalFocusCalls = 0;
+    fireEvent.mouseDown(card(1).open);
+
+    expect(terminalFocusCalls).toBe(0);
+  });
+
+  it('sends the set on the send shortcut while the pane holds focus', async () => {
+    const submit = vi.fn();
+    renderTerminal({ submit, paneActive: true });
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0][0]).toContain(TURN_1.slice(0, 26));
+    expect(stored()).toHaveLength(0);
+  });
+
+  it('commits the comment being typed when the send shortcut fires', async () => {
+    // Half-written feedback is still what the user meant to say; dropping it on
+    // the way out would be silent data loss.
+    const submit = vi.fn();
+    renderTerminal({ submit, paneActive: true });
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Write a comment'));
+    fireEvent.change(screen.getByPlaceholderText('What should change here?'), {
+      target: { value: 'still typing this' },
+    });
+
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(submit.mock.calls[0][0]).toContain('still typing this');
+  });
+
+  it('leaves the send keystroke to the PTY when the pane is not the focused one', async () => {
+    // Registration is the gate: the dispatcher consumes ⌘Enter whenever a
+    // handler exists, so a pane that is merely mounted must not register one.
+    const submit = vi.fn();
+    renderTerminal({ submit, paneActive: false });
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(stored()).toHaveLength(1);
+  });
+
+  it('leaves the send keystroke to the PTY when there is nothing to send', async () => {
+    const submit = vi.fn();
+    const { rerender } = renderTerminal({ submit, paneActive: true });
+    await windowReady('turn-1');
+    rerender({ paneActive: true });
+
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+
+    expect(submit).not.toHaveBeenCalled();
   });
 
   it('offers no annotation surface when the session cannot be sent to', async () => {

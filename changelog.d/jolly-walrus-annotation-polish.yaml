@@ -1,0 +1,18 @@
+kind: changed
+area: terminal
+change: >
+  Terminal annotations answer the keyboard and the second look. ⌘Enter sends the
+  whole set to the session without reaching for the panel, while the pane you
+  annotated has focus and marks are waiting. Clicking a row in the floating
+  panel opens that annotation's comment box with the caret already in it, so a
+  row is edited where it is read. Removing one is now findable from both places:
+  a named "Remove" beside Cancel in the open comment box, and a tinted control
+  in the icon row rather than a ninth glyph among eight reaction emoji. Closing
+  the editor hands the keyboard back to the terminal.
+notes: >
+  The panel row's remove control also stops jumping to a line of its own. The
+  row was one grid, and a comment spanning it pushed the control past the last
+  column into an implicit new row — so it moved exactly when an annotation
+  carried text, which is when it is most wanted. The row is now two controls
+  side by side, which also gives it keyboard reach and stops nesting a button
+  inside a clickable element.
