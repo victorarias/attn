@@ -103,10 +103,7 @@ func subscribe(t *testing.T, d *Daemon, q protocol.DocumentQuery) *liveQuery {
 // these tests wait on a real signal rather than on a duration.
 func (lq *liveQuery) next(t *testing.T) *protocol.DocSubscribeResult {
 	t.Helper()
-	var resp protocol.Response
-	if err := lq.dec.Decode(&resp); err != nil {
-		t.Fatalf("decode delivery: %v", err)
-	}
+	resp := lq.nextRaw(t)
 	if !resp.Ok {
 		t.Fatalf("delivery carried an error: %v", protocol.Deref(resp.Error))
 	}
@@ -114,6 +111,17 @@ func (lq *liveQuery) next(t *testing.T) *protocol.DocSubscribeResult {
 		t.Fatal("delivery carried no result")
 	}
 	return resp.DocSubscribeResult
+}
+
+// nextRaw reads one delivery without requiring it to have succeeded, for the
+// cases where the end of a subscription is the thing under test.
+func (lq *liveQuery) nextRaw(t *testing.T) protocol.Response {
+	t.Helper()
+	var resp protocol.Response
+	if err := lq.dec.Decode(&resp); err != nil {
+		t.Fatalf("decode delivery: %v", err)
+	}
+	return resp
 }
 
 func ids(result *protocol.DocSubscribeResult) []string {
@@ -373,8 +381,15 @@ func TestRemovingACollectionReachesItsLiveQueries(t *testing.T) {
 	if n := resp.DocUndefineResult.DocumentsRemoved; n != 1 {
 		t.Fatalf("removed %d documents, want 1", n)
 	}
-	if got := ids(lq.next(t)); len(got) != 0 {
-		t.Fatalf("after the collection went = %v, want empty", got)
+	// The watcher is told the collection is gone, not handed an empty list: an
+	// empty result set claims the collection is still there holding nothing, and
+	// leaves the caller watching an address that can never answer again.
+	final := lq.nextRaw(t)
+	if final.Ok {
+		t.Fatalf("after the collection went, delivery = %+v, want an error", final)
+	}
+	if msg := protocol.Deref(final.Error); !strings.Contains(msg, "is not declared") {
+		t.Fatalf("error does not say the collection is gone: %q", msg)
 	}
 }
 
@@ -432,5 +447,46 @@ func TestAnAfterCursorToADeletedDocumentIsReported(t *testing.T) {
 	}
 	if err := protocol.Deref(resp.Error); !strings.Contains(err, "b") || !strings.Contains(err, "no longer exists") {
 		t.Fatalf("error = %q", err)
+	}
+}
+
+// The other way a subscription's collection can move under it: a redeclare that
+// drops a field the live query filters on. The field's column goes with it, so
+// continuing would mean answering a question the collection no longer offers.
+// The watcher is told which field, the same way a fresh query would be.
+func TestRedeclaringWithoutAFieldEndsTheLiveQueriesUsingIt(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	putDoc(t, d, "a", `{"status":"pending"}`)
+
+	q := testQuery()
+	q.Filters = []protocol.DocumentFilter{{Field: "status", Op: "eq", ValueJson: `"pending"`}}
+	lq := subscribe(t, d, q)
+	if got := ids(lq.next(t)); !equalStrings(got, []string{"a"}) {
+		t.Fatalf("initial = %v, want [a]", got)
+	}
+
+	// Redeclared with no queryable fields at all.
+	resp := docCall(t, func(c net.Conn) {
+		d.handleDocDefine(c, &protocol.DocDefineMessage{
+			Cmd: protocol.CmdDocDefine,
+			Schema: protocol.DocumentCollectionSchema{
+				Namespace: testDocNS, Collection: testDocColl,
+			},
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("redeclare: %v", protocol.Deref(resp.Error))
+	}
+	// A write is what wakes the subscription; the redeclare alone is not a
+	// document change.
+	putDoc(t, d, "b", `{"status":"pending"}`)
+
+	final := lq.nextRaw(t)
+	if final.Ok {
+		t.Fatalf("delivery after the field went = %+v, want an error", final)
+	}
+	if msg := protocol.Deref(final.Error); !strings.Contains(msg, "status") {
+		t.Fatalf("error does not name the field that went: %q", msg)
 	}
 }

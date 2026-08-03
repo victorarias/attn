@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	_ "github.com/mattn/go-sqlite3"
 
+	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/rankkey"
 )
 
@@ -905,6 +907,14 @@ CREATE TABLE IF NOT EXISTS document_collections (
     updated_at  TEXT NOT NULL,
     PRIMARY KEY (namespace, collection)
 );`},
+	// Migration 88's shared table is replaced by a table per collection: the
+	// measurement that overturned it, and the shape that replaces it, are in
+	// docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md. It carries
+	// v88's declarations and documents across rather than dropping them — the
+	// CLI's `attn doc define` and `attn doc put` shipped with migration 88, so
+	// any installed profile may already hold records a user put there by hand.
+	// Applied by applyMigration89.
+	{89, "rebuild the document store as a table per collection", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1170,6 +1180,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 85 {
 			if err := applyMigration85(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 89 {
+			if err := applyMigration89(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2116,6 +2131,181 @@ func applyMigration85(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN turn_snoozed_until TEXT NOT NULL DEFAULT ''")
 	return err
+}
+
+// applyMigration89 rebuilds the document store as a table per collection and
+// carries migration 88's contents across. `attn doc define` and `attn doc put`
+// shipped together with 88, so an installed profile can already hold
+// declarations and documents someone wrote by hand: this is an upgrade, not a
+// replace. The shape it upgrades to, and the measurement that chose it, are in
+// docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
+//
+// Every v88 document lands in exactly one new table or the migration fails
+// rather than committing a partial carry — the count is checked, not assumed.
+//
+// Guarded on the new registry's minting column, so a rewound schema_migrations
+// table re-runs it without erroring on work already done.
+func applyMigration89(tx *sql.Tx) error {
+	migrated, err := columnExists(tx, "document_collections", "id")
+	if err != nil || migrated {
+		return err
+	}
+
+	if _, err := tx.Exec(`ALTER TABLE document_collections RENAME TO document_collections_v88`); err != nil {
+		return err
+	}
+	// id is the mint: a collection's table is doc_<id>, so no identifier the
+	// store executes is ever a function of a namespace or collection name.
+	//
+	// AUTOINCREMENT, so an id is never reused. A plain rowid hands the next
+	// declaration the id a dropped one just freed, which would point a table name
+	// that is still held somewhere — an in-flight subscription's schema, a
+	// compiled query — at a different collection's documents. Undefine then
+	// define is a normal thing to do, so that has to be impossible rather than
+	// unlikely.
+	if _, err := tx.Exec(`CREATE TABLE document_collections (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    namespace   TEXT NOT NULL,
+    collection  TEXT NOT NULL,
+    fields_json TEXT NOT NULL,
+    updated_at  TEXT NOT NULL
+)`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE UNIQUE INDEX idx_document_collections_address
+    ON document_collections(namespace, collection)`); err != nil {
+		return err
+	}
+
+	collections, err := readV88Collections(tx)
+	if err != nil {
+		return err
+	}
+	carried := 0
+	for _, c := range collections {
+		n, err := carryV88Collection(tx, c)
+		if err != nil {
+			return fmt.Errorf("carrying %s/%s across: %w", c.namespace, c.collection, err)
+		}
+		carried += n
+	}
+
+	var stored int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM documents`).Scan(&stored); err != nil {
+		return err
+	}
+	if carried != stored {
+		return fmt.Errorf("carried %d of %d stored documents; refusing to drop the rest", carried, stored)
+	}
+
+	if _, err := tx.Exec(`DROP TABLE documents`); err != nil {
+		return err
+	}
+	_, err = tx.Exec(`DROP TABLE document_collections_v88`)
+	return err
+}
+
+// v88Collection is one collection to carry across: its declaration as v88
+// recorded it, and the address its documents are stored under.
+type v88Collection struct {
+	namespace  string
+	collection string
+	fields     []docstore.FieldSpec
+	fieldsJSON string
+	updatedAt  string
+}
+
+// readV88Collections lists what migration 89 has to carry: every declared
+// collection, plus any address holding documents that no declaration names.
+//
+// The second group cannot arise through the API — a put resolves the
+// declaration before it writes — but carrying it costs one query and the
+// alternative is deleting documents. Such an address arrives with an empty
+// declaration, which leaves its documents readable by id and queryable on
+// created_at/updated_at, and one `doc_define` away from queryable by field.
+func readV88Collections(tx *sql.Tx) ([]v88Collection, error) {
+	rows, err := tx.Query(`SELECT namespace, collection, fields_json, updated_at
+        FROM document_collections_v88 ORDER BY namespace, collection`)
+	if err != nil {
+		return nil, err
+	}
+	var out []v88Collection
+	for rows.Next() {
+		var c v88Collection
+		if err := rows.Scan(&c.namespace, &c.collection, &c.fieldsJSON, &c.updatedAt); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		if err := json.Unmarshal([]byte(c.fieldsJSON), &c.fields); err != nil {
+			rows.Close()
+			return nil, fmt.Errorf("reading the declaration of %s/%s: %w", c.namespace, c.collection, err)
+		}
+		out = append(out, c)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	// An undeclared address is dated by its newest document: the migration has no
+	// clock, and that timestamp is both real and already in the stored format.
+	orphans, err := tx.Query(`SELECT d.namespace, d.collection, MAX(d.updated_at)
+        FROM documents d
+       WHERE NOT EXISTS (SELECT 1 FROM document_collections_v88 c
+                          WHERE c.namespace = d.namespace AND c.collection = d.collection)
+       GROUP BY d.namespace, d.collection
+       ORDER BY d.namespace, d.collection`)
+	if err != nil {
+		return nil, err
+	}
+	defer orphans.Close()
+	for orphans.Next() {
+		c := v88Collection{fieldsJSON: "[]"}
+		if err := orphans.Scan(&c.namespace, &c.collection, &c.updatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, orphans.Err()
+}
+
+// carryV88Collection mints a collection's registry row, builds its table from
+// the declaration, and moves its documents in. It returns how many it moved, so
+// the caller can prove nothing was left behind.
+//
+// The declaration is validated before any of its field names reach DDL. They
+// were validated when they were written, so a failure here means the database
+// was edited outside attn — worth stopping for, since the alternative is
+// splicing unchecked text into a CREATE TABLE.
+func carryV88Collection(tx *sql.Tx, c v88Collection) (int, error) {
+	schema := docstore.CollectionSchema{Namespace: c.namespace, Collection: c.collection, Fields: c.fields}
+	if err := schema.Validate(); err != nil {
+		return 0, err
+	}
+	res, err := tx.Exec(
+		`INSERT INTO document_collections (namespace, collection, fields_json, updated_at) VALUES (?, ?, ?, ?)`,
+		c.namespace, c.collection, c.fieldsJSON, c.updatedAt)
+	if err != nil {
+		return 0, err
+	}
+	id, err := res.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	table := docstore.TableName(id)
+	if err := createCollectionTable(tx, table, c.fields); err != nil {
+		return 0, err
+	}
+	// The bodies move byte for byte; the generated columns compute from them on
+	// read, so this is the whole of the carry.
+	moved, err := tx.Exec(`INSERT INTO `+table+` (id, body, created_at, updated_at)
+        SELECT id, body, created_at, updated_at FROM documents WHERE namespace = ? AND collection = ?`,
+		c.namespace, c.collection)
+	if err != nil {
+		return 0, err
+	}
+	n, err := moved.RowsAffected()
+	return int(n), err
 }
 
 func columnExists(tx *sql.Tx, table, column string) (bool, error) {

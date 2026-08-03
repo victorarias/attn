@@ -19,6 +19,12 @@
 // `owner/name` string; who may write under which owner is enforced where the
 // namespace is granted, not here.
 //
+// A collection is physically its own table, and a declared field an indexed
+// generated column in it, so this package also owns the naming those identifiers
+// use — see TableName and FieldColumn, and
+// docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md. The store builds
+// its DDL from those names; it does not invent any.
+//
 // See docs/plans/2026-08-03-ext-a3-doc-store.md.
 package docstore
 
@@ -55,9 +61,10 @@ const (
 )
 
 // FieldType is what a declared field holds. The type is not decoration: it
-// decides how a filter's bound is bound to the statement, and comparing a number
+// decides how a filter's bound is bound to the statement — comparing a number
 // field against a string bound would otherwise match nothing at all rather than
-// failing.
+// failing — and it is the affinity of the column the field is stored through,
+// so it also decides how two stored values compare with each other.
 type FieldType string
 
 const (
@@ -88,18 +95,26 @@ type FieldSpec struct {
 }
 
 // CollectionSchema is a collection's declaration: which fields may be filtered
-// and sorted on. It is the API contract, and it is deliberately not a storage
-// schema — a document's body is arbitrary JSON, and an undeclared field is
-// stored and read back untouched. Declaring a field says "you may query this",
-// not "this must exist".
+// and sorted on. It is the API contract for queries, and it is deliberately not
+// a schema the body must satisfy — a document's body is arbitrary JSON, an
+// undeclared key is stored and read back untouched, and a declared field the
+// body omits is simply absent. Declaring a field says "you may query this", not
+// "this must exist".
 //
-// v1 executes queries by scanning within a collection, so a declaration creates
-// no index today. It is still the contract, because it is what lets indexes
-// appear later without any author-facing change.
+// Physically a declared field is an indexed generated column over the body, so
+// the declaration is also what the store builds. Adding one is DDL and rewrites
+// no document; see docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
+//
+// Table is the collection's own table, minted by the store from the
+// declaration's row id and filled in on read. It is not part of the declaration
+// a caller writes, and Compile refuses a schema whose Table is not a minted
+// name — that check is the whole defence for the one identifier in the compiled
+// SQL that does not come from a validated field name.
 type CollectionSchema struct {
 	Namespace  string      `json:"namespace"`
 	Collection string      `json:"collection"`
 	Fields     []FieldSpec `json:"fields"`
+	Table      string      `json:"-"`
 }
 
 // Filter is one comparison against a declared or reserved field.
@@ -148,20 +163,18 @@ type Document struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
-// Compiled is a validated query as SQL. Where and Order are fragments the store
-// splices into its own SELECT; Args binds Where's placeholders in order.
+// Compiled is a validated query as SQL. Table is the collection's table, Where
+// and Order are fragments the store splices into its own SELECT, and Args binds
+// Where's placeholders in order. Where is empty when nothing constrains the
+// query: the table already holds exactly one collection, so "everything" needs
+// no predicate at all.
 type Compiled struct {
+	Table string
 	Where string
 	Args  []any
 	Order string
 	Limit int
 }
-
-// documentsTable is the table the compiled fragments belong to. Compile already
-// names that table's columns — body, id, namespace, collection — and the after
-// cursor additionally reads one row back out of it, so the name lives here
-// beside them rather than being threaded in from the store.
-const documentsTable = "documents"
 
 var (
 	// A namespace is `owner/name`: the owner segment is the isolation class a
@@ -171,8 +184,82 @@ var (
 	collectionRe  = regexp.MustCompile(`^` + namePart + `$`)
 	documentIDRe  = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 	fieldNameRe   = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+	tableNameRe   = regexp.MustCompile(`^doc_[1-9][0-9]*$`)
 	reservedField = map[string]bool{FieldCreatedAt: true, FieldUpdatedAt: true}
 )
+
+// Physical naming. A collection is one table and a declared field is one
+// generated column in it, so these names end up spliced into SQL as
+// identifiers. Every one of them is derived here from something already
+// checked — an integer row id, or a field name matching fieldNameRe — so there
+// is no caller-supplied text in any identifier the store executes.
+const (
+	// tablePrefix keeps minted tables recognisable in a schema dump and out of
+	// the way of attn's own tables.
+	tablePrefix = "doc_"
+	// fieldColumnPrefix keeps a declared field from colliding with the columns
+	// the store owns: a collection may declare a field called `id` or `body`
+	// without shadowing either.
+	fieldColumnPrefix = "f_"
+)
+
+// TableName is the table holding a collection's documents, derived from its
+// declaration's row id. Derived rather than built from the address because a
+// namespace contains a slash and a collection name is caller-chosen: minting
+// from an integer means no identifier is ever a function of caller text.
+func TableName(id int64) string {
+	return fmt.Sprintf("%s%d", tablePrefix, id)
+}
+
+// ValidateTableName accepts a minted table name. Compile calls it before
+// splicing, so a schema that reached the compiler from anywhere but the store's
+// own read path fails loudly instead of composing SQL.
+func ValidateTableName(name string) error {
+	if name == "" {
+		return fmt.Errorf("docstore: collection has no table; a declaration must be read from the store before it can be queried")
+	}
+	if !tableNameRe.MatchString(name) {
+		return fmt.Errorf("docstore: %q is not a minted table name", name)
+	}
+	return nil
+}
+
+// FieldColumn is the generated column a declared field is queried through.
+func FieldColumn(field string) string {
+	return fieldColumnPrefix + field
+}
+
+// FieldExpression is what that column computes: the field read out of the body.
+// The store builds its DDL from this, and it is the reason a declaration
+// rewrites no document — the column is VIRTUAL, so it exists for every document
+// already stored the moment it is added.
+func FieldExpression(field string) string {
+	return "json_extract(body, '$." + field + "')"
+}
+
+// ColumnAffinity is the SQLite affinity a declared type maps to. This is where
+// the declared type stops being decoration: a body storing "5" in a number
+// field reads, compares, and orders as the number 5, because the column that
+// carries it is NUMERIC. A value with no such reading — an array, an object —
+// keeps its JSON text, which is what makes those still orderable rather than an
+// error.
+func ColumnAffinity(t FieldType) string {
+	switch t {
+	case FieldNumber:
+		return "NUMERIC"
+	case FieldBool:
+		return "INTEGER"
+	default:
+		return "TEXT"
+	}
+}
+
+// quoteIdent renders an identifier for SQL. Every identifier here already
+// matches a validating pattern, so this is belt-and-braces rather than the
+// defence — but it is what makes a field named like a keyword harmless.
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
 
 // ValidateNamespace accepts an `owner/name` namespace. The store does not care
 // which owners exist; it cares that the string is a well-formed two-part name it
@@ -212,9 +299,9 @@ func ValidateDocumentID(id string) error {
 }
 
 // Validate checks a collection declaration. Field names are restricted to plain
-// identifiers, which is also what makes the compiled JSON path safe to build by
-// concatenation: there is no quoting to get wrong because there is nothing to
-// quote.
+// identifiers because a declared field becomes both a JSON path and a column
+// name in the collection's table: this is the check that keeps every identifier
+// the store goes on to execute free of caller-shaped text.
 func (s CollectionSchema) Validate() error {
 	if err := ValidateNamespace(s.Namespace); err != nil {
 		return err
@@ -292,9 +379,15 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 		return Compiled{}, fmt.Errorf("docstore: query targets %s/%s but was compiled against the declaration for %s/%s",
 			q.Namespace, q.Collection, schema.Namespace, schema.Collection)
 	}
+	if err := ValidateTableName(schema.Table); err != nil {
+		return Compiled{}, err
+	}
 
-	where := []string{"namespace = ?", "collection = ?"}
-	args := []any{q.Namespace, q.Collection}
+	// No namespace or collection predicate: the table is the collection. That
+	// isolation is structural — there is no statement here that could reach
+	// another namespace's documents even if it were built wrong.
+	var where []string
+	var args []any
 
 	for _, f := range q.Filters {
 		op, ok := opSQL[f.Op]
@@ -336,7 +429,7 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 	}
 
 	if q.After != "" || anchor != nil {
-		clause, cursorArgs, err := q.afterTuple(sortExpr, desc, anchor)
+		clause, cursorArgs, err := q.afterTuple(schema.Table, sortExpr, desc, anchor)
 		if err != nil {
 			return Compiled{}, err
 		}
@@ -355,7 +448,13 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 			q.Namespace, q.Collection, limit, MaxLimit)
 	}
 
-	return Compiled{Where: strings.Join(where, " AND "), Args: args, Order: order, Limit: limit}, nil
+	return Compiled{
+		Table: schema.Table,
+		Where: strings.Join(where, " AND "),
+		Args:  args,
+		Order: order,
+		Limit: limit,
+	}, nil
 }
 
 // afterTuple compiles the After cursor: "strictly past the anchor in the
@@ -372,7 +471,7 @@ func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, err
 // may be queried, not what a document must contain — and NULL compares as
 // nothing at all, so it is branched on rather than bound. SQLite sorts NULL
 // first, so in ASC every non-NULL row is past a NULL anchor and in DESC none is.
-func (q Query) afterTuple(sortExpr string, desc bool, anchor *Document) (string, []any, error) {
+func (q Query) afterTuple(table, sortExpr string, desc bool, anchor *Document) (string, []any, error) {
 	if q.After == "" {
 		return "", nil, fmt.Errorf("docstore: %s/%s was compiled with a cursor document but no after id", q.Namespace, q.Collection)
 	}
@@ -410,14 +509,14 @@ func (q Query) afterTuple(sortExpr string, desc bool, anchor *Document) (string,
 	// The anchor's sort value is read back out of the table rather than bound
 	// from Go. A declared field says what may be queried, not what a document
 	// must hold, so a "number" field may legitimately contain an array or an
-	// object — values that have no bindable Go equivalent, and that json_extract
-	// yields as JSON text. Reading the value through the same expression the
-	// ORDER BY uses makes the cursor compare exactly what the ordering compares,
-	// for every JSON shape, with no Go-side reconstruction to disagree with
-	// SQLite's own rendering or type ordering. The subquery is uncorrelated, so
+	// object — values that have no bindable Go equivalent, and that the column
+	// carries as JSON text. Reading the value through the same column the ORDER
+	// BY uses makes the cursor compare exactly what the ordering compares, for
+	// every JSON shape and under the column's own affinity, with no Go-side
+	// reconstruction to disagree with either. The subquery is uncorrelated, so
 	// it is evaluated once per statement.
-	value := "(SELECT " + sortExpr + " FROM " + documentsTable + " WHERE namespace = ? AND collection = ? AND id = ?)"
-	valueArgs := []any{q.Namespace, q.Collection, q.After}
+	value := "(SELECT " + sortExpr + " FROM " + table + " WHERE id = ?)"
+	valueArgs := []any{q.After}
 
 	clause := "(" + sortExpr + " > " + value + " OR (" + sortExpr + " = " + value + " AND id > ?))"
 	if desc {
@@ -455,9 +554,11 @@ func (q Query) anchorSortIsNull(anchor *Document) (bool, error) {
 	return value == nil, nil
 }
 
-// fieldExpr resolves a field reference to SQL. A reserved name is a real column;
-// anything else must be declared, and reads out of the body. use names what the
-// reference was for, so the error says whether the filter or the sort is wrong.
+// fieldExpr resolves a field reference to SQL. A reserved name is one of the
+// store's own stamped columns and is written literally; anything else must be
+// declared, and resolves to that field's generated column, quoted because its
+// name descends from caller text. use names what the reference was for, so the
+// error says whether the filter or the sort is wrong.
 func (q Query) fieldExpr(schema CollectionSchema, name, use string) (string, FieldSpec, error) {
 	if name == "" {
 		return "", FieldSpec{}, fmt.Errorf("docstore: %s/%s has a %s with no field name", q.Namespace, q.Collection, use)
@@ -470,7 +571,7 @@ func (q Query) fieldExpr(schema CollectionSchema, name, use string) (string, Fie
 		return "", FieldSpec{}, fmt.Errorf("docstore: %s/%s cannot %s on %q, which the collection does not declare (queryable: %s)",
 			q.Namespace, q.Collection, use, name, schema.declaredNames())
 	}
-	return "json_extract(body, '$." + name + "')", spec, nil
+	return quoteIdent(FieldColumn(name)), spec, nil
 }
 
 // bindValue converts a filter bound to what the statement should carry, and

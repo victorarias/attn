@@ -15,6 +15,9 @@ func requestsSchema() CollectionSchema {
 			{Name: "attempts", Type: FieldNumber},
 			{Name: "urgent", Type: FieldBool},
 		},
+		// As the store hands a declaration back: a minted table, without which
+		// nothing compiles.
+		Table: "doc_12",
 	}
 }
 
@@ -41,12 +44,17 @@ func TestPendingRequestsNewestFirstCompiles(t *testing.T) {
 		Sort:       &Sort{Field: FieldCreatedAt, Desc: true},
 		Limit:      20,
 	})
-	want := "namespace = ? AND collection = ? AND json_extract(body, '$.status') = ?"
+	want := `"f_status" = ?`
 	if c.Where != want {
 		t.Fatalf("where = %q, want %q", c.Where, want)
 	}
-	if got := []any{"ext/approval-gate", "requests", "pending"}; !equalArgs(c.Args, got) {
+	// No namespace or collection predicate: the table is the collection, so the
+	// only argument left is the caller's bound.
+	if got := []any{"pending"}; !equalArgs(c.Args, got) {
 		t.Fatalf("args = %v, want %v", c.Args, got)
+	}
+	if c.Table != "doc_12" {
+		t.Fatalf("table = %q", c.Table)
 	}
 	if c.Order != "created_at DESC, id DESC" {
 		t.Fatalf("order = %q", c.Order)
@@ -66,7 +74,7 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 		Collection: "requests",
 		Sort:       &Sort{Field: "status"},
 	})
-	if c.Order != "json_extract(body, '$.status') ASC, id ASC" {
+	if c.Order != `"f_status" ASC, id ASC` {
 		t.Fatalf("order = %q", c.Order)
 	}
 	c = mustCompile(t, Query{
@@ -74,7 +82,7 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 		Collection: "requests",
 		Sort:       &Sort{Field: "status", Desc: true},
 	})
-	if c.Order != "json_extract(body, '$.status') DESC, id DESC" {
+	if c.Order != `"f_status" DESC, id DESC` {
 		t.Fatalf("descending order = %q", c.Order)
 	}
 	// And an unsorted query is still deterministic.
@@ -177,10 +185,10 @@ func TestBoundsBindTheWayJSONExtractCompares(t *testing.T) {
 			{Field: "urgent", Op: OpEq, Value: true},
 		},
 	})
-	if got := c.Args[2]; got != float64(3) {
+	if got := c.Args[0]; got != float64(3) {
 		t.Fatalf("int bound = %#v, want float64(3)", got)
 	}
-	if got := c.Args[3]; got != 1 {
+	if got := c.Args[1]; got != 1 {
 		t.Fatalf("true bound = %#v, want 1", got)
 	}
 }
@@ -202,7 +210,7 @@ func TestAQueryRoundTripsThroughJSON(t *testing.T) {
 	if c.Limit != 5 || c.Order != "created_at DESC, id DESC" {
 		t.Fatalf("compiled = %+v", c)
 	}
-	if got := c.Args[2]; got != float64(2) {
+	if got := c.Args[0]; got != float64(2) {
 		t.Fatalf("json number bound = %#v", got)
 	}
 }
@@ -241,8 +249,8 @@ func TestNamespaceShapeIsTwoParts(t *testing.T) {
 	}
 }
 
-// A field name is a plain identifier, which is also what makes the compiled JSON
-// path safe: there is no quoting to get wrong because there is nothing to quote.
+// A field name is a plain identifier, which is what keeps both things it becomes
+// safe: a JSON path in the column's expression, and the column's own name.
 func TestFieldNamesAreIdentifiersSoThePathNeedsNoQuoting(t *testing.T) {
 	for _, bad := range []string{"has space", "with'quote", "a.b", "$x", ""} {
 		s := requestsSchema()
@@ -299,14 +307,15 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 		Sort:       &Sort{Field: "attempts"},
 		After:      "b",
 	}, anchor)
-	value := "(SELECT json_extract(body, '$.attempts') FROM documents WHERE namespace = ? AND collection = ? AND id = ?)"
-	want := "(json_extract(body, '$.attempts') > " + value + " OR (json_extract(body, '$.attempts') = " + value + " AND id > ?))"
+	value := `(SELECT "f_attempts" FROM doc_12 WHERE id = ?)`
+	want := `("f_attempts" > ` + value + ` OR ("f_attempts" = ` + value + ` AND id > ?))`
 	if !strings.HasSuffix(c.Where, want) {
 		t.Fatalf("where = %q, want it to end with %q", c.Where, want)
 	}
-	// The anchor's value is read back through the same expression the ORDER BY
-	// uses, so the only cursor arguments are the anchor's address.
-	if got := c.Args[len(c.Args)-7:]; !equalArgs(got, []any{"ext/approval-gate", "requests", "b", "ext/approval-gate", "requests", "b", "b"}) {
+	// The anchor's value is read back through the same column the ORDER BY uses,
+	// so the only cursor arguments are the anchor's id — once per read of its
+	// value, once for the tiebreaker.
+	if got := c.Args[len(c.Args)-3:]; !equalArgs(got, []any{"b", "b", "b"}) {
 		t.Fatalf("cursor args = %v", got)
 	}
 
@@ -318,7 +327,7 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 		Sort:       &Sort{Field: "attempts", Desc: true},
 		After:      "b",
 	}, anchor)
-	want = "(json_extract(body, '$.attempts') IS NULL OR json_extract(body, '$.attempts') < " + value + " OR (json_extract(body, '$.attempts') = " + value + " AND id < ?))"
+	want = `("f_attempts" IS NULL OR "f_attempts" < ` + value + ` OR ("f_attempts" = ` + value + ` AND id < ?))`
 	if !strings.HasSuffix(c.Where, want) {
 		t.Fatalf("descending where = %q, want it to end with %q", c.Where, want)
 	}
@@ -375,5 +384,67 @@ func TestTheLimitCeilingPointsAtTheCursor(t *testing.T) {
 	}.Compile(requestsSchema(), nil)
 	if err == nil || !strings.Contains(err.Error(), "after cursor") {
 		t.Fatalf("over-limit error = %v", err)
+	}
+}
+
+// Compiling needs a minted table, and refusing anything else is the whole
+// defence for the one identifier in the compiled SQL that is not derived from a
+// validated field name. A schema that reached the compiler from anywhere but a
+// read of the registry has to fail rather than compose a statement.
+func TestAQueryWillNotCompileWithoutAMintedTable(t *testing.T) {
+	bare := requestsSchema()
+	bare.Table = ""
+	if _, err := (Query{Namespace: "ext/approval-gate", Collection: "requests"}).Compile(bare, nil); err == nil {
+		t.Fatal("a declaration with no table compiled")
+	}
+	for _, forged := range []string{
+		"documents",
+		"doc_1; DROP TABLE sessions",
+		"doc_0x1",
+		"doc_",
+		`doc_1" --`,
+	} {
+		s := requestsSchema()
+		s.Table = forged
+		if _, err := (Query{Namespace: "ext/approval-gate", Collection: "requests"}).Compile(s, nil); err == nil {
+			t.Fatalf("table name %q compiled", forged)
+		}
+	}
+}
+
+// The physical names are derived from something already checked — an integer row
+// id, a field name that matched the identifier pattern — so no identifier the
+// store executes is ever a function of caller text.
+func TestPhysicalNamesAreDerivedFromCheckedInput(t *testing.T) {
+	if got := TableName(12); got != "doc_12" {
+		t.Fatalf("TableName(12) = %q", got)
+	}
+	if err := ValidateTableName(TableName(12)); err != nil {
+		t.Fatalf("a minted name was rejected: %v", err)
+	}
+	if got := FieldColumn("status"); got != "f_status" {
+		t.Fatalf("FieldColumn = %q", got)
+	}
+	// The prefix is what lets a collection declare a field named like one of the
+	// store's own columns without shadowing it.
+	if FieldColumn("id") == "id" || FieldColumn("body") == "body" {
+		t.Fatal("a declared field can shadow a stored column")
+	}
+	if got := FieldExpression("status"); got != "json_extract(body, '$.status')" {
+		t.Fatalf("FieldExpression = %q", got)
+	}
+	// Affinity is how two stored values compare, so each declared type has to map
+	// to one that reads its values the way the declaration promises.
+	for _, tc := range []struct {
+		typ  FieldType
+		want string
+	}{
+		{FieldString, "TEXT"},
+		{FieldNumber, "NUMERIC"},
+		{FieldBool, "INTEGER"},
+	} {
+		if got := ColumnAffinity(tc.typ); got != tc.want {
+			t.Fatalf("ColumnAffinity(%s) = %q, want %q", tc.typ, got, tc.want)
+		}
 	}
 }

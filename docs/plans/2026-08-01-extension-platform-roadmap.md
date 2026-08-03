@@ -94,9 +94,14 @@ a query and receives updates on change.
 - Exit: write → change event → subscribed query update, durable across
   restart; namespace isolation enforced.
 - Plan: [2026-08-03-ext-a3-doc-store.md](2026-08-03-ext-a3-doc-store.md). The
-  gate answered indexes with **declared fields, scanned** — a collection
-  declares what is queryable, and indexes become an invisible optimization
-  later rather than part of the surface.
+  gate answered indexes with **declared fields, scanned**; measurement then
+  overturned scan-first before anything wrote to the store, and
+  **A3.1** rebuilds the physical schema — a table per collection with an
+  indexed virtual column per declared field, inside `attn.db` — with the
+  query surface unchanged:
+  [2026-08-03-ext-a3.1-doc-store-physical-schema.md](2026-08-03-ext-a3.1-doc-store-physical-schema.md).
+  A3.1 lands before A4, because A4 is where extensions start declaring
+  collections.
 
 ### A4. Extension registry + shared runtime
 

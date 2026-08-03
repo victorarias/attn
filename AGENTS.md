@@ -273,8 +273,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   `internal/pty`, not inside the daemon
 - `internal/store`: SQLite plus in-memory cache
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
-- `internal/docstore`: document-store query semantics and SQL compilation (no DB
-  handle; `internal/store/documents.go` executes what it compiles)
+- `internal/docstore`: document-store query semantics, SQL compilation, and the
+  physical naming (no DB handle; `internal/store/documents.go` executes what it
+  compiles). A collection is its own table `doc_<id>`, minted from its registry
+  row; a declared field is an indexed generated column over the body. Every
+  identifier the store executes is derived here from an integer or a validated
+  field name — never from caller text
 - `internal/jobs`: durable job queue (retry/backoff, coalescing, commit fence,
   cron entries) — every background duty and every periodic tick runs on it
 - `internal/classifier`: stop-time state classification

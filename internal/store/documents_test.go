@@ -33,12 +33,24 @@ func storeWithRequests(t *testing.T, bodies map[string]string) (*Store, time.Tim
 	}
 	i := 0
 	for _, id := range sortedKeys(bodies) {
-		if err := s.PutDocument("ext/approval-gate", "requests", id, []byte(bodies[id]), base.Add(time.Duration(i)*time.Second)); err != nil {
+		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(bodies[id]), base.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 		i++
 	}
 	return s, base
+}
+
+// declOf reads a collection's declaration. Every document operation takes one,
+// because the declaration is what names the table the documents live in — the
+// same read the daemon does before touching a collection.
+func declOf(t *testing.T, s *Store, namespace, collection string) docstore.CollectionSchema {
+	t.Helper()
+	schema, ok, err := s.DocumentCollection(namespace, collection)
+	if err != nil || !ok {
+		t.Fatalf("declaration for %s/%s: ok=%v err=%v", namespace, collection, ok, err)
+	}
+	return *schema
 }
 
 func sortedKeys(m map[string]string) []string {
@@ -64,7 +76,7 @@ func queryIDs(t *testing.T, s *Store, q docstore.Query) []string {
 	}
 	var anchor *docstore.Document
 	if q.After != "" {
-		doc, found, err := s.GetDocument(q.Namespace, q.Collection, q.After)
+		doc, found, err := s.GetDocument(*schema, q.After)
 		if err != nil {
 			t.Fatalf("anchor %s: %v", q.After, err)
 		}
@@ -135,7 +147,7 @@ func TestRedeclaringAddsAQueryableFieldWithoutTouchingDocuments(t *testing.T) {
 func TestABodyComesBackExactlyAsWritten(t *testing.T) {
 	body := `{"status":"pending","nested":{"deep":[1,2,{"x":null}]},"undeclared":"kept"}`
 	s, _ := storeWithRequests(t, map[string]string{"a": body})
-	doc, ok, err := s.GetDocument("ext/approval-gate", "requests", "a")
+	doc, ok, err := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
 	if err != nil || !ok {
 		t.Fatalf("get: ok=%v err=%v", ok, err)
 	}
@@ -149,10 +161,10 @@ func TestABodyComesBackExactlyAsWritten(t *testing.T) {
 func TestReplacingADocumentKeepsCreatedAtAndMovesUpdatedAt(t *testing.T) {
 	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
 	later := base.Add(time.Hour)
-	if err := s.PutDocument("ext/approval-gate", "requests", "a", []byte(`{"status":"approved"}`), later); err != nil {
+	if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), "a", []byte(`{"status":"approved"}`), later); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
-	doc, _, err := s.GetDocument("ext/approval-gate", "requests", "a")
+	doc, _, err := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,7 +372,7 @@ func TestPagingByCreatedAtWithIdenticalTimestamps(t *testing.T) {
 		t.Fatalf("define: %v", err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if err := s.PutDocument("ext/approval-gate", "requests", id, []byte(`{"status":"pending"}`), base); err != nil {
+		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(`{"status":"pending"}`), base); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -406,11 +418,11 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 	if err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatalf("define other: %v", err)
 	}
-	if err := s.PutDocument("ext/other", "requests", "shared-id", []byte(`{"status":"approved"}`), base); err != nil {
+	if err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "shared-id", []byte(`{"status":"approved"}`), base); err != nil {
 		t.Fatalf("put other: %v", err)
 	}
 
-	mine, _, err := s.GetDocument("ext/approval-gate", "requests", "shared-id")
+	mine, _, err := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "shared-id")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -424,10 +436,10 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 		t.Fatalf("query crossed the namespace boundary: %v", got)
 	}
 	// Deleting one namespace's document leaves the other's alone.
-	if _, err := s.DeleteDocument("ext/other", "requests", "shared-id"); err != nil {
+	if _, err := s.DeleteDocument(declOf(t, s, "ext/other", "requests"), "shared-id"); err != nil {
 		t.Fatal(err)
 	}
-	if _, ok, _ := s.GetDocument("ext/approval-gate", "requests", "shared-id"); !ok {
+	if _, ok, _ := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "shared-id"); !ok {
 		t.Fatal("deleting in one namespace removed the other's document")
 	}
 }
@@ -436,11 +448,11 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 // change that did not happen.
 func TestDeleteReportsWhetherADocumentWasThere(t *testing.T) {
 	s, _ := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
-	existed, err := s.DeleteDocument("ext/approval-gate", "requests", "a")
+	existed, err := s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
 	if err != nil || !existed {
 		t.Fatalf("first delete: existed=%v err=%v", existed, err)
 	}
-	existed, err = s.DeleteDocument("ext/approval-gate", "requests", "a")
+	existed, err = s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
 	if err != nil || existed {
 		t.Fatalf("second delete: existed=%v err=%v", existed, err)
 	}
@@ -454,6 +466,10 @@ func TestRemovingACollectionTakesItsDocuments(t *testing.T) {
 		"a": `{"status":"pending"}`,
 		"b": `{"status":"pending"}`,
 	})
+	// Held from before the removal: reading through it afterwards is what proves
+	// the storage went, rather than only the registry row that names it.
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+
 	n, err := s.DeleteDocumentCollection("ext/approval-gate", "requests")
 	if err != nil {
 		t.Fatalf("delete collection: %v", err)
@@ -464,12 +480,14 @@ func TestRemovingACollectionTakesItsDocuments(t *testing.T) {
 	if _, ok, _ := s.DocumentCollection("ext/approval-gate", "requests"); ok {
 		t.Fatal("declaration survived")
 	}
-	if _, ok, _ := s.GetDocument("ext/approval-gate", "requests", "a"); ok {
-		t.Fatal("document survived its collection")
+	if _, ok, err := s.GetDocument(schema, "a"); ok || err == nil {
+		t.Fatalf("document survived its collection: ok=%v err=%v", ok, err)
 	}
 }
 
-// The count behind the slow-query receipt is per collection, not per table.
+// The count behind the slow-query receipt sees one collection: two collections
+// sharing a name under different namespaces are two tables, and neither counts
+// the other's documents.
 func TestCountIsScopedToTheCollection(t *testing.T) {
 	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`, "b": `{"status":"pending"}`})
 	other := requestsDeclaration()
@@ -477,10 +495,10 @@ func TestCountIsScopedToTheCollection(t *testing.T) {
 	if err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutDocument("ext/other", "requests", "z", []byte(`{"status":"x"}`), base); err != nil {
+	if err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "z", []byte(`{"status":"x"}`), base); err != nil {
 		t.Fatal(err)
 	}
-	n, err := s.CountDocuments("ext/approval-gate", "requests")
+	n, err := s.CountDocuments(declOf(t, s, "ext/approval-gate", "requests"))
 	if err != nil || n != 2 {
 		t.Fatalf("count = %d err = %v, want 2", n, err)
 	}
@@ -536,7 +554,7 @@ func TestDocumentsSurviveReopeningTheDatabase(t *testing.T) {
 	if err := first.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
-	if err := first.PutDocument("ext/approval-gate", "requests", "a", []byte(`{"status":"pending"}`), base); err != nil {
+	if err := first.PutDocument(declOf(t, first, "ext/approval-gate", "requests"), "a", []byte(`{"status":"pending"}`), base); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	first.Close()
@@ -561,7 +579,7 @@ func TestDocumentsSurviveReopeningTheDatabase(t *testing.T) {
 	}); !equalStrings(got, []string{"a"}) {
 		t.Fatalf("query after reopen = %v, want [a]", got)
 	}
-	doc, _, err := second.GetDocument("ext/approval-gate", "requests", "a")
+	doc, _, err := second.GetDocument(*schema, "a")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -677,5 +695,361 @@ func TestPagingOverAnExplicitJSONNull(t *testing.T) {
 	}
 	if got := queryIDs(t, s, q); !equalStrings(got, []string{"b"}) {
 		t.Fatalf("page after a null-valued document = %v, want [b]", got)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Physical schema: a table per collection, an indexed column per declared field
+// ---------------------------------------------------------------------------
+
+// The point of the whole physical schema: a filtered and sorted query reaches an
+// index rather than reading every document. Asserted through the query planner
+// because the alternative — timing the query — is the kind of test that passes
+// on a fast machine and fails in CI without either result meaning anything.
+func TestAQueryOnADeclaredFieldUsesItsIndex(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":1}`,
+		"b": `{"status":"approved","attempts":2}`,
+	})
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+
+	for _, tc := range []struct {
+		name  string
+		query docstore.Query
+	}{
+		{"filter", docstore.Query{
+			Namespace: "ext/approval-gate", Collection: "requests",
+			Filters: []docstore.Filter{{Field: "status", Op: docstore.OpEq, Value: "pending"}},
+		}},
+		{"sort", docstore.Query{
+			Namespace: "ext/approval-gate", Collection: "requests",
+			Sort: &docstore.Sort{Field: "attempts"},
+		}},
+		{"sort descending", docstore.Query{
+			Namespace: "ext/approval-gate", Collection: "requests",
+			Sort: &docstore.Sort{Field: "attempts", Desc: true},
+		}},
+		{"reserved sort", docstore.Query{
+			Namespace: "ext/approval-gate", Collection: "requests",
+			Sort: &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c, err := tc.query.Compile(schema, nil)
+			if err != nil {
+				t.Fatalf("compile: %v", err)
+			}
+			plan, err := s.QueryPlan(c)
+			if err != nil {
+				t.Fatalf("plan: %v", err)
+			}
+			joined := strings.Join(plan, " | ")
+			if !strings.Contains(joined, "USING INDEX") && !strings.Contains(joined, "USING COVERING INDEX") {
+				t.Fatalf("plan does not use an index: %s", joined)
+			}
+			// A sort served by an index needs no sorting pass. The temp B-tree is
+			// what this schema exists to remove, so its absence is the assertion
+			// that matters for an ordered query.
+			if tc.query.Sort != nil && strings.Contains(joined, "TEMP B-TREE") {
+				t.Fatalf("ordered query still sorts in a temp B-tree: %s", joined)
+			}
+		})
+	}
+}
+
+// The declared type is not decoration: it is the affinity of the column the
+// field is compared through, so a body that stores a number as text still
+// compares as a number. Under the shared-table schema this compared as text
+// against every real number, which put "10" before 9.
+func TestADeclaredTypeDecidesHowStoredValuesCompare(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":9}`,
+		"b": `{"status":"pending","attempts":"10"}`,
+	})
+	got := queryIDs(t, s, docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"},
+	})
+	if !equalStrings(got, []string{"a", "b"}) {
+		t.Fatalf("ascending by attempts = %v, want [a b] — \"10\" must order as the number 10", got)
+	}
+	// And the same value is reachable by a numeric filter, which is the half a
+	// caller notices first.
+	got = queryIDs(t, s, docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Filters: []docstore.Filter{{Field: "attempts", Op: docstore.OpGt, Value: 9}},
+	})
+	if !equalStrings(got, []string{"b"}) {
+		t.Fatalf("attempts > 9 = %v, want [b]", got)
+	}
+}
+
+// Two collections are two tables, so a field name means whatever each of them
+// declared it to mean. Sharing one table made every declared name global.
+func TestCollectionsWithTheSameFieldNameDoNotShareStorage(t *testing.T) {
+	s := New()
+	now := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	for _, coll := range []string{"requests", "settings"} {
+		schema := docstore.CollectionSchema{
+			Namespace: "ext/approval-gate", Collection: coll,
+			Fields: []docstore.FieldSpec{{Name: "status", Type: docstore.FieldString}},
+		}
+		if err := s.DefineDocumentCollection(schema, now); err != nil {
+			t.Fatalf("define %s: %v", coll, err)
+		}
+		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", coll), coll+"-1",
+			[]byte(`{"status":"`+coll+`"}`), now); err != nil {
+			t.Fatalf("put into %s: %v", coll, err)
+		}
+	}
+	for _, coll := range []string{"requests", "settings"} {
+		got := queryIDs(t, s, docstore.Query{Namespace: "ext/approval-gate", Collection: coll})
+		if !equalStrings(got, []string{coll + "-1"}) {
+			t.Fatalf("%s holds %v, want only its own document", coll, got)
+		}
+	}
+}
+
+// Redeclaring is DDL, so it has to remove as well as add. A field that leaves
+// the declaration stops being queryable; the documents that carried it are
+// untouched and it works again the moment it is redeclared.
+func TestRedeclaringRemovesAFieldAndCanBringItBack(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":1,"urgent":true}`,
+	})
+	withoutUrgent := requestsDeclaration()
+	withoutUrgent.Fields = withoutUrgent.Fields[:2]
+	if err := s.DefineDocumentCollection(withoutUrgent, base); err != nil {
+		t.Fatalf("redeclare without urgent: %v", err)
+	}
+
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+	_, err := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Filters: []docstore.Filter{{Field: "urgent", Op: docstore.OpEq, Value: true}},
+	}.Compile(schema, nil)
+	if err == nil {
+		t.Fatal("filtering on an undeclared field compiled; it must be rejected")
+	}
+
+	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+		t.Fatalf("redeclare with urgent: %v", err)
+	}
+	got := queryIDs(t, s, docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Filters: []docstore.Filter{{Field: "urgent", Op: docstore.OpEq, Value: true}},
+	})
+	if !equalStrings(got, []string{"a"}) {
+		t.Fatalf("after redeclaring urgent = %v, want [a] — the stored body never changed", got)
+	}
+}
+
+// Changing a declared field's type has to move its column, because the column's
+// affinity is how two stored values compare. Leaving the old column in place
+// would keep comparing numbers as text while the declaration said otherwise.
+func TestRedeclaringAFieldsTypeChangesHowItCompares(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":9}`,
+		"b": `{"status":"pending","attempts":10}`,
+	})
+	asText := requestsDeclaration()
+	asText.Fields[1] = docstore.FieldSpec{Name: "attempts", Type: docstore.FieldString}
+	if err := s.DefineDocumentCollection(asText, base); err != nil {
+		t.Fatalf("redeclare attempts as string: %v", err)
+	}
+	got := queryIDs(t, s, docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"},
+	})
+	if !equalStrings(got, []string{"b", "a"}) {
+		t.Fatalf("attempts declared string sorts %v, want [b a] — \"10\" sorts before \"9\" as text", got)
+	}
+}
+
+// Undefining drops the collection's table, which is what returns the space, and
+// declaring the same address again starts empty on a fresh table rather than
+// finding the old documents.
+func TestUndefiningDropsTheStorageAndRedeclaringStartsEmpty(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending"}`,
+		"b": `{"status":"pending"}`,
+	})
+	before := declOf(t, s, "ext/approval-gate", "requests")
+
+	removed, err := s.DeleteDocumentCollection("ext/approval-gate", "requests")
+	if err != nil {
+		t.Fatalf("undefine: %v", err)
+	}
+	if removed != 2 {
+		t.Fatalf("undefine removed %d documents, want 2", removed)
+	}
+	if _, ok, err := s.DocumentCollection("ext/approval-gate", "requests"); err != nil || ok {
+		t.Fatalf("declaration after undefine: ok=%v err=%v", ok, err)
+	}
+
+	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+		t.Fatalf("redefine: %v", err)
+	}
+	after := declOf(t, s, "ext/approval-gate", "requests")
+	if after.Table == before.Table {
+		t.Fatalf("redeclared collection reuses table %s; a dropped table's name must not come back", after.Table)
+	}
+	if got := queryIDs(t, s, docstore.Query{Namespace: "ext/approval-gate", Collection: "requests"}); len(got) != 0 {
+		t.Fatalf("redeclared collection holds %v, want nothing", got)
+	}
+}
+
+// A schema that did not come from a read of the registry has no table, and must
+// fail loudly rather than reach a statement. This is the check standing between
+// the registry and every identifier the store executes.
+func TestAnUnmintedSchemaIsRefused(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	unminted := requestsDeclaration() // Table is empty: never read back.
+	if _, _, err := s.GetDocument(unminted, "a"); err == nil {
+		t.Fatal("a schema with no table was accepted")
+	}
+	forged := requestsDeclaration()
+	forged.Table = "documents; DROP TABLE sessions"
+	if _, _, err := s.GetDocument(forged, "a"); err == nil {
+		t.Fatal("a forged table name was accepted")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Migration 89: carrying a populated v88 store across
+// ---------------------------------------------------------------------------
+
+// seedV88DocumentStore reshapes a head-schema database back into migration 88's
+// document store — one shared `documents` table, a registry with no minting id —
+// and rewinds the migration watermark so reopening replays 89 over real rows.
+func seedV88DocumentStore(t *testing.T, dbPath string) {
+	t.Helper()
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("open for seeding: %v", err)
+	}
+	if _, err := db.Exec(`
+		DROP TABLE document_collections;
+		CREATE TABLE documents (
+		    namespace  TEXT NOT NULL,
+		    collection TEXT NOT NULL,
+		    id         TEXT NOT NULL,
+		    body       TEXT NOT NULL,
+		    created_at TEXT NOT NULL,
+		    updated_at TEXT NOT NULL,
+		    PRIMARY KEY (namespace, collection, id)
+		);
+		CREATE TABLE document_collections (
+		    namespace   TEXT NOT NULL,
+		    collection  TEXT NOT NULL,
+		    fields_json TEXT NOT NULL,
+		    updated_at  TEXT NOT NULL,
+		    PRIMARY KEY (namespace, collection)
+		);
+		INSERT INTO document_collections VALUES
+		    ('ext/approval-gate', 'requests',
+		     '[{"name":"status","type":"string"},{"name":"attempts","type":"number"}]',
+		     '2026-08-02T09:00:00Z'),
+		    ('ext/notes', 'scratch', '[]', '2026-08-02T09:30:00Z');
+		INSERT INTO documents VALUES
+		    ('ext/approval-gate', 'requests', 'r1', '{"status":"open","attempts":2,"note":"kept"}',
+		     '2026-08-02T10:00:00Z', '2026-08-02T10:00:00Z'),
+		    ('ext/approval-gate', 'requests', 'r2', '{"status":"done","attempts":"10"}',
+		     '2026-08-02T10:01:00Z', '2026-08-02T10:05:00Z'),
+		    ('ext/approval-gate', 'requests', 'r3', '{"status":"open","attempts":7}',
+		     '2026-08-02T10:02:00Z', '2026-08-02T10:02:00Z'),
+		    ('ext/notes', 'scratch', 'n1', '{"anything":true}',
+		     '2026-08-02T11:00:00Z', '2026-08-02T11:00:00Z'),
+		    ('ext/ghost', 'lost', 'g1', '{"orphaned":true}',
+		     '2026-08-02T12:00:00Z', '2026-08-02T12:00:00Z');
+		DELETE FROM schema_migrations WHERE version >= 89;
+	`); err != nil {
+		t.Fatalf("seed v88 document store: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close seeded database: %v", err)
+	}
+}
+
+// TestAPopulatedV88StoreIsCarriedIntoItsOwnTables is migration 89's upgrade
+// witness. `attn doc define` and `attn doc put` shipped with migration 88, so a
+// populated v88 database is something an installed profile can already hold, and
+// the rebuild has to bring it forward rather than start it over.
+func TestAPopulatedV88StoreIsCarriedIntoItsOwnTables(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-89.db")
+	seedV88DocumentStore(t, dbPath)
+
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer s.Close()
+
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+	if len(schema.Fields) != 2 || schema.Fields[0].Name != "status" || schema.Fields[1].Type != docstore.FieldNumber {
+		t.Fatalf("declaration did not survive: %+v", schema.Fields)
+	}
+
+	doc, found, err := s.GetDocument(schema, "r1")
+	if err != nil || !found {
+		t.Fatalf("r1 after migration: found=%v err=%v", found, err)
+	}
+	if string(doc.Body) != `{"status":"open","attempts":2,"note":"kept"}` {
+		t.Fatalf("body was rewritten: %s", doc.Body)
+	}
+	want := time.Date(2026, 8, 2, 10, 0, 0, 0, time.UTC)
+	if !doc.CreatedAt.Equal(want) || !doc.UpdatedAt.Equal(want) {
+		t.Fatalf("timestamps moved: created=%s updated=%s", doc.CreatedAt, doc.UpdatedAt)
+	}
+
+	// The carry builds the collection's columns and indexes from its declaration,
+	// so a field declared under v88 is queryable — and indexed — without anyone
+	// redeclaring it.
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Filters: []docstore.Filter{{Field: "status", Op: docstore.OpEq, Value: "open"}},
+		Sort:    &docstore.Sort{Field: "attempts"},
+	}
+	if got := queryIDs(t, s, q); strings.Join(got, ",") != "r1,r3" {
+		t.Fatalf("query over carried documents = %v, want [r1 r3]", got)
+	}
+	c, err := q.Compile(schema, nil)
+	if err != nil {
+		t.Fatalf("compile: %v", err)
+	}
+	plan, err := s.QueryPlan(c)
+	if err != nil {
+		t.Fatalf("plan: %v", err)
+	}
+	if joined := strings.Join(plan, " | "); !strings.Contains(joined, "INDEX") {
+		t.Fatalf("carried collection has no index: %s", joined)
+	}
+
+	// A collection declaring no fields still gets its table.
+	notes := declOf(t, s, "ext/notes", "scratch")
+	if _, found, err := s.GetDocument(notes, "n1"); err != nil || !found {
+		t.Fatalf("n1 after migration: found=%v err=%v", found, err)
+	}
+
+	// Documents stored under an address no declaration named cannot happen
+	// through the API, but deleting them would be the wrong answer if they ever
+	// did: they arrive under an empty declaration, readable and one doc_define
+	// away from queryable by field.
+	ghost, ok, err := s.DocumentCollection("ext/ghost", "lost")
+	if err != nil || !ok {
+		t.Fatalf("undeclared address was not carried: ok=%v err=%v", ok, err)
+	}
+	if len(ghost.Fields) != 0 {
+		t.Fatalf("undeclared address arrived with fields: %+v", ghost.Fields)
+	}
+	if _, found, err := s.GetDocument(*ghost, "g1"); err != nil || !found {
+		t.Fatalf("g1 after migration: found=%v err=%v", found, err)
+	}
+
+	if collections, err := s.ListDocumentCollections(); err != nil || len(collections) != 3 {
+		t.Fatalf("collections after migration = %d (err=%v), want 3", len(collections), err)
+	}
+	if _, err := s.db.Exec(`SELECT 1 FROM documents LIMIT 1`); err == nil {
+		t.Fatal("the shared v88 table is still there")
 	}
 }

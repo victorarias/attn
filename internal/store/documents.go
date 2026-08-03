@@ -4,33 +4,49 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/docstore"
 )
 
-// SQLite persistence for the document store (migration 88). This file is only
-// persistence: what a query means, and the SQL a validated one compiles to, live
-// in internal/docstore, which reaches nothing — the same split internal/bus and
+// SQLite persistence for the document store. This file is only persistence:
+// what a query means, and the SQL a validated one compiles to, live in
+// internal/docstore, which reaches nothing — the same split internal/bus and
 // bus.go use.
 //
-// Two tables. `documents` holds the records; `document_collections` holds each
-// collection's declaration, durable so that every surface — the daemon, the CLI,
-// and later an extension's manifest apply — agrees on what a collection allows
-// without one of them being the live owner of that knowledge.
+// ONE TABLE PER COLLECTION. `document_collections` is the registry: one row per
+// declared collection, whose row id mints the name of the table holding its
+// documents (`doc_<id>`). A declared field is an indexed VIRTUAL generated
+// column over the body in that table, so a query reads an index instead of
+// scanning, while the body is still stored and returned byte for byte and
+// declaring a field rewrites no document. The measurement behind the shape is
+// in docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
 //
-// Isolation is structural rather than a check: namespace and collection are part
-// of the primary key and of every statement below, so there is no read or write
-// that is not already scoped to one namespace.
+// Isolation is structural rather than a check: a collection's documents are the
+// only rows in its table, so there is no read or write here that could reach
+// another namespace even if its predicate were wrong.
+//
+// Every identifier spliced into the SQL below comes from docstore — a table
+// name derived from an integer, a column name derived from a field name that
+// matched a validating pattern. None of it is caller text.
 
-// documentColumns is the read projection; body is returned byte for byte.
+// documentColumns is the read projection; body is returned byte for byte. The
+// generated columns are never selected: they exist to be filtered and ordered
+// on, and the body already carries what they compute.
 const documentColumns = `id, body, created_at, updated_at`
 
-// DefineDocumentCollection records a collection's declaration, replacing any
-// previous one. Redeclaring is how a collection gains a queryable field, and it
-// is deliberately not a migration: documents are untouched, an added field
-// becomes queryable for documents that happen to carry it, and a removed one
-// stops being queryable without anything being rewritten.
+// DefineDocumentCollection records a collection's declaration and brings its
+// table into line with it, creating the table on first declaration. Redeclaring
+// is how a collection gains or loses a queryable field: an added field is a new
+// generated column plus its index, a removed one drops both, and a field whose
+// type changed is replaced so its column carries the new affinity. Documents are
+// never rewritten — a VIRTUAL column computes from the body, so it applies to
+// every document already stored the moment it exists.
+//
+// Registry row and DDL commit together. A declaration whose table did not get
+// built, or a table no declaration names, would each be a collection that
+// cannot be queried or cannot be found.
 func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now time.Time) error {
 	if s.db == nil {
 		return fmt.Errorf("store: no database")
@@ -42,41 +58,64 @@ func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now t
 	if err != nil {
 		return fmt.Errorf("store: encoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
-	_, err = s.db.Exec(
-		`INSERT INTO document_collections (namespace, collection, fields_json, updated_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(namespace, collection) DO UPDATE SET
-		   fields_json=excluded.fields_json,
-		   updated_at=excluded.updated_at`,
-		schema.Namespace, schema.Collection, string(fields), now.UTC().Format(docstore.TimeFormat))
+	ts := now.UTC().Format(docstore.TimeFormat)
+
+	tx, err := s.db.Begin()
 	if err != nil {
 		return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	existing, table, found, err := readCollectionTx(tx, schema.Namespace, schema.Collection)
+	if err != nil {
+		return err
+	}
+
+	if !found {
+		res, err := tx.Exec(
+			`INSERT INTO document_collections (namespace, collection, fields_json, updated_at) VALUES (?, ?, ?, ?)`,
+			schema.Namespace, schema.Collection, string(fields), ts)
+		if err != nil {
+			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+		}
+		id, err := res.LastInsertId()
+		if err != nil {
+			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+		}
+		table = docstore.TableName(id)
+		if err := createCollectionTable(tx, table, schema.Fields); err != nil {
+			return fmt.Errorf("store: creating storage for %s/%s: %w", schema.Namespace, schema.Collection, err)
+		}
+	} else {
+		if err := alterCollectionTable(tx, table, existing.Fields, schema.Fields); err != nil {
+			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+		}
+		if _, err := tx.Exec(
+			`UPDATE document_collections SET fields_json = ?, updated_at = ? WHERE namespace = ? AND collection = ?`,
+			string(fields), ts, schema.Namespace, schema.Collection); err != nil {
+			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("store: committing declaration of %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	return nil
 }
 
-// DocumentCollection returns a collection's declaration. The bool is false with
-// a nil error when the collection was never declared — a caller must tell "no
-// such collection" apart from a read failure, because the first is what every
-// query against an undeclared collection has to report.
+// DocumentCollection returns a collection's declaration with its table filled
+// in. The bool is false with a nil error when the collection was never declared
+// — a caller must tell "no such collection" apart from a read failure, because
+// the first is what every query against an undeclared collection has to report.
 func (s *Store) DocumentCollection(namespace, collection string) (*docstore.CollectionSchema, bool, error) {
 	if s.db == nil {
 		return nil, false, fmt.Errorf("store: no database")
 	}
-	row := s.db.QueryRow(
-		`SELECT fields_json FROM document_collections WHERE namespace = ? AND collection = ?`,
-		namespace, collection)
-	var fields string
-	switch err := row.Scan(&fields); {
-	case err == sql.ErrNoRows:
-		return nil, false, nil
-	case err != nil:
-		return nil, false, fmt.Errorf("store: reading %s/%s: %w", namespace, collection, err)
+	schema, table, found, err := readCollection(s.db, namespace, collection)
+	if err != nil || !found {
+		return nil, false, err
 	}
-	schema := docstore.CollectionSchema{Namespace: namespace, Collection: collection}
-	if err := json.Unmarshal([]byte(fields), &schema.Fields); err != nil {
-		return nil, false, fmt.Errorf("store: decoding fields for %s/%s: %w", namespace, collection, err)
-	}
+	schema.Table = table
 	return &schema, true, nil
 }
 
@@ -87,30 +126,35 @@ func (s *Store) ListDocumentCollections() ([]docstore.CollectionSchema, error) {
 		return nil, fmt.Errorf("store: no database")
 	}
 	rows, err := s.db.Query(
-		`SELECT namespace, collection, fields_json FROM document_collections ORDER BY namespace, collection`)
+		`SELECT id, namespace, collection, fields_json FROM document_collections ORDER BY namespace, collection`)
 	if err != nil {
 		return nil, fmt.Errorf("store: listing document collections: %w", err)
 	}
 	defer rows.Close()
 	var out []docstore.CollectionSchema
 	for rows.Next() {
-		var schema docstore.CollectionSchema
-		var fields string
-		if err := rows.Scan(&schema.Namespace, &schema.Collection, &fields); err != nil {
+		var (
+			id     int64
+			schema docstore.CollectionSchema
+			fields string
+		)
+		if err := rows.Scan(&id, &schema.Namespace, &schema.Collection, &fields); err != nil {
 			return nil, fmt.Errorf("store: scanning document collection: %w", err)
 		}
 		if err := json.Unmarshal([]byte(fields), &schema.Fields); err != nil {
 			return nil, fmt.Errorf("store: decoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
+		schema.Table = docstore.TableName(id)
 		out = append(out, schema)
 	}
 	return out, rows.Err()
 }
 
 // DeleteDocumentCollection removes a declaration and every document under it,
-// reporting how many documents went. Both halves in one transaction: a
-// declaration without its documents would leave records nothing can name, and
-// documents without their declaration would leave records nothing can query.
+// reporting how many documents went. Dropping the table is what returns the
+// space, and it happens in the same transaction as the registry delete: a
+// declaration without its table would leave a collection nothing can query, and
+// a table without its declaration would leave rows nothing can name.
 func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("store: no database")
@@ -121,13 +165,20 @@ func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	res, err := tx.Exec(`DELETE FROM documents WHERE namespace = ? AND collection = ?`, namespace, collection)
-	if err != nil {
-		return 0, fmt.Errorf("store: deleting documents in %s/%s: %w", namespace, collection, err)
-	}
-	n, err := res.RowsAffected()
+	_, table, found, err := readCollectionTx(tx, namespace, collection)
 	if err != nil {
 		return 0, err
+	}
+	if !found {
+		return 0, nil
+	}
+
+	var n int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: counting %s/%s: %w", namespace, collection, err)
+	}
+	if _, err := tx.Exec(`DROP TABLE ` + table); err != nil {
+		return 0, fmt.Errorf("store: dropping storage for %s/%s: %w", namespace, collection, err)
 	}
 	if _, err := tx.Exec(
 		`DELETE FROM document_collections WHERE namespace = ? AND collection = ?`, namespace, collection); err != nil {
@@ -136,44 +187,48 @@ func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, err
 	if err := tx.Commit(); err != nil {
 		return 0, fmt.Errorf("store: committing deletion of %s/%s: %w", namespace, collection, err)
 	}
-	return int(n), nil
+	return n, nil
 }
 
 // PutDocument writes a document, creating or fully replacing it. created_at
 // survives a replacement — it is when the record first appeared, which is what a
 // "newest first" query means by it — while updated_at moves on every write.
-func (s *Store) PutDocument(namespace, collection, id string, body []byte, now time.Time) error {
-	if s.db == nil {
-		return fmt.Errorf("store: no database")
+//
+// The schema names the table, which is why every caller reads the declaration
+// first: an undeclared collection has no storage, and that has to be an error a
+// caller reports rather than a table appearing by surprise.
+func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []byte, now time.Time) error {
+	table, err := s.documentTable(schema)
+	if err != nil {
+		return err
 	}
 	ts := now.UTC().Format(docstore.TimeFormat)
-	_, err := s.db.Exec(
-		`INSERT INTO documents (namespace, collection, id, body, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(namespace, collection, id) DO UPDATE SET
+	_, err = s.db.Exec(
+		`INSERT INTO `+table+` (id, body, created_at, updated_at)
+		 VALUES (?, ?, ?, ?)
+		 ON CONFLICT(id) DO UPDATE SET
 		   body=excluded.body,
 		   updated_at=excluded.updated_at`,
-		namespace, collection, id, string(body), ts, ts)
+		id, string(body), ts, ts)
 	if err != nil {
-		return fmt.Errorf("store: writing %s/%s/%s: %w", namespace, collection, id, err)
+		return fmt.Errorf("store: writing %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
 	}
 	return nil
 }
 
 // GetDocument returns one document by its address.
-func (s *Store) GetDocument(namespace, collection, id string) (*docstore.Document, bool, error) {
-	if s.db == nil {
-		return nil, false, fmt.Errorf("store: no database")
+func (s *Store) GetDocument(schema docstore.CollectionSchema, id string) (*docstore.Document, bool, error) {
+	table, err := s.documentTable(schema)
+	if err != nil {
+		return nil, false, err
 	}
-	row := s.db.QueryRow(
-		`SELECT `+documentColumns+` FROM documents WHERE namespace = ? AND collection = ? AND id = ?`,
-		namespace, collection, id)
+	row := s.db.QueryRow(`SELECT `+documentColumns+` FROM `+table+` WHERE id = ?`, id)
 	doc, err := scanDocument(row)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("store: reading %s/%s/%s: %w", namespace, collection, id, err)
+		return nil, false, fmt.Errorf("store: reading %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
 	}
 	return doc, true, nil
 }
@@ -181,14 +236,14 @@ func (s *Store) GetDocument(namespace, collection, id string) (*docstore.Documen
 // DeleteDocument removes a document, reporting whether one was there. The caller
 // needs the difference: a delete that removed nothing must not announce a change
 // that did not happen.
-func (s *Store) DeleteDocument(namespace, collection, id string) (bool, error) {
-	if s.db == nil {
-		return false, fmt.Errorf("store: no database")
-	}
-	res, err := s.db.Exec(
-		`DELETE FROM documents WHERE namespace = ? AND collection = ? AND id = ?`, namespace, collection, id)
+func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string) (bool, error) {
+	table, err := s.documentTable(schema)
 	if err != nil {
-		return false, fmt.Errorf("store: deleting %s/%s/%s: %w", namespace, collection, id, err)
+		return false, err
+	}
+	res, err := s.db.Exec(`DELETE FROM `+table+` WHERE id = ?`, id)
+	if err != nil {
+		return false, fmt.Errorf("store: deleting %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
 	}
 	n, err := res.RowsAffected()
 	if err != nil {
@@ -205,9 +260,16 @@ func (s *Store) QueryDocuments(c docstore.Compiled) ([]docstore.Document, error)
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
 	}
-	rows, err := s.db.Query(
-		`SELECT `+documentColumns+` FROM documents WHERE `+c.Where+` ORDER BY `+c.Order+` LIMIT ?`,
-		append(append([]any{}, c.Args...), c.Limit)...)
+	if err := docstore.ValidateTableName(c.Table); err != nil {
+		return nil, err
+	}
+	stmt := `SELECT ` + documentColumns + ` FROM ` + c.Table
+	if c.Where != "" {
+		stmt += ` WHERE ` + c.Where
+	}
+	stmt += ` ORDER BY ` + c.Order + ` LIMIT ?`
+
+	rows, err := s.db.Query(stmt, append(append([]any{}, c.Args...), c.Limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: querying documents: %w", err)
 	}
@@ -224,19 +286,222 @@ func (s *Store) QueryDocuments(c docstore.Compiled) ([]docstore.Document, error)
 }
 
 // CountDocuments reports how many documents a collection holds. It is what the
-// slow-query log reports alongside a duration, so the day a scan gets slow the
-// receipt for adding an index is already written down.
-func (s *Store) CountDocuments(namespace, collection string) (int, error) {
-	if s.db == nil {
-		return 0, fmt.Errorf("store: no database")
+// slow-query log reports alongside a duration.
+func (s *Store) CountDocuments(schema docstore.CollectionSchema) (int, error) {
+	table, err := s.documentTable(schema)
+	if err != nil {
+		return 0, err
 	}
 	var n int
-	err := s.db.QueryRow(
-		`SELECT COUNT(*) FROM documents WHERE namespace = ? AND collection = ?`, namespace, collection).Scan(&n)
-	if err != nil {
-		return 0, fmt.Errorf("store: counting %s/%s: %w", namespace, collection, err)
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM ` + table).Scan(&n); err != nil {
+		return 0, fmt.Errorf("store: counting %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	return n, nil
+}
+
+// QueryPlan returns SQLite's plan for a compiled query, one row per step. It
+// exists so a test can assert that a filtered or sorted query reaches an index
+// rather than scanning the collection — the property this whole physical schema
+// is for, and one that no timing assertion could check without being flaky.
+func (s *Store) QueryPlan(c docstore.Compiled) ([]string, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("store: no database")
+	}
+	if err := docstore.ValidateTableName(c.Table); err != nil {
+		return nil, err
+	}
+	stmt := `SELECT ` + documentColumns + ` FROM ` + c.Table
+	if c.Where != "" {
+		stmt += ` WHERE ` + c.Where
+	}
+	stmt += ` ORDER BY ` + c.Order + ` LIMIT ?`
+
+	rows, err := s.db.Query(`EXPLAIN QUERY PLAN `+stmt, append(append([]any{}, c.Args...), c.Limit)...)
+	if err != nil {
+		return nil, fmt.Errorf("store: explaining query: %w", err)
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var id, parent, notUsed int
+		var detail string
+		if err := rows.Scan(&id, &parent, &notUsed, &detail); err != nil {
+			return nil, fmt.Errorf("store: scanning query plan: %w", err)
+		}
+		out = append(out, detail)
+	}
+	return out, rows.Err()
+}
+
+// documentTable resolves the table a document operation runs against, refusing
+// a schema that did not come from a read of the registry.
+func (s *Store) documentTable(schema docstore.CollectionSchema) (string, error) {
+	if s.db == nil {
+		return "", fmt.Errorf("store: no database")
+	}
+	if err := docstore.ValidateTableName(schema.Table); err != nil {
+		return "", fmt.Errorf("store: %s/%s: %w", schema.Namespace, schema.Collection, err)
+	}
+	return schema.Table, nil
+}
+
+// ---------------------------------------------------------------------------
+// DDL
+// ---------------------------------------------------------------------------
+
+// createCollectionTable builds a collection's storage: the four stored columns,
+// an index for each reserved ordering column, and a generated column plus index
+// for every declared field.
+//
+// WITHOUT ROWID because a document is addressed by its id and never by position:
+// clustering the row on the id it is looked up by removes a whole B-tree and the
+// hop through it.
+func createCollectionTable(tx *sql.Tx, table string, fields []docstore.FieldSpec) error {
+	if err := docstore.ValidateTableName(table); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`CREATE TABLE ` + table + ` (
+    id         TEXT NOT NULL PRIMARY KEY,
+    body       TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+) WITHOUT ROWID`); err != nil {
+		return err
+	}
+	// created_at and updated_at are queryable without being declared, so they
+	// are indexed unconditionally. Each index carries the id tiebreaker, which
+	// is what makes it serve the whole ordering tuple rather than only its
+	// first half — the same tuple the after cursor compares against.
+	for _, col := range []string{docstore.FieldCreatedAt, docstore.FieldUpdatedAt} {
+		if err := createFieldIndex(tx, table, col); err != nil {
+			return err
+		}
+	}
+	for _, f := range fields {
+		if err := addFieldColumn(tx, table, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// alterCollectionTable brings an existing table into line with a new
+// declaration. A field whose type changed is dropped and re-added rather than
+// left alone: its column's affinity is how two stored values compare, so a
+// declaration that says "number" must not keep comparing as text.
+func alterCollectionTable(tx *sql.Tx, table string, before, after []docstore.FieldSpec) error {
+	if err := docstore.ValidateTableName(table); err != nil {
+		return err
+	}
+	old := make(map[string]docstore.FieldSpec, len(before))
+	for _, f := range before {
+		old[f.Name] = f
+	}
+	want := make(map[string]docstore.FieldSpec, len(after))
+	for _, f := range after {
+		want[f.Name] = f
+	}
+
+	for _, f := range before {
+		next, kept := want[f.Name]
+		if kept && next.Type == f.Type {
+			continue
+		}
+		if err := dropFieldColumn(tx, table, f); err != nil {
+			return err
+		}
+	}
+	for _, f := range after {
+		prev, existed := old[f.Name]
+		if existed && prev.Type == f.Type {
+			continue
+		}
+		if err := addFieldColumn(tx, table, f); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func addFieldColumn(tx *sql.Tx, table string, f docstore.FieldSpec) error {
+	col := quoteIdent(docstore.FieldColumn(f.Name))
+	// VIRTUAL, not STORED: the index materialises the values that get compared,
+	// so storing them in the row as well would pay for them twice. SQLite also
+	// refuses to add a STORED column to an existing table, which is what would
+	// make redeclaring a rewrite instead of a one-statement change.
+	_, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (%s) VIRTUAL`,
+		table, col, docstore.ColumnAffinity(f.Type), docstore.FieldExpression(f.Name)))
+	if err != nil {
+		return err
+	}
+	return createFieldIndex(tx, table, docstore.FieldColumn(f.Name))
+}
+
+func dropFieldColumn(tx *sql.Tx, table string, f docstore.FieldSpec) error {
+	column := docstore.FieldColumn(f.Name)
+	// The index goes first: SQLite refuses to drop an indexed column.
+	if _, err := tx.Exec(`DROP INDEX IF EXISTS ` + quoteIdent(fieldIndexName(table, column))); err != nil {
+		return err
+	}
+	_, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s DROP COLUMN %s`, table, quoteIdent(column)))
+	return err
+}
+
+// createFieldIndex indexes one column with the id tiebreaker beside it, which is
+// the order every query asks for. One index serves both directions: SQLite walks
+// it backwards for a DESC ordering.
+func createFieldIndex(tx *sql.Tx, table, column string) error {
+	_, err := tx.Exec(fmt.Sprintf(`CREATE INDEX %s ON %s (%s, id)`,
+		quoteIdent(fieldIndexName(table, column)), table, quoteIdent(column)))
+	return err
+}
+
+// fieldIndexName is unique across the database because the table name is.
+func fieldIndexName(table, column string) string {
+	return table + "_" + column
+}
+
+// quoteIdent renders an identifier for SQL. Every identifier reaching it is
+// already derived from a validated name; the quoting is what makes a field named
+// like a keyword harmless.
+func quoteIdent(name string) string {
+	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// ---------------------------------------------------------------------------
+// Registry reads
+// ---------------------------------------------------------------------------
+
+type rowQuerier interface {
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+// readCollection reads a declaration and the table minted for it.
+func readCollection(q rowQuerier, namespace, collection string) (docstore.CollectionSchema, string, bool, error) {
+	schema := docstore.CollectionSchema{Namespace: namespace, Collection: collection}
+	var (
+		id     int64
+		fields string
+	)
+	err := q.QueryRow(
+		`SELECT id, fields_json FROM document_collections WHERE namespace = ? AND collection = ?`,
+		namespace, collection).Scan(&id, &fields)
+	switch {
+	case err == sql.ErrNoRows:
+		return schema, "", false, nil
+	case err != nil:
+		return schema, "", false, fmt.Errorf("store: reading %s/%s: %w", namespace, collection, err)
+	}
+	if err := json.Unmarshal([]byte(fields), &schema.Fields); err != nil {
+		return schema, "", false, fmt.Errorf("store: decoding fields for %s/%s: %w", namespace, collection, err)
+	}
+	table := docstore.TableName(id)
+	schema.Table = table
+	return schema, table, true, nil
+}
+
+func readCollectionTx(tx *sql.Tx, namespace, collection string) (docstore.CollectionSchema, string, bool, error) {
+	return readCollection(tx, namespace, collection)
 }
 
 func scanDocument(sc rowScanner) (*docstore.Document, error) {

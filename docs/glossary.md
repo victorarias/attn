@@ -181,8 +181,16 @@ locate every record:
 A collection carries a **declaration**: the fields it promises are queryable,
 each with a type. Declaring a field does not constrain what a document may
 contain — undeclared keys are stored and returned untouched — it only says what a
-query may name. `created_at` and `updated_at` are always queryable and are never
+query may name, and it is what the store indexes that field by. The type decides
+how stored values compare, so a body holding `"5"` in a `number` field sorts as
+the number 5. `created_at` and `updated_at` are always queryable and are never
 declared.
+
+Physically a collection is its own table and a declared field an indexed column
+computed from the body, so a declaration is built rather than merely recorded —
+without any document being rewritten. A **live query** therefore ends, with an
+error saying which, when its collection is removed or redeclared without a field
+it uses: the collection can no longer answer the question that was asked.
 
 A **query** is one JSON object: namespace, collection, filters, sort, limit, and
 an optional **after cursor** — the id of the last document of the previous page.

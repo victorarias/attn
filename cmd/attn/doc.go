@@ -65,17 +65,23 @@ A collection declares which fields may be filtered and sorted on; created_at and
 updated_at are always available and are never declared. Everything else in a
 document body is stored and returned untouched.
 
+A declared field is indexed, so filtering and sorting on it reads an index
+rather than every document. Declaring one rewrites nothing: the index is built
+from the bodies already stored.
+
 commands:
   define <namespace> <collection> [field:type ...]
         declare a collection, replacing any previous declaration. Types are
-        string, number and bool. Redeclaring is how a collection gains a
-        queryable field; no document is rewritten.
+        string, number and bool, and the type decides how stored values compare:
+        a body holding "5" in a number field sorts as the number 5. Redeclaring
+        is how a collection gains or loses a queryable field, and builds or drops
+        that field's index; no document is rewritten.
 
   undefine <namespace> <collection>
         remove a collection's declaration and every document under it.
 
   collections [--json]
-        list every declared collection.
+        list every declared collection, and the indexed field each one offers.
 
   put <namespace> <collection> <id> <body|->
         write a document. The body is a JSON object, or - to read stdin.
@@ -169,7 +175,10 @@ func runDocCollections(args []string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "NAMESPACE\tCOLLECTION\tQUERYABLE FIELDS")
+	// "indexed" rather than "queryable": everything in a body can be read, and
+	// what declaring buys is that these are the ones a query may name — and the
+	// ones it reaches through an index rather than a scan.
+	fmt.Fprintln(w, "NAMESPACE\tCOLLECTION\tINDEXED FIELDS")
 	for _, c := range result.Collections {
 		names := make([]string, 0, len(c.Fields))
 		for _, f := range c.Fields {
