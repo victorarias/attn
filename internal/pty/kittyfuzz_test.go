@@ -81,13 +81,21 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 
 // FuzzKittyWireMirror runs the same property with kitty LIVE, which is the
 // configuration A4 flips on. It exercises synthesis — the observed scroll and
-// cursor written in an APC's place — and it is known red on the two defects
-// recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md: an
-// undescribed image the placement diff cannot see because it appeared and died
-// inside one chunk, and the `Updated`-blind end-of-feed check. Both need a
-// decision that belongs to the flip, so this target is NOT a gate yet and is not
-// run with -fuzz in CI. Its seeds still run on every `go test`, which is what
-// keeps the recorded corpus honest without reddening the build.
+// cursor written in an APC's place — and it is knowingly red on two defects
+// recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md:
+// synthesis ends with an absolute column move that a client with left/right
+// margins enabled (`\x1b[?69h`) measures from the MARGIN, and writeAPC claims
+// ghostty's kitty stamp wholesale, so an extractable APC erases an undescribed
+// one earlier in the same chunk.
+//
+// The two placement-diff blind spots this target used to reach are closed: an
+// image that appeared and died inside one chunk, and the `Updated`-blind
+// end-of-feed check. Both were the same choice and it is made — see
+// unaccountedResync in wirefeed.go, and the decision record in the plan.
+//
+// So this target is not a gate yet and is not run with -fuzz in CI. Its seeds
+// still run on every `go test`, which is what keeps the recorded corpus honest
+// without reddening the build.
 func FuzzKittyWireMirror(f *testing.F) {
 	fuzzKittyWireMirror(f, mirrorStorageLimit)
 }

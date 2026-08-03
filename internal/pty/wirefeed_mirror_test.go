@@ -40,6 +40,22 @@ func kittyPlaceRGB(id uint32, w, h int, extra string) string {
 		id, w, h, extra, base64.StdEncoding.EncodeToString(pix))
 }
 
+// kittyTransmitRGB carries pixels and places nothing: a=t replaces the image
+// stored under an id, so a placement already showing that id keeps its key and
+// its position while its content — and its cell footprint — moves under it.
+func kittyTransmitRGB(id uint32, w, h int) string {
+	return fmt.Sprintf("\x1b_Ga=t,i=%d,f=24,t=d,s=%d,v=%d;%s\x1b\\",
+		id, w, h, base64.StdEncoding.EncodeToString(kittyCorpusPixels(w, h)))
+}
+
+// undescribed puts an APC where the segmenter must not cut it out: an
+// unfinished CSI in front of it makes the APC's leading ESC that CSI's exit
+// too, so removing the APC would remove the exit with it. The bytes therefore
+// go to the wire verbatim while ghostty still dispatches the command — an image
+// on the worker's grid that the client, which cannot parse kitty, never sees.
+// See kittyseg.go, and the corpus entry "an apc that cancels an unfinished csi".
+func undescribed(apc string) string { return "\x1b[1" + apc }
+
 // mirror holds the two terminals and the feeder under test.
 type mirror struct {
 	worker *ghosttyvt.Terminal
@@ -154,6 +170,12 @@ var mirrorCases = []mirrorCase{
 		},
 	},
 	{
+		// Leaving the alternate screen prunes the placements it held, which
+		// moves ghostty's stamp on bytes no APC accounted for. The check runs;
+		// the delta is a pure removal; nothing resyncs. That exemption is the
+		// case's point, so it is asserted rather than left implied — the mode
+		// switch is on the wire already, the client never drew the image, and no
+		// row came back when it went away.
 		name: "image placed on the alternate screen, then back",
 		cols: 20, rows: 8,
 		chunks: []string{
@@ -161,6 +183,32 @@ var mirrorCases = []mirrorCase{
 			"\x1b[?1049h\x1b[3;3Halt",
 			kittyPlaceRGB(5, 16, 32, ""),
 			"\x1b[?1049l",
+		},
+		check: func(t *testing.T, m *mirror) {
+			if len(m.feed.deltas) != 1 || !onlyRemovals(m.feed.deltas[0]) {
+				t.Fatalf("leaving the alternate screen produced deltas %+v, want one pure removal: the exemption is not the thing being exercised", m.feed.deltas)
+			}
+		},
+	},
+	{
+		// The same exemption reached the other way: a delete the wire could not
+		// describe. The bytes go out verbatim, ghostty retires the placement,
+		// and the grids stay equal — so the chunk is silent even though the
+		// stamp moved on bytes nothing accounted for.
+		name: "an undescribed delete of a live placement",
+		cols: 20, rows: 8,
+		chunks: []string{
+			"\x1b[2;2Hkeep",
+			kittyPlaceRGB(54, 16, 32, ""),
+			undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+		},
+		check: func(t *testing.T, m *mirror) {
+			if len(m.feed.deltas) != 1 || !onlyRemovals(m.feed.deltas[0]) {
+				t.Fatalf("the undescribed delete produced deltas %+v, want one pure removal", m.feed.deltas)
+			}
+			if len(m.feed.placements) != 0 {
+				t.Errorf("observed placements after the delete = %+v, want none", m.feed.placements)
+			}
 		},
 	},
 	{
@@ -267,6 +315,21 @@ var mirrorCases = []mirrorCase{
 			}
 		},
 	},
+}
+
+// The three delta shapes the end-of-feed check distinguishes. onlyRemovals is
+// the one it lets pass in silence: a placement retired and nothing created,
+// re-placed, or retransmitted.
+func onlyRemovals(delta kittyPlacementDelta) bool {
+	return len(delta.Removed) > 0 && len(delta.Added) == 0 && len(delta.Updated) == 0
+}
+
+func onlyAdditions(delta kittyPlacementDelta) bool {
+	return len(delta.Added) > 0 && len(delta.Removed) == 0 && len(delta.Updated) == 0
+}
+
+func onlyUpdates(delta kittyPlacementDelta) bool {
+	return len(delta.Updated) > 0 && len(delta.Added) == 0 && len(delta.Removed) == 0
 }
 
 // halfOf and restOf cut an escape in two at a fixed point well inside its
@@ -416,6 +479,132 @@ func TestWireFeedResyncsWhenTheAnchorHitsTheTopOfHistory(t *testing.T) {
 	}
 	if worker := m.worker.PlainText(); strings.TrimSpace(worker) != "" {
 		t.Errorf("worker screen = %q, want it scrolled clear: the case does not exercise a lost anchor otherwise", worker)
+	}
+}
+
+// The end-of-feed check's whole truth table, on streams that reach every row of
+// it. It runs only when ghostty's kitty stamp moved on bytes the wire carried
+// verbatim, and from there the question is not whether an image APPEARED but
+// whether anything happened that could have scrolled the grid: creating or
+// re-placing a placement can, retiring one cannot. So a delta that is nothing
+// but removals is silent and everything else — an empty diff under a moved
+// stamp included — is a snapshot re-push.
+//
+// Asserted on the reason and not only on the grids, because the grids cannot
+// tell the two failures apart and one of the silent rows is silent by DESIGN.
+// Where nothing should resync the grids are asserted too, which is the whole
+// claim those rows make.
+//
+// Every row also states the delta shape it means to exercise. Without that a
+// row passes for the wrong reason the day ghostty reports one of these
+// differently — a re-place that came back as an Added placement would still
+// resync, and would stop being the Updated case the row is named for.
+func TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval(t *testing.T) {
+	cases := []struct {
+		name   string
+		chunks []string
+		want   string
+		// shape names what the last chunk's observations must have found, so a
+		// row cannot pass while exercising a different branch of the rule.
+		shape func(kittyPlacementDelta) bool
+	}{
+		{
+			// Placed and deleted inside one chunk: the sets on both sides of the
+			// diff are empty, so no observation can name what moved and the
+			// stamp is the only witness. The cursor is two columns and one row
+			// apart by the end.
+			name: "a placement that appears and dies inside one chunk",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(47, 16, 32, "")) + undescribed("\x1b_Ga=d\x1b\\"),
+			},
+			want: kittyResyncStampWithoutDelta,
+			// No shape: the point of the row is that there is no delta at all.
+		},
+		{
+			// A live key put somewhere new. Nothing is added; the diff reports
+			// Updated, and the placement moved the cursor on the worker alone.
+			name: "a live placement re-placed at a new position",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(52, 16, 32, ",p=7"),
+				"\x1b[6;9Hmove" + undescribed("\x1b_Ga=p,i=52,p=7\x1b\\"),
+			},
+			want:  kittyResyncUndescribedImage,
+			shape: onlyUpdates,
+		},
+		{
+			// New pixels under a live key: ImageGeneration moves and the key
+			// does not, which is Updated again.
+			name: "an image retransmitted under a live placement id",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(53, 16, 32, ""),
+				undescribed(kittyTransmitRGB(53, 8, 16)),
+			},
+			want:  kittyResyncUndescribedImage,
+			shape: onlyUpdates,
+		},
+		{
+			// The original shape, kept in the table so widening the rule cannot
+			// drop it: a placement created by an APC the wire carried verbatim.
+			name:   "a placement created by an undescribed apc",
+			chunks: []string{"\x1b[2;2Hkeep", undescribed(kittyPlaceRGB(55, 16, 32, ""))},
+			want:   kittyResyncUndescribedImage,
+			shape:  onlyAdditions,
+		},
+		{
+			name: "a live placement deleted by an undescribed apc",
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(54, 16, 32, ""),
+				undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+			},
+			want:  "",
+			shape: onlyRemovals,
+		},
+		{
+			name: "live placements pruned by leaving the alternate screen",
+			chunks: []string{
+				"primary line\r\n",
+				"\x1b[?1049h\x1b[3;3Halt",
+				kittyPlaceRGB(56, 16, 32, ""),
+				"\x1b[?1049l",
+			},
+			want:  "",
+			shape: onlyRemovals,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+			for i, chunk := range tc.chunks[:len(tc.chunks)-1] {
+				m.write(chunk)
+				if m.lastResync != "" {
+					t.Fatalf("chunk %d resynced (%s) before the chunk under test", i, m.lastResync)
+				}
+			}
+			m.write(tc.chunks[len(tc.chunks)-1])
+
+			if m.lastResync != tc.want {
+				t.Fatalf("resync = %q, want %q", m.lastResync, tc.want)
+			}
+			if tc.shape == nil {
+				if len(m.feed.deltas) != 0 {
+					t.Fatalf("deltas = %+v, want none: the diff has to be blind here, or the stamp is not what fired", m.feed.deltas)
+				}
+			} else if len(m.feed.deltas) != 1 || !tc.shape(m.feed.deltas[0]) {
+				t.Fatalf("deltas = %+v: not the shape this row is named for", m.feed.deltas)
+			}
+			if tc.want != "" {
+				// The wire deliberately carries no synthesis for the chunk, so
+				// the grids are allowed to differ; the snapshot re-push is what
+				// makes the client whole.
+				return
+			}
+			m.agree(t, "after a chunk that only retired placements")
+		})
 	}
 }
 

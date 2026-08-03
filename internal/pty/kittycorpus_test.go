@@ -332,6 +332,65 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{"\x1b[1" + kittyPlaceRGB(44, 8, 16, "") + " done"},
 		},
 		{
+			// A placement that appears and DIES inside one chunk. Both APCs are
+			// undescribed, so the wire carries their bytes verbatim and the
+			// client does nothing with either; ghostty places the image, moves
+			// the cursor past it, and then deletes it. The set before the chunk
+			// and the set after are both empty, so the placement diff sees
+			// nothing at all — the generation stamp, which moved four times, is
+			// the only witness that anything happened.
+			name: "an undescribed image displayed and deleted in one chunk",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				undescribed(kittyPlaceRGB(47, 16, 32, "")) + undescribed("\x1b_Ga=d\x1b\\"),
+			},
+		},
+		{
+			// A live placement PUT somewhere new by an undescribed APC. The
+			// {ImageID, PlacementID} key does not move, so the diff reports it
+			// as Updated and nothing as Added — the shape a check keyed on
+			// appearance alone is blind to, while the placement advances the
+			// worker's cursor two columns and a row past the client's.
+			name: "an undescribed re-place of a live placement at a new position",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(52, 16, 32, ",p=7"),
+				"\x1b[6;9Hmove" + undescribed("\x1b_Ga=p,i=52,p=7\x1b\\"),
+			},
+		},
+		{
+			// New pixels under a live placement id: ImageGeneration moves and
+			// the key does not, so this is Updated as well — and the placement's
+			// footprint shrinks from 2x2 cells to 1x1 with the image. Nothing
+			// scrolls here and the resync is charged anyway: the end-of-feed
+			// check cannot tell a retransmission from a re-place, and an
+			// undescribed APC is rare enough to pay for the difference.
+			name: "an undescribed retransmission under a live placement id",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(53, 16, 32, ""),
+				undescribed(kittyTransmitRGB(53, 8, 16)),
+			},
+		},
+		{
+			// The exemption, pinned green. An undescribed DELETE moves the stamp
+			// too, and its diff is nothing but a removal: retiring a placement
+			// gives back no rows, so nothing scrolled, and the client learns the
+			// set emptied from the placement fan-out rather than from the wire.
+			// The grids agree, so this entry is replayed rather than exempt —
+			// which is what makes a rule that resyncs on prunes fail here.
+			name: "an undescribed delete of a live placement",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(54, 16, 32, ""),
+				undescribed("\x1b_Ga=d,d=i,i=54\x1b\\") + " tail",
+			},
+		},
+		{
 			// The mode has to survive a chunk boundary in every one of these
 			// states, which is the whole reason it is carried on the segmenter
 			// rather than recomputed per call. The APC pattern inside the OSC is

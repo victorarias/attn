@@ -68,7 +68,8 @@ const (
 	// placement does looks like that, and synthesis does not express it.
 	kittyResyncReverseScroll = "kitty_layout_reverse_scroll"
 	// kittyResyncUndescribedImage: ghostty's kitty state moved on bytes that
-	// went to the wire verbatim rather than through synthesis. That happens when
+	// went to the wire verbatim rather than through synthesis, and the diff
+	// found a placement created, re-placed, or retransmitted. That happens when
 	// an APC is one ghostty parses as kitty but the segmenter cannot cut out —
 	// an APC introduced from inside another sequence, whose leading ESC is also
 	// that sequence's exit (see kittyseg.go). Replaying those bytes keeps the
@@ -76,6 +77,14 @@ const (
 	// client cannot parse kitty, so the image the worker just placed moved its
 	// grid and not the client's. Only a snapshot can settle that.
 	kittyResyncUndescribedImage = "kitty_undescribed_image"
+	// kittyResyncStampWithoutDelta: the same verbatim bytes moved ghostty's
+	// kitty stamp and the diff that followed found NOTHING — the set before and
+	// the set after are equal. That is a placement created and destroyed inside
+	// one chunk, which an emitter reaches by drawing an image and clearing it in
+	// one 4 KiB PTY read. Whatever it scrolled is on the worker's grid, no wire
+	// byte described it, and the two sets being equal means no observation can
+	// ever name what moved. The stamp is the only witness there is.
+	kittyResyncStampWithoutDelta = "kitty_stamp_without_delta"
 )
 
 // kittyPlacementKey identifies a placement across observations: kitty's own
@@ -87,9 +96,10 @@ type kittyPlacementKey struct {
 
 // kittyPlacementDelta is what one observation found changed in the active
 // screen's placement set. It answers two questions and neither is the wire's:
-// whether an image APPEARED on bytes the wire could not describe (a resync),
-// and whether anything at all moved (an update for the client, which carries
-// the whole set rather than this).
+// whether bytes the wire could not describe did anything but RETIRE a
+// placement (a resync — see unaccountedResync), and whether anything at all
+// moved (an update for the client, which carries the whole set rather than
+// this).
 //
 // Updated carries placements whose fields moved for ANY reason, a viewport
 // position that changed because the screen scrolled included.
@@ -136,9 +146,9 @@ type wireFeeder struct {
 	// of the next diff.
 	placements []ghosttyvt.KittyPlacement
 	// deltas holds what the observations in the MOST RECENT feed call found, so
-	// it stays bounded by one chunk. It is never handed out: appeared() reads it
-	// for the resync decision, and changedPlacements() reads its emptiness as
-	// the whole test for "this chunk moved something".
+	// it stays bounded by one chunk. It is never handed out: unaccountedResync
+	// reads the tail of it for the resync decision, and changedPlacements()
+	// reads its emptiness as the whole test for "this chunk moved something".
 	deltas []kittyPlacementDelta
 
 	// resync names the observation that failed during this feed, "" when none.
@@ -241,19 +251,17 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	// One cheap read per chunk buys the guarantee that no image ever lands on
 	// the worker's grid alone.
 	//
-	// Only an APPEARING placement is a divergence. The stamp also moves when
-	// ghostty prunes placements the screen no longer holds — leaving the
-	// alternate screen is the common one — and a placement going away costs the
-	// client nothing: it never drew the image, and the mode switch that pruned
-	// it is on the wire already.
+	// Only the observations from HERE on are the unaccounted ones: writeAPC's
+	// own dispatches appended their deltas earlier in this same call, and every
+	// one of those was either described on the wire or resynced over already.
 	observed := false
 	if stamped := f.term.KittyGeneration(); stamped != f.generation {
 		f.generation = stamped
 		before := len(f.deltas)
 		f.observe()
 		observed = true
-		if f.appeared(before) {
-			f.failResync(kittyResyncUndescribedImage)
+		if reason, ok := unaccountedResync(f.deltas[before:]); ok {
+			f.failResync(reason)
 		}
 	}
 
@@ -471,16 +479,40 @@ func (f *wireFeeder) observe() {
 	}
 }
 
-// appeared reports whether the observations recorded past index from brought
-// any placement into existence, as opposed to only retiring or moving ones the
-// wire has already accounted for.
-func (f *wireFeeder) appeared(from int) bool {
-	for _, delta := range f.deltas[from:] {
-		if len(delta.Added) > 0 {
-			return true
+// unaccountedResync names what a generation move on bytes the wire carried
+// VERBATIM costs the client, given the observations that move produced. Reports
+// false when it costs nothing.
+//
+// The rule rests on one distinction: a resync exists for grid SCROLL the wire
+// never expressed, never for knowledge of the placement set. The set reaches
+// the client on its own, through changedPlacements' fan-out, whatever happened
+// here. And only bringing a placement into existence or putting a live one
+// somewhere new can scroll the grid — retiring one moves nothing, because
+// ghostty does not give back the rows an image took. So the exemption is
+// exactly a delta that is nothing but removals, and everything else resyncs:
+//
+//   - no delta at all, with the stamp moved: a placement that appeared and died
+//     inside this chunk. It left the before and after sets equal while its
+//     scroll stayed on the worker's grid, so nothing but the stamp can see it.
+//   - Added: a placement the wire never described came into existence.
+//   - Updated: a live {ImageID, PlacementID} put at a new spot, or an image
+//     retransmitted under one (ImageGeneration moves, the key does not). The
+//     first can scroll; the second is charged with it because this check cannot
+//     tell them apart, and an undescribed APC is rare enough to pay for that.
+//
+// Scroll noise cannot reach here: an ordinary scroll moves every live placement
+// but leaves ghostty's stamp alone, so this runs only when the terminal itself
+// says its kitty state changed on bytes nothing accounted for.
+func unaccountedResync(deltas []kittyPlacementDelta) (string, bool) {
+	if len(deltas) == 0 {
+		return kittyResyncStampWithoutDelta, true
+	}
+	for _, delta := range deltas {
+		if len(delta.Added) > 0 || len(delta.Updated) > 0 {
+			return kittyResyncUndescribedImage, true
 		}
 	}
-	return false
+	return "", false
 }
 
 // failResync records the first observation failure of this chunk. The APC's
@@ -529,8 +561,8 @@ func (f *wireFeeder) snapshotBlocks() []AttachBlockData {
 // without images off cgo here too.
 //
 // The stored set is deliberately left alone. It is the left side of the next
-// diff, and writing it from outside feed() would let a reflow absorb an
-// appearance that appeared() has to see.
+// diff, and writing it from outside feed() would let a reflow absorb a mutation
+// the end-of-feed check has to see.
 func (f *wireFeeder) snapshotPlacements() ([]ghosttyvt.KittyPlacement, bool) {
 	if len(f.placements) == 0 {
 		return nil, false

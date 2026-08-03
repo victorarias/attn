@@ -730,10 +730,11 @@ moves and `writeAPC` returns early — and all become live the moment the limit 
 flipped. None may ship with the flip.
 
 `FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
-property with kitty live, and it is knowingly red until the last two below are
-decided. Soaking it is part of this phase's work, not A2's. (The pin skew noted
-under A2 is NOT one of these — it is a live limit today, and gated on the two
-ghostty pins converging rather than on the storage flip.)
+property with kitty live. The two placement-diff items below are decided and
+fixed; what it stays red on is the CHA-under-margins item and the stamp-claim
+item its soak turned up. Soaking it is part of this phase's work, not A2's.
+(The pin skew noted under A2 is NOT one of these — it is a live limit today,
+and gated on the two ghostty pins converging rather than on the storage flip.)
 
 - [ ] **CHA is wrong under DECLRMM + origin mode.** Synthesis ends with an
       absolute column move, and a client with left/right margins enabled
@@ -750,30 +751,73 @@ ghostty pins converging rather than on the storage flip.)
       Measure real emitters before deciding whether that needs a cheaper
       repair (a wire-side sequence-abort byte was sketched and rejected as
       unproven; see the segmenter's header).
-- [ ] **The undescribed-image check only sees images APPEAR.** The end-of-feed
-      comparison resyncs on `delta.Added` alone, because `Updated` is scroll
-      noise: `ViewportCol`/`ViewportRow` are viewport-relative, and observation
-      happens only on APC writes, so ordinary scrolling between two of them
-      moves every live placement and would resync constantly. The cost is two
-      divergences that stay silent on a verbatim APC — a re-place of an
+- [x] **The undescribed-image check only sees images APPEAR.** The end-of-feed
+      comparison resynced on `delta.Added` alone, because `Updated` looked like
+      scroll noise: `ViewportCol`/`ViewportRow` are viewport-relative, so
+      ordinary scrolling moves every live placement. The cost was two
+      divergences that stayed silent on a verbatim APC — a re-place of an
       existing `{ImageID, PlacementID}` at a new spot, and a retransmission
       that changes the image content under a live id (`ImageGeneration` moves,
-      the placement key does not). Decide at the flip: include `Updated` and
-      accept the re-pushes, or key the diff on the fields a scroll cannot move.
-- [ ] **A placement that appears and dies inside one chunk is invisible.** The
+      the placement key does not). **Decided: include `Updated`.** The
+      scroll-noise worry does not apply, because a plain scroll does not move
+      ghostty's kitty stamp and this check runs only when the stamp moved on
+      bytes nothing accounted for. See the decision record below.
+- [x] **A placement that appears and dies inside one chunk is invisible.** The
       end-of-feed check runs ONE diff per feed call, against the placement set
       from before it. An image that is displayed and then deleted in the same
-      PTY chunk leaves that set unchanged, so `Added` is empty and no resync
-      fires — while the scroll the placement caused is still on the worker's
+      PTY chunk left that set unchanged, so `Added` was empty and no resync
+      fired — while the scroll the placement caused was still on the worker's
       grid and never reached the wire. Found by `FuzzKittyWireMirror` at ~30s
       on a transmit-and-display followed by `\x1b_Ga=d\x1b\\`, which reports
       `gen 0->4, added=0 removed=0 updated=0` and leaves the worker at `(3,1)`
       against the client's `(1,0)`. It needs no exotic stream: PTY reads are
       4 KiB and up, so an emitter that draws an image and clears it lands both
-      in one read. The generation stamp is the honest signal here — it moved
-      four times while the diff saw nothing — but keying purely on the stamp
-      resyncs on prunes too, which is what the `Added`-only rule was avoiding.
-      Decide with the item above; they are the same choice seen twice.
+      in one read. **Decided: resync when the stamp moved and the diff found
+      nothing at all** — the stamp is the only witness such a chunk leaves. See
+      the decision record below; this and the item above were one choice.
+- [ ] **An extractable APC erases an earlier undescribed one in the same
+      chunk.** `writeAPC` claims the stamp wholesale (`f.generation = stamped`)
+      and reads its own "before" stamp AFTER the chunk's earlier plain bytes
+      have already reached the terminal. So an undescribed APC followed by ANY
+      extractable APC in the same chunk leaves the end-of-feed check nothing to
+      see: the stamp reads as accounted for, `writeAPC` observed nothing
+      (its own before and after are equal when the second APC is a no-op), and
+      no resync fires. Found by `FuzzKittyWireMirror` at ~8m on a placement APC
+      terminated by a stray ESC — which ghostty DISPATCHES, so the image lands
+      while the segmenter replays the bytes as plain — followed by `\x1bi` and
+      an empty `\x1b_G\x1b\\`; the worker ends at `(2,1)` against the client's
+      `(0,0)`. Reproduces identically with the old `Added`-only predicate, so
+      it is a third blind spot rather than a consequence of the rule below: the
+      ACCOUNTING is wrong, not the predicate. The fix belongs where the stamp
+      is claimed — `writeAPC` may claim only the move it made — and needs a
+      corpus entry. No entry is recorded for it yet on purpose: the stream is
+      silently divergent today, so an entry would pin a wrong grid as correct.
+
+**Decision record — what an unaccounted kitty mutation costs.** A resync exists
+for grid SCROLL the wire never expressed, never for knowledge of the placement
+set: the set reaches the client on its own through the placement fan-out,
+whatever happened here. And only bringing a placement into existence or putting
+a live one somewhere new can scroll the grid — retiring one gives back no rows.
+So when ghostty's stamp moves on bytes the wire carried verbatim:
+
+- no delta at all → resync, `kitty_stamp_without_delta`. The sets on both sides
+  of the diff are equal, so nothing but the stamp can witness the placement that
+  appeared and died.
+- any `Added` or `Updated` → resync, `kitty_undescribed_image`. A retransmission
+  that scrolls nothing is charged with it too: this check cannot tell one from a
+  re-place, and it does not need to.
+- nothing but `Removed` → silent. That is the alternate-screen prune and the
+  undescribed delete, and it is the ONLY exemption.
+
+Accepted cost: plain bytes that scroll a live placement BEFORE an undescribed
+APC in the same chunk read as `Updated` and resync. It takes an undescribed APC
+to reach at all — one introduced from a non-ground parser state — and how rare
+those are in real emitters is the measurement the item above owes.
+`unaccountedResync` in `internal/pty/wirefeed.go` is the rule; the corpus
+entries named "an undescribed …" and
+`TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval` are its truth
+table, red in both directions (measured: reverting to `Added`-only reddens the
+three resync rows, resyncing on every delta reddens the two silent ones).
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
