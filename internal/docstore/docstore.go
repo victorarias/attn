@@ -67,9 +67,8 @@ const (
 )
 
 // Op is a filter comparison. Equality plus the four range operators is the whole
-// surface: it covers both proof compositions (a pending-requests panel, and
-// records after a cursor), and range on the sort field is what makes cursor
-// pagination work.
+// surface: it covers a pending-requests panel and a changed-since sweep.
+// Pagination is deliberately not built out of these — see Query.After.
 type Op string
 
 const (
@@ -111,8 +110,8 @@ type Filter struct {
 }
 
 // Sort names the ordering field. Results always carry a stable total order —
-// Compile appends the document id as a tiebreaker — so paging through a sort
-// with ties cannot skip or repeat a document.
+// Compile appends the document id as a tiebreaker, in the same direction as the
+// sort — so two documents sharing a sort value have a defined relative position.
 type Sort struct {
 	Field string `json:"field"`
 	Desc  bool   `json:"desc,omitempty"`
@@ -122,12 +121,21 @@ type Sort struct {
 //
 // A zero Limit means DefaultLimit rather than "unbounded": a query with no
 // ceiling is a wire message with no ceiling.
+//
+// After is the id of the last document of the previous page, and is how a
+// caller gets the next one. It has to be part of the query rather than a filter
+// a caller writes by hand: the visible order is (sort field, id), and a filter
+// can only constrain one of those, so `sort > value` skips every document tied
+// with the anchor and `sort >= value` returns the anchor again. Compile turns
+// After into a comparison against the whole ordering tuple, which is the only
+// form that neither skips nor repeats.
 type Query struct {
 	Namespace  string   `json:"namespace"`
 	Collection string   `json:"collection"`
 	Filters    []Filter `json:"filters,omitempty"`
 	Sort       *Sort    `json:"sort,omitempty"`
 	Limit      int      `json:"limit,omitempty"`
+	After      string   `json:"after,omitempty"`
 }
 
 // Document is one stored record. Body is the document as written, byte for byte
@@ -261,7 +269,13 @@ func (s CollectionSchema) declaredNames() string {
 // SQL. Every rejection names the collection, the offending part, and what is
 // available — the reader is an agent that must fix the query from the error
 // alone.
-func (q Query) Compile(schema CollectionSchema) (Compiled, error) {
+//
+// anchor is the document q.After names, which the caller reads before compiling
+// because this package holds no database handle. It is nil when q.After is
+// empty, and its absence when q.After is set is an error rather than an empty
+// page: a cursor pointing at a document that no longer exists is a caller
+// mistake worth hearing about, not a silent end of results.
+func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, error) {
 	if err := ValidateNamespace(q.Namespace); err != nil {
 		return Compiled{}, err
 	}
@@ -294,20 +308,34 @@ func (q Query) Compile(schema CollectionSchema) (Compiled, error) {
 		args = append(args, val)
 	}
 
+	sortExpr := ""
+	desc := false
 	order := "id ASC"
 	if q.Sort != nil {
 		expr, _, err := q.fieldExpr(schema, q.Sort.Field, "sort")
 		if err != nil {
 			return Compiled{}, err
 		}
+		sortExpr, desc = expr, q.Sort.Desc
 		dir := "ASC"
-		if q.Sort.Desc {
+		if desc {
 			dir = "DESC"
 		}
 		// The id tiebreaker is what makes the order total. Without it two
 		// documents sharing a sort value have no defined relative position, and
-		// a paginating reader can see one twice and the other never.
-		order = expr + " " + dir + ", id ASC"
+		// a paginating reader can see one twice and the other never. It runs in
+		// the sort's own direction so the visible order is one uniformly
+		// directed tuple, which is what the After cursor compares against.
+		order = expr + " " + dir + ", id " + dir
+	}
+
+	if q.After != "" || anchor != nil {
+		clause, cursorArgs, err := q.afterTuple(schema, sortExpr, desc, anchor)
+		if err != nil {
+			return Compiled{}, err
+		}
+		where = append(where, clause)
+		args = append(args, cursorArgs...)
 	}
 
 	limit := q.Limit
@@ -317,11 +345,107 @@ func (q Query) Compile(schema CollectionSchema) (Compiled, error) {
 	case limit < 0:
 		return Compiled{}, fmt.Errorf("docstore: %s/%s limit is %d; a limit must be positive", q.Namespace, q.Collection, limit)
 	case limit > MaxLimit:
-		return Compiled{}, fmt.Errorf("docstore: %s/%s limit is %d, above the maximum of %d; page with a range filter on the sort field instead",
+		return Compiled{}, fmt.Errorf("docstore: %s/%s limit is %d, above the maximum of %d; page instead, passing the last document's id as the query's after cursor",
 			q.Namespace, q.Collection, limit, MaxLimit)
 	}
 
 	return Compiled{Where: strings.Join(where, " AND "), Args: args, Order: order, Limit: limit}, nil
+}
+
+// afterTuple compiles the After cursor: "strictly past the anchor in the
+// visible order". The visible order is (sort field, id) both running the same
+// direction, so past-the-anchor is the tuple comparison
+//
+//	sort <cmp> value OR (sort = value AND id <cmp> anchorID)
+//
+// A range filter cannot express that second branch, which is why After exists:
+// with ties on the sort field, `sort > value` loses every document that shares
+// the anchor's value and `sort >= value` hands the anchor back.
+//
+// A missing or JSON-null sort value is a real case — a declared field says what
+// may be queried, not what a document must contain — and NULL compares as
+// nothing at all, so it is branched on rather than bound. SQLite sorts NULL
+// first, so in ASC every non-NULL row is past a NULL anchor and in DESC none is.
+func (q Query) afterTuple(schema CollectionSchema, sortExpr string, desc bool, anchor *Document) (string, []any, error) {
+	if q.After == "" {
+		return "", nil, fmt.Errorf("docstore: %s/%s was compiled with a cursor document but no after id", q.Namespace, q.Collection)
+	}
+	if err := ValidateDocumentID(q.After); err != nil {
+		return "", nil, err
+	}
+	if anchor == nil {
+		return "", nil, fmt.Errorf("docstore: %s/%s cannot page after %q, which no longer exists; page again from the start, or use the id of a document that is still stored",
+			q.Namespace, q.Collection, q.After)
+	}
+	if anchor.ID != q.After {
+		return "", nil, fmt.Errorf("docstore: %s/%s was compiled to page after %q but given document %q", q.Namespace, q.Collection, q.After, anchor.ID)
+	}
+
+	cmp := ">"
+	if desc {
+		cmp = "<"
+	}
+	if sortExpr == "" {
+		// No sort: the whole order is id ASC, so the cursor is one comparison.
+		return "id " + cmp + " ?", []any{q.After}, nil
+	}
+
+	value, err := q.anchorSortValue(schema, anchor)
+	if err != nil {
+		return "", nil, err
+	}
+	if value == nil {
+		if desc {
+			return "(" + sortExpr + " IS NULL AND id < ?)", []any{q.After}, nil
+		}
+		return "(" + sortExpr + " IS NOT NULL OR id > ?)", []any{q.After}, nil
+	}
+	clause := "(" + sortExpr + " " + cmp + " ? OR (" + sortExpr + " = ? AND id " + cmp + " ?))"
+	if desc {
+		// Descending puts NULLs last, so they are past any non-NULL anchor.
+		clause = "(" + sortExpr + " IS NULL OR " + sortExpr + " < ? OR (" + sortExpr + " = ? AND id < ?))"
+	}
+	return clause, []any{value, value, q.After}, nil
+}
+
+// anchorSortValue reads the cursor document's value for the sort field, bound
+// the way the compiled expression compares. It returns nil for a document that
+// does not carry the field, which is the NULL branch above.
+func (q Query) anchorSortValue(schema CollectionSchema, anchor *Document) (any, error) {
+	field := q.Sort.Field
+	switch field {
+	case FieldCreatedAt:
+		return anchor.CreatedAt.UTC().Format(TimeFormat), nil
+	case FieldUpdatedAt:
+		return anchor.UpdatedAt.UTC().Format(TimeFormat), nil
+	}
+	var body map[string]json.RawMessage
+	if err := json.Unmarshal(anchor.Body, &body); err != nil {
+		return nil, fmt.Errorf("docstore: %s/%s cannot page after %q: its body is not a JSON object (%w)", q.Namespace, q.Collection, anchor.ID, err)
+	}
+	raw, ok := body[field]
+	if !ok {
+		return nil, nil
+	}
+	var value any
+	if err := json.Unmarshal(raw, &value); err != nil {
+		return nil, fmt.Errorf("docstore: %s/%s cannot page after %q: its %q is not valid JSON (%w)", q.Namespace, q.Collection, anchor.ID, field, err)
+	}
+	// Bound the way json_extract yields it, so the comparison and the ORDER BY
+	// agree: booleans come back as 1/0, everything else as itself. The stored
+	// value is bound whatever its type, even if it disagrees with the
+	// declaration — the ordering it participates in is the stored one.
+	switch v := value.(type) {
+	case nil:
+		return nil, nil
+	case bool:
+		if v {
+			return 1, nil
+		}
+		return 0, nil
+	default:
+		return v, nil
+	}
 }
 
 // fieldExpr resolves a field reference to SQL. A reserved name is a real column;

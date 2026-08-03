@@ -184,9 +184,12 @@ contain — undeclared keys are stored and returned untouched — it only says w
 query may name. `created_at` and `updated_at` are always queryable and are never
 declared.
 
-A **query** is one JSON object: namespace, collection, filters, sort, limit. It
-returns a whole result set, never a page cursor; a range filter on the sort field
-is how a caller pages.
+A **query** is one JSON object: namespace, collection, filters, sort, limit, and
+an optional **after cursor** — the id of the last document of the previous page.
+The cursor is part of the query rather than a filter a caller writes, because the
+visible order is (sort field, id) and a filter can only constrain one of those:
+with documents tied on the sort field, `sort > value` skips the tied ones and
+`sort >= value` returns the anchor again.
 
 A **live query** is that same query left open. Every delivery is the whole
 current result set, so a subscriber renders what it is handed and never

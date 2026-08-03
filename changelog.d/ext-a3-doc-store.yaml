@@ -6,9 +6,9 @@ change: >
   caller-chosen ids, and a collection declares which fields are queryable.
   Documents are stored byte for byte and nothing rewrites them, so adding a
   queryable field is a declaration change rather than a migration. A query is
-  one JSON object — namespace, collection, filters, sort, limit — and can be
-  left open as a live query, where every delivery is the whole current result
-  set. `attn doc` is the first consumer: define, put, get, delete, query, and
+  one JSON object — namespace, collection, filters, sort, limit, and an after
+  cursor for the next page — and can be left open as a live query, where every
+  delivery is the whole current result set. `attn doc` is the first consumer: define, put, get, delete, query, and
   watch.
 notes: >
   Nothing user-visible in the app yet; the store is the spine the extension

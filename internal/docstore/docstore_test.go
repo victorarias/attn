@@ -18,9 +18,13 @@ func requestsSchema() CollectionSchema {
 	}
 }
 
-func mustCompile(t *testing.T, q Query) Compiled {
+func mustCompile(t *testing.T, q Query, anchor ...*Document) Compiled {
 	t.Helper()
-	c, err := q.Compile(requestsSchema())
+	var after *Document
+	if len(anchor) == 1 {
+		after = anchor[0]
+	}
+	c, err := q.Compile(requestsSchema(), after)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -44,7 +48,7 @@ func TestPendingRequestsNewestFirstCompiles(t *testing.T) {
 	if got := []any{"ext/approval-gate", "requests", "pending"}; !equalArgs(c.Args, got) {
 		t.Fatalf("args = %v, want %v", c.Args, got)
 	}
-	if c.Order != "created_at DESC, id ASC" {
+	if c.Order != "created_at DESC, id DESC" {
 		t.Fatalf("order = %q", c.Order)
 	}
 	if c.Limit != 20 {
@@ -52,8 +56,10 @@ func TestPendingRequestsNewestFirstCompiles(t *testing.T) {
 	}
 }
 
-// Every sort carries the document id as a tiebreaker, so documents sharing a
-// sort value have a defined relative position and paging cannot skip or repeat.
+// Every sort carries the document id as a tiebreaker, in the sort's own
+// direction, so documents sharing a sort value have a defined relative position
+// and the visible order is one uniformly directed tuple the cursor can compare
+// against.
 func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 	c := mustCompile(t, Query{
 		Namespace:  "ext/approval-gate",
@@ -62,6 +68,14 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 	})
 	if c.Order != "json_extract(body, '$.status') ASC, id ASC" {
 		t.Fatalf("order = %q", c.Order)
+	}
+	c = mustCompile(t, Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		Sort:       &Sort{Field: "status", Desc: true},
+	})
+	if c.Order != "json_extract(body, '$.status') DESC, id DESC" {
+		t.Fatalf("descending order = %q", c.Order)
 	}
 	// And an unsorted query is still deterministic.
 	if c := mustCompile(t, Query{Namespace: "ext/approval-gate", Collection: "requests"}); c.Order != "id ASC" {
@@ -103,7 +117,7 @@ func TestQueryingAnUndeclaredFieldSaysWhatIsQueryable(t *testing.T) {
 		Namespace:  "ext/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: "priority", Op: OpEq, Value: "high"}},
-	}.Compile(requestsSchema())
+	}.Compile(requestsSchema(), nil)
 	if err == nil {
 		t.Fatal("filtering an undeclared field was accepted")
 	}
@@ -117,7 +131,7 @@ func TestQueryingAnUndeclaredFieldSaysWhatIsQueryable(t *testing.T) {
 		Namespace:  "ext/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "priority"},
-	}.Compile(requestsSchema())
+	}.Compile(requestsSchema(), nil)
 	if err == nil || !strings.Contains(err.Error(), "sort") {
 		t.Fatalf("sort on an undeclared field: %v", err)
 	}
@@ -141,7 +155,7 @@ func TestAFilterBoundMustMatchTheDeclaredType(t *testing.T) {
 				Namespace:  "ext/approval-gate",
 				Collection: "requests",
 				Filters:    []Filter{{Field: tc.field, Op: OpEq, Value: tc.value}},
-			}.Compile(requestsSchema())
+			}.Compile(requestsSchema(), nil)
 			if err == nil {
 				t.Fatal("mismatched bound was accepted")
 			}
@@ -181,11 +195,11 @@ func TestAQueryRoundTripsThroughJSON(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &q); err != nil {
 		t.Fatal(err)
 	}
-	c, err := q.Compile(requestsSchema())
+	c, err := q.Compile(requestsSchema(), nil)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	if c.Limit != 5 || c.Order != "created_at DESC, id ASC" {
+	if c.Limit != 5 || c.Order != "created_at DESC, id DESC" {
 		t.Fatalf("compiled = %+v", c)
 	}
 	if got := c.Args[2]; got != float64(2) {
@@ -200,7 +214,7 @@ func TestLimitDefaultsAndItsCeilingNamesTheAsk(t *testing.T) {
 	if c := mustCompile(t, Query{Namespace: "ext/approval-gate", Collection: "requests"}); c.Limit != DefaultLimit {
 		t.Fatalf("default limit = %d, want %d", c.Limit, DefaultLimit)
 	}
-	_, err := Query{Namespace: "ext/approval-gate", Collection: "requests", Limit: MaxLimit + 1}.Compile(requestsSchema())
+	_, err := Query{Namespace: "ext/approval-gate", Collection: "requests", Limit: MaxLimit + 1}.Compile(requestsSchema(), nil)
 	if err == nil {
 		t.Fatal("a limit above the maximum was accepted")
 	}
@@ -256,7 +270,7 @@ func TestBodyMustBeAJSONObject(t *testing.T) {
 // and refusing it is what keeps a caller from reading one collection under
 // another's rules.
 func TestAQueryWillNotCompileAgainstAnotherCollectionsDeclaration(t *testing.T) {
-	_, err := Query{Namespace: "ext/other", Collection: "requests"}.Compile(requestsSchema())
+	_, err := Query{Namespace: "ext/other", Collection: "requests"}.Compile(requestsSchema(), nil)
 	if err == nil {
 		t.Fatal("mismatched declaration was accepted")
 	}
@@ -272,4 +286,91 @@ func equalArgs(got, want []any) bool {
 		}
 	}
 	return true
+}
+
+// The after cursor compiles to a comparison against the whole ordering tuple.
+// The second branch — equal sort value, greater id — is the one a filter cannot
+// express, and is why After is part of the query rather than caller-written.
+func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
+	anchor := &Document{ID: "b", Body: []byte(`{"attempts":7}`)}
+	c := mustCompile(t, Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		Sort:       &Sort{Field: "attempts"},
+		After:      "b",
+	}, anchor)
+	want := "(json_extract(body, '$.attempts') > ? OR (json_extract(body, '$.attempts') = ? AND id > ?))"
+	if !strings.HasSuffix(c.Where, want) {
+		t.Fatalf("where = %q, want it to end with %q", c.Where, want)
+	}
+	if got := c.Args[len(c.Args)-3:]; !equalArgs(got, []any{float64(7), float64(7), "b"}) {
+		t.Fatalf("cursor args = %v", got)
+	}
+
+	// Descending flips both comparisons, and admits the NULLs the descending
+	// order puts last.
+	c = mustCompile(t, Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		Sort:       &Sort{Field: "attempts", Desc: true},
+		After:      "b",
+	}, anchor)
+	want = "(json_extract(body, '$.attempts') IS NULL OR json_extract(body, '$.attempts') < ? OR (json_extract(body, '$.attempts') = ? AND id < ?))"
+	if !strings.HasSuffix(c.Where, want) {
+		t.Fatalf("descending where = %q, want it to end with %q", c.Where, want)
+	}
+}
+
+// An unsorted query's whole order is the id, so its cursor is that one column.
+func TestTheAfterCursorOfAnUnsortedQueryIsTheID(t *testing.T) {
+	c := mustCompile(t, Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		After:      "b",
+	}, &Document{ID: "b", Body: []byte(`{}`)})
+	if !strings.HasSuffix(c.Where, "id > ?") {
+		t.Fatalf("where = %q", c.Where)
+	}
+}
+
+// A cursor whose document is gone fails loudly. An empty page would read as
+// "end of results", which is a silent truncation of the caller's walk.
+func TestAnAfterCursorWithNoDocumentIsAnError(t *testing.T) {
+	_, err := Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		Sort:       &Sort{Field: "attempts"},
+		After:      "vanished",
+	}.Compile(requestsSchema(), nil)
+	if err == nil {
+		t.Fatal("a cursor to a missing document was accepted")
+	}
+	for _, want := range []string{"vanished", "no longer exists"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("error %q does not mention %q", err, want)
+		}
+	}
+	// And an anchor that is not the document the cursor named is a caller bug,
+	// not a page: it would silently return the wrong slice.
+	_, err = Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		After:      "b",
+	}.Compile(requestsSchema(), &Document{ID: "c", Body: []byte(`{}`)})
+	if err == nil || !strings.Contains(err.Error(), "\"c\"") {
+		t.Fatalf("mismatched anchor: %v", err)
+	}
+}
+
+// The over-limit error points at the cursor, because the range filter it used
+// to suggest is exactly the thing that breaks on ties.
+func TestTheLimitCeilingPointsAtTheCursor(t *testing.T) {
+	_, err := Query{
+		Namespace:  "ext/approval-gate",
+		Collection: "requests",
+		Limit:      MaxLimit + 1,
+	}.Compile(requestsSchema(), nil)
+	if err == nil || !strings.Contains(err.Error(), "after cursor") {
+		t.Fatalf("over-limit error = %v", err)
+	}
 }

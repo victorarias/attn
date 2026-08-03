@@ -175,9 +175,28 @@ workspaces 8. The default is an order of magnitude past that working set and the
 ceiling two — a tripwire. Asking past the ceiling is an error naming the limit
 and the ask, never a silent truncation.
 
-Every sort is made total by an `id ASC` tiebreaker, so a range filter on the
-sort field is a correct cursor. That is the whole pagination story; there is no
-offset and no opaque page token.
+Every sort is made total by an id tiebreaker running in the sort's own
+direction, so the visible order is one uniformly directed `(sort field, id)`
+tuple. Pagination is `Query.After`, the id of the previous page's last document,
+compiled to a comparison against that whole tuple:
+
+```
+sort <cmp> value OR (sort = value AND id <cmp> anchor)
+```
+
+A caller-written range filter is **not** a correct cursor and the query language
+deliberately does not present it as one — it can constrain only the first half of
+the tuple, so `sort > value` skips every document tied with the anchor and `sort
+>= value` returns the anchor forever. Documents missing the sort field are a real
+case, since a declaration says what may be queried rather than what a document
+must carry, so the NULL side of the tuple is branched on explicitly: SQLite sorts
+NULL first ascending and last descending, and the cursor agrees in both
+directions. A cursor naming a document that no longer exists is an error, not an
+empty page, because an empty page reads as the end of the walk.
+
+The daemon resolves the anchor document before compiling — `docstore` holds no
+database handle and needs the anchor's sort value. There is no offset and no
+opaque page token.
 
 ### Live queries
 

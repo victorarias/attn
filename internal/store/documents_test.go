@@ -3,6 +3,7 @@ package store
 import (
 	"encoding/json"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,7 +62,17 @@ func queryIDs(t *testing.T, s *Store, q docstore.Query) []string {
 	if err != nil || !ok {
 		t.Fatalf("declaration for %s/%s: ok=%v err=%v", q.Namespace, q.Collection, ok, err)
 	}
-	c, err := q.Compile(*schema)
+	var anchor *docstore.Document
+	if q.After != "" {
+		doc, found, err := s.GetDocument(q.Namespace, q.Collection, q.After)
+		if err != nil {
+			t.Fatalf("anchor %s: %v", q.After, err)
+		}
+		if found {
+			anchor = doc
+		}
+	}
+	c, err := q.Compile(*schema, anchor)
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
@@ -195,9 +206,8 @@ func TestFiltersSortAndLimitExecuteAgainstRealJSON(t *testing.T) {
 	}
 }
 
-// A range filter on the sort field is what paginates: the last id of a page is
-// the cursor for the next, and the id tiebreaker keeps the order total.
-func TestARangeFilterOnTheSortFieldPaginates(t *testing.T) {
+// The after cursor paginates: the last id of a page names the start of the next.
+func TestTheAfterCursorPaginates(t *testing.T) {
 	s, _ := storeWithRequests(t, map[string]string{
 		"a": `{"status":"pending","attempts":1}`,
 		"b": `{"status":"pending","attempts":2}`,
@@ -207,13 +217,182 @@ func TestARangeFilterOnTheSortFieldPaginates(t *testing.T) {
 		Namespace: "ext/approval-gate", Collection: "requests",
 		Sort: &docstore.Sort{Field: "attempts"}, Limit: 2,
 	}
-	first := queryIDs(t, s, q)
-	if !equalStrings(first, []string{"a", "b"}) {
-		t.Fatalf("first page = %v", first)
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"a", "b"}) {
+		t.Fatalf("first page = %v", got)
 	}
-	q.Filters = []docstore.Filter{{Field: "attempts", Op: docstore.OpGt, Value: 2}}
+	q.After = "b"
 	if got := queryIDs(t, s, q); !equalStrings(got, []string{"c"}) {
 		t.Fatalf("second page = %v", got)
+	}
+}
+
+// The boundary a range filter cannot express: every document shares one sort
+// value, so the whole ordering is the id tiebreaker. Paged one at a time, the
+// cursor must walk every document exactly once — `sort > value` would return
+// nothing after the first page and `sort >= value` would return the same
+// document forever.
+func TestPagingAcrossDocumentsThatShareASortValue(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":7}`,
+		"b": `{"status":"pending","attempts":7}`,
+		"c": `{"status":"pending","attempts":7}`,
+	})
+	for _, tc := range []struct {
+		name string
+		desc bool
+		want []string
+	}{
+		{"ascending", false, []string{"a", "b", "c"}},
+		{"descending", true, []string{"c", "b", "a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := docstore.Query{
+				Namespace: "ext/approval-gate", Collection: "requests",
+				Sort: &docstore.Sort{Field: "attempts", Desc: tc.desc}, Limit: 1,
+			}
+			var walked []string
+			for range tc.want {
+				page := queryIDs(t, s, q)
+				if len(page) != 1 {
+					t.Fatalf("page after %q = %v, want exactly one document", q.After, page)
+				}
+				walked = append(walked, page[0])
+				q.After = page[0]
+			}
+			if !equalStrings(walked, tc.want) {
+				t.Fatalf("walked %v, want %v", walked, tc.want)
+			}
+			if rest := queryIDs(t, s, q); len(rest) != 0 {
+				t.Fatalf("page past the last document = %v, want none", rest)
+			}
+		})
+	}
+}
+
+// Ties on a partially shared sort value: the cursor has to cross from one group
+// into the next without losing the tied documents on either side of the seam.
+func TestPagingCrossesATieGroupBoundary(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending","attempts":1}`,
+		"b": `{"status":"pending","attempts":2}`,
+		"c": `{"status":"pending","attempts":2}`,
+		"d": `{"status":"pending","attempts":3}`,
+	})
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: "attempts"}, Limit: 2, After: "b",
+	}
+	// "b" is the first of the pair sharing attempts=2, so its tie partner "c"
+	// must survive the page break.
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"c", "d"}) {
+		t.Fatalf("page after the first of a tied pair = %v, want [c d]", got)
+	}
+	q.After = "c"
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"d"}) {
+		t.Fatalf("page after the last of a tied pair = %v, want [d]", got)
+	}
+}
+
+// A declared field says what may be queried, not what a document must carry, so
+// a document missing the sort field is a real row in the ordering. SQLite sorts
+// its NULL first ascending and last descending, and the cursor has to agree in
+// both directions or the missing-field documents vanish from paging.
+func TestPagingOverDocumentsMissingTheSortField(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending"}`,
+		"b": `{"status":"pending"}`,
+		"c": `{"status":"pending","attempts":5}`,
+	})
+	for _, tc := range []struct {
+		name string
+		desc bool
+		want []string
+	}{
+		{"ascending puts the missing field first", false, []string{"a", "b", "c"}},
+		{"descending puts it last", true, []string{"c", "b", "a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			q := docstore.Query{
+				Namespace: "ext/approval-gate", Collection: "requests",
+				Sort: &docstore.Sort{Field: "attempts", Desc: tc.desc}, Limit: 1,
+			}
+			var walked []string
+			for range tc.want {
+				page := queryIDs(t, s, q)
+				if len(page) != 1 {
+					t.Fatalf("page after %q = %v, want exactly one document", q.After, page)
+				}
+				walked = append(walked, page[0])
+				q.After = page[0]
+			}
+			if !equalStrings(walked, tc.want) {
+				t.Fatalf("walked %v, want %v", walked, tc.want)
+			}
+			if rest := queryIDs(t, s, q); len(rest) != 0 {
+				t.Fatalf("page past the last document = %v, want none", rest)
+			}
+		})
+	}
+}
+
+// An unsorted query is ordered by id alone, and the cursor is that one column.
+func TestPagingAnUnsortedQuery(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{
+		"a": `{"status":"pending"}`,
+		"b": `{"status":"pending"}`,
+		"c": `{"status":"pending"}`,
+	})
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Limit: 2, After: "a",
+	}
+	if got := queryIDs(t, s, q); !equalStrings(got, []string{"b", "c"}) {
+		t.Fatalf("page after a = %v", got)
+	}
+}
+
+// Timestamps are the sort a live panel actually uses, and two documents written
+// in the same instant tie there too.
+func TestPagingByCreatedAtWithIdenticalTimestamps(t *testing.T) {
+	s := New()
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+		t.Fatalf("define: %v", err)
+	}
+	for _, id := range []string{"a", "b", "c"} {
+		if err := s.PutDocument("ext/approval-gate", "requests", id, []byte(`{"status":"pending"}`), base); err != nil {
+			t.Fatalf("put %s: %v", id, err)
+		}
+	}
+	q := docstore.Query{
+		Namespace: "ext/approval-gate", Collection: "requests",
+		Sort: &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true}, Limit: 1,
+	}
+	var walked []string
+	for i := 0; i < 3; i++ {
+		page := queryIDs(t, s, q)
+		if len(page) != 1 {
+			t.Fatalf("page after %q = %v, want exactly one document", q.After, page)
+		}
+		walked = append(walked, page[0])
+		q.After = page[0]
+	}
+	if !equalStrings(walked, []string{"c", "b", "a"}) {
+		t.Fatalf("walked %v, want [c b a]", walked)
+	}
+}
+
+// A cursor pointing at a document that is gone is an error, not an empty page:
+// silently returning nothing reads as "end of results" and quietly truncates.
+func TestPagingAfterADeletedDocumentSaysSo(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema, _, err := s.DocumentCollection("ext/approval-gate", "requests")
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := docstore.Query{Namespace: "ext/approval-gate", Collection: "requests", After: "gone"}
+	if _, err := q.Compile(*schema, nil); err == nil || !strings.Contains(err.Error(), "gone") {
+		t.Fatalf("cursor to a missing document: %v", err)
 	}
 }
 
@@ -315,7 +494,7 @@ func TestAnEmptyResultIsAnEmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := docstore.Query{Namespace: "ext/approval-gate", Collection: "requests"}.Compile(*schema)
+	c, err := docstore.Query{Namespace: "ext/approval-gate", Collection: "requests"}.Compile(*schema, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

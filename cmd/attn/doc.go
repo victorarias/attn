@@ -98,6 +98,11 @@ query flags:
   --sort <field>    order by a declared field, or created_at / updated_at.
   --desc            reverse the sort.
   --limit <n>       at most n documents (default %d, maximum %d).
+  --after <id>      the next page: documents that come after this one in the
+                    same order. Pass the id of the last document of the previous
+                    page. Use this rather than a --where on the sort field —
+                    documents sharing a sort value would otherwise be skipped or
+                    repeated.
 `, docstore.DefaultLimit, docstore.MaxLimit)
 }
 
@@ -290,6 +295,9 @@ func parseDocQueryFlags(verb, namespace, collection string, args []string) (prot
 				query.Sort = &protocol.DocumentSort{}
 			}
 			query.Sort.Field = field
+		case "--after":
+			after := next()
+			query.After = &after
 		case "--limit":
 			raw := next()
 			n, err := strconv.Atoi(raw)

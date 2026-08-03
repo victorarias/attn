@@ -1463,6 +1463,7 @@ export enum DocQueryMessageCmd {
 }
 
 export interface Query {
+    after?:     string;
     collection: string;
     filters?:   FilterElement[];
     limit?:     number;
@@ -1526,6 +1527,7 @@ export interface DocumentFilter {
 }
 
 export interface DocumentQuery {
+    after?:     string;
     collection: string;
     filters?:   FilterElement[];
     limit?:     number;
@@ -10445,6 +10447,7 @@ const typeMap: any = {
         { json: "query", js: "query", typ: r("Query") },
     ], "any"),
     "Query": o([
+        { json: "after", js: "after", typ: u(undefined, "") },
         { json: "collection", js: "collection", typ: "" },
         { json: "filters", js: "filters", typ: u(undefined, a(r("FilterElement"))) },
         { json: "limit", js: "limit", typ: u(undefined, 0) },
@@ -10486,6 +10489,7 @@ const typeMap: any = {
         { json: "value_json", js: "value_json", typ: "" },
     ], "any"),
     "DocumentQuery": o([
+        { json: "after", js: "after", typ: u(undefined, "") },
         { json: "collection", js: "collection", typ: "" },
         { json: "filters", js: "filters", typ: u(undefined, a(r("FilterElement"))) },
         { json: "limit", js: "limit", typ: u(undefined, 0) },

@@ -1236,6 +1236,9 @@ type DocumentFilter struct {
 }
 
 type DocumentQuery struct {
+	// After corresponds to the JSON schema field "after".
+	After *string `json:"after,omitempty,omitzero"`
+
 	// Collection corresponds to the JSON schema field "collection".
 	Collection string `json:"collection"`
 

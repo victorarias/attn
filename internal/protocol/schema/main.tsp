@@ -3439,6 +3439,11 @@ model DocumentQuery {
   "filters"?: DocumentFilter[];
   "sort"?: DocumentSort;
   "limit"?: int32;
+  // The id of the last document of the previous page. The visible order is
+  // (sort field, id), and a filter can only constrain one of those, so a tie on
+  // the sort field makes range-filter paging skip or repeat. This compares
+  // against the whole tuple.
+  "after"?: string;
 }
 
 // One stored document. `body` is the document's JSON as written, byte for byte.

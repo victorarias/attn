@@ -377,3 +377,60 @@ func TestRemovingACollectionReachesItsLiveQueries(t *testing.T) {
 		t.Fatalf("after the collection went = %v, want empty", got)
 	}
 }
+
+// The after cursor survives the wire and pages a real tie. `attn doc query
+// --after` is the reachable form of the only pagination the store offers, so it
+// has to be proven from the message in rather than from the compiler alone.
+func TestPagingWithTheAfterCursorOverTheWire(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	for _, id := range []string{"a", "b", "c"} {
+		putDoc(t, d, id, `{"status":"pending"}`)
+	}
+
+	limit := 1
+	q := testQuery()
+	q.Sort = &protocol.DocumentSort{Field: "status"}
+	q.Limit = &limit
+
+	var walked []string
+	for range []string{"a", "b", "c"} {
+		resp := docCall(t, func(c net.Conn) {
+			d.handleDocQuery(c, &protocol.DocQueryMessage{Cmd: protocol.CmdDocQuery, Query: q})
+		})
+		if !resp.Ok {
+			t.Fatalf("query after %v: %v", q.After, protocol.Deref(resp.Error))
+		}
+		docs := resp.DocQueryResult.Documents
+		if len(docs) != 1 {
+			t.Fatalf("page after %v = %d documents, want 1", q.After, len(docs))
+		}
+		walked = append(walked, docs[0].ID)
+		next := docs[0].ID
+		q.After = &next
+	}
+	if strings.Join(walked, ",") != "a,b,c" {
+		t.Fatalf("walked %v, want [a b c]", walked)
+	}
+}
+
+// A cursor to a document that has been deleted fails the query rather than
+// returning an empty page that reads as the end of the walk.
+func TestAnAfterCursorToADeletedDocumentIsReported(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	putDoc(t, d, "a", `{"status":"pending"}`)
+
+	gone := "b"
+	q := testQuery()
+	q.After = &gone
+	resp := docCall(t, func(c net.Conn) {
+		d.handleDocQuery(c, &protocol.DocQueryMessage{Cmd: protocol.CmdDocQuery, Query: q})
+	})
+	if resp.Ok {
+		t.Fatal("a cursor to a missing document was accepted")
+	}
+	if err := protocol.Deref(resp.Error); !strings.Contains(err, "b") || !strings.Contains(err, "no longer exists") {
+		t.Fatalf("error = %q", err)
+	}
+}

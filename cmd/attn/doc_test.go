@@ -105,3 +105,12 @@ func TestWhereRepeatsToAccumulateFilters(t *testing.T) {
 		t.Fatalf("second filter = %+v", query.Filters[1])
 	}
 }
+
+// --after carries the cursor, which is the only correct way to page: a --where
+// on the sort field skips or repeats documents that share a sort value.
+func TestAfterFlagCarriesTheCursor(t *testing.T) {
+	query, _ := parseDocQueryFlags("query", "ext/a", "c", []string{"--sort", "attempts", "--after", "b7"})
+	if query.After == nil || *query.After != "b7" {
+		t.Fatalf("after = %v", query.After)
+	}
+}

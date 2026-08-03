@@ -140,12 +140,30 @@ func (d *Daemon) documentSubscriptionCount() int {
 	return len(d.docSubs)
 }
 
+// compileDocQuery resolves the query's after cursor and compiles it. The cursor
+// is a document id, so the anchor has to be read here: docstore holds no
+// database handle, and it needs the anchor's sort value to compare against the
+// whole ordering tuple.
+func (d *Daemon) compileDocQuery(q docstore.Query, schema docstore.CollectionSchema) (docstore.Compiled, error) {
+	var anchor *docstore.Document
+	if q.After != "" {
+		doc, found, err := d.store.GetDocument(q.Namespace, q.Collection, q.After)
+		if err != nil {
+			return docstore.Compiled{}, err
+		}
+		if found {
+			anchor = doc
+		}
+	}
+	return q.Compile(schema, anchor)
+}
+
 // runDocQuery compiles and runs a query, returning its documents on the wire.
 func (d *Daemon) runDocQuery(q docstore.Query, schema docstore.CollectionSchema) ([]protocol.StoredDocument, error) {
 	if d.store == nil {
 		return nil, fmt.Errorf("no database")
 	}
-	compiled, err := q.Compile(schema)
+	compiled, err := d.compileDocQuery(q, schema)
 	if err != nil {
 		return nil, err
 	}
@@ -368,7 +386,7 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 	}
 	// Compile once up front. A query that cannot compile must fail the subscribe
 	// rather than fail on every delivery of a subscription that looked accepted.
-	if _, err := q.Compile(*schema); err != nil {
+	if _, err := d.compileDocQuery(q, *schema); err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
@@ -460,6 +478,9 @@ func documentQueryFromProtocol(q protocol.DocumentQuery) (docstore.Query, error)
 	}
 	if q.Limit != nil {
 		out.Limit = *q.Limit
+	}
+	if q.After != nil {
+		out.After = *q.After
 	}
 	return out, nil
 }
