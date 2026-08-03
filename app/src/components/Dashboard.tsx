@@ -74,6 +74,13 @@ interface DashboardProps {
   // first with the settled rest below, or the plain state grouping that is all
   // there is to say when nothing tracks turns.
   queueModeEnabled?: boolean;
+  // Whether home is waiting for the queue to refill: on, the next turn to open
+  // takes the user to it. Owned by App, which arms it when it hands the user
+  // here after the last turn closed and clears it when they walk here
+  // themselves. Home's job is to say which of the two happened and let the user
+  // change it — an app that moves you on its own has to show you the switch.
+  followNextTurn?: boolean;
+  onToggleFollowNextTurn?: () => void;
 }
 
 export function Dashboard({
@@ -93,6 +100,8 @@ export function Dashboard({
   onOpenSettings,
   onMutedGroupClick,
   queueModeEnabled = false,
+  followNextTurn = false,
+  onToggleFollowNextTurn,
 }: DashboardProps) {
   const now = useNow(TURN_AGE_TICK_MS);
 
@@ -298,6 +307,20 @@ export function Dashboard({
           <div className="all-settled-body">
             <span className="all-settled-title">All settled</span>
             <span className="all-settled-detail">{stillRunning}</span>
+            {/* The wait, stated and reversible. It sits inside the banner
+                because it only means anything while nothing is owed: the moment
+                a turn opens it has either taken the user there or it has not,
+                and that is the whole promise. */}
+            {onToggleFollowNextTurn && (
+              <label className="all-settled-follow" data-testid="follow-next-turn">
+                <input
+                  type="checkbox"
+                  checked={followNextTurn}
+                  onChange={onToggleFollowNextTurn}
+                />
+                <span>Take me to the next agent that needs you</span>
+              </label>
+            )}
           </div>
         </div>
       )}

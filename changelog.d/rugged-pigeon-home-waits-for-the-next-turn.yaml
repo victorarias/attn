@@ -1,0 +1,17 @@
+kind: added
+area: queue
+change: >
+  Home can wait for the next agent instead of just sitting there. Working the
+  queue down to nothing lands you on the home screen, and until now the next
+  turn to open would sit in the queue until you went and took it — so an
+  auto-settle that moved you on quietly ended with you watching a screen that
+  knew an agent wanted you and said nothing. The all-settled banner now carries
+  "Take me to the next agent that needs you", and arriving because the queue ran
+  dry — from an auto-settle countdown, a settle from the sidebar, Cmd+Shift+E,
+  or a snooze — ticks it for you. The next turn to open takes you to it: the one
+  owed longest, the same agent the queue's first row and Cmd+J lead with.
+  Walking home yourself leaves the box unticked and leaves you there, however
+  many agents start asking; choosing to be on the home screen is a decision, not
+  a gap between turns. The box is yours either way — tick it to wait, untick it
+  to stay — and the wait belongs to that visit alone, so leaving home ends it
+  and coming back starts over.
