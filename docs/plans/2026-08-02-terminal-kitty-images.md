@@ -634,9 +634,12 @@ the `get_pane_placement_state` bridge action. It covers: the placement appears
 with its blob resident and visible; it rides the text it sits in across two
 scroll bursts; the program's own `a=d` empties the set; and — with the
 override absent — an identical session produces no placements at all, which is
-the shipping default. The first APC and the delete carry `q=2`: without it the
-terminal answers `\x1b_Gi=<id>;OK\x1b\\` on the PTY, and at a shell prompt with
-nobody reading, that reply is typed into the next command line. Real emitters
+the shipping default. (A4 inverted the scenario when the default flipped: the
+image legs now inject nothing — proving the on-by-default world — and the dark
+leg pins the `ATTN_KITTY_STORAGE_LIMIT=0` escape hatch.) The first APC and the
+delete carry `q=2`: without it the terminal answers `\x1b_Gi=<id>;OK\x1b\\` on
+the PTY, and at a shell prompt with nobody reading, that reply is typed into
+the next command line. Real emitters
 either set `q` or read the reply; kitty behaves the same way.
 
 **Live tier (real emitters, throwaway profile).** chafa 1.18.2 and timg 1.6.3
@@ -1155,6 +1158,40 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       `FuzzKittyWireMirror` soaked 15m / 42.5M execs green with the tripwire in
       (the class had been reached 97s into the previous soak).
 
+#### A4 verification record
+
+Evidence from the live ladder on throwaway profile `kimg1` (darwin/arm64,
+retina), full app + daemon built from this branch.
+
+**Packaged harness.** `real-app:scenario-terminal-kitty-image`, inverted this
+phase to match the flip, ran green end to end: the default-daemon leg (nothing
+injected into any environment) described the placement with its blob resident,
+held its buffer row across two scroll bursts, and emptied the set on the
+program's `a=d`; the escape-hatch leg (`ATTN_KITTY_STORAGE_LIMIT=0`) produced
+zero placements after the same budget the default leg needed to succeed. Window
+captures passed the native-window and byte-floor tripwires, byte-distinct
+across legs.
+
+**Live tier, local.** A real shell pane's `TIOCGWINSZ` answered 1116x1050 px for
+a 62x25 grid — 18x42 device pixels per cell, exactly 2x the CSS cell, so the
+frontend's fit-time `xpixel`/`ypixel` reached the worker terminal and the kernel
+winsize. chafa 1.18.2, given no size flags, placed a 522x546 px image = 29x13
+cells — sized from the real pixel geometry, drawn at device scale (sharp on
+retina, not 2x-blown). The placement survived a full app quit and relaunch: the
+restore snapshot re-described it and the blob was re-pulled.
+
+**Live tier, remote (OrbStack VM `attn-remote@orb`, hub relay).** Endpoint
+bootstrap cross-compiled and deployed the daemon at this branch's fingerprint
+(protocol 207) and connected. A remote shell session's `TIOCGWINSZ` answered the
+same 1116x1050 — pixel geometry crosses the relay to the VM PTY. The
+checkerboard escape written on the VM produced a placement described through the
+relay with its blob pulled over the base64 JSON path; the delete emptied the
+set. The passthrough witness: with the HOST daemon restarted under
+`ATTN_KITTY_STORAGE_LIMIT=0`, the relay-ensured VM daemon's
+`/proc/<pid>/environ` carried `ATTN_KITTY_STORAGE_LIMIT=0` (the hub's remote env
+script exports it), and a remote session under it stayed dark — zero placements
+inside the success-path budget.
+
 ## Open questions
 
 - ~~Alt-screen snapshot semantics: do snapshot placements carry a screen
@@ -1169,5 +1206,7 @@ three resync rows, resyncing on every delta reddens the two silent ones).
 - Unicode-placeholder (virtual) placements: rendered via placeholder cells,
   not cursor placements. Likely excluded from v1 as a named limitation —
   confirm what the diff exposes for them.
-- Does limit-0 actually silence `a=q`? A1's first verification step; the
-  response-drain filter is the fallback.
+- ~~Does limit-0 actually silence `a=q`?~~ Answered in A1: yes, measured. At
+  limit 0 ghostty short-circuits the whole graphics protocol and no `a=q` reply
+  is emitted at all — no response-drain filter needed. That is what made the
+  pre-flip announcement honest (PR #727), and the escape hatch relies on it now.
