@@ -782,8 +782,67 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(daemon.annotations.map((entry) => entry.id)).toEqual([keptId]));
     expect(daemon.calls.clearAnnotations).toBe(0);
     // The panel says why it did not empty, and still offers the send.
-    expect(screen.getByTestId('annotation-send-note').textContent).toMatch(/1 annotated since is still here/);
+    expect(screen.getByTestId('annotation-send-note').textContent).toMatch(/1 still here/);
     expect(screen.getByText('Send all')).toBeTruthy();
+  });
+
+  it('keeps an annotation edited while the send carrying it was in flight', async () => {
+    // Same window, the other way in: the mark WAS in the payload, but the user
+    // changed it before the send answered. The agent got the old version, so
+    // spending it would delete a revision that has never been sent.
+    const { daemon } = renderTerminal();
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    const id = stored()[0].id;
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    expect(daemon.submitted[0]).toContain('🔍 Verify this');
+
+    // Mid-flight, the user changes their mind about the label.
+    activate(id);
+    fireEvent.click(screen.getByLabelText('Needs tests'));
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+
+    await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
+    expect(stored()).toHaveLength(1);
+    expect(stored()[0].id).toBe(id);
+    expect(stored()[0].emoji).toBe('🧪');
+    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧪']));
+    expect(daemon.calls.clearAnnotations).toBe(0);
+  });
+
+  it('spends a mark the send carried unchanged, even beside an edited one', async () => {
+    // The keep is per entry, not per send: an edit to one annotation must not
+    // strand the others the same payload delivered.
+    const { daemon } = renderTerminal();
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    const editedId = stored()[0].id;
+    anchor('turn-1', 31, 55);
+    fireEvent.click(screen.getByLabelText('Needs tests'));
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+
+    activate(editedId);
+    fireEvent.click(screen.getByLabelText('Out of scope'));
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+
+    await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual([editedId]));
+    expect(stored()[0].emoji).toBe('🚫');
   });
 
   it('tombstones the daemon draft only once the send is delivered', async () => {

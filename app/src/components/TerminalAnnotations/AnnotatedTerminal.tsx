@@ -511,12 +511,20 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               : { kind: 'error', message: 'The session did not take the feedback. Nothing was sent.' });
             return;
           }
-          // Spend the snapshot that was sent, not the store. The round trip has
-          // a deliberate pause in it and the surface stays live throughout, so
-          // a mark made while the send was in flight is in the store but was
-          // never in the payload — clearing wholesale would delete work the
-          // user can never send.
-          sending.forEach((entry) => store.remove(entry.id));
+          // Spend what was actually delivered, and only that. The round trip
+          // has a deliberate pause in it and the surface stays live throughout,
+          // so by the time it answers the store can hold marks the payload
+          // never contained: one made since, and one whose label or comment was
+          // changed since. An entry is spent only if it still reads exactly as
+          // it did when it was composed — otherwise the agent got the old text
+          // and the newer version has yet to be sent.
+          const current = new Map(store.list().map((entry) => [entry.id, entry]));
+          sending.forEach((entry) => {
+            const now = current.get(entry.id);
+            if (!now) return;
+            if (now.emoji !== entry.emoji || now.comment !== entry.comment) return;
+            store.remove(entry.id);
+          });
           const kept = store.list().length;
           setOutcome({ kind: 'sent', count: sending.length, kept });
           bump();
@@ -653,7 +661,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       : outcome?.kind === 'error'
         ? outcome.message
         : outcome?.kind === 'sent' && outcome.kept > 0
-          ? `✓ sent ${outcome.count} to the session. ${outcome.kept} annotated since is still here, ready to send.`
+          ? `✓ sent ${outcome.count} to the session. ${outcome.kept} still here — annotated or changed while it was sending, so not part of what went.`
           : null;
 
     return (
