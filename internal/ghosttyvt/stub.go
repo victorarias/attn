@@ -48,6 +48,10 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 }
 
+// ResizeNoReflow mirrors the real build's no-reflow resize. The stub parses
+// nothing, so there is no grid to reflow and no mode to toggle.
+func (t *Terminal) ResizeNoReflow(cols, rows int) { t.Resize(cols, rows) }
+
 func (t *Terminal) DrainResponses() []byte { return nil }
 
 func (t *Terminal) Size() (cols, rows int) { return t.cols, t.rows }

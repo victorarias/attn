@@ -817,13 +817,19 @@ func (s *Session) resize(cols, rows uint16) error {
 	s.cols = cols
 	s.rows = rows
 	s.metaMu.Unlock()
-	// The reflow mutates the same terminal info() serializes and the block feed
+	// The resize mutates the same terminal info() serializes and the block feed
 	// resolves rows against, so it belongs in that critical section.
+	//
+	// No-reflow, because every client frame is: the app's fit and its replay
+	// both resize with DEC wraparound off (app/src/utils/ghosttyResize.ts), so a
+	// reflowing worker would re-wrap history the clients keep unwrapped and the
+	// same bytes would occupy different rows on the two grids. Every row-indexed
+	// mapping across the wire — placements above all — rides on them being equal.
 	s.replayMu.Lock()
 	if s.ghostty != nil {
-		s.ghostty.Resize(int(cols), int(rows))
+		s.ghostty.ResizeNoReflow(int(cols), int(rows))
 	}
-	// A reflow moves images without producing a byte of output, so no chunk
+	// A resize moves images without producing a byte of output, so no chunk
 	// carries the correction and the client cannot derive it: it never saw the
 	// placements move. Deferring to "the next chunk" fails exactly when no next
 	// chunk comes, which is the common case — a resize on an idle session leaves
@@ -927,7 +933,7 @@ func (s *Session) kill(sig syscall.Signal, waitTimeout time.Duration) error {
 // closePTY releases the pty and the native terminal state behind it.
 //
 // The wire feed and the Ghostty terminal own native refs that info() resolves
-// and resize() reflows, so their teardown takes replayMu — the same lock those
+// and resize() moves, so their teardown takes replayMu — the same lock those
 // readers hold. Manager.Remove can hand an already-looked-up session to an
 // in-flight attach before closing it; without this hold that attach could read
 // or free the same native ref concurrently. Both fields are nil'd under the

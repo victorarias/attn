@@ -664,10 +664,9 @@ with the flip.
 **Wrap anchoring gap (A4 input).** In a pane whose prompt wraps (a long cwd),
 the first scroll after a placement moves its mapped buffer row by one; every
 later scroll holds. Short-prompt panes never drift. It is not a race — two
-reads 500 ms apart agree — so it is a real off-by-one in how a wrapped row is
-counted when the placement's screen row is converted to a buffer row. The
-harness scenario tolerates one row on the first burst and asserts the strict
-invariant on the second, so accumulation would fail the scenario.
+reads 500 ms apart agree. Root-caused and fixed in A4 (resize reflow
+asymmetry; see the decision record there), and the harness scenario now asserts
+the strict invariant on both bursts.
 
 **Remote leg: passes end to end.** Against a real OrbStack VM daemon
 (`attn-remote@orb`), the whole chain runs: the app opens a shell session on the
@@ -890,9 +889,46 @@ three resync rows, resyncing on every delta reddens the two silent ones).
 - [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
       images from it; without it chafa guesses ~8 x 11.4 px cells against a real
       9 x 22.6 CSS px cell. Measured in A3's live tier.
-- [ ] Fix the one-row anchoring drift on a wrapped prompt row. Measured in A3's
-      live tier; the packaged scenario tolerates one row on the first scroll and
-      would fail if it ever accumulated.
+- [x] **Fix the one-row anchoring drift on a wrapped prompt row. Root cause:
+      resize reflow asymmetry.** The worker reflowed on resize
+      (`ghosttyvt.Terminal.Resize`) while every client frame deliberately does
+      not — the app's fit and its historical replay both write `ESC[?7l`,
+      resize, `ESC[?7h` (`resizeGhosttyWithoutReflow`), load-bearing since
+      PR #306 for the block store and replay at historical geometry. After any
+      width-changing fit with wrapped content on screen, the same bytes then
+      occupied a different number of rows on the two grids, and the client's
+      mapping mixes the two frames: `bufferRow = clientScrollback +
+      workerViewportRow`. That is also why block anchoring and annotation
+      alignment clear on a width change.
+
+      **Fixed by making every frame take the no-reflow path.**
+      `ghosttyvt.ResizeNoReflow` runs the client's own recipe inside the worker
+      terminal — read DEC mode 7, and only when it is on write `ESC[?7l`,
+      resize, `ESC[?7h` — and `Session.resize` calls it. The frontend's
+      `resizeLocal` joins them: its live branch (the daemon's `pty_resized`
+      echo, the only resize a non-owner hub mirror ever sees) still resized
+      plainly, so a mirror would have held a third frame.
+
+      **Measured.** A 36-character wrapped prompt across a 20→40 column resize
+      occupies one row on a reflowing worker and two on a client; δ reached 2
+      rows with more wrapped lines and flips sign on narrowing. It self-corrects
+      once enough rows scroll into history — the reported "drift" was the
+      correction, not the error. `TestResizeKeepsAPlacementsBufferRow` pins the
+      repro (buffer row 3→4 before the fix);
+      `TestSessionResizeKeepsTheWorkerFrameEqualToAClientFrame` pins the grids
+      themselves against a control terminal driven by the client's recipe,
+      including alt screen and a program that turned DECAWM off.
+
+      **Rejected.** Making the client's fit reflow instead: the no-reflow path
+      is load-bearing for the block store. A wire-side absolute anchor: an
+      absolute row is meaningless while the two frames disagree, which is the
+      actual defect. Reattaching on every resize: a full dump per drag, and a
+      visible reset.
+
+      **Cost, honestly.** Ghostty's no-reflow resize was already the client's
+      path but is newly exercised on the worker, where the restore dump and
+      approval classification read from. The frame-parity test is what covers
+      it, on a real spawned session rather than a hand-built terminal.
 - [ ] A supported way to turn images on for a remote daemon. A3 ran the remote
       leg end to end (see its verification record), so what is left here is the
       switch rather than the pipeline: the hub forwards a fixed env allowlist,

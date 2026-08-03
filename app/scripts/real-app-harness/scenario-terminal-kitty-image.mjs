@@ -371,16 +371,6 @@ async function main() {
       // viewport and then keeps going. The invariant needs no line counting:
       // the image keeps its absolute buffer row, and its screen row falls by
       // exactly the number of rows that moved into scrollback.
-      //
-      // The first burst is measured with one row of slack, and only the first.
-      // Known gap (A4 input, isolated 2026-08-03): when soft-wrapped content
-      // above the image scrolls from the screen into history, the client's
-      // scrollback count and the worker's viewport row disagree by exactly one
-      // row, once. It does not accumulate — every later scroll is exact, which
-      // is what the second burst pins down — and it does not appear at all when
-      // nothing above the image wrapped. Tighten this to zero when the wrap
-      // accounting is fixed; until then a scenario asserting zero here would be
-      // asserting something the product does not do.
       const lines = placed.state.rows + 5;
       const settledAfterBurst = async (previousScrollback, description) => poll(async () => {
         const state = await client.request('get_pane_placement_state', { sessionId, paneId: pane.paneId });
@@ -401,8 +391,8 @@ async function main() {
 
       const firstRows = first.state.scrollback - placed.state.scrollback;
       runner.assert(
-        Math.abs(first.placement.bufferRow - placed.placement.bufferRow) <= 1,
-        `buffer row moved from ${placed.placement.bufferRow} to ${first.placement.bufferRow}; the image may lose at most the one known wrap row`,
+        first.placement.bufferRow === placed.placement.bufferRow,
+        `buffer row moved from ${placed.placement.bufferRow} to ${first.placement.bufferRow}; scrolling moves an image between history and screen, never off its row`,
         { before: placed.placement, after: first.placement, scrolledRows: firstRows },
       );
       runner.assert(

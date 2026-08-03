@@ -2,7 +2,7 @@
 
 package pty
 
-// A resize reflows the grid without producing output, so nothing on the wire
+// A resize moves the grid without producing output, so nothing on the wire
 // tells a client its images moved. These pin the emission that does.
 //
 // Session.resize fans out inline, before it returns, so every assertion here
@@ -43,16 +43,16 @@ func releaseAndPlace(t *testing.T, spawn *kittySpawn) PlacementUpdate {
 	}
 }
 
-// The reflow moves an image, and the client is told where it went. Nothing else
+// The resize moves an image, and the client is told where it went. Nothing else
 // can tell it: a resize produces no output, so there is no chunk carrying the
 // correction, and on an idle session none is ever coming. Without this the
 // image stays drawn at the old grid's position until something types.
 //
 // Shrinking the screen under the image is what makes this falsifiable. A set
-// re-sent from the last observation rather than read fresh after the reflow
+// re-sent from the last observation rather than read fresh after the resize
 // still describes the old row, so the assertion is that the row MOVED, not that
 // an update merely arrived.
-func TestResizeDescribesPlacementsAfterTheReflow(t *testing.T) {
+func TestResizeDescribesPlacementsAfterTheResize(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real PTY spawn in short mode")
 	}
@@ -74,30 +74,30 @@ func TestResizeDescribesPlacementsAfterTheReflow(t *testing.T) {
 		t.Fatalf("Resize() error: %v", err)
 	}
 
-	var reflowed PlacementUpdate
+	var resized PlacementUpdate
 	select {
-	case reflowed = <-spawn.updates:
+	case resized = <-spawn.updates:
 	default:
-		t.Fatal("the reflow described nothing: the client is left drawing at the old geometry")
+		t.Fatal("the resize described nothing: the client is left drawing at the old geometry")
 	}
-	if len(reflowed.Placements) != 1 {
-		t.Fatalf("placements after the resize = %+v, want the image still described", reflowed.Placements)
+	if len(resized.Placements) != 1 {
+		t.Fatalf("placements after the resize = %+v, want the image still described", resized.Placements)
 	}
-	after := reflowed.Placements[0]
+	after := resized.Placements[0]
 
 	if after.ViewportRow >= before.ViewportRow {
-		t.Errorf("viewport row after the reflow = %d, want less than the %d it was placed at: the set was not re-read from the reflowed grid",
+		t.Errorf("viewport row after the resize = %d, want less than the %d it was placed at: the set was not re-read from the resized grid",
 			after.ViewportRow, before.ViewportRow)
 	}
 	if after.ImageID != before.ImageID {
-		t.Errorf("described image id = %d after the reflow, want %d", after.ImageID, before.ImageID)
+		t.Errorf("described image id = %d after the resize, want %d", after.ImageID, before.ImageID)
 	}
 	// The watermark, not a fresh seq: no bytes were produced, so the set belongs
 	// to the last chunk the client already has. A fresh seq would claim to
 	// describe a chunk that never went out, and the client would be holding a
 	// set stamped ahead of every byte it has seen.
-	if reflowed.Seq != watermark {
-		t.Errorf("resize update seq = %d, want the replay watermark %d", reflowed.Seq, watermark)
+	if resized.Seq != watermark {
+		t.Errorf("resize update seq = %d, want the replay watermark %d", resized.Seq, watermark)
 	}
 }
 

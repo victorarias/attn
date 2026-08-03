@@ -94,7 +94,10 @@ function mapPlacements(
     if (p.pixel_width <= 0 || p.pixel_height <= 0) continue;
     // viewport_row is screen-relative on the worker's grid, which equals the
     // client's by the grid-equality invariant, and goes negative once the
-    // placement scrolls above the screen.
+    // placement scrolls above the screen. The equality holds across resizes
+    // too: every frame — the worker's and every client's — resizes without
+    // reflow, so a width change never re-wraps one grid's history and not
+    // another's.
     const bufferRow = scrollbackLength + p.viewport_row;
     if (bufferRow < 0) continue;
     placed.push({

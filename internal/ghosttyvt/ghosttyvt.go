@@ -101,6 +101,15 @@ static bool ghosttyvt_cursor_visible(GhosttyTerminal t) {
 	return visible;
 }
 
+// DEC wraparound (mode 7, DECAWM). False on a failed read is the safe answer:
+// the caller then resizes plainly instead of toggling a mode it could not read,
+// so a failure can never leave wraparound enabled behind the program's back.
+static bool ghosttyvt_wraparound(GhosttyTerminal t) {
+	bool enabled = false;
+	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_WRAPAROUND, &enabled) != GHOSTTY_SUCCESS) return false;
+	return enabled;
+}
+
 static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
 	GhosttyPoint p;
 	memset(&p, 0, sizeof(p));
@@ -267,15 +276,9 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 // malformed input is safe by design. Query responses produced during the write
 // are appended to the response buffer (see DrainResponses).
 func (t *Terminal) Write(p []byte) {
-	if len(p) == 0 {
-		return
-	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	if t.closed {
-		return
-	}
-	C.ghostty_terminal_vt_write(t.term, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
+	t.writeLocked(p)
 }
 
 // Resize changes the terminal dimensions; the primary screen reflows when
@@ -286,6 +289,58 @@ func (t *Terminal) Resize(cols, rows int) {
 	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.resizeLocked(cols, rows)
+}
+
+// The DECAWM toggle that selects ghostty's no-reflow resize. Same bytes the
+// client writes around its own resize.
+var (
+	disableWraparound = []byte("\x1b[?7l")
+	enableWraparound  = []byte("\x1b[?7h")
+)
+
+// ResizeNoReflow changes the terminal dimensions on ghostty's no-reflow resize
+// path, selected by temporarily disabling DEC wraparound (mode 7) when it is
+// enabled. It mirrors the client's resizeGhosttyWithoutReflow
+// (app/src/utils/ghosttyResize.ts) so the worker's grid stays frame-equal with
+// the client's across a resize: the same bytes then occupy the same rows on
+// both, which is what every row-indexed mapping between them rides on. The
+// toggle bytes are internal to this model and never reach any wire.
+//
+// With wraparound already disabled ghostty does not reflow, so the plain resize
+// is the same path — and writing the mode back on would enable a mode the
+// program had off.
+func (t *Terminal) ResizeNoReflow(cols, rows int) {
+	if cols <= 0 || rows <= 0 {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return
+	}
+	if !bool(C.ghosttyvt_wraparound(t.term)) {
+		t.resizeLocked(cols, rows)
+		return
+	}
+	// Held across all three steps: an interleaved write would be parsed with
+	// wraparound off and wrap where the program meant it to.
+	t.writeLocked(disableWraparound)
+	defer t.writeLocked(enableWraparound)
+	t.resizeLocked(cols, rows)
+}
+
+// writeLocked feeds bytes through the parser. Caller holds t.mu.
+func (t *Terminal) writeLocked(p []byte) {
+	if len(p) == 0 || t.closed {
+		return
+	}
+	C.ghostty_terminal_vt_write(t.term, (*C.uint8_t)(unsafe.Pointer(&p[0])), C.size_t(len(p)))
+}
+
+// resizeLocked resizes the native terminal and records the new size. Caller
+// holds t.mu and has validated cols/rows.
+func (t *Terminal) resizeLocked(cols, rows int) {
 	if t.closed {
 		return
 	}
