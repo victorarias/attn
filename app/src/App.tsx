@@ -751,7 +751,6 @@ function AppContent({
     sendSetChiefOfStaff,
     sendUnregisterSession,
     sendSetSetting,
-    sendGetSettings,
     sendCreateWorktree,
     sendDeleteWorktree,
     sendListPlugins,
@@ -4091,7 +4090,6 @@ function AppContent({
         onRemovePlugin={sendRemovePlugin}
         onSetPluginPriority={sendSetPluginPriority}
         onSetSetting={sendSetSetting}
-        onRefreshSettings={sendGetSettings}
         themePreference={themePreference}
         onSetTheme={setTheme}
         uiScale={scale}

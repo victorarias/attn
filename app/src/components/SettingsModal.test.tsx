@@ -3,6 +3,9 @@ import { act, fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
 import { getSettingsAutomationHandle } from './settingsAutomation';
 
+const daemonApi = vi.hoisted(() => ({ sendGetSettings: vi.fn() }));
+vi.mock('../contexts/DaemonApiContext', () => ({ useDaemonApi: () => daemonApi }));
+
 describe('SettingsModal', () => {
   it('closes on escape', async () => {
     const onClose = vi.fn();
@@ -789,7 +792,7 @@ describe('SettingsModal model data capture', () => {
 
   it('refreshes captured bytes at the configured cadence only while Data is visible', () => {
     vi.useFakeTimers();
-    const onRefreshSettings = vi.fn();
+    daemonApi.sendGetSettings.mockClear();
     const { unmount } = render(
       <SettingsModal
         isOpen
@@ -818,7 +821,6 @@ describe('SettingsModal model data capture', () => {
         onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
         onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
         onSetSetting={vi.fn()}
-        onRefreshSettings={onRefreshSettings}
         themePreference="system"
         onSetTheme={vi.fn()}
       />,
@@ -826,16 +828,16 @@ describe('SettingsModal model data capture', () => {
 
     try {
       fireEvent.click(screen.getByTestId('settings-nav-data'));
-      expect(onRefreshSettings).toHaveBeenCalledTimes(1);
+      expect(daemonApi.sendGetSettings).toHaveBeenCalledTimes(1);
 
       act(() => vi.advanceTimersByTime(9_999));
-      expect(onRefreshSettings).toHaveBeenCalledTimes(1);
+      expect(daemonApi.sendGetSettings).toHaveBeenCalledTimes(1);
       act(() => vi.advanceTimersByTime(1));
-      expect(onRefreshSettings).toHaveBeenCalledTimes(2);
+      expect(daemonApi.sendGetSettings).toHaveBeenCalledTimes(2);
 
       fireEvent.click(screen.getByTestId('settings-nav-general'));
       act(() => vi.advanceTimersByTime(10_000));
-      expect(onRefreshSettings).toHaveBeenCalledTimes(2);
+      expect(daemonApi.sendGetSettings).toHaveBeenCalledTimes(2);
     } finally {
       unmount();
       vi.useRealTimers();
