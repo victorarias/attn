@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "204"
+const ProtocolVersion = "205"
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -24,7 +24,24 @@ const CapabilityBrowserHost = "browser_host"
 // binary websocket frames (see binaryframe.go) instead of base64-in-JSON
 // pty_output events. Clients without it keep the JSON event, which is what
 // keeps daemon-to-daemon relays and older automation clients working.
+//
+// It is the general "this client takes binary frames" bit, so kitty image blobs
+// ride it too: the same client that can decode a PTY frame can decode a blob.
 const CapabilityBinaryPtyOutput = "binary_pty_output"
+
+// CapabilityKittyImages opts a client into being TOLD about images: the
+// kitty_placements event describing where they sit on the grid. A client
+// without it hears nothing about them, which is what every client did before
+// this existed — the APC bytes are stripped from the PTY stream, so an unaware
+// client draws a correct screen with no images in it.
+//
+// It says nothing about transport. get_kitty_image answers whether or not a
+// client advertised this, and how the pixels travel is
+// CapabilityBinaryPtyOutput's call. The two are separate because the hub asks
+// for one and not the other: it relays kitty traffic between daemons over a
+// text pipe, so it needs the descriptions in JSON and cannot take a binary
+// frame at all.
+const CapabilityKittyImages = "kitty_images"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.
 type SessionAgent = string
@@ -180,6 +197,7 @@ const (
 	CmdAttachSession                         = "attach_session"
 	CmdDetachSession                         = "detach_session"
 	CmdGetScreenSnapshot                     = "get_screen_snapshot"
+	CmdGetKittyImage                         = "get_kitty_image"
 	CmdPtyInput                              = "pty_input"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
@@ -333,6 +351,8 @@ const (
 	EventGetScreenSnapshotResult         = "get_screen_snapshot_result"
 	EventSessionExited                   = "session_exited"
 	EventPtyDesync                       = "pty_desync"
+	EventKittyPlacements                 = "kitty_placements"
+	EventKittyImageResult                = "kitty_image_result"
 	EventRuntimeRespawned                = "runtime_respawned"
 	EventPtyResized                      = "pty_resized"
 	EventWorkspaceLayout                 = "workspace_layout"
@@ -1403,6 +1423,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg GetScreenSnapshotMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal get_screen_snapshot: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdGetKittyImage:
+		var msg GetKittyImageMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal get_kitty_image: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

@@ -50,6 +50,11 @@ type sessionSubscriber struct {
 	id     string
 	send   func(data []byte, seq uint32) bool
 	onDrop func(reason string)
+	// onPlacements receives the kitty placement set whenever a chunk moved it,
+	// interleaved with this subscriber's own byte stream. nil for subscribers
+	// that do not draw (the debug capture, the orphan-activity probe) and for
+	// every subscriber of a session that never stores an image. See OnPlacements.
+	onPlacements func(update PlacementUpdate)
 }
 
 type terminalQueries struct {
@@ -102,7 +107,14 @@ type Session struct {
 	// the worker-side command-block table (Phase 3a), and returns the bytes the
 	// wire carries in place of what it fed. nil exactly when ghostty is nil;
 	// every use is nil-guarded like ghostty's.
-	wireFeed   *wireFeeder
+	wireFeed *wireFeeder
+	// kittyEpoch is the offset folded into every kitty generation that leaves
+	// this session, so a worker that replaces another under the same session id
+	// can never mint an identity a client already holds pixels for. Set where
+	// ghostty is constructed and never after; wireFeed holds the same value for
+	// the placement half, this field serves the image half (kittyImage). See
+	// mintKittyEpoch.
+	kittyEpoch uint64
 	seqCounter atomic.Uint32
 
 	// replayMu makes Ghostty feeds and lastReplaySeq atomic for snapshots, so a
@@ -147,14 +159,20 @@ type Session struct {
 	startedAt  time.Time
 }
 
-func (s *Session) addSubscriber(subID string, send func([]byte, uint32) bool, onDrop func(reason string)) {
-	s.subMu.Lock()
-	defer s.subMu.Unlock()
-	s.subscribers[subID] = &sessionSubscriber{
+func (s *Session) addSubscriber(subID string, send func([]byte, uint32) bool, onDrop func(reason string), opts ...SubscriberOption) {
+	sub := &sessionSubscriber{
 		id:     subID,
 		send:   send,
 		onDrop: onDrop,
 	}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(sub)
+		}
+	}
+	s.subMu.Lock()
+	defer s.subMu.Unlock()
+	s.subscribers[subID] = sub
 }
 
 func (s *Session) removeSubscriber(subID string) {
@@ -195,6 +213,30 @@ func (s *Session) fanOut(data []byte, seq uint32) {
 			delete(s.subscribers, id)
 		}
 		s.subMu.Unlock()
+	}
+}
+
+// fanOutPlacements hands one placement update to every subscriber that asked
+// for placements.
+//
+// Called from the read loop AFTER the chunk's bytes are fanned out, and with
+// replayMu released. The order is the contract: an update states where images
+// sit on the grid THOSE bytes produce, so a client that applied it first would
+// draw them against a screen it has not scrolled yet. The set itself was
+// captured inside the same critical section that stamped the seq, so what is
+// delivered here cannot have moved since.
+func (s *Session) fanOutPlacements(update PlacementUpdate) {
+	s.subMu.RLock()
+	var subs []*sessionSubscriber
+	for _, sub := range s.subscribers {
+		if sub.onPlacements != nil {
+			subs = append(subs, sub)
+		}
+	}
+	s.subMu.RUnlock()
+
+	for _, sub := range subs {
+		sub.onPlacements(update)
 	}
 }
 
@@ -338,6 +380,8 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					readLoopSeqGapHook()
 				}
 				wire, resync := data, ""
+				var placements []KittyPlacement
+				placementsMoved := false
 				s.replayMu.Lock()
 				if s.wireFeed != nil {
 					// Feed the server-authoritative terminal under the same lock
@@ -346,6 +390,10 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 					// hands back the wire bytes for this chunk, which differ
 					// from the raw ones only when it extracted a kitty APC.
 					wire, resync = s.wireFeed.feed(data)
+					// Read the placement set in the same hold: it was measured on
+					// the grid this chunk produced, and the seq below is what ties
+					// it to those bytes for the client.
+					placements, placementsMoved = s.wireFeed.changedPlacements()
 				}
 				s.lastReplaySeq = seq
 				s.replayMu.Unlock()
@@ -382,6 +430,11 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				if len(wire) > 0 {
 					s.fanOut(wire, seq)
 				}
+				// After the bytes, never before them: the set describes the grid
+				// they produce.
+				if placementsMoved {
+					s.fanOutPlacements(PlacementUpdate{Seq: seq, Placements: placements})
+				}
 				if resync != "" {
 					if logf != nil {
 						logf("pty layout resync: session=%s reason=%s", s.id, resync)
@@ -416,15 +469,21 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 	if len(carryover) > 0 {
 		seq := s.seqCounter.Add(1)
 		wire, resync := carryover, ""
+		var placements []KittyPlacement
+		placementsMoved := false
 		s.replayMu.Lock()
 		if s.wireFeed != nil {
 			wire, resync = s.wireFeed.feed(carryover)
+			placements, placementsMoved = s.wireFeed.changedPlacements()
 		}
 		s.lastReplaySeq = seq
 		s.replayMu.Unlock()
 		s.drainGhosttyResponses(logf)
 		if len(wire) > 0 {
 			s.fanOut(wire, seq)
+		}
+		if placementsMoved {
+			s.fanOutPlacements(PlacementUpdate{Seq: seq, Placements: placements})
 		}
 		if resync != "" {
 			if logf != nil {
@@ -624,12 +683,16 @@ func (s *Session) info() AttachInfo {
 		snapshot := s.ghostty.Serialize()
 		ghosttySnapshot = snapshot.VTDump
 	}
-	// Resolve command blocks inside the SAME hold as the dump and watermark:
-	// the attach snapshot is an atomic {dump, blocks, watermark} triple, so a
-	// block row always indexes the dump it shipped with (Phase 3a contract).
+	// Resolve command blocks and kitty placements inside the SAME hold as the
+	// dump and watermark: the attach snapshot is an atomic {dump, blocks,
+	// placements, watermark} quadruple, so a block row and an image position
+	// always index the dump they shipped with (Phase 3a contract, extended by
+	// the kitty phase).
 	var ghosttyBlocks []AttachBlockData
+	var ghosttyPlacements []KittyPlacement
 	if s.wireFeed != nil {
 		ghosttyBlocks = s.wireFeed.snapshotBlocks()
+		ghosttyPlacements, _ = s.wireFeed.snapshotPlacements()
 	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
@@ -656,8 +719,34 @@ func (s *Session) info() AttachInfo {
 		ExitSignal:                 exitSignal,
 		GhosttySnapshot:            ghosttySnapshot,
 		GhosttyBlocks:              ghosttyBlocks,
+		GhosttyPlacements:          ghosttyPlacements,
 		GhosttyScrollbackTruncated: ghosttyTruncated,
 	}
+}
+
+// kittyImage copies one stored image out of the session's terminal.
+//
+// Under replayMu like every other terminal read: teardown nils the terminal
+// under that lock, so an unlocked check-then-use could copy out of a freed
+// handle. A session with no terminal, and an id the storage does not hold, give
+// the same ordinary answer — ErrKittyImageNotFound naming the id.
+func (s *Session) kittyImage(imageID uint32) (KittyImage, error) {
+	s.replayMu.Lock()
+	defer s.replayMu.Unlock()
+	if s.ghostty == nil {
+		return KittyImage{}, fmt.Errorf("%w: image %d (session has no terminal)", ErrKittyImageNotFound, imageID)
+	}
+	img, ok := s.ghostty.KittyImage(imageID)
+	if !ok {
+		return KittyImage{}, fmt.Errorf("%w: image %d", ErrKittyImageNotFound, imageID)
+	}
+	// The second and last fold of the session's epoch (the placement read is the
+	// other). A client asks for pixels because a placement named a generation it
+	// has none for, and it stores what comes back under the generation the
+	// answer carries — so the two halves have to speak the same numbering or the
+	// pull repeats forever. See mintKittyEpoch.
+	img.Generation += s.kittyEpoch
+	return img, nil
 }
 
 // screenSnapshot is a lean, read-only ghostty viewport serialization plus the
@@ -734,7 +823,29 @@ func (s *Session) resize(cols, rows uint16) error {
 	if s.ghostty != nil {
 		s.ghostty.Resize(int(cols), int(rows))
 	}
+	// A reflow moves images without producing a byte of output, so no chunk
+	// carries the correction and the client cannot derive it: it never saw the
+	// placements move. Deferring to "the next chunk" fails exactly when no next
+	// chunk comes, which is the common case — a resize on an idle session leaves
+	// every image drawn where the old grid put it until something types.
+	var placements []KittyPlacement
+	placementsHeld := false
+	if s.wireFeed != nil {
+		placements, placementsHeld = s.wireFeed.snapshotPlacements()
+	}
+	seq := s.lastReplaySeq
 	s.replayMu.Unlock()
+
+	// Stamped with the replay watermark rather than a fresh seq: no bytes were
+	// produced, so the set describes the grid as of the last chunk the client
+	// has. That makes a resize emission raceable against a concurrent chunk's
+	// emission at an equal or lower seq, and the resolution is the ordering rule
+	// clients apply — a set is taken when its seq is >= the last one applied.
+	// Because every emission carries the WHOLE set, any interleaving that drops
+	// one is healed by the next, and the loser is never a partial update.
+	if placementsHeld {
+		s.fanOutPlacements(PlacementUpdate{Seq: seq, Placements: placements})
+	}
 
 	// The ioctl resolves ptmx.Fd(), so it must not overlap the close.
 	s.writeMu.Lock()

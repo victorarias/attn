@@ -1127,6 +1127,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleDetachSessionWS(client, msg.(*protocol.DetachSessionMessage))
 	case protocol.CmdGetScreenSnapshot: // wire: get_screen_snapshot
 		d.handleGetScreenSnapshot(client, msg.(*protocol.GetScreenSnapshotMessage))
+	case protocol.CmdGetKittyImage: // wire: get_kitty_image
+		d.handleGetKittyImage(client, msg.(*protocol.GetKittyImageMessage))
 	case protocol.CmdPtyInput: // wire: pty_input
 		d.handlePtyInput(client, msg.(*protocol.PtyInputMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
@@ -1523,6 +1525,13 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		if typed, ok := msg.(*protocol.DetachSessionMessage); ok {
 			return typed.ID
 		}
+	case protocol.CmdGetKittyImage: // wire: get_kitty_image
+		// The pixels live in the worker that owns the PTY, so a pull for a
+		// remote session has to reach the daemon that hosts it; the answer
+		// comes back through the relay like the placements that provoked it.
+		if typed, ok := msg.(*protocol.GetKittyImageMessage); ok {
+			return typed.ID
+		}
 	case protocol.CmdPtyInput: // wire: pty_input
 		if typed, ok := msg.(*protocol.PtyInputMessage); ok {
 			return typed.ID
@@ -1641,7 +1650,7 @@ func (d *Daemon) broadcastRawWSMessage(payload []byte) {
 			return client.resolvePendingRemoteAttach(envelope.ID, envelope.Success)
 		})
 		return
-	case protocol.EventPtyOutput, protocol.EventPtyDesync:
+	case protocol.EventPtyOutput, protocol.EventPtyDesync, protocol.EventKittyPlacements, protocol.EventKittyImageResult:
 		if strings.TrimSpace(envelope.ID) == "" {
 			d.wsHub.BroadcastRawText(payload)
 			return

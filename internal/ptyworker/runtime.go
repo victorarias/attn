@@ -895,6 +895,32 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 					)
 				}
 			},
+			// Placements ride this connection's own queue, which is what keeps a
+			// set ordered behind the output event carrying the same seq.
+			//
+			// The success path does not log. While an image is on screen this
+			// fires for every chunk that scrolls it, so a line per update is
+			// hundreds a second through a plain `cat` — enough to bury the rest
+			// of the session log. Only a forward failure is worth a line, and it
+			// is bounded by the send queue giving up.
+			pty.OnPlacements(func(update pty.PlacementUpdate) {
+				seq := update.Seq
+				if !c.sendEvent(EventEnvelope{
+					Type:       "evt",
+					Event:      EventKittyPlacements,
+					SessionID:  c.runtime.cfg.SessionID,
+					Seq:        &seq,
+					Placements: placementsToWire(update.Placements),
+				}) {
+					c.runtime.logf(
+						"worker kitty placements forward failed: session=%s conn=%s sub=%s seq=%d",
+						c.runtime.cfg.SessionID,
+						c.connID,
+						subID,
+						update.Seq,
+					)
+				}
+			}),
 		)
 		if err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) {
@@ -916,6 +942,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ExitSignal:                 info.ExitSignal,
 			GhosttySnapshot:            info.GhosttySnapshot,
 			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
+			GhosttyPlacements:          placementsToWire(info.GhosttyPlacements),
 			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 		})
 	case MethodDetach:
@@ -990,6 +1017,40 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			return
 		}
 		c.sendResult(req.ID, map[string]any{"ok": true})
+	case MethodKittyImage:
+		var params KittyImageParams
+		if err := json.Unmarshal(req.Params, &params); err != nil {
+			c.sendError(req.ID, ErrBadRequest, "invalid kitty_image params")
+			return
+		}
+		img, err := c.runtime.manager.KittyImage(c.runtime.cfg.SessionID, params.ImageID)
+		if err != nil {
+			switch {
+			case errors.Is(err, pty.ErrSessionNotFound):
+				c.sendError(req.ID, ErrSessionNotFound, err.Error())
+			case errors.Is(err, pty.ErrKittyImageNotFound):
+				c.sendError(req.ID, ErrImageNotFound, err.Error())
+			default:
+				c.sendError(req.ID, ErrInternal, err.Error())
+			}
+			return
+		}
+		result, err := kittyImageToWire(img)
+		if err != nil {
+			c.sendError(req.ID, ErrInternal, err.Error())
+			return
+		}
+		c.runtime.logf(
+			"worker kitty image: session=%s conn=%s image=%d %dx%d format=%s bytes=%d",
+			c.runtime.cfg.SessionID,
+			c.connID,
+			result.ImageID,
+			result.Width,
+			result.Height,
+			result.Format,
+			len(img.Data),
+		)
+		c.sendResult(req.ID, result)
 	case MethodSignal:
 		var params SignalParams
 		if err := json.Unmarshal(req.Params, &params); err != nil {

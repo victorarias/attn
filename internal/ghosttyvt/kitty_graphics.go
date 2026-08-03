@@ -163,6 +163,12 @@ const (
 // KittyPlacement is one placement observed in the active screen's storage,
 // geometry resolved at observation time (viewport-relative; scrolling moves
 // placements between observations without changing the generation stamp).
+//
+// ImageGeneration is PROCESS-LOCAL, like every stamp in this file: ghostty
+// numbers them per process, so two terminals mint the same numbers for
+// different pixels. internal/pty folds a per-terminal-instance epoch into every
+// generation before it leaves the worker (mintKittyEpoch in
+// internal/pty/kitty.go); nothing here does, and nothing here should.
 type KittyPlacement struct {
 	ImageID         uint32
 	PlacementID     uint32
@@ -184,7 +190,9 @@ type KittyPlacement struct {
 
 // KittyImage is a decoded, uncompressed image copied out of the storage.
 // Format is never PNG (ghostty decodes PNG to RGBA before storing) and the
-// data is never compressed.
+// data is never compressed. Generation is the same process-local stamp
+// KittyPlacement.ImageGeneration carries, and gets the same epoch folded into
+// it on the way out of the worker.
 type KittyImage struct {
 	ID         uint32
 	Width      uint32
@@ -203,6 +211,10 @@ type KittyImage struct {
 // Applying a zero storage limit deletes everything, and that deletion takes a
 // stamp of its own — so a terminal with kitty disabled reports nonzero and
 // empty. Only a *changed* stamp means "observe again".
+//
+// Unlike the per-image stamps, this one is used raw wherever it is read: it is
+// a change detector that never leaves the process, so it needs none of the
+// identity epoching internal/pty applies to what it describes to clients.
 func (t *Terminal) KittyGeneration() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()

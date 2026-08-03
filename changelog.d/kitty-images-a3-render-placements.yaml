@@ -1,0 +1,36 @@
+kind: internal
+area: terminal
+change: >
+  attn's terminal can now draw kitty-graphics images, though not yet by
+  default. The worker — the only part of attn that parses kitty escapes —
+  describes the images on its screen to the app: where each one sits, how big
+  it is, and which image it is. The app asks for the pixels of any image it
+  has not seen, caches them per session, and draws each one over the
+  terminal's text. Images follow the text they were printed next to as it
+  scrolls, survive switching sessions away and back and a full app restart,
+  and disappear when the program that drew them deletes them.
+notes: >
+  Phase A3 of docs/plans/2026-08-02-terminal-kitty-images.md. Still
+  feature-dark on purpose: the worker's kitty image storage limit stays 0
+  unless ATTN_KITTY_STORAGE_LIMIT is set in the daemon's environment, so a
+  shipping session stores no image, no placement is ever observed, and the
+  whole path costs one flag check per PTY chunk. A4 replaces that default with
+  a measured number and its receipts, and is the release where this becomes a
+  user-visible feature worth a bullet.
+
+  Protocol 205: kitty_placements (the full placement set of the active screen,
+  seq-stamped), get_kitty_image plus its kitty_image_result, and placements
+  carried in the attach snapshot beside the VT dump and OSC 133 blocks. Two
+  capabilities, deliberately split: kitty_images means "describe images to me",
+  the existing binary_pty_output decides only whether the pixels travel as a
+  binary frame or as base64 JSON — the hub relay is a text pipe and takes the
+  JSON path. The relay asks for images and never claims the binary capability,
+  confirmed from the remote daemon's own hello, and a remote session draws one
+  end to end against a real remote daemon (see the plan's A3 verification
+  record).
+
+  Named v1 limitations: images draw above text (kitty z<0 under-text is
+  deferred), no images in mission-control grid tiles, no animations. Images
+  render at a plausible but not pixel-perfect size, because the PTY reports no
+  cell-pixel geometry to emitters and the client maps image pixels to CSS
+  pixels; both halves of that are an A4 decision with their own receipts.

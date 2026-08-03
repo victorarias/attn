@@ -1,9 +1,12 @@
 package ptyworker
 
 import (
+	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"time"
 
+	"github.com/victorarias/attn/internal/ghosttyvt"
 	"github.com/victorarias/attn/internal/pty"
 )
 
@@ -37,6 +40,13 @@ const (
 	MethodSignal   = "signal"
 	MethodRemove   = "remove"
 	MethodHealth   = "health"
+	// MethodKittyImage returns one stored image's decoded pixels by ghostty
+	// image id. Pulled on demand rather than pushed with the placement that
+	// references it: an image is megabytes of raw pixels and a client usually
+	// already has it. Added without an RPC version bump, following the
+	// MethodSnapshot precedent: an older worker rejects it with ErrBadRequest
+	// ("unknown method"), which reads the same as an image it cannot serve.
+	MethodKittyImage = "kitty_image"
 )
 
 const (
@@ -44,6 +54,14 @@ const (
 	EventDesync       = "desync"
 	EventStateChanged = "state_changed"
 	EventExit         = "exit"
+	// EventKittyPlacements carries the FULL kitty placement set of the session's
+	// active screen as of the chunk stamped Seq, the empty set included — that
+	// is how a client learns the last image is gone. Sent on the attach
+	// connection, after the EventOutput carrying the same Seq, because the
+	// positions were measured on the grid those bytes produce. Additive like the
+	// methods above: a worker that never sends it leaves its client drawing no
+	// images, which is also what a client that ignores it does.
+	EventKittyPlacements = "kitty_placements"
 )
 
 const (
@@ -54,6 +72,11 @@ const (
 	ErrSessionNotRunning  = "session_not_running"
 	ErrIO                 = "io_error"
 	ErrInternal           = "internal_error"
+	// ErrImageNotFound answers MethodKittyImage for an id the terminal does not
+	// hold — evicted at the storage limit, deleted by the program, or never
+	// transmitted. Its own code because it is an ordinary answer: the caller
+	// drops that placement's render instead of treating the session as broken.
+	ErrImageNotFound = "image_not_found"
 )
 
 type RPCError struct {
@@ -96,6 +119,98 @@ type EventEnvelope struct {
 	StateSource     *string `json:"state_source,omitempty"`
 	StateDetail     *string `json:"state_detail,omitempty"`
 	StateObservedAt *string `json:"state_observed_at,omitempty"`
+
+	// Placements is the whole placement set on EventKittyPlacements, stamped by
+	// Seq. An absent array on that event is the empty set — the event name
+	// already says what the field is about, so there is nothing to distinguish
+	// it from.
+	Placements []KittyPlacement `json:"placements,omitempty"`
+}
+
+// KittyPlacement is the wire form of one observed placement (see
+// pty.KittyPlacement for field semantics). Viewport row and column are
+// screen-relative on the worker's grid, which the client's grid equals, so a
+// client maps them by adding its own scrollback length.
+type KittyPlacement struct {
+	ImageID         uint32 `json:"image_id"`
+	PlacementID     uint32 `json:"placement_id"`
+	Virtual         bool   `json:"virtual,omitempty"`
+	Z               int32  `json:"z,omitempty"`
+	PixelWidth      uint32 `json:"pixel_width"`
+	PixelHeight     uint32 `json:"pixel_height"`
+	GridCols        uint32 `json:"grid_cols"`
+	GridRows        uint32 `json:"grid_rows"`
+	ViewportCol     int32  `json:"viewport_col"`
+	ViewportRow     int32  `json:"viewport_row"`
+	ViewportVisible bool   `json:"viewport_visible,omitempty"`
+	SourceX         uint32 `json:"source_x,omitempty"`
+	SourceY         uint32 `json:"source_y,omitempty"`
+	SourceWidth     uint32 `json:"source_width,omitempty"`
+	SourceHeight    uint32 `json:"source_height,omitempty"`
+	ImageGeneration uint64 `json:"image_generation"`
+}
+
+// placementsToWire converts an observed placement set to its wire form (1:1
+// fields). An empty set converts to nil, which the event carries as an absent
+// array and means exactly that.
+func placementsToWire(placements []pty.KittyPlacement) []KittyPlacement {
+	if len(placements) == 0 {
+		return nil
+	}
+	out := make([]KittyPlacement, len(placements))
+	for i, p := range placements {
+		out[i] = KittyPlacement{
+			ImageID:         p.ImageID,
+			PlacementID:     p.PlacementID,
+			Virtual:         p.Virtual,
+			Z:               p.Z,
+			PixelWidth:      p.PixelWidth,
+			PixelHeight:     p.PixelHeight,
+			GridCols:        p.GridCols,
+			GridRows:        p.GridRows,
+			ViewportCol:     p.ViewportCol,
+			ViewportRow:     p.ViewportRow,
+			ViewportVisible: p.ViewportVisible,
+			SourceX:         p.SourceX,
+			SourceY:         p.SourceY,
+			SourceWidth:     p.SourceWidth,
+			SourceHeight:    p.SourceHeight,
+			ImageGeneration: p.ImageGeneration,
+		}
+	}
+	return out
+}
+
+// PlacementsFromWire reads a wire placement set back into the observation form
+// the rest of the daemon speaks. Both legs live here so the pair stays one
+// contract: a field added on one side and forgotten on the other is a placement
+// that silently loses its geometry.
+func PlacementsFromWire(placements []KittyPlacement) []pty.KittyPlacement {
+	if len(placements) == 0 {
+		return nil
+	}
+	out := make([]pty.KittyPlacement, len(placements))
+	for i, p := range placements {
+		out[i] = pty.KittyPlacement{
+			ImageID:         p.ImageID,
+			PlacementID:     p.PlacementID,
+			Virtual:         p.Virtual,
+			Z:               p.Z,
+			PixelWidth:      p.PixelWidth,
+			PixelHeight:     p.PixelHeight,
+			GridCols:        p.GridCols,
+			GridRows:        p.GridRows,
+			ViewportCol:     p.ViewportCol,
+			ViewportRow:     p.ViewportRow,
+			ViewportVisible: p.ViewportVisible,
+			SourceX:         p.SourceX,
+			SourceY:         p.SourceY,
+			SourceWidth:     p.SourceWidth,
+			SourceHeight:    p.SourceHeight,
+			ImageGeneration: p.ImageGeneration,
+		}
+	}
+	return out
 }
 
 type HelloParams struct {
@@ -146,6 +261,11 @@ type AttachResult struct {
 	// LastSeq (Phase 3a). Mirrors pty.AttachBlockData. Omitted when absent;
 	// additive and skew-safe like GhosttySnapshot.
 	GhosttyBlocks []AttachBlock `json:"ghostty_blocks,omitempty"`
+	// GhosttyPlacements is the kitty placement set of the screen
+	// GhosttySnapshot serializes, captured in the same hold as it, the blocks,
+	// and LastSeq. Omitted when the session holds no images; additive and
+	// skew-safe like the fields above.
+	GhosttyPlacements []KittyPlacement `json:"ghostty_placements,omitempty"`
 	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
 	// scrollback lines at its cap before GhosttySnapshot was serialized.
 	GhosttyScrollbackTruncated bool `json:"ghostty_scrollback_truncated,omitempty"`
@@ -203,6 +323,94 @@ type SetThemeParams struct {
 	Foreground string `json:"foreground"`
 	Background string `json:"background"`
 	Cursor     string `json:"cursor"`
+}
+
+type KittyImageParams struct {
+	ImageID uint32 `json:"image_id"`
+}
+
+// KittyImageResult is one stored image. Data is base64'd RAW PIXELS in Format's
+// layout — ghostty decodes PNG and inflates zlib before storing, so there is no
+// compressed form to pass through — which makes the payload Width*Height*bpp,
+// bounded by the session's storage limit rather than by what the program sent.
+//
+// Generation pairs with ImageID: a program that retransmits an id replaces the
+// pixels behind every placement of it, and a cache keyed on the id alone would
+// serve the old ones forever.
+type KittyImageResult struct {
+	ImageID    uint32 `json:"image_id"`
+	Width      uint32 `json:"width"`
+	Height     uint32 `json:"height"`
+	Format     string `json:"format"`
+	Generation uint64 `json:"generation"`
+	Data       string `json:"data"`
+}
+
+// Kitty pixel-layout names. Spelled out on the wire rather than passed through
+// as ghostty's enum value: this RPC crosses a version boundary — a worker
+// outlives the daemon that spawned it — and a number whose meaning is a
+// declaration order is one pin bump away from being read as a different layout.
+const (
+	kittyFormatRGB       = "rgb"
+	kittyFormatRGBA      = "rgba"
+	kittyFormatGrayAlpha = "gray_alpha"
+	kittyFormatGray      = "gray"
+)
+
+// kittyImageToWire encodes a stored image for the JSON hop.
+func kittyImageToWire(img pty.KittyImage) (KittyImageResult, error) {
+	var format string
+	switch img.Format {
+	case ghosttyvt.KittyImageRGB:
+		format = kittyFormatRGB
+	case ghosttyvt.KittyImageRGBA:
+		format = kittyFormatRGBA
+	case ghosttyvt.KittyImageGrayAlpha:
+		format = kittyFormatGrayAlpha
+	case ghosttyvt.KittyImageGray:
+		format = kittyFormatGray
+	default:
+		return KittyImageResult{}, fmt.Errorf("kitty image %d has unknown pixel format %d", img.ID, img.Format)
+	}
+	return KittyImageResult{
+		ImageID:    img.ID,
+		Width:      img.Width,
+		Height:     img.Height,
+		Format:     format,
+		Generation: img.Generation,
+		Data:       base64.StdEncoding.EncodeToString(img.Data),
+	}, nil
+}
+
+// Decode reads a wire image back into the form the daemon serves to clients.
+// The failures it names are both "this worker and this daemon disagree", which
+// the caller reports rather than rendering.
+func (r KittyImageResult) Decode() (pty.KittyImage, error) {
+	var format ghosttyvt.KittyImageFormat
+	switch r.Format {
+	case kittyFormatRGB:
+		format = ghosttyvt.KittyImageRGB
+	case kittyFormatRGBA:
+		format = ghosttyvt.KittyImageRGBA
+	case kittyFormatGrayAlpha:
+		format = ghosttyvt.KittyImageGrayAlpha
+	case kittyFormatGray:
+		format = ghosttyvt.KittyImageGray
+	default:
+		return pty.KittyImage{}, fmt.Errorf("kitty image %d has unknown pixel format %q", r.ImageID, r.Format)
+	}
+	data, err := base64.StdEncoding.DecodeString(r.Data)
+	if err != nil {
+		return pty.KittyImage{}, fmt.Errorf("decode kitty image %d pixels: %w", r.ImageID, err)
+	}
+	return pty.KittyImage{
+		ID:         r.ImageID,
+		Width:      r.Width,
+		Height:     r.Height,
+		Format:     format,
+		Generation: r.Generation,
+		Data:       data,
+	}, nil
 }
 
 func IsCompatibleVersion(peerMajor, peerMinor int) bool {

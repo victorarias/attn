@@ -117,6 +117,10 @@ type AttachInfo struct {
 	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
 	// (atomic with the dump and LastSeq). nil when ghostty is absent.
 	GhosttyBlocks []AttachBlockData
+	// GhosttyPlacements is the kitty placement set of the screen GhosttySnapshot
+	// serializes, captured in that same hold. nil when the session holds no
+	// images, which is every session while the feature is dark.
+	GhosttyPlacements []KittyPlacement
 	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
 	// scrollback lines at its cap before this snapshot was taken.
 	GhosttyScrollbackTruncated bool
@@ -308,7 +312,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	// The Ghostty terminal backs the classifier, CPR, tiles, and attach restore;
 	// a session without it is not viable.
-	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{})
+	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{
+		KittyImageStorageLimit: kittyStorageLimit(m.logf),
+	})
 	if err != nil {
 		if ptmx != nil {
 			_ = ptmx.Close()
@@ -323,7 +329,12 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		return fmt.Errorf("ghostty terminal construction failed: %w", err)
 	}
 	session.ghostty = gt
-	session.wireFeed = newWireFeeder(gt)
+	// One epoch per terminal, held by both halves that hand a generation out:
+	// the placement read and the image serve. A worker that replaces another
+	// under the same session id gets a different one, which is what keeps a
+	// client from redrawing the dead worker's pixels (see mintKittyEpoch).
+	session.kittyEpoch = mintKittyEpoch()
+	session.wireFeed = newWireFeeder(gt, session.kittyEpoch)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session
@@ -363,7 +374,15 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	return nil
 }
 
-func (m *Manager) Attach(sessionID, subscriberID string, send func([]byte, uint32) bool, onDrop func(reason string)) (AttachInfo, error) {
+// Attach registers a subscriber for the session's byte stream and returns the
+// attach snapshot. Options carry the streams a subscriber can additionally ask
+// for; a subscriber that only wants bytes passes none (see OnPlacements).
+func (m *Manager) Attach(
+	sessionID, subscriberID string,
+	send func([]byte, uint32) bool,
+	onDrop func(reason string),
+	opts ...SubscriberOption,
+) (AttachInfo, error) {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return AttachInfo{}, err
@@ -371,8 +390,19 @@ func (m *Manager) Attach(sessionID, subscriberID string, send func([]byte, uint3
 	if send == nil {
 		return AttachInfo{}, errors.New("subscriber send callback is required")
 	}
-	session.addSubscriber(subscriberID, send, onDrop)
+	session.addSubscriber(subscriberID, send, onDrop, opts...)
 	return session.info(), nil
+}
+
+// KittyImage copies one stored image out of a session's terminal. Returns
+// ErrSessionNotFound for an unknown session and ErrKittyImageNotFound for an id
+// the terminal does not hold — evicted, deleted, or never transmitted.
+func (m *Manager) KittyImage(sessionID string, imageID uint32) (KittyImage, error) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return KittyImage{}, err
+	}
+	return session.kittyImage(imageID)
 }
 
 // SetTheme replaces the colors sessionID answers OSC 10/11/12 queries with.

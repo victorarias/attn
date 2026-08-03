@@ -39,9 +39,10 @@ package pty
 // a silent divergence between the worker grid and the client's.
 //
 // Feature-dark today. Production terminals run with a zero kitty storage limit
-// (ghosttyvt.Options), so ghostty refuses every transmission, the generation
-// stamp never moves, and the only visible effect is that APC bytes are dropped
-// from the wire instead of being sent to a client that cannot parse them.
+// (ghosttyvt.Options; ATTN_KITTY_STORAGE_LIMIT overrides it for non-production
+// verification), so ghostty refuses every transmission, the generation stamp
+// never moves, and the only visible effect is that APC bytes are dropped from
+// the wire instead of being sent to a client that cannot parse them.
 // Design: docs/plans/2026-08-02-terminal-kitty-images.md.
 
 import (
@@ -84,14 +85,14 @@ type kittyPlacementKey struct {
 	PlacementID uint32
 }
 
-// kittyPlacementDelta is what one APC did to the active screen's placement set.
-// It is the shape the protocol events of the next phase are cut from; nothing
-// consumes it yet.
+// kittyPlacementDelta is what one observation found changed in the active
+// screen's placement set. It answers two questions and neither is the wire's:
+// whether an image APPEARED on bytes the wire could not describe (a resync),
+// and whether anything at all moved (an update for the client, which carries
+// the whole set rather than this).
 //
-// Updated carries placements whose fields moved for ANY reason, including a
-// viewport position that changed because the screen scrolled since the last
-// observation — observation only happens on APC writes, so scroll-induced
-// movement surfaces late, at the next one, rather than as it happens.
+// Updated carries placements whose fields moved for ANY reason, a viewport
+// position that changed because the screen scrolled included.
 type kittyPlacementDelta struct {
 	Added   []ghosttyvt.KittyPlacement
 	Removed []kittyPlacementKey
@@ -120,14 +121,24 @@ type wireFeeder struct {
 	// describes it on the wire, or is one the wire cannot describe — and the
 	// difference between this and the terminal's own stamp at the end of a feed
 	// is exactly the second kind.
+	//
+	// Raw, and deliberately: this is an internal change detector that never
+	// leaves the process, so folding the epoch into it would buy nothing and
+	// invite the two to be confused.
 	generation uint64
+
+	// epoch is the terminal-instance offset folded into every generation this
+	// feeder hands out; see mintKittyEpoch. Session.kittyEpoch carries the same
+	// value for the image half, and the two must match.
+	epoch uint64
 
 	// placements is the placement set as of the last observation, the left side
 	// of the next diff.
 	placements []ghosttyvt.KittyPlacement
-	// deltas holds what the APCs in the MOST RECENT feed call did to that set,
-	// so it stays bounded by one chunk. The next phase replaces it with an
-	// event sink; until then only tests read it.
+	// deltas holds what the observations in the MOST RECENT feed call found, so
+	// it stays bounded by one chunk. It is never handed out: appeared() reads it
+	// for the resync decision, and changedPlacements() reads its emptiness as
+	// the whole test for "this chunk moved something".
 	deltas []kittyPlacementDelta
 
 	// resync names the observation that failed during this feed, "" when none.
@@ -137,12 +148,15 @@ type wireFeeder struct {
 // newWireFeeder wires the feed path for a session's ghostty terminal. Returns
 // nil when the terminal is absent, exactly like newBlockFeeder: callers
 // nil-guard, and a session without a terminal fans out its raw bytes unchanged.
-func newWireFeeder(term *ghosttyvt.Terminal) *wireFeeder {
+//
+// epoch is the session's kitty identity offset (mintKittyEpoch), which the
+// caller must also hold on the Session so the image serve folds the same one.
+func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64) *wireFeeder {
 	blocks := newBlockFeeder(term)
 	if blocks == nil {
 		return nil
 	}
-	return &wireFeeder{term: term, blocks: blocks, generation: term.KittyGeneration()}
+	return &wireFeeder{term: term, blocks: blocks, epoch: epoch, generation: term.KittyGeneration()}
 }
 
 // feed writes one PTY chunk into the terminal and returns the bytes the wire
@@ -232,13 +246,31 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 	// alternate screen is the common one — and a placement going away costs the
 	// client nothing: it never drew the image, and the mode switch that pruned
 	// it is on the wire already.
+	observed := false
 	if stamped := f.term.KittyGeneration(); stamped != f.generation {
 		f.generation = stamped
 		before := len(f.deltas)
 		f.observe()
+		observed = true
 		if f.appeared(before) {
 			f.failResync(kittyResyncUndescribedImage)
 		}
+	}
+
+	// A live placement moves on bytes that touch no kitty state at all — a
+	// scroll is the common one — and ghostty's stamp does not move with it, so
+	// the check above cannot see it. Re-reading at the end of every chunk that
+	// could have moved one is what keeps a described position from running a
+	// chunk (or a screenful) behind the grid it refers to. It is also why an
+	// observation the APC's own dispatch already took is not enough on its own:
+	// plain bytes after the APC, in the same chunk, scroll what it just placed.
+	//
+	// The gate is a slice length, not a terminal read. With no placements —
+	// every chunk of every session while the feature is dark — this costs one
+	// comparison and never crosses into cgo, and nothing except a placement's
+	// own dispatch can create the first one.
+	if !observed && len(f.placements) > 0 {
+		f.observe()
 	}
 
 	if whole {
@@ -400,11 +432,38 @@ func appendCSI(dst []byte, n int, final byte) []byte {
 	return append(dst, final)
 }
 
+// placementReadHook is a test-only seam fired on every read of the placement
+// set, so a test can hold both the feed path and the resize path to their cost:
+// a session with no images must never reach ghostty for placements at all. nil
+// (a single branch) in production.
+var placementReadHook func()
+
+// readPlacements is the only place the placement set is read out of ghostty —
+// the cgo crossing every caller here is gated to avoid. Callers hold replayMu.
+//
+// Being the only read is also what makes it the only place a generation crosses
+// out of ghostty's process-local numbering into the session's: every placement
+// exit (the live fan-out, the resize re-describe, the attach snapshot) draws
+// from here, so one fold covers all three. The set is freshly copied out per
+// call, so stamping it mutates nothing shared, and the offset is constant, so
+// the diff against the last observation is untouched.
+func (f *wireFeeder) readPlacements() []ghosttyvt.KittyPlacement {
+	if placementReadHook != nil {
+		placementReadHook()
+	}
+	placements := f.term.KittyPlacements()
+	for i := range placements {
+		placements[i].ImageGeneration += f.epoch
+	}
+	return placements
+}
+
 // observe diffs ghostty's placement set against the last observation. Called
-// only when the generation stamp moved, which is the terminal's own statement
-// that the set or its images changed.
+// when the generation stamp moved — the terminal's own statement that the set
+// or its images changed — and at the end of any chunk that could have moved a
+// placement the terminal does not consider changed at all (see feed).
 func (f *wireFeeder) observe() {
-	current := f.term.KittyPlacements()
+	current := f.readPlacements()
 	delta := diffKittyPlacements(f.placements, current)
 	f.placements = current
 	if !delta.empty() {
@@ -433,10 +492,50 @@ func (f *wireFeeder) failResync(reason string) {
 	}
 }
 
+// changedPlacements reports the active screen's whole placement set when this
+// feed moved it — membership, geometry, or position — and nothing when it did
+// not. The caller stamps the set with the chunk's seq (Session.readLoop) and
+// hands it to the client.
+//
+// The returned slice needs no copy: observe REPLACES the set rather than
+// mutating it, so what is handed out stays the truth of the moment it
+// described.
+func (f *wireFeeder) changedPlacements() ([]ghosttyvt.KittyPlacement, bool) {
+	if len(f.deltas) == 0 {
+		return nil, false
+	}
+	return f.placements, true
+}
+
 // snapshotBlocks resolves the block table under the caller's replayMu — the
 // SAME hold that serializes the VT dump and reads the seq watermark.
 func (f *wireFeeder) snapshotBlocks() []AttachBlockData {
 	return f.blocks.snapshotBlocks()
+}
+
+// snapshotPlacements resolves the active screen's placement set under the
+// caller's replayMu — the same hold as the dump, the blocks, and the watermark,
+// so an attaching client gets one consistent picture rather than four readings
+// of a moving terminal. Also the resize path's read (Session.resize).
+//
+// Read fresh from the terminal rather than reused from the last observation: a
+// resize reflows the grid under that same lock without feeding a chunk, so the
+// stored positions can be one reflow stale.
+//
+// The bool says whether this feeder holds any placement, which is NOT the same
+// as the returned set being non-empty: a reflow can drop the last placement, and
+// that reads as held-but-empty — the one thing that tells a client to stop
+// drawing. Only an unheld set skips the terminal, which is what keeps a session
+// without images off cgo here too.
+//
+// The stored set is deliberately left alone. It is the left side of the next
+// diff, and writing it from outside feed() would let a reflow absorb an
+// appearance that appeared() has to see.
+func (f *wireFeeder) snapshotPlacements() ([]ghosttyvt.KittyPlacement, bool) {
+	if len(f.placements) == 0 {
+		return nil, false
+	}
+	return f.readPlacements(), true
 }
 
 // close frees the native refs the block table holds. Called from closePTY

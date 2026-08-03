@@ -120,7 +120,15 @@ import {
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
 import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
+  KittyPlacementStore,
+  placementQuad,
+  placementSourceRect,
+} from '../utils/kittyPlacements';
+import { kittyImageCache, type KittyImageStatus } from '../utils/kittyImageCache';
+import type { PlacementElement } from '../types/generated';
+import {
   WebGlTerminalRenderer,
+  type WebGlImageQuad,
   type WebGlOverlay,
 } from './GhosttyWebGlRenderer';
 import './GhosttyTerminal.css';
@@ -214,6 +222,12 @@ export interface GhosttyTerminalHandle {
   // Enqueued on the write chain so it runs after the VT dump is applied and the
   // restored buffer exists to compute anchor text from.
   seedBlocks: (blocks: SeededBlock[]) => Promise<void>;
+  // Apply one described kitty placement set. Enqueued on the write chain so the
+  // positions land against the grid the bytes of that seq produced.
+  applyPlacements: (sessionId: string, seq: number, placements: PlacementElement[]) => Promise<void>;
+  // Seed placements from a restore snapshot, after the dump write. An empty set
+  // is meaningful: it clears what the pane drew before the reattach.
+  seedPlacements: (sessionId: string, placements: PlacementElement[]) => Promise<void>;
   reset: () => void;
   scrollToTop: () => boolean;
   getText: () => string;
@@ -231,6 +245,7 @@ export interface GhosttyTerminalHandle {
   getVisibleContent: () => TerminalVisibleContentSnapshot;
   getVisibleStyleSummary: () => TerminalVisibleStyleSnapshot;
   getBlockState: () => BlockStateSnapshot;
+  getPlacementState: () => PlacementStateSnapshot;
   drain: () => Promise<void>;
 }
 
@@ -265,6 +280,49 @@ export interface BlockStateSnapshot {
 const EMPTY_BLOCK_STATE: BlockStateSnapshot = {
   cols: 0, rows: 0, scrollback: 0, viewportOffset: 0, firstViewportBufferRow: 0,
   selectedBlockId: null, blocks: [],
+};
+
+// Live inspection of the kitty placement store for the get_pane_placement_state
+// bridge action. Reports the set as APPLIED — buffer rows, sizes, image
+// identity — plus where each lands on screen now and whether its pixels are in
+// hand, which together are what "this image is on screen" means. A harness can
+// assert an image appeared, moved with the scroll, and vanished when the
+// program deleted it, without reaching into the renderer.
+export interface PlacementStateSnapshotEntry {
+  imageId: number;
+  placementId: number;
+  generation: number;
+  z: number;
+  bufferRow: number;
+  col: number;
+  pixelWidth: number;
+  pixelHeight: number;
+  sourceX: number;
+  sourceY: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  /** Viewport row of the placement's top edge; negative means it starts above. */
+  screenRow: number;
+  /** Its rectangle intersects the grid's pixel box. */
+  visible: boolean;
+  blob: KittyImageStatus;
+}
+
+export interface PlacementStateSnapshot {
+  sessionId: string;
+  cols: number;
+  rows: number;
+  scrollback: number;
+  viewportOffset: number;
+  firstViewportBufferRow: number;
+  /** -1 until a set has been applied; equal seqs are legal (a resize re-describes). */
+  lastAppliedSeq: number;
+  placements: PlacementStateSnapshotEntry[];
+}
+
+const EMPTY_PLACEMENT_STATE: PlacementStateSnapshot = {
+  sessionId: '', cols: 0, rows: 0, scrollback: 0, viewportOffset: 0,
+  firstViewportBufferRow: 0, lastAppliedSeq: -1, placements: [],
 };
 
 interface SelectionRange {
@@ -617,8 +675,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // Carries a lone trailing ESC across output chunks so a RIS split on the
     // chunk boundary still re-enables grapheme clustering (see terminalGraphemeMode).
     const graphemeResetCarryRef = useRef(false);
-    const blockStoreRef = useRef(new TerminalBlockStore());
+    // Both stores are built once, by useState's lazy initializer, and carried by
+    // a ref: `useRef(new Store())` constructs a store on every render and throws
+    // it away, which is waste on a component that re-renders per repaint. Same
+    // shape as modelOpRing below.
+    const [blockStore] = useState(() => new TerminalBlockStore());
+    const blockStoreRef = useRef(blockStore);
     const selectedBlockIdRef = useRef<number | null>(null);
+    const [placementStore] = useState(() => new KittyPlacementStore());
+    const placementStoreRef = useRef(placementStore);
+    // The session id the placements were described for. The blob cache is
+    // app-level and keyed by it, and it arrives on the description rather than
+    // from props: a pane's own runtime id is the same id, but the description is
+    // what makes that a fact rather than an assumption.
+    const placementSessionRef = useRef('');
     const writeChainRef = useRef(Promise.resolve());
     // Bounded ring of the raw inputs fed to this pane's model, dumped into the
     // model_fault diagnostics record so a trap arrives with its own repro. Its
@@ -974,7 +1044,55 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         }
       }
-      const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current);
+      // Kitty images. Positions are recomputed every frame from the store's
+      // buffer rows, so scrolling moves them with the text they sit in without
+      // anything being re-described. A placement whose pixels have not arrived
+      // (or never will) simply is not drawn — the cache's answer, whichever it
+      // is, wakes this pane to draw again.
+      const imageQuads: WebGlImageQuad[] = [];
+      const placed = placementStoreRef.current.placements();
+      if (placed.length > 0) {
+        const firstRow = viewportBufferStart(scrollbackLength, viewportOffsetRef.current);
+        const gridWidth = terminal.cols * renderer.cellWidth;
+        const gridHeight = terminal.rows * renderer.cellHeight;
+        for (const placement of placed) {
+          const quad = placementQuad(
+            placement,
+            firstRow,
+            renderer.cellWidth,
+            renderer.cellHeight,
+            gridWidth,
+            gridHeight,
+          );
+          if (!quad) continue;
+          const blob = kittyImageCache.get(
+            placementSessionRef.current,
+            placement.imageId,
+            placement.generation,
+          );
+          if (!blob) continue;
+          const rect = placementSourceRect(quad, blob.width, blob.height);
+          imageQuads.push({
+            source: {
+              imageId: blob.imageId,
+              generation: blob.generation,
+              width: blob.width,
+              height: blob.height,
+              format: blob.format,
+              pixels: blob.pixels,
+            },
+            x: quad.x,
+            y: quad.y,
+            width: quad.width,
+            height: quad.height,
+            sourceX: rect.x,
+            sourceY: rect.y,
+            sourceWidth: rect.width,
+            sourceHeight: rect.height,
+          });
+        }
+      }
+      const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current, imageQuads);
       if (sample) {
         renderCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
@@ -1717,6 +1835,119 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
     }, [enqueueOperation, selectionLineAtBufferRow]);
 
+    // Ask for the pixels behind every placement the cache lacks. Idempotent per
+    // (session, image, generation): a set re-described because it scrolled asks
+    // for nothing, and a failed pull is not retried until a retransmission mints
+    // a new generation.
+    const requestPlacementBlobs = useCallback(() => {
+      const sessionId = placementSessionRef.current;
+      if (!sessionId) return;
+      for (const placement of placementStoreRef.current.placements()) {
+        kittyImageCache.ensure(sessionId, placement.imageId, placement.generation);
+      }
+    }, []);
+
+    // Apply one described placement set. Enqueued on the write chain so it lands
+    // behind the bytes of the chunk it was measured on — the positions are
+    // meaningless against any other grid — and so the scrollback length it maps
+    // against is the one those bytes produced.
+    const applyPlacements = useCallback((
+      sessionId: string,
+      seq: number,
+      placements: PlacementElement[],
+    ) => {
+      return enqueueOperation('applyPlacements', () => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        placementSessionRef.current = sessionId;
+        if (!placementStoreRef.current.apply(seq, placements, terminal.getScrollbackLength())) {
+          return;
+        }
+        requestPlacementBlobs();
+        scheduleOutputRender();
+      });
+    }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
+
+    // Seed placements from a restore snapshot, after the dump write. The dump
+    // carries no images, so this is the only path that survives an attach; an
+    // empty set is a real message here, clearing whatever the pane was drawing
+    // before the reattach.
+    const seedPlacements = useCallback((sessionId: string, placements: PlacementElement[]) => {
+      return enqueueOperation('seedPlacements', () => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        placementSessionRef.current = sessionId;
+        placementStoreRef.current.seed(placements, terminal.getScrollbackLength());
+        requestPlacementBlobs();
+        scheduleOutputRender();
+      });
+    }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
+
+    // Pixels landing (or failing to) is the only thing that changes an image's
+    // drawability between descriptions, so it is the only repaint signal this
+    // feature adds. No polling, no animation frame of its own.
+    useEffect(() => kittyImageCache.subscribe((sessionId, imageId) => {
+      if (sessionId !== placementSessionRef.current) return;
+      if (!placementStoreRef.current.placements().some((p) => p.imageId === imageId)) return;
+      scheduleOutputRender();
+    }), [scheduleOutputRender]);
+
+    // Live placement-store snapshot for the get_pane_placement_state bridge
+    // action: the set as applied, where each entry lands on screen right now,
+    // and whether its pixels are in hand. Deliberately not renderer internals —
+    // a harness asserts that an image is positioned and drawable, and the
+    // renderer's own answer to that is a texture id.
+    const getPlacementState = useCallback((): PlacementStateSnapshot => {
+      const terminal = terminalRef.current;
+      if (!terminal) return { ...EMPTY_PLACEMENT_STATE };
+      const renderer = rendererRef.current;
+      const scrollback = terminal.getScrollbackLength();
+      const viewportOffset = viewportOffsetRef.current;
+      const firstViewportBufferRow = viewportBufferStart(scrollback, viewportOffset);
+      const sessionId = placementSessionRef.current;
+      const placements = placementStoreRef.current.placements().map((placement) => {
+        const quad = renderer
+          ? placementQuad(
+            placement,
+            firstViewportBufferRow,
+            renderer.cellWidth,
+            renderer.cellHeight,
+            terminal.cols * renderer.cellWidth,
+            terminal.rows * renderer.cellHeight,
+          )
+          : null;
+        return {
+          imageId: placement.imageId,
+          placementId: placement.placementId,
+          generation: placement.generation,
+          z: placement.z,
+          bufferRow: placement.bufferRow,
+          col: placement.col,
+          pixelWidth: placement.pixelWidth,
+          pixelHeight: placement.pixelHeight,
+          sourceX: placement.sourceX,
+          sourceY: placement.sourceY,
+          sourceWidth: placement.sourceWidth,
+          sourceHeight: placement.sourceHeight,
+          screenRow: placement.bufferRow - firstViewportBufferRow,
+          visible: quad !== null,
+          blob: sessionId
+            ? kittyImageCache.status(sessionId, placement.imageId, placement.generation)
+            : 'absent' as KittyImageStatus,
+        };
+      });
+      return {
+        sessionId,
+        cols: terminal.cols,
+        rows: terminal.rows,
+        scrollback,
+        viewportOffset,
+        firstViewportBufferRow,
+        lastAppliedSeq: placementStoreRef.current.lastAppliedSeq(),
+        placements,
+      };
+    }, []);
+
     // Reconcile the block store with the model's new geometry after a resize.
     //
     // A WIDTH change invalidates stored rows: a reflowing resize (live
@@ -1736,6 +1967,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // rows that no longer hold the same text.
         annotationsRef.current?.noteGeometryChange();
         blockStoreRef.current.clear();
+        // Placements are stored as buffer rows too, and a reflow renumbers
+        // every one of them. The worker re-describes its whole set after a
+        // resize, so this is a gap of one description rather than a loss —
+        // absent until then beats drawing an image over the wrong text.
+        placementStoreRef.current.clear();
         selectedBlockIdRef.current = null;
         return;
       }
@@ -2054,7 +2290,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       write,
       resizeLocal,
       seedBlocks,
-      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+      applyPlacements,
+      seedPlacements,
+      reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); placementStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -2078,8 +2316,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getVisibleContent,
       getVisibleStyleSummary,
       getBlockState,
+      getPlacementState,
       drain: () => writeChainRef.current,
-    }), [fit, getBlockState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, write]);
+    }), [applyPlacements, fit, getBlockState, getPlacementState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, seedPlacements, write]);
 
     useEffect(() => {
       let active = true;
@@ -2140,6 +2379,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         // are meaningless.
         osc133StateRef.current = emptyOsc133State();
         blockStoreRef.current.clear();
+        placementStoreRef.current.clear();
         // The buffer the annotations were resolved against is gone. Keeping
         // them would leave anchors pointing into whatever replaces it.
         annotationsRef.current?.reset();
@@ -2260,7 +2500,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           write,
           resizeLocal,
           seedBlocks,
-          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+          applyPlacements,
+          seedPlacements,
+          reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); placementStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -2270,6 +2512,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           getVisibleContent,
           getVisibleStyleSummary,
           getBlockState,
+          getPlacementState,
           drain: () => writeChainRef.current,
         });
         if (recoveredModelFault) {

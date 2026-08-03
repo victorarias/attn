@@ -3,7 +3,7 @@ import { ptyAttach, ptyDetach, ptyResize, ptyWrite, type PtyEventPayload } from 
 import { formatExitNotice } from '../../pty/exitNotice';
 import { recordFocus } from '../../utils/terminalDiagnosticsLog';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
-import type { BlockStateSnapshot, GhosttyTerminalHandle } from '../GhosttyTerminal';
+import type { BlockStateSnapshot, GhosttyTerminalHandle, PlacementStateSnapshot } from '../GhosttyTerminal';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
@@ -55,6 +55,7 @@ export interface GhosttyPaneRuntime {
   getPaneVisibleContent: (paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (paneId: string) => TerminalVisibleStyleSnapshot;
   getPaneBlockState: (paneId: string) => BlockStateSnapshot | null;
+  getPanePlacementState: (paneId: string) => PlacementStateSnapshot | null;
   resetPaneTerminal: (paneId: string) => boolean;
   injectPaneBytes: (paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectPaneBase64: (paneId: string, data: string) => Promise<boolean>;
@@ -135,6 +136,12 @@ export function useGhosttyPaneRuntime(
         break;
       case 'seed_blocks':
         void terminal.seedBlocks(event.blocks);
+        break;
+      case 'placements':
+        void terminal.applyPlacements(event.id, event.seq, event.placements);
+        break;
+      case 'seed_placements':
+        void terminal.seedPlacements(event.id, event.placements);
         break;
       case 'replay_complete':
         void terminal.drain().then(() => {
@@ -395,6 +402,7 @@ export function useGhosttyPaneRuntime(
     getPaneVisibleContent: (paneId: string) => get(paneId)?.getVisibleContent() ?? emptyContent(),
     getPaneVisibleStyleSummary: (paneId: string) => get(paneId)?.getVisibleStyleSummary() ?? emptyStyle(),
     getPaneBlockState: (paneId: string) => get(paneId)?.getBlockState() ?? null,
+    getPanePlacementState: (paneId: string) => get(paneId)?.getPlacementState() ?? null,
     resetPaneTerminal: (paneId: string) => { const terminal = get(paneId); if (!terminal) return false; terminal.reset(); return true; },
     injectPaneBytes: async (paneId: string, bytes: Uint8Array) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(bytes); return true; },
     injectPaneBase64: async (paneId: string, data: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(decodePtyBytes(data)); return true; },

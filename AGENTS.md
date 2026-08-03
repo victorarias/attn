@@ -408,12 +408,24 @@ Design and gate decisions:
   client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
-- No image protocol renders anywhere today. Sixel does not exist in ghostty at
-  all, and kitty graphics are deliberately disabled in the worker terminal
-  (`KittyImageStorageLimit` 0 at construction) so the worker's authoritative
-  grid cannot desync from the client model, which never parses kitty — ghostty
-  hard-disables it on wasm. Worker-authoritative image support is planned in
+- Kitty images are worker-authoritative and **dark by default**. The worker is
+  the only kitty parser in the system — ghostty hard-disables kitty on wasm, so
+  the client model never sees an APC. The worker describes what it stored:
+  `kitty_placements` carries the active screen's whole placement set, the app
+  pulls pixels it lacks with `get_kitty_image`, and the attach snapshot carries
+  placements beside the VT dump and the OSC 133 blocks. `KittyImageStorageLimit`
+  is 0 at construction, so a shipping session stores no image and observes no
+  placement, costing one flag check per PTY chunk; `ATTN_KITTY_STORAGE_LIMIT` (bytes,
+  read from the daemon's environment at session spawn, inherited by the worker)
+  turns it on for a non-production profile. A4 replaces the default with a
+  measured number:
   [docs/plans/2026-08-02-terminal-kitty-images.md](docs/plans/2026-08-02-terminal-kitty-images.md).
+  Sixel does not exist in ghostty at all.
+- Two capabilities, not one. `kitty_images` means "describe images to me" and
+  gates the placement events; `binary_pty_output` decides only how a blob
+  TRAVELS (binary frame `0x02` vs base64 JSON `kitty_image_result`). The hub
+  relay advertises the first and never the second, because it is a text pipe —
+  collapsing them would either starve the relay of placements or corrupt it.
 - Session switching must retain utility-terminal focus. `App.tsx` may fit the
   main terminal but focuses it only when utility is inactive;
   `SessionTerminalWorkspace` prefers the active `GhosttyTerminal` handle.

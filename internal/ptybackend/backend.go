@@ -15,6 +15,11 @@ const (
 	OutputEventKindOutput = "output"
 	OutputEventKindDesync = "desync"
 	OutputEventKindExit   = "exit"
+	// OutputEventKindPlacements carries the session's whole kitty placement set
+	// as of the chunk stamped Seq. It rides the attach stream rather than a
+	// side channel because it only means anything in order against the bytes:
+	// the positions were measured on the grid the same-seq output produces.
+	OutputEventKindPlacements = "kitty_placements"
 )
 
 type SpawnOptions struct {
@@ -121,6 +126,10 @@ type AttachInfo struct {
 	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
 	// LastSeq (Phase 3a). nil when absent.
 	GhosttyBlocks []pty.AttachBlockData
+	// GhosttyPlacements is the kitty placement set of the screen
+	// GhosttySnapshot serializes, captured in that same hold. nil when the
+	// session holds no images.
+	GhosttyPlacements []pty.KittyPlacement
 	// GhosttyScrollbackTruncated reports whether the ghostty terminal dropped
 	// scrollback lines at its cap before GhosttySnapshot was serialized.
 	GhosttyScrollbackTruncated bool
@@ -131,6 +140,9 @@ type OutputEvent struct {
 	Data   []byte
 	Seq    uint32
 	Reason string
+	// Placements is the full set on OutputEventKindPlacements, empty included —
+	// an empty set is how a client learns the last image is gone.
+	Placements []pty.KittyPlacement
 }
 
 type SessionInfo struct {
@@ -236,6 +248,15 @@ type WorkerProcessProvider interface {
 // the capability existed) return an error; callers degrade gracefully.
 type SnapshotProvider interface {
 	Snapshot(ctx context.Context, sessionID string) (pty.SnapshotInfo, error)
+}
+
+// KittyImageProvider copies one stored image out of a session's terminal, by
+// the ghostty image id a placement carries. Optional like SnapshotProvider: a
+// backend that cannot serve one (a worker built before the method existed)
+// simply is not asked twice — the caller drops that placement's render, and the
+// error names the id it could not find.
+type KittyImageProvider interface {
+	KittyImage(ctx context.Context, sessionID string, imageID uint32) (pty.KittyImage, error)
 }
 
 type SessionLivenessProber interface {

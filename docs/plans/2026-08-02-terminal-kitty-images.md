@@ -588,14 +588,139 @@ Three consequences worth carrying forward:
 
 ### A3 — protocol + frontend rendering
 
-- [ ] Protocol: placement/blob events + snapshot placements
+- [x] Protocol: placement/blob events + snapshot placements
       (`main.tsp` → `make generate-types` → `constants.go` ProtocolVersion →
-      `useDaemonSocket.ts` — all three lockstep spots).
-- [ ] Frontend: placement store with block-style anchoring/reanchor, blob
+      `useDaemonSocket.ts` — all three lockstep spots). ProtocolVersion 205.
+- [x] Frontend: placement store with block-style anchoring/reanchor, blob
       cache, textured-quad pass in `GhosttyWebGlRenderer`.
-- [ ] Blob transport decision with measured emitter sizes (the receipt for
+- [x] Blob transport decision with measured emitter sizes (the receipt for
       the cap and for frame-vs-event).
-- [ ] Packaged harness scenario.
+- [x] Packaged harness scenario — `real-app:scenario-terminal-kitty-image`.
+      Deliberately out of `scenarioCatalog.mjs`: it restarts the profile daemon
+      twice to move `ATTN_KITTY_STORAGE_LIMIT` in and out of the worker's
+      environment, the same reason `scenario-automation-scheduled-cleanup` sits
+      outside the catalog.
+- [x] Restore path: snapshot placements seed the store after the dump write
+      (blocks precedent), verified live across detach/reattach and a full app
+      restart against a live daemon. Moved up from A4 — the work landed here.
+- [x] Remote-session verification via the OrbStack VM. Passes end to end, and
+      found the one A3 defect that only a remote session could show: the hub
+      dropped every relayed kitty event. See "A3 verification record" below.
+
+#### A3 verification record
+
+Evidence behind the boxes above, so a later reader can tell what was actually
+observed from what was assumed.
+
+**Packaged harness (`real-app:scenario-terminal-kitty-image`).** Writes a
+raw-bytes kitty APC into a shell pane from a file (never through `write_pane`
+JS strings — an escape does not survive shell quoting), then asserts through
+the `get_pane_placement_state` bridge action. It covers: the placement appears
+with its blob resident and visible; it rides the text it sits in across two
+scroll bursts; the program's own `a=d` empties the set; and — with the
+override absent — an identical session produces no placements at all, which is
+the shipping default. The first APC and the delete carry `q=2`: without it the
+terminal answers `\x1b_Gi=<id>;OK\x1b\\` on the PTY, and at a shell prompt with
+nobody reading, that reply is typed into the next command line. Real emitters
+either set `q` or read the reply; kitty behaves the same way.
+
+**Live tier (real emitters, throwaway profile).** chafa 1.18.2 and timg 1.6.3
+against a 3000x2000 photo both produced resident, visible placements
+(240x160 px and 270x180 px). Scrolling held the anchor; switching to another
+session and back preserved the placement; a full app restart against the live
+daemon restored it from the attach snapshot with the blob re-pulled; `a=d`
+emptied the set.
+
+**Identity epoch (review fix).** Image identities are per terminal INSTANCE, not
+per process: `internal/pty` mints a random epoch when a session's ghostty
+terminal is built and folds it into every generation that leaves the worker (the
+placement read and the image serve, the only two exits). Ghostty's own stamps
+restart with each worker process while a session id does not — `runtime_respawned`
+replaces the worker, and so do a daemon restart and a revive — so raw stamps
+would let a replacement worker describe (same session, same image id, same
+generation) for different pixels, and the app's blob cache and GPU textures key
+on exactly that. With the epoch, a respawned worker can never mint an identity a
+client still holds pixels for. The window is `[2^32, 2^52)`: generations ride
+JSON into JS Numbers, exact only to 2^53 and dropped outright past
+`Number.MAX_SAFE_INTEGER` by the binary-frame decoder, so starting below 2^52
+leaves 2^52 of stamp headroom (a stamp moves by one per storage mutation), while
+the 2^32 floor keeps every epoched identity disjoint from a raw one. No protocol
+change and no frontend change — the frontend already treats a generation as
+opaque, so a fresh epoch is a new cache key by construction.
+
+**Geometry gap (A4 input, measured not guessed).** chafa asked for a 30x14
+cell area and emitted a 240x160 px image, i.e. it assumed roughly 8 x 11.4 px
+cells, because the PTY reports no `ws_xpixel`/`ws_ypixel`. The real cell is
+about 9 x 22.6 CSS px, and the client draws image pixels as CSS px, so on a 2x
+display the image lands at about half its intended row height and twice its
+native size in device pixels. Plausible, not pixel-perfect — exactly what the
+design predicted. Reporting pixel geometry on the PTY is the fix and belongs
+with the flip.
+
+**Wrap anchoring gap (A4 input).** In a pane whose prompt wraps (a long cwd),
+the first scroll after a placement moves its mapped buffer row by one; every
+later scroll holds. Short-prompt panes never drift. It is not a race — two
+reads 500 ms apart agree — so it is a real off-by-one in how a wrapped row is
+counted when the placement's screen row is converted to a buffer row. The
+harness scenario tolerates one row on the first burst and asserts the strict
+invariant on the second, so accumulation would fail the scenario.
+
+**Remote leg: passes end to end.** Against a real OrbStack VM daemon
+(`attn-remote@orb`), the whole chain runs: the app opens a shell session on the
+endpoint, `cat` of a kitty APC file on the VM reaches the VM's worker, that
+worker describes the placement, the hub relays the description, the app pulls
+the blob it has no pixels for, and the image draws — a checkerboard, confirmed
+in a native window capture rather than from state alone. The program's own
+`a=d` then empties the set over the same relay, so the way out is proven too.
+The generation on the wire was epoch-folded (2762831881943625), which is the
+identity epoch above working on a freshly spawned remote session. Images were
+on for that run only because the VM's daemon was started by hand with
+`ATTN_KITTY_STORAGE_LIMIT` in its environment — the unsupported route, and the
+reason this leg proves the pipeline rather than the switch: the hub forwards a
+fixed env allowlist, so a remote daemon has no supported way to be told to
+store images at all. Supplying one is what A4's remote item owes.
+
+**The A3 defect it found.** The hub dropped every relayed kitty event. Its
+`forwardsRawEvent` allowlist (`internal/hub/manager.go`) never listed
+`kitty_placements` or `kitty_image_result`, so `consumeRemote` discarded both
+before the daemon's routing for them could run. That routing was correct and
+unit-tested, which is what made the hole invisible: a client attached straight
+to the remote daemon received placements, the same session through the hub
+received nothing, and every test stayed green. Fixed on this branch, with the
+two events pinned by name so the allowlist cannot lose them again. Only a
+remote session can show this — the whole class of defect is why the leg is
+worth running.
+
+**What first blocked the leg is an environment bug, pre-existing on main and
+out of scope here.** A profile derives its WebSocket port from its name, so the
+same profile on the host and on the VM lands on the same port, and OrbStack
+republishes the VM's listener on the host's localhost whenever that port is
+free. The local daemon's own bind then fails, is logged at INFO, and is
+ignored — so the app silently attaches to the VM's daemon while the CLI keeps
+talking to the local one, and nothing in either surface says so. A bind failure
+on the daemon's own port has to be fatal. That fix ships as its own PR; it is
+not an images problem and does not belong in this one.
+
+Two more remote-side gaps found on the way, each worth fixing independently:
+
+- `attn daemon stop` cannot run on a stock Debian remote: its lock check shells
+  out to `lsof`, which is not installed, so it refuses with
+  `could not verify pid N holds the daemon lock`. The hub's own stop script
+  uses `ss` and works.
+- An endpoint whose remote binary does not match the local one parks in
+  `binary_mismatch`, and every forwarded command is then refused with
+  `endpoint not found: <id>` — for an endpoint the same daemon reports as
+  `connected`. The text is misleading rather than wrong, and the state is easy
+  to reach: any local edit that moves the source fingerprint while a remote
+  daemon is already running, since the hub only reinstalls the remote binary
+  when it starts one. The remedy is a Sync click, which the harness cannot
+  trigger.
+
+**What the leg establishes about the relay itself.** The remote daemon's log
+records the hub's hello verbatim — `kind="hub"` with
+`capabilities=[workspace_sessions kitty_images]`. The relay asks for image
+descriptions and never claims `binary_pty_output`, which is the capability
+split's whole point: placements and blobs cross the relay as JSON.
 
 ### A4 — enable, restore, remote, receipts
 
@@ -652,16 +777,32 @@ ghostty pins converging rather than on the storage flip.)
 
 - [ ] Flip the storage limit on (measured number, named limit errors surfaced
       through kitty's own response channel and the daemon log).
-- [ ] Restore path: snapshot placements seed the store after the dump write
-      (blocks precedent); live verification of detach/reattach and revive.
-- [ ] Remote-session verification via the OrbStack VM.
-- [ ] AGENTS.md: write the new truth; changelog fragment (user-visible).
+- [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
+      images from it; without it chafa guesses ~8 x 11.4 px cells against a real
+      9 x 22.6 CSS px cell. Measured in A3's live tier.
+- [ ] Fix the one-row anchoring drift on a wrapped prompt row. Measured in A3's
+      live tier; the packaged scenario tolerates one row on the first scroll and
+      would fail if it ever accumulated.
+- [ ] A supported way to turn images on for a remote daemon. A3 ran the remote
+      leg end to end (see its verification record), so what is left here is the
+      switch rather than the pipeline: the hub forwards a fixed env allowlist,
+      so the storage-limit override has no supported route to a remote daemon.
+      Stops mattering once the limit ships as a default; needs an
+      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated at
+      the flip.
+- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Done in
+      A3 — the terminal section now states that kitty images are worker
+      authoritative and dark by default, and why the relay never advertises
+      `binary_pty_output`.
 
 ## Open questions
 
-- Alt-screen snapshot semantics: the dump serializes the active screen; do
-  snapshot placements carry a screen flag (blocks are primary-only, images
-  are not)? Decide in A3 with the restore work.
+- ~~Alt-screen snapshot semantics: do snapshot placements carry a screen
+  flag?~~ Answered in A3: no flag, and none is needed. The dump and the
+  placement set are taken from the same terminal at the same instant and both
+  describe whatever screen is active, so a client that writes the dump and
+  seeds placements from the same `attach_result` cannot disagree with itself.
+  Blocks needed a flag because they are primary-only; images are not.
 - Animations (`a=a`): the diff would emit a blob update per frame — a wire
   flood. V1 declares them out of scope; decide whether to coalesce or drop,
   with an event-volume tripwire either way.

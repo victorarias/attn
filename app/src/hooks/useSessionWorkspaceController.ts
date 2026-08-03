@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react';
 import type { Session } from '../store/sessions';
-import type { BlockStateSnapshot } from '../components/GhosttyTerminal';
+import type { BlockStateSnapshot, PlacementStateSnapshot } from '../components/GhosttyTerminal';
 import type { SessionTerminalWorkspaceHandle } from '../components/SessionTerminalWorkspace';
 import type { LeafDropSnapshot } from '../components/SessionTerminalWorkspace/leafDrag';
 import { usePaneRuntimeEventRouter } from '../components/SessionTerminalWorkspace/paneRuntimeEventRouter';
@@ -34,6 +34,7 @@ interface SessionWorkspaceController {
   getPaneVisibleContent: (sessionId: string, paneId: string) => TerminalVisibleContentSnapshot;
   getPaneVisibleStyleSummary: (sessionId: string, paneId: string) => TerminalVisibleStyleSnapshot;
   getPaneBlockState: (sessionId: string, paneId: string) => BlockStateSnapshot | null;
+  getPanePlacementState: (sessionId: string, paneId: string) => PlacementStateSnapshot | null;
   resetSessionPaneTerminal: (sessionId: string, paneId: string) => boolean;
   injectSessionPaneBytes: (sessionId: string, paneId: string, bytes: Uint8Array) => Promise<boolean>;
   injectSessionPaneBase64: (sessionId: string, paneId: string, payload: string) => Promise<boolean>;
@@ -142,6 +143,11 @@ export function useSessionWorkspaceController(
     return workspaceId ? workspaceRefs.current.get(workspaceId)?.getPaneBlockState(paneId) ?? null : null;
   }, [workspaceIdForSession]);
 
+  const getPanePlacementState = useCallback((sessionId: string, paneId: string) => {
+    const workspaceId = workspaceIdForSession(sessionId);
+    return workspaceId ? workspaceRefs.current.get(workspaceId)?.getPanePlacementState(paneId) ?? null : null;
+  }, [workspaceIdForSession]);
+
   const resetSessionPaneTerminal = useCallback((sessionId: string, paneId: string) => {
     const workspaceId = workspaceIdForSession(sessionId);
     return workspaceId ? workspaceRefs.current.get(workspaceId)?.resetPaneTerminal(paneId) || false : false;
@@ -181,6 +187,7 @@ export function useSessionWorkspaceController(
     getPaneVisibleContent,
     getPaneVisibleStyleSummary,
     getPaneBlockState,
+    getPanePlacementState,
     resetSessionPaneTerminal,
     injectSessionPaneBytes,
     injectSessionPaneBase64,
