@@ -590,7 +590,7 @@ Three consequences worth carrying forward:
 
 - [x] Protocol: placement/blob events + snapshot placements
       (`main.tsp` → `make generate-types` → `constants.go` ProtocolVersion →
-      `useDaemonSocket.ts` — all three lockstep spots). ProtocolVersion 204.
+      `useDaemonSocket.ts` — all three lockstep spots). ProtocolVersion 205.
 - [x] Frontend: placement store with block-style anchoring/reanchor, blob
       cache, textured-quad pass in `GhosttyWebGlRenderer`.
 - [x] Blob transport decision with measured emitter sizes (the receipt for
@@ -603,9 +603,9 @@ Three consequences worth carrying forward:
 - [x] Restore path: snapshot placements seed the store after the dump write
       (blocks precedent), verified live across detach/reattach and a full app
       restart against a live daemon. Moved up from A4 — the work landed here.
-- [ ] Remote-session verification via the OrbStack VM. Blocked on a remote
-      workspace-registration failure that is not specific to images; see
-      "A3 verification record" below.
+- [x] Remote-session verification via the OrbStack VM. Passes end to end, and
+      found the one A3 defect that only a remote session could show: the hub
+      dropped every relayed kitty event. See "A3 verification record" below.
 
 #### A3 verification record
 
@@ -665,41 +665,57 @@ counted when the placement's screen row is converted to a buffer row. The
 harness scenario tolerates one row on the first burst and asserts the strict
 invariant on the second, so accumulation would fail the scenario.
 
-**Remote leg: blocked, and not on images.** A remote session cannot be created
-at all on this branch's base: `create_session` with an `endpoint_id` times out
-in `register_workspace`. The repo's own `real-app:scenario-tr402` fails
-identically at `create_remote_session`, with a dark hub-started remote daemon
-and a single freshly added endpoint, so it is neither the harness driver nor
-the storage-limit override. The daemon's answer is `endpoint not found: <id>`
-for an endpoint it simultaneously reports as `connected` — misleading, since
-the same text also covers "the hub is holding this endpoint back". One state
-that produces it was confirmed: when the local and remote binaries differ, the
-endpoint parks in `binary_mismatch` ("remote binary (tree:…) differs from this
-client (tree:…) — click Sync to update") and every forwarded command is refused
-with the not-found text. The remedy is a user action the harness has no path
-to trigger, and the mismatch happens on any local edit that moves the source
-fingerprint while a remote daemon is already running (the hub only reinstalls
-the remote binary when it starts one).
+**Remote leg: passes end to end.** Against a real OrbStack VM daemon
+(`attn-remote@orb`), the whole chain runs: the app opens a shell session on the
+endpoint, `cat` of a kitty APC file on the VM reaches the VM's worker, that
+worker describes the placement, the hub relays the description, the app pulls
+the blob it has no pixels for, and the image draws — a checkerboard, confirmed
+in a native window capture rather than from state alone. The program's own
+`a=d` then empties the set over the same relay, so the way out is proven too.
+The generation on the wire was epoch-folded (2762831881943625), which is the
+identity epoch above working on a freshly spawned remote session.
 
-Two remote-side gaps found on the way and worth fixing independently:
+**The A3 defect it found.** The hub dropped every relayed kitty event. Its
+`forwardsRawEvent` allowlist (`internal/hub/manager.go`) never listed
+`kitty_placements` or `kitty_image_result`, so `consumeRemote` discarded both
+before the daemon's routing for them could run. That routing was correct and
+unit-tested, which is what made the hole invisible: a client attached straight
+to the remote daemon received placements, the same session through the hub
+received nothing, and every test stayed green. Fixed on this branch, with the
+two events pinned by name so the allowlist cannot lose them again. Only a
+remote session can show this — the whole class of defect is why the leg is
+worth running.
+
+**What first blocked the leg is an environment bug, pre-existing on main and
+out of scope here.** A profile derives its WebSocket port from its name, so the
+same profile on the host and on the VM lands on the same port, and OrbStack
+republishes the VM's listener on the host's localhost whenever that port is
+free. The local daemon's own bind then fails, is logged at INFO, and is
+ignored — so the app silently attaches to the VM's daemon while the CLI keeps
+talking to the local one, and nothing in either surface says so. A bind failure
+on the daemon's own port has to be fatal. That fix ships as its own PR; it is
+not an images problem and does not belong in this one.
+
+Two more remote-side gaps found on the way, each worth fixing independently:
 
 - `attn daemon stop` cannot run on a stock Debian remote: its lock check shells
   out to `lsof`, which is not installed, so it refuses with
   `could not verify pid N holds the daemon lock`. The hub's own stop script
   uses `ss` and works.
-- A remote daemon on an OrbStack VM republishes its WebSocket port on the
-  host's localhost, and a same-named profile hashes to the same port on both
-  machines. If the local daemon is not holding the port when the VM daemon
-  binds it, the local daemon loses the bind — logged as `HTTP server error:
-  listen tcp …: bind: address already in use` and then ignored — and the app
-  silently attaches to the Linux daemon instead. A bind failure on the daemon's
-  own port should be fatal, not a log line.
+- An endpoint whose remote binary does not match the local one parks in
+  `binary_mismatch`, and every forwarded command is then refused with
+  `endpoint not found: <id>` — for an endpoint the same daemon reports as
+  `connected`. The text is misleading rather than wrong, and the state is easy
+  to reach: any local edit that moves the source fingerprint while a remote
+  daemon is already running, since the hub only reinstalls the remote binary
+  when it starts one. The remedy is a Sync click, which the harness cannot
+  trigger.
 
-**What the remote leg did establish.** The remote daemon's log records the
-hub's hello verbatim: `client hello: kind="hub" version="protocol-204"
-capabilities=[workspace_sessions kitty_images]`. The relay asks for image
+**What the leg establishes about the relay itself.** The remote daemon's log
+records the hub's hello verbatim — `kind="hub"` with
+`capabilities=[workspace_sessions kitty_images]`. The relay asks for image
 descriptions and never claims `binary_pty_output`, which is the capability
-split's whole point — placements and blobs cross the relay as JSON.
+split's whole point: placements and blobs cross the relay as JSON.
 
 ### A4 — enable, restore, remote, receipts
 
@@ -762,13 +778,13 @@ ghostty pins converging rather than on the storage flip.)
 - [ ] Fix the one-row anchoring drift on a wrapped prompt row. Measured in A3's
       live tier; the packaged scenario tolerates one row on the first scroll and
       would fail if it ever accumulated.
-- [ ] Remote-session verification via the OrbStack VM. A3 could not run it: see
-      A3's verification record for the registration failure that blocks every
-      remote session today, and for the two remote-side gaps found with it.
-      The remote daemon also has no supported way to receive the storage-limit
-      override — the hub forwards a fixed env allowlist — which stops mattering
-      once the limit ships as a default, and needs an
-      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated.
+- [ ] A supported way to turn images on for a remote daemon. A3 ran the remote
+      leg end to end (see its verification record), so what is left here is the
+      switch rather than the pipeline: the hub forwards a fixed env allowlist,
+      so the storage-limit override has no supported route to a remote daemon.
+      Stops mattering once the limit ships as a default; needs an
+      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated at
+      the flip.
 - [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Done in
       A3 — the terminal section now states that kitty images are worker
       authoritative and dark by default, and why the relay never advertises
