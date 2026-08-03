@@ -101,43 +101,63 @@ func TestResizeDescribesPlacementsAfterTheResize(t *testing.T) {
 	}
 }
 
-// The shipping configuration resizes constantly — every pane drag, every window
-// change, on every session — and none of those sessions hold an image. The
-// resize path must reach ghostty for placements exactly never, or the feed
-// path's careful gating is undone by the one beside it.
+// Resizing is constant — every pane drag, every window change, on every session
+// — and a session with no image on screen must reach ghostty for placements
+// exactly never, or the feed path's careful gating is undone by the one beside
+// it.
+//
+// Two ways a session ends up holding no image, and both have to cost nothing:
+// the shipping configuration where images are live and the program simply never
+// emitted one, and the escape hatch where storage is off and an image-emitting
+// program was refused. Each is deterministic — with no placement stored there is
+// never an update to deliver — so the empty channel below is a fact rather than
+// a race.
 func TestResizeCostsNothingWithoutPlacements(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping real PTY spawn in short mode")
 	}
-	t.Setenv(kittyStorageLimitEnv, "")
+	for _, tc := range []struct {
+		name    string
+		limit   string
+		payload string
+	}{
+		// Pinned rather than inherited: the default is what the flip changed, and
+		// a test that reads its meaning from an unset variable changes meaning
+		// with it. This one was written when the empty value meant images off,
+		// and went quietly vacuous the day it started meaning 320MB.
+		{name: "images live and the program emits none", limit: "", payload: "\x1b[6;1Hplain"},
+		{name: "images off and the program emits one", limit: "0", payload: "\x1b[6;1H" + kittyPlaceRGB(83, 16, 32, "")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv(kittyStorageLimitEnv, tc.limit)
 
-	// Atomic because the feed path fires this hook from the read loop while the
-	// resize path fires it from here. Registered before the spawn so its cleanup
-	// runs after the manager has been shut down and the read loop is gone.
-	var reads atomic.Int32
-	placementReadHook = func() { reads.Add(1) }
-	t.Cleanup(func() { placementReadHook = nil })
+			// Atomic because the feed path fires this hook from the read loop while
+			// the resize path fires it from here. Registered before the spawn so its
+			// cleanup runs after the manager has been shut down and the read loop is
+			// gone.
+			var reads atomic.Int32
+			placementReadHook = func() { reads.Add(1) }
+			t.Cleanup(func() { placementReadHook = nil })
 
-	// The payload still transmits an image: with storage off it is refused, so
-	// the session looks exactly like a production one that met an image-emitting
-	// program.
-	spawn := newHeldKittySpawn(t, "kitty-resize-dark", "\x1b[6;1H"+kittyPlaceRGB(83, 16, 32, ""))
-	if err := spawn.manager.Input(spawn.id, []byte("\n")); err != nil {
-		t.Fatalf("Input() error: %v", err)
-	}
-	if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
-		t.Fatalf("Resize() error: %v", err)
-	}
-	if err := spawn.manager.Resize(spawn.id, 100, 30, 0, 0); err != nil {
-		t.Fatalf("Resize() error: %v", err)
-	}
+			spawn := newHeldKittySpawn(t, "kitty-resize-"+tc.limit+"x", tc.payload)
+			if err := spawn.manager.Input(spawn.id, []byte("\n")); err != nil {
+				t.Fatalf("Input() error: %v", err)
+			}
+			if err := spawn.manager.Resize(spawn.id, 40, 4, 0, 0); err != nil {
+				t.Fatalf("Resize() error: %v", err)
+			}
+			if err := spawn.manager.Resize(spawn.id, 100, 30, 0, 0); err != nil {
+				t.Fatalf("Resize() error: %v", err)
+			}
 
-	select {
-	case update := <-spawn.updates:
-		t.Fatalf("a placement was described with images disabled: %+v", update)
-	default:
-	}
-	if got := reads.Load(); got != 0 {
-		t.Errorf("the placement set was read %d times on a session with no images, want never", got)
+			select {
+			case update := <-spawn.updates:
+				t.Fatalf("a placement was described on a session with no image: %+v", update)
+			default:
+			}
+			if got := reads.Load(); got != 0 {
+				t.Errorf("the placement set was read %d times on a session with no images, want never", got)
+			}
+		})
 	}
 }

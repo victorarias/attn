@@ -105,6 +105,18 @@ const (
 	// history short of the worker's while the viewport still agreed. Reachable
 	// because kitty's `r=` lets a 2x2 image claim any number of rows.
 	kittyResyncScrollClamped = "kitty_layout_scroll_clamped"
+	// kittyResyncPendingWrap: the cursor sat in the LAST COLUMN when a described
+	// dispatch landed. A cursor there may carry a pending wrap — the cell is
+	// written, the cursor has not moved, and the next printable byte wraps before
+	// it lands — and a dispatch consumes that bit on the worker while the wire's
+	// bytes leave the client's set. CursorPos reports the same column either way,
+	// so the measurement cannot tell a consumed wrap from an untouched one and the
+	// last column itself is the tripwire. Measured: print exactly a screen's width,
+	// place an image, print one more character — the worker stays on row 0 and the
+	// client wraps to row 1. DECAWM off makes the bit moot and this fires anyway,
+	// harmlessly, rather than growing a mode read for a case no emitter reaches
+	// (every emitter in the A4 sweep positions the cursor before transmitting).
+	kittyResyncPendingWrap = "kitty_layout_pending_wrap"
 )
 
 // kittyPlacementKey identifies a placement across observations: kitty's own
@@ -472,6 +484,16 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	// with its cursor where the worker's is.
 	if f.term.LeftRightMarginMode() {
 		f.failResync(kittyResyncMarginMode)
+	}
+
+	// The same shape as the margin tripwire: state the dispatch changed and the
+	// measurement cannot read, answered by a resync while the dispatch is still
+	// described in full. It sits after the early return above on measurement,
+	// not on faith — a query and a delete of an id that is not there, both sent
+	// with the cursor in the last column, leave the worker's pending wrap alone
+	// and their grids agree, so a dispatch that changed nothing needs no resync.
+	if screenCols, _ := f.term.Size(); col == screenCols-1 {
+		f.failResync(kittyResyncPendingWrap)
 	}
 
 	// SU scrolls the active scroll region and leaves the cursor's viewport

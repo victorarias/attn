@@ -260,16 +260,27 @@ Layers around the gate:
 
 ### A1 — stop the lie (small PR, ships first)
 
-- [ ] Set the worker terminal's kitty image storage limit to 0
+Shipped as PR #727 (`e1577ea5`). All four items are done; the boxes below were
+ticked afterwards, in A4, when an audit caught the ledger still claiming images
+do not render on the branch that turns them on.
+
+- [x] Set the worker terminal's kitty image storage limit to 0
       (`GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT`, plumbed through
-      `ghosttyvt.Options`).
-- [ ] Verify limit-0 silences the `a=q` OK reply; if ghostty still ACKs,
-      filter `_G` responses in the worker's response drain instead. Test:
-      no support reply reaches the program, no cursor movement from a
-      direct-RGB write — the probe scenario, kept this time.
-- [ ] Correct the AGENTS.md terminal section (images do not render today;
-      sixel does not exist in ghostty).
-- [ ] Changelog fragment.
+      `ghosttyvt.Options`). Shipped in `e1577ea5`. A4 kept the plumbing and
+      changed only the number it carries.
+- [x] Verify limit-0 silences the `a=q` OK reply; if ghostty still ACKs,
+      filter `_G` responses in the worker's response drain instead. **No filter
+      was needed, and this was measured rather than assumed:** at limit 0 an
+      `a=q` query returns no bytes at all, and an `a=q` followed by a DA1
+      returns the DA1 alone — ghostty short-circuits the whole graphics
+      protocol when storage is disabled (`graphics_exec.zig`), so nothing
+      reaches the response drain to filter. Re-measured in A4 against the
+      current pin.
+- [x] Correct the AGENTS.md terminal section (images do not render today;
+      sixel does not exist in ghostty). Written in A1; A4's flip rewrote the
+      same paragraph to the new truth — on by default, the 320MB limit, the
+      `=0` hatch — and kept sixel's absence.
+- [x] Changelog fragment. Carried by #727; CI enforces one per PR.
 
 ### A2 — worker: segmenter, observation, synthesis (feature dark, one live fix)
 
@@ -966,6 +977,17 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       any other store. Pinned by
       `TestWireFeedLogsATransmissionTheStorageLimitRefused` and
       `TestWireFeedKeepsQuietForEverythingThatIsNotARefusal`.
+      **A test the flip quietly emptied, caught by a later audit.**
+      `TestResizeCostsNothingWithoutPlacements` set `ATTN_KITTY_STORAGE_LIMIT`
+      to the empty string to mean images off, so the day empty started meaning
+      320MB it began spawning a session that really did place the image, and
+      only passed because it read the update channel before the read loop had
+      delivered it (measured: a two-second wait turns it red). A test whose
+      meaning is read from an unset variable changes meaning with the default.
+      It now pins the limit explicitly and covers both ways a session ends up
+      with nothing to draw: images live and the program emitting none, and
+      storage off with an image-emitting program refused.
+
       **Recorded observability gap, no machinery:** the limit is per TERMINAL,
       and a session holds a primary and an alternate screen, so the worst case a
       session can occupy is 2x the number above. Nothing tracks or reports total
@@ -1084,7 +1106,7 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       names the 320MB limit and the `=0` hatch, keeps the reasons the client
       never parses kitty and the relay never advertises `binary_pty_output`, and
       keeps sixel's absence. One user-facing fragment covers the PR.
-- [ ] **A placement on a row that is already full: the deferred wrap synthesis
+- [x] **A placement on a row that is already full: the deferred wrap synthesis
       cannot measure.** Found by `FuzzKittyWireMirror` after the A4 work landed,
       as `62f19a45d7a5c8c7`: on a 20x8 grid, print exactly 20 characters, place
       an image, print one more. The worker ends at (19,0) and the client at
@@ -1106,11 +1128,32 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       introduced it; the earlier 15m soak simply never reached the input. No
       corpus entry was added, because a corpus entry would pin the wrong grid.
 
-      **Shape of the answer, not yet decided.** Either the measurement grows to
-      see the pending bit — which needs a native accessor ghostty does not
-      expose today — or `writeAPC` treats an anchor sitting at the last column
-      with a wrap pending as another thing it cannot measure and resyncs, the
-      same answer the margin box and the over-tall `SU` got.
+      **Fixed with a tripwire resync**, the same doctrine the margin box and the
+      over-tall `SU` got: `writeAPC` fires `kittyResyncPendingWrap`
+      (`kitty_layout_pending_wrap`) whenever the PRE-dispatch cursor sat in the
+      last column, whether or not a wrap was actually pending — the measurement
+      cannot tell, which is what makes the column itself the tripwire — and the
+      dispatch is still described in full. DECAWM off makes the bit moot and the
+      resync fires anyway, harmlessly, rather than growing a mode read.
+
+      **Rejected: normalizing the bit on the wire.** A net-zero `CUB 1` / `CUF 1`
+      would clear the client's pending wrap to match, but its correctness rests
+      on every dispatch shape consuming the worker's bit, which would need
+      measuring across `a=q`, `a=d`, and `m=1` — all to save a resync in a case
+      no real emitter reaches, since emitters position the cursor before
+      transmitting.
+
+      **Placed on measurement, not faith.** The check sits after the early
+      return for a dispatch that changed nothing, because a query and a delete
+      of an id that is not there, both sent with the cursor in the last column,
+      leave the worker's pending wrap alone and their grids agree.
+
+      Pinned by `TestWireFeedResyncsWithACursorInTheLastColumn` — which carries
+      the mid-row control that keeps the tripwire from firing on every placement
+      — and by the resync-exempt corpus entry "placement on a row that is
+      already full". The saved fuzz input `62f19a45d7a5c8c7` replays green, and
+      `FuzzKittyWireMirror` soaked 15m / 42.5M execs green with the tripwire in
+      (the class had been reached 97s into the previous soak).
 
 ## Open questions
 

@@ -758,6 +758,57 @@ func TestWireFeedResyncsWhileLeftRightMarginsAreSet(t *testing.T) {
 	}
 }
 
+// The last column is the one place a cursor position hides state: a cell there
+// can be written with the wrap DEFERRED, so the cursor still reads as column
+// cols-1 while the next printable byte will wrap before it lands. A dispatch
+// consumes that bit on the worker and the wire's bytes do not consume it on the
+// client, and no accessor exposes it to compare — so the column is the tripwire.
+//
+// The control is the isolation: the identical stream with the cursor mid-row
+// carries no pending wrap, stays silent, and its grids agree. Without it this
+// test would pass for a tripwire that fired on every placement.
+func TestWireFeedResyncsWithACursorInTheLastColumn(t *testing.T) {
+	const cols, rows = 20, 8
+	// 8x16 px is one cell, so the placement itself scrolls nothing and moves the
+	// cursor by a single column — everything this case shows comes from the wrap.
+	place := kittyPlaceRGB(70, 8, 16, "")
+
+	control := newMirror(t, cols, rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write(strings.Repeat("x", 5))
+	control.write(place)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s): mid-row this is an ordinary one-cell placement", control.lastResync)
+	}
+	if got, want := string(control.lastWire), string(wireST)+"\x1b[1C"; got != want {
+		t.Fatalf("control wire = %q, want %q: mid-row the placement is described by its cursor move alone", got, want)
+	}
+	control.write("y")
+	control.agree(t, "with the cursor mid-row")
+
+	m := newMirror(t, cols, rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	// Exactly a screen width fills the row and leaves the wrap pending.
+	m.write(strings.Repeat("x", cols))
+	m.write(place)
+	if m.lastResync != kittyResyncPendingWrap {
+		t.Fatalf("resync = %q, want %q: the placement consumed a pending wrap nothing could measure",
+			m.lastResync, kittyResyncPendingWrap)
+	}
+	// Described in full, same as the margin tripwire: the measurement read the
+	// same column and row on both sides of the dispatch, so there is no movement
+	// to describe and the wire carries the abort alone. A resync is not a stop
+	// order — it is what repairs what the description could not say.
+	if got, want := string(m.lastWire), string(wireST); got != want {
+		t.Errorf("wire = %q, want %q: the dispatch is still described, and it measured no movement", got, want)
+	}
+
+	m.write("y")
+	wx, wy := m.worker.CursorPos()
+	cx, cy := m.client.CursorPos()
+	if wx == cx && wy == cy {
+		t.Errorf("the cursors agree at (%d,%d), so the case no longer exercises a consumed pending wrap", wx, wy)
+	}
+}
+
 // A limit someone can hit is a limit they must see. Ghostty refuses an image
 // larger than the whole storage limit and says nothing — kitty's own response is
 // suppressed by the `q=2` every measured emitter sends — so the worker is the

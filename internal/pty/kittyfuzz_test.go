@@ -30,8 +30,9 @@ package pty
 // What it reaches now is a different kind of defect: divergences in what the
 // feed path DOES with a correctly framed sequence, not in where it cuts one.
 // Those belong to the configuration that has kitty live, which is why the
-// property runs as two targets — see FuzzKittyWireMirrorShipping, the gate, and
-// FuzzKittyWireMirror, which is knowingly red on the A4 defects.
+// property runs as two targets — FuzzKittyWireMirror, which since the A4 flip is
+// the shipping configuration, and FuzzKittyWireMirrorShipping, whose name
+// predates that flip and which now guards the storage-off escape hatch.
 //
 // The client in both is a native terminal standing in for the frontend's wasm
 // model, fed through writeAsClient rather than written raw. The two ghostty
@@ -83,8 +84,8 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 // A4 flip is the SHIPPING configuration: a session's terminal is built with
 // kittyStorageLimitDefault unless the environment says otherwise. It exercises
 // synthesis — the observed scroll and cursor written in an APC's place — and it
-// has one open class, recorded next to the closed ones in the plan.
-// All six classes A4 set out to close are closed:
+// has no knowingly-red class left. All seven recorded under A4 in
+// docs/plans/2026-08-02-terminal-kitty-images.md are closed:
 //
 //   - an image that appeared and died inside one chunk, and the `Updated`-blind
 //     end-of-feed check, both settled by unaccountedResync;
@@ -92,21 +93,15 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 //     settleUnaccounted running before every described dispatch;
 //   - the absolute column move a client with left/right margins measured from
 //     the MARGIN, now relative like the row;
-//   - a scroll one `SU` cannot carry and a scroll confined to the margin box,
-//     both of them limits of what writeAPC can MEASURE rather than describe, so
-//     both answered with a tripwire resync (kittyResyncScrollClamped,
-//     kittyResyncMarginMode) instead of cleverer synthesis.
+//   - a scroll one `SU` cannot carry, a scroll confined to the margin box, and a
+//     dispatch on a cursor carrying a deferred wrap — all three limits of what
+//     writeAPC can MEASURE rather than describe, so all three answered with a
+//     tripwire resync (kittyResyncScrollClamped, kittyResyncMarginMode,
+//     kittyResyncPendingWrap) instead of cleverer synthesis.
 //
-// Still open, and the reason this target is knowingly red: a placement on a row
-// that is already full. The pending wrap the last column carries is not part of
-// a cursor position, so a placement that consumes it measures as no movement at
-// all and the client keeps a wrap the worker no longer has. It predates the A4
-// flip — reproduced at 17540431 and 28d360cd — and the answer is undecided
-// between measuring the bit and resyncing on it, so no corpus entry pins it: a
-// pinned entry would pin the wrong grid.
-//
-// Last measured on the pin in ghostty-vt-native.pin: 15m / 38.1M execs green,
-// then the deferred-wrap counterexample above 97s into the next 2m soak.
+// Measured on the pin in ghostty-vt-native.pin: 15m / 38.1M execs green, then
+// the deferred-wrap class 97s into the next soak, then 15m / 42.5M execs green
+// again with its tripwire in.
 //
 // Both targets are gated the same way, which is the way every fuzz target in
 // this repo is gated: their seeds run on every `go test ./internal/pty`, in CI

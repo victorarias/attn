@@ -496,6 +496,21 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			},
 		},
 		{
+			// The pending-wrap tripwire, on the shape FuzzKittyWireMirror found
+			// (62f19a45d7a5c8c7): exactly a screen width fills the row and leaves
+			// the wrap deferred, and the placement consumes it on the worker
+			// alone. The trailing character is what makes the difference visible
+			// — it wraps on the client and overwrites the last column on the
+			// worker. Resync-exempt from replay, which is what the resync is for.
+			name: "placement on a row that is already full",
+			cols: 20, rows: 8,
+			chunks: []string{
+				strings.Repeat("0", 20),
+				kittyPlaceRGB(67, 8, 16, ""),
+				"0",
+			},
+		},
+		{
 			// The mode has to survive a chunk boundary in every one of these
 			// states, which is the whole reason it is carried on the segmenter
 			// rather than recomputed per call. The APC pattern inside the OSC is

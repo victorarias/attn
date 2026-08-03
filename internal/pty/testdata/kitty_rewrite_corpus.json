@@ -887,6 +887,30 @@
       "cursorRow": 7
     },
     {
+      "name": "placement on a row that is already full",
+      "cols": 20,
+      "rows": 8,
+      "chunks": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        "G19HYT1ULGk9NjcsZj0yNCx0PWQscz04LHY9MTY7RFJRYklpa3dOejVGVEZOYVlXaHZkbjJFaTVLWm9LZXV0YnpEeXRIWTMrYnQ5QUFIRGhVY0l5b3hPRDlHVFZSYlltbHdkMzZGakpPYW9haXZ0cjNFeTlMWjRPZnU5UUVJRHhZZEpDc3lPVUJIVGxWY1kycHhlSCtHalpTYm9xbXd0NzdGek5QYTRlanY5Z0lKRUJjZUpTd3pPa0ZJVDFaZFpHdHllWUNIanBXY282cXh1TC9HemRUYjR1bnc5d01LRVJnZkppMDBPMEpKVUZkZVpXeHplb0dJajVhZHBLdXl1Y0RIenRYYzQrcngrQVFMRWhrZ0p5NDFQRU5LVVZoZlptMTBlNEtKa0plZXBheXp1c0hJejliZDVPdnkrUVVNRXhvaEtDODJQVVJMVWxsZ1oyNTFmSU9La1ppZnBxMjB1OExKME5mZTVlenorZ1lORkJzaUtUQTNQa1ZNVTFwaGFHOTJmWVNMa3BtZ3A2NjF2TVBLMGRqZjV1MzBBQWNPRlJ3aktqRTRQMFpOVkZ0aWFYQjNmb1dNazVxaHFLKzJ2Y1RMMHRuZzUrNzFBUWdQRmgwa0t6STVRRWRPVlZ4amFuRjRmNGFObEp1aXFiQzN2c1hNMDlyaDZPLzJBZ2tRRng0bExETTZRVWhQVmwxa2EzSjVnSWVPbFp5anFyRzQbXA==",
+        "MA=="
+      ],
+      "wire": [
+        "MDAwMDAwMDAwMDAwMDAwMDAwMDA=",
+        "G1w=",
+        "MA=="
+      ],
+      "resync": [
+        "",
+        "kitty_layout_pending_wrap",
+        ""
+      ],
+      "workerPlainText": "00000000000000000000",
+      "workerViewportText": "00000000000000000000\n\n\n\n\n\n\n\n",
+      "cursorCol": 19,
+      "cursorRow": 0
+    },
+    {
       "name": "a foreign string split across feed chunks around an apc pattern",
       "cols": 20,
       "rows": 8,
