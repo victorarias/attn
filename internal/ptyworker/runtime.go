@@ -896,18 +896,14 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 				}
 			},
 			// Placements ride this connection's own queue, which is what keeps a
-			// set ordered behind the output event carrying the same seq. Reached
-			// only by a session that stores an image; not a hot path, so the log
-			// is unconditional.
+			// set ordered behind the output event carrying the same seq.
+			//
+			// The success path does not log. While an image is on screen this
+			// fires for every chunk that scrolls it, so a line per update is
+			// hundreds a second through a plain `cat` — enough to bury the rest
+			// of the session log. Only a forward failure is worth a line, and it
+			// is bounded by the send queue giving up.
 			pty.OnPlacements(func(update pty.PlacementUpdate) {
-				c.runtime.logf(
-					"worker kitty placements: session=%s conn=%s sub=%s seq=%d count=%d",
-					c.runtime.cfg.SessionID,
-					c.connID,
-					subID,
-					update.Seq,
-					len(update.Placements),
-				)
 				seq := update.Seq
 				if !c.sendEvent(EventEnvelope{
 					Type:       "evt",

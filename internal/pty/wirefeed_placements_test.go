@@ -37,8 +37,8 @@ func newPlacementRecorder(t *testing.T, cols, rows int, limit uint64) *placement
 	t.Cleanup(feed.close)
 
 	rec := &placementRecorder{feed: feed, term: term}
-	observeHook = func() { rec.observed++ }
-	t.Cleanup(func() { observeHook = nil })
+	placementReadHook = func() { rec.observed++ }
+	t.Cleanup(func() { placementReadHook = nil })
 	return rec
 }
 
@@ -82,8 +82,17 @@ func TestPlacementUpdateDescribesAPlacedImage(t *testing.T) {
 	if got := update.Placements[0].ImageID; got != 40 {
 		t.Errorf("described image id = %d, want 40", got)
 	}
-	if got := update.Placements[0].GridRows; got != 2 {
-		t.Errorf("described height = %d rows, want the 2 the image occupies", got)
+	// Pixel size, not GridCols/GridRows. A placement transmitted without an
+	// explicit cell footprint carries zeros for those — kitty's "natural size" —
+	// until something makes ghostty resolve them, so on the real spawn path the
+	// FIRST description of an image reports 0x0 cells. The pixel dimensions are
+	// populated from the start on every path, and are what a renderer needs to
+	// size the image regardless.
+	if got := update.Placements[0].PixelHeight; got != 32 {
+		t.Errorf("described height = %d px, want the 32 the image was transmitted at", got)
+	}
+	if got := update.Placements[0].PixelWidth; got != 16 {
+		t.Errorf("described width = %d px, want the 16 the image was transmitted at", got)
 	}
 }
 

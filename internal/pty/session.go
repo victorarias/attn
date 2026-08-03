@@ -685,7 +685,7 @@ func (s *Session) info() AttachInfo {
 	var ghosttyPlacements []KittyPlacement
 	if s.wireFeed != nil {
 		ghosttyBlocks = s.wireFeed.snapshotBlocks()
-		ghosttyPlacements = s.wireFeed.snapshotPlacements()
+		ghosttyPlacements, _ = s.wireFeed.snapshotPlacements()
 	}
 	replayWatermark := s.lastReplaySeq
 	s.replayMu.Unlock()
@@ -810,7 +810,29 @@ func (s *Session) resize(cols, rows uint16) error {
 	if s.ghostty != nil {
 		s.ghostty.Resize(int(cols), int(rows))
 	}
+	// A reflow moves images without producing a byte of output, so no chunk
+	// carries the correction and the client cannot derive it: it never saw the
+	// placements move. Deferring to "the next chunk" fails exactly when no next
+	// chunk comes, which is the common case — a resize on an idle session leaves
+	// every image drawn where the old grid put it until something types.
+	var placements []KittyPlacement
+	placementsHeld := false
+	if s.wireFeed != nil {
+		placements, placementsHeld = s.wireFeed.snapshotPlacements()
+	}
+	seq := s.lastReplaySeq
 	s.replayMu.Unlock()
+
+	// Stamped with the replay watermark rather than a fresh seq: no bytes were
+	// produced, so the set describes the grid as of the last chunk the client
+	// has. That makes a resize emission raceable against a concurrent chunk's
+	// emission at an equal or lower seq, and the resolution is the ordering rule
+	// clients apply — a set is taken when its seq is >= the last one applied.
+	// Because every emission carries the WHOLE set, any interleaving that drops
+	// one is healed by the next, and the loser is never a partial update.
+	if placementsHeld {
+		s.fanOutPlacements(PlacementUpdate{Seq: seq, Placements: placements})
+	}
 
 	// The ioctl resolves ptmx.Fd(), so it must not overlap the close.
 	s.writeMu.Lock()

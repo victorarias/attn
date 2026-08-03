@@ -420,21 +420,27 @@ func appendCSI(dst []byte, n int, final byte) []byte {
 	return append(dst, final)
 }
 
-// observeHook is a test-only seam fired on every placement observation, so a
-// test can hold the feed path to its cost: this is the one place that reads the
-// placement set out of ghostty, and a session with no images must never reach
-// it. nil (a single branch) in production.
-var observeHook func()
+// placementReadHook is a test-only seam fired on every read of the placement
+// set, so a test can hold both the feed path and the resize path to their cost:
+// a session with no images must never reach ghostty for placements at all. nil
+// (a single branch) in production.
+var placementReadHook func()
+
+// readPlacements is the only place the placement set is read out of ghostty —
+// the cgo crossing every caller here is gated to avoid. Callers hold replayMu.
+func (f *wireFeeder) readPlacements() []ghosttyvt.KittyPlacement {
+	if placementReadHook != nil {
+		placementReadHook()
+	}
+	return f.term.KittyPlacements()
+}
 
 // observe diffs ghostty's placement set against the last observation. Called
 // when the generation stamp moved — the terminal's own statement that the set
 // or its images changed — and at the end of any chunk that could have moved a
 // placement the terminal does not consider changed at all (see feed).
 func (f *wireFeeder) observe() {
-	if observeHook != nil {
-		observeHook()
-	}
-	current := f.term.KittyPlacements()
+	current := f.readPlacements()
 	delta := diffKittyPlacements(f.placements, current)
 	f.placements = current
 	if !delta.empty() {
@@ -487,18 +493,26 @@ func (f *wireFeeder) snapshotBlocks() []AttachBlockData {
 // snapshotPlacements resolves the active screen's placement set under the
 // caller's replayMu — the same hold as the dump, the blocks, and the watermark,
 // so an attaching client gets one consistent picture rather than four readings
-// of a moving terminal.
+// of a moving terminal. Also the resize path's read (Session.resize).
 //
 // Read fresh from the terminal rather than reused from the last observation: a
 // resize reflows the grid under that same lock without feeding a chunk, so the
-// stored positions can be one reflow stale. An empty set cannot become
-// non-empty that way, which is what keeps a session without images off cgo
-// here too.
-func (f *wireFeeder) snapshotPlacements() []ghosttyvt.KittyPlacement {
+// stored positions can be one reflow stale.
+//
+// The bool says whether this feeder holds any placement, which is NOT the same
+// as the returned set being non-empty: a reflow can drop the last placement, and
+// that reads as held-but-empty — the one thing that tells a client to stop
+// drawing. Only an unheld set skips the terminal, which is what keeps a session
+// without images off cgo here too.
+//
+// The stored set is deliberately left alone. It is the left side of the next
+// diff, and writing it from outside feed() would let a reflow absorb an
+// appearance that appeared() has to see.
+func (f *wireFeeder) snapshotPlacements() ([]ghosttyvt.KittyPlacement, bool) {
 	if len(f.placements) == 0 {
-		return nil
+		return nil, false
 	}
-	return f.term.KittyPlacements()
+	return f.readPlacements(), true
 }
 
 // close frees the native refs the block table holds. Called from closePTY

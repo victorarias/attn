@@ -7,9 +7,12 @@ package pty
 // to the attached client, and the pixels behind it can be fetched back.
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -23,9 +26,24 @@ type kittySpawn struct {
 	id      string
 	updates chan PlacementUpdate
 	exited  chan struct{}
+
+	// The byte stream the client would see, so a test can wait for a marker the
+	// payload ends with and know the child has written everything it is going to.
+	mu      sync.Mutex
+	output  []byte
+	arrived chan struct{}
 }
 
 func newKittySpawn(t *testing.T, id, payload string) *kittySpawn {
+	t.Helper()
+	return newKittySpawnCmd(t, id, payload, "read release; cat %s")
+}
+
+// newKittySpawnCmd runs script with the payload path substituted in. The shape
+// of the script decides the session's lifetime: the plain one exits once it has
+// emitted, a trailing read holds the session open for tests that need to act on
+// it afterwards.
+func newKittySpawnCmd(t *testing.T, id, payload, script string) *kittySpawn {
 	t.Helper()
 	path := filepath.Join(t.TempDir(), "payload")
 	if err := os.WriteFile(path, []byte(payload), 0o600); err != nil {
@@ -39,14 +57,18 @@ func newKittySpawn(t *testing.T, id, payload string) *kittySpawn {
 		id:      id,
 		updates: make(chan PlacementUpdate, 16),
 		exited:  make(chan struct{}),
+		arrived: make(chan struct{}, 1),
 	}
-	m.SetExitHandler(func(ExitInfo) { close(spawn.exited) })
+	// Shutdown kills a held child, so the handler can fire from teardown as well
+	// as from the child finishing on its own.
+	var once sync.Once
+	m.SetExitHandler(func(ExitInfo) { once.Do(func() { close(spawn.exited) }) })
 
 	if err := m.Spawn(SpawnOptions{
 		ID:              id,
 		CWD:             t.TempDir(),
 		Agent:           "probe-kitty",
-		ExternalCommand: []string{"/bin/sh", "-c", "read release; cat " + path},
+		ExternalCommand: []string{"/bin/sh", "-c", fmt.Sprintf(script, path)},
 		Cols:            40,
 		Rows:            12,
 	}); err != nil {
@@ -54,13 +76,53 @@ func newKittySpawn(t *testing.T, id, payload string) *kittySpawn {
 	}
 
 	if _, err := m.Attach(id, "test-client",
-		func([]byte, uint32) bool { return true },
+		func(data []byte, seq uint32) bool {
+			spawn.mu.Lock()
+			spawn.output = append(spawn.output, data...)
+			spawn.mu.Unlock()
+			select {
+			case spawn.arrived <- struct{}{}:
+			default:
+			}
+			return true
+		},
 		nil,
 		OnPlacements(func(update PlacementUpdate) { spawn.updates <- update }),
 	); err != nil {
 		t.Fatalf("Attach() error: %v", err)
 	}
 	return spawn
+}
+
+// waitForOutput blocks until marker has come out of the session, then returns
+// the replay watermark. A payload can span several chunks, so "the image was
+// described" is NOT the same moment as "the child is done writing" — a test
+// that wants a stable watermark has to wait for the end of the output, and a
+// marker at the end of the payload is the only thing that says so.
+func (k *kittySpawn) waitForOutput(t *testing.T, marker string) uint32 {
+	t.Helper()
+	deadline := time.After(10 * time.Second)
+	for {
+		k.mu.Lock()
+		seen := bytes.Contains(k.output, []byte(marker))
+		k.mu.Unlock()
+		if seen {
+			break
+		}
+		select {
+		case <-k.arrived:
+		case <-deadline:
+			t.Fatalf("timed out waiting for %q in the session output", marker)
+		}
+	}
+
+	session, err := k.manager.getSession(k.id)
+	if err != nil {
+		t.Fatalf("getSession() error: %v", err)
+	}
+	session.replayMu.Lock()
+	defer session.replayMu.Unlock()
+	return session.lastReplaySeq
 }
 
 // release lets the child emit, and returns once it has exited — which is the
