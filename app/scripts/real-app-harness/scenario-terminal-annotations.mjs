@@ -599,7 +599,7 @@ async function main() {
       await sleep(300);
     });
 
-    await runner.step('send_shortcut_types_it_and_tombstones_it', async () => {
+    await runner.step('send_shortcut_submits_it_and_tombstones_it', async () => {
       // A real ⌘Return, not the button: the button is a click handler any unit
       // test can drive, while the keystroke has to survive AppKit, reach the
       // page's capture-phase listener, and be claimed by this pane instead of
@@ -614,7 +614,7 @@ async function main() {
         10_000,
       );
       runner.assert(
-        /typed 1 into the session/.test(sent.footer || ''),
+        /sent 1 to the session/.test(sent.footer || ''),
         `Panel footer after Send all = ${JSON.stringify(sent.footer)}, want the sent confirmation`,
       );
 
@@ -630,16 +630,20 @@ async function main() {
       // must not be able to put the sent marks back.
       runner.assert(after.generation >= 2, `Generation after send = ${after.generation}, want the raised tombstone`);
 
+      // The claim this whole path exists for: Send all SUBMITS. Text sitting in
+      // the composer would satisfy any assertion about the pane's contents, so
+      // the only proof that separates a paste from a send is the session taking
+      // a turn on it — which is also what proves the Enter landed as a keypress
+      // rather than being folded into the pasted block.
+      await waitForTurn(observer, sessionId, 'the turn the annotation feedback opened');
+
       const lines = await readLines(client, sessionId, paneId);
-      // Claude separates the prompt marker with a non-breaking space, and
-      // collapses a multi-line insert into a "[Pasted text #1 +N lines]"
-      // placeholder it expands on submit. Both are the text having arrived, so
-      // match the marker followed by any whitespace and any content — asserting
-      // the annotation's own words here would fail whenever it collapses.
-      const promptRow = lines.findIndex((line) => /^❯\s+\S/.test(line));
+      // Submitted means the composer is empty again: whatever the agent said
+      // back, the prompt must not still be holding the payload.
+      const stillComposing = lines.some((line) => /^❯\s+\S/.test(line));
       runner.assert(
-        promptRow >= 0,
-        `Send all typed nothing into the session's prompt. Pane text:\n${lines.join('\n')}`,
+        !stillComposing,
+        `The feedback is still sitting in the prompt, so it was typed but never submitted. Pane text:\n${lines.join('\n')}`,
       );
     });
 

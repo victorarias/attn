@@ -1015,13 +1015,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   // visible session, so ⌘Enter belongs to at most one pane and
                   // stays with the PTY everywhere else.
                   paneActive={isActiveSession && sessionVisible && activeLeafId === agentPane.id}
-                  onSubmitAnnotations={(text) => {
-                    // Bracketed paste, not a plain write: the payload is
-                    // multi-line, and without the guard every newline submits
-                    // the partial feedback as its own turn. It lands in the
-                    // agent's prompt for the user to read and send.
-                    runtime.handleTerminalInput(agentPane.id)(`\u001b[200~${text}\u001b[201~`);
-                  }}
                   fontSize={fontSize}
                   resolvedTheme={resolvedTheme}
                   cwd={paneSession?.cwd}

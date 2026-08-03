@@ -2214,6 +2214,41 @@ model SessionAnnotationsClearResultMessage {
   generation: int32;
 }
 
+// Deliver composed annotation feedback into a session — the same doorbell
+// primitive markdown annotations submit through: bracketed paste, a measured
+// gap, then Enter.
+//
+// The text is composed client-side rather than from the persisted draft: a
+// quick label's instruction is UI vocabulary that belongs with the chip that
+// offers it, and the client can already write these exact bytes with
+// pty_input. What the daemon owns here is the delivery — the approval guard,
+// the PTY write fence that keeps a racing keystroke out of the gap, and the
+// gap itself, without which the agent folds Enter into the pasted text and
+// nothing is ever submitted.
+model SessionAnnotationsSubmitMessage {
+  cmd: "session_annotations_submit";
+  session_id: string;
+  // The composed feedback, delivered as one pasted block.
+  text: string;
+  request_id: string;
+}
+
+// Result of session_annotations_submit.
+// status: "delivered" — typed into the session and submitted.
+//         "skipped_pending_approval" — the session is waiting on an approval
+//           prompt, where the submit's Enter would answer it. Nothing was
+//           typed; the annotations are kept so the send can be retried once
+//           the prompt is resolved.
+//         "error" — see error; annotations kept.
+model SessionAnnotationsSubmitResultMessage {
+  event: "session_annotations_submit_result";
+  request_id: string;
+  session_id: string;
+  success: boolean;
+  status: string;
+  error?: string;
+}
+
 // Fetch the persisted annotation draft for an absolute markdown file path.
 // The reply's generation is the current generation floor —
 // max(stored generation, tombstone) — so a re-mounting client seeds its

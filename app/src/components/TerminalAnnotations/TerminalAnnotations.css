@@ -337,6 +337,21 @@
   color: var(--color-error);
 }
 
+/* Why a send did not happen. Sits between the list and the footer so the Send
+   button it is asking you to press again stays visible under it. */
+.anno-panel-note {
+  padding: 8px 10px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.4;
+}
+
+.anno-panel-send:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .anno-panel-n,
 .anno-panel-sent {
   color: var(--color-text-tertiary);

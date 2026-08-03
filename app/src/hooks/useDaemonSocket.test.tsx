@@ -3289,6 +3289,66 @@ describe('useDaemonSocket notebook and annotation events', () => {
     unmount();
   });
 
+  it('resolves session_annotations_submit with the delivered status', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSubmit('session-1', 'Feedback on your last message.');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      cmd: 'session_annotations_submit',
+      session_id: 'session-1',
+      text: 'Feedback on your last message.',
+    });
+
+    ws.emit({
+      event: 'session_annotations_submit_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      status: 'delivered',
+    });
+    await expect(promise).resolves.toEqual({ status: 'delivered' });
+    unmount();
+  });
+
+  it('resolves a submit the daemon refused for a pending approval', async () => {
+    // The caller has to tell "nothing was sent, keep the marks" apart from a
+    // broken socket, so the skip arrives as a status rather than a rejection.
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSubmit('session-1', 'feedback');
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_annotations_submit_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: false,
+      status: 'skipped_pending_approval',
+    });
+
+    await expect(promise).resolves.toEqual({ status: 'skipped_pending_approval' });
+    unmount();
+  });
+
+  it('rejects a submit the daemon failed to deliver', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsSubmit('session-1', 'feedback');
+    await Promise.resolve();
+    ws.emit({
+      event: 'session_annotations_submit_result',
+      request_id: lastSent(ws).request_id,
+      session_id: 'session-1',
+      success: false,
+      status: 'error',
+      error: 'pty write failed',
+    });
+
+    await expect(promise).rejects.toThrow('pty write failed');
+    unmount();
+  });
+
   it('resolves notebook_read with the daemon result', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 

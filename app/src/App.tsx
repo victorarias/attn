@@ -808,6 +808,7 @@ function AppContent({
     sendSessionAnnotationsGet,
     sendSessionAnnotationsSave,
     sendSessionAnnotationsClear,
+    sendSessionAnnotationsSubmit,
     sendWorkspaceMoveLeaf,
     sendWorkspaceMoveLeafToWorkspace,
     sendWorkspaceMoveLeafToNewWorkspace,
@@ -3237,7 +3238,8 @@ function AppContent({
     fetchAnnotations: sendSessionAnnotationsGet,
     saveAnnotations: sendSessionAnnotationsSave,
     clearAnnotations: sendSessionAnnotationsClear,
-  }), [sendSessionMessagesGet, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear]);
+    submitAnnotations: sendSessionAnnotationsSubmit,
+  }), [sendSessionMessagesGet, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear, sendSessionAnnotationsSubmit]);
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();

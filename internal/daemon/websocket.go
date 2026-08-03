@@ -1175,6 +1175,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleSessionAnnotationsSave(client, msg.(*protocol.SessionAnnotationsSaveMessage))
 	case protocol.CmdSessionAnnotationsClear: // wire: session_annotations_clear
 		d.handleSessionAnnotationsClear(client, msg.(*protocol.SessionAnnotationsClearMessage))
+	case protocol.CmdSessionAnnotationsSubmit: // wire: session_annotations_submit
+		d.handleSessionAnnotationsSubmit(client, msg.(*protocol.SessionAnnotationsSubmitMessage))
 	case protocol.CmdMarkdownAnnotationsGet: // wire: markdown_annotations_get
 		d.handleMarkdownAnnotationsGet(client, msg.(*protocol.MarkdownAnnotationsGetMessage))
 	case protocol.CmdMarkdownAnnotationsSave: // wire: markdown_annotations_save
@@ -1377,6 +1379,13 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdSessionAnnotationsClear: // wire: session_annotations_clear
 		if typed, ok := msg.(*protocol.SessionAnnotationsClearMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSessionAnnotationsSubmit: // wire: session_annotations_submit
+		// The submit writes into the session's PTY, which only the daemon
+		// running that PTY can do. Answered locally a hub would have no session
+		// to type into, so a remote pane's Send all would silently do nothing.
+		if typed, ok := msg.(*protocol.SessionAnnotationsSubmitMessage); ok {
 			return typed.SessionID
 		}
 	}

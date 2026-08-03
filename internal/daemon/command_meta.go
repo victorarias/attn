@@ -133,11 +133,14 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSessionAnnotationsGet:                 commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionAnnotationsSave:                commandMetadata(ScopeSession, false, true),
 	protocol.CmdSessionAnnotationsClear:               commandMetadata(ScopeSession, false, true),
-	protocol.CmdBrowserControl:                        commandMetadata(ScopeSession, true, true),
-	protocol.CmdBrowserControlResult:                  commandMetadata(ScopeHubLocal, false, true),
-	protocol.CmdRenameSession:                         commandMetadata(ScopeSession, false, true),
-	protocol.CmdRenameWorkspace:                       commandMetadata(ScopeEndpoint, false, true),
-	protocol.CmdSetChiefOfStaff:                       commandMetadata(ScopeHubLocal, false, true),
+	// Blocks during recovery, unlike its get/save/clear siblings: those touch
+	// only the store, this one types into a PTY.
+	protocol.CmdSessionAnnotationsSubmit: commandMetadata(ScopeSession, true, true),
+	protocol.CmdBrowserControl:           commandMetadata(ScopeSession, true, true),
+	protocol.CmdBrowserControlResult:     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdRenameSession:            commandMetadata(ScopeSession, false, true),
+	protocol.CmdRenameWorkspace:          commandMetadata(ScopeEndpoint, false, true),
+	protocol.CmdSetChiefOfStaff:          commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

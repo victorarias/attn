@@ -68,6 +68,30 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   // Set to fail the next save the way a competing writer would, so the client's
   // stale path can be driven without a second component in the test.
   stealNextSave: TerminalAnnotation[] | null = null;
+  // Every payload the client asked to have delivered, in order — including the
+  // ones the daemon then refused, which is how "it tried but nothing was sent"
+  // stays distinguishable from "it never tried".
+  submitted: string[] = [];
+  // How the next submit answers. The refusals are real protocol outcomes the
+  // client has to keep the user's marks through.
+  nextSubmitStatus: 'delivered' | 'skipped_pending_approval' | 'error' = 'delivered';
+  submitRejection: Error | null = null;
+  // Held open to drive the in-flight window: resolve it to let the send answer.
+  releaseSubmit: (() => void) | null = null;
+
+  submitAnnotations = async (_sessionId: string, text: string) => {
+    this.submitted.push(text);
+    if (this.releaseSubmit !== null) {
+      await new Promise<void>((resolve) => {
+        this.releaseSubmit = () => {
+          this.releaseSubmit = null;
+          resolve();
+        };
+      });
+    }
+    if (this.submitRejection) throw this.submitRejection;
+    return { status: this.nextSubmitStatus };
+  };
 
   fetchMessages = async (_sessionId: string) => {
     this.calls.fetchMessages += 1;
@@ -116,14 +140,12 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
 function props(overrides: {
   state?: UISessionState;
   api?: SessionAnnotationApi;
-  submit?: (text: string) => void;
   paneActive?: boolean;
 }) {
   return {
     sessionId: 'session-1',
     sessionState: overrides.state ?? ('idle' as UISessionState),
     annotationApi: overrides.api,
-    onSubmitAnnotations: overrides.submit,
     paneActive: overrides.paneActive ?? false,
     fontSize: 13,
     debugName: 'test',
@@ -136,22 +158,19 @@ function props(overrides: {
 function renderTerminal(overrides: {
   state?: UISessionState;
   api?: FakeAnnotationDaemon;
-  submit?: (text: string) => void;
   paneActive?: boolean;
 } = {}) {
   const daemon = overrides.api ?? new FakeAnnotationDaemon();
-  const submit = overrides.submit ?? vi.fn();
-  const view = render(<AnnotatedTerminal {...props({ ...overrides, api: daemon, submit })} />);
+  const view = render(<AnnotatedTerminal {...props({ ...overrides, api: daemon })} />);
   const rerender = (next: { state?: UISessionState; paneActive?: boolean } = {}) =>
     view.rerender(
       <AnnotatedTerminal {...props({
         state: next.state ?? overrides.state,
         paneActive: next.paneActive ?? overrides.paneActive,
         api: daemon,
-        submit,
       })} />,
     );
-  return { ...view, rerender, daemon, submit };
+  return { ...view, rerender, daemon };
 }
 
 /** Waits for the annotatable window to have reached the store. */
@@ -328,9 +347,8 @@ describe('AnnotatedTerminal', () => {
     expect(screen.queryByTestId('annotation-popup')).toBeNull();
   });
 
-  it('types the whole set into the session and clears it', async () => {
-    const submit = vi.fn();
-    renderTerminal({ submit });
+  it('sends the whole set to the session and clears it', async () => {
+    const { daemon } = renderTerminal();
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
@@ -340,14 +358,13 @@ describe('AnnotatedTerminal', () => {
 
     fireEvent.click(screen.getByText('Send all'));
 
-    expect(submit).toHaveBeenCalledTimes(1);
-    const payload = submit.mock.calls[0][0] as string;
-    expect(payload).toContain(TURN_1.slice(0, 26));
-    expect(payload).toContain(TURN_1.slice(31, 55));
+    await waitFor(() => expect(screen.getByText(/sent 2 to the session/)).toBeTruthy());
+    expect(daemon.submitted).toHaveLength(1);
+    expect(daemon.submitted[0]).toContain(TURN_1.slice(0, 26));
+    expect(daemon.submitted[0]).toContain(TURN_1.slice(31, 55));
     // Sending is the end of the set: leaving it behind would re-send the same
     // feedback on the next click.
     expect(stored()).toHaveLength(0);
-    expect(screen.getByText(/typed 2 into the session/)).toBeTruthy();
   });
 
   it('reopens a reaction from the message, and lets it be changed', async () => {
@@ -599,8 +616,7 @@ describe('AnnotatedTerminal', () => {
   });
 
   it('sends the set on the send shortcut while the pane holds focus', async () => {
-    const submit = vi.fn();
-    renderTerminal({ submit, paneActive: true });
+    const { daemon } = renderTerminal({ paneActive: true });
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
@@ -608,16 +624,15 @@ describe('AnnotatedTerminal', () => {
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit.mock.calls[0][0]).toContain(TURN_1.slice(0, 26));
-    expect(stored()).toHaveLength(0);
+    await waitFor(() => expect(stored()).toHaveLength(0));
+    expect(daemon.submitted).toHaveLength(1);
+    expect(daemon.submitted[0]).toContain(TURN_1.slice(0, 26));
   });
 
   it('commits the comment being typed when the send shortcut fires', async () => {
     // Half-written feedback is still what the user meant to say; dropping it on
     // the way out would be silent data loss.
-    const submit = vi.fn();
-    renderTerminal({ submit, paneActive: true });
+    const { daemon } = renderTerminal({ paneActive: true });
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
@@ -628,15 +643,14 @@ describe('AnnotatedTerminal', () => {
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
-    expect(submit).toHaveBeenCalledTimes(1);
-    expect(submit.mock.calls[0][0]).toContain('still typing this');
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    expect(daemon.submitted[0]).toContain('still typing this');
   });
 
   it('leaves the send keystroke to the PTY when the pane is not the focused one', async () => {
     // Registration is the gate: the dispatcher consumes ⌘Enter whenever a
     // handler exists, so a pane that is merely mounted must not register one.
-    const submit = vi.fn();
-    renderTerminal({ submit, paneActive: false });
+    const { daemon } = renderTerminal({ paneActive: false });
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
@@ -644,31 +658,118 @@ describe('AnnotatedTerminal', () => {
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
-    expect(submit).not.toHaveBeenCalled();
+    expect(daemon.submitted).toEqual([]);
     expect(stored()).toHaveLength(1);
   });
 
   it('leaves the send keystroke to the PTY when there is nothing to send', async () => {
-    const submit = vi.fn();
-    const { rerender } = renderTerminal({ submit, paneActive: true });
+    const { daemon, rerender } = renderTerminal({ paneActive: true });
     await windowReady('turn-1');
     rerender({ paneActive: true });
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
-    expect(submit).not.toHaveBeenCalled();
+    expect(daemon.submitted).toEqual([]);
   });
 
-  it('offers no annotation surface when the session cannot be sent to', async () => {
-    // Without a submit path an annotation has nowhere to go, so the terminal is
-    // never given a store and the alt-drag stays an ordinary selection.
-    const daemon = new FakeAnnotationDaemon();
-    render(<AnnotatedTerminal {...props({ api: daemon, submit: undefined })} />);
+  it('offers no annotation surface without a daemon to hold the marks', async () => {
+    // Annotations that cannot be persisted or delivered have nowhere to go, so
+    // the terminal is never given a store and the alt-drag stays an ordinary
+    // selection.
+    render(<AnnotatedTerminal {...props({ api: undefined })} />);
 
     await act(async () => {});
     expect(terminal.annotations).toBeUndefined();
     expect(terminal.onAnnotationAnchor).toBeUndefined();
-    expect(daemon.calls.fetchMessages).toBe(0);
+  });
+});
+
+// Sending is the moment the user's marks stop being theirs and become a turn.
+// Everything here is about the one asymmetry that makes it dangerous: a
+// delivered send SHOULD clear them, and every other outcome MUST NOT.
+describe('AnnotatedTerminal sending', () => {
+  it('keeps the marks and says why when the session is on an approval prompt', async () => {
+    // pending_approval is annotatable — an approval prompt is exactly when a
+    // user wants to push back — but it is also where the submitting Enter would
+    // answer the prompt. The daemon refuses; the marks have to survive it.
+    const { daemon } = renderTerminal({ state: 'pending_approval' as UISessionState });
+    daemon.nextSubmitStatus = 'skipped_pending_approval';
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
+    expect(screen.getByTestId('annotation-send-note').textContent).toMatch(/waiting on an approval/i);
+    expect(daemon.submitted).toHaveLength(1);
+    expect(stored()).toHaveLength(1);
+    // And the way to retry is still there, under the reason it did not go.
+    expect(screen.getByText('Send all')).toBeTruthy();
+  });
+
+  it('keeps the marks and shows the failure when delivery fails', async () => {
+    const { daemon } = renderTerminal();
+    daemon.submitRejection = new Error('Session annotation send timed out');
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
+    expect(screen.getByTestId('annotation-send-note').textContent).toContain('timed out');
+    expect(stored()).toHaveLength(1);
+    // The tombstone is what spends the marks daemon-side. A failed send must
+    // never raise it, or a reload would come back empty.
+    expect(daemon.calls.clearAnnotations).toBe(0);
+  });
+
+  it('refuses a second send while the first is still in flight', async () => {
+    // The send is reachable from the button and from ⌘Enter, and the marks are
+    // not cleared until the first answers — so an unguarded second one delivers
+    // the same feedback twice.
+    const { daemon } = renderTerminal({ paneActive: true });
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(screen.getByText('Sending…')).toBeTruthy());
+    fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
+    fireEvent.click(screen.getByText('Sending…'));
+
+    expect(daemon.submitted).toHaveLength(1);
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+    await waitFor(() => expect(stored()).toHaveLength(0));
+  });
+
+  it('tombstones the daemon draft only once the send is delivered', async () => {
+    const { daemon } = renderTerminal();
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    await waitFor(() => expect(daemon.annotations).toHaveLength(1));
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    // In flight: the daemon still holds them, because a send that never
+    // arrives must leave something to come back to.
+    expect(daemon.annotations).toHaveLength(1);
+    expect(daemon.calls.clearAnnotations).toBe(0);
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+    await waitFor(() => expect(daemon.calls.clearAnnotations).toBe(1));
+    expect(daemon.annotations).toHaveLength(0);
   });
 });
 
