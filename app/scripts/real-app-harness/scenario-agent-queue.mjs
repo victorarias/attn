@@ -34,7 +34,12 @@
  *      the next agent that owes a turn, the same as settling by hand does,
  *  11. settling by keyboard hands over the next agent that still owes a turn,
  *      and lands on home when nothing does,
- *  12. a settle survives a daemon restart.
+ *  12. a settle survives a daemon restart,
+ *  13. landing on home that way leaves it waiting for the queue to refill — the
+ *      banner says so on a switch the user can throw either way — and the next
+ *      turn to open takes the user to it,
+ *  14. walking to home instead leaves the user there, however many agents start
+ *      asking.
  *
  * Prereqs: `claude` on PATH; a non-production profile install with the
  * automation layer; a built `./attn` (or ATTN_HARNESS_BIN) for the restart step.
@@ -683,6 +688,98 @@ async function main() {
       runner.assert(
         state.activeSessionId === null,
         `no agent is selected once the queue is empty: ${state.activeSessionId}`,
+      );
+
+      // Home reached this way is a wait, not a stop: the user did not choose to
+      // be here, the queue simply ran out. The banner says so on its own switch.
+      const home = await pollFor(
+        async () => {
+          const current = await client.request('home_get_state');
+          return current.allSettled ? current : null;
+        },
+        'home to announce that everything is settled',
+        15_000,
+      );
+      runner.assert(
+        home.followNextTurn === true,
+        `landing on home from a settle arms the wait: ${JSON.stringify(home)}`,
+      );
+
+      // And it is the user's to change, both ways: a switch that only the app
+      // can throw is not a switch.
+      await client.request('dom_click', { selector: '[data-testid="follow-next-turn"] input' });
+      const off = await pollFor(
+        async () => {
+          const current = await client.request('home_get_state');
+          return current.followNextTurn === false ? current : null;
+        },
+        'the wait to be called off from the banner',
+        10_000,
+      );
+      runner.assert(off.followNextTurn === false, 'the wait can be called off from the banner');
+      await client.request('dom_click', { selector: '[data-testid="follow-next-turn"] input' });
+      const backOn = await pollFor(
+        async () => {
+          const current = await client.request('home_get_state');
+          return current.followNextTurn === true ? current : null;
+        },
+        'the wait to be armed again from the banner',
+        10_000,
+      );
+      runner.assert(backOn.followNextTurn === true, 'and armed again from the same switch');
+    });
+
+    await runner.step('waiting_at_home_takes_the_user_to_the_next_turn', async () => {
+      // The other half of the handover. A turn opening while the user waits is
+      // the same event as a turn closing seen from the other side, so it moves
+      // them the same way — without this, home watches an agent start asking and
+      // says nothing.
+      await driveToOwedTurn(client, observer, beta, 'what to do about the wait', 'beta to want the user again');
+      await waitForTurns(client, [beta.sessionId], 'beta back in the band while home waits');
+      const jumped = await pollFor(
+        async () => {
+          const current = await client.request('get_state');
+          return current.activeSessionId === beta.sessionId ? current : null;
+        },
+        'the wait at home to end on the agent that opened a turn',
+        20_000,
+      );
+      runner.assert(
+        jumped.activeSessionId === beta.sessionId,
+        `waiting at home handed over the agent that wants the user: ${jumped.activeSessionId}`,
+      );
+    });
+
+    await runner.step('home_the_user_walked_to_keeps_them', async () => {
+      // The rule the wait exists under: deciding to be on home means staying
+      // there. Going home by hand — from an agent whose turn is still open, so
+      // there is something to be pulled to the whole time — leaves the wait off,
+      // and every agent that starts asking afterwards stays in the queue until
+      // the user goes and takes it.
+      await driver.activateApp();
+      await driver.clickWindow(0.5, 0.5);
+      await driver.pressKey('h', { command: true, shift: true });
+      const home = await pollFor(async () => {
+        const current = await client.request('get_state');
+        return current.activeSessionId === null ? current : null;
+      }, 'Cmd+Shift+H to land on home', 15_000);
+      runner.assert(home.activeSessionId === null, 'the user walked home');
+
+      await driveToOwedTurn(client, observer, alpha, 'whether to stay put', 'alpha to want the user too');
+      await waitForTurns(
+        client,
+        [beta.sessionId, alpha.sessionId],
+        'both agents owed while the user sits on home',
+        30_000,
+      );
+      // Long enough that a jump would have happened: the follow reacts to the
+      // same broadcast that puts the row in the band, which the wait above
+      // already proved lands within seconds.
+      await delay(5_000);
+      const stayed = await client.request('get_state');
+      runner.assert(
+        stayed.activeSessionId === null,
+        `a home the user chose keeps them, however many agents ask: ${stayed.activeSessionId}`,
       );
     });
 

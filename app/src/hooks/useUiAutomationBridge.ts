@@ -2004,6 +2004,26 @@ export function useUiAutomationBridge({
         });
         return session ? serializeSession(session, getActivePaneIdForSession) : null;
       }
+      case 'home_get_state': {
+        // What home is saying about the queue, read off the banner the user is
+        // looking at. `allSettled: false` is a real answer — the banner is drawn
+        // only while nothing is owed — and `followNextTurn` is the switch that
+        // decides whether the next turn to open comes and gets the user, so a
+        // caller can testify both to how it was set and to who set it.
+        //
+        // Scoped to the view that is actually on screen: home stays mounted
+        // behind the session view, so an unscoped query would report the banner
+        // to a caller looking at an agent.
+        const visible = document.querySelector('.view-container.visible');
+        const banner = visible?.querySelector('[data-testid="all-settled"]') ?? null;
+        const follow = visible?.querySelector('[data-testid="follow-next-turn"] input');
+        return {
+          onScreen: Boolean(visible?.querySelector('.dashboard')),
+          allSettled: Boolean(banner),
+          detail: banner?.querySelector('.all-settled-detail')?.textContent?.trim() || '',
+          followNextTurn: follow instanceof HTMLInputElement ? follow.checked : null,
+        };
+      }
       case 'queue_get_state': {
         // Read the rendered band, not the model behind it: ordering, membership,
         // and the live state dot are the whole claim of the queue arrangement,

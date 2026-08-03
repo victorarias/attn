@@ -112,6 +112,7 @@ import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts }
 import {
   advanceAfterTurnClosed,
   buildQueueBands,
+  headOfQueue,
   isQueueModeEnabled,
   oldestWantedTurn,
   QUEUE_MODE_SETTING,
@@ -1315,11 +1316,36 @@ function AppContent({
     };
   }, [sendUnsubscribeGitStatus, clearGitStatus]);
 
-  // Function to go to dashboard
-  const goToDashboard = useCallback(() => {
+  // Home is reached two ways, and which one it was decides whether home is a
+  // stop or a wait. Walking here — ⌘0, the sidebar's Home, leaving grid with no
+  // agent selected — is a decision to be here, so nothing may take the user
+  // away again. Being handed here because the queue ran dry is not a decision at
+  // all: there was simply nothing left to go to, and the user is waiting for
+  // work rather than choosing to stop. Only the second arms the latch below.
+  //
+  // The latch is deliberately not a setting. It answers "am I waiting right
+  // now", which is true of one visit to home and false of the next; a
+  // remembered preference would keep pulling the user out of a home they walked
+  // to on purpose, which is the one thing this must never do.
+  const [followNextTurn, setFollowNextTurn] = useState(false);
+  const enterHome = useCallback((awaitingNextTurn: boolean) => {
     setActiveSession(null);
     setView('dashboard');
+    setFollowNextTurn(awaitingNextTurn);
   }, [setActiveSession]);
+
+  // Home because the user asked for it: every button, shortcut and menu route.
+  const goToDashboard = useCallback(() => enterHome(false), [enterHome]);
+
+  // Home because the queue ran dry under the user, not because they asked.
+  const goHomeAwaitingNextTurn = useCallback(() => enterHome(true), [enterHome]);
+
+  // Leaving home ends the wait, whatever took the user out — the follow itself,
+  // ⌘J, a click in the sidebar, grid. Coming back has to arm it again, so the
+  // latch can never outlive the visit it belongs to.
+  useEffect(() => {
+    if (view !== 'dashboard') setFollowNextTurn(false);
+  }, [view]);
 
   // Cmd+G toggles the global grid view on/off; leaving grid returns to wherever
   // the user was (a session if one is active, otherwise the dashboard).
@@ -2726,9 +2752,31 @@ function AppContent({
     if (advance.to === 'session') {
       handleSelectSession(advance.row.session.id);
     } else {
-      goToDashboard();
+      goHomeAwaitingNextTurn();
     }
-  }, [queueBands, queueModeEnabled, view, activeSessionId, handleSelectSession, goToDashboard]);
+  }, [queueBands, queueModeEnabled, view, activeSessionId, handleSelectSession, goHomeAwaitingNextTurn]);
+
+  // Waiting at home: the next turn to open comes and gets the user.
+  //
+  // This is the other half of the handover. Closing the last turn lands the user
+  // on home, and the queue refilling is the same event as a turn closing seen
+  // from the other side — an agent's claim on the user changed while they were
+  // looking somewhere else. Without this, working the queue to the end parks the
+  // user on a screen that watches the next turn open and says nothing.
+  //
+  // Gated on the latch rather than on being home, which is what keeps a home the
+  // user walked to quiet. It is armed by the handover above, or by the user
+  // ticking the box on the banner; either way the box says which it is, so the
+  // jump is never a surprise.
+  //
+  // The head of the queue, not whichever turn happened to open — a wait that
+  // ends on the oldest owed turn is the same order as the band, ⌘J, and the
+  // handover, and picking by arrival time would make it its own fourth order.
+  useEffect(() => {
+    if (!followNextTurn || !queueModeEnabled || view !== 'dashboard') return;
+    const next = headOfQueue(queueBands);
+    if (next) handleSelectSession(next.session.id);
+  }, [followNextTurn, queueModeEnabled, view, queueBands, handleSelectSession]);
 
   // Keyboard shortcut handlers
   const handleJumpToWaiting = useCallback(() => {
@@ -3640,6 +3688,8 @@ function AppContent({
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           queueModeEnabled={queueModeEnabled}
+          followNextTurn={followNextTurn}
+          onToggleFollowNextTurn={() => setFollowNextTurn((armed) => !armed)}
           onSelectSession={handleSelectSession}
           onNewSession={() => handleNewSession('vertical')}
           onRefreshPRs={handleRefreshPRs}

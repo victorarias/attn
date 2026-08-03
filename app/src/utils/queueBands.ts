@@ -249,6 +249,19 @@ function nextOwedAfter<TSession extends QueueBandSession>(
   return null;
 }
 
+/**
+ * The turn at the head of the queue: the one owed longest, which is the row the
+ * band lists first and the agent ⌘J jumps to. Exported because two places send
+ * the user there and they must not disagree about which agent "next" means —
+ * the handover when it runs off the end of the old snapshot, and home when it is
+ * waiting for the queue to refill.
+ */
+export function headOfQueue<TSession extends QueueBandSession>(
+  bands: QueueBands<TSession> | null,
+): QueueRow<TSession> | null {
+  return bands?.turns[0] ?? null;
+}
+
 /** Where selection goes when a turn closes: the next agent, or home. */
 export type QueueAdvance<TSession extends QueueBandSession> =
   | { to: 'session'; row: QueueRow<TSession> }
@@ -301,6 +314,6 @@ export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
     bands.snoozed.some((row) => row.session.id === sessionId);
   if (!owedBefore || !closedNow) return null;
   const stillOwed = new Set(bands.turns.map((row) => row.session.id));
-  const next = nextOwedAfter(previousTurns, sessionId, stillOwed) ?? bands.turns[0] ?? null;
+  const next = nextOwedAfter(previousTurns, sessionId, stillOwed) ?? headOfQueue(bands);
   return next ? { to: 'session', row: next } : { to: 'dashboard' };
 }

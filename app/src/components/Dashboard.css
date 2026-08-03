@@ -108,6 +108,25 @@
   font-size: var(--font-size-sm);
   color: var(--color-text-muted);
 }
+/* Quieter than the detail line above it: it is a switch, not news. */
+.all-settled-follow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.all-settled-follow input {
+  accent-color: #78c88c;
+  cursor: pointer;
+  margin: 0;
+}
+.all-settled-follow:hover {
+  color: var(--color-text-secondary);
+}
 
 .rate-limit-banner {
   display: flex;

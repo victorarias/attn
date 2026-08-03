@@ -259,4 +259,51 @@ describe('Dashboard in queue mode', () => {
     expect(screen.queryByTestId('all-settled')).not.toBeInTheDocument();
     expect(screen.getByTestId('session-group-waiting')).toContainElement(screen.getByTestId('session-s1'));
   });
+
+  // The wait has to be visible and reversible from the screen it happens on:
+  // being moved to another agent without having been told is the surprise the
+  // switch exists to remove, and an armed latch with no way off is a one-way
+  // door.
+  describe('the follow-next-turn switch', () => {
+    const settled = [{ id: 's1', label: 'busy', state: 'working' as const, cwd: '/a', turnOwed: false }];
+
+    it('shows what the wait is set to and turns it off from the banner', () => {
+      const onToggleFollowNextTurn = vi.fn();
+      render(
+        <Dashboard
+          {...props}
+          sessions={settled}
+          followNextTurn
+          onToggleFollowNextTurn={onToggleFollowNextTurn}
+        />
+      );
+
+      const box = screen.getByTestId('follow-next-turn').querySelector('input') as HTMLInputElement;
+      expect(box.checked).toBe(true);
+      fireEvent.click(box);
+      expect(onToggleFollowNextTurn).toHaveBeenCalledTimes(1);
+    });
+
+    it('is off, and still offered, when the user walked home themselves', () => {
+      render(
+        <Dashboard {...props} sessions={settled} onToggleFollowNextTurn={vi.fn()} />
+      );
+
+      const box = screen.getByTestId('follow-next-turn').querySelector('input') as HTMLInputElement;
+      expect(box.checked).toBe(false);
+    });
+
+    it('is absent while a turn is owed, since there is nothing to wait for', () => {
+      render(
+        <Dashboard
+          {...props}
+          sessions={[{ id: 's1', label: 'asking', state: 'waiting_input', cwd: '/a', turnOwed: true, turnOpenedAt: '2026-07-29T09:00:00Z' }]}
+          followNextTurn
+          onToggleFollowNextTurn={vi.fn()}
+        />
+      );
+
+      expect(screen.queryByTestId('follow-next-turn')).not.toBeInTheDocument();
+    });
+  });
 });

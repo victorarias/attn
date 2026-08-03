@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   advanceAfterTurnClosed,
   buildQueueBands,
+  headOfQueue,
   oldestWantedTurn,
   type QueueBandSession,
 } from './queueBands';
@@ -438,5 +439,27 @@ describe('advanceAfterTurnClosed', () => {
 
     expect(advanceAfterTurnClosed(bands.turns, bands, null)).toBeNull();
     expect(advanceAfterTurnClosed(bands.turns, null, 'a')).toBeNull();
+  });
+});
+
+describe('headOfQueue', () => {
+  it('is the turn owed longest, not the first one listed by the workspace tree', () => {
+    // Home waits on this while the queue is empty, so it must answer with the
+    // same row the band and ⌘J lead with — the oldest turn, wherever it lives.
+    const bands = buildQueueBands(views([
+      { id: 'newer', label: 'newer', workspaceId: 'ws-a', turnOwed: true, turnOpenedAt: '2026-07-26T12:00:00Z' },
+      { id: 'older', label: 'older', workspaceId: 'ws-b', turnOwed: true, turnOpenedAt: '2026-07-26T09:00:00Z' },
+    ]));
+
+    expect(headOfQueue(bands)?.session.id).toBe('older');
+  });
+
+  it('is null while nothing is owed, and with no bands at all', () => {
+    const settled = buildQueueBands(views([
+      { id: 'a', label: 'a', workspaceId: 'ws-a', turnOwed: false },
+    ]));
+
+    expect(headOfQueue(settled)).toBeNull();
+    expect(headOfQueue(null)).toBeNull();
   });
 });
