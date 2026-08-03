@@ -749,6 +749,43 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(stored()).toHaveLength(0));
   });
 
+  it('keeps an annotation made while an earlier send was in flight', async () => {
+    // The round trip has a deliberate pause in it (the daemon's gap between the
+    // paste and its Enter) and the surface stays live throughout, so a mark can
+    // be made after the payload was composed. It was never in that payload, so
+    // spending it on the delivery would delete work the user can never send.
+    const { daemon } = renderTerminal();
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    const sentId = stored()[0].id;
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    // Mid-flight, the user marks something else.
+    anchor('turn-1', 31, 55);
+    fireEvent.click(screen.getByLabelText('Needs tests'));
+    const keptId = stored().find((entry) => entry.id !== sentId)!.id;
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+
+    await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual([keptId]));
+    // Only the sent annotation's own words went out.
+    expect(daemon.submitted[0]).toContain(TURN_1.slice(0, 26));
+    expect(daemon.submitted[0]).not.toContain(TURN_1.slice(31, 55));
+    // And the survivor is written through rather than tombstoned away with the
+    // rest, so a reload still has it.
+    await waitFor(() => expect(daemon.annotations.map((entry) => entry.id)).toEqual([keptId]));
+    expect(daemon.calls.clearAnnotations).toBe(0);
+    // The panel says why it did not empty, and still offers the send.
+    expect(screen.getByTestId('annotation-send-note').textContent).toMatch(/1 annotated since is still here/);
+    expect(screen.getByText('Send all')).toBeTruthy();
+  });
+
   it('tombstones the daemon draft only once the send is delivered', async () => {
     const { daemon } = renderTerminal();
     daemon.releaseSubmit = () => {};

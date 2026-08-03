@@ -110,7 +110,10 @@ interface Notice {
 // button people press twice.
 type SendOutcome =
   | { kind: 'sending' }
-  | { kind: 'sent'; count: number }
+  // `kept` is what was annotated while the send was in flight and therefore
+  // was not part of it. Reported rather than assumed to be zero: a panel that
+  // does not empty after a successful send otherwise reads as a failed one.
+  | { kind: 'sent'; count: number; kept: number }
   | { kind: 'skipped' }
   | { kind: 'error'; message: string };
 
@@ -479,7 +482,13 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       // Re-read after that commit rather than reusing the render's list, which
       // predates it. Committing an emptied comment can leave nothing to send;
       // that is still a mutation the daemon has to hear about.
-      const sending = store.list();
+      //
+      // Copied, not referenced: `list()` hands back the store's own array (it
+      // is read once per repaint, so it does not allocate), and this one is
+      // held across the delivery round trip. A mark made mid-flight would
+      // otherwise appear in a payload that was composed before it existed, and
+      // be spent by a send it was never part of.
+      const sending = store.list().map((entry) => ({ ...entry }));
       closeComposer();
       bump();
       if (sending.length === 0) {
@@ -502,11 +511,24 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               : { kind: 'error', message: 'The session did not take the feedback. Nothing was sent.' });
             return;
           }
-          setOutcome({ kind: 'sent', count: sending.length });
-          store.clear();
+          // Spend the snapshot that was sent, not the store. The round trip has
+          // a deliberate pause in it and the surface stays live throughout, so
+          // a mark made while the send was in flight is in the store but was
+          // never in the payload — clearing wholesale would delete work the
+          // user can never send.
+          sending.forEach((entry) => store.remove(entry.id));
+          const kept = store.list().length;
+          setOutcome({ kind: 'sent', count: sending.length, kept });
           bump();
-          // A tombstone rather than a save of the empty list: it also refuses
-          // any save that was already in flight, so sent marks cannot reappear.
+          // Either way the generation is raised, which is what refuses a save
+          // that was already in flight and keeps sent marks from reappearing.
+          // A tombstone when nothing survived; an ordinary write-through of the
+          // survivors when something did, because a tombstone would take them
+          // with it.
+          if (kept > 0) {
+            persist();
+            return;
+          }
           generationRef.current += 1;
           return annotationApi.clearAnnotations(sessionId, generationRef.current)
             .then((cleared) => {
@@ -622,6 +644,17 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     }, [panelAt]);
 
     const panelOpen = annotations.length > 0 || outcome?.kind === 'sent';
+
+    // The sentence above the footer. A refusal explains why the marks are still
+    // there; a send that left some behind explains why the panel did not empty.
+    // Both are the answer to "I pressed Send and the list is still here".
+    const noteText = outcome?.kind === 'skipped'
+      ? 'Not sent — the session is waiting on an approval, where the sending Enter would answer it. Send again once you have answered.'
+      : outcome?.kind === 'error'
+        ? outcome.message
+        : outcome?.kind === 'sent' && outcome.kept > 0
+          ? `✓ sent ${outcome.count} to the session. ${outcome.kept} annotated since is still here, ready to send.`
+          : null;
 
     return (
       <>
@@ -789,15 +822,13 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
             {/* A refusal sits above the footer rather than replacing it: it is
                 asking to be retried, and the button that retries has to stay
                 where the eye already is. */}
-            {outcome?.kind === 'skipped' || outcome?.kind === 'error' ? (
+            {noteText ? (
               <div className="anno-panel-note" data-testid="annotation-send-note" role="status">
-                {outcome.kind === 'skipped'
-                  ? 'Not sent — the session is waiting on an approval, where the sending Enter would answer it. Send again once you have answered.'
-                  : outcome.message}
+                {noteText}
               </div>
             ) : null}
             <div className="anno-panel-foot">
-              {outcome?.kind === 'sent' ? (
+              {outcome?.kind === 'sent' && outcome.kept === 0 ? (
                 <span className="anno-panel-sent">✓ sent {outcome.count} to the session</span>
               ) : (
                 <>

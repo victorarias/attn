@@ -8,4 +8,6 @@ change: >
   waiting on an approval prompt — where that Enter would answer the prompt — the
   send is refused and the panel says so with the annotations still there to
   retry, and annotations are now cleared only once the daemon confirms delivery,
-  so a send that fails no longer takes the marks with it.
+  so a send that fails no longer takes the marks with it. A send clears only
+  what it actually sent: anything annotated while it was in flight stays, and
+  the panel says why it did not empty.
