@@ -414,17 +414,19 @@ Design and gate decisions:
   client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
-- Kitty images are worker-authoritative and **dark by default**. The worker is
-  the only kitty parser in the system — ghostty hard-disables kitty on wasm, so
-  the client model never sees an APC. The worker describes what it stored:
-  `kitty_placements` carries the active screen's whole placement set, the app
-  pulls pixels it lacks with `get_kitty_image`, and the attach snapshot carries
-  placements beside the VT dump and the OSC 133 blocks. `KittyImageStorageLimit`
-  is 0 at construction, so a shipping session stores no image and observes no
-  placement, costing one flag check per PTY chunk; `ATTN_KITTY_STORAGE_LIMIT` (bytes,
-  read from the daemon's environment at session spawn, inherited by the worker)
-  turns it on for a non-production profile. A4 replaces the default with a
-  measured number:
+- Kitty images are worker-authoritative and **on by default**. The worker is the
+  only kitty parser in the system — ghostty hard-disables kitty on wasm, so the
+  client model never sees an APC and the worker's grid stays authoritative. The
+  worker describes what it stored: `kitty_placements` carries the active screen's
+  whole placement set, the app pulls pixels it lacks with `get_kitty_image`, and
+  the attach snapshot carries placements beside the VT dump and the OSC 133
+  blocks. `KittyImageStorageLimit` is 320MB at construction (ghostty's own app
+  default; receipt in the plan); `ATTN_KITTY_STORAGE_LIMIT` (bytes, read from the
+  daemon's environment at session spawn, inherited by the worker, forwarded to
+  remote daemons) tunes it, and **0 disables the protocol** — the escape hatch,
+  where a session stores no image and observes no placement. An image larger than
+  the whole limit is refused outright and silently by ghostty; the worker logs
+  that with the limit and the ask. Design:
   [docs/plans/2026-08-02-terminal-kitty-images.md](docs/plans/2026-08-02-terminal-kitty-images.md).
   Sixel does not exist in ghostty at all.
 - Two capabilities, not one. `kitty_images` means "describe images to me" and

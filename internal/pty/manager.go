@@ -312,8 +312,9 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	}
 	// The Ghostty terminal backs the classifier, CPR, tiles, and attach restore;
 	// a session without it is not viable.
+	kittyLimit := kittyStorageLimit(m.logf)
 	gt, err := ghosttyvt.New(int(opts.Cols), int(opts.Rows), ghosttyvt.Options{
-		KittyImageStorageLimit: kittyStorageLimit(m.logf),
+		KittyImageStorageLimit: kittyLimit,
 	})
 	if err != nil {
 		if ptmx != nil {
@@ -334,7 +335,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	// under the same session id gets a different one, which is what keeps a
 	// client from redrawing the dead worker's pixels (see mintKittyEpoch).
 	session.kittyEpoch = mintKittyEpoch()
-	session.wireFeed = newWireFeeder(gt, session.kittyEpoch)
+	session.wireFeed = newWireFeeder(gt, session.kittyEpoch, m.logf, kittyLimit)
 
 	m.mu.Lock()
 	m.sessions[opts.ID] = session

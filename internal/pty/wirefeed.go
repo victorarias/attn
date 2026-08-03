@@ -38,14 +38,16 @@ package pty
 // forces a snapshot re-push instead of guessing: a resync nobody notices beats
 // a silent divergence between the worker grid and the client's.
 //
-// Feature-dark today. Production terminals run with a zero kitty storage limit
-// (ghosttyvt.Options; ATTN_KITTY_STORAGE_LIMIT overrides it for non-production
-// verification), so ghostty refuses every transmission, the generation stamp
-// never moves, and the only visible effect is that APC bytes are dropped from
-// the wire instead of being sent to a client that cannot parse them.
+// Live by default: a session's terminal is built with kittyStorageLimitDefault,
+// so this path runs for real and its synthesis is what keeps the two grids
+// equal. ATTN_KITTY_STORAGE_LIMIT=0 turns the protocol off again — ghostty then
+// refuses every transmission, the generation stamp never moves, and the only
+// visible effect is that APC bytes are dropped from the wire instead of being
+// sent to a client that cannot parse them.
 // Design: docs/plans/2026-08-02-terminal-kitty-images.md.
 
 import (
+	"bytes"
 	"strconv"
 
 	"github.com/victorarias/attn/internal/ghosttyvt"
@@ -173,6 +175,20 @@ type wireFeeder struct {
 
 	// resync names the observation that failed during this feed, "" when none.
 	resync string
+
+	// logf reports a refused transmission, and nothing else. nil in tests that
+	// do not care.
+	logf LogFunc
+
+	// kittyLimit is the storage cap this session's terminal was BUILT with,
+	// carried rather than re-read so the log names the number in force here
+	// even if the environment moved after the spawn.
+	kittyLimit uint64
+
+	// pending is the transmission being assembled across m=1 escapes, so a
+	// refusal is judged once, where a completed transmission should have
+	// stored. Zero between transmissions.
+	pending kittyTransmission
 }
 
 // newWireFeeder wires the feed path for a session's ghostty terminal. Returns
@@ -181,12 +197,20 @@ type wireFeeder struct {
 //
 // epoch is the session's kitty identity offset (mintKittyEpoch), which the
 // caller must also hold on the Session so the image serve folds the same one.
-func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64) *wireFeeder {
+// kittyLimit is the cap the terminal was built with, for the refusal log.
+func newWireFeeder(term *ghosttyvt.Terminal, epoch uint64, logf LogFunc, kittyLimit uint64) *wireFeeder {
 	blocks := newBlockFeeder(term)
 	if blocks == nil {
 		return nil
 	}
-	return &wireFeeder{term: term, blocks: blocks, epoch: epoch, generation: term.KittyGeneration()}
+	return &wireFeeder{
+		term:       term,
+		blocks:     blocks,
+		epoch:      epoch,
+		logf:       logf,
+		kittyLimit: kittyLimit,
+		generation: term.KittyGeneration(),
+	}
 }
 
 // feed writes one PTY chunk into the terminal and returns the bytes the wire
@@ -372,6 +396,7 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	// settle may see it again. The settle at entry is what makes the claim
 	// honest — it covers this dispatch's move and nothing that ran before it.
 	f.generation = stamped
+	f.noteTransmission(apc, stamped != generation)
 	movedCol, movedRow := f.term.CursorPos()
 	// An unchanged generation means the storage did not change, so no placement
 	// appeared, so nothing scrolled the grid on an image's behalf — which is
@@ -472,6 +497,127 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	} else {
 		f.wire = appendCSI(f.wire, col-movedCol, 'D')
 	}
+}
+
+// kittyTransmission is a transmission being assembled: kitty splits a large
+// image across several escapes, each carrying `m=1` until the last, and nothing
+// is stored until that last one lands.
+type kittyTransmission struct {
+	// ask is the storage the image will occupy once decoded, from the geometry
+	// the first escape declared. Zero when it declared none (f=100, a PNG whose
+	// decoded size only ghostty knows), and then payload stands in.
+	ask uint64
+	// payload counts the base64 bytes seen across every escape so far.
+	payload uint64
+	// open is set while an escape has promised more to come.
+	open bool
+}
+
+// noteTransmission logs the one failure ghostty has no way to report: an image
+// refused for exceeding the storage limit. Every emitter measured in the A4
+// sweep transmits with `q=2`, which suppresses kitty's own response, so the
+// program is not told and neither is anyone else — the image simply never
+// appears. The worker is the only place that can see it, which is why this file
+// interprets an APC here and nowhere else.
+//
+// stored says whether ghostty's kitty generation moved on this escape, which is
+// the whole signal. Measured, and every row of it is a case this must not
+// mistake for a refusal:
+//
+//	single transmission that fits      generation moves
+//	single transmission over the limit  UNCHANGED — the one true positive
+//	chunked (m=1 …) that fits           unchanged on every intermediate escape,
+//	                                    moves only on the completing m=0
+//	chunked over the limit              unchanged throughout, m=0 included
+//	a=q query                           unchanged — never a transmission
+//	a=p re-place, a=d delete of a live id   moves
+//	a=d delete of an id that is not there   unchanged — never a transmission
+//	eviction (a third image into a store that holds one)   moves
+//
+// So intermediate escapes are accumulated and never judged, and eviction — the
+// ordinary way an animation reuses its budget — is invisible here because
+// admitting the new image moves the stamp like any other store.
+func (f *wireFeeder) noteTransmission(apc []byte, stored bool) {
+	ask, more, ok := parseKittyTransmission(apc)
+	if !ok {
+		return
+	}
+	f.pending.payload += ask.payload
+	if ask.ask > 0 {
+		f.pending.ask = ask.ask
+	}
+	if more {
+		f.pending.open = true
+		return
+	}
+
+	want := f.pending.ask
+	if want == 0 {
+		want = f.pending.payload
+	}
+	f.pending = kittyTransmission{}
+	if stored || f.logf == nil {
+		return
+	}
+	f.logf(
+		"pty kitty storage: an image transmission stored nothing — %s=%d bytes, this image asks for about %d. "+
+			"An image larger than the whole limit is refused outright; raise the limit or have the program send a smaller one. "+
+			"(Evicting an older image to fit a new one is not this, and is never logged.)",
+		kittyStorageLimitEnv,
+		f.kittyLimit,
+		want,
+	)
+}
+
+// parseKittyTransmission reads the four keys a refusal check needs out of one
+// complete APC — the action, `m`, and the declared geometry — plus the payload
+// length. It reports ok only for a transmission: kitty's default action is `t`,
+// so an escape with no `a=` at all is one, which is exactly what a continuation
+// escape looks like.
+//
+// Deliberately not a kitty parser. It reads what it recognizes and treats the
+// rest as absent, because the worst a misread can do here is drop a log line.
+func parseKittyTransmission(apc []byte) (t kittyTransmission, more bool, ok bool) {
+	body := apc
+	body = bytes.TrimPrefix(body, []byte("\x1b_G"))
+	if len(body) == len(apc) {
+		return t, false, false
+	}
+	body = bytes.TrimSuffix(bytes.TrimSuffix(body, []byte("\x1b\\")), []byte{0x9c})
+
+	control := body
+	if i := bytes.IndexByte(body, ';'); i >= 0 {
+		control = body[:i]
+		// Base64 in, raw bytes out: 4 encoded characters carry 3.
+		t.payload = uint64(len(body)-i-1) * 3 / 4
+	}
+
+	action := byte('t')
+	var width, height uint64
+	for _, pair := range bytes.Split(control, []byte(",")) {
+		key, value, found := bytes.Cut(pair, []byte("="))
+		if !found || len(key) != 1 || len(value) == 0 {
+			continue
+		}
+		switch key[0] {
+		case 'a':
+			action = value[0]
+		case 'm':
+			more = value[0] == '1'
+		case 's':
+			width, _ = strconv.ParseUint(string(value), 10, 64)
+		case 'v':
+			height, _ = strconv.ParseUint(string(value), 10, 64)
+		}
+	}
+	if action != 't' && action != 'T' {
+		return kittyTransmission{}, false, false
+	}
+	// Ghostty stores decoded RGBA whatever the wire format was, so declared
+	// pixels are the honest ask; a format that declares none (PNG) leaves this
+	// zero and the payload stands in.
+	t.ask = width * height * 4
+	return t, more, true
 }
 
 // appendCSI writes `ESC [ n <final>`, or nothing when n is zero — every

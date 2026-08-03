@@ -1,0 +1,16 @@
+kind: added
+area: terminal
+change: >
+  Images now render in the terminal. Anything that draws with the kitty
+  graphics protocol — chafa, timg, kitten icat, and the tools that shell out
+  to them — shows up as a picture instead of a blank gap or a wall of escape
+  characters. They are sharp on retina displays, they survive switching
+  sessions and reattaching, and they work the same on a remote machine as on
+  the local one.
+notes: >
+  On by default with a 320MB per-session image budget; ATTN_KITTY_STORAGE_LIMIT
+  tunes it and 0 turns the protocol off entirely. A single image larger than
+  the whole budget is refused by the terminal without telling the program, so
+  the worker logs that case with the limit and the size asked for. The daemon
+  remains the only thing that parses image data; the app is told where images
+  are and fetches the pixels.

@@ -66,22 +66,24 @@ const (
 // after it on either side.
 var fuzzKittyFlush = []byte("\x1b\\")
 
-// FuzzKittyWireMirrorShipping is the gate: it runs the mirror property in the
-// configuration production actually runs, with the worker's kitty storage limit
-// at zero. Ghostty refuses every transmission there, so nothing is stamped and
-// writeAPC returns early — the property under test is the DISPOSAL, which is
-// what ships today: which bytes reach the terminal, which reach the wire, and
-// whether the two grids still agree afterwards.
+// FuzzKittyWireMirrorShipping runs the mirror property with the worker's kitty
+// storage limit at zero — no longer production, but the escape hatch production
+// can be put back into with ATTN_KITTY_STORAGE_LIMIT=0. Ghostty refuses every
+// transmission there, so nothing is stamped and writeAPC returns early: the
+// property under test is the DISPOSAL alone — which bytes reach the terminal,
+// which reach the wire, and whether the two grids still agree afterwards.
 //
-// This one must stay green. A counterexample here is a live defect, not a
-// deferred one.
+// It stays because the hatch has to keep working. A counterexample here is a
+// live defect for anyone who turned images off.
 func FuzzKittyWireMirrorShipping(f *testing.F) {
 	fuzzKittyWireMirror(f, 0)
 }
 
-// FuzzKittyWireMirror runs the same property with kitty LIVE, which is the
-// configuration A4 flips on. It exercises synthesis — the observed scroll and
-// cursor written in an APC's place — and it has no knowingly-red class left.
+// FuzzKittyWireMirror runs the same property with kitty LIVE, which since the
+// A4 flip is the SHIPPING configuration: a session's terminal is built with
+// kittyStorageLimitDefault unless the environment says otherwise. It exercises
+// synthesis — the observed scroll and cursor written in an APC's place — and it
+// has no knowingly-red class left.
 // All six recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md
 // are closed:
 //
@@ -97,9 +99,12 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 //     kittyResyncMarginMode) instead of cleverer synthesis.
 //
 // Last measured 15m / 38.1M execs green on the pin in ghostty-vt-native.pin.
-// Making it a gate — -fuzz time in CI, a seed corpus committed for it — is the
-// storage-limit flip's job, not this file's. Until then its seeds still run on
-// every `go test`, which is what keeps the recorded corpus honest.
+//
+// Both targets are gated the same way, which is the way every fuzz target in
+// this repo is gated: their seeds run on every `go test ./internal/pty`, in CI
+// through scripts/test-go.sh. Nothing in .github/workflows spends `-fuzz` time
+// on any target, so there is no separate budget for the live one to join —
+// soaking stays a deliberate act, and the recorded corpus is what CI enforces.
 func FuzzKittyWireMirror(f *testing.F) {
 	fuzzKittyWireMirror(f, mirrorStorageLimit)
 }
@@ -120,7 +125,7 @@ func fuzzKittyWireMirror(f *testing.F, storageLimit uint64) {
 		baseline := ghosttyvt.LiveTrackedRefs()
 		worker := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{KittyImageStorageLimit: storageLimit})
 		client := newKittyTerminal(t, fuzzKittyCols, fuzzKittyRows, ghosttyvt.Options{})
-		feeder := newWireFeeder(worker, 0)
+		feeder := newWireFeeder(worker, 0, nil, 0)
 		if feeder == nil {
 			t.Fatalf("newWireFeeder returned nil for a live terminal")
 		}

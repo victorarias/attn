@@ -74,34 +74,53 @@ func OnPlacements(fn func(PlacementUpdate)) SubscriberOption {
 }
 
 // kittyStorageLimitEnv overrides the kitty image storage cap a new session's
-// terminal is built with, in BYTES.
+// terminal is built with, in BYTES. Images are on by default, so this is a
+// tripwire override rather than a feature flag: a value here is for tuning a
+// session that hit the ceiling, or for turning the protocol off.
 //
-// Unset — the shipping default — is 0, which makes ghostty refuse every
-// transmission: nothing is stored, no placement is ever observed, and the feed
-// path never leaves its no-cgo path. The override exists so a non-production
-// profile can run the whole description pipeline against real emitters before a
-// measured default replaces it.
+// Zero is the one special value — it makes ghostty refuse every transmission,
+// so nothing is stored, no placement is ever observed, and the feed path never
+// leaves its no-cgo path. That is the escape hatch if a program's images ever
+// misbehave, and it is what FuzzKittyWireMirrorShipping still guards.
 const kittyStorageLimitEnv = "ATTN_KITTY_STORAGE_LIMIT"
 
+// kittyStorageLimitDefault is what a session gets with nothing in the
+// environment: 320MB, which is ghostty's own app default and within 5% of
+// kitty's.
+//
+// Set past where any real image lands, because the failure past it is total
+// rather than gradual. Ghostty refuses a single image larger than the WHOLE
+// limit outright (addImage returns error.OutOfMemory) and every emitter
+// measured in the A4 sweep transmits with q=2, which suppresses the response —
+// so an over-limit image does not degrade, it silently does not appear.
+// The largest legitimate single image the sweep produced is ~81.4MB, a
+// full-screen Pro Display XDR capture at 2x; 320MB clears that by about 4x.
+//
+// Under the limit, hitting it is ordinary: ghostty evicts the oldest image to
+// admit a new one, which is what an animation does all day and costs nothing.
+const kittyStorageLimitDefault = 320_000_000
+
 // kittyStorageLimit resolves the cap for a session about to be spawned. A value
-// that is not a byte count is reported and treated as absent: a session with
-// images silently disabled is confusing, but a spawn that fails over a
-// diagnostic environment variable is worse.
+// that is not a byte count is reported and treated as absent — meaning the
+// DEFAULT, not zero: a typo in a tuning variable must not silently turn images
+// off, and a spawn that fails over a diagnostic environment variable is worse
+// than either.
 func kittyStorageLimit(logf LogFunc) uint64 {
 	raw := strings.TrimSpace(os.Getenv(kittyStorageLimitEnv))
 	if raw == "" {
-		return 0
+		return kittyStorageLimitDefault
 	}
 	limit, err := strconv.ParseUint(raw, 10, 64)
 	if err != nil {
 		if logf != nil {
 			logf(
-				"pty kitty storage: ignoring %s=%q, want a byte count; images stay disabled for this session",
+				"pty kitty storage: ignoring %s=%q, want a byte count; images run at the default %d bytes for this session",
 				kittyStorageLimitEnv,
 				raw,
+				uint64(kittyStorageLimitDefault),
 			)
 		}
-		return 0
+		return kittyStorageLimitDefault
 	}
 	return limit
 }

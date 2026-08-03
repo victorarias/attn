@@ -923,8 +923,54 @@ entries named "an undescribed …" and
 table, red in both directions (measured: reverting to `Added`-only reddens the
 three resync rows, resyncing on every delta reddens the two silent ones).
 
-- [ ] Flip the storage limit on (measured number, named limit errors surfaced
-      through kitty's own response channel and the daemon log).
+- [x] **Flip the storage limit on.** `kittyStorageLimit` returns 320,000,000
+      bytes with nothing in the environment. **Receipt:** that is ghostty app's
+      own default and within 5% of kitty's, and the failure past it is total
+      rather than gradual — ghostty refuses a single image larger than the WHOLE
+      limit outright (`addImage` → `error.OutOfMemory`), and every emitter in the
+      sweep transmits with `q=2`, which suppresses kitty's response, so an
+      over-limit image does not degrade, it silently does not appear. The largest
+      legitimate single image the sweep produced is ~81.4MB (a full-screen Pro
+      Display XDR capture at 2x), so the default clears the biggest real image by
+      about 4x. Under the limit, hitting it is ordinary: ghostty evicts the
+      oldest image to admit a new one, which is what an animation does all day.
+      `ATTN_KITTY_STORAGE_LIMIT` is now a tuning override rather than a feature
+      flag, and an unparseable value falls back to the DEFAULT rather than to
+      zero — a typo in a tuning variable must not silently turn the feature off.
+      `=0` remains the escape hatch, and `FuzzKittyWireMirrorShipping` still
+      guards it.
+      **Named refusal logging.** A limit someone can hit is a limit they must
+      see, and this one is invisible everywhere else: kitty's own error goes
+      nowhere under `q=2`. The worker is the only witness, so `writeAPC` judges
+      one thing — a transmission that COMPLETED and moved no kitty generation —
+      and logs the variable, its value, and the ask (`s`×`v`×4 for a raw format,
+      payload bytes for PNG), saying in the same breath that eviction is not
+      this case. Measured first, because most of the shapes that reach this path
+      also fail to move the generation:
+
+      | APC | generation |
+      | --- | --- |
+      | single transmission that fits | moves |
+      | single transmission over the limit | **unchanged** — the one true positive |
+      | chunked `m=1` that fits | unchanged on every intermediate, moves only on the completing `m=0` |
+      | chunked over the limit | unchanged throughout, `m=0` included |
+      | `a=q` query | unchanged |
+      | `a=p` re-place, `a=d` of a live id | moves |
+      | `a=d` of an id that is not there | unchanged |
+      | eviction (a third image into a one-image store) | moves |
+
+      So intermediate escapes are accumulated and never judged — an emitter
+      sends dozens per image, and judging them would put a line in the log for
+      ordinary output — queries and deletes are never judged at all, and
+      eviction is invisible because admitting the new image moves the stamp like
+      any other store. Pinned by
+      `TestWireFeedLogsATransmissionTheStorageLimitRefused` and
+      `TestWireFeedKeepsQuietForEverythingThatIsNotARefusal`.
+      **Recorded observability gap, no machinery:** the limit is per TERMINAL,
+      and a session holds a primary and an alternate screen, so the worst case a
+      session can occupy is 2x the number above. Nothing tracks or reports total
+      image memory across sessions today. If image memory ever shows up in a
+      profile, that is the measurement to take first.
 - [ ] Report pixel geometry on the PTY (`ws_xpixel`/`ws_ypixel`). Emitters size
       images from it; without it chafa guesses ~8 x 11.4 px cells against a real
       9 x 22.6 CSS px cell. Measured in A3's live tier.
@@ -968,17 +1014,25 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       path but is newly exercised on the worker, where the restore dump and
       approval classification read from. The frame-parity test is what covers
       it, on a real spawned session rather than a hand-built terminal.
-- [ ] A supported way to turn images on for a remote daemon. A3 ran the remote
-      leg end to end (see its verification record), so what is left here is the
-      switch rather than the pipeline: the hub forwards a fixed env allowlist,
-      so the storage-limit override has no supported route to a remote daemon.
-      Stops mattering once the limit ships as a default; needs an
-      `ATTN_REMOTE_KITTY_STORAGE_LIMIT` passthrough if it is still env-gated at
-      the flip.
-- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Done in
-      A3 — the terminal section now states that kitty images are worker
-      authoritative and dark by default, and why the relay never advertises
-      `binary_pty_output`.
+- [x] **A supported way to turn images on — now off — for a remote daemon.** A3
+      ran the remote leg end to end, so what was left was the switch rather than
+      the pipeline: the hub forwards a fixed env allowlist and the storage-limit
+      override had no route through it. **Decided: forward
+      `ATTN_KITTY_STORAGE_LIMIT` under its own name** (`remoteShellEnvScript` in
+      `internal/hub/ssh.go`), not as an `ATTN_REMOTE_`-prefixed twin like the
+      socket and port overrides — the hub and its remotes should run the same
+      image budget, so one variable governs both ends. The flip inverts what
+      this is for: the default now travels by being the default on both sides,
+      and what needs a route is the way OUT. `=0` is non-empty, so it exports
+      and disables the remote exactly as it disables the hub. Pinned by
+      `TestRemoteShellCommandCarriesTheKittyDisableToTheRemote` and its
+      unset-stays-silent twin.
+- [x] AGENTS.md: write the new truth; changelog fragment (user-visible). Written
+      in A3 for the dark default and rewritten at the flip: the terminal section
+      now states that kitty images are worker-authoritative and ON by default,
+      names the 320MB limit and the `=0` hatch, keeps the reasons the client
+      never parses kitty and the relay never advertises `binary_pty_output`, and
+      keeps sixel's absence. One user-facing fragment covers the PR.
 
 ## Open questions
 

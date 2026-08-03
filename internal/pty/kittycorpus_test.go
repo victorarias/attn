@@ -688,7 +688,7 @@ func runKittyCorpusEntry(t *testing.T, in kittyCorpusInput) kittyCorpusEntry {
 	baseline := ghosttyvt.LiveTrackedRefs()
 
 	worker := newKittyTerminal(t, in.cols, in.rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
-	feeder := newWireFeeder(worker, 0)
+	feeder := newWireFeeder(worker, 0, nil, 0)
 	if feeder == nil {
 		t.Fatalf("newWireFeeder returned nil for a live terminal")
 	}

@@ -89,7 +89,7 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 	// The client stands in for the frontend's model: same size, no kitty.
 	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{MaxScrollback: opts.MaxScrollback})
 
-	feed := newWireFeeder(worker, 0)
+	feed := newWireFeeder(worker, 0, nil, 0)
 	if feed == nil {
 		t.Fatalf("newWireFeeder returned nil for a live terminal")
 	}
@@ -755,6 +755,96 @@ func TestWireFeedResyncsWhileLeftRightMarginsAreSet(t *testing.T) {
 	}
 	if worker, client := m.worker.ViewportText(), m.client.ViewportText(); worker == client {
 		t.Errorf("the grids agree, so the case no longer exercises an unmeasurable margin scroll:\n%s", worker)
+	}
+}
+
+// A limit someone can hit is a limit they must see. Ghostty refuses an image
+// larger than the whole storage limit and says nothing — kitty's own response is
+// suppressed by the `q=2` every measured emitter sends — so the worker is the
+// only place the refusal is visible at all.
+//
+// The pair is the point. The same transmission that is refused under a small
+// limit is accepted under a large one, and the accepted case must be silent:
+// a log on every image would be noise nobody reads, and eviction (an older image
+// dropped to admit a new one) is normal and reaches this same path.
+func TestWireFeedLogsATransmissionTheStorageLimitRefused(t *testing.T) {
+	// 64x64 RGBA is 16,384 bytes stored; the refusing limit is under it and the
+	// accepting one is over.
+	const refuses, accepts = 4096, 1 << 20
+
+	feedUnder := func(limit uint64, apc string) []string {
+		term := newKittyTerminal(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: limit})
+		var logs []string
+		feeder := newWireFeeder(term, 0, func(format string, args ...interface{}) {
+			logs = append(logs, fmt.Sprintf(format, args...))
+		}, limit)
+		if feeder == nil {
+			t.Fatalf("newWireFeeder returned nil for a live terminal")
+		}
+		t.Cleanup(feeder.close)
+		feeder.feed([]byte(apc))
+		return logs
+	}
+
+	oversized := kittyPlaceRGB(90, 64, 64, "")
+	logs := feedUnder(refuses, oversized)
+	if len(logs) != 1 {
+		t.Fatalf("logs = %q, want exactly one line for a refused transmission", logs)
+	}
+	// Name the limit, its value, and the ask: an agent can act on all three.
+	for _, want := range []string{kittyStorageLimitEnv, fmt.Sprint(refuses), fmt.Sprint(64 * 64 * 4)} {
+		if !strings.Contains(logs[0], want) {
+			t.Errorf("refusal log %q does not name %q", logs[0], want)
+		}
+	}
+
+	if logs := feedUnder(accepts, oversized); len(logs) != 0 {
+		t.Errorf("logs = %q for a transmission that was stored, want silence", logs)
+	}
+}
+
+// Every APC shape that is NOT a refused transmission, on the path that judges
+// one. Each row is a measured way to reach "the kitty generation did not move",
+// and mistaking any of them for a refusal would put a line in the daemon log for
+// ordinary output — the chunked rows especially, where kitty stores nothing
+// until the last escape and an emitter sends dozens of them per image.
+func TestWireFeedKeepsQuietForEverythingThatIsNotARefusal(t *testing.T) {
+	const limit = 1 << 20
+	place := kittyPlaceRGB(91, 16, 32, ",p=7")
+
+	for _, tc := range []struct {
+		name   string
+		chunks []string
+	}{
+		{name: "a transmission split across m=1 escapes", chunks: []string{kittyPlaceRGBChunked(92, 16, 32, 64)}},
+		{name: "a support query", chunks: []string{"\x1b_Ga=q,i=31,f=24,t=d,s=1,v=1;AAAA\x1b\\"}},
+		{name: "a re-place of a live placement", chunks: []string{place, "\x1b_Ga=p,i=91,p=8\x1b\\"}},
+		{name: "a delete of an image that is not there", chunks: []string{"\x1b_Ga=d,d=i,i=404\x1b\\"}},
+		{name: "an eviction under a limit that holds one image", chunks: []string{
+			kittyTransmitRGB(93, 32, 32), kittyTransmitRGB(94, 32, 32), kittyTransmitRGB(95, 32, 32),
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			storage := uint64(limit)
+			if tc.name == "an eviction under a limit that holds one image" {
+				storage = 8192
+			}
+			term := newKittyTerminal(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: storage})
+			var logs []string
+			feeder := newWireFeeder(term, 0, func(format string, args ...interface{}) {
+				logs = append(logs, fmt.Sprintf(format, args...))
+			}, storage)
+			if feeder == nil {
+				t.Fatalf("newWireFeeder returned nil for a live terminal")
+			}
+			t.Cleanup(feeder.close)
+			for _, chunk := range tc.chunks {
+				feeder.feed([]byte(chunk))
+			}
+			if len(logs) != 0 {
+				t.Errorf("logs = %q, want silence", logs)
+			}
+		})
 	}
 }
 
