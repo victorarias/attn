@@ -93,6 +93,16 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 			_ = stream.publish(OutputEvent{Kind: OutputEventKindDesync, Reason: reason})
 			stream.Close()
 		},
+		// Same stream as the bytes, so a set stays ordered behind the output it
+		// was measured on — the worker backend gets that ordering from the
+		// connection's send queue, this one from the stream channel.
+		pty.OnPlacements(func(update pty.PlacementUpdate) {
+			_ = stream.publish(OutputEvent{
+				Kind:       OutputEventKindPlacements,
+				Seq:        update.Seq,
+				Placements: update.Placements,
+			})
+		}),
 	)
 	if err != nil {
 		stream.Close()
@@ -109,8 +119,15 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		ExitSignal:                 info.ExitSignal,
 		GhosttySnapshot:            info.GhosttySnapshot,
 		GhosttyBlocks:              info.GhosttyBlocks,
+		GhosttyPlacements:          info.GhosttyPlacements,
 		GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,
 	}, stream, nil
+}
+
+// KittyImage serves the pixels behind a placement straight out of the session's
+// terminal — no hop, because this backend hosts the terminal in-process.
+func (b *EmbeddedBackend) KittyImage(_ context.Context, sessionID string, imageID uint32) (pty.KittyImage, error) {
+	return b.manager.KittyImage(sessionID, imageID)
 }
 
 func (b *EmbeddedBackend) Snapshot(_ context.Context, sessionID string) (pty.SnapshotInfo, error) {

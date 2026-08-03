@@ -686,6 +686,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				ExitSignal:                 attachResult.ExitSignal,
 				GhosttySnapshot:            attachResult.GhosttySnapshot,
 				GhosttyBlocks:              attachBlocksFromWire(attachResult.GhosttyBlocks),
+				GhosttyPlacements:          ptyworker.PlacementsFromWire(attachResult.GhosttyPlacements),
 				GhosttyScrollbackTruncated: attachResult.GhosttyScrollbackTruncated,
 			}, stream, nil
 		}
@@ -1085,6 +1086,49 @@ func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (pty.Sna
 		}
 	}
 	return info, nil
+}
+
+// KittyImage fetches one stored image from the worker that owns the session.
+// One round trip on the session's unix socket per image a client has not seen
+// — placements are rare and clients cache the pixels, so this is not a stream.
+// An id the worker no longer holds comes back as pty.ErrKittyImageNotFound.
+func (b *WorkerBackend) KittyImage(ctx context.Context, sessionID string, imageID uint32) (pty.KittyImage, error) {
+	session, err := b.getSession(sessionID)
+	if err != nil {
+		return pty.KittyImage{}, err
+	}
+	rpcCtx, cancel := withDefaultRPCTimeout(ctx)
+	defer cancel()
+	conn, enc, dec, err := b.connectAuthed(rpcCtx, session)
+	if err != nil {
+		return pty.KittyImage{}, err
+	}
+	defer conn.Close()
+	if err := applyConnDeadline(conn, rpcCtx); err != nil {
+		return pty.KittyImage{}, err
+	}
+
+	reqID := b.nextReqID("kitty-image")
+	if err := writeRequest(enc, reqID, ptyworker.MethodKittyImage, ptyworker.KittyImageParams{ImageID: imageID}); err != nil {
+		return pty.KittyImage{}, err
+	}
+	for {
+		frameType, res, _, err := readFrame(dec)
+		if err != nil {
+			return pty.KittyImage{}, err
+		}
+		if frameType != "res" || res.ID != reqID {
+			continue
+		}
+		if !res.OK {
+			return pty.KittyImage{}, b.rpcError(sessionID, res.Error)
+		}
+		var result ptyworker.KittyImageResult
+		if err := json.Unmarshal(res.Result, &result); err != nil {
+			return pty.KittyImage{}, fmt.Errorf("decode kitty image result: %w", err)
+		}
+		return result.Decode()
+	}
 }
 
 func (b *WorkerBackend) SessionLikelyAlive(ctx context.Context, sessionID string) (bool, error) {
@@ -1567,6 +1611,8 @@ func (b *WorkerBackend) rpcError(sessionID string, rpcErr *ptyworker.RPCError) e
 	switch rpcErr.Code {
 	case ptyworker.ErrSessionNotFound:
 		return fmt.Errorf("%w: %s", pty.ErrSessionNotFound, sessionID)
+	case ptyworker.ErrImageNotFound:
+		return fmt.Errorf("%w: %s", pty.ErrKittyImageNotFound, rpcErr.Message)
 	case ptyworker.ErrSessionNotRunning:
 		return errors.New(rpcErr.Message)
 	default:
@@ -2305,6 +2351,18 @@ func convertWorkerEvent(evt ptyworker.EventEnvelope) (OutputEvent, bool) {
 			reason = *evt.Reason
 		}
 		return OutputEvent{Kind: OutputEventKindDesync, Reason: reason}, true
+	case ptyworker.EventKittyPlacements:
+		seq := uint32(0)
+		if evt.Seq != nil {
+			seq = *evt.Seq
+		}
+		// No emptiness check: an event with no placements is the worker saying
+		// the last image is gone, and dropping it would leave a ghost on screen.
+		return OutputEvent{
+			Kind:       OutputEventKindPlacements,
+			Seq:        seq,
+			Placements: ptyworker.PlacementsFromWire(evt.Placements),
+		}, true
 	default:
 		return OutputEvent{}, false
 	}
