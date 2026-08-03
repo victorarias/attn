@@ -1021,6 +1021,13 @@ export function useDaemonSocket({
       case 'unregister':
         rejectPendingByPredicate((key) => key.startsWith('unregister:'), error);
         return;
+      // command_error carries no correlation id, so this fails every
+      // registration in flight. Registering more than one workspace at a time
+      // is not something the app does, and over-rejecting beats the ten-second
+      // silent timeout that a failure used to surface as.
+      case 'register_workspace':
+        rejectPendingByPredicate((key) => key.startsWith('register_workspace:'), error);
+        return;
       case 'unregister_workspace':
         rejectPendingByPredicate((key) => key.startsWith('unregister_workspace:'), error);
         return;
