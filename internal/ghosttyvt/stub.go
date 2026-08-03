@@ -64,6 +64,8 @@ func (t *Terminal) CursorPos() (x, y int) { return 0, 0 }
 
 func (t *Terminal) CursorVisible() bool { return false }
 
+func (t *Terminal) LeftRightMarginMode() bool { return false }
+
 func (t *Terminal) ViewportText() string { return "" }
 
 func (t *Terminal) SerializeViewport() Snapshot { return Snapshot{Cols: t.cols, Rows: t.rows} }

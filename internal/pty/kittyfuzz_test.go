@@ -81,27 +81,25 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 
 // FuzzKittyWireMirror runs the same property with kitty LIVE, which is the
 // configuration A4 flips on. It exercises synthesis — the observed scroll and
-// cursor written in an APC's place — and it is knowingly red on two synthesis
-// defects recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md,
-// both in what the scroll MEASUREMENT can see. Synthesis expresses the measured
-// scroll as one `SU`, which ghostty clamps to the screen height, so a placement
-// taller than the screen (kitty's `r=` reaches it cheaply) leaves the client's
-// history short. And a scroll confined to the left/right margin box under
-// DECLRMM (`\x1b[?69h`) is not movement the tracked refs report at all, so the
-// wire carries no `SU` and the client's text stays put under a cursor that
-// agrees.
+// cursor written in an APC's place — and it has no knowingly-red class left.
+// All six recorded under A4 in docs/plans/2026-08-02-terminal-kitty-images.md
+// are closed:
 //
-// The four blind spots this target used to reach are closed: an image that
-// appeared and died inside one chunk, the `Updated`-blind end-of-feed check
-// (both settled by unaccountedResync), a described APC absorbing an undescribed
-// one's stamp move (settleUnaccounted, which now runs before every described
-// dispatch as well as at the end of a feed), and the absolute column move, which
-// a client with left/right margins (`\x1b[?69h`) measured from the MARGIN — the
-// column is now relative like the row.
+//   - an image that appeared and died inside one chunk, and the `Updated`-blind
+//     end-of-feed check, both settled by unaccountedResync;
+//   - a described APC absorbing an undescribed one's stamp move, settled by
+//     settleUnaccounted running before every described dispatch;
+//   - the absolute column move a client with left/right margins measured from
+//     the MARGIN, now relative like the row;
+//   - a scroll one `SU` cannot carry and a scroll confined to the margin box,
+//     both of them limits of what writeAPC can MEASURE rather than describe, so
+//     both answered with a tripwire resync (kittyResyncScrollClamped,
+//     kittyResyncMarginMode) instead of cleverer synthesis.
 //
-// So this target is not a gate yet and is not run with -fuzz in CI. Its seeds
-// still run on every `go test`, which is what keeps the recorded corpus honest
-// without reddening the build.
+// Last measured 15m / 38.1M execs green on the pin in ghostty-vt-native.pin.
+// Making it a gate — -fuzz time in CI, a seed corpus committed for it — is the
+// storage-limit flip's job, not this file's. Until then its seeds still run on
+// every `go test`, which is what keeps the recorded corpus honest.
 func FuzzKittyWireMirror(f *testing.F) {
 	fuzzKittyWireMirror(f, mirrorStorageLimit)
 }

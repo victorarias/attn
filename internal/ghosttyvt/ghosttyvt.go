@@ -110,6 +110,15 @@ static bool ghosttyvt_wraparound(GhosttyTerminal t) {
 	return enabled;
 }
 
+// Left/right margin mode (DECLRMM, DEC private mode 69). False on a failed read
+// leaves the caller trusting its own scroll measurement, which is what a
+// terminal without margins earns anyway.
+static bool ghosttyvt_left_right_margin_mode(GhosttyTerminal t) {
+	bool enabled = false;
+	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN, &enabled) != GHOSTTY_SUCCESS) return false;
+	return enabled;
+}
+
 static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
 	GhosttyPoint p;
 	memset(&p, 0, sizeof(p));
@@ -398,6 +407,15 @@ func (t *Terminal) CursorVisible() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return !t.closed && bool(C.ghosttyvt_cursor_visible(t.term))
+}
+
+// LeftRightMarginMode reports whether DECLRMM (DEC private mode 69) is enabled.
+// False on a failed read: the caller then trusts its scroll measurement, which
+// is the behavior a terminal without margins earns.
+func (t *Terminal) LeftRightMarginMode() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return !t.closed && bool(C.ghosttyvt_left_right_margin_mode(t.term))
 }
 
 // ViewportText returns the visible screen as plain text: one line per viewport

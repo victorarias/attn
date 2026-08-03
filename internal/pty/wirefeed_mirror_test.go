@@ -661,6 +661,103 @@ func TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne(t *testing.T) {
 	}
 }
 
+// The receipt behind the kittyResyncScrollClamped threshold, and the reason it
+// is the screen height rather than a guess. `r=N` makes a 2x2 image claim N
+// rows, so the scroll a placement causes is dialable one row at a time; the
+// tallest scroll a single SU still reproduces is the number the tripwire is set
+// at.
+//
+// Measured on this ghostty pin, cursor on row 1, image placed there:
+//
+//	8-row screen:  r=14 -> SU 8 agrees,  r=15 -> SU 9 lost a row of history
+//	12-row screen: r=22 -> SU 12 agrees, r=23 -> SU 13 lost a row of history
+//
+// Both sides are pinned because both are wrong to move. One row tighter and the
+// wire would resync over a scroll it could have carried; one row looser and it
+// would emit a clamped SU and diverge in silence, which is what this used to do.
+func TestWireFeedSynthesizesTheLargestScrollOneSUCarries(t *testing.T) {
+	for _, tc := range []struct {
+		rows int
+		// carried is the tallest image whose scroll one SU reproduces; overflow
+		// is the next row up, where SU would be clamped.
+		carried, overflow int
+	}{
+		{rows: 8, carried: 14, overflow: 15},
+		{rows: 12, carried: 22, overflow: 23},
+	} {
+		t.Run(fmt.Sprintf("%d rows", tc.rows), func(t *testing.T) {
+			// The resync is the placement chunk's; the trailing text after it is
+			// only what makes the scroll reach history where it can be compared.
+			place := func(rowCount int) (*mirror, string) {
+				m := newMirror(t, 20, tc.rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+				m.write("\x1b[2;2Hkeep")
+				m.write(kittyPlaceRGB(uint32(80+rowCount), 16, 32, fmt.Sprintf(",r=%d", rowCount)))
+				resync := m.lastResync
+				m.write("\r\ntail")
+				return m, resync
+			}
+
+			at, resync := place(tc.carried)
+			if resync != "" {
+				t.Fatalf("r=%d resynced (%s) on a %d-row screen: one SU still carries that scroll",
+					tc.carried, resync, tc.rows)
+			}
+			at.agree(t, fmt.Sprintf("after an r=%d placement", tc.carried))
+
+			if _, resync := place(tc.overflow); resync != kittyResyncScrollClamped {
+				t.Errorf("r=%d resync = %q, want %q: SU cannot carry a scroll taller than the %d-row screen",
+					tc.overflow, resync, kittyResyncScrollClamped, tc.rows)
+			}
+		})
+	}
+}
+
+// DECLRMM is the tripwire, and the same stream without it is the control. A
+// scroll confined to the margin box moves text between rows without moving the
+// rows, so the tracked pair reports nothing and the wire carries no SU for it —
+// the client's text stays put under a cursor that agrees, which is a divergence
+// no assertion on the cursor would catch.
+//
+// The control is what keeps this honest: it is the identical stream on a
+// terminal with no margins set, and it must stay silent AND byte-equal. A
+// tripwire that fired on every placement would pass the first half of this test
+// and fail the second.
+func TestWireFeedResyncsWhileLeftRightMarginsAreSet(t *testing.T) {
+	const bottom = "\x1b[32;5Hxy"
+	place := kittyPlaceRGB(65, 16, 32, "")
+
+	control := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	control.write("\x1b[1;1Htop" + bottom)
+	control.write(place)
+	if control.lastResync != "" {
+		t.Fatalf("the control resynced (%s): without margins this is an ordinary bottom-row placement", control.lastResync)
+	}
+	control.agree(t, "with no margins set")
+
+	m := newMirror(t, 20, 8, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+	m.write("\x1b[1;1Htop\x1b[?69h\x1b[4;14s" + bottom)
+	m.write(place)
+	if m.lastResync != kittyResyncMarginMode {
+		t.Fatalf("resync = %q, want %q: the placement scrolled the margin box and nothing measured it",
+			m.lastResync, kittyResyncMarginMode)
+	}
+	// Described in full anyway: the cursor moves are the part of the measurement
+	// margins do not spoil, and they are worth having until the snapshot lands.
+	// The one thing missing against the control is its SU — the scroll that
+	// happened inside the margin box and that nothing on this side could see,
+	// which is the whole reason the reason string exists.
+	if got, want := string(control.lastWire), string(wireST)+"\x1b[2S\x1b[1A\x1b[2C"; got != want {
+		t.Fatalf("control wire = %q, want %q: without margins the same placement scrolls two rows and says so", got, want)
+	}
+	if got, want := string(m.lastWire), string(wireST)+"\x1b[1A\x1b[2C"; got != want {
+		t.Errorf("wire = %q, want the control's cursor moves without its SU (%q): a resync is not a stop order",
+			got, want)
+	}
+	if worker, client := m.worker.ViewportText(), m.client.ViewportText(); worker == client {
+		t.Errorf("the grids agree, so the case no longer exercises an unmeasurable margin scroll:\n%s", worker)
+	}
+}
+
 // Ghostty answers a support query from the terminal's own response channel, and
 // the read loop forwards it to the program. Stripping the APC from the WIRE
 // must not touch that: a program that asks whether images are supported still

@@ -733,11 +733,12 @@ moves and `writeAPC` returns early — and all become live the moment the limit 
 flipped. None may ship with the flip.
 
 `FuzzKittyWireMirror` is the target that reaches them: it runs the mirror
-property with kitty live. Four are decided and fixed — the two placement-diff
-items, the CHA-under-margins item, and the stamp-claim item the first soak turned
-up. Two are open, both found by soaking after those fixes and both in what
-`writeAPC` MEASURES rather than in how it describes it: the over-tall scroll and
-the margin-box scroll. Soaking is part of this phase's work, not A2's.
+property with kitty live. All of them are now closed — the two placement-diff
+items and the stamp-claim item by fixing the accounting, the CHA-under-margins
+item by describing the column relatively, and the two MEASUREMENT items the later
+soaks turned up (the over-tall scroll and the margin-box scroll) by tripwire
+resyncs rather than cleverer synthesis. Soaking is part of this phase's work, not
+A2's.
 (The pin skew noted under A2 is NOT one of these — it is a live limit today,
 and gated on the two ghostty pins converging rather than on the storage flip.)
 
@@ -754,14 +755,20 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       ghostty pin — margins alone are not enough — kept so the two modes are
       pinned apart), and a wide placement pushing the cursor right inside
       margins.
-- [ ] **An undescribed image forces a snapshot on every occurrence.** A kitty
+- [x] **An undescribed image forces a snapshot on every occurrence.** A kitty
       APC introduced from inside another sequence reaches the terminal whole
       and places an image the wire cannot describe, so the feeder resyncs
       (`kitty_undescribed_image`). Correct but blunt: a producer that emits
       images from a non-ground state would re-push a snapshot per image.
-      Measure real emitters before deciding whether that needs a cheaper
-      repair (a wire-side sequence-abort byte was sketched and rejected as
-      unproven; see the segmenter's header).
+      **Decided by measurement, not by code: the blunt resync is the accepted
+      cost.** The emitter sweep (chafa, timg, kitten icat; ~600MB of captured
+      output) found ZERO unextracted APCs in any default configuration — every
+      emitter starts its APC from ground, which is the state the segmenter can
+      cut from. The one exception is `chafa --passthrough`, auto-triggered by a
+      stale `$TMUX` or `TERM=screen*`, which costs one snapshot per still image;
+      attn sets `TERM=xterm-256color`, so the default path is ground. The
+      wire-side sequence-abort byte that was sketched for this stays rejected —
+      it would buy nothing measurable (see the segmenter's header).
 - [x] **The undescribed-image check only sees images APPEAR.** The end-of-feed
       comparison resynced on `delta.Added` alone, because `Updated` looked like
       scroll noise: `ViewportCol`/`ViewportRow` are viewport-relative, so
@@ -813,7 +820,7 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       pinned byte-for-byte by
       `TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne`, because a
       resync must not stop the settling APC from being described.
-- [ ] **A synthesized scroll taller than the screen loses history.** Synthesis
+- [x] **A synthesized scroll taller than the screen loses history.** Synthesis
       expresses the measured scroll as `CSI n S`, and ghostty CLAMPS `SU` to the
       height of the scroll region: on an 8-row screen, `CSI 47 S` pushes 8 rows
       into scrollback, while the placement that caused it pushed 47. The
@@ -825,12 +832,27 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       `SU 14` diverges — so the threshold is exactly the screen height. Cheap to
       reach because kitty's `r=` lets a small image claim any number of rows.
       Found by `FuzzKittyWireMirror` at ~1m30s after the settle fix; it predates
-      both this phase's fixes, which never touch `writeAPC`'s measurement. Fix
-      by splitting the scroll into region-height `SU`s, or by resyncing when the
-      measured scroll exceeds the screen — and it needs a corpus entry either
-      way. None is recorded yet on purpose: the stream diverges silently today,
-      so an entry would pin a wrong grid as correct.
-- [ ] **A scroll confined to the left/right margin box is measured as zero.**
+      both this phase's fixes, which never touch `writeAPC`'s measurement.
+      **Decided: resync past the boundary, measured rather than assumed.** The
+      boundary is the screen height exactly — the largest scroll one `SU`
+      reproduces byte for byte, pinned on both sides by
+      `TestWireFeedSynthesizesTheLargestScrollOneSUCarries`:
+
+      | screen | last agreeing | first diverging |
+      | --- | --- | --- |
+      | 8 rows | `r=14` → `SU 8` | `r=15` → `SU 9`, a row of history lost |
+      | 12 rows | `r=22` → `SU 12` | `r=23` → `SU 13`, a row of history lost |
+
+      A DECSTBM region does not shrink it: measured on a 12-row screen with a
+      4-row region, a placement inside it never scrolls more than one row no
+      matter how tall `r=` makes it, so the region case cannot reach the clamp.
+      Past the boundary `writeAPC` now emits `kitty_layout_scroll_clamped`
+      instead of the clamped `SU`. Splitting the scroll into region-height
+      `SU`s was rejected: no measured emitter draws an image taller than the
+      screen, so the split would be unexercised cleverness on a path a resync
+      already covers. Corpus entry: "placement scrolling further than one su
+      can carry", resync-exempt from replay.
+- [x] **A scroll confined to the left/right margin box is measured as zero.**
       With DECLRMM on (`\x1b[?69h` plus `DECSLRM`), a placement at the bottom of
       the margin box scrolls only the columns inside it, and the tracked-ref
       measurement does not see that as movement: `scrolled` comes out 0, the
@@ -853,10 +875,27 @@ and gated on the two ghostty pins converging rather than on the storage flip.)
       Found by `FuzzKittyWireMirror` at ~1m48s once A4's margin corpus entries
       gave it margins to mutate. Predates the relative-column fix — measured by
       restoring the absolute `CHA` and re-running the same probe, which shows
-      the identical text divergence with the column defect stacked on top. Fix
-      by measuring the scroll in a frame that includes a margin-box scroll, or
-      by resyncing while DECLRMM is on; no corpus entry yet, for the same reason
-      as the item above.
+      the identical text divergence with the column defect stacked on top.
+      **Decided: resync while the mode is on.** `writeAPC` reads DECLRMM through
+      the new `ghosttyvt.Terminal.LeftRightMarginMode` and emits
+      `kitty_layout_margin_mode` on every described dispatch while the mode is
+      set, without asking whether that dispatch scrolled the box — nothing can
+      tell those apart from this side, which is the defect itself. Measuring the
+      scroll in a frame that includes a margin-box scroll was rejected on the
+      same ground as the `SU` split above: no measured emitter enables DECLRMM,
+      so the blunt tripwire costs nothing real, and a margin-aware measurement
+      would be unexercised machinery. The dispatch is still described in full —
+      the cursor moves are the part margins do not spoil, and they keep a client
+      that has not re-attached yet closer to the truth.
+      Cost if some future emitter does set the mode: one snapshot per image,
+      the same bill the undescribed-image item accepts.
+      `TestWireFeedResyncsWhileLeftRightMarginsAreSet` pins it against a
+      no-margins control that must stay silent and byte-equal; corpus entry
+      "placement scrolling the box while left and right margins are set". The
+      three margin entries from the CHA fix now record this resync instead of a
+      replayed grid — the mode is covered wherever it appears, and the relative
+      column they were written for is pinned by every non-margin entry and still
+      governs a client whose mode read fails.
 
 **Decision record — what an unaccounted kitty mutation costs.** A resync exists
 for grid SCROLL the wire never expressed, never for knowledge of the placement

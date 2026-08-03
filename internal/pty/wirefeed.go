@@ -85,6 +85,24 @@ const (
 	// byte described it, and the two sets being equal means no observation can
 	// ever name what moved. The stamp is the only witness there is.
 	kittyResyncStampWithoutDelta = "kitty_stamp_without_delta"
+	// kittyResyncMarginMode: DECLRMM (DEC private mode 69) was on when a
+	// described dispatch landed. A scroll confined to the left/right margin box
+	// moves the text inside those columns without moving the rows, and the
+	// tracked pair below measures rows — so a margin-box scroll reads as no
+	// scroll at all and the wire carries no SU for it. Measured: with margins
+	// `\x1b[4;14s` and a placement at the bottom of the box, the worker's text
+	// climbs two rows and the client's stays put under a cursor that agrees.
+	// This is a tripwire, not a repair: it fires on every described dispatch
+	// while margins are on, whether or not that dispatch actually scrolled the
+	// box, because the measurement cannot tell those apart. Nothing pays for it
+	// in practice — no emitter in the A4 sweep enables DECLRMM.
+	kittyResyncMarginMode = "kitty_layout_margin_mode"
+	// kittyResyncScrollClamped: the placement scrolled the grid further than one
+	// SU can express. ghostty clamps SU to the height of the scroll region, so a
+	// taller scroll would push the client's oldest rows nowhere and leave its
+	// history short of the worker's while the viewport still agreed. Reachable
+	// because kitty's `r=` lets a 2x2 image claim any number of rows.
+	kittyResyncScrollClamped = "kitty_layout_scroll_clamped"
 )
 
 // kittyPlacementKey identifies a placement across observations: kitty's own
@@ -407,6 +425,28 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	if anchor == 0 && f.term.AltScreenActive() {
 		f.failResync(kittyResyncAnchorClamped)
 		return
+	}
+
+	// One SU carries at most a screen's worth of rows into history: ghostty
+	// clamps it to the scroll region, and a region is never taller than the
+	// screen. Past that the client's history comes out short by exactly the
+	// overflow while its viewport still agrees, so the tripwire is set at the
+	// largest scroll a single SU reproduces. Receipt:
+	// TestWireFeedSynthesizesTheLargestScrollOneSUCarries, which pins both sides
+	// of the boundary on an 8-row and a 12-row screen.
+	if _, screenRows := f.term.Size(); scrolled > screenRows {
+		f.failResync(kittyResyncScrollClamped)
+		return
+	}
+
+	// A margin-confined scroll is movement this measurement cannot see, so while
+	// DECLRMM is on the numbers below are not trustworthy on their own. The
+	// cursor moves still are — they agreed in every measured margin case — so the
+	// dispatch is described in full and the resync repairs the text: a resync is
+	// never a stop order, and a client that has not re-attached yet is better off
+	// with its cursor where the worker's is.
+	if f.term.LeftRightMarginMode() {
+		f.failResync(kittyResyncMarginMode)
 	}
 
 	// SU scrolls the active scroll region and leaves the cursor's viewport

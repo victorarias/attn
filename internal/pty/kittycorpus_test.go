@@ -424,6 +424,15 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			// LEFT MARGIN, so the same number means two places. Recorded at
 			// worker column 11 against a client at 13 before synthesis went
 			// relative. Margins 4..14 with the cursor inside them.
+			//
+			// These three now record a resync rather than a replayed grid: the
+			// margin tripwire fires on any described dispatch while DECLRMM is
+			// on, and it does not ask whether this particular one scrolled the
+			// box. What they pin is that the tripwire covers the mode wherever
+			// it appears — inside margins, outside them, with origin mode and
+			// without. The relative column move they were written for is pinned
+			// by every non-margin entry in this file, and it still governs a
+			// client whose mode read fails.
 			name: "placement inside left and right margins under origin mode",
 			cols: 20, rows: 8,
 			chunks: []string{
@@ -456,6 +465,34 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{
 				"\x1b[?69h\x1b[2;18s\x1b[?6h\x1b[2;2Hxy",
 				kittyPlaceRGB(64, 48, 32, ""),
+			},
+		},
+		{
+			// The margin tripwire on the stream that exposed the class: a
+			// placement at the bottom of the margin box scrolls the columns
+			// inside it, which the row-based measurement cannot see. `top`
+			// outside the box is the tell — it stays put on the worker while
+			// the text inside the box climbs. Resync-exempt from replay, which
+			// is what the resync is for.
+			name: "placement scrolling the box while left and right margins are set",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[1;1Htop\x1b[?69h\x1b[4;14s\x1b[32;5Hxy",
+				kittyPlaceRGB(65, 16, 32, ""),
+			},
+		},
+		{
+			// A scroll one SU cannot carry: kitty's `r=` makes a 2x2 image claim
+			// 15 rows on an 8-row screen, and ghostty clamps SU to the scroll
+			// region, so the wire would have pushed 8 rows into history where
+			// the worker pushed 9. The trailing text is what makes the lost row
+			// reach history at all.
+			name: "placement scrolling further than one su can carry",
+			cols: 20, rows: 8,
+			chunks: []string{
+				"\x1b[2;2Hkeep",
+				kittyPlaceRGB(66, 16, 32, ",r=15"),
+				"\r\ntail",
 			},
 		},
 		{
