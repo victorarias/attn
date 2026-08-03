@@ -33,6 +33,52 @@ func TestNotebookTasksEnabledDefaultsOn(t *testing.T) {
 	}
 }
 
+// TestNotebookSummariesEnabledDefaultsOn proves the per-duty switch is also
+// opt-out and that its effective value is present in the settings payload even
+// when no row has been persisted yet.
+func TestNotebookSummariesEnabledDefaultsOn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	if !d.notebookSummariesEnabled() {
+		t.Fatal("unset notebook.summarize_session.enabled must default to ON")
+	}
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookSummarizeSessionEnabled]; got != "true" {
+		t.Fatalf("effective summary setting = %#v, want true", got)
+	}
+
+	d.store.SetSetting(SettingNotebookSummarizeSessionEnabled, "false")
+	if d.notebookSummariesEnabled() {
+		t.Fatal("explicit false must disable session summaries")
+	}
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookSummarizeSessionEnabled]; got != "false" {
+		t.Fatalf("effective summary setting = %#v, want false", got)
+	}
+}
+
+// TestNotebookSummariesDisabledOnlySkipsSummaries proves the per-duty switch
+// leaves journal narration alone while preventing summary records from being
+// created. Re-enabling restores the enqueue path without changing its model.
+func TestNotebookSummariesDisabledOnlySkipsSummaries(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	installNotebookNarrationRunner(t, d)
+
+	d.store.SetSetting(SettingNotebookSummarizeSessionEnabled, "false")
+	d.enqueueSummarizeSession("session-off", "", "")
+	d.enqueueNarrateWorkspace("ws-on")
+	assertNoTask(t, d, notebookSummarizeSessionKind, "session-off")
+	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-on") {
+		t.Fatal("summary switch must not disable journal narration")
+	}
+
+	d.store.SetSetting(SettingNotebookSummarizeSessionEnabled, "true")
+	d.enqueueSummarizeSession("session-on", "", "")
+	if !taskExists(t, d, notebookSummarizeSessionKind, "session-on") {
+		t.Fatal("summarize must enqueue once its duty switch is on")
+	}
+}
+
 // TestNotebookTasksDisabledSkipsEnqueue proves the master switch gates the
 // BACKGROUND enqueue chokepoints: with the toggle off, a session-stop summarize and
 // a workspace narrate create no durable record at all; flipping it back on (here via
@@ -71,6 +117,24 @@ func TestNotebookTasksDisabledExecutorNoOps(t *testing.T) {
 
 	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
 		t.Fatal("summarize executor ran the agent while the master switch was off")
+		return agentdriver.HeadlessTaskResult{}, nil
+	}
+
+	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+}
+
+// TestNotebookSummariesDisabledExecutorNoOps covers the queued-before-toggle
+// case: the durable record completes without spawning a headless agent.
+func TestNotebookSummariesDisabledExecutorNoOps(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	installNotebookNarrationRunner(t, d)
+	d.store.SetSetting(SettingNotebookSummarizeSessionEnabled, "false")
+
+	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		t.Fatal("summarize executor ran the agent while session summaries were off")
 		return agentdriver.HeadlessTaskResult{}, nil
 	}
 

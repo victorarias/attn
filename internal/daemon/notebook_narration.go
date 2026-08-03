@@ -138,9 +138,9 @@ var notebookNarrationAllowedTools = []string{"Read", "Write", "Edit", "Grep", "G
 // success, if the workspace has since been removed it re-enqueues the retrospective
 // narrate so the late digest lands in it (see the re-narrate hook below).
 func (d *Daemon) summarizeSessionHandler(ctx context.Context, job *jobs.Job) (any, error) {
-	// Master switch: a run queued before the keeper was disabled must not fire
-	// background work after the toggle is off. No-op success retires the record.
-	if !d.notebookTasksEnabled() {
+	// A run queued before either switch was disabled must not fire background
+	// work after the toggle is off. No-op success retires the record.
+	if !d.notebookTasksEnabled() || !d.notebookSummariesEnabled() {
 		return nil, nil
 	}
 	sessionID := strings.TrimSpace(jobSubject(job))
@@ -629,7 +629,7 @@ func (d *Daemon) enqueueSummarizeSession(sessionID, transcriptPath, workspaceID 
 	if sessionID == "" {
 		return
 	}
-	if !d.notebookTasksEnabled() {
+	if !d.notebookTasksEnabled() || !d.notebookSummariesEnabled() {
 		return
 	}
 	runner := d.jobQueueRef()

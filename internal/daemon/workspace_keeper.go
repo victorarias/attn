@@ -126,6 +126,20 @@ func (d *Daemon) notebookTasksEnabled() bool {
 	return parseBooleanSetting(raw)
 }
 
+// notebookSummariesEnabled reports whether the keeper's per-session digest duty
+// is enabled. It is an independent, default-on opt-out beneath the keeper master
+// switch: callers check both so the master can still stop every duty at once.
+func (d *Daemon) notebookSummariesEnabled() bool {
+	if d.store == nil {
+		return true
+	}
+	raw := strings.TrimSpace(d.store.GetSetting(SettingNotebookSummarizeSessionEnabled))
+	if raw == "" {
+		return true
+	}
+	return parseBooleanSetting(raw)
+}
+
 // legacyKeeperCompactSettingKey is the pre-rename persisted settings key. It is
 // retained ONLY so migrateKeeperCompactSettingKey can copy a user's configured
 // agent/model forward to SettingKeeperCompact. Never read it anywhere else.

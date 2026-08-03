@@ -144,10 +144,10 @@ const emptyKeeperDrafts: Record<KeeperDutyKey, KeeperDraft> = {
   compact: { agent: '', model: '' },
 };
 
-// initialKeeperDraft seeds a row's editable draft from the saved config. An always-on
-// duty with no override pre-selects its built-in default agent (or the first eligible
-// one) plus that agent's recommended model, so the row shows what "unset" resolves to;
-// an opt-in duty with no override starts blank (the Disabled state).
+// initialKeeperDraft seeds a row's editable draft from the saved config. A
+// default-configured duty with no override pre-selects its built-in default agent (or
+// the first eligible one) plus that agent's recommended model, so the row shows what
+// "unset" resolves to; an opt-in duty with no override starts blank (Disabled).
 function initialKeeperDraft(
   duty: KeeperDutyDescriptor,
   saved: KeeperConfig | null,
@@ -294,7 +294,8 @@ export function SettingsModal({
   const actualAutoSettleArm = String(autoSettleSeconds(settings, AUTO_SETTLE_ARM_SETTING));
   const actualAutoSettleCountdown = String(autoSettleSeconds(settings, AUTO_SETTLE_COUNTDOWN_SETTING));
   // The saved (persisted) config for every keeper duty, keyed by duty. A null entry
-  // means the setting is blank (default for always-on duties, disabled for opt-in).
+  // means the setting is blank (built-in model for default-configured duties,
+  // disabled for opt-in duties).
   const actualKeeperConfigs = useMemo(() => {
     const configs = {} as Record<KeeperDutyKey, KeeperConfig | null>;
     for (const duty of KEEPER_DUTIES) {
@@ -305,6 +306,8 @@ export function SettingsModal({
   // The keeper master switch is daemon-normalized to its effective value (default ON),
   // so a missing key reads as enabled rather than off.
   const keeperTasksEnabled = (settings['notebook.tasks_enabled'] ?? 'true') !== 'false';
+  const notebookSummariesEnabled =
+    (settings['notebook.summarize_session.enabled'] ?? 'true') !== 'false';
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
   const orderedAgentList = useMemo(
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
@@ -646,6 +649,13 @@ export function SettingsModal({
     onSetSetting('notebook.tasks_enabled', keeperTasksEnabled ? 'false' : 'true');
   }, [keeperTasksEnabled, onSetSetting]);
 
+  const handleToggleNotebookSummaries = useCallback(() => {
+    onSetSetting(
+      'notebook.summarize_session.enabled',
+      notebookSummariesEnabled ? 'false' : 'true',
+    );
+  }, [notebookSummariesEnabled, onSetSetting]);
+
   // Switching a duty's agent resets its model to that agent's recommended default
   // (the first preset); choosing the empty "Disabled" agent (opt-in duties only)
   // clears the model so Save stays disabled.
@@ -682,9 +692,9 @@ export function SettingsModal({
     );
   }, [keeperDrafts, onSetSetting]);
 
-  // Clearing writes a blank override. For an opt-in duty that disables it; for an
-  // always-on duty it reverts to the built-in tier default. Either way the draft
-  // re-seeds to its unset starting point.
+  // Clearing writes a blank override. For an opt-in duty that disables it; for a
+  // default-configured duty it reverts to the built-in tier default. Either way the
+  // draft re-seeds to its unset starting point.
   const clearKeeperDuty = useCallback((dutyKey: KeeperDutyKey) => {
     const duty = KEEPER_DUTY_BY_KEY[dutyKey];
     onSetSetting(duty.settingKey, '');
@@ -997,7 +1007,7 @@ export function SettingsModal({
           title: 'Agent runtime',
           description: 'Agent executable paths, defaults, context maintenance, capabilities, and PTY runtime mode.',
           count: orderedAgentList.length + 8,
-          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model workflows auto-approve unattended chief context window cap tokens compaction auto-compact headless',
+          keywords: 'agents executables claude codex cursor default capabilities pty backend editor context keeper compact model summaries summarize haiku costs workflows auto-approve unattended chief context window cap tokens compaction auto-compact headless',
         },
       ],
     },
@@ -2031,11 +2041,30 @@ export function SettingsModal({
               const agentId = `${duty.testIdPrefix}-agent`;
               const modelId = `${duty.testIdPrefix}-model`;
               const customId = `${duty.testIdPrefix}-model-custom`;
+              const dutyEnabled = duty.key !== 'summarize' || notebookSummariesEnabled;
               return (
-                <div className="settings-keeper-duty" key={duty.key}>
+                <div
+                  className={`settings-keeper-duty${dutyEnabled ? '' : ' is-disabled'}`}
+                  key={duty.key}
+                >
                   <div className="settings-keeper-duty-head">
-                    <p className="settings-row-title">{duty.title}</p>
-                    <p className="settings-row-copy">{duty.description}</p>
+                    <div>
+                      <p className="settings-row-title">{duty.title}</p>
+                      <p className="settings-row-copy">{duty.description}</p>
+                    </div>
+                    {duty.key === 'summarize' && (
+                      <button
+                        type="button"
+                        className="settings-action"
+                        data-testid="settings-keeper-summarize-toggle"
+                        aria-label={notebookSummariesEnabled
+                          ? 'Disable session summaries'
+                          : 'Enable session summaries'}
+                        onClick={handleToggleNotebookSummaries}
+                      >
+                        {notebookSummariesEnabled ? 'Disable' : 'Enable'}
+                      </button>
+                    )}
                   </div>
                   <div className="settings-field-grid two-column">
                     <div className="settings-field">
@@ -2114,7 +2143,11 @@ export function SettingsModal({
                       `attn workspace context compact` to run it immediately.
                     </div>
                   ) : (
-                    <div className="settings-hint">Defaults to {duty.defaultLabel} when unset.</div>
+                    <div className="settings-hint">
+                      {duty.key === 'summarize' && !notebookSummariesEnabled
+                        ? `Disabled. Its ${duty.defaultLabel} model setting is preserved.`
+                        : `Defaults to ${duty.defaultLabel} when unset.`}
+                    </div>
                   )}
                 </div>
               );
