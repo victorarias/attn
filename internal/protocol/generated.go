@@ -119,6 +119,9 @@ type AttachSnapshot struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
 
+	// Placements corresponds to the JSON schema field "placements".
+	Placements []KittyPlacement `json:"placements,omitempty,omitzero"`
+
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
 
@@ -1733,6 +1736,17 @@ type GetFileDiffMessage struct {
 	Staged *bool `json:"staged,omitempty,omitzero"`
 }
 
+type GetKittyImageMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ImageID corresponds to the JSON schema field "image_id".
+	ImageID int `json:"image_id"`
+}
+
 type GetPresentationRoundMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2196,6 +2210,102 @@ type KillSessionMessage struct {
 
 	// Signal corresponds to the JSON schema field "signal".
 	Signal *string `json:"signal,omitempty,omitzero"`
+}
+
+type KittyImageResultMessage struct {
+	// DataB64 corresponds to the JSON schema field "data_b64".
+	DataB64 *string `json:"data_b64,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Format corresponds to the JSON schema field "format".
+	Format *string `json:"format,omitempty,omitzero"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation *int `json:"generation,omitempty,omitzero"`
+
+	// Height corresponds to the JSON schema field "height".
+	Height *int `json:"height,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ImageID corresponds to the JSON schema field "image_id".
+	ImageID int `json:"image_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Width corresponds to the JSON schema field "width".
+	Width *int `json:"width,omitempty,omitzero"`
+}
+
+type KittyPlacement struct {
+	// GridCols corresponds to the JSON schema field "grid_cols".
+	GridCols int `json:"grid_cols"`
+
+	// GridRows corresponds to the JSON schema field "grid_rows".
+	GridRows int `json:"grid_rows"`
+
+	// ImageGeneration corresponds to the JSON schema field "image_generation".
+	ImageGeneration int `json:"image_generation"`
+
+	// ImageID corresponds to the JSON schema field "image_id".
+	ImageID int `json:"image_id"`
+
+	// PixelHeight corresponds to the JSON schema field "pixel_height".
+	PixelHeight int `json:"pixel_height"`
+
+	// PixelWidth corresponds to the JSON schema field "pixel_width".
+	PixelWidth int `json:"pixel_width"`
+
+	// PlacementID corresponds to the JSON schema field "placement_id".
+	PlacementID int `json:"placement_id"`
+
+	// SourceHeight corresponds to the JSON schema field "source_height".
+	SourceHeight int `json:"source_height"`
+
+	// SourceWidth corresponds to the JSON schema field "source_width".
+	SourceWidth int `json:"source_width"`
+
+	// SourceX corresponds to the JSON schema field "source_x".
+	SourceX int `json:"source_x"`
+
+	// SourceY corresponds to the JSON schema field "source_y".
+	SourceY int `json:"source_y"`
+
+	// ViewportCol corresponds to the JSON schema field "viewport_col".
+	ViewportCol int `json:"viewport_col"`
+
+	// ViewportRow corresponds to the JSON schema field "viewport_row".
+	ViewportRow int `json:"viewport_row"`
+
+	// ViewportVisible corresponds to the JSON schema field "viewport_visible".
+	ViewportVisible bool `json:"viewport_visible"`
+
+	// Virtual corresponds to the JSON schema field "virtual".
+	Virtual bool `json:"virtual"`
+
+	// Z corresponds to the JSON schema field "z".
+	Z int `json:"z"`
+}
+
+type KittyPlacementsMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Placements corresponds to the JSON schema field "placements".
+	Placements []KittyPlacement `json:"placements"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
 }
 
 type ListBranchesMessage struct {

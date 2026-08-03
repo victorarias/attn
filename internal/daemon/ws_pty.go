@@ -85,7 +85,12 @@ type attachReplayPayload struct {
 	ghosttyRows     uint16
 	// ghosttyBlocks are the worker's OSC 133 command blocks resolved atomically
 	// with ghosttySnapshot (Phase 3a). Carried only alongside a snapshot.
-	ghosttyBlocks       []pty.AttachBlockData
+	ghosttyBlocks []pty.AttachBlockData
+	// ghosttyPlacements are the kitty placements on that same screen, captured
+	// in the same hold. The dump has no images in it — the APC bytes were
+	// stripped before any of this — so without these a restore silently loses
+	// every image the session was showing.
+	ghosttyPlacements   []pty.KittyPlacement
 	scrollbackTruncated bool
 	decision            string
 }
@@ -117,6 +122,7 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, policy protocol.Attach
 		ghosttyCols:         info.Cols,
 		ghosttyRows:         info.Rows,
 		ghosttyBlocks:       info.GhosttyBlocks,
+		ghosttyPlacements:   info.GhosttyPlacements,
 		scrollbackTruncated: info.GhosttyScrollbackTruncated,
 		decision:            "use_ghostty_snapshot",
 	}
@@ -402,6 +408,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 			Rows:                int(replay.ghosttyRows),
 			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
 			Blocks:              attachBlocksToProtocol(replay.ghosttyBlocks),
+			Placements:          placementsToProtocol(replay.ghosttyPlacements),
 			ScrollbackTruncated: replay.scrollbackTruncated,
 		}
 	}
@@ -560,6 +567,28 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 			}
 			if !d.sendOutboundBlocking(client, outbound, ptyOutputSendWait) {
 				d.logf("pty_output send failed, closing stream: id=%s seq=%d", sessionID, event.Seq)
+				_ = stream.Close()
+				return
+			}
+		case ptybackend.OutputEventKindPlacements:
+			// Byte-stream companion, not a state change: the set describes the
+			// grid the same-seq output produces, so it rides this per-session
+			// path in order behind those bytes rather than the bus, exactly as
+			// pty_output does. Clients that cannot draw images never asked to
+			// hear about them.
+			if !client.HasCapability(protocol.CapabilityKittyImages) {
+				continue
+			}
+			outbound, err := encodeKittyPlacementsMessage(sessionID, event)
+			if err != nil {
+				d.logf("kitty_placements marshal failed: id=%s seq=%d err=%v", sessionID, event.Seq, err)
+				continue
+			}
+			// Blocking, like the bytes: a dropped set leaves the client drawing
+			// an image that has moved or gone, and only the next change would
+			// heal it — which on an idle session never comes.
+			if !d.sendOutboundBlocking(client, outbound, ptyOutputSendWait) {
+				d.logf("kitty_placements send failed, closing stream: id=%s seq=%d", sessionID, event.Seq)
 				_ = stream.Close()
 				return
 			}

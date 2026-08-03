@@ -1862,6 +1862,20 @@ model GetScreenSnapshotMessage {
   id: string;
 }
 
+// Pulls the pixels behind a placement. Images are pulled on miss, never pushed:
+// a stored image is megabytes of raw pixels and a client usually already has
+// it, so kitty_placements describes and this fetches what the cache lacks.
+//
+// image_id alone identifies the image — a terminal holds one generation per id,
+// and the answer states which. Answered whether or not the client advertised
+// "kitty_images"; the capability only decides whether the pixels come back as
+// binary frame 0x02 or as base64 in kitty_image_result.
+model GetKittyImageMessage {
+  cmd: "get_kitty_image";
+  id: string;
+  image_id: safeint;
+}
+
 model PtyInputMessage {
   cmd: "pty_input";
   id: string;
@@ -3184,6 +3198,39 @@ model AttachBlock {
   exit_code?: int32;
 }
 
+// One kitty image placed on the worker's active screen, as ghostty resolved it
+// at observation time. The worker is the only kitty parser in the system — APC
+// bytes never reach a client — so this description is the only way a client
+// learns an image exists.
+//
+// Geometry is the worker's, and the client's grid equals it, so viewport_row /
+// viewport_col are screen-relative and a client maps them by adding its own
+// scrollback length at apply time.
+//
+// grid_cols / grid_rows are ADVISORY and are 0 on a freshly placed image: kitty
+// calls that "natural size", and ghostty resolves a cell footprint only when
+// something reflows the placement. The wire carries what ghostty resolved and
+// never a synthesized count, so a client sizes from pixel_width / pixel_height
+// and treats the grid fields as a hint.
+model KittyPlacement {
+  image_id: safeint;
+  placement_id: safeint;
+  image_generation: safeint;  // changes on any retransmission of image_id
+  virtual: boolean;           // unicode-placeholder placement; no cursor geometry
+  z: int32;
+  viewport_row: int32;        // top-left, screen-relative; negative = scrolled up
+  viewport_col: int32;
+  viewport_visible: boolean;  // false: fully off-screen or virtual
+  grid_cols: int32;           // advisory; 0 until a reflow resolves it
+  grid_rows: int32;
+  pixel_width: int32;         // rendered size (source rect + aspect applied)
+  pixel_height: int32;
+  source_x: int32;            // resolved source rect in image pixels
+  source_y: int32;
+  source_width: int32;
+  source_height: int32;
+}
+
 // Server-authoritative restore snapshot: a self-contained VT serialization of
 // the worker's parsed terminal (grid + scrollback + cursor + modes, both
 // primary and alternate screens) produced by libghostty-vt. Present on every
@@ -3194,6 +3241,10 @@ model AttachSnapshot {
   rows: int32;
   vt_dump_b64: string;           // base64 self-contained VT stream
   blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
+  // Kitty placements on the screen vt_dump_b64 serializes, captured in the same
+  // hold. Absent when the session holds no images. Pixels are not inlined; the
+  // client pulls what its cache lacks with get_kitty_image.
+  placements?: KittyPlacement[];
   scrollback_truncated: boolean; // ghostty dropped scrollback at its cap
 }
 
@@ -3247,6 +3298,56 @@ model PtyDesyncMessage {
   event: "pty_desync";
   id: string;
   reason: string;
+}
+
+// The session's WHOLE kitty placement set as of the chunk stamped seq, sent
+// only to clients that advertised the "kitty_images" capability. Rides the same
+// per-session path as pty_output and arrives after the bytes of the same seq,
+// because the positions were measured on the grid those bytes produce.
+//
+// placements is REQUIRED and may be empty. The empty set is the one message
+// that tells a client the last image is gone; a client that treats an absent
+// array as "nothing to do" keeps drawing a ghost forever.
+//
+// Sets are replaced wholesale, never merged. A client applies a set whose seq
+// is >= the last it applied — a resize re-describes at the replay watermark
+// rather than a fresh seq, so equal seqs happen and both are truthful.
+model KittyPlacementsMessage {
+  event: "kitty_placements";
+  id: string;
+  seq: int32;
+  placements: KittyPlacement[];
+}
+
+// Answer to get_kitty_image: one stored image's RAW PIXELS in format's layout
+// (ghostty decodes PNG and inflates zlib before storing, so there is no
+// compressed form to pass through).
+//
+// This JSON form serves clients WITHOUT the "kitty_images" capability —
+// automation and relays — so they can still assert on an image. Capable clients
+// get the same pixels as binary frame 0x02 instead, skipping base64.
+//
+// A FAILURE has no pixels and so has no frame: success=false always arrives
+// here, on both kinds of client. A capable client must handle both shapes.
+//
+// Correlation is by content key (id, image_id, generation), never a request id:
+// a cache fill is last-writer-wins per key, and two answers for the same key
+// carry the same pixels.
+//
+// success=false is an ordinary answer, not a broken session: the image was
+// evicted at the storage limit, deleted by the program, or never transmitted.
+// error names the image id and the client drops that placement's render.
+model KittyImageResultMessage {
+  event: "kitty_image_result";
+  id: string;
+  image_id: safeint;
+  success: boolean;
+  generation?: safeint;
+  width?: int32;
+  height?: int32;
+  format?: string;    // "rgb" | "rgba" | "gray_alpha" | "gray"
+  data_b64?: string;  // base64 raw pixels, present on success
+  error?: string;
 }
 
 // runtime_respawned: the daemon killed and re-spawned a session's agent process
@@ -4008,6 +4109,8 @@ alias DaemonEvent =
   | PtyOutputMessage
   | SessionExitedMessage
   | PtyDesyncMessage
+  | KittyPlacementsMessage
+  | KittyImageResultMessage
   | RuntimeRespawnedMessage
   | PtyResizedMessage
   | BrowserControlRequestMessage
