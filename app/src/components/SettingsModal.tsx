@@ -24,6 +24,7 @@ import {
   AUTO_SETTLE_COUNTDOWN_SETTING,
 } from '../utils/queueBands';
 import type { ThemePreference } from '../hooks/useTheme';
+import { useDaemonApi } from '../contexts/DaemonApiContext';
 import {
   AGENT_CAPABILITY_ORDER,
   agentCapabilityLabel,
@@ -197,6 +198,7 @@ export function SettingsModal({
   retryTask,
   taskChangeSignal,
 }: SettingsModalProps) {
+  const { sendGetSettings } = useDaemonApi();
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
@@ -457,6 +459,19 @@ export function SettingsModal({
   }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
+
+  useEffect(() => {
+    if (!isOpen || selectedSection !== 'data') return;
+
+    sendGetSettings();
+    if (!modelCaptureEnabled) return;
+
+    const intervalSeconds = Number(modelCaptureInterval);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) return;
+
+    const intervalID = window.setInterval(sendGetSettings, intervalSeconds * 1000);
+    return () => window.clearInterval(intervalID);
+  }, [isOpen, selectedSection, modelCaptureEnabled, modelCaptureInterval, sendGetSettings]);
 
   // Publish a read/select handle for the UI automation bridge (testing only).
   // Registered for the component's whole lifetime (not just while open) so the

@@ -2557,6 +2557,40 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
 });
 
+describe('useDaemonSocket settings refresh', () => {
+  let originalWebSocket: typeof WebSocket;
+
+  beforeEach(() => {
+    originalWebSocket = globalThis.WebSocket;
+    FakeWebSocket.instances = [];
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+  });
+
+  afterEach(() => {
+    globalThis.WebSocket = originalWebSocket;
+    vi.clearAllMocks();
+  });
+
+  it('requests a fresh settings snapshot', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+
+    const ws = await waitForOpenSocket();
+    act(() => result.current.sendGetSettings());
+
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({ cmd: 'get_settings' });
+    unmount();
+  });
+});
+
 describe('useDaemonSocket workflow runs', () => {
   let originalWebSocket: typeof WebSocket;
 

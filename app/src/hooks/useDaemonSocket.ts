@@ -3843,6 +3843,12 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
   }, []);
 
+  const sendGetSettings = useCallback(() => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ cmd: 'get_settings' }));
+  }, []);
+
   const sendListPlugins = useCallback((): Promise<PluginListResult> => {
     const key = 'list_plugins';
     return sendKeyedRequest<PluginListResult>(key, { cmd: 'list_plugins' }, 'List plugins timed out');
@@ -4912,6 +4918,7 @@ export function useDaemonSocket({
     sendCreateWorktree,
     sendDeleteWorktree,
     sendSetSetting,
+    sendGetSettings,
     sendListPlugins,
     sendInstallPlugin,
     sendInstallBundledPlugin,
