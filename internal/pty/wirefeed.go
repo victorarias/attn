@@ -509,8 +509,6 @@ type kittyTransmission struct {
 	ask uint64
 	// payload counts the base64 bytes seen across every escape so far.
 	payload uint64
-	// open is set while an escape has promised more to come.
-	open bool
 }
 
 // noteTransmission logs the one failure ghostty has no way to report: an image
@@ -547,7 +545,6 @@ func (f *wireFeeder) noteTransmission(apc []byte, stored bool) {
 		f.pending.ask = ask.ask
 	}
 	if more {
-		f.pending.open = true
 		return
 	}
 
