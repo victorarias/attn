@@ -18,16 +18,16 @@ notes: >
   a measured number and its receipts, and is the release where this becomes a
   user-visible feature worth a bullet.
 
-  Protocol 204: kitty_placements (the full placement set of the active screen,
+  Protocol 205: kitty_placements (the full placement set of the active screen,
   seq-stamped), get_kitty_image plus its kitty_image_result, and placements
   carried in the attach snapshot beside the VT dump and OSC 133 blocks. Two
   capabilities, deliberately split: kitty_images means "describe images to me",
   the existing binary_pty_output decides only whether the pixels travel as a
   binary frame or as base64 JSON — the hub relay is a text pipe and takes the
   JSON path. The relay asks for images and never claims the binary capability,
-  confirmed from the remote daemon's own hello; a remote session drawing one
-  end to end is still unverified, because remote sessions cannot currently be
-  created at all on this base (see the plan's A3 verification record).
+  confirmed from the remote daemon's own hello, and a remote session draws one
+  end to end against a real remote daemon (see the plan's A3 verification
+  record).
 
   Named v1 limitations: images draw above text (kitty z<0 under-text is
   deferred), no images in mission-control grid tiles, no animations. Images
