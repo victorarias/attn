@@ -1,0 +1,8 @@
+kind: fixed
+area: settings
+change: >
+  The Data settings page now refreshes the model-capture byte count while it is
+  visible, using the configured capture interval.
+symptom: >
+  The capture toggle worked and observations accumulated on disk, but the
+  Captured value stayed at 0 bytes until the app reconnected.

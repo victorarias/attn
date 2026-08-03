@@ -786,6 +786,61 @@ describe('SettingsModal model data capture', () => {
     });
     expect(onSetSetting).toHaveBeenCalledWith('model_capture.max_gb', '10');
   });
+
+  it('refreshes captured bytes at the configured cadence only while Data is visible', () => {
+    vi.useFakeTimers();
+    const onRefreshSettings = vi.fn();
+    const { unmount } = render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          'model_capture.enabled': 'true',
+          'model_capture.interval_seconds': '10',
+          'model_capture.max_gb': '5',
+          'model_capture.path': '/Users/me/.attn/model-captures',
+          'model_capture.bytes': '0',
+        }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={vi.fn()}
+        onRefreshSettings={onRefreshSettings}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+
+    try {
+      fireEvent.click(screen.getByTestId('settings-nav-data'));
+      expect(onRefreshSettings).toHaveBeenCalledTimes(1);
+
+      act(() => vi.advanceTimersByTime(9_999));
+      expect(onRefreshSettings).toHaveBeenCalledTimes(1);
+      act(() => vi.advanceTimersByTime(1));
+      expect(onRefreshSettings).toHaveBeenCalledTimes(2);
+
+      fireEvent.click(screen.getByTestId('settings-nav-general'));
+      act(() => vi.advanceTimersByTime(10_000));
+      expect(onRefreshSettings).toHaveBeenCalledTimes(2);
+    } finally {
+      unmount();
+      vi.useRealTimers();
+    }
+  });
 });
 
 describe('SettingsModal notebook folder', () => {

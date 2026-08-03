@@ -73,6 +73,7 @@ interface SettingsModalProps {
   onRemovePlugin: (name: string) => Promise<{ success: boolean; name?: string }>;
   onSetPluginPriority: (name: string, priority: number) => Promise<{ success: boolean; name?: string }>;
   onSetSetting: (key: string, value: string) => void;
+  onRefreshSettings?: () => void;
   themePreference: ThemePreference;
   onSetTheme: (theme: ThemePreference) => void;
   /** App-wide font scale (uiScale setting). Optional so tests without font-size
@@ -182,6 +183,7 @@ export function SettingsModal({
   onRemovePlugin,
   onSetPluginPriority,
   onSetSetting,
+  onRefreshSettings,
   themePreference,
   onSetTheme,
   uiScale = 1,
@@ -454,6 +456,19 @@ export function SettingsModal({
   }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
+
+  useEffect(() => {
+    if (!isOpen || selectedSection !== 'data' || !onRefreshSettings) return;
+
+    onRefreshSettings();
+    if (!modelCaptureEnabled) return;
+
+    const intervalSeconds = Number(modelCaptureInterval);
+    if (!Number.isFinite(intervalSeconds) || intervalSeconds <= 0) return;
+
+    const intervalID = window.setInterval(onRefreshSettings, intervalSeconds * 1000);
+    return () => window.clearInterval(intervalID);
+  }, [isOpen, selectedSection, modelCaptureEnabled, modelCaptureInterval, onRefreshSettings]);
 
   // Publish a read/select handle for the UI automation bridge (testing only).
   // Registered for the component's whole lifetime (not just while open) so the
