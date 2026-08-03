@@ -1079,6 +1079,10 @@ func (b *WorkerBackend) Snapshot(ctx context.Context, sessionID string) (pty.Sna
 			Cols:    res.ScreenCols,
 			Rows:    res.ScreenRows,
 		}
+		if res.ScreenText != nil {
+			info.Screen.Text = *res.ScreenText
+			info.Screen.HasText = true
+		}
 	}
 	return info, nil
 }

@@ -9,6 +9,12 @@ Format: `[YYYY-MM-DD]` entries with categories: Added, Changed, Fixed, Removed.
 ## [2026-08-02]
 
 ### Added
+- **Opt-in local model-training capture.** Settings > Data can now record the
+  exact visible text from local Codex and Claude terminal viewports into private,
+  profile-local hourly JSONL files. Capture is off by default, reacts promptly
+  to daemon state changes, deduplicates unchanged viewports, and has configurable
+  sampling and oldest-first storage limits. Disabling it stops new writes without
+  deleting the corpus already collected.
 - **Terminal panes now show what they are doing.** A shell pane used to sit at
   a grey idle dot forever; now it reads the terminal's foreground directly, so
   it shows working while a command runs and returns to idle when the prompt

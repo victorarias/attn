@@ -83,6 +83,10 @@ type SpawnOptions struct {
 // (grid tiles) and the automations gate.
 type ViewportSnapshot struct {
 	Payload []byte
+	// Text is the plain visible viewport captured from the same authoritative
+	// Ghostty model as Payload. It intentionally excludes scrollback and styles.
+	Text    string
+	HasText bool
 	Cols    uint16
 	Rows    uint16
 }

@@ -730,6 +730,64 @@ describe('SettingsModal', () => {
   });
 });
 
+describe('SettingsModal model data capture', () => {
+  it('shows the privacy boundary and persists capture controls', async () => {
+    const onSetSetting = vi.fn();
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={{
+          'model_capture.enabled': 'false',
+          'model_capture.interval_seconds': '10',
+          'model_capture.max_gb': '5',
+          'model_capture.path': '/Users/me/.attn/model-captures',
+          'model_capture.bytes': String(1536 * 1024),
+        }}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('settings-nav-data'));
+    expect(await screen.findByText(/Captures exact visible terminal text/)).toBeInTheDocument();
+    expect(screen.getByTestId('settings-model-capture-path')).toHaveTextContent(
+      '/Users/me/.attn/model-captures',
+    );
+    expect(screen.getByTestId('settings-model-capture-size')).toHaveTextContent('1.5 MB');
+
+    fireEvent.click(screen.getByTestId('settings-model-capture-toggle'));
+    expect(onSetSetting).toHaveBeenCalledWith('model_capture.enabled', 'true');
+
+    fireEvent.change(screen.getByTestId('settings-model-capture-interval'), {
+      target: { value: '30' },
+    });
+    expect(onSetSetting).toHaveBeenCalledWith('model_capture.interval_seconds', '30');
+
+    fireEvent.change(screen.getByTestId('settings-model-capture-max-gb'), {
+      target: { value: '10' },
+    });
+    expect(onSetSetting).toHaveBeenCalledWith('model_capture.max_gb', '10');
+  });
+});
+
 describe('SettingsModal notebook folder', () => {
   function renderModal(
     settings: Record<string, string>,

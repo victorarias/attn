@@ -812,6 +812,10 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 		}
 		if info.Screen != nil {
 			result.ScreenSnapshot = info.Screen.Payload
+			if info.Screen.HasText {
+				text := info.Screen.Text
+				result.ScreenText = &text
+			}
 			result.ScreenCols = info.Screen.Cols
 			result.ScreenRows = info.Screen.Rows
 		}

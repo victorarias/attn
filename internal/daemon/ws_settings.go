@@ -13,6 +13,7 @@ import (
 	"github.com/robfig/cron/v3"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/modelcapture"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -38,6 +39,14 @@ const (
 	SettingKeeperCompact     = "workspace_keeper_compact"
 	SettingTailscaleEnabled  = "tailscale_enabled"
 	SettingWorkflowsEnabled  = "workflows_enabled"
+	// Model capture is an explicit, local-only opt-in because visible terminal
+	// text can contain source code, conversations, and secrets.
+	SettingModelCaptureEnabled         = "model_capture.enabled"
+	SettingModelCaptureIntervalSeconds = "model_capture.interval_seconds"
+	SettingModelCaptureMaxGB           = "model_capture.max_gb"
+	// Read-only effective status surfaced to Settings.
+	SettingModelCapturePath  = "model_capture.path"
+	SettingModelCaptureBytes = "model_capture.bytes"
 	// SettingQueueModeEnabled selects the sidebar arrangement: off (the default)
 	// is the workspace tree alone; on adds the anchored chief slot and the "Your
 	// turn" band above it. It is daemon-owned because which arrangement is in
@@ -313,6 +322,16 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingTailscaleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingTailscaleEnabled]))
 	settings[SettingWorkflowsEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingWorkflowsEnabled]))
+	settings[SettingModelCaptureEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingModelCaptureEnabled]))
+	settings[SettingModelCaptureIntervalSeconds] = strconv.Itoa(int(d.modelCaptureInterval() / time.Second))
+	settings[SettingModelCaptureMaxGB] = strconv.FormatInt(d.modelCaptureMaxBytes()>>30, 10)
+	settings[SettingModelCapturePath] = d.modelCaptureDir()
+	if bytes, err := modelcapture.SizeBytes(d.modelCaptureDir()); err == nil {
+		settings[SettingModelCaptureBytes] = strconv.FormatInt(bytes, 10)
+	} else {
+		d.logf("model capture size failed: %v", err)
+		settings[SettingModelCaptureBytes] = "0"
+	}
 	settings[SettingQueueModeEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingQueueModeEnabled]))
 	settings[SettingAutoApproveEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoApproveEnabled]))
 	// Surface the EFFECTIVE auto-settle policy so the UI shows the concrete
@@ -471,8 +490,12 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
 		return validateBooleanSetting(value)
+	case SettingModelCaptureIntervalSeconds:
+		return validateModelCaptureInterval(value)
+	case SettingModelCaptureMaxGB:
+		return validateModelCaptureMaxGB(value)
 	case SettingAutoSettleArmSeconds:
 		return validateAutoSettleSeconds("auto-settle delay", value, autoSettleArmMinSeconds, autoSettleArmMaxSeconds)
 	case SettingAutoSettleCountdownSeconds:

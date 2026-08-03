@@ -163,6 +163,12 @@ gotOutput:
 	if !bytes.Contains(snap.Screen.Payload, []byte("__ATTN_WORKER__")) {
 		t.Fatalf("snapshot missing printed marker; got %q", snap.Screen.Payload)
 	}
+	if !strings.Contains(snap.Screen.Text, "__ATTN_WORKER__") {
+		t.Fatalf("plain snapshot missing printed marker; got %q", snap.Screen.Text)
+	}
+	if !snap.Screen.HasText {
+		t.Fatal("plain snapshot should be marked available")
+	}
 	if snap.Screen.Cols == 0 || snap.Screen.Rows == 0 {
 		t.Fatalf("snapshot geometry = %dx%d, want non-zero", snap.Screen.Cols, snap.Screen.Rows)
 	}

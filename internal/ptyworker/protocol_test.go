@@ -69,12 +69,14 @@ func TestResponseEnvelopeErrorRoundTrip(t *testing.T) {
 }
 
 func TestSnapshotResultRoundTrip(t *testing.T) {
+	screenText := "plain viewport"
 	original := SnapshotResult{
 		LastSeq:        42,
 		Cols:           100,
 		Rows:           30,
 		Running:        true,
 		ScreenSnapshot: []byte("rendered viewport"),
+		ScreenText:     &screenText,
 		ScreenCols:     80,
 		ScreenRows:     24,
 	}
@@ -89,7 +91,7 @@ func TestSnapshotResultRoundTrip(t *testing.T) {
 	if decoded.LastSeq != original.LastSeq || decoded.Cols != original.Cols || decoded.Rows != original.Rows || decoded.Running != original.Running {
 		t.Fatalf("snapshot metadata = %+v, want %+v", decoded, original)
 	}
-	if string(decoded.ScreenSnapshot) != string(original.ScreenSnapshot) || decoded.ScreenCols != original.ScreenCols || decoded.ScreenRows != original.ScreenRows {
+	if string(decoded.ScreenSnapshot) != string(original.ScreenSnapshot) || decoded.ScreenText == nil || *decoded.ScreenText != *original.ScreenText || decoded.ScreenCols != original.ScreenCols || decoded.ScreenRows != original.ScreenRows {
 		t.Fatalf("snapshot viewport = %+v, want %+v", decoded, original)
 	}
 }

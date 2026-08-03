@@ -1027,6 +1027,9 @@ func (d *Daemon) Start() error {
 	// driven by cron granularity, not retention policy.
 	go d.runAutomationRetentionSweep()
 	go d.runEvidenceResolveLoop()
+	// Opt-in local viewport dataset capture. The loop re-reads settings on every
+	// pass, so toggles and cadence changes apply to already-running sessions.
+	go d.runModelCaptureLoop()
 
 	// Ticket TTL sweep: hard-deletes terminal tickets past their retention
 	// window. This is also what actually bounds a bound continuity thread's
