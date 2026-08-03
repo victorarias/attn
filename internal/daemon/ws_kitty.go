@@ -4,9 +4,16 @@ package daemon
 // stores; this translates its observations into the protocol clients speak, and
 // answers their pulls for the pixels behind a placement.
 //
-// Two rules run through everything here. Placement traffic is gated on
-// CapabilityKittyImages, because a client that cannot draw an image has nothing
-// to do with the description and the events would be pure noise on its socket.
+// Two capabilities answer two different questions, and keeping them apart is
+// what makes the remote relay work. CapabilityKittyImages is "describe images
+// to me": it gates the kitty_placements fan-out, because a client that draws no
+// images has nothing to do with the description. CapabilityBinaryPtyOutput is
+// "I take binary frames", the same bit that already picks PTY output's
+// transport, and it decides only how a blob travels — frame 0x02 or base64 in
+// JSON. A client can want one without the other: the hub relays kitty traffic
+// between daemons over a text pipe, so it asks for the descriptions and takes
+// its blobs as JSON.
+//
 // And nothing is correlated by request id: an answer names (session, image id,
 // generation), which is the key a client's blob cache uses, so a duplicate is an
 // idempotent refill rather than an orphan.
@@ -92,14 +99,17 @@ func kittyImageFormatCode(format ghosttyvt.KittyImageFormat) (byte, bool) {
 }
 
 // handleGetKittyImage answers a client's pull for the pixels behind a
-// placement. Capable clients get binary frame 0x02; everyone else gets the same
-// image base64'd into kitty_image_result, so an automation client can assert on
-// an image without implementing the frame.
+// placement. It answers whatever the client advertised — asking is enough, and
+// an automation client that never opted into the description feed still needs
+// to be able to assert on an image. Only the transport is a capability
+// decision: CapabilityBinaryPtyOutput gets binary frame 0x02, everyone else
+// gets the same image base64'd into kitty_image_result.
 //
 // Every failure is an ordinary answer with success=false — an evicted or
 // unknown id, a backend that cannot serve images at all — because none of them
 // mean the session is broken, and the client's move in all cases is the same:
-// drop that placement's render until something re-describes it.
+// drop that placement's render until something re-describes it. A failure has
+// no pixels and so no frame, so it goes as JSON to both kinds of client.
 func (d *Daemon) handleGetKittyImage(client *wsClient, msg *protocol.GetKittyImageMessage) {
 	provider, ok := d.ptyBackend.(ptybackend.KittyImageProvider)
 	if !ok {
@@ -120,10 +130,10 @@ func (d *Daemon) handleGetKittyImage(client *wsClient, msg *protocol.GetKittyIma
 	d.logf(
 		"kitty image: id=%s image=%d generation=%d %dx%d format=%d bytes=%d binary=%v",
 		msg.ID, image.ID, image.Generation, image.Width, image.Height,
-		format, len(image.Data), client.HasCapability(protocol.CapabilityKittyImages),
+		format, len(image.Data), client.HasCapability(protocol.CapabilityBinaryPtyOutput),
 	)
 
-	if client.HasCapability(protocol.CapabilityKittyImages) {
+	if client.HasCapability(protocol.CapabilityBinaryPtyOutput) {
 		frame, err := protocol.EncodeKittyImageFrame(
 			msg.ID, image.ID, image.Generation, image.Width, image.Height, format, image.Data,
 		)

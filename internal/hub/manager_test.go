@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -622,7 +623,15 @@ func TestForwardsRawEventIncludesPickerResults(t *testing.T) {
 // spawn_session, forwarded client payloads, ...) from a connection that never
 // sent client_hello. The hub's persistent endpoint connection must therefore
 // declare workspace_sessions before anything else is written.
-func TestSendClientHelloDeclaresWorkspaceSessions(t *testing.T) {
+//
+// The rest of the list is load-bearing for the remote leg in both directions,
+// so this pins it exactly rather than checking for presence. kitty_images is
+// what makes a remote session's images visible at all — the remote daemon
+// describes placements only to clients that ask, and this is its only client,
+// so dropping it silently kills images on every remote session. Adding
+// binary_pty_output would break the relay outright: it reads each message back
+// as a JSON envelope, so a binary frame arrives as bytes it cannot parse.
+func TestSendClientHelloDeclaresExactlyTheRelaysCapabilities(t *testing.T) {
 	received := make(chan protocol.ClientHelloMessage, 1)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		conn, err := websocket.Accept(w, r, nil)
@@ -668,14 +677,13 @@ func TestSendClientHelloDeclaresWorkspaceSessions(t *testing.T) {
 		if want := "protocol-" + protocol.ProtocolVersion; hello.Version != want {
 			t.Errorf("version = %q, want %q", hello.Version, want)
 		}
-		found := false
-		for _, c := range hello.Capabilities {
-			if c == protocol.CapabilityWorkspaceSessions {
-				found = true
-			}
+		want := []string{protocol.CapabilityWorkspaceSessions, protocol.CapabilityKittyImages}
+		if !slices.Equal(hello.Capabilities, want) {
+			t.Errorf("capabilities = %v, want exactly %v", hello.Capabilities, want)
 		}
-		if !found {
-			t.Errorf("capabilities = %v, missing %q", hello.Capabilities, protocol.CapabilityWorkspaceSessions)
+		if slices.Contains(hello.Capabilities, protocol.CapabilityBinaryPtyOutput) {
+			t.Errorf("capabilities = %v, must not advertise %q over a text relay",
+				hello.Capabilities, protocol.CapabilityBinaryPtyOutput)
 		}
 	case <-ctx.Done():
 		t.Fatal("timed out waiting for client_hello")

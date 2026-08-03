@@ -45,7 +45,21 @@ func kittyTestImage() pty.KittyImage {
 	}
 }
 
+// kittyCapableClient is the real app's set: it wants the descriptions and can
+// decode a binary frame.
 func kittyCapableClient() *wsClient {
+	client := spawnTestClient()
+	client.setIdentity("test", "v", []string{
+		protocol.CapabilityWorkspaceSessions,
+		protocol.CapabilityKittyImages,
+		protocol.CapabilityBinaryPtyOutput,
+	})
+	return client
+}
+
+// kittyRelayClient is the hub's set: it wants the descriptions and cannot take
+// a binary frame, because it relays what it receives over a text pipe.
+func kittyRelayClient() *wsClient {
 	client := spawnTestClient()
 	client.setIdentity("test", "v", []string{
 		protocol.CapabilityWorkspaceSessions,
@@ -79,20 +93,30 @@ func readKittyImageResult(t *testing.T, client *wsClient) protocol.KittyImageRes
 }
 
 // The event family is the only thing that tells a client an image exists, and a
-// client that cannot draw one has nothing to do with it. Sending anyway spams
-// every automation client and relay with traffic they parse and drop; not
-// sending to a capable client leaves the app blind to every image.
+// client that draws none has nothing to do with it. Sending anyway spams every
+// automation client with traffic it parses and drops; not sending leaves a
+// client that asked blind to every image.
+//
+// The gate is kitty_images and nothing else. The two clients in the middle are
+// what pin that: a gate accidentally written against binary_pty_output would
+// serve the hub nothing (killing images on every remote session) and spam a
+// binary-capable client that never asked.
 func TestKittyPlacementsReachOnlyClientsThatAskedForThem(t *testing.T) {
-	capable := kittyCapableClient()
-	plain := kittyPlainClient()
+	binaryOnly := spawnTestClient()
+	binaryOnly.setIdentity("test", "v", []string{
+		protocol.CapabilityWorkspaceSessions,
+		protocol.CapabilityBinaryPtyOutput,
+	})
 
 	for _, tc := range []struct {
 		name      string
 		client    *wsClient
 		wantEvent bool
 	}{
-		{"capable client", capable, true},
-		{"client without the capability", plain, false},
+		{"app: describes and decodes frames", kittyCapableClient(), true},
+		{"hub: describes, no frames", kittyRelayClient(), true},
+		{"decodes frames but never asked", binaryOnly, false},
+		{"asked for neither", kittyPlainClient(), false},
 	} {
 		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 		t.Cleanup(func() { _ = d.store.Close() })
@@ -169,10 +193,10 @@ func TestKittyPlacementsEventCarriesTheEmptySet(t *testing.T) {
 	}
 }
 
-// Capable clients take the pixels as a binary frame — a measured real image is
-// megabytes, and base64-in-JSON adds a third of that plus a parse stall on the
-// UI thread.
-func TestHandleGetKittyImageAnswersCapableClientsWithABinaryFrame(t *testing.T) {
+// Clients that can decode a frame take the pixels that way — a measured real
+// image is megabytes, and base64-in-JSON adds a third of that plus a parse
+// stall on the UI thread.
+func TestHandleGetKittyImageAnswersBinaryCapableClientsWithAFrame(t *testing.T) {
 	image := kittyTestImage()
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(func() { _ = d.store.Close() })
@@ -200,9 +224,39 @@ func TestHandleGetKittyImageAnswersCapableClientsWithABinaryFrame(t *testing.T) 
 	}
 }
 
-// Automation clients and relays never take a binary frame, so the same image
-// has to be assertable as JSON — otherwise nothing outside the app can prove an
-// image reached a session.
+// The hub asks for image descriptions and cannot take a binary frame: it relays
+// what it receives over a text pipe, re-reading each message as a JSON envelope
+// before pushing it on, so a frame would arrive as bytes it cannot parse and go
+// out as an invalid text message. Wanting the descriptions must therefore not
+// imply wanting the frames — this is the whole reason the two capabilities are
+// separate, and the contract the remote leg rests on.
+func TestHandleGetKittyImageAnswersTheRelayWithBase64DespiteKittyImages(t *testing.T) {
+	image := kittyTestImage()
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(func() { _ = d.store.Close() })
+	d.ptyBackend = &kittyImageBackend{fakeSpawnBackend: &fakeSpawnBackend{}, image: image}
+	client := kittyRelayClient()
+
+	d.handleGetKittyImage(client, &protocol.GetKittyImageMessage{ID: "sess-1", ImageID: 77})
+
+	result := readKittyImageResult(t, client)
+	if !result.Success {
+		t.Fatalf("result failed: %v", protocol.Deref(result.Error))
+	}
+	if protocol.Deref(result.Format) != "rgb" || protocol.Deref(result.Generation) != 5 {
+		t.Fatalf("result = %+v", result)
+	}
+	pixels, err := base64.StdEncoding.DecodeString(protocol.Deref(result.DataB64))
+	if err != nil {
+		t.Fatalf("decode data_b64: %v", err)
+	}
+	if string(pixels) != string(image.Data) {
+		t.Fatalf("pixels = %x, want %x", pixels, image.Data)
+	}
+}
+
+// Automation clients that never opted into anything still have to be able to
+// pull an image, or nothing outside the app can prove one reached a session.
 func TestHandleGetKittyImageAnswersPlainClientsWithBase64(t *testing.T) {
 	image := kittyTestImage()
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))

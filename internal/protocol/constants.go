@@ -24,17 +24,23 @@ const CapabilityBrowserHost = "browser_host"
 // binary websocket frames (see binaryframe.go) instead of base64-in-JSON
 // pty_output events. Clients without it keep the JSON event, which is what
 // keeps daemon-to-daemon relays and older automation clients working.
+//
+// It is the general "this client takes binary frames" bit, so kitty image blobs
+// ride it too: the same client that can decode a PTY frame can decode a blob.
 const CapabilityBinaryPtyOutput = "binary_pty_output"
 
-// CapabilityKittyImages opts a client into the kitty image feed: the
-// kitty_placements event describing where images sit on the grid, and the
-// binary blob frames answering get_kitty_image. A client without it is told
-// nothing about images, which is what every client did before this existed —
-// the APC bytes are stripped from the PTY stream, so an unaware client draws a
-// correct screen with no images in it.
+// CapabilityKittyImages opts a client into being TOLD about images: the
+// kitty_placements event describing where they sit on the grid. A client
+// without it hears nothing about them, which is what every client did before
+// this existed — the APC bytes are stripped from the PTY stream, so an unaware
+// client draws a correct screen with no images in it.
 //
-// get_kitty_image answers regardless of the capability (as base64-in-JSON), so
-// automation clients can assert on an image without taking the binary path.
+// It says nothing about transport. get_kitty_image answers whether or not a
+// client advertised this, and how the pixels travel is
+// CapabilityBinaryPtyOutput's call. The two are separate because the hub asks
+// for one and not the other: it relays kitty traffic between daemons over a
+// text pipe, so it needs the descriptions in JSON and cannot take a binary
+// frame at all.
 const CapabilityKittyImages = "kitty_images"
 
 // SessionAgent labels in-tree and externally registered agent identifiers.

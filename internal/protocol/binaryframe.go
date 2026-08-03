@@ -45,8 +45,11 @@ const BinaryFrameTypePtyOutput byte = 0x01
 // is the same key a client's blob cache is keyed on, so a duplicate answer is
 // an idempotent cache fill rather than an orphan.
 //
-// Clients that did not advertise CapabilityKittyImages get the base64
-// kitty_image_result event instead.
+// Clients that did not advertise CapabilityBinaryPtyOutput get the base64
+// kitty_image_result event instead — the same bit that picks pty_output's
+// transport picks this one, because it is the one that says a client can decode
+// a frame at all. Wanting to hear about images is a separate question
+// (CapabilityKittyImages), and the hub answers the two differently.
 const BinaryFrameTypeKittyImage byte = 0x02
 
 const binaryPtyHeaderBytes = 1 + 1 + 4 // type + id length + seq

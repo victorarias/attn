@@ -1867,9 +1867,10 @@ model GetScreenSnapshotMessage {
 // it, so kitty_placements describes and this fetches what the cache lacks.
 //
 // image_id alone identifies the image — a terminal holds one generation per id,
-// and the answer states which. Answered whether or not the client advertised
-// "kitty_images"; the capability only decides whether the pixels come back as
-// binary frame 0x02 or as base64 in kitty_image_result.
+// and the answer states which. Asking is enough: this is answered whether or
+// not the client advertised "kitty_images". What decides the shape of the
+// answer is "binary_pty_output" — with it the pixels come back as binary frame
+// 0x02, without it as base64 in kitty_image_result.
 model GetKittyImageMessage {
   cmd: "get_kitty_image";
   id: string;
@@ -3323,12 +3324,16 @@ model KittyPlacementsMessage {
 // (ghostty decodes PNG and inflates zlib before storing, so there is no
 // compressed form to pass through).
 //
-// This JSON form serves clients WITHOUT the "kitty_images" capability —
-// automation and relays — so they can still assert on an image. Capable clients
-// get the same pixels as binary frame 0x02 instead, skipping base64.
+// This JSON form serves clients WITHOUT "binary_pty_output" — automation
+// clients and the hub's daemon-to-daemon relay, which is a text pipe — so they
+// can still assert on an image. Clients advertising it get the same pixels as
+// binary frame 0x02 instead, skipping base64. Note this is the transport bit,
+// not "kitty_images": whether a client is TOLD about images and whether it can
+// decode a frame are separate questions.
 //
 // A FAILURE has no pixels and so has no frame: success=false always arrives
-// here, on both kinds of client. A capable client must handle both shapes.
+// here, on both kinds of client. A binary-capable client must handle both
+// shapes.
 //
 // Correlation is by content key (id, image_id, generation), never a request id:
 // a cache fill is last-writer-wins per key, and two answers for the same key

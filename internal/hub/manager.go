@@ -576,12 +576,26 @@ func versionMismatchStatus(e *VersionMismatchError) (string, string) {
 // hello is fire-and-forget (the daemon never replies to it), but without the
 // workspace_sessions capability it declares, the daemon rejects every gated
 // command later forwarded over this connection.
+//
+// kitty_images is what makes a remote session's images visible at all: the
+// remote daemon sends placement descriptions only to clients that ask, and this
+// connection is the only client it has. The relay carries them onward by
+// session id like pty_output.
+//
+// binary_pty_output is deliberately absent, here as for PTY output. The relay
+// is a text pipe — it reads a message, re-reads the envelope as JSON, and
+// re-broadcasts — so a binary frame would arrive as bytes it cannot parse and
+// would be pushed out as an invalid text message. Leaving the bit off makes the
+// remote daemon answer image pulls with base64 JSON, which survives the trip.
 func sendClientHello(ctx context.Context, conn *websocket.Conn) error {
 	payload, err := json.Marshal(protocol.ClientHelloMessage{
-		Cmd:          protocol.CmdClientHello,
-		ClientKind:   "hub",
-		Version:      "protocol-" + protocol.ProtocolVersion,
-		Capabilities: []string{protocol.CapabilityWorkspaceSessions},
+		Cmd:        protocol.CmdClientHello,
+		ClientKind: "hub",
+		Version:    "protocol-" + protocol.ProtocolVersion,
+		Capabilities: []string{
+			protocol.CapabilityWorkspaceSessions,
+			protocol.CapabilityKittyImages,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal client_hello: %w", err)
