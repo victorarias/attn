@@ -161,6 +161,31 @@
   opacity: 0.75;
 }
 
+/* Why an annotate gesture did nothing, said where the gesture was made. Not a
+   toast in the corner: the user is looking at the text they just dragged over,
+   and an explanation that appears somewhere else is one they never see. */
+.anno-notice {
+  position: fixed;
+  z-index: 60;
+  transform: translate(-50%, -100%) translateY(-8px);
+  max-width: 340px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border);
+  background: var(--color-bg-elevated);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  line-height: 1.45;
+  /* It explains a finished gesture and disappears on its own; catching the
+     pointer would make it something in the way. */
+  pointer-events: none;
+}
+
+.anno-notice--placed {
+  transform: none;
+}
+
 .anno-panel {
   position: fixed;
   right: 20px;

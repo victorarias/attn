@@ -1,0 +1,18 @@
+kind: changed
+area: terminal
+change: >
+  Terminal annotations can now say a thing is right. 💯 "Exactly this" leads the
+  label row, held apart from the seven labels that ask for a change, and tells
+  the agent to preserve the decision and the reasoning behind it rather than
+  revisit it on the next pass. Until now every label was a correction, so the
+  only feedback the surface could carry was an objection. The feedback message
+  also stops opening with "Address each annotation" — the annotations are the
+  instruction.
+notes: >
+  An annotate gesture that resolves to nothing now says why instead of doing
+  nothing. Four causes looked identical on screen — the text is not the agent's,
+  the session has no readable transcript, the turn is still running, or the
+  agent has not spoken yet — and each has a different answer, so the surface
+  names the one that applies where the gesture was made. The daemon also logs
+  the unresolvable-transcript case with the session's agent and directory, which
+  was previously returned to the app and dropped without a trace on either side.

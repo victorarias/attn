@@ -24,6 +24,10 @@ import type { UISessionState } from '../../types/sessionState';
 interface CapturedProps {
   annotations?: TerminalAnnotationStore;
   onAnnotationAnchor?: (anchor: MessageAnchor, at: { clientX: number; clientY: number }) => void;
+  onAnnotationMiss?: (
+    reason: 'no-messages' | 'outside-messages',
+    at: { clientX: number; clientY: number },
+  ) => void;
   onAnnotationActivate?: (annotationId: string, at: { clientX: number; clientY: number }) => void;
 }
 
@@ -161,6 +165,17 @@ function anchor(messageKey: string, start: number, end: number) {
   act(() => {
     terminal.onAnnotationAnchor?.({ messageKey, start, end, quote }, { clientX: 120, clientY: 200 });
   });
+}
+
+/** Drives an alt-drag the terminal could not resolve to an anchor. */
+function miss(reason: 'no-messages' | 'outside-messages') {
+  act(() => {
+    terminal.onAnnotationMiss?.(reason, { clientX: 120, clientY: 200 });
+  });
+}
+
+function notice(): string | null {
+  return screen.queryByTestId('annotation-notice')?.textContent ?? null;
 }
 
 /** Drives the alt-click the terminal reports over an existing wash. */
@@ -767,5 +782,94 @@ describe('AnnotatedTerminal persistence', () => {
     }], daemon.tombstone);
     expect(late.stale).toBe(true);
     expect(daemon.annotations).toHaveLength(0);
+  });
+
+  // An annotate gesture that resolves to nothing used to do exactly nothing —
+  // no popup, no message, no log line — and the four reasons for it are
+  // indistinguishable from the feature being broken.
+  describe('when a gesture cannot be annotated', () => {
+    it('says the text was not the agent’s when there is a window it missed', async () => {
+      renderTerminal();
+      await windowReady('turn-1');
+
+      miss('outside-messages');
+
+      expect(notice()).toContain('Only what the agent wrote can be annotated');
+    });
+
+    it('names the unreadable transcript rather than blaming the selection', async () => {
+      // The daemon's own path: resolveTranscriptPathForSession found nothing, so
+      // there is no window and never will be for this session.
+      const daemon = new FakeAnnotationDaemon();
+      daemon.fetchMessages = async () => {
+        throw new Error('session_messages_get: no transcript for session session-1');
+      };
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      renderTerminal({ api: daemon });
+      await waitFor(() => expect(warn).toHaveBeenCalled());
+
+      miss('no-messages');
+
+      expect(notice()).toContain('No transcript could be read');
+      // The sentence is for the user; the daemon's wording is what makes the
+      // cause searchable afterwards.
+      expect(warn.mock.calls[0][0]).toContain('no transcript for session session-1');
+      warn.mockRestore();
+    });
+
+    it('points at the running turn when the window was never fetched', async () => {
+      // Not an error at all: nothing is anchored mid-turn by design, and the
+      // user has only to wait.
+      renderTerminal({ state: 'working' });
+
+      miss('no-messages');
+
+      expect(notice()).toContain('once the agent stops talking');
+    });
+
+    it('says the agent has not spoken when the window came back empty', async () => {
+      const daemon = new FakeAnnotationDaemon();
+      daemon.messages = [];
+      renderTerminal({ api: daemon });
+      await waitFor(() => expect(daemon.calls.fetchMessages).toBe(1));
+
+      miss('no-messages');
+
+      expect(notice()).toContain('has not written a message');
+    });
+
+    it('clears itself once an annotation actually lands', async () => {
+      renderTerminal();
+      await windowReady('turn-1');
+      miss('outside-messages');
+      expect(notice()).not.toBeNull();
+
+      anchor('turn-1', 0, 26);
+
+      expect(notice()).toBeNull();
+      expect(screen.getByTestId('annotation-popup')).toBeTruthy();
+    });
+
+    it('goes away on its own rather than becoming something to dismiss', async () => {
+      vi.useFakeTimers();
+      try {
+        renderTerminal();
+        // Settle the hydrate/window fetches inside act so their resolution is
+        // not mistaken for the timer this test is about.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0);
+        });
+        miss('outside-messages');
+        expect(notice()).not.toBeNull();
+
+        act(() => {
+          vi.advanceTimersByTime(5000);
+        });
+
+        expect(notice()).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

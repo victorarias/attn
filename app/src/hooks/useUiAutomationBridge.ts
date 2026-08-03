@@ -959,6 +959,7 @@ function paneCellRect(
 function annotationSurfaceState() {
   const popup = document.querySelector('[data-testid="annotation-popup"]');
   const panel = document.querySelector('[data-testid="annotation-panel"]');
+  const notice = document.querySelector('[data-testid="annotation-notice"]');
   const text = (root: Element | null | undefined, selector: string) =>
     root?.querySelector(selector)?.textContent?.trim() ?? '';
   // Reported so a driver can check the surface is actually reachable — a popup
@@ -1000,6 +1001,11 @@ function annotationSurfaceState() {
       removeRect: box(card.querySelector('.anno-card-remove')),
     })),
     footer: text(panel, '.anno-panel-foot'),
+    // What an annotate gesture that resolved to nothing said for itself. The
+    // whole failure mode this covers is silence, so a driver asserting only on
+    // popup/panel presence cannot tell "explained itself" from "did nothing".
+    notice: notice?.textContent?.trim() ?? null,
+    noticeRect: box(notice),
   };
 }
 
