@@ -1,0 +1,11 @@
+kind: internal
+area: daemon
+change: >
+  Document queries are now checked against a second, deliberately dumb query
+  path — a shadow table with no generated columns and no indexes, paginated by
+  slicing — so the compiler's SQL, its index and its cursor are compared against
+  an answer that cannot be subtly wrong. Three legs: every arrangement of a
+  six-value alphabet across three documents (85,536 checks, no random seed),
+  a four-thousand document corpus large enough that SQLite reaches for the
+  index, and a corpus written, deleted and redeclared while the queries run.
+  ATTN_DOCSTORE_SWEEP widens the exhaustive leg for a soak run.
