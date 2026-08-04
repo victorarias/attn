@@ -172,8 +172,15 @@ async function waitForPaneWriteQuiescence(
   }
 }
 
+// Let `frames` frames actually elapse, so a React commit, the layout it
+// triggers, and the paint that follows each get their own frame to happen in.
+// The awaits have to be sequential: nextAnimationFrame() registers its callback
+// when it is constructed, so building them all up front queues them onto the
+// same frame and Promise.all would return after one, whatever `frames` says.
 async function settleUi(frames = 2) {
-  await Promise.all(Array.from({ length: frames }, () => nextAnimationFrame()));
+  for (let index = 0; index < frames; index += 1) {
+    await nextAnimationFrame();
+  }
 }
 
 function resolvePaneId(
