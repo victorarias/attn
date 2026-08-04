@@ -123,6 +123,14 @@ type modelWorld struct {
 	table  string
 	shadow string
 	ids    []string
+
+	// anchors caches the cursor lookup. Compiling an After cursor needs the
+	// anchor document, and one corpus is asked about the same handful of anchors
+	// by hundreds of queries that cannot have changed it; re-reading each one is
+	// most of the statements the harness runs. Cleared whenever the corpus moves,
+	// which is what refillShadow already marks — every path that writes, deletes
+	// or redeclares goes through it.
+	anchors map[string]*docstore.Document
 }
 
 func newModelWorld(t *testing.T) *modelWorld {
@@ -137,7 +145,7 @@ func newModelWorldFor(t *testing.T, decl docstore.CollectionSchema, ids []string
 		t.Fatalf("define: %v", err)
 	}
 	schema := declOf(t, s, decl.Namespace, decl.Collection)
-	w := &modelWorld{t: t, s: s, schema: schema, table: schema.Table, shadow: "shadow_docs", ids: ids}
+	w := &modelWorld{t: t, s: s, schema: schema, table: schema.Table, shadow: "shadow_docs", ids: ids, anchors: map[string]*docstore.Document{}}
 	w.createShadow()
 	return w
 }
@@ -193,6 +201,7 @@ func (w *modelWorld) loadCorpus(bodies []string) {
 // refillShadow rebuilds the dumb table from the real one.
 func (w *modelWorld) refillShadow() {
 	w.t.Helper()
+	w.anchors = map[string]*docstore.Document{}
 	if _, err := w.s.db.Exec("DELETE FROM " + w.shadow); err != nil {
 		w.t.Fatalf("clear shadow: %v", err)
 	}
@@ -339,18 +348,35 @@ func naivePage(matching, everything []string, q docstore.Query) []string {
 	return append([]string{}, out...)
 }
 
+// anchorFor reads the document a cursor names — the same read the daemon makes
+// before compiling a paged query — and remembers it for as long as the corpus
+// holds still. A cursor naming a document that is not there stays a nil anchor,
+// which is the case the compiler rejects and an example test pins; caching must
+// not turn that into a miss that silently re-reads.
+func (w *modelWorld) anchorFor(after string) (*docstore.Document, error) {
+	if after == "" {
+		return nil, nil
+	}
+	if doc, ok := w.anchors[after]; ok {
+		return doc, nil
+	}
+	doc, found, err := w.s.GetDocument(w.schema, after)
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		doc = nil
+	}
+	w.anchors[after] = doc
+	return doc, nil
+}
+
 // realIDs runs the query through the compiler and the store — the path under
 // test, exactly as the daemon drives it.
 func (w *modelWorld) realIDs(q docstore.Query) ([]string, error) {
-	var anchor *docstore.Document
-	if q.After != "" {
-		doc, found, err := w.s.GetDocument(w.schema, q.After)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			anchor = doc
-		}
+	anchor, err := w.anchorFor(q.After)
+	if err != nil {
+		return nil, err
 	}
 	c, err := q.Compile(w.schema, anchor)
 	if err != nil {
@@ -376,15 +402,9 @@ func (w *modelWorld) realIDs(q docstore.Query) ([]string, error) {
 // support — a class that cannot appear until there is enough data for SQLite to
 // prefer the index at all.
 func (w *modelWorld) unindexedIDs(q docstore.Query) ([]string, error) {
-	var anchor *docstore.Document
-	if q.After != "" {
-		doc, found, err := w.s.GetDocument(w.schema, q.After)
-		if err != nil {
-			return nil, err
-		}
-		if found {
-			anchor = doc
-		}
+	anchor, err := w.anchorFor(q.After)
+	if err != nil {
+		return nil, err
 	}
 	c, err := q.Compile(w.schema, anchor)
 	if err != nil {
@@ -810,15 +830,9 @@ func TestALargeRandomCorpusAgreesWithTheDumbQuery(t *testing.T) {
 // its own plan rather than guessed from the shape of the SQL.
 func (w *modelWorld) usesAnIndex(q docstore.Query) bool {
 	w.t.Helper()
-	var anchor *docstore.Document
-	if q.After != "" {
-		doc, found, err := w.s.GetDocument(w.schema, q.After)
-		if err != nil {
-			w.t.Fatalf("anchor: %v", err)
-		}
-		if found {
-			anchor = doc
-		}
+	anchor, err := w.anchorFor(q.After)
+	if err != nil {
+		w.t.Fatalf("anchor: %v", err)
 	}
 	c, err := q.Compile(w.schema, anchor)
 	if err != nil {
