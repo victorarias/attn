@@ -532,11 +532,17 @@ export class WebGlTerminalRenderer {
       : null;
 
     // The cursor is drawn as an inverted cell, so where it sits is part of the
-    // frame even when no cell content changed. A same-row move, a visibility
-    // toggle, or a move made while hidden all report DIRTY_NONE, so comparing
-    // it against the last frame is the only thing standing between those and a
-    // cursor left painted at its old column until unrelated output arrives.
-    const cursorMoved = cursorRow !== this.lastCursorRow || cursor.x !== this.lastCursorCol;
+    // frame even when no cell content changed. A same-row move and a visibility
+    // toggle both report DIRTY_NONE, and comparing the cursor against the last
+    // frame here is the only thing standing between those and a cursor left
+    // painted at its old column until unrelated output arrives.
+    //
+    // Only the drawn cursor counts. A hidden one paints nothing, so its column
+    // cannot go stale, and a TUI moving a hidden cursor mid-redraw — which they
+    // do constantly — would otherwise pass this check, find no row to mark, and
+    // be escalated to a full-grid paint by the zero-row guard below.
+    const cursorMoved = cursorRow !== this.lastCursorRow
+      || (cursorRow !== null && cursor.x !== this.lastCursorCol);
     if (!force && dirty === DIRTY_NONE && !cursorMoved) {
       return null;
     }

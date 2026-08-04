@@ -676,6 +676,38 @@ describe('WebGlTerminalRenderer dirty rows', () => {
     expect(renderer.render(terminal)).toBeNull();
   });
 
+  // A hidden cursor paints nothing, so moving it changes no pixels. Treating
+  // that as a render reason is worse than missing it: the frame has no row to
+  // mark, so the zero-row guard escalates it to a full-grid paint — on the one
+  // path (a TUI redrawing with the cursor hidden) that must stay cheap.
+  it('does not paint at all when a hidden cursor moves with nothing else dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: false };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 31, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
+  it('does not paint when a hidden cursor changes row with nothing else dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: false };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 4, y: 44, visible: false };
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
   it('paints nothing extra when a hidden cursor moves', () => {
     const { renderer } = makeRenderer();
     const { terminal, state } = makeControllableTerminal(50, 50);

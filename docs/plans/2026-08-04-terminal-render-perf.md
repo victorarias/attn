@@ -306,6 +306,14 @@ row the frame is PARTIAL, the cursor's own row is absent from the set, and the
 cursor is baked into that cached row, so the row keeps the cursor at its old
 column until a full paint.
 
+Only the *drawn* cursor counts. A hidden cursor paints nothing, so its column
+cannot go stale, and treating a hidden-to-hidden column move as a render reason
+is worse than missing it: the frame has no row to mark, so the zero-row guard
+escalates it to a whole-grid paint — on exactly the path that must stay cheap,
+since a TUI redrawing hides the cursor and moves it constantly. The comparison
+therefore looks at the row always and the column only while the cursor is
+visible.
+
 So the renderer compares the cursor position ahead of the early return, and a
 partial paint marks the cursor's row and the row it was last drawn on on top of
 `isRowDirty()`. A frame that exists *only* because the cursor moved has no dirty
@@ -333,6 +341,8 @@ partial-paint work has to keep doing so.
 - A bare same-row move and a bare visibility toggle — both NONE dirty states —
   each produce a three-row partial paint rather than no paint or a full one.
   A frame where nothing at all changed still returns null.
+- A hidden cursor moving by column or by row under a NONE dirty state produces
+  no paint at all, so a hidden-cursor redraw never escalates to a full grid.
 - Live on the packaged build (profile `cursorpaint`, 155x46 = 7,130-cell pane):
   every paint partial, 1.54 MB retained row vertices under the 2 MiB ceiling,
   and the `bridge-pty-bench` progress payload rebuilt 2 rows per frame with
