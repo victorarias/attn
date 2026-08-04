@@ -308,8 +308,14 @@ export function SettingsModal({
   // The keeper master switch is daemon-normalized to its effective value (default ON),
   // so a missing key reads as enabled rather than off.
   const keeperTasksEnabled = (settings['notebook.tasks_enabled'] ?? 'true') !== 'false';
-  const notebookSummariesEnabled =
-    (settings['notebook.summarize_session.enabled'] ?? 'true') !== 'false';
+  const keeperDutyEnabled = useMemo(() => {
+    const enabled = {} as Record<KeeperDutyKey, boolean>;
+    for (const duty of KEEPER_DUTIES) {
+      enabled[duty.key] = duty.enabledSettingKey === undefined
+        || (settings[duty.enabledSettingKey] ?? 'true') !== 'false';
+    }
+    return enabled;
+  }, [settings]);
   const resolvedDefaultAgent = resolvePreferredAgent(actualDefaultAgent, agentAvailability, 'codex');
   const orderedAgentList = useMemo(
     () => orderedAgents(agentAvailability, resolvedDefaultAgent, 'codex'),
@@ -664,12 +670,11 @@ export function SettingsModal({
     onSetSetting('notebook.tasks_enabled', keeperTasksEnabled ? 'false' : 'true');
   }, [keeperTasksEnabled, onSetSetting]);
 
-  const handleToggleNotebookSummaries = useCallback(() => {
-    onSetSetting(
-      'notebook.summarize_session.enabled',
-      notebookSummariesEnabled ? 'false' : 'true',
-    );
-  }, [notebookSummariesEnabled, onSetSetting]);
+  const handleToggleKeeperDuty = useCallback((dutyKey: KeeperDutyKey) => {
+    const duty = KEEPER_DUTY_BY_KEY[dutyKey];
+    if (!duty.enabledSettingKey) return;
+    onSetSetting(duty.enabledSettingKey, keeperDutyEnabled[dutyKey] ? 'false' : 'true');
+  }, [keeperDutyEnabled, onSetSetting]);
 
   // Switching a duty's agent resets its model to that agent's recommended default
   // (the first preset); choosing the empty "Disabled" agent (opt-in duties only)
@@ -2056,7 +2061,7 @@ export function SettingsModal({
               const agentId = `${duty.testIdPrefix}-agent`;
               const modelId = `${duty.testIdPrefix}-model`;
               const customId = `${duty.testIdPrefix}-model-custom`;
-              const dutyEnabled = duty.key !== 'summarize' || notebookSummariesEnabled;
+              const dutyEnabled = keeperDutyEnabled[duty.key];
               return (
                 <div
                   className={`settings-keeper-duty${dutyEnabled ? '' : ' is-disabled'}`}
@@ -2067,17 +2072,15 @@ export function SettingsModal({
                       <p className="settings-row-title">{duty.title}</p>
                       <p className="settings-row-copy">{duty.description}</p>
                     </div>
-                    {duty.key === 'summarize' && (
+                    {duty.enabledSettingKey && (
                       <button
                         type="button"
                         className="settings-action"
-                        data-testid="settings-keeper-summarize-toggle"
-                        aria-label={notebookSummariesEnabled
-                          ? 'Disable session summaries'
-                          : 'Enable session summaries'}
-                        onClick={handleToggleNotebookSummaries}
+                        data-testid={`${duty.testIdPrefix}-toggle`}
+                        aria-label={`${dutyEnabled ? 'Disable' : 'Enable'} ${duty.title.toLowerCase()}`}
+                        onClick={() => handleToggleKeeperDuty(duty.key)}
                       >
-                        {notebookSummariesEnabled ? 'Disable' : 'Enable'}
+                        {dutyEnabled ? 'Disable' : 'Enable'}
                       </button>
                     )}
                   </div>
@@ -2159,7 +2162,7 @@ export function SettingsModal({
                     </div>
                   ) : (
                     <div className="settings-hint">
-                      {duty.key === 'summarize' && !notebookSummariesEnabled
+                      {duty.enabledSettingKey && !dutyEnabled
                         ? `Disabled. Its ${duty.defaultLabel} model setting is preserved.`
                         : `Defaults to ${duty.defaultLabel} when unset.`}
                     </div>

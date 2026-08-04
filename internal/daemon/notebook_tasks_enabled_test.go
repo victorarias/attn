@@ -57,6 +57,29 @@ func TestNotebookSummariesEnabledDefaultsOn(t *testing.T) {
 	}
 }
 
+// TestNotebookWorkspaceNarrationEnabledDefaultsOn proves the curated-journal
+// switch is opt-out and appears as its effective value in every settings snapshot.
+func TestNotebookWorkspaceNarrationEnabledDefaultsOn(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	if !d.notebookWorkspaceNarrationEnabled() {
+		t.Fatal("unset notebook.narrate_workspace.enabled must default to ON")
+	}
+	settings := d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookNarrateWorkspaceEnabled]; got != "true" {
+		t.Fatalf("effective narration setting = %#v, want true", got)
+	}
+
+	d.store.SetSetting(SettingNotebookNarrateWorkspaceEnabled, "false")
+	if d.notebookWorkspaceNarrationEnabled() {
+		t.Fatal("explicit false must disable workspace narration")
+	}
+	settings = d.settingsWithAgentAvailability()
+	if got := settings[SettingNotebookNarrateWorkspaceEnabled]; got != "false" {
+		t.Fatalf("effective narration setting = %#v, want false", got)
+	}
+}
+
 // TestNotebookSummariesDisabledOnlySkipsSummaries proves the per-duty switch
 // leaves journal narration alone while preventing summary records from being
 // created. Re-enabling restores the enqueue path without changing its model.
@@ -76,6 +99,36 @@ func TestNotebookSummariesDisabledOnlySkipsSummaries(t *testing.T) {
 	d.enqueueSummarizeSession("session-on", "", "")
 	if !taskExists(t, d, notebookSummarizeSessionKind, "session-on") {
 		t.Fatal("summarize must enqueue once its duty switch is on")
+	}
+}
+
+// TestNotebookNarrationDisabledOnlySkipsNarration proves the switch gates every
+// narration enqueue path without disabling session summaries. Re-enabling restores
+// routine narration without changing its agent/model configuration.
+func TestNotebookNarrationDisabledOnlySkipsNarration(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	installNotebookNarrationRunner(t, d)
+
+	d.store.SetSetting(SettingNotebookNarrateWorkspace, `{"agent":"claude","model":"claude-custom"}`)
+	d.store.SetSetting(SettingNotebookNarrateWorkspaceEnabled, "false")
+	d.enqueueNarrateWorkspace("ws-routine-off")
+	d.enqueueDailyNarrateWorkspace("ws-daily-off")
+	d.enqueueFinalNarrateWorkspace("ws-final-off")
+	d.enqueueSummarizeSession("session-on", "", "")
+	assertNoTask(t, d, notebookNarrateWorkspaceKind, "ws-routine-off")
+	assertNoTask(t, d, notebookNarrateWorkspaceKind, "ws-daily-off")
+	assertNoTask(t, d, notebookNarrateWorkspaceKind, "ws-final-off")
+	if !taskExists(t, d, notebookSummarizeSessionKind, "session-on") {
+		t.Fatal("narration switch must not disable session summaries")
+	}
+
+	d.store.SetSetting(SettingNotebookNarrateWorkspaceEnabled, "true")
+	d.enqueueNarrateWorkspace("ws-routine-on")
+	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-routine-on") {
+		t.Fatal("narration must enqueue once its duty switch is on")
+	}
+	if got := d.store.GetSetting(SettingNotebookNarrateWorkspace); got != `{"agent":"claude","model":"claude-custom"}` {
+		t.Fatalf("narration model config changed across toggle: %s", got)
 	}
 }
 
@@ -142,6 +195,24 @@ func TestNotebookSummariesDisabledExecutorNoOps(t *testing.T) {
 		t.Fatalf("enqueue: %v", err)
 	}
 	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+}
+
+// TestNotebookNarrationDisabledExecutorNoOps covers the queued-before-toggle
+// case: the durable record completes without spawning a headless agent.
+func TestNotebookNarrationDisabledExecutorNoOps(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	installNotebookNarrationRunner(t, d)
+	d.store.SetSetting(SettingNotebookNarrateWorkspaceEnabled, "false")
+
+	d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		t.Fatal("narrate executor ran the agent while journal narration was off")
+		return agentdriver.HeadlessTaskResult{}, nil
+	}
+
+	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
+		t.Fatalf("enqueue: %v", err)
+	}
+	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
 }
 
 // assertNoTask fails if a record exists for the given kind/subject. Unlike

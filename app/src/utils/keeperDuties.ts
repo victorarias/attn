@@ -27,6 +27,8 @@ export interface KeeperDutyDescriptor {
   key: KeeperDutyKey;
   /** The persisted settings key the daemon reads for this duty. */
   settingKey: string;
+  /** Optional persisted default-on runtime switch, independent of agent/model config. */
+  enabledSettingKey?: string;
   /** Row title. */
   title: string;
   /** One-line summary of what the duty does. */
@@ -87,6 +89,7 @@ export const KEEPER_DUTIES: readonly KeeperDutyDescriptor[] = [
   {
     key: 'summarize',
     settingKey: 'notebook.summarize_session',
+    enabledSettingKey: 'notebook.summarize_session.enabled',
     title: 'Session summaries',
     description: 'Distills each finished session into a short digest for the journal.',
     testIdPrefix: 'settings-keeper-summarize',
@@ -97,6 +100,7 @@ export const KEEPER_DUTIES: readonly KeeperDutyDescriptor[] = [
   {
     key: 'narrate',
     settingKey: 'notebook.narrate_workspace',
+    enabledSettingKey: 'notebook.narrate_workspace.enabled',
     title: 'Journal narration',
     description: 'Curates per-workspace digests into the running work journal.',
     testIdPrefix: 'settings-keeper-narrate',

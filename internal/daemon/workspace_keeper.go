@@ -130,10 +130,23 @@ func (d *Daemon) notebookTasksEnabled() bool {
 // is enabled. It is an independent, default-on opt-out beneath the keeper master
 // switch: callers check both so the master can still stop every duty at once.
 func (d *Daemon) notebookSummariesEnabled() bool {
+	return d.notebookDutyEnabled(SettingNotebookSummarizeSessionEnabled)
+}
+
+// notebookWorkspaceNarrationEnabled reports whether the keeper's curated-journal
+// duty is enabled. Like summaries, it is an independent, default-on opt-out beneath
+// the keeper master switch.
+func (d *Daemon) notebookWorkspaceNarrationEnabled() bool {
+	return d.notebookDutyEnabled(SettingNotebookNarrateWorkspaceEnabled)
+}
+
+// notebookDutyEnabled resolves a per-duty default-on switch. Keeping the default
+// policy here makes every keeper duty treat absent settings identically.
+func (d *Daemon) notebookDutyEnabled(settingKey string) bool {
 	if d.store == nil {
 		return true
 	}
-	raw := strings.TrimSpace(d.store.GetSetting(SettingNotebookSummarizeSessionEnabled))
+	raw := strings.TrimSpace(d.store.GetSetting(settingKey))
 	if raw == "" {
 		return true
 	}

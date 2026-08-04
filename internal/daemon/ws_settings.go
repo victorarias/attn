@@ -126,6 +126,11 @@ const (
 	// because its native Write/Edit enforce read-before-write CAS on the shared
 	// journal; see parseNotebookNarrationConfig.
 	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
+	// SettingNotebookNarrateWorkspaceEnabled independently gates every curated-
+	// journal narrate path. Default ON preserves existing installs; only an explicit
+	// "false" stops new narrations and retires queued narrations without launching
+	// their agent. Raw session summaries and context compaction remain independent.
+	SettingNotebookNarrateWorkspaceEnabled = "notebook.narrate_workspace.enabled"
 	// SettingChiefContextWindowCap caps the chief-of-staff session's effective
 	// context window (in tokens): auto-compaction triggers at this threshold
 	// instead of at the model's full window, so each cache-cold chief wake
@@ -352,6 +357,9 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	// existing profiles. Surface its effective value for the same reason as the
 	// keeper master switch: the app should never mistake an absent key for off.
 	settings[SettingNotebookSummarizeSessionEnabled] = strconv.FormatBool(d.notebookSummariesEnabled())
+	// The narration duty follows the same default-on, independently opt-out
+	// contract as summaries. Always send its effective value to the app.
+	settings[SettingNotebookNarrateWorkspaceEnabled] = strconv.FormatBool(d.notebookWorkspaceNarrationEnabled())
 	// Surface the EFFECTIVE token caps so the UI shows the concrete default
 	// (128000) rather than an absent key when the operator has not set one.
 	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
@@ -499,7 +507,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingNotebookNarrateWorkspaceEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
 		return validateBooleanSetting(value)
 	case SettingModelCaptureIntervalSeconds:
 		return validateModelCaptureInterval(value)

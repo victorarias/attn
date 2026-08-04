@@ -1017,6 +1017,39 @@ describe('SettingsModal keeper', () => {
     );
   });
 
+  it('toggles journal narration independently and defaults it on', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-keeper-narrate-toggle');
+    expect(toggle).toHaveTextContent('Disable');
+    expect(toggle).toHaveAccessibleName('Disable journal narration');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'notebook.narrate_workspace.enabled',
+      'false',
+    );
+  });
+
+  it('re-enables journal narration without losing its model configuration', async () => {
+    const onSetSetting = renderModal({
+      'notebook.narrate_workspace.enabled': 'false',
+      'notebook.narrate_workspace': '{"agent":"codex","model":"gpt-5.4"}',
+    });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const toggle = await screen.findByTestId('settings-keeper-narrate-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    expect(toggle).toHaveAccessibleName('Enable journal narration');
+    expect(screen.getByTestId('settings-keeper-narrate-agent')).toHaveValue('codex');
+    expect(screen.getByTestId('settings-keeper-narrate-model')).toHaveValue('gpt-5.4');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith(
+      'notebook.narrate_workspace.enabled',
+      'true',
+    );
+  });
+
   it('seeds default-configured duties with their tier default and saves an override', async () => {
     const onSetSetting = renderModal({});
     fireEvent.click(screen.getByTestId('settings-nav-agents'));

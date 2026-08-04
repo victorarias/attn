@@ -155,8 +155,9 @@ func (d *Daemon) notebookCronTick(now time.Time) {
 //
 // The daily narrate fires on the shared notebook-maintenance nightly slot defined by
 // the notebook cron schedule/timezone SETTINGS; a dedicated split can come later.
-// Narration is always on (no enabled gate), so this fires on its own anchor; that is
-// why it uses a SEPARATE state file (NarrateCronState).
+// It advances its own anchor whether narration is enabled or not; the per-duty gate
+// at the enqueue seam suppresses agent work while off. The separate state file
+// (NarrateCronState) keeps that schedule independent.
 //
 // Activity gate: only workspaces that saw a session end or a content-changing context
 // write since the last fire are in the set, so idle workspaces are skipped and never

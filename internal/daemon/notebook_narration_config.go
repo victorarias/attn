@@ -20,8 +20,8 @@ const (
 // Tier-default model ids. Narration model configuration never disables on a blank
 // value (unlike the keeper's compaction duty): an unset setting falls back to a
 // built-in default so session-end and removal-boundary narration work out of the
-// box. The summary duty has a separate boolean runtime switch. Claude is the
-// default agent for BOTH tiers because its native
+// box. Summary and narration each have a separate boolean runtime switch. Claude
+// is the default agent for BOTH tiers because its native
 // Write/Edit enforce read-before-write CAS, which the shared-journal concurrency
 // story depends on (Codex apply-patch CAS is unverified for the installed
 // version — see notebook_narration.go).

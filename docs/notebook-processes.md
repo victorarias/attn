@@ -144,8 +144,11 @@ narrative.
   (`{agent,model}` JSON; blank uses the tier default). Session summaries are
   default-on and can be disabled independently with
   `notebook.summarize_session.enabled`; queued summaries retire without launching
-  an agent after it is disabled. Workspace narration remains on unless the keeper
-  master switch (`notebook.tasks_enabled`) is disabled.
+  an agent after it is disabled. Workspace narration is also default-on and can be
+  disabled independently with `notebook.narrate_workspace.enabled`; every routine,
+  nightly, final-removal, or already queued narration retires without launching an
+  agent while disabled. The keeper master switch (`notebook.tasks_enabled`) still
+  takes precedence over every duty.
 
 ## The notebook cron (`internal/daemon/notebook_cron.go`)
 
