@@ -484,8 +484,11 @@ func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
 	return &codexTranscriptWatcherBehavior{}
 }
 
-func (c *Codex) RecoveredRunningState(ptyState string) protocol.SessionState {
-	return protocol.SessionStateLaunching
+// RecoveredRunningState is always no-opinion: codex announces its approvals in
+// its title, which is a level the resolver reads as evidence, so nothing inside a
+// codex worker ever caches a protocol state to recover.
+func (c *Codex) RecoveredRunningState(ptyState string) (protocol.SessionState, bool) {
+	return "", false
 }
 
 func (c *Codex) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

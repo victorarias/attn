@@ -1019,7 +1019,7 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	return SessionInfo{
+	result := SessionInfo{
 		SessionID:  sessionID,
 		Agent:      info.Agent,
 		CWD:        info.CWD,
@@ -1031,7 +1031,24 @@ func (b *WorkerBackend) SessionInfo(ctx context.Context, sessionID string) (Sess
 		LastSeq:    info.LastSeq,
 		ExitCode:   info.ExitCode,
 		ExitSignal: info.ExitSignal,
-	}, nil
+	}
+	// A worker predating these fields sends nothing, which reads as "no level to
+	// recover" — the daemon then leaves the session's persisted state alone
+	// rather than inventing one, which is the same thing it does for a session
+	// that has genuinely never painted a title.
+	if claim := strings.TrimSpace(info.LastSignalClaim); claim != "" {
+		at, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(info.LastSignalAt))
+		if err == nil {
+			result.LastSignal = pty.Observation{
+				Source: pty.Source(info.LastSignalSource),
+				Claim:  claim,
+				Detail: info.LastSignalDetail,
+				At:     at,
+			}
+			result.HasLastSignal = true
+		}
+	}
+	return result, nil
 }
 
 // SessionLaunchParams returns the launch flags the worker recorded in its

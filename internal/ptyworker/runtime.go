@@ -1181,9 +1181,13 @@ func (r *Runtime) infoResult() (InfoResult, error) {
 	exitSignal := r.exitSignal
 	r.stateMu.RUnlock()
 
-	if state == "" {
-		state = "working"
-	}
+	// State is left empty when nothing ever set it, rather than filled in with
+	// `working`. The invented default was read as a claim by everything
+	// downstream — it is what stamped every recovered session `working` and then
+	// `launching` on a daemon restart — and the worker genuinely has no opinion:
+	// no observer has named a protocol state since the screen scraper was
+	// deleted. Saying nothing is the honest answer, and the level below is what
+	// the daemon actually wants.
 	result := InfoResult{
 		Running:   info.Running,
 		Agent:     r.cfg.Agent,
@@ -1194,6 +1198,12 @@ func (r *Runtime) infoResult() (InfoResult, error) {
 		ChildPID:  info.PID,
 		LastSeq:   info.LastSeq,
 		State:     state,
+	}
+	if signal, ok := r.manager.LastSignal(r.cfg.SessionID); ok {
+		result.LastSignalClaim = signal.Claim
+		result.LastSignalDetail = signal.Detail
+		result.LastSignalSource = string(signal.Source)
+		result.LastSignalAt = signal.At.Format(time.RFC3339Nano)
 	}
 	if exitCode != nil {
 		code := *exitCode

@@ -19,9 +19,10 @@ type SessionRecoveryPolicyProvider interface {
 }
 
 // RecoveredStatePolicyProvider customizes how a recovered session's PTY state
-// maps onto a session state at startup.
+// maps onto a session state at startup. The second return is whether the driver
+// has an opinion at all; see RecoveredRunningSessionState.
 type RecoveredStatePolicyProvider interface {
-	RecoveredRunningState(ptyState string) protocol.SessionState
+	RecoveredRunningState(ptyState string) (protocol.SessionState, bool)
 }
 
 // ResumePolicyProvider customizes resume ID lifecycle behavior.
@@ -70,19 +71,38 @@ func RecoverOnMissingPTY(d Driver) bool {
 	return false
 }
 
-func RecoveredRunningSessionState(d Driver, ptyState string) protocol.SessionState {
+// RecoveredRunningSessionState maps a recovered worker's cached PTY state onto a
+// session state, and reports false when there is nothing there to map.
+//
+// The false case is the common one and it is not a failure: since the screen
+// scraper was deleted, no observer inside a worker names a protocol state, so a
+// running worker's cached state is empty for every agent. It used to be filled
+// in with `launching` on the theory that a recovered session had not proved
+// itself yet — but a daemon restart does not un-run an agent, and the session's
+// persisted state is the last thing the resolver concluded about it. Overwriting
+// that with `launching` discarded the state of every live session on every
+// restart, and left the quiet ones there indefinitely: an agent parked at its
+// prompt paints nothing, so no evidence ever arrived to move it again.
+//
+// So the rule is now the honest one — say something only when the worker
+// actually observed something, and otherwise leave the persisted state alone.
+func RecoveredRunningSessionState(d Driver, ptyState string) (protocol.SessionState, bool) {
 	if p, ok := d.(RecoveredStatePolicyProvider); ok {
 		return p.RecoveredRunningState(ptyState)
 	}
+	return recoveredStateFromPTYClaim(ptyState)
+}
+
+// recoveredStateFromPTYClaim is the shared mapping: the two states a worker can
+// still claim, and no opinion about anything else.
+func recoveredStateFromPTYClaim(ptyState string) (protocol.SessionState, bool) {
 	switch ptyState {
 	case protocol.StateWaitingInput:
-		return protocol.SessionStateWaitingInput
+		return protocol.SessionStateWaitingInput, true
 	case protocol.StatePendingApproval:
-		return protocol.SessionStatePendingApproval
+		return protocol.SessionStatePendingApproval, true
 	default:
-		// Recovered sessions should default to launching unless we have explicit
-		// runtime evidence that the session is waiting for input/approval.
-		return protocol.SessionStateLaunching
+		return "", false
 	}
 }
 

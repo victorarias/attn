@@ -47,17 +47,28 @@ func TestRecoveredRunningSessionState_DefaultAndAgentOverrides(t *testing.T) {
 			},
 		},
 	}
-	if got := RecoveredRunningSessionState(defaultDriver, protocol.StateWaitingInput); got != protocol.SessionStateWaitingInput {
-		t.Fatalf("default recovered waiting_input = %s, want waiting_input", got)
+	if got, ok := RecoveredRunningSessionState(defaultDriver, protocol.StateWaitingInput); !ok || got != protocol.SessionStateWaitingInput {
+		t.Fatalf("default recovered waiting_input = %s (ok=%v), want waiting_input", got, ok)
 	}
-	if got := RecoveredRunningSessionState(Get("codex"), protocol.StateWaitingInput); got != protocol.SessionStateLaunching {
-		t.Fatalf("codex recovered waiting_input = %s, want launching", got)
+	if got, ok := RecoveredRunningSessionState(Get("copilot"), protocol.StatePendingApproval); !ok || got != protocol.SessionStatePendingApproval {
+		t.Fatalf("copilot recovered pending_approval = %s (ok=%v), want pending_approval", got, ok)
 	}
-	if got := RecoveredRunningSessionState(Get("codex"), protocol.StatePendingApproval); got != protocol.SessionStateLaunching {
-		t.Fatalf("codex recovered pending_approval = %s, want launching", got)
+	// No opinion, not a state. Codex announces approvals in its title, which the
+	// resolver reads as evidence, so its worker caches nothing to recover; and a
+	// driver with nothing to say must not have `launching` put in its mouth,
+	// because recovery reads that as permission to overwrite the session's real
+	// state.
+	if got, ok := RecoveredRunningSessionState(Get("codex"), protocol.StateWaitingInput); ok {
+		t.Fatalf("codex recovered waiting_input = %s (ok=%v), want no opinion", got, ok)
 	}
-	if got := RecoveredRunningSessionState(Get("copilot"), protocol.StatePendingApproval); got != protocol.SessionStatePendingApproval {
-		t.Fatalf("copilot recovered pending_approval = %s, want pending_approval", got)
+	if got, ok := RecoveredRunningSessionState(Get("codex"), protocol.StatePendingApproval); ok {
+		t.Fatalf("codex recovered pending_approval = %s (ok=%v), want no opinion", got, ok)
+	}
+	if got, ok := RecoveredRunningSessionState(Get("claude"), protocol.StateWorking); ok {
+		t.Fatalf("claude recovered working = %s (ok=%v), want no opinion", got, ok)
+	}
+	if got, ok := RecoveredRunningSessionState(defaultDriver, protocol.StateWorking); ok {
+		t.Fatalf("default recovered working = %s (ok=%v), want no opinion", got, ok)
 	}
 }
 

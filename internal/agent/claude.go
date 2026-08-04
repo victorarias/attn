@@ -560,15 +560,8 @@ func (c *Claude) RecoverOnMissingPTY() bool {
 // RecoveredRunningState mirrors the default recovered-state mapping. Claude has
 // no special recovery needs; the method exists to satisfy
 // RecoveredStatePolicyProvider.
-func (c *Claude) RecoveredRunningState(ptyState string) protocol.SessionState {
-	switch ptyState {
-	case protocol.StateWaitingInput:
-		return protocol.SessionStateWaitingInput
-	case protocol.StatePendingApproval:
-		return protocol.SessionStatePendingApproval
-	default:
-		return protocol.SessionStateLaunching
-	}
+func (c *Claude) RecoveredRunningState(ptyState string) (protocol.SessionState, bool) {
+	return recoveredStateFromPTYClaim(ptyState)
 }
 
 func (c *Claude) ResolveSpawnResumeSessionID(existingSessionID, requestedResumeID, storedResumeID string) string {

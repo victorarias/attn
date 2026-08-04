@@ -1,0 +1,28 @@
+kind: fixed
+area: sessions
+change: >
+  Restarting the daemon no longer resets every running agent to "launching".
+  Recovery used to overwrite the state of each live session on the theory that
+  a recovered agent had not proved itself yet, and then had nothing left to
+  correct it with: an agent parked at its prompt writes nothing to its
+  terminal, so no fresh evidence ever arrived and it stayed "launching"
+  indefinitely — measured at over two hours on sessions that were simply
+  waiting to be read. Only busy agents recovered, because they repaint their
+  title within a second. A restart is not news about an agent, so the state
+  attn last concluded now stands, and the evidence behind it is recovered
+  rather than discarded: the worker still holds the agent's latest title
+  heartbeat and reports it back, so the resolver can confirm or correct that
+  state on its first tick instead of having nothing to go on. An agent that
+  finished while the daemon was down settles and reaches your queue; one that
+  was waiting on an approval or a question comes back still waiting, unless it
+  visibly moved on in the meantime.
+---
+kind: fixed
+area: queue
+change: >
+  A snoozed agent now comes back. A snooze only opens a turn if the agent is in
+  a state that wants you, and a daemon restart used to leave every agent in
+  "launching" — so when the deadline arrived the deferral was cashed and
+  nothing was delivered: the agent silently left the Snoozed section without
+  ever reaching your queue. Deadlines already survived a restart; now the state
+  they are delivered against does too.

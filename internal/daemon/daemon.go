@@ -1383,7 +1383,14 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 				label = sessionID
 			}
 
-			state := sessionStateFromRecoveredInfo(info)
+			// A session attn has no row for is genuinely new to it, so `launching`
+			// is the honest starting point here even though it is the wrong answer
+			// for a session being re-adopted below: nothing has been concluded
+			// about this one yet, and the resolver owns it from its first level.
+			state, ok := sessionStateFromRecoveredInfo(info)
+			if !ok {
+				state = protocol.SessionStateLaunching
+			}
 
 			d.store.Add(&protocol.Session{
 				ID:             sessionID,
@@ -1427,8 +1434,23 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 				// Persisted plugin reports remain authoritative across daemon recovery.
 				continue
 			}
-			nextState := sessionStateFromRecoveredInfo(info)
-			if existing.State != nextState {
+			// Recovering the evidence is what recovering the session means. The
+			// state in the store is the last thing the resolver concluded, and a
+			// restart is not new information about the agent — but the evidence
+			// behind that conclusion was in memory and died with the old daemon,
+			// so without this the resolver would have nothing to re-justify it
+			// from, and nothing to correct it with either.
+			d.seedRecoveredEvidence(sessionID, existing, info)
+			nextState, ok := sessionStateFromRecoveredInfo(info)
+			if !ok && !resolverOwnedStates[existing.State] {
+				// A live worker contradicts the persisted state, and the resolver has
+				// no standing to correct it — `recoverable` is the revive path's, set
+				// precisely because the worker was gone. Leaving it would strand the
+				// session there for good, so hand it to the resolver at its own entry
+				// point and let the evidence just seeded decide what it really is.
+				nextState, ok = protocol.SessionStateLaunching, true
+			}
+			if ok && existing.State != nextState {
 				d.applyState(sessionStateChange{
 					sessionID: sessionID,
 					state:     string(nextState),
@@ -1439,20 +1461,8 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			}
 			continue
 		}
-		switch existing.State {
-		case protocol.SessionStateWaitingInput, protocol.SessionStatePendingApproval:
-			// Preserve interactive waiting/approval states during recovery.
-		default:
-			if existing.State != protocol.SessionStateLaunching {
-				d.applyState(sessionStateChange{
-					sessionID: sessionID,
-					state:     protocol.StateLaunching,
-					cause:     startupRecovery{},
-				})
-				report.StateUpdated++
-				report.markChanged(sessionID)
-			}
-		}
+		// The worker is live but did not answer `info`. That says nothing about
+		// the agent, so the persisted state stands untouched.
 	}
 
 	for _, session := range d.store.List("") {
@@ -1615,9 +1625,14 @@ func normalizeStoredSessionAgent(agent string, fallback protocol.SessionAgent) p
 	return protocol.NormalizeSessionAgent(fallback, protocol.SessionAgentCodex)
 }
 
-func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) protocol.SessionState {
+// sessionStateFromRecoveredInfo is what the worker can prove about a session at
+// recovery, and false when it can prove nothing. A worker whose child has exited
+// is the one unambiguous case; beyond that only a driver that still caches a
+// protocol state has anything to say. Everything else is left to the persisted
+// state and the evidence seeded alongside it.
+func sessionStateFromRecoveredInfo(info ptybackend.SessionInfo) (protocol.SessionState, bool) {
 	if !info.Running {
-		return protocol.SessionStateIdle
+		return protocol.SessionStateIdle, true
 	}
 	agent := normalizeStoredSessionAgent(info.Agent, protocol.SessionAgentCodex)
 	return agentdriver.RecoveredRunningSessionState(agentdriver.Get(string(agent)), info.State)
@@ -1928,14 +1943,20 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 		d.traceStateVeto(sessionID, origin, state, "plugin_driver_owns_state")
 		return
 	}
-	if session.Agent == protocol.SessionAgentShell {
-		// The worker poll's job is taking an agent session out of `launching`,
-		// and its cached state defaults to `working` until something sets it —
-		// which for a shell is never: no harness observer ever writes it. A
-		// shell spawns `idle` and the resolver owns it from there on its
-		// foreground heartbeat, so a worker-info claim (the watch-subscribe
-		// replay in particular) would only flip it to a state nothing observed.
-		d.traceStateVeto(sessionID, origin, state, "shell_resolver_owned")
+	if session.State != protocol.SessionStateLaunching {
+		// The worker poll's job is taking a session out of `launching`, and that
+		// is the whole of its authority. Its cached state defaults to `working`
+		// until something sets it — which, since the screen scraper was deleted,
+		// is never for any agent — so applied any wider it does not report an
+		// observation, it invents one. The case that made this load-bearing is
+		// the watch-subscribe replay on a daemon restart, which fires once per
+		// live session and would otherwise stamp every one of them `working`
+		// before recovery had a chance to leave their real states alone.
+		//
+		// A shell is the same story from the other end: it spawns `idle` and the
+		// resolver owns it from there on its foreground heartbeat, so no
+		// worker-info claim was ever wanted for one.
+		d.traceStateVeto(sessionID, origin, state, "resolver_owned")
 		return
 	}
 	agent := session.Agent

@@ -239,6 +239,18 @@ type InfoResult struct {
 	LastSeq   uint32 `json:"last_seq"`
 	State     string `json:"state"`
 
+	// LastSignal* is the newest level the session's signal observers emitted —
+	// the agent's own title heartbeat, or a shell pane's foreground level. It is
+	// evidence, not a state claim, and it is here because the worker outlives the
+	// daemon: an agent parked at its prompt paints nothing, so a daemon that
+	// restarted has no other way to learn what the level currently says. Empty
+	// claim means the session has never produced one, which is also what a worker
+	// predating these fields reports.
+	LastSignalClaim  string `json:"last_signal_claim,omitempty"`
+	LastSignalDetail string `json:"last_signal_detail,omitempty"`
+	LastSignalSource string `json:"last_signal_source,omitempty"`
+	LastSignalAt     string `json:"last_signal_at,omitempty"`
+
 	ExitCode   *int    `json:"exit_code,omitempty"`
 	ExitSignal *string `json:"exit_signal,omitempty"`
 }

@@ -91,13 +91,11 @@ func (c *Copilot) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
 	return &copilotTranscriptWatcherBehavior{}
 }
 
-func (c *Copilot) RecoveredRunningState(ptyState string) protocol.SessionState {
-	switch ptyState {
-	case protocol.StatePendingApproval:
-		return protocol.SessionStatePendingApproval
-	default:
-		return protocol.SessionStateLaunching
+func (c *Copilot) RecoveredRunningState(ptyState string) (protocol.SessionState, bool) {
+	if ptyState == protocol.StatePendingApproval {
+		return protocol.SessionStatePendingApproval, true
 	}
+	return "", false
 }
 
 // --- ClassifierProvider ---

@@ -226,7 +226,7 @@ func (s *Session) runShellForegroundPoller(interval time.Duration) {
 				continue
 			}
 			if obs, ok := s.shellSignals.ObservePoll(fgPgid, time.Now()); ok {
-				s.onState(obs)
+				s.emitSignal(obs)
 			}
 		}
 	}
