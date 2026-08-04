@@ -5,8 +5,7 @@
 > the decisions: pi's extension surface ([earendil-works/pi](https://github.com/earendil-works/pi)),
 > openclaw's history of embedding pi ([openclaw/openclaw](https://github.com/openclaw/openclaw)),
 > and attn's plugin system ([docs/plans/2026-04-16-plugin-system.md](../plans/2026-04-16-plugin-system.md),
-> with [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md) and an
-> earlier pi-plugin plan that has since been deleted; git history has it).
+> with the earlier pi plan [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md)).
 
 ## End state (the why)
 
@@ -24,6 +23,11 @@ doorbell wakes as in-band steering, links its session to attn's on birth. The
 claude-code integration is attn adapting to a closed harness from the outside;
 pi is the harness attn gets to shape from the inside.
 
+The conversation itself is attn's own surface: it reads with the density of a
+terminal transcript, but it's built from real UI — tool calls that expand,
+diffs that render, images inline, scroll that behaves. The terminal remains
+for harnesses that live there; pi's sessions are drawn by the app itself.
+
 Why it matters: attn's model is many agents, one Victor. Today the harness
 underneath is someone else's product — its roadmap, its model lock-in, its
 opaque state. pi is small, open, and extensible at every seam that matters.
@@ -37,21 +41,21 @@ with a single `pi install`, each capability a piece that stands alone.
 Everything this vision wants maps onto pi's supported extension surface; the
 verified feature-by-feature mapping informs each capability's own doc.
 
-Plugins are the whole bet: attn wants signals, steering, and capabilities —
-never ownership of the agent loop. (Forking pi and RPC-first embedding were
-considered and rejected on exactly that line; openclaw's history of vendoring
-pi is the price list for crossing it.)
+Plugins are the whole bet: attn wants signals, steering, capabilities, and its
+own rendering — never ownership of the agent loop. openclaw's history of
+vendoring pi is the price list for crossing that line.
 
 ## The shape: two plugin systems meet in the middle
 
 Both sides are plugins; neither harness gets forked or patched:
 
-- **attn side** — an agent-driver plugin per attn's own plugin system, like
-  the opencode plugin before it: it launches pi into an attn-owned PTY and
-  carries the session's lifecycle.
-- **pi side** — the attn suite, a pi package the driver stages: it links the
-  session, declares state, delivers doorbells and nudges as steering, and
-  carries the harness capabilities.
+- **attn side** — the driver plugin provides a headless host entrypoint
+  (Bun, in-repo) that runs pi via `createAgentSession`; the daemon spawns it
+  per session and owns its process group and lifecycle.
+- **pi side** — the attn suite, loaded into the host's pi runtime, carrying
+  the in-loop capabilities.
+
+The PTY/terminal path stays for claude, codex, and shell sessions.
 
 State flips from inference to declaration: today attn *deduces* claude's state
 from hooks, heuristics, and a stop-time classifier; the pi extension *reports*
@@ -59,6 +63,13 @@ it — declared state is authoritative, with no classifier fallback. What
 survives of classification is a service, not a guess: when the agent stops,
 the plugin can ask attn to read the last turn and enrich the stop — done, or
 waiting on a reply — so the user understands *why* the session went quiet.
+
+Two streams come out of the host: a small typed semantic stream in attn's own
+vocabulary — session linked, run started/settled, state, tool started/
+finished, message committed — that the daemon understands and every attn
+feature integrates on; and a render stream — streaming deltas, tool detail —
+that the daemon routes without parsing, typed in TypeScript shared between
+host and app.
 
 ## The capabilities (each gets its own doc)
 
@@ -96,26 +107,32 @@ waiting on a reply — so the user understands *why* the session went quiet.
   actually living in pi, not by a claude-code comparison table.
 - **Pin pi like a protocol.** Version the seam, gate on compat — the same
   reflex as attn's `ProtocolVersion`.
-- **The agent stays a guest in attn's house.** attn owns the PTY, the session
-  lifecycle, and the outer harness. pi owns the loop, the models, the context.
-  The seam is the socket.
+- **The agent stays a guest in attn's house.** attn owns the process, the
+  session lifecycle, and the outer harness. pi owns the loop, the models, the
+  context. The seam is the socket.
+- **attn integrates on declarations, never on renderings.** The daemon's
+  picture of a session must be complete without ever reading a render event;
+  deltas exist only so the app can paint.
 
 ## Scope & non-goals
 
 **In scope:** the attn-side driver plugin; the pi-side attn suite carrying the
-capabilities above; multi-model daily use; living in it.
+capabilities above; multi-model daily use; attn-rendered conversations via the
+pi SDK; living in it.
 
-**Non-goals:** forking or vendoring pi; RPC-mode embedding and attn-rendered
-conversations; a click-to-approve permissioning system; MCP support before
-something needs it; migrating claude/codex/copilot integrations to this
-pattern; parity for claude-code features Victor doesn't actually use.
+**Non-goals:** forking or vendoring pi; a click-to-approve permissioning
+system; MCP support before something needs it; migrating claude/codex/copilot
+integrations to this pattern; parity for claude-code features Victor doesn't
+actually use.
 
 ## Big rocks (the arc)
 
 Each rock opens with its own alignment + implementation doc.
 
-- [ ] **Driver plugin** — pi launches, resumes, and lives as an attn session.
-- [ ] **attn citizenship** — linking, declared state, doorbell/nudge steering.
+- [x] **Driver plugin** — pi launches, resumes, and lives as an attn session.
+- [x] **attn citizenship** — linking, declared state, doorbell/nudge steering.
+- [ ] **Headless host + rendered conversation** — the SDK host process and the
+      React conversation surface, built in vertical slices (own plan doc).
 - [ ] **Safety envelope + auto mode** — the autonomy dial.
 - [ ] **Subagents** — adapted from ecosystem prior art.
 - [ ] **Background eyes** — monitors that wake the agent.
@@ -129,10 +146,3 @@ Each rock opens with its own alignment + implementation doc.
 
 - The safety envelope's exact policy vocabulary — designed fresh in its own
   doc, not inherited from claude's permission modes.
-- The shape of the stop-enrichment service (how the plugin asks attn to
-  classify a stop as done vs. waiting on a reply) — designed in the
-  citizenship doc.
-- **Blindspots (ground before the first chunk):** pi's extension runtime under
-  long-lived real sessions; pi's release cadence and API stability in
-  practice; how pi's TUI behaves under attn's PTY geometry rules compared to
-  claude/codex.
