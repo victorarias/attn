@@ -153,6 +153,14 @@ type SessionInfo struct {
 	Running bool
 	State   string
 
+	// LastSignal is the newest level the session's signal observers emitted, and
+	// false when it has produced none. It is evidence rather than a state claim,
+	// and it is what lets a daemon that restarted learn what a quiet agent's
+	// heartbeat currently says instead of waiting for the next repaint that a
+	// session parked at its prompt will never produce.
+	LastSignal    pty.Observation
+	HasLastSignal bool
+
 	Cols    uint16
 	Rows    uint16
 	PID     int

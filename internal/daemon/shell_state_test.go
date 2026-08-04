@@ -15,6 +15,10 @@ import (
 // caches state "working" from birth, nothing ever sets a shell worker's state,
 // and the watch-subscribe replay reports that cache as a worker-info claim —
 // which would flip every freshly spawned shell out of `idle`.
+//
+// The veto is no longer shell-specific: no agent's worker caches a real state
+// any more, so a worker-info claim may only end `launching`. A shell never sits
+// there, which is why it is still the sharpest case to pin.
 func TestShellIgnoresTheWorkerPollsStateClaim(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "shell-veto.sock"))
 	const id = "shell-worker-info"
@@ -31,8 +35,8 @@ func TestShellIgnoresTheWorkerPollsStateClaim(t *testing.T) {
 		t.Fatalf("state=%q: the worker poll moved a shell", got)
 	}
 	got := onlyObservation(t, d, id)
-	if got.Outcome != statetrace.OutcomeVetoed || got.Reason != "shell_resolver_owned" {
-		t.Fatalf("trace = %+v, want vetoed/shell_resolver_owned", got)
+	if got.Outcome != statetrace.OutcomeVetoed || got.Reason != "resolver_owned" {
+		t.Fatalf("trace = %+v, want vetoed/resolver_owned", got)
 	}
 }
 

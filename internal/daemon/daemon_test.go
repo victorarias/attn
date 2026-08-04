@@ -1544,55 +1544,64 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_SkipsRecentlyUpdatedSessions(
 
 func TestSessionStateFromRecoveredInfo(t *testing.T) {
 	tests := []struct {
-		name string
-		info ptybackend.SessionInfo
-		want protocol.SessionState
+		name   string
+		info   ptybackend.SessionInfo
+		want   protocol.SessionState
+		wantOK bool
 	}{
 		{
-			name: "not running is idle",
-			info: ptybackend.SessionInfo{Running: false, State: protocol.StateWorking},
-			want: protocol.SessionStateIdle,
+			name:   "not running is idle",
+			info:   ptybackend.SessionInfo{Running: false, State: protocol.StateWorking},
+			want:   protocol.SessionStateIdle,
+			wantOK: true,
 		},
 		{
-			name: "waiting input",
-			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateWaitingInput},
-			want: protocol.SessionStateWaitingInput,
+			name:   "waiting input",
+			info:   ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateWaitingInput},
+			want:   protocol.SessionStateWaitingInput,
+			wantOK: true,
 		},
 		{
-			name: "codex waiting input normalizes to launching",
+			name: "codex waiting input is no opinion",
 			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCodex), State: protocol.StateWaitingInput},
-			want: protocol.SessionStateLaunching,
 		},
 		{
-			name: "codex pending approval normalizes to launching",
-			info: ptybackend.SessionInfo{Running: true, State: protocol.StatePendingApproval},
-			want: protocol.SessionStateLaunching,
+			name:   "claude pending approval",
+			info:   ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StatePendingApproval},
+			want:   protocol.SessionStatePendingApproval,
+			wantOK: true,
 		},
 		{
-			name: "claude pending approval",
-			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StatePendingApproval},
-			want: protocol.SessionStatePendingApproval,
+			name:   "copilot pending approval",
+			info:   ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCopilot), State: protocol.StatePendingApproval},
+			want:   protocol.SessionStatePendingApproval,
+			wantOK: true,
 		},
+		// The three below are the whole point of the change: a running worker
+		// with nothing observed must not manufacture a state for the session,
+		// because recovery uses "no opinion" to mean "leave the persisted state
+		// alone". `working` is the case that matters most — it is the string a
+		// worker with no observer of its own reports for every agent.
 		{
-			name: "explicit idle running session normalizes to launching",
-			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateIdle},
-			want: protocol.SessionStateLaunching,
-		},
-		{
-			name: "copilot explicit idle normalizes to launching",
-			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentCopilot), State: protocol.StateIdle},
-			want: protocol.SessionStateLaunching,
-		},
-		{
-			name: "default working normalizes to launching",
+			name: "running with the worker's default working is no opinion",
 			info: ptybackend.SessionInfo{Running: true, State: protocol.StateWorking},
-			want: protocol.SessionStateLaunching,
+		},
+		{
+			name: "running with an empty state is no opinion",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude)},
+		},
+		{
+			name: "explicit idle on a running session is no opinion",
+			info: ptybackend.SessionInfo{Running: true, Agent: string(protocol.SessionAgentClaude), State: protocol.StateIdle},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := sessionStateFromRecoveredInfo(tt.info)
-			if got != tt.want {
+			got, ok := sessionStateFromRecoveredInfo(tt.info)
+			if ok != tt.wantOK {
+				t.Fatalf("sessionStateFromRecoveredInfo() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if ok && got != tt.want {
 				t.Fatalf("sessionStateFromRecoveredInfo() = %s, want %s", got, tt.want)
 			}
 		})

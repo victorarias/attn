@@ -158,6 +158,15 @@ type Session struct {
 	shellSignals *shellSignalArbiter
 	onState      func(obs Observation)
 
+	// lastSignal is the most recent observation either observer emitted, kept so
+	// the level can be *read* rather than only heard as it goes past. A level says
+	// "this is still true", and a daemon that was not running when it was painted
+	// has no other way to learn it: an agent parked at its prompt writes nothing to
+	// the PTY, so a daemon restart would otherwise leave it with no evidence at all
+	// until the user typed. Written by both emitters, read from the info RPC.
+	lastSignalMu sync.RWMutex
+	lastSignal   *Observation
+
 	exitMu     sync.RWMutex
 	running    bool
 	exitCode   *int
@@ -454,12 +463,12 @@ func (s *Session) readLoop(onExit func(exitCode int, signal string), logf func(s
 				// never touches.
 				if s.harnessSignals != nil && s.onState != nil {
 					for _, obs := range s.harnessSignals.Observe(data, time.Now()) {
-						s.onState(obs)
+						s.emitSignal(obs)
 					}
 				}
 				if s.shellSignals != nil && s.onState != nil {
 					for _, obs := range s.shellSignals.ObserveOutput(data, time.Now()) {
-						s.onState(obs)
+						s.emitSignal(obs)
 					}
 				}
 				if len(data) > 0 {
@@ -631,6 +640,30 @@ func parseExitStatus(waitErr error) (int, string) {
 		return -1, status.Signal().String()
 	}
 	return status.ExitStatus(), ""
+}
+
+// emitSignal is the single exit for both signal observers: it remembers the
+// observation before handing it on, so the level survives in a readable form as
+// well as travelling as an event. Both callers run on their own goroutine (the
+// read loop, the shell foreground poller), which is why the field is guarded.
+func (s *Session) emitSignal(obs Observation) {
+	s.lastSignalMu.Lock()
+	stored := obs
+	s.lastSignal = &stored
+	s.lastSignalMu.Unlock()
+	s.onState(obs)
+}
+
+// LastSignal is the most recent level either observer emitted, and false when
+// the session has not produced one. It is what a reconnecting daemon reads to
+// recover evidence it was not running to hear.
+func (s *Session) LastSignal() (Observation, bool) {
+	s.lastSignalMu.RLock()
+	defer s.lastSignalMu.RUnlock()
+	if s.lastSignal == nil {
+		return Observation{}, false
+	}
+	return *s.lastSignal, true
 }
 
 func (s *Session) markExited(exitCode int, signal string) {

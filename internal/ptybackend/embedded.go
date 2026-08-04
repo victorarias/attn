@@ -173,7 +173,7 @@ func (b *EmbeddedBackend) SessionInfo(_ context.Context, sessionID string) (Sess
 	if err != nil {
 		return SessionInfo{}, err
 	}
-	return SessionInfo{
+	result := SessionInfo{
 		SessionID:  info.SessionID,
 		Agent:      info.Agent,
 		CWD:        info.CWD,
@@ -184,7 +184,9 @@ func (b *EmbeddedBackend) SessionInfo(_ context.Context, sessionID string) (Sess
 		LastSeq:    info.LastSeq,
 		ExitCode:   info.ExitCode,
 		ExitSignal: info.ExitSignal,
-	}, nil
+	}
+	result.LastSignal, result.HasLastSignal = b.manager.LastSignal(sessionID)
+	return result, nil
 }
 
 type embeddedStream struct {

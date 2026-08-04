@@ -492,6 +492,17 @@ func (m *Manager) SessionInfo(sessionID string) (SessionInfo, error) {
 	}, nil
 }
 
+// LastSignal is one session's most recent level observation. It reports false
+// for a session that has produced none, and for an unknown session — both mean
+// "nothing to recover", which is the only thing the caller does differently.
+func (m *Manager) LastSignal(sessionID string) (Observation, bool) {
+	session, err := m.getSession(sessionID)
+	if err != nil {
+		return Observation{}, false
+	}
+	return session.LastSignal()
+}
+
 func (m *Manager) Remove(sessionID string) {
 	m.mu.Lock()
 	session, ok := m.sessions[sessionID]
