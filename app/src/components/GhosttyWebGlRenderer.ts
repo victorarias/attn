@@ -13,6 +13,7 @@ import {
   type KittyPixelFormat,
 } from '../utils/kittyImageFormat';
 import {
+  TERMINAL_FLOATS_PER_QUAD,
   TERMINAL_FLOATS_PER_VERTEX,
   TerminalVertexBuffer,
 } from './terminalVertexBuffer';
@@ -109,6 +110,23 @@ export const KITTY_Z_UNDER_BACKGROUND = -1_073_741_824;
 // single upload.
 export const IMAGE_TEXTURE_LIMIT = 16;
 
+// Below this grid size, copying the cached rows into the complete staging
+// buffer costs more than rebuilding the small viewport. Packaged A/Bs put the
+// crossover below a 1,785-printable-cell split pane. Keep a wider safety margin
+// around ordinary interaction-sized panes and enable it only above 2,048 cells;
+// the packaged 3,212-cell case remains a measured win.
+const ROW_VERTEX_CACHE_MIN_CELLS = 2_048;
+const ROW_VERTEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
+
+// Starting capacity per row, in quads per column, for each cell pass. Every
+// printable cell contributes a foreground quad, so a full row is the honest
+// start for that pass. How many cells carry a non-default background is a
+// property of the content, not something to guess at: the background pass
+// starts at the buffer minimum and grows into whatever the pane turns out to
+// need, which costs a reallocation on a styled row and nothing on a plain one.
+const ROW_FG_QUADS_PER_CELL = 1;
+const ROW_BG_QUADS_PER_CELL = 0;
+
 interface AtlasGlyph {
   u0: number;
   v0: number;
@@ -144,6 +162,12 @@ interface BlockRect {
 export interface WebGlRenderSample {
   cpuSubmitMs: number;
   cells: number;
+  paintedCells: number;
+  paintedRows: number;
+  fullPaint: boolean;
+  submittedQuads: number;
+  retainedRowVertexBytes: number;
+  modelPrintable: number;
   quads: number;
   glyphUploads: number;
   // TEMP (blank-on-split): diagnostics to explain why drawn quads can fall
@@ -356,6 +380,24 @@ export class WebGlTerminalRenderer {
   private atlasY = 1;
   private atlasRowHeight = 0;
   private atlasGeneration = 0;
+  // Ghostty reports dirty rows until markClean(). Cache each rendered row in
+  // the same CPU-side vertex format the complete frame already uses: partial
+  // model updates only rebuild changed rows, then concatenate the row buffers
+  // and still clear/draw a complete frame. That last part is deliberate — a
+  // WebGL drawing buffer is not retained across composites by default, so
+  // scissoring dirty pixels would trade correctness for speed unless we kept a
+  // much larger Retina-sized framebuffer. This cache is visible-grid and
+  // content proportional, with a hard retained-memory ceiling.
+  private dirtyRowMask = new Uint8Array(0);
+  // One entry per row per cell pass. Two arrays rather than one of pairs: the
+  // frame concatenates every row's backgrounds, then every row's foregrounds,
+  // so each is walked whole.
+  private rowBgVertices: Array<TerminalVertexBuffer | null> = [];
+  private rowFgVertices: Array<TerminalVertexBuffer | null> = [];
+  private printableByRow = new Uint32Array(0);
+  private rowCacheValid = false;
+  private rowCacheOverBudget = false;
+  private modelPrintable = 0;
 
   // UV of the center of the 1×1 solid white texel at atlas pixel (0,0). Depends
   // on the current atlas size, so it is recomputed rather than precomputed.
@@ -459,6 +501,13 @@ export class WebGlTerminalRenderer {
     this.canvas.style.width = `${cols * this.cellWidth}px`;
     this.canvas.style.height = `${rows * this.cellHeight}px`;
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
+    this.dirtyRowMask = new Uint8Array(rows);
+    this.rowBgVertices = Array.from({ length: rows }, () => null);
+    this.rowFgVertices = Array.from({ length: rows }, () => null);
+    this.printableByRow = new Uint32Array(rows);
+    this.rowCacheValid = false;
+    this.rowCacheOverBudget = false;
+    this.modelPrintable = 0;
   }
 
   render(
@@ -473,6 +522,52 @@ export class WebGlTerminalRenderer {
     const dirty = terminal.update();
     if (!force && dirty === 0) {
       return null;
+    }
+
+    // DirtyState is intentionally not exported by ghostty-web, but its public
+    // update() contract defines 1 as PARTIAL and 2 as FULL. Scrolled viewports,
+    // overlays, and images are derived surfaces rather than the model's active
+    // grid, so they bypass and invalidate the row cache.
+    if (this.dirtyRowMask.length !== terminal.rows) {
+      this.dirtyRowMask = new Uint8Array(terminal.rows);
+      this.rowBgVertices = Array.from({ length: terminal.rows }, () => null);
+      this.rowFgVertices = Array.from({ length: terminal.rows }, () => null);
+      this.printableByRow = new Uint32Array(terminal.rows);
+      this.rowCacheValid = false;
+      this.rowCacheOverBudget = false;
+      this.modelPrintable = 0;
+    }
+    const gridCells = terminal.cols * terminal.rows;
+    const canCacheRows = gridCells >= ROW_VERTEX_CACHE_MIN_CELLS
+      && gridCells * TERMINAL_FLOATS_PER_QUAD * Float32Array.BYTES_PER_ELEMENT <= ROW_VERTEX_CACHE_MAX_BYTES
+      && !this.rowCacheOverBudget
+      && viewportCells === undefined
+      && viewportOffset === 0
+      && (overlays?.length ?? 0) === 0
+      && (images?.length ?? 0) === 0;
+    let fullPaint = force || dirty !== 1 || !canCacheRows || !this.rowCacheValid;
+    const rowsToPaint = this.dirtyRowMask;
+    rowsToPaint.fill(fullPaint ? 1 : 0);
+    if (!fullPaint) {
+      let dirtyRows = 0;
+      for (let row = 0; row < terminal.rows; row += 1) {
+        if (!terminal.isRowDirty(row)) continue;
+        // Match ghostty-web's own canvas renderer: include neighboring rows so
+        // a grapheme whose pixels cross a row boundary is cleared and rebuilt.
+        rowsToPaint[row] = 1;
+        if (row > 0) rowsToPaint[row - 1] = 1;
+        if (row + 1 < terminal.rows) rowsToPaint[row + 1] = 1;
+        dirtyRows += 1;
+      }
+      // PARTIAL with no rows would leave an unknowable stale surface. It should
+      // not occur, but a full paint is the safe failure mode if the ABI drifts.
+      if (dirtyRows === 0) {
+        fullPaint = true;
+        rowsToPaint.fill(1);
+      }
+    }
+    if (!canCacheRows) {
+      this.rowCacheValid = false;
     }
 
     const gl = this.gl;
@@ -525,10 +620,28 @@ export class WebGlTerminalRenderer {
     gl.clearColor(defaultBg.r / 255, defaultBg.g / 255, defaultBg.b / 255, 1);
     gl.clear(gl.COLOR_BUFFER_BIT);
 
+    let paintedRows = 0;
+    let frameModelPrintable = 0;
     for (let row = 0; row < terminal.rows; row += 1) {
+      if (rowsToPaint[row] === 0) continue;
+      paintedRows += 1;
       const rowSpans = spansByRow[row];
+      // A row caches its two passes separately, because the frame concatenates
+      // every row's backgrounds before any row's foregrounds.
+      const rowBgTarget = canCacheRows
+        ? this.rowVertexBuffer(this.rowBgVertices, row, terminal.cols, ROW_BG_QUADS_PER_CELL)
+        : bgVertices;
+      const rowFgTarget = canCacheRows
+        ? this.rowVertexBuffer(this.rowFgVertices, row, terminal.cols, ROW_FG_QUADS_PER_CELL)
+        : fgVertices;
+      if (canCacheRows) {
+        rowBgTarget.reset();
+        rowFgTarget.reset();
+      }
+      let printableInRow = 0;
       for (let col = 0; col < terminal.cols; col += 1) {
         const cell = cells[row * terminal.cols + col];
+        if (cell && cell.codepoint > 32) printableInRow += 1;
         if (!cell || cell.width === 0) {
           if (cell && cell.codepoint > 32) {
             printableSkippedZeroWidth += 1;
@@ -549,40 +662,69 @@ export class WebGlTerminalRenderer {
         const bg = this.cellBackground(cell);
 
         if (bg !== this.defaultBgPacked) {
-          this.pushSolidQuad(bgVertices, x, y, width, this.cellHeight * scale, bg, 1);
+          this.pushSolidQuad(rowBgTarget, x, y, width, this.cellHeight * scale, bg, 1);
         }
         if (rowSpans) {
           for (const span of rowSpans) {
             if (span.kind === 'background' && col >= span.startCol && col < span.endCol) {
-              this.pushSolidQuad(fgVertices, x, y, width, this.cellHeight * scale, span.rgb, span.alpha);
+              this.pushSolidQuad(rowFgTarget, x, y, width, this.cellHeight * scale, span.rgb, span.alpha);
             }
           }
         }
         if (isCursor) {
-          this.pushSolidQuad(fgVertices, x, y, width, this.cellHeight * scale, cursorBg, 1);
+          this.pushSolidQuad(rowFgTarget, x, y, width, this.cellHeight * scale, cursorBg, 1);
         }
         if ((cell.flags & CellFlags.INVISIBLE) === 0 && cell.codepoint !== 0 && cell.codepoint !== 32) {
           const alpha = (cell.flags & CellFlags.FAINT) !== 0 ? 0.5 : 1;
-          if (!this.pushBlockElement(fgVertices, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
+          if (!this.pushBlockElement(rowFgTarget, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
             const glyph = cell.grapheme_len > 0
               ? this.getGlyph(graphemeAtViewportCell(terminal, row, col, viewportOffset), cell.flags)
               : this.getCodepointGlyph(cell.codepoint, cell.flags);
-            this.pushTexturedQuad(fgVertices, x, y, glyph.width, glyph.height, glyph, fg, alpha);
+            this.pushTexturedQuad(rowFgTarget, x, y, glyph.width, glyph.height, glyph, fg, alpha);
           }
         }
         if ((cell.flags & CellFlags.UNDERLINE) !== 0) {
-          this.pushSolidQuad(fgVertices, x, y + (this.baseline + 2) * scale, width, scale, fg, 1);
+          this.pushSolidQuad(rowFgTarget, x, y + (this.baseline + 2) * scale, width, scale, fg, 1);
         }
         if ((cell.flags & CellFlags.STRIKETHROUGH) !== 0) {
-          this.pushSolidQuad(fgVertices, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
+          this.pushSolidQuad(rowFgTarget, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
         }
         if (rowSpans) {
           for (const span of rowSpans) {
             if (span.kind === 'underline' && col >= span.startCol && col < span.endCol) {
-              this.pushSolidQuad(fgVertices, x, y + (this.baseline + 2) * scale, width, scale, span.rgb, span.alpha);
+              this.pushSolidQuad(rowFgTarget, x, y + (this.baseline + 2) * scale, width, scale, span.rgb, span.alpha);
             }
           }
         }
+      }
+      if (canCacheRows) {
+        this.modelPrintable += printableInRow - this.printableByRow[row];
+        this.printableByRow[row] = printableInRow;
+      } else {
+        frameModelPrintable += printableInRow;
+      }
+    }
+
+    let retainedRowVertexBytes = 0;
+    if (canCacheRows) {
+      // Concatenate in pass order, not row order: every row's backgrounds form
+      // the first draw, every row's foregrounds the second, so an image tier can
+      // be drawn between them exactly as it is on the direct path.
+      bgVertices.reset();
+      fgVertices.reset();
+      for (const row of this.rowBgVertices) {
+        if (row) bgVertices.append(row.view());
+      }
+      for (const row of this.rowFgVertices) {
+        if (row) fgVertices.append(row.view());
+      }
+      retainedRowVertexBytes = this.retainedRowVertexBytes();
+      // A styled cell can emit several quads. If real content grows the cache
+      // past the guardrail, finish this already-built frame, then release the
+      // rows and keep this grid on the direct renderer until its next resize.
+      if (retainedRowVertexBytes > ROW_VERTEX_CACHE_MAX_BYTES) {
+        this.rowCacheOverBudget = true;
+        this.rowCacheValid = false;
       }
     }
 
@@ -646,11 +788,27 @@ export class WebGlTerminalRenderer {
       gl.bufferData(gl.ARRAY_BUFFER, outlineVertices.view(), gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / TERMINAL_FLOATS_PER_VERTEX);
     }
+    const submittedQuads = bgVertices.quadCount + fgVertices.quadCount + outlineVertices.quadCount + imageQuadsDrawn;
+    const sampleModelPrintable = canCacheRows ? this.modelPrintable : frameModelPrintable;
+    if (canCacheRows && !this.rowCacheOverBudget) this.rowCacheValid = true;
+    if (this.rowCacheOverBudget) {
+      this.rowBgVertices = Array.from({ length: terminal.rows }, () => null);
+      this.rowFgVertices = Array.from({ length: terminal.rows }, () => null);
+      this.printableByRow = new Uint32Array(terminal.rows);
+      this.modelPrintable = 0;
+      retainedRowVertexBytes = 0;
+    }
     terminal.markClean();
     return {
       cpuSubmitMs: performance.now() - startedAt,
       cells: terminal.cols * terminal.rows,
-      quads: bgVertices.quadCount + fgVertices.quadCount + outlineVertices.quadCount + imageQuadsDrawn,
+      paintedCells: paintedRows * terminal.cols,
+      paintedRows,
+      fullPaint,
+      submittedQuads,
+      retainedRowVertexBytes,
+      modelPrintable: sampleModelPrintable,
+      quads: submittedQuads,
       glyphUploads: this.glyphs.size - glyphCountBefore,
       cellsArrayLen: cells.length,
       printableSkippedNull,
@@ -815,6 +973,36 @@ export class WebGlTerminalRenderer {
     this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, stride, offset);
   }
 
+  // `quadsPerCell` is how many quads a cell is expected to contribute to this
+  // pass, and only sets the starting capacity — the buffer grows on demand, so
+  // an underestimate costs one reallocation rather than a wrong frame. The two
+  // passes are estimated differently on purpose: a foreground cell draws a glyph
+  // and can add a tint, an underline, or a strikethrough, while a background
+  // draws at most one quad and only for a non-default color, which most rows
+  // have none of. Sizing both at a full row is what doubled retained bytes.
+  private rowVertexBuffer(
+    rows: Array<TerminalVertexBuffer | null>,
+    row: number,
+    cols: number,
+    quadsPerCell: number,
+  ): TerminalVertexBuffer {
+    const existing = rows[row];
+    if (existing) return existing;
+    const created = new TerminalVertexBuffer(Math.max(
+      TERMINAL_FLOATS_PER_QUAD,
+      Math.ceil(cols * quadsPerCell) * TERMINAL_FLOATS_PER_QUAD,
+    ));
+    rows[row] = created;
+    return created;
+  }
+
+  private retainedRowVertexBytes(): number {
+    let bytes = 0;
+    for (const row of this.rowBgVertices) bytes += row?.capacityBytes ?? 0;
+    for (const row of this.rowFgVertices) bytes += row?.capacityBytes ?? 0;
+    return bytes;
+  }
+
   private cellForeground(cell: GhosttyCell): PackedRgb {
     if ((cell.flags & CellFlags.INVERSE) !== 0) {
       return packRgb(cell.bg_r, cell.bg_g, cell.bg_b);
@@ -926,6 +1114,9 @@ export class WebGlTerminalRenderer {
   private reseedAtlas(): void {
     this.glyphs.clear();
     this.codepointGlyphs.clear();
+    // Cached vertices carry UVs into this atlas. Once it moves, every row has
+    // to be rebuilt before it can be concatenated into another frame.
+    this.rowCacheValid = false;
     this.atlasX = 2;
     this.atlasY = 1;
     this.atlasRowHeight = 0;

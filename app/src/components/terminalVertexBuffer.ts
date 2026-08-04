@@ -29,12 +29,23 @@ export class TerminalVertexBuffer {
     return this.cursor / TERMINAL_FLOATS_PER_QUAD;
   }
 
+  get capacityBytes(): number {
+    return this.scratch.byteLength;
+  }
+
   reset(): void {
     this.cursor = 0;
   }
 
   view(): Float32Array {
     return this.scratch.subarray(0, this.cursor);
+  }
+
+  append(vertices: Float32Array): void {
+    if (vertices.length === 0) return;
+    this.ensureCapacity(vertices.length);
+    this.scratch.set(vertices, this.cursor);
+    this.cursor += vertices.length;
   }
 
   pushQuad(

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GhosttyCell, GhosttyTerminal } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { TERMINAL_FLOATS_PER_QUAD } from './terminalVertexBuffer';
 import {
   graphemeAtViewportCell,
   nextAtlasSize,
@@ -466,6 +467,139 @@ describe('WebGlTerminalRenderer kitty z layering', () => {
     // of the image the selection was dragged across.
     expect(draws[0].floats).toBe(0);
     expect(draws[2].floats).toBe(FLOATS_PER_QUAD);
+  });
+});
+
+// The row cache keeps a buffer per row per cell pass. This fixture's cells all
+// carry the default background, so every foreground row fills to one quad per
+// column while every background row stays at the one-quad minimum it was
+// allocated with.
+const QUAD_BYTES = TERMINAL_FLOATS_PER_QUAD * Float32Array.BYTES_PER_ELEMENT;
+const ROW_FG_BYTES = 50 * 50 * QUAD_BYTES;
+const ROW_BG_MIN_BYTES = 50 * QUAD_BYTES;
+
+function makeControllableTerminal(cols: number, rows: number) {
+  const cells = Array.from({ length: cols * rows }, () => ({
+    codepoint: 65,
+    grapheme_len: 0,
+    width: 1,
+    flags: 0,
+    fg_r: 255, fg_g: 255, fg_b: 255,
+    bg_r: 0, bg_g: 0, bg_b: 0,
+  }));
+  const state = {
+    dirty: 2,
+    rows: new Set(Array.from({ length: rows }, (_, row) => row)),
+  };
+  const markClean = vi.fn();
+  const terminal = {
+    cols,
+    rows,
+    update: () => state.dirty,
+    isRowDirty: (row: number) => state.rows.has(row),
+    markClean,
+    getCursor: () => ({ x: 0, y: 0, visible: false }),
+    getViewport: () => cells,
+    getScrollbackLength: () => 0,
+    getGraphemeString: () => '',
+    getScrollbackGraphemeString: () => '',
+  } as unknown as GhosttyTerminal;
+  return { terminal, cells, state, markClean };
+}
+
+describe('WebGlTerminalRenderer dirty rows', () => {
+  it('rebuilds small grids directly instead of paying to copy a row cache', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(4, 5);
+    renderer.resize(4, 5);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([2]);
+
+    expect(renderer.render(terminal)).toMatchObject({
+      fullPaint: true,
+      paintedRows: 5,
+      retainedRowVertexBytes: 0,
+    });
+  });
+
+  it('rebuilds only a dirty row and its neighbors while submitting a complete cached frame', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, cells, state, markClean } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+
+    const initial = renderer.render(terminal);
+    expect(initial).toMatchObject({
+      fullPaint: true,
+      paintedRows: 50,
+      submittedQuads: 2500,
+      retainedRowVertexBytes: ROW_FG_BYTES + ROW_BG_MIN_BYTES,
+      modelPrintable: 2500,
+      quads: 2500,
+    });
+
+    // Clear the middle row. Ghostty marks that row dirty; the renderer expands
+    // by one row on either side for cross-row grapheme pixels.
+    for (let col = 0; col < 50; col += 1) cells[25 * 50 + col].codepoint = 0;
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    const partial = renderer.render(terminal);
+
+    expect(partial).toMatchObject({
+      fullPaint: false,
+      paintedRows: 3,
+      paintedCells: 150,
+      submittedQuads: 2450,
+      retainedRowVertexBytes: ROW_FG_BYTES + ROW_BG_MIN_BYTES,
+      modelPrintable: 2450,
+      quads: 2450,
+    });
+    expect(markClean).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps overlays on the full-frame path even when Ghostty is partially dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    const sample = renderer.render(terminal, false, undefined, [
+      { startRow: 25, startCol: 0, endRow: 25, endCol: 1, color: '#ffffff', kind: 'underline' },
+    ]);
+
+    expect(sample).toMatchObject({ fullPaint: true, paintedRows: 50 });
+
+    // Removing an overlay also changes pixels outside the model's dirty set.
+    // One full frame retires that composited surface before partial paints resume.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: true, paintedRows: 50 });
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('releases a row cache that grows beyond the two MiB guardrail', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, cells, state } = makeControllableTerminal(100, 30);
+    for (const cell of cells) {
+      cell.bg_r = 64;
+      cell.flags = CellFlags.UNDERLINE | CellFlags.STRIKETHROUGH;
+    }
+    renderer.resize(100, 30);
+
+    expect(renderer.render(terminal)).toMatchObject({
+      fullPaint: true,
+      retainedRowVertexBytes: 0,
+      modelPrintable: 3000,
+    });
+
+    state.dirty = 1;
+    state.rows = new Set([15]);
+    expect(renderer.render(terminal)).toMatchObject({
+      fullPaint: true,
+      paintedRows: 30,
+      retainedRowVertexBytes: 0,
+    });
   });
 });
 

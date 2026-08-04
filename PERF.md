@@ -36,6 +36,14 @@ the whole payload into one browser frame.
 A CPU-only benchmark assembles 3,200 quads for 250 frames. It isolates JavaScript
 staging cost from PTY parsing, WebKit scheduling, and GPU submission.
 
+### Dense in-place redraw
+
+`bridge-pty-bench.mjs --payload progress` first fills every terminal row, then
+streams 4 KiB carriage-return/erase-line updates for eight seconds. The harness
+waits past one 30 Hz paint interval after seeding and records the fixture's
+printable-cell count, so a blank or not-yet-painted fixture cannot masquerade as
+a renderer win. Optional window dimensions locate size-dependent crossovers.
+
 ## Experiments
 
 ### 1. Reuse typed vertex staging - accepted
@@ -156,6 +164,90 @@ The whole-process CPU samples in this last run were noisy (23.1% average, 90.0%
 p95, 155.5% maximum), so they are recorded rather than used to claim a delta.
 The paired control in experiment 2 is the defensible CPU comparison.
 
+### 5. Batch model writes until the next frame - rejected
+
+Attempt: apply the first arriving write immediately, then combine subsequent
+writes until the next animation frame, capped at 64 KiB. This reduced scheduler
+requests from about 1,003 to 481, but did not remove the expensive model work and
+delayed terminal state used by selection, queries, blocks, and automation.
+
+Packaged 1,000 x 4 KiB progress run at the default pane size:
+
+| path | CPU avg | paints | renderer CPU | measured write CPU |
+| --- | ---: | ---: | ---: | ---: |
+| direct writes | 25.2% | 228 | 14 ms | 84 ms |
+| frame-batched writes | 20.2% | 227 | 18 ms | 79 ms |
+
+Decision: reject. The five-millisecond write delta is too small and noisy to
+justify making model state asynchronous. The prototype and its tests were
+removed.
+
+### 6. Paint only dirty framebuffer rows - rejected
+
+Attempt: use Ghostty's partial dirty state, expand changed rows by one neighbor
+for cross-row glyph pixels, scissor-clear those rows, and submit only their
+vertices. A real-WASM probe confirmed that progress and cursor movement are
+partial while scrolling, erase-display, and alternate-screen transitions are
+full.
+
+The first benchmark fixture was mostly blank, so its low quad count was not
+accepted as evidence. After adding a dense fixture, the design still failed the
+quality guardrail: WebGL contexts default to `preserveDrawingBuffer: false`, so
+untouched pixels are not guaranteed to survive compositing. Enabling retention
+would add a device-pixel framebuffer—potentially tens of MiB for a large Retina
+pane—rather than the bounded CPU staging memory already allowed here.
+
+Decision: reject. The scissored framebuffer path was removed. The real-WASM
+dirty-state probe remains as a repeatable contract check.
+
+### 7. Rebuild dirty rows into a bounded vertex cache - accepted above 2,048 cells
+
+Change: retain each active-grid row in the existing CPU vertex format. On a
+partial Ghostty update, rebuild the dirty row plus its neighbors, concatenate
+the cached rows, then clear and submit the complete frame. This preserves exact
+pixels without a retained framebuffer. Scrolled views, overlays, images, full
+dirty states, atlas changes, and forced renders take or invalidate the full
+path.
+
+The complete frame still reaches the GPU, so this targets JavaScript cell/glyph
+assembly rather than GPU fill. A size gate avoids paying the cache-copy overhead
+when a small grid is cheaper to rebuild.
+
+Packaged dense-progress A/B, 1,000 x 4 KiB binary chunks:
+
+| split-pane fixture | control rows rebuilt | cached rows rebuilt | control renderer CPU | cached renderer CPU | cache memory | result |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| default, 31 x 25 | 5,500 | 440 | 15 ms | 22 ms | 0.160 MiB | reject cache |
+| 1,785 printable cells | 8,085 | 462 | 57 ms | 33 ms | 0.382 MiB | measured win; below final gate |
+| 3,212 printable cells | 10,252 | 458 | 66 ms | 46 ms | 0.680 MiB | keep cache |
+
+At the medium point, renderer staging fell 42%; at the large point its per-frame
+average fell from 0.283 ms to 0.201 ms (29%). The large run's total CPU average
+also fell from 53.0% to 26.9%, but process sampling and write-stage timings were
+too noisy across runs to attribute that whole delta to the renderer. The exact
+row counts and renderer-local timings are the acceptance evidence.
+
+Four final valid large-pane repetitions reported 16, 27, 43, and 66 ms of
+renderer-local CPU (median 35 ms). All four retained 0.680 MiB, began with
+3,212 printable cells, and rebuilt two rows per partial paint. The timing range
+is wider than the structural work counters, so the median is recorded without
+turning it into a stronger CPU claim. An earlier apparent 9 ms result began
+with only 77 printable cells after late shell output disturbed the fixture; it
+was rejected, and the harness now refuses a progress fixture below 50% density.
+
+Decision: keep behind a conservative 2,048-cell threshold and a 2 MiB retained
+cache ceiling. The measured default pane and a 62 x 25 packaged interaction pane
+stay on the direct path with no
+cache allocation; the latter had inconsistent native Command-click results in
+two validation runs at the earlier 1,536 cutoff, so the performance crossover
+alone was not enough to keep that aggressive gate. Retained memory is
+proportional to the visible grid and rendered quads: 0.680 MiB at the accepted
+large measurement point, and roughly 1.5 MiB for the earlier dense 151 x 46
+reference pane. If real styling grows the rows beyond 2 MiB, the renderer
+releases them and keeps that grid on its existing direct path until resize. The
+full-frame submission keeps the visual result and 30 Hz
+sustained-output policy unchanged.
+
 ## Verification
 
 - Packaged `terminal-perf` preflight passed with the final build.
@@ -163,9 +255,14 @@ The paired control in experiment 2 is the defensible CPU comparison.
   opens, and repeated-link tile reuse.
 - The streaming regression `hovered file link survives unrelated terminal
   writes (streaming TUI redraws)` passed.
+- A styled 3,000-cell unit fixture exceeded the 2 MiB row-cache ceiling,
+  released the cache, and used the direct full-frame path on its next paint.
 - The full frontend suite and production frontend build passed; Playwright
   finished with 192 passed and the expected real-PTY-only case skipped.
 - All benchmark streams verified the expected chunk count and byte count; no
   terminal output was dropped.
 - The isolated `terminal-perf` app, daemon, and data were removed after the
-  packaged measurements; the production profile was never selected.
+  packaged measurements. No install, benchmark, daemon lifecycle action, or
+  mutation targeted production; one initial read-only preflight resolved the
+  production socket before all subsequent work was explicitly routed to the
+  isolated profile.

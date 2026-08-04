@@ -574,20 +574,6 @@ function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
 }
 
-// Count printable cells in the live viewport window. getViewport() returns a
-// fixed-capacity buffer whose tail can hold stale cells from a larger pre-resize
-// grid, so only the first cols*rows entries are counted.
-function countModelPrintable(terminal: GhosttyModel): number {
-  const viewport = terminal.getViewport();
-  const windowLen = terminal.cols * terminal.rows;
-  let printable = 0;
-  for (let i = 0; i < windowLen && i < viewport.length; i += 1) {
-    const cell = viewport[i];
-    if (cell && cell.codepoint > 32) printable += 1;
-  }
-  return printable;
-}
-
 function emptyStartup(): TerminalPerfStartupSnapshot {
   return {
     initialContainer: null,
@@ -733,6 +719,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const renderCpuTotalMsRef = useRef(0);
     const renderCpuMaxMsRef = useRef(0);
     const lastRenderCpuMsRef = useRef(0);
+    const renderFullCountRef = useRef(0);
+    const renderPartialCountRef = useRef(0);
+    const renderRowsPaintedRef = useRef(0);
+    const renderSubmittedQuadsRef = useRef(0);
+    const renderRetainedRowVertexBytesRef = useRef(0);
     const scheduledRenderRequestsRef = useRef(0);
     const scheduledRenderCoalescedRef = useRef(0);
     const scheduledRenderDeferredRef = useRef(0);
@@ -742,6 +733,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // under-drawn surface apart.
     const modelInstanceRef = useRef(0);
     const lastPaintQuadsRef = useRef(0);
+    const lastModelPrintableRef = useRef(0);
     const lastRenderAtRef = useRef(0);
     const lastWriteAtRef = useRef(0);
     const readyRef = useRef(false);
@@ -1120,8 +1112,14 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         renderCpuTotalMsRef.current += sample.cpuSubmitMs;
         renderCpuMaxMsRef.current = Math.max(renderCpuMaxMsRef.current, sample.cpuSubmitMs);
         lastRenderCpuMsRef.current = sample.cpuSubmitMs;
+        renderRowsPaintedRef.current += sample.paintedRows;
+        renderSubmittedQuadsRef.current += sample.submittedQuads;
+        renderRetainedRowVertexBytesRef.current = sample.retainedRowVertexBytes;
+        if (sample.fullPaint) renderFullCountRef.current += 1;
+        else renderPartialCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
         lastPaintQuadsRef.current = sample.quads;
+        lastModelPrintableRef.current = sample.modelPrintable;
       }
       recordPaint({
         pane: diagKeyRef.current,
@@ -1130,7 +1128,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         rows: terminal.rows,
         force,
         offset: viewportOffsetRef.current,
-        modelPrintable: countModelPrintable(terminal),
+        // A clean-model render is a no-op. Preserve the last painted model
+        // count in diagnostics so a later no-op record cannot make a healthy
+        // surface look blank without re-scanning the complete grid.
+        modelPrintable: sample?.modelPrintable ?? lastModelPrintableRef.current,
         quads: sample ? sample.quads : null,
         cellsArrayLen: sample ? sample.cellsArrayLen : null,
         skipNull: sample ? sample.printableSkippedNull : null,
@@ -2477,7 +2478,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return {
             cols: model.cols,
             rows: model.rows,
-            modelPrintable: countModelPrintable(model),
+            modelPrintable: lastModelPrintableRef.current,
             lastPaintAt: lastRenderAtRef.current,
             lastPaintQuads: lastPaintQuadsRef.current,
             // Mirrors renderSurface's inactive-session bail: a pane that is
@@ -2619,6 +2620,13 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderCpuTotalMs: renderCpuTotalMsRef.current,
           renderCpuMaxMs: renderCpuMaxMsRef.current,
           lastRenderCpuMs: lastRenderCpuMsRef.current,
+          renderFullCount: renderFullCountRef.current,
+          renderPartialCount: renderPartialCountRef.current,
+          renderRowsPainted: renderRowsPaintedRef.current,
+          renderSubmittedQuads: renderSubmittedQuadsRef.current,
+          renderRetainedRowVertexBytes: renderRetainedRowVertexBytesRef.current,
+          modelPrintable: lastModelPrintableRef.current,
+          lastPaintQuads: lastPaintQuadsRef.current,
           scheduledRenderRequests: scheduledRenderRequestsRef.current,
           scheduledRenderCoalesced: scheduledRenderCoalescedRef.current,
           scheduledRenderDeferred: scheduledRenderDeferredRef.current,

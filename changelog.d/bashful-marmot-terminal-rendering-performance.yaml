@@ -2,11 +2,15 @@ kind: changed
 area: terminal
 change: >
   Streaming terminal output now reuses GPU-ready vertex buffers between paints,
-  avoids repeated per-cell color and glyph-key allocations, and limits sustained
-  output to 30 paints per second while preserving immediate interaction paints.
+  avoids repeated per-cell color and glyph-key allocations, rebuilds only dirty
+  rows in large in-place redraws, and limits sustained output to 30 paints per
+  second while preserving immediate interaction paints.
 notes: >
   The main terminal renderer and mission-control grid renderer now share the
   same reusable typed vertex buffer. Continuous output keeps only the newest
   model state for the next paint; the first output after idle, direct input, and
-  the final state are still rendered promptly. Terminal performance snapshots
+  the final state are still rendered promptly. Large active grids cache bounded
+  CPU-side row vertices while still clearing and submitting a complete frame, so
+  WebGL framebuffer retention is not required. Small grids, scrolling, overlays,
+  and images keep the direct full-render path. Terminal performance snapshots
   expose renderer CPU and scheduling counters for packaged-app measurements.

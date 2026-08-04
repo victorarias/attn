@@ -50,4 +50,17 @@ describe('TerminalVertexBuffer', () => {
     expect(vertices.quadCount).toBe(2);
     expect(Array.from(vertices.view().slice(0, TERMINAL_FLOATS_PER_QUAD))).toEqual(firstQuad);
   });
+
+  it('appends an existing row without rebuilding its quads', () => {
+    const row = new TerminalVertexBuffer(TERMINAL_FLOATS_PER_QUAD);
+    row.pushQuad(1, 2, 3, 4, 0, 0, 1, 1, 0x010203, 1, 0);
+    const frame = new TerminalVertexBuffer(TERMINAL_FLOATS_PER_QUAD);
+
+    frame.append(row.view());
+    frame.append(row.view());
+
+    expect(frame.quadCount).toBe(2);
+    expect(Array.from(frame.view().slice(0, TERMINAL_FLOATS_PER_QUAD))).toEqual(Array.from(row.view()));
+    expect(Array.from(frame.view().slice(TERMINAL_FLOATS_PER_QUAD))).toEqual(Array.from(row.view()));
+  });
 });

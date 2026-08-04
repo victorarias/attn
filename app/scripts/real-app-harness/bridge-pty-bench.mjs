@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { setFrontWindowBounds } from './nativeWindowCapture.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -24,7 +25,10 @@ function parseArgs(argv) {
       || arg === '--chunk-count'
       || arg === '--chunk-delay-ms'
       || arg === '--mode'
+      || arg === '--payload'
       || arg === '--flush-every'
+      || arg === '--window-width'
+      || arg === '--window-height'
     ) {
       index += 1;
       continue;
@@ -37,7 +41,10 @@ function parseArgs(argv) {
   options.chunkCount = 128;
   options.chunkDelayMs = 0;
   options.mode = null;
+  options.payload = 'scroll';
   options.flushEvery = null;
+  options.windowWidth = null;
+  options.windowHeight = null;
 
   for (let index = 0; index < filteredArgv.length; index += 1) {
     const arg = filteredArgv[index];
@@ -45,7 +52,10 @@ function parseArgs(argv) {
     if (arg === '--chunk-count') options.chunkCount = Number(filteredArgv[index + 1]);
     if (arg === '--chunk-delay-ms') options.chunkDelayMs = Number(filteredArgv[index + 1]);
     if (arg === '--mode') options.mode = filteredArgv[index + 1];
+    if (arg === '--payload') options.payload = filteredArgv[index + 1];
     if (arg === '--flush-every') options.flushEvery = Number(filteredArgv[index + 1]);
+    if (arg === '--window-width') options.windowWidth = Number(filteredArgv[index + 1]);
+    if (arg === '--window-height') options.windowHeight = Number(filteredArgv[index + 1]);
   }
 
   if (!Number.isFinite(options.chunkBytes) || options.chunkBytes <= 0) {
@@ -59,6 +69,12 @@ function parseArgs(argv) {
   }
   if (options.flushEvery !== null && (!Number.isFinite(options.flushEvery) || options.flushEvery <= 0)) {
     throw new Error('--flush-every must be a positive number');
+  }
+  if (!['scroll', 'progress'].includes(options.payload)) {
+    throw new Error('--payload must be scroll or progress');
+  }
+  if ((options.windowWidth === null) !== (options.windowHeight === null)) {
+    throw new Error('--window-width and --window-height must be provided together');
   }
 
   return options;
@@ -240,6 +256,7 @@ async function sampleWhilePending(rootPid, extraPids, promise, intervalMs = 100)
 function compactResult(mode, bench, processSummary) {
   return {
     mode,
+    payload: bench.payload || 'scroll',
     flushEvery: bench.flushEvery || 1,
     totalMs: Number(bench.totalMs.toFixed(2)),
     throughputMiBPerSec: Number((bench.throughputMiBPerSec || 0).toFixed(2)),
@@ -256,9 +273,18 @@ function compactResult(mode, bench, processSummary) {
     rendererAvgFrameMs: bench.renderer?.renderCount > 0
       ? Number((bench.renderer.cpuSubmitMs / bench.renderer.renderCount).toFixed(3))
       : 0,
+    rendererFullPaintCount: bench.renderer?.fullPaintCount || 0,
+    rendererPartialPaintCount: bench.renderer?.partialPaintCount || 0,
+    rendererRowsPainted: bench.renderer?.rowsPainted || 0,
+    rendererSubmittedQuads: bench.renderer?.submittedQuads || 0,
+    rendererRetainedRowVertexMb: Number(((bench.renderer?.retainedRowVertexBytes || 0) / (1024 * 1024)).toFixed(3)),
+    fixturePrintable: bench.renderer?.fixturePrintable || 0,
+    finalModelPrintable: bench.renderer?.finalModelPrintable || 0,
+    finalPaintQuads: bench.renderer?.finalPaintQuads || 0,
     scheduledRenderRequests: bench.renderer?.scheduledRequests || 0,
     scheduledRenderCoalesced: bench.renderer?.scheduledCoalesced || 0,
     scheduledRenderDeferred: bench.renderer?.scheduledDeferred || 0,
+    writeParsedCount: bench.renderer?.writeParsedCount || 0,
     ptyOutputCount: bench.pty.ptyOutputCount || 0,
     terminalWriteCount: bench.pty.terminalWriteCount || 0,
     totalPayloadBytes: bench.totalPayloadBytes,
@@ -273,7 +299,10 @@ async function main() {
     console.log('  --chunk-count <n>          Number of chunks per mode (default: 128)');
     console.log('  --chunk-delay-ms <n>       Delay between chunks for sustained-output measurements');
     console.log('  --mode <name>              Run only bytes, base64, or json_base64');
+    console.log('  --payload <name>           Run scrolling output or in-place progress updates');
     console.log('  --flush-every <n>           Run only one batching level');
+    console.log('  --window-width <n>          Resize the isolated benchmark window before creating panes');
+    console.log('  --window-height <n>         Resize the isolated benchmark window before creating panes');
     return;
   }
 
@@ -292,6 +321,13 @@ async function main() {
     await client.waitForManifest(20_000);
     await client.waitForReady(20_000);
     await client.waitForFrontendResponsive(20_000);
+    if (options.windowWidth !== null && options.windowHeight !== null) {
+      await setFrontWindowBounds(
+        { x: 60, y: 60, width: options.windowWidth, height: options.windowHeight },
+        { client },
+      );
+      await client.waitForFrontendResponsive(20_000);
+    }
     await observer.connect();
     await observer.unregisterMatchingSessions(
       (session) => typeof session.label === 'string' && session.label.startsWith('attn-pty-bench-'),
@@ -353,6 +389,7 @@ async function main() {
         mode: entry.mode,
         chunkBytes: options.chunkBytes,
         chunkCount: options.chunkCount,
+        payload: options.payload,
         interChunkDelayMs: options.chunkDelayMs,
         flushEvery: entry.flushEvery,
       }, { timeoutMs: 120_000 });
@@ -390,6 +427,7 @@ async function main() {
       chunkBytes: options.chunkBytes,
       chunkCount: options.chunkCount,
       chunkDelayMs: options.chunkDelayMs,
+      payload: options.payload,
       results,
       compact,
       deltas,

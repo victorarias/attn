@@ -52,6 +52,13 @@ export interface TerminalPerfSnapshot {
   renderCpuTotalMs: number;
   renderCpuMaxMs: number;
   lastRenderCpuMs: number;
+  renderFullCount: number;
+  renderPartialCount: number;
+  renderRowsPainted: number;
+  renderSubmittedQuads: number;
+  renderRetainedRowVertexBytes: number;
+  modelPrintable: number;
+  lastPaintQuads: number;
   scheduledRenderRequests: number;
   scheduledRenderCoalesced: number;
   scheduledRenderDeferred: number;
