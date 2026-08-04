@@ -727,6 +727,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scheduledOutputRenderRef = useRef<number | null>(null);
     const renderCountRef = useRef(0);
+    const renderCpuTotalMsRef = useRef(0);
+    const renderCpuMaxMsRef = useRef(0);
+    const lastRenderCpuMsRef = useRef(0);
     const writeCountRef = useRef(0);
     // Diagnostics: model instance (increments on rebuild) and last paint quads,
     // used by the blank-on-split watchdog to tell a fresh empty model and an
@@ -1108,6 +1111,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current, imageQuads);
       if (sample) {
         renderCountRef.current += 1;
+        renderCpuTotalMsRef.current += sample.cpuSubmitMs;
+        renderCpuMaxMsRef.current = Math.max(renderCpuMaxMsRef.current, sample.cpuSubmitMs);
+        lastRenderCpuMsRef.current = sample.cpuSubmitMs;
         lastRenderAtRef.current = Date.now();
         lastPaintQuadsRef.current = sample.quads;
       }
@@ -2586,6 +2592,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           writeQueueChunks: 0,
           writeQueueBytes: 0,
           renderCount: renderCountRef.current,
+          renderCpuTotalMs: renderCpuTotalMsRef.current,
+          renderCpuMaxMs: renderCpuMaxMsRef.current,
+          lastRenderCpuMs: lastRenderCpuMsRef.current,
           writeParsedCount: writeCountRef.current,
           lastRenderAt: lastRenderAtRef.current,
           lastWriteParsedAt: lastWriteAtRef.current,

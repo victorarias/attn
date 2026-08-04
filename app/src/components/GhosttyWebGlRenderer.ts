@@ -12,6 +12,10 @@ import {
   KITTY_FORMAT_BYTES_PER_PIXEL,
   type KittyPixelFormat,
 } from '../utils/kittyImageFormat';
+import {
+  TERMINAL_FLOATS_PER_VERTEX,
+  TerminalVertexBuffer,
+} from './terminalVertexBuffer';
 
 interface RendererTheme {
   background: string;
@@ -172,7 +176,6 @@ export const MAX_ATLAS_SIZE = 2048;
 // fragment path: 0 = tinted coverage (text/box/overlays sample the atlas alpha
 // and paint it in the quad's color), 1 = color glyph (emoji: sample the atlas
 // RGBA directly so the glyph keeps its own colors).
-const FLOATS_PER_VERTEX = 9;
 
 // Next atlas size when the current one fills: double it, but never exceed the
 // cap. Idempotent at the cap, so repeated growth always converges to
@@ -312,9 +315,18 @@ export class WebGlTerminalRenderer {
   private readonly program: WebGLProgram;
   private readonly buffer: WebGLBuffer;
   private readonly texture: WebGLTexture;
+  private readonly uResolution: WebGLUniformLocation | null;
   private readonly atlas: HTMLCanvasElement;
   private readonly atlasContext: CanvasRenderingContext2D;
   private readonly glyphs = new Map<string, AtlasGlyph>();
+  // One buffer per cell pass. They are separate because an image can draw
+  // between them, and staying separate is also what lets each keep its own
+  // grown capacity: backgrounds are one quad per non-default cell, foregrounds
+  // several per styled cell, so a shared buffer would size to their sum.
+  private readonly cellBgVertices = new TerminalVertexBuffer();
+  private readonly cellFgVertices = new TerminalVertexBuffer();
+  private readonly outlineVertices = new TerminalVertexBuffer(256);
+  private readonly imageVertices = new TerminalVertexBuffer(64);
   // Insertion order is LRU order; a texture is re-inserted when it is drawn.
   private readonly imageTextures = new Map<string, WebGLTexture>();
   // Device pixels per CSS pixel, captured once at construction. Read by
@@ -325,7 +337,8 @@ export class WebGlTerminalRenderer {
   private baseline: number;
   private fontSize: number;
   private readonly fontFamily: string;
-  private readonly theme: RendererTheme;
+  private readonly defaultBg: Rgb;
+  private readonly cursorBg: Rgb;
   private atlasSize = INITIAL_ATLAS_SIZE;
   private atlasX = 2;
   private atlasY = 1;
@@ -353,7 +366,8 @@ export class WebGlTerminalRenderer {
     this.canvas = canvas;
     this.fontSize = fontSize;
     this.fontFamily = fontFamily;
-    this.theme = theme;
+    this.defaultBg = parseColor(theme.background);
+    this.cursorBg = parseColor(theme.cursor);
     this.dpr = Math.max(window.devicePixelRatio || 1, 1);
 
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
@@ -398,12 +412,13 @@ export class WebGlTerminalRenderer {
 
     gl.useProgram(this.program);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    const stride = FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
+    const stride = TERMINAL_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
     this.configureAttribute('a_position', 2, stride, 0);
     this.configureAttribute('a_texcoord', 2, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
     this.configureAttribute('a_color', 4, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
     this.configureAttribute('a_mode', 1, stride, 8 * Float32Array.BYTES_PER_ELEMENT);
     gl.uniform1i(gl.getUniformLocation(this.program, 'u_atlas'), 0);
+    this.uResolution = gl.getUniformLocation(this.program, 'u_resolution');
     gl.enable(gl.BLEND);
     // Premultiplied-alpha blending: the shader emits color already multiplied by
     // coverage, so source factor is ONE. This keeps tinted text identical to the
@@ -448,9 +463,9 @@ export class WebGlTerminalRenderer {
 
     const gl = this.gl;
     const scale = this.dpr;
-    const defaultBg = parseColor(this.theme.background);
-    const cursorBg = parseColor(this.theme.cursor);
-    const cursorFg = parseColor(this.theme.background);
+    const defaultBg = this.defaultBg;
+    const cursorBg = this.cursorBg;
+    const cursorFg = this.defaultBg;
     const cursor = terminal.getCursor();
     const cursorRow = cursor.visible
       ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
@@ -461,8 +476,10 @@ export class WebGlTerminalRenderer {
     // paints — selection/search tints, the cursor block, glyphs, underlines —
     // is foreground, and draws after the under-text images so neither the
     // cursor nor a selection can vanish behind one.
-    const bgVertices: number[] = [];
-    const fgVertices: number[] = [];
+    const bgVertices = this.cellBgVertices;
+    const fgVertices = this.cellFgVertices;
+    bgVertices.reset();
+    fgVertices.reset();
     const glyphCountBefore = this.glyphs.size;
     const atlasGenerationBefore = this.atlasGeneration;
     // Resolve overlays into per-row column spans once per frame so the cell
@@ -558,7 +575,8 @@ export class WebGlTerminalRenderer {
 
     // Outlines are the last thing on the frame, after every image pass, so a
     // selected block's border stays legible over an image drawn above the text.
-    const outlineVertices: number[] = [];
+    const outlineVertices = this.outlineVertices;
+    outlineVertices.reset();
 
     for (const outline of outlines) {
       const top = Math.max(0, outline.startRow) * this.cellHeight * scale;
@@ -602,24 +620,24 @@ export class WebGlTerminalRenderer {
     gl.useProgram(this.program);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.uniform2f(gl.getUniformLocation(this.program, 'u_resolution'), this.canvas.width, this.canvas.height);
+    gl.uniform2f(this.uResolution, this.canvas.width, this.canvas.height);
     let imageQuadsDrawn = 0;
     imageQuadsDrawn += this.drawImages(underBackground, scale);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bgVertices), gl.DYNAMIC_DRAW);
-    gl.drawArrays(gl.TRIANGLES, 0, bgVertices.length / FLOATS_PER_VERTEX);
+    gl.bufferData(gl.ARRAY_BUFFER, bgVertices.view(), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, bgVertices.length / TERMINAL_FLOATS_PER_VERTEX);
     imageQuadsDrawn += this.drawImages(underText, scale);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fgVertices), gl.DYNAMIC_DRAW);
-    gl.drawArrays(gl.TRIANGLES, 0, fgVertices.length / FLOATS_PER_VERTEX);
+    gl.bufferData(gl.ARRAY_BUFFER, fgVertices.view(), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, fgVertices.length / TERMINAL_FLOATS_PER_VERTEX);
     imageQuadsDrawn += this.drawImages(overText, scale);
     if (outlineVertices.length > 0) {
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(outlineVertices), gl.DYNAMIC_DRAW);
-      gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / FLOATS_PER_VERTEX);
+      gl.bufferData(gl.ARRAY_BUFFER, outlineVertices.view(), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / TERMINAL_FLOATS_PER_VERTEX);
     }
     terminal.markClean();
     return {
       cpuSubmitMs: performance.now() - startedAt,
       cells: terminal.cols * terminal.rows,
-      quads: (bgVertices.length + fgVertices.length + outlineVertices.length) / FLOATS_PER_VERTEX / 6 + imageQuadsDrawn,
+      quads: bgVertices.quadCount + fgVertices.quadCount + outlineVertices.quadCount + imageQuadsDrawn,
       glyphUploads: this.glyphs.size - glyphCountBefore,
       cellsArrayLen: cells.length,
       printableSkippedNull,
@@ -658,7 +676,8 @@ export class WebGlTerminalRenderer {
       if (!texture) continue;
       const { width, height } = quad.source;
       if (width <= 0 || height <= 0) continue;
-      const vertices: number[] = [];
+      const vertices = this.imageVertices;
+      vertices.reset();
       this.pushQuad(
         vertices,
         quad.x * scale,
@@ -676,8 +695,8 @@ export class WebGlTerminalRenderer {
         GLYPH_MODE_COLOR,
       );
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
-      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
+      gl.bufferData(gl.ARRAY_BUFFER, vertices.view(), gl.DYNAMIC_DRAW);
+      gl.drawArrays(gl.TRIANGLES, 0, vertices.length / TERMINAL_FLOATS_PER_VERTEX);
       drawn += 1;
     }
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -909,14 +928,14 @@ export class WebGlTerminalRenderer {
     );
   }
 
-  private pushSolidQuad(vertices: number[], x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
+  private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
     // Keep all samples within the white texel. Sampling its edges with LINEAR
     // filtering blends into transparent atlas neighbours and leaves seams. Mode
     // 0: tint the (fully-opaque) texel coverage with the quad color.
     this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha, GLYPH_MODE_TINT);
   }
 
-  private pushBlockElement(vertices: number[], codepoint: number, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): boolean {
+  private pushBlockElement(vertices: TerminalVertexBuffer, codepoint: number, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): boolean {
     const rects = BLOCK_ELEMENT_RECTS[codepoint];
     if (!rects) {
       return false;
@@ -935,14 +954,14 @@ export class WebGlTerminalRenderer {
     return true;
   }
 
-  private pushTexturedQuad(vertices: number[], x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb, alpha: number): void {
+  private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb, alpha: number): void {
     // Color glyphs (emoji) carry their own colors and use mode 1 so the shader
     // passes the atlas RGBA through; monochrome glyphs use mode 0 and are tinted.
     this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
   }
 
   private pushQuad(
-    vertices: number[],
+    vertices: TerminalVertexBuffer,
     x: number,
     y: number,
     width: number,
@@ -955,14 +974,6 @@ export class WebGlTerminalRenderer {
     alpha: number,
     mode: number,
   ): void {
-    const rgba = [color.r / 255, color.g / 255, color.b / 255, alpha];
-    vertices.push(
-      x, y, u0, v0, ...rgba, mode,
-      x + width, y, u1, v0, ...rgba, mode,
-      x, y + height, u0, v1, ...rgba, mode,
-      x, y + height, u0, v1, ...rgba, mode,
-      x + width, y, u1, v0, ...rgba, mode,
-      x + width, y + height, u1, v1, ...rgba, mode,
-    );
+    vertices.pushQuad(x, y, width, height, u0, v0, u1, v1, color, alpha, mode);
   }
 }

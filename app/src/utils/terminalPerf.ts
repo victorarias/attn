@@ -49,6 +49,9 @@ export interface TerminalPerfSnapshot {
   writeQueueChunks: number;
   writeQueueBytes: number;
   renderCount: number;
+  renderCpuTotalMs: number;
+  renderCpuMaxMs: number;
+  lastRenderCpuMs: number;
   writeParsedCount: number;
   lastRenderAt: number;
   lastWriteParsedAt: number;

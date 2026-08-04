@@ -12,6 +12,10 @@ function decodeBase64Utf8(value) {
   return Buffer.from(value, 'base64').toString('utf8');
 }
 
+export function attachSnapshotText(message) {
+  return decodeBase64Utf8(message?.snapshot?.vt_dump_b64 ?? message?.scrollback);
+}
+
 function workspacePaneIds(workspace) {
   return (workspace?.panes || []).map((pane) => pane.pane_id);
 }
@@ -479,7 +483,12 @@ export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
         reject(new Error(data.error || `attach_session failed for ${runtimeId}`));
         return;
       }
-      resolve(decodeBase64Utf8(data.scrollback));
+      // Restore is server-authoritative: the daemon now carries the parsed
+      // terminal as a self-contained VT dump instead of the removed raw
+      // scrollback field. The dump still contains the rendered text, which is
+      // what harness completion/token checks need. Keep the old field as a
+      // compatibility fallback for older packaged apps.
+      resolve(attachSnapshotText(data));
     });
 
     ws.once('error', (error) => {

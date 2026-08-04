@@ -218,6 +218,11 @@ function compactResult(mode, bench, processSummary) {
     ptyJsonParseMs: Number((bench.pty.ptyJsonParseMs || 0).toFixed(3)),
     decodeMs: Number((bench.pty.decodeMs || 0).toFixed(3)),
     terminalWriteCallMs: Number((bench.pty.terminalWriteCallMs || 0).toFixed(3)),
+    rendererPaintCount: bench.renderer?.renderCount || 0,
+    rendererCpuSubmitMs: Number((bench.renderer?.cpuSubmitMs || 0).toFixed(3)),
+    rendererAvgFrameMs: bench.renderer?.renderCount > 0
+      ? Number((bench.renderer.cpuSubmitMs / bench.renderer.renderCount).toFixed(3))
+      : 0,
     ptyOutputCount: bench.pty.ptyOutputCount || 0,
     terminalWriteCount: bench.pty.terminalWriteCount || 0,
     totalPayloadBytes: bench.totalPayloadBytes,
@@ -282,13 +287,11 @@ async function main() {
       direction: 'vertical',
     }, { timeoutMs: 30_000 });
 
-    const workspace = await observer.waitForWorkspace(
+    const utilityPane = await observer.waitForUtilityPane(
       sessionId,
-      (entry) => (entry.panes || []).some((pane) => pane.kind === 'shell' && pane.runtime_id),
-      `utility pane for ${sessionId}`,
       20_000,
+      new Set([targetPaneId]),
     );
-    const utilityPane = (workspace.panes || []).find((pane) => pane.kind === 'shell' && pane.runtime_id);
     if (!utilityPane?.runtime_id) {
       throw new Error('Utility pane not found');
     }

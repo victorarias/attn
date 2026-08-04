@@ -1,0 +1,9 @@
+kind: changed
+area: terminal
+change: >
+  Streaming terminal output now reuses GPU-ready vertex buffers between paints,
+  reducing the allocation and copying work required to draw each frame.
+notes: >
+  The main terminal renderer and mission-control grid renderer now share the
+  same reusable typed vertex buffer. Terminal performance snapshots also expose
+  renderer CPU time so packaged-app benchmarks can measure paint cost directly.

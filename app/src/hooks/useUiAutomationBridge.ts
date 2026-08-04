@@ -3203,6 +3203,11 @@ export function useUiAutomationBridge({
           throw new Error(`Pane terminal not ready for ${paneId}`);
         }
         clearPtyPerfSnapshot();
+        const rendererBefore = getTerminalPerfSnapshot().find(
+          (terminal) => terminal.runtimeId === runtimeId || (
+            terminal.sessionId === sessionId && terminal.paneId === paneId
+          ),
+        );
 
         const startedAt = performance.now();
         let bufferedByteChunks: Uint8Array[] = [];
@@ -3276,6 +3281,11 @@ export function useUiAutomationBridge({
 
         await settleUi(2);
         const totalMs = performance.now() - startedAt;
+        const rendererAfter = getTerminalPerfSnapshot().find(
+          (terminal) => terminal.runtimeId === runtimeId || (
+            terminal.sessionId === sessionId && terminal.paneId === paneId
+          ),
+        );
         return {
           sessionId,
           paneId,
@@ -3290,6 +3300,13 @@ export function useUiAutomationBridge({
             ? ((bytes.length * chunkCount) / (1024 * 1024)) / (totalMs / 1000)
             : null,
           pty: getPtyPerfSnapshot(),
+          renderer: rendererBefore && rendererAfter
+            ? {
+                renderCount: rendererAfter.renderCount - rendererBefore.renderCount,
+                cpuSubmitMs: rendererAfter.renderCpuTotalMs - rendererBefore.renderCpuTotalMs,
+                lastFrameMs: rendererAfter.lastRenderCpuMs,
+              }
+            : null,
           pane: {
             size: getPaneSize(sessionId, paneId),
             textLength: getPaneText(sessionId, paneId).length,
