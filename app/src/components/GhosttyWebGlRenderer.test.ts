@@ -490,6 +490,7 @@ function makeControllableTerminal(cols: number, rows: number) {
   const state = {
     dirty: 2,
     rows: new Set(Array.from({ length: rows }, (_, row) => row)),
+    cursor: { x: 0, y: 0, visible: false },
   };
   const markClean = vi.fn();
   const terminal = {
@@ -498,7 +499,7 @@ function makeControllableTerminal(cols: number, rows: number) {
     update: () => state.dirty,
     isRowDirty: (row: number) => state.rows.has(row),
     markClean,
-    getCursor: () => ({ x: 0, y: 0, visible: false }),
+    getCursor: () => state.cursor,
     getViewport: () => cells,
     getScrollbackLength: () => 0,
     getGraphemeString: () => '',
@@ -578,6 +579,67 @@ describe('WebGlTerminalRenderer dirty rows', () => {
     expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
   });
 
+  it('repaints the row the cursor left behind, which Ghostty does not mark dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    // A bare reposition: no cell changed, so the model reports no dirty rows.
+    state.dirty = 1;
+    state.rows = new Set();
+    state.cursor = { x: 0, y: 30, visible: true };
+
+    // Rows 9-11 (vacated) and 29-31 (arrived), each expanded by one neighbor.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  // The regressing case: Ghostty reports DIRTY_NONE for a move within one row,
+  // so such a move only reaches the renderer riding along with an unrelated
+  // dirty row. The cursor's own row is absent from that set.
+  it('repaints the cursor row on a same-row move that rides along with another dirty row', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([40]);
+    state.cursor = { x: 7, y: 10, visible: true };
+
+    // Rows 39-41 for the dirty row, 9-11 for the cursor's unmarked row.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  it('repaints the row a hidden cursor was drawn on', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([40]);
+    state.cursor = { x: 0, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  it('paints nothing extra when a hidden cursor moves', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    state.cursor = { x: 40, y: 40, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
   it('releases a row cache that grows beyond the two MiB guardrail', () => {
     const { renderer } = makeRenderer();
     const { terminal, cells, state } = makeControllableTerminal(100, 30);
@@ -587,7 +649,8 @@ describe('WebGlTerminalRenderer dirty rows', () => {
     }
     renderer.resize(100, 30);
 
-    expect(renderer.render(terminal)).toMatchObject({
+    const built = renderer.render(terminal);
+    expect(built).toMatchObject({
       fullPaint: true,
       retainedRowVertexBytes: 0,
       modelPrintable: 3000,
@@ -595,11 +658,16 @@ describe('WebGlTerminalRenderer dirty rows', () => {
 
     state.dirty = 1;
     state.rows = new Set([15]);
-    expect(renderer.render(terminal)).toMatchObject({
+    const afterRelease = renderer.render(terminal);
+    expect(afterRelease).toMatchObject({
       fullPaint: true,
       paintedRows: 30,
       retainedRowVertexBytes: 0,
     });
+    // The frame buffer is what a direct-path paint stages regardless, so the
+    // reported total stays non-zero after the cache is gone.
+    expect(afterRelease!.retainedRowVertexBytes).toBe(0);
+    expect(afterRelease!.retainedStagingBytes).toBeGreaterThan(0);
   });
 });
 

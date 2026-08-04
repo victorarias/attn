@@ -139,6 +139,39 @@ function waitForBenchmarkDelay(delayMs: number) {
   });
 }
 
+// The seed is written to the model, but output paints are paced at 30 Hz, so
+// the dense surface may not have reached the GPU yet. Wait for a paint that
+// happened after the seed instead of for a fixed interval.
+async function waitForSeededPaint(
+  readPerf: () => { renderCount: number } | undefined,
+  renderCountBeforeSeed: number,
+  maxFrames = 120,
+): Promise<void> {
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if ((readPerf()?.renderCount ?? 0) > renderCountBeforeSeed) return;
+    await nextAnimationFrame();
+  }
+}
+
+// A freshly created utility shell keeps emitting its prompt after the reset
+// request returns, and there is no event for "the shell is done talking". Wait
+// on the real signal instead of a fixed sleep: the pane's parsed-write counter
+// going unchanged across consecutive frames means nothing more arrived.
+async function waitForPaneWriteQuiescence(
+  readWriteCount: () => number | null,
+  quietFrames = 3,
+  maxFrames = 120,
+): Promise<void> {
+  let last = readWriteCount();
+  let quiet = 0;
+  for (let frame = 0; frame < maxFrames && quiet < quietFrames; frame += 1) {
+    await nextAnimationFrame();
+    const current = readWriteCount();
+    quiet = current === last ? quiet + 1 : 0;
+    last = current;
+  }
+}
+
 async function settleUi(frames = 2) {
   for (let index = 0; index < frames; index += 1) {
     await nextAnimationFrame();
@@ -3224,45 +3257,40 @@ export function useUiAutomationBridge({
         if (!resetSessionPaneTerminal(sessionId, paneId)) {
           throw new Error(`Pane terminal not ready for ${paneId}`);
         }
-        // A freshly created utility shell can still emit its prompt after the
-        // reset request returns. Let that output arrive before constructing a
-        // deterministic benchmark fixture; otherwise it can move the cursor or
-        // erase rows immediately after the seed.
-        if (benchmarkPayload === 'progress') {
-          await waitForBenchmarkDelay(100);
-          await drainSessionPaneTerminal(sessionId, paneId);
-        }
-        await settleUi(2);
-        const terminalBeforeSeed = getTerminalPerfSnapshot().find(
+        const paneTerminalPerf = () => getTerminalPerfSnapshot().find(
           (terminal) => terminal.runtimeId === runtimeId || (
             terminal.sessionId === sessionId && terminal.paneId === paneId
           ),
         );
-        if (benchmarkPayload === 'progress' && !terminalBeforeSeed) {
-          throw new Error(`Pane terminal disappeared before seeding ${paneId}`);
-        }
-        if (benchmarkPayload === 'progress' && terminalBeforeSeed) {
-          const seed = buildBenchmarkProgressSeed(terminalBeforeSeed.cols, terminalBeforeSeed.rows);
+
+        if (benchmarkPayload === 'progress') {
+          // The shell's own prompt can move the cursor or erase rows right
+          // after the seed, so let it finish before building the fixture.
+          await waitForPaneWriteQuiescence(() => paneTerminalPerf()?.writeParsedCount ?? null);
+          await drainSessionPaneTerminal(sessionId, paneId);
+          await settleUi(2);
+
+          const beforeSeed = paneTerminalPerf();
+          if (!beforeSeed) {
+            throw new Error(`Pane terminal disappeared before seeding ${paneId}`);
+          }
+          const seed = buildBenchmarkProgressSeed(beforeSeed.cols, beforeSeed.rows);
           if (!(await injectSessionPaneBytes(sessionId, paneId, seed))) {
             throw new Error(`Failed to seed progress fixture in pane ${paneId}`);
           }
           if (!(await drainSessionPaneTerminal(sessionId, paneId))) {
             throw new Error(`Failed to drain progress fixture in pane ${paneId}`);
           }
-          // Output paints are intentionally paced at 30 Hz. Two display frames
-          // can finish before that timer fires on a 60 Hz panel, which would
-          // let the measured writes overwrite the seed before its dense surface
-          // has ever rendered. Wait past one paint interval, then let React and
-          // the compositor settle before taking the baseline counters.
-          await waitForBenchmarkDelay(50);
+          // Output paints are paced at 30 Hz, so the seed is written but not
+          // necessarily painted yet. Wait for a paint that actually covers it
+          // rather than for a fixed interval, or the measured writes overwrite
+          // a fixture whose dense surface never rendered.
+          await waitForSeededPaint(paneTerminalPerf, beforeSeed.renderCount);
           await settleUi(2);
         }
+        await settleUi(2);
         clearPtyPerfSnapshot();
-        const rendererBefore = getTerminalPerfSnapshot().find(
-          (terminal) => terminal.runtimeId === runtimeId || (
-            terminal.sessionId === sessionId && terminal.paneId === paneId
-          ),
-        );
+        const rendererBefore = paneTerminalPerf();
         if (
           benchmarkPayload === 'progress'
           && rendererBefore
@@ -3354,11 +3382,7 @@ export function useUiAutomationBridge({
 
         await settleUi(2);
         const totalMs = performance.now() - startedAt;
-        const rendererAfter = getTerminalPerfSnapshot().find(
-          (terminal) => terminal.runtimeId === runtimeId || (
-            terminal.sessionId === sessionId && terminal.paneId === paneId
-          ),
-        );
+        const rendererAfter = paneTerminalPerf();
         return {
           sessionId,
           paneId,
@@ -3385,6 +3409,7 @@ export function useUiAutomationBridge({
                 rowsPainted: rendererAfter.renderRowsPainted - rendererBefore.renderRowsPainted,
                 submittedQuads: rendererAfter.renderSubmittedQuads - rendererBefore.renderSubmittedQuads,
                 retainedRowVertexBytes: rendererAfter.renderRetainedRowVertexBytes,
+                retainedStagingBytes: rendererAfter.renderRetainedStagingBytes,
                 fixturePrintable: rendererBefore.modelPrintable,
                 finalModelPrintable: rendererAfter.modelPrintable,
                 finalPaintQuads: rendererAfter.lastPaintQuads,

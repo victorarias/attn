@@ -1,20 +1,27 @@
-# Terminal rendering performance log
+# Terminal rendering performance
 
-This log records terminal rendering experiments on `perf/terminal-stream-rendering`.
-It keeps rejected approaches beside accepted ones so later work does not repeat
-measurements or trade away responsiveness for an attractive microbenchmark.
+Streaming terminal output rebuilt and submitted the full visible grid at display
+refresh rate even when a TUI changed only a progress row. Terminal panes stay
+open all day, so that repeated work is a standing CPU, GPU, and battery cost.
+
+This is the design record for reducing it: what was measured, what was kept, and
+what was tried and rejected. The rejected entries are here so later work does not
+repeat the measurements or trade responsiveness for an attractive microbenchmark.
 
 ## Guardrails
 
+Any future change to this path is held to the same rules:
+
 - Preserve every terminal byte and always paint the newest model state.
-- Keep direct interaction paints immediate. Any frame-rate policy applies only
+- Keep direct interaction paints immediate. A frame-rate policy applies only
   while PTY output is arriving continuously.
 - Do not add a continuous repaint loop.
-- Keep renderer-owned CPU staging bounded. The main vertex buffer starts at
-  128 KiB and a dense 151 x 46 pane grows it to 2 MiB; optimizations should not
-  add another full-frame retained copy without stronger evidence.
+- Keep renderer-owned CPU staging bounded and reported. Every renderer sample
+  carries both `retainedRowVertexBytes` (what the row cache adds) and
+  `retainedStagingBytes` (that plus the frame buffer it concatenates into). A
+  receipt that names only one of them understates the pane by roughly half.
 - Run packaged-app measurements only in an isolated named profile and clean it
-  immediately afterwards. Production `~/.attn` remains read-only.
+  up afterwards. Production `~/.attn` stays read-only.
 
 ## Measurement methods
 
@@ -39,10 +46,13 @@ staging cost from PTY parsing, WebKit scheduling, and GPU submission.
 ### Dense in-place redraw
 
 `bridge-pty-bench.mjs --payload progress` first fills every terminal row, then
-streams 4 KiB carriage-return/erase-line updates for eight seconds. The harness
-waits past one 30 Hz paint interval after seeding and records the fixture's
-printable-cell count, so a blank or not-yet-painted fixture cannot masquerade as
-a renderer win. Optional window dimensions locate size-dependent crossovers.
+streams 4 KiB carriage-return/erase-line updates for eight seconds. Because
+output paints are paced, the harness waits for a paint that actually covers the
+seed (a renderer paint count past the pre-seed value) rather than for a fixed
+interval, and records the fixture's printable-cell count. A blank or
+not-yet-painted fixture therefore cannot masquerade as a renderer win: the run
+fails outright below 50% density. Optional window dimensions locate
+size-dependent crossovers.
 
 ## Experiments
 
@@ -186,16 +196,16 @@ removed.
 
 Attempt: use Ghostty's partial dirty state, expand changed rows by one neighbor
 for cross-row glyph pixels, scissor-clear those rows, and submit only their
-vertices. A real-WASM probe confirmed that progress and cursor movement are
-partial while scrolling, erase-display, and alternate-screen transitions are
-full.
+vertices. A real-WASM probe (`scripts/bench-terminal-dirty-rows.mjs`) confirmed
+that progress redraws are partial while scrolling, erase-display, and
+alternate-screen transitions are full. That probe survived the rejection and is
+the source of the cursor contract recorded in experiment 7.
 
-The first benchmark fixture was mostly blank, so its low quad count was not
-accepted as evidence. After adding a dense fixture, the design still failed the
-quality guardrail: WebGL contexts default to `preserveDrawingBuffer: false`, so
-untouched pixels are not guaranteed to survive compositing. Enabling retention
-would add a device-pixel framebuffer—potentially tens of MiB for a large Retina
-pane—rather than the bounded CPU staging memory already allowed here.
+Measured against a dense fixture, the design failed the quality guardrail rather
+than the performance one: WebGL contexts default to `preserveDrawingBuffer:
+false`, so untouched pixels are not guaranteed to survive compositing. Enabling
+retention would add a device-pixel framebuffer — potentially tens of MiB for a
+large Retina pane — rather than the bounded CPU staging memory allowed here.
 
 Decision: reject. The scissored framebuffer path was removed. The real-WASM
 dirty-state probe remains as a repeatable contract check.
@@ -227,26 +237,72 @@ also fell from 53.0% to 26.9%, but process sampling and write-stage timings were
 too noisy across runs to attribute that whole delta to the renderer. The exact
 row counts and renderer-local timings are the acceptance evidence.
 
-Four final valid large-pane repetitions reported 16, 27, 43, and 66 ms of
-renderer-local CPU (median 35 ms). All four retained 0.680 MiB, began with
-3,212 printable cells, and rebuilt two rows per partial paint. The timing range
-is wider than the structural work counters, so the median is recorded without
-turning it into a stronger CPU claim. An earlier apparent 9 ms result began
-with only 77 printable cells after late shell output disturbed the fixture; it
-was rejected, and the harness now refuses a progress fixture below 50% density.
+Four large-pane repetitions reported 16, 27, 43, and 66 ms of renderer-local CPU
+(median 35 ms). All four retained 0.680 MiB, began with 3,212 printable cells,
+and rebuilt two rows per partial paint. The timing range is wider than the
+structural work counters, so the median is recorded without being turned into a
+stronger CPU claim.
 
-Decision: keep behind a conservative 2,048-cell threshold and a 2 MiB retained
-cache ceiling. The measured default pane and a 62 x 25 packaged interaction pane
-stay on the direct path with no
-cache allocation; the latter had inconsistent native Command-click results in
-two validation runs at the earlier 1,536 cutoff, so the performance crossover
-alone was not enough to keep that aggressive gate. Retained memory is
-proportional to the visible grid and rendered quads: 0.680 MiB at the accepted
-large measurement point, and roughly 1.5 MiB for the earlier dense 151 x 46
-reference pane. If real styling grows the rows beyond 2 MiB, the renderer
-releases them and keeps that grid on its existing direct path until resize. The
-full-frame submission keeps the visual result and 30 Hz
-sustained-output policy unchanged.
+A faster-looking 9 ms result was discarded on inspection: its fixture held only
+77 printable cells, because late shell output had overwritten the seed. That is
+why the harness now waits for a paint covering the seed and fails any progress
+run below 50% density — a benchmark that measures an empty screen reports a
+large win for doing nothing.
+
+The wide timing range earlier in this section is why the structural counters
+(rows rebuilt, quads submitted, bytes retained) are the acceptance evidence and
+the CPU numbers are recorded rather than claimed.
+
+Decision: keep behind a 2,048-cell threshold and a 2 MiB row-cache ceiling. The
+measured default pane and a 62 x 25 packaged interaction pane stay on the direct
+path with no cache allocation; the latter had inconsistent native Command-click
+results in two validation runs at an earlier 1,536 cutoff, so the performance
+crossover alone was not enough to justify the more aggressive gate.
+
+Two limits, deliberately: the 2,048-cell floor is a performance gate (below it,
+copying the rows costs more than rebuilding them) and the 2 MiB ceiling is a
+memory gate. There is no size *cap* — an earlier draft also refused to cache any
+grid whose cell count times one quad exceeded the ceiling, which excluded the
+largest panes (above ~9,700 cells) on an estimate that assumed exactly one quad
+per cell and so was wrong in both directions. The ceiling is enforced against
+what a built frame actually retained.
+
+The ceiling governs the cache's marginal cost — the retained rows — not the
+frame buffer they concatenate into. A frame has to be staged somewhere whether
+or not the cache exists: a dense styled 100 x 30 grid emitting four quads per
+cell grows that buffer to 4 MiB on the direct path alone. Folding it into the
+gate would trip the cache on memory the direct path spends anyway, so both
+numbers are reported on every sample and only the rows are gated.
+
+Retained rows are proportional to the visible grid and rendered quads: 0.680 MiB
+at the accepted large measurement point, roughly 1.5 MiB for the dense 151 x 46
+reference pane. If real styling pushes them past 2 MiB the renderer releases
+them at that transition and keeps the grid on the direct path until it resizes.
+Full-frame submission keeps the visual result and the 30 Hz sustained-output
+policy unchanged.
+
+**The model's dirty set covers the cursor only across rows.** Measured with
+`scripts/bench-terminal-dirty-rows.mjs` against the vendored WASM:
+
+| cursor change | reported dirty state | reported rows |
+| --- | --- | --- |
+| `\x1b[2;4H` (row 0 → row 1) | PARTIAL | both rows |
+| `\x1b[2;9H` (within one row) | NONE | — |
+| `\x1b[D` (back one column) | NONE | — |
+| `\x1b[?25l` / `\x1b[?25h` | NONE | — |
+
+A same-row move or a visibility toggle on its own never reaches the row
+selection, because `render()` returns early on a NONE dirty state — that is
+pre-existing behavior and the cursor simply stays put until the next paint. The
+row cache is what makes them matter: when one rides along with an *unrelated*
+dirty row the frame is PARTIAL, the cursor's own row is absent from the set, and
+the cursor is baked into that cached row as an inverted cell, so the row would
+keep the cursor at its old column until a full paint.
+
+So a partial paint marks the cursor's row and the row it was last drawn on, on
+top of `isRowDirty()` — at most six rows, and it removes the class. ghostty-web's
+own canvas renderer compensates the same way, and future partial-paint work has
+to keep doing so.
 
 ## Verification
 
@@ -261,8 +317,5 @@ sustained-output policy unchanged.
   finished with 192 passed and the expected real-PTY-only case skipped.
 - All benchmark streams verified the expected chunk count and byte count; no
   terminal output was dropped.
-- The isolated `terminal-perf` app, daemon, and data were removed after the
-  packaged measurements. No install, benchmark, daemon lifecycle action, or
-  mutation targeted production; one initial read-only preflight resolved the
-  production socket before all subsequent work was explicitly routed to the
-  isolated profile.
+- Cursor movement with no dirty rows repaints both the vacated and the arrived
+  row; a hidden cursor moving adds no work.

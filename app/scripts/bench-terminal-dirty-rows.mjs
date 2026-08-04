@@ -47,6 +47,11 @@ write(
   Array.from({ length: 300 }, (_, index) => `\r\x1b[2Kp ${String(index).padStart(6, '0')} xx`).join('').slice(0, 4096),
 );
 write('cursor move only', '\x1b[2;4H');
+write('cursor move within one row', '\x1b[2;9H');
+write('cursor back one column', '\x1b[D');
+write('hide cursor', '\x1b[?25l');
+write('cursor move while hidden', '\x1b[4;2H');
+write('show cursor', '\x1b[?25h');
 write('overwrite one row', 'updated');
 write('erase display', '\x1b[2J');
 const denseRows = Array.from({ length: terminal.rows }, (_, row) => (

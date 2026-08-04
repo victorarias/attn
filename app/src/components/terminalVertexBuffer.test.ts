@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { packRgb } from './terminalColor';
 import {
   TERMINAL_FLOATS_PER_QUAD,
   TerminalVertexBuffer,
@@ -7,7 +8,7 @@ import {
 describe('TerminalVertexBuffer', () => {
   it('writes the two triangles of a quad in GPU-ready layout', () => {
     const vertices = new TerminalVertexBuffer();
-    vertices.pushQuad(10, 20, 30, 40, 0.1, 0.2, 0.7, 0.8, { r: 255, g: 128, b: 0 }, 0.5, 1);
+    vertices.pushQuad(10, 20, 30, 40, 0.1, 0.2, 0.7, 0.8, packRgb(255, 128, 0), 0.5, 1);
 
     expect(vertices.length).toBe(TERMINAL_FLOATS_PER_QUAD);
     expect(vertices.quadCount).toBe(1);
@@ -19,7 +20,7 @@ describe('TerminalVertexBuffer', () => {
     ]);
   });
 
-  it('accepts packed RGB without a color object', () => {
+  it('normalizes each packed channel onto its own float', () => {
     const vertices = new TerminalVertexBuffer(TERMINAL_FLOATS_PER_QUAD);
 
     vertices.pushQuad(0, 0, 1, 1, 0, 0, 1, 1, 0xff8000, 0.5, 1);
@@ -31,11 +32,11 @@ describe('TerminalVertexBuffer', () => {
 
   it('reuses its allocation after reset', () => {
     const vertices = new TerminalVertexBuffer();
-    vertices.pushQuad(0, 0, 1, 1, 0, 0, 1, 1, { r: 0, g: 0, b: 0 }, 1, 0);
+    vertices.pushQuad(0, 0, 1, 1, 0, 0, 1, 1, packRgb(0, 0, 0), 1, 0);
     const allocation = vertices.view().buffer;
 
     vertices.reset();
-    vertices.pushQuad(1, 1, 2, 2, 0, 0, 1, 1, { r: 255, g: 255, b: 255 }, 1, 0);
+    vertices.pushQuad(1, 1, 2, 2, 0, 0, 1, 1, packRgb(255, 255, 255), 1, 0);
 
     expect(vertices.view().buffer).toBe(allocation);
     expect(vertices.quadCount).toBe(1);
@@ -43,9 +44,9 @@ describe('TerminalVertexBuffer', () => {
 
   it('grows without losing vertices already written in the frame', () => {
     const vertices = new TerminalVertexBuffer(TERMINAL_FLOATS_PER_QUAD);
-    vertices.pushQuad(1, 2, 3, 4, 0, 0, 1, 1, { r: 1, g: 2, b: 3 }, 1, 0);
+    vertices.pushQuad(1, 2, 3, 4, 0, 0, 1, 1, packRgb(1, 2, 3), 1, 0);
     const firstQuad = Array.from(vertices.view());
-    vertices.pushQuad(5, 6, 7, 8, 0, 0, 1, 1, { r: 4, g: 5, b: 6 }, 1, 0);
+    vertices.pushQuad(5, 6, 7, 8, 0, 0, 1, 1, packRgb(4, 5, 6), 1, 0);
 
     expect(vertices.quadCount).toBe(2);
     expect(Array.from(vertices.view().slice(0, TERMINAL_FLOATS_PER_QUAD))).toEqual(firstQuad);

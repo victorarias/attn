@@ -1,13 +1,7 @@
+import type { PackedRgb } from './terminalColor';
+
 export const TERMINAL_FLOATS_PER_VERTEX = 9;
 export const TERMINAL_FLOATS_PER_QUAD = TERMINAL_FLOATS_PER_VERTEX * 6;
-
-interface Rgb {
-  r: number;
-  g: number;
-  b: number;
-}
-
-type TerminalVertexColor = Rgb | number;
 
 // Reusable CPU-side vertex staging for terminal glyphs and solid quads. A
 // number[] plus `new Float32Array(vertices)` allocates and copies the complete
@@ -57,15 +51,15 @@ export class TerminalVertexBuffer {
     v0: number,
     u1: number,
     v1: number,
-    color: TerminalVertexColor,
+    color: PackedRgb,
     alpha: number,
     mode: number,
   ): void {
     this.ensureCapacity(TERMINAL_FLOATS_PER_QUAD);
     const vertices = this.scratch;
-    const r = (typeof color === 'number' ? color >>> 16 & 0xff : color.r) / 255;
-    const g = (typeof color === 'number' ? color >>> 8 & 0xff : color.g) / 255;
-    const b = (typeof color === 'number' ? color & 0xff : color.b) / 255;
+    const r = (color >>> 16 & 0xff) / 255;
+    const g = (color >>> 8 & 0xff) / 255;
+    const b = (color & 0xff) / 255;
     let offset = this.cursor;
 
     vertices[offset++] = x; vertices[offset++] = y; vertices[offset++] = u0; vertices[offset++] = v0; vertices[offset++] = r; vertices[offset++] = g; vertices[offset++] = b; vertices[offset++] = alpha; vertices[offset++] = mode;

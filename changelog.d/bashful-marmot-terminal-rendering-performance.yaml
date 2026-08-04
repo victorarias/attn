@@ -7,10 +7,13 @@ change: >
   second while preserving immediate interaction paints.
 notes: >
   The main terminal renderer and mission-control grid renderer now share the
-  same reusable typed vertex buffer. Continuous output keeps only the newest
-  model state for the next paint; the first output after idle, direct input, and
-  the final state are still rendered promptly. Large active grids cache bounded
-  CPU-side row vertices while still clearing and submitting a complete frame, so
-  WebGL framebuffer retention is not required. Small grids, scrolling, overlays,
-  and images keep the direct full-render path. Terminal performance snapshots
-  expose renderer CPU and scheduling counters for packaged-app measurements.
+  same reusable typed vertex buffer and a single packed color representation.
+  Continuous output keeps only the newest model state for the next paint; the
+  first output after idle, direct input, and the final state are still rendered
+  promptly. Large active grids cache bounded CPU-side row vertices while still
+  clearing and submitting a complete frame, so WebGL framebuffer retention is
+  not required. A partial paint also repaints the cursor's row and the row it
+  moved from, which the model's dirty set does not cover. Small grids,
+  scrolling, overlays, and images keep the direct full-render path. Terminal
+  performance snapshots expose renderer CPU, scheduling counters, and both
+  retained-memory figures for packaged-app measurements.

@@ -57,6 +57,7 @@ export interface TerminalPerfSnapshot {
   renderRowsPainted: number;
   renderSubmittedQuads: number;
   renderRetainedRowVertexBytes: number;
+  renderRetainedStagingBytes: number;
   modelPrintable: number;
   lastPaintQuads: number;
   scheduledRenderRequests: number;

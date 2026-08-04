@@ -483,11 +483,11 @@ export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
         reject(new Error(data.error || `attach_session failed for ${runtimeId}`));
         return;
       }
-      // Restore is server-authoritative: the daemon now carries the parsed
-      // terminal as a self-contained VT dump instead of the removed raw
-      // scrollback field. The dump still contains the rendered text, which is
-      // what harness completion/token checks need. Keep the old field as a
-      // compatibility fallback for older packaged apps.
+      // Restore is server-authoritative: attach carries the parsed terminal as
+      // a self-contained VT dump, and its rendered text is what the harness
+      // completion/token checks read. `scrollback` is not a product fallback —
+      // the daemon no longer sends it (see AGENTS.md, "Terminal") — it only
+      // lets this script read a packaged build predating that change.
       resolve(attachSnapshotText(data));
     });
 

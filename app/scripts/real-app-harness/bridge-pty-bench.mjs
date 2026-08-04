@@ -278,6 +278,7 @@ function compactResult(mode, bench, processSummary) {
     rendererRowsPainted: bench.renderer?.rowsPainted || 0,
     rendererSubmittedQuads: bench.renderer?.submittedQuads || 0,
     rendererRetainedRowVertexMb: Number(((bench.renderer?.retainedRowVertexBytes || 0) / (1024 * 1024)).toFixed(3)),
+    rendererRetainedStagingMb: Number(((bench.renderer?.retainedStagingBytes || 0) / (1024 * 1024)).toFixed(3)),
     fixturePrintable: bench.renderer?.fixturePrintable || 0,
     finalModelPrintable: bench.renderer?.finalModelPrintable || 0,
     finalPaintQuads: bench.renderer?.finalPaintQuads || 0,

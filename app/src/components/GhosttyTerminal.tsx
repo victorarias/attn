@@ -574,6 +574,27 @@ function colorNumber(value: string): number {
   return Number.parseInt(value.slice(1), 16);
 }
 
+// Count printable cells in the live viewport window. getViewport() returns a
+// fixed-capacity buffer whose tail can hold stale cells from a larger pre-resize
+// grid, so only the first cols*rows entries are counted.
+//
+// This is deliberately a second, renderer-independent witness. The blank-on-
+// split watchdog compares "how much the model holds" against "how many quads
+// the renderer drew"; if both numbers come out of the same render pass they
+// move together and an under-drawing renderer can never be caught. Too
+// expensive for every paint, which is why renderSurface uses the render
+// sample's own count and only the watchdog probe re-scans.
+function countModelPrintable(terminal: GhosttyModel): number {
+  const viewport = terminal.getViewport();
+  const windowLen = terminal.cols * terminal.rows;
+  let printable = 0;
+  for (let i = 0; i < windowLen && i < viewport.length; i += 1) {
+    const cell = viewport[i];
+    if (cell && cell.codepoint > 32) printable += 1;
+  }
+  return printable;
+}
+
 function emptyStartup(): TerminalPerfStartupSnapshot {
   return {
     initialContainer: null,
@@ -724,6 +745,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const renderRowsPaintedRef = useRef(0);
     const renderSubmittedQuadsRef = useRef(0);
     const renderRetainedRowVertexBytesRef = useRef(0);
+    const renderRetainedStagingBytesRef = useRef(0);
     const scheduledRenderRequestsRef = useRef(0);
     const scheduledRenderCoalescedRef = useRef(0);
     const scheduledRenderDeferredRef = useRef(0);
@@ -1115,6 +1137,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         renderRowsPaintedRef.current += sample.paintedRows;
         renderSubmittedQuadsRef.current += sample.submittedQuads;
         renderRetainedRowVertexBytesRef.current = sample.retainedRowVertexBytes;
+        renderRetainedStagingBytesRef.current = sample.retainedStagingBytes;
         if (sample.fullPaint) renderFullCountRef.current += 1;
         else renderPartialCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
@@ -1169,7 +1192,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       scheduledOutputRenderForceRef.current = false;
     }, []);
 
-    const scheduleOutputRender = useCallback((force = true) => {
+    // `force` is not optional on purpose. A forced paint repaints a clean model
+    // (what an image placement needs); an unforced one is a no-op when nothing
+    // changed (what streamed output wants, so the row cache can serve it). A
+    // default here would silently pick one for the next caller.
+    const scheduleOutputRender = useCallback((force: boolean) => {
       scheduledRenderRequestsRef.current += 1;
       scheduledOutputRenderForceRef.current ||= force;
       if (scheduledOutputRenderRef.current !== null) {
@@ -1908,7 +1935,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
         requestPlacementBlobs();
-        scheduleOutputRender();
+        scheduleOutputRender(true);
       });
     }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
 
@@ -1923,7 +1950,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         placementSessionRef.current = sessionId;
         placementStoreRef.current.seed(placements, terminal.getScrollbackLength());
         requestPlacementBlobs();
-        scheduleOutputRender();
+        scheduleOutputRender(true);
       });
     }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
 
@@ -1933,7 +1960,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     useEffect(() => kittyImageCache.subscribe((sessionId, imageId) => {
       if (sessionId !== placementSessionRef.current) return;
       if (!placementStoreRef.current.placements().some((p) => p.imageId === imageId)) return;
-      scheduleOutputRender();
+      scheduleOutputRender(true);
     }), [scheduleOutputRender]);
 
     // Live placement-store snapshot for the get_pane_placement_state bridge
@@ -2478,7 +2505,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return {
             cols: model.cols,
             rows: model.rows,
-            modelPrintable: lastModelPrintableRef.current,
+            modelPrintable: countModelPrintable(model),
             lastPaintAt: lastRenderAtRef.current,
             lastPaintQuads: lastPaintQuadsRef.current,
             // Mirrors renderSurface's inactive-session bail: a pane that is
@@ -2625,6 +2652,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderRowsPainted: renderRowsPaintedRef.current,
           renderSubmittedQuads: renderSubmittedQuadsRef.current,
           renderRetainedRowVertexBytes: renderRetainedRowVertexBytesRef.current,
+          renderRetainedStagingBytes: renderRetainedStagingBytesRef.current,
           modelPrintable: lastModelPrintableRef.current,
           lastPaintQuads: lastPaintQuadsRef.current,
           scheduledRenderRequests: scheduledRenderRequestsRef.current,

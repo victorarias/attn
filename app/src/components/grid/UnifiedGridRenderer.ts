@@ -24,6 +24,7 @@ import {
   TERMINAL_FLOATS_PER_VERTEX,
   TerminalVertexBuffer,
 } from '../terminalVertexBuffer';
+import { type Rgb, packColor, parseColor } from '../terminalColor';
 import type { UISessionState } from '../../types/sessionState';
 import type {
   GridRenderer,
@@ -32,12 +33,6 @@ import type {
   TileModel,
 } from './GridRenderer';
 import type { CellMetrics } from './gridConfig';
-
-interface Rgb {
-  r: number;
-  g: number;
-  b: number;
-}
 
 interface AtlasGlyph {
   u0: number;
@@ -141,15 +136,6 @@ const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
     { x: 0, y: 1 / 2, width: 1 / 2, height: 1 / 2 },
   ],
 };
-
-function parseColor(value: string): Rgb {
-  const normalized = value.replace('#', '');
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16),
-  };
-}
 
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
@@ -659,6 +645,6 @@ export class UnifiedGridRenderer implements GridRenderer {
     alpha: number,
     mode: number,
   ): void {
-    this.vertices.pushQuad(x, y, w, h, u0, v0, u1, v1, color, alpha, mode);
+    this.vertices.pushQuad(x, y, w, h, u0, v0, u1, v1, packColor(color), alpha, mode);
   }
 }

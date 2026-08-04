@@ -17,6 +17,15 @@ import {
   TERMINAL_FLOATS_PER_VERTEX,
   TerminalVertexBuffer,
 } from './terminalVertexBuffer';
+import {
+  PACKED_WHITE,
+  type PackedRgb,
+  type Rgb,
+  packColor,
+  packRgb,
+  parseColor,
+  parsePackedColor,
+} from './terminalColor';
 
 interface RendererTheme {
   background: string;
@@ -43,7 +52,7 @@ export interface WebGlOverlay {
 interface OverlaySpan {
   startCol: number;
   endCol: number;
-  rgb: Rgb;
+  rgb: PackedRgb;
   alpha: number;
   kind: 'background' | 'underline';
 }
@@ -116,6 +125,17 @@ export const IMAGE_TEXTURE_LIMIT = 16;
 // around ordinary interaction-sized panes and enable it only above 2,048 cells;
 // the packaged 3,212-cell case remains a measured win.
 const ROW_VERTEX_CACHE_MIN_CELLS = 2_048;
+// Ceiling on what the row cache itself retains. This governs the cache's
+// marginal cost only: the frame buffer the rows concatenate into is a second
+// full-frame copy, but a frame has to be staged somewhere whether or not the
+// cache exists, so folding it in here would trip the gate on memory the direct
+// path spends anyway. Both numbers are reported on every sample
+// (retainedRowVertexBytes and retainedStagingBytes) so the receipt stays whole.
+//
+// Styled content emits several quads per cell, so the real cost is
+// content-dependent and only knowable after a frame is built; a grid that
+// crosses the ceiling releases its rows and stays on the direct path until it
+// resizes.
 const ROW_VERTEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
 // Starting capacity per row, in quads per column, for each cell pass. Every
@@ -126,6 +146,12 @@ const ROW_VERTEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 // need, which costs a reallocation on a styled row and nothing on a plain one.
 const ROW_FG_QUADS_PER_CELL = 1;
 const ROW_BG_QUADS_PER_CELL = 0;
+
+// ghostty-web does not export DirtyState, but its update() contract defines
+// these values. PARTIAL is the only one the row cache can serve; anything else
+// rebuilds the whole grid.
+const DIRTY_NONE = 0;
+const DIRTY_PARTIAL = 1;
 
 interface AtlasGlyph {
   u0: number;
@@ -138,18 +164,6 @@ interface AtlasGlyph {
   // as Apple Color Emoji). Such glyphs are drawn directly from the atlas
   // instead of being tinted with the cell's foreground color.
   colored: boolean;
-}
-
-interface Rgb {
-  r: number;
-  g: number;
-  b: number;
-}
-
-type PackedRgb = number;
-
-function packRgb(r: number, g: number, b: number): PackedRgb {
-  return r << 16 | g << 8 | b;
 }
 
 interface BlockRect {
@@ -167,6 +181,9 @@ export interface WebGlRenderSample {
   fullPaint: boolean;
   submittedQuads: number;
   retainedRowVertexBytes: number;
+  // Rows plus the frame buffer they concatenate into: everything this renderer
+  // holds between paints, including the staging a pane pays on the direct path.
+  retainedStagingBytes: number;
   modelPrintable: number;
   quads: number;
   glyphUploads: number;
@@ -287,15 +304,6 @@ function imageUpload(
   return { format: gl.RGBA, pixels: rgba };
 }
 
-function parseColor(value: string): Rgb {
-  const normalized = value.replace('#', '');
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16),
-  };
-}
-
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) {
@@ -398,6 +406,10 @@ export class WebGlTerminalRenderer {
   private rowCacheValid = false;
   private rowCacheOverBudget = false;
   private modelPrintable = 0;
+  // Cursor position as the last frame drew it, so a partial paint can repaint
+  // the row it left behind. null row means the cursor was hidden.
+  private lastCursorRow: number | null = null;
+  private lastCursorCol = -1;
 
   // UV of the center of the 1×1 solid white texel at atlas pixel (0,0). Depends
   // on the current atlas size, so it is recomputed rather than precomputed.
@@ -420,10 +432,10 @@ export class WebGlTerminalRenderer {
     this.canvas = canvas;
     this.fontSize = fontSize;
     this.fontFamily = fontFamily;
+    // defaultBg stays unpacked for gl.clearColor, which wants normalized floats.
     this.defaultBg = parseColor(theme.background);
-    this.defaultBgPacked = packRgb(this.defaultBg.r, this.defaultBg.g, this.defaultBg.b);
-    const cursorBg = parseColor(theme.cursor);
-    this.cursorBgPacked = packRgb(cursorBg.r, cursorBg.g, cursorBg.b);
+    this.defaultBgPacked = packColor(this.defaultBg);
+    this.cursorBgPacked = parsePackedColor(theme.cursor);
     this.dpr = Math.max(window.devicePixelRatio || 1, 1);
 
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
@@ -501,13 +513,7 @@ export class WebGlTerminalRenderer {
     this.canvas.style.width = `${cols * this.cellWidth}px`;
     this.canvas.style.height = `${rows * this.cellHeight}px`;
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    this.dirtyRowMask = new Uint8Array(rows);
-    this.rowBgVertices = Array.from({ length: rows }, () => null);
-    this.rowFgVertices = Array.from({ length: rows }, () => null);
-    this.printableByRow = new Uint32Array(rows);
-    this.rowCacheValid = false;
-    this.rowCacheOverBudget = false;
-    this.modelPrintable = 0;
+    this.resetRowCache(rows);
   }
 
   render(
@@ -520,43 +526,63 @@ export class WebGlTerminalRenderer {
   ): WebGlRenderSample | null {
     const startedAt = performance.now();
     const dirty = terminal.update();
-    if (!force && dirty === 0) {
+    if (!force && dirty === DIRTY_NONE) {
       return null;
     }
 
-    // DirtyState is intentionally not exported by ghostty-web, but its public
-    // update() contract defines 1 as PARTIAL and 2 as FULL. Scrolled viewports,
-    // overlays, and images are derived surfaces rather than the model's active
-    // grid, so they bypass and invalidate the row cache.
     if (this.dirtyRowMask.length !== terminal.rows) {
-      this.dirtyRowMask = new Uint8Array(terminal.rows);
-      this.rowBgVertices = Array.from({ length: terminal.rows }, () => null);
-      this.rowFgVertices = Array.from({ length: terminal.rows }, () => null);
-      this.printableByRow = new Uint32Array(terminal.rows);
-      this.rowCacheValid = false;
-      this.rowCacheOverBudget = false;
-      this.modelPrintable = 0;
+      this.resetRowCache(terminal.rows);
     }
+    // Scrolled viewports, overlays, and images are derived surfaces rather than
+    // the model's active grid, so they bypass and invalidate the row cache.
     const gridCells = terminal.cols * terminal.rows;
     const canCacheRows = gridCells >= ROW_VERTEX_CACHE_MIN_CELLS
-      && gridCells * TERMINAL_FLOATS_PER_QUAD * Float32Array.BYTES_PER_ELEMENT <= ROW_VERTEX_CACHE_MAX_BYTES
       && !this.rowCacheOverBudget
       && viewportCells === undefined
       && viewportOffset === 0
       && (overlays?.length ?? 0) === 0
       && (images?.length ?? 0) === 0;
-    let fullPaint = force || dirty !== 1 || !canCacheRows || !this.rowCacheValid;
+
+    const cursor = terminal.getCursor();
+    const cursorRow = cursor.visible
+      ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
+      : null;
+
+    let fullPaint = force || dirty !== DIRTY_PARTIAL || !canCacheRows || !this.rowCacheValid;
     const rowsToPaint = this.dirtyRowMask;
     rowsToPaint.fill(fullPaint ? 1 : 0);
     if (!fullPaint) {
       let dirtyRows = 0;
-      for (let row = 0; row < terminal.rows; row += 1) {
-        if (!terminal.isRowDirty(row)) continue;
+      const markRow = (row: number) => {
+        if (row < 0 || row >= terminal.rows) return;
         // Match ghostty-web's own canvas renderer: include neighboring rows so
         // a grapheme whose pixels cross a row boundary is cleared and rebuilt.
         rowsToPaint[row] = 1;
         if (row > 0) rowsToPaint[row - 1] = 1;
         if (row + 1 < terminal.rows) rowsToPaint[row + 1] = 1;
+      };
+      for (let row = 0; row < terminal.rows; row += 1) {
+        if (!terminal.isRowDirty(row)) continue;
+        markRow(row);
+        dirtyRows += 1;
+      }
+      // The model's dirty set covers the cursor only when it changes row.
+      // Measured with scripts/bench-terminal-dirty-rows.mjs against the
+      // vendored WASM: a cross-row CUP reports both the vacated and the
+      // arrived row, but a move within one row ("\x1b[2;9H", "\x1b[D") and a
+      // visibility toggle ("\x1b[?25l") report DIRTY_NONE — no rows at all.
+      //
+      // Alone those never reach here, since render() returns early on
+      // DIRTY_NONE. They matter when they ride along with an unrelated dirty
+      // row: the frame is PARTIAL, the cursor's row is not in the set, and the
+      // cursor is baked into the cached row as an inverted cell — so the row
+      // would keep the cursor at its old column. Repainting both rows costs at
+      // most six rows and removes the whole class. ghostty-web's own canvas
+      // renderer compensates the same way.
+      const cursorMoved = cursorRow !== this.lastCursorRow || cursor.x !== this.lastCursorCol;
+      if (cursorMoved && (cursorRow !== null || this.lastCursorRow !== null)) {
+        if (cursorRow !== null) markRow(cursorRow);
+        if (this.lastCursorRow !== null) markRow(this.lastCursorRow);
         dirtyRows += 1;
       }
       // PARTIAL with no rows would leave an unknowable stale surface. It should
@@ -566,6 +592,8 @@ export class WebGlTerminalRenderer {
         rowsToPaint.fill(1);
       }
     }
+    this.lastCursorRow = cursorRow;
+    this.lastCursorCol = cursor.x;
     if (!canCacheRows) {
       this.rowCacheValid = false;
     }
@@ -575,10 +603,6 @@ export class WebGlTerminalRenderer {
     const defaultBg = this.defaultBg;
     const cursorBg = this.cursorBgPacked;
     const cursorFg = this.defaultBgPacked;
-    const cursor = terminal.getCursor();
-    const cursorRow = cursor.visible
-      ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
-      : null;
     const cells = viewportCells ?? terminal.getViewport();
     // Two cell passes, so an image can be drawn between them. bgVertices holds
     // ONLY the per-cell non-default background fills; everything else a cell
@@ -595,9 +619,9 @@ export class WebGlTerminalRenderer {
     // loop only checks the (typically 0-2) spans on its own row. Outlines are
     // geometric borders and render in a dedicated pass after the cells.
     const spansByRow: Array<OverlaySpan[] | undefined> = new Array(terminal.rows);
-    const outlines: Array<{ startRow: number; startCol: number; endRow: number; endCol: number; rgb: Rgb; alpha: number }> = [];
+    const outlines: Array<{ startRow: number; startCol: number; endRow: number; endCol: number; rgb: PackedRgb; alpha: number }> = [];
     for (const overlay of overlays ?? []) {
-      const rgb = parseColor(overlay.color);
+      const rgb = parsePackedColor(overlay.color);
       const alpha = overlay.alpha ?? 1;
       if (overlay.kind === 'outline') {
         outlines.push({ ...overlay, rgb, alpha });
@@ -705,7 +729,12 @@ export class WebGlTerminalRenderer {
       }
     }
 
+    // Settle the printable count before the budget check below can release the
+    // per-row totals it is derived from.
+    const sampleModelPrintable = canCacheRows ? this.modelPrintable : frameModelPrintable;
+
     let retainedRowVertexBytes = 0;
+    let retainedStagingBytes = this.cellBgVertices.capacityBytes + this.cellFgVertices.capacityBytes;
     if (canCacheRows) {
       // Concatenate in pass order, not row order: every row's backgrounds form
       // the first draw, every row's foregrounds the second, so an image tier can
@@ -719,12 +748,19 @@ export class WebGlTerminalRenderer {
         if (row) fgVertices.append(row.view());
       }
       retainedRowVertexBytes = this.retainedRowVertexBytes();
+      retainedStagingBytes = this.retainedStagingBytes();
       // A styled cell can emit several quads. If real content grows the cache
-      // past the guardrail, finish this already-built frame, then release the
-      // rows and keep this grid on the direct renderer until its next resize.
+      // past the guardrail, release the rows and keep this grid on the direct
+      // renderer until its next resize. The frame already built above is
+      // unaffected: it was concatenated into the two cell buffers the draw
+      // reads from. Releasing here rather than after the draw is what makes it
+      // happen exactly once — canCacheRows requires !rowCacheOverBudget, so
+      // this branch is unreachable on every later frame of the episode.
       if (retainedRowVertexBytes > ROW_VERTEX_CACHE_MAX_BYTES) {
         this.rowCacheOverBudget = true;
-        this.rowCacheValid = false;
+        this.releaseRowCache(terminal.rows);
+        retainedRowVertexBytes = 0;
+        retainedStagingBytes = this.cellBgVertices.capacityBytes + this.cellFgVertices.capacityBytes;
       }
     }
 
@@ -789,15 +825,7 @@ export class WebGlTerminalRenderer {
       gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / TERMINAL_FLOATS_PER_VERTEX);
     }
     const submittedQuads = bgVertices.quadCount + fgVertices.quadCount + outlineVertices.quadCount + imageQuadsDrawn;
-    const sampleModelPrintable = canCacheRows ? this.modelPrintable : frameModelPrintable;
     if (canCacheRows && !this.rowCacheOverBudget) this.rowCacheValid = true;
-    if (this.rowCacheOverBudget) {
-      this.rowBgVertices = Array.from({ length: terminal.rows }, () => null);
-      this.rowFgVertices = Array.from({ length: terminal.rows }, () => null);
-      this.printableByRow = new Uint32Array(terminal.rows);
-      this.modelPrintable = 0;
-      retainedRowVertexBytes = 0;
-    }
     terminal.markClean();
     return {
       cpuSubmitMs: performance.now() - startedAt,
@@ -807,6 +835,7 @@ export class WebGlTerminalRenderer {
       fullPaint,
       submittedQuads,
       retainedRowVertexBytes,
+      retainedStagingBytes,
       modelPrintable: sampleModelPrintable,
       quads: submittedQuads,
       glyphUploads: this.glyphs.size - glyphCountBefore,
@@ -861,7 +890,7 @@ export class WebGlTerminalRenderer {
         (quad.sourceY + quad.sourceHeight) / height,
         // The color-glyph path passes the texel through, scaled by quad alpha:
         // exactly "draw this texture" once the alpha is 1.
-        { r: 255, g: 255, b: 255 },
+        PACKED_WHITE,
         1,
         GLYPH_MODE_COLOR,
       );
@@ -964,6 +993,11 @@ export class WebGlTerminalRenderer {
     this.cellHeight = Math.max(1, Math.ceil(fontSize * 1.45));
     this.baseline = Math.ceil(fontSize * 1.1);
     this.metricsDirty = true;
+    // Cached row vertices carry pixel geometry built from the old cell metrics.
+    // invalidateGlyphCache() happens to drop them too (a reseeded atlas moves
+    // every UV), but geometry is its own reason and has to survive someone
+    // making the atlas survivable.
+    this.rowCacheValid = false;
     this.invalidateGlyphCache();
   }
 
@@ -996,11 +1030,40 @@ export class WebGlTerminalRenderer {
     return created;
   }
 
+  // What the row cache itself retains: zero on the direct path, so this stays
+  // the legible "is the cache allocated" signal.
   private retainedRowVertexBytes(): number {
     let bytes = 0;
     for (const row of this.rowBgVertices) bytes += row?.capacityBytes ?? 0;
     for (const row of this.rowFgVertices) bytes += row?.capacityBytes ?? 0;
     return bytes;
+  }
+
+  // Everything this renderer keeps alive between paints: the retained rows plus
+  // the frame buffers they concatenate into, which hold a second full-frame
+  // copy of the same content. Reported, not gated — see
+  // ROW_VERTEX_CACHE_MAX_BYTES — so a memory receipt covers both halves instead
+  // of the rows alone.
+  private retainedStagingBytes(): number {
+    return this.cellBgVertices.capacityBytes
+      + this.cellFgVertices.capacityBytes
+      + this.retainedRowVertexBytes();
+  }
+
+  private resetRowCache(rows: number): void {
+    this.dirtyRowMask = new Uint8Array(rows);
+    this.rowCacheOverBudget = false;
+    this.releaseRowCache(rows);
+  }
+
+  // Drop the retained rows but keep the over-budget verdict, so a grid that
+  // crossed the ceiling stays on the direct path until it resizes.
+  private releaseRowCache(rows: number): void {
+    this.rowBgVertices = Array.from({ length: rows }, () => null);
+    this.rowFgVertices = Array.from({ length: rows }, () => null);
+    this.printableByRow = new Uint32Array(rows);
+    this.rowCacheValid = false;
+    this.modelPrintable = 0;
   }
 
   private cellForeground(cell: GhosttyCell): PackedRgb {
@@ -1139,14 +1202,14 @@ export class WebGlTerminalRenderer {
     );
   }
 
-  private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: Rgb | PackedRgb, alpha: number): void {
+  private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: PackedRgb, alpha: number): void {
     // Keep all samples within the white texel. Sampling its edges with LINEAR
     // filtering blends into transparent atlas neighbours and leaves seams. Mode
     // 0: tint the (fully-opaque) texel coverage with the quad color.
     this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha, GLYPH_MODE_TINT);
   }
 
-  private pushBlockElement(vertices: TerminalVertexBuffer, codepoint: number, x: number, y: number, width: number, height: number, color: Rgb | PackedRgb, alpha: number): boolean {
+  private pushBlockElement(vertices: TerminalVertexBuffer, codepoint: number, x: number, y: number, width: number, height: number, color: PackedRgb, alpha: number): boolean {
     const rects = BLOCK_ELEMENT_RECTS[codepoint];
     if (!rects) {
       return false;
@@ -1165,7 +1228,7 @@ export class WebGlTerminalRenderer {
     return true;
   }
 
-  private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb | PackedRgb, alpha: number): void {
+  private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: PackedRgb, alpha: number): void {
     // Color glyphs (emoji) carry their own colors and use mode 1 so the shader
     // passes the atlas RGBA through; monochrome glyphs use mode 0 and are tinted.
     this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
@@ -1181,7 +1244,7 @@ export class WebGlTerminalRenderer {
     v0: number,
     u1: number,
     v1: number,
-    color: Rgb | PackedRgb,
+    color: PackedRgb,
     alpha: number,
     mode: number,
   ): void {
