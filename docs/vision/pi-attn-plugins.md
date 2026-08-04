@@ -5,8 +5,8 @@
 > the decisions: pi's extension surface ([earendil-works/pi](https://github.com/earendil-works/pi)),
 > openclaw's history of embedding pi ([openclaw/openclaw](https://github.com/openclaw/openclaw)),
 > and attn's plugin system ([docs/plans/2026-04-16-plugin-system.md](../plans/2026-04-16-plugin-system.md),
-> with the earlier pi plans [2026-04-16-pi-plugin.md](../plans/2026-04-16-pi-plugin.md)
-> and [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md)).
+> with [2026-04-07-pi-integration.md](../plans/2026-04-07-pi-integration.md) and an
+> earlier pi-plugin plan that has since been deleted; git history has it).
 
 ## End state (the why)
 

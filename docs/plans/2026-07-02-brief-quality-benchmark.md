@@ -31,7 +31,7 @@ Current (precedent, all verified):
     -> gates: role (chief_of_staff_get_state), guidance (ps grep), model (pane status line)
     -> write_pane human prompt -> observe ticket_list for a NEW bound ticket
     -> verdicts in runDir/summary.json; exit 0 unless the harness itself broke
-  Benchmark-support configs (docs/plans/2026-06-28-delegated-ticket-awareness.md):
+  Benchmark-support configs (from the delegated-ticket-awareness plan, since deleted):
     auto_approve_enabled, chief_model_<agent> via set_setting before create_session
 
 Target (one new scenario + one shared pure helper):

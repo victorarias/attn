@@ -235,8 +235,8 @@ real concept and drives binding rotation.
 
 ## Follow-ups
 
-- Mark the remaining unchecked slices in
-  `2026-07-18-attn-automations-implementation.md` as superseded by this plan.
+- The v1 automations implementation plan this supersedes was deleted rather than
+  annotated slice by slice; git history has it.
 - Future triggers from the vision (comments, Slack checks) enter as new
   trigger types against the v2 engine seam — first new one stresses the
   provider seam per the vision's hardening rock.

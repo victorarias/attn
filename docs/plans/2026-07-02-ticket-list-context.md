@@ -164,9 +164,8 @@ Ownership: the store owns the durable snapshot; **delegation mint is the only wr
       same repo + branch deserve a flag). One coordinated clause to the same effect in
       the chief's `ticket list` sentence in `hooks.ChiefGuidance`
       (`internal/hooks/hooks.go`) — **sequencing:** that sentence lives inside the
-      "Delegation hands work off" bullet that
-      [2026-07-02-chief-guidance-brief-craft.md](2026-07-02-chief-guidance-brief-craft.md)
-      rewrites and owns, so this plan lands AFTER it: rebase onto the landed bullet,
+      "Delegation hands work off" bullet that the chief-guidance-brief-craft plan
+      (since deleted; git history has it) rewrites and owns, so this plan lands AFTER it: rebase onto the landed bullet,
       keep every substring its `TestChiefGuidance` asserts (e.g. "arm a harness
       Monitor", "a default, not a hard rule") byte-identical, and keep the addition to
       one clause (it sits outside that plan's line budget, acknowledged there).
