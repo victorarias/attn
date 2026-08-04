@@ -526,9 +526,25 @@ export class WebGlTerminalRenderer {
   ): WebGlRenderSample | null {
     const startedAt = performance.now();
     const dirty = terminal.update();
-    if (!force && dirty === DIRTY_NONE) {
+    const cursor = terminal.getCursor();
+    const cursorRow = cursor.visible
+      ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
+      : null;
+
+    // The cursor is drawn as an inverted cell, so where it sits is part of the
+    // frame even when no cell content changed. A same-row move, a visibility
+    // toggle, or a move made while hidden all report DIRTY_NONE, so comparing
+    // it against the last frame is the only thing standing between those and a
+    // cursor left painted at its old column until unrelated output arrives.
+    const cursorMoved = cursorRow !== this.lastCursorRow || cursor.x !== this.lastCursorCol;
+    if (!force && dirty === DIRTY_NONE && !cursorMoved) {
       return null;
     }
+    // A frame that exists only because the cursor moved has no dirty cells, but
+    // it is still a two-row repaint rather than a whole-grid one. Without this
+    // it would fall to `dirty !== DIRTY_PARTIAL` below and full-paint the grid
+    // on every arrow key — the exact cost the row cache is here to avoid.
+    const cursorOnlyPaint = dirty === DIRTY_NONE && cursorMoved;
 
     if (this.dirtyRowMask.length !== terminal.rows) {
       this.resetRowCache(terminal.rows);
@@ -543,12 +559,10 @@ export class WebGlTerminalRenderer {
       && (overlays?.length ?? 0) === 0
       && (images?.length ?? 0) === 0;
 
-    const cursor = terminal.getCursor();
-    const cursorRow = cursor.visible
-      ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
-      : null;
-
-    let fullPaint = force || dirty !== DIRTY_PARTIAL || !canCacheRows || !this.rowCacheValid;
+    let fullPaint = force
+      || (dirty !== DIRTY_PARTIAL && !cursorOnlyPaint)
+      || !canCacheRows
+      || !this.rowCacheValid;
     const rowsToPaint = this.dirtyRowMask;
     rowsToPaint.fill(fullPaint ? 1 : 0);
     if (!fullPaint) {
@@ -572,14 +586,13 @@ export class WebGlTerminalRenderer {
       // arrived row, but a move within one row ("\x1b[2;9H", "\x1b[D") and a
       // visibility toggle ("\x1b[?25l") report DIRTY_NONE — no rows at all.
       //
-      // Alone those never reach here, since render() returns early on
-      // DIRTY_NONE. They matter when they ride along with an unrelated dirty
-      // row: the frame is PARTIAL, the cursor's row is not in the set, and the
-      // cursor is baked into the cached row as an inverted cell — so the row
-      // would keep the cursor at its old column. Repainting both rows costs at
-      // most six rows and removes the whole class. ghostty-web's own canvas
-      // renderer compensates the same way.
-      const cursorMoved = cursorRow !== this.lastCursorRow || cursor.x !== this.lastCursorCol;
+      // A bare move (DIRTY_NONE, no other dirty rows) would leave the old
+      // inverted cursor on screen until unrelated output triggers a paint. When
+      // riding along with an unrelated dirty row in a PARTIAL frame, the
+      // cursor's row is not in the set and the cursor stays baked into the
+      // cached row at the old column. Repainting both the vacated and arrived
+      // rows costs at most six rows and covers both cases. ghostty-web's own
+      // canvas renderer compensates the same way.
       if (cursorMoved && (cursorRow !== null || this.lastCursorRow !== null)) {
         if (cursorRow !== null) markRow(cursorRow);
         if (this.lastCursorRow !== null) markRow(this.lastCursorRow);

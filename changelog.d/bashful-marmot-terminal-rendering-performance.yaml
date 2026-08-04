@@ -12,8 +12,10 @@ notes: >
   first output after idle, direct input, and the final state are still rendered
   promptly. Large active grids cache bounded CPU-side row vertices while still
   clearing and submitting a complete frame, so WebGL framebuffer retention is
-  not required. A partial paint also repaints the cursor's row and the row it
-  moved from, which the model's dirty set does not cover. Small grids,
+  not required. The cursor is drawn as an inverted cell, so a moved cursor now
+  paints on its own: a same-row move or a visibility toggle reports no dirty
+  rows at all, and a partial paint repaints both the row it left and the row it
+  arrived on rather than the whole grid. Small grids,
   scrolling, overlays, and images keep the direct full-render path. Terminal
   performance snapshots expose renderer CPU, scheduling counters, and both
   retained-memory figures for packaged-app measurements.

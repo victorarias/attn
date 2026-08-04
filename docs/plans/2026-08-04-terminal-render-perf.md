@@ -291,18 +291,29 @@ policy unchanged.
 | `\x1b[D` (back one column) | NONE | — |
 | `\x1b[?25l` / `\x1b[?25h` | NONE | — |
 
-A same-row move or a visibility toggle on its own never reaches the row
-selection, because `render()` returns early on a NONE dirty state — that is
-pre-existing behavior and the cursor simply stays put until the next paint. The
-row cache is what makes them matter: when one rides along with an *unrelated*
-dirty row the frame is PARTIAL, the cursor's own row is absent from the set, and
-the cursor is baked into that cached row as an inverted cell, so the row would
-keep the cursor at its old column until a full paint.
+The cursor is drawn as an inverted cell, so where it sits is part of the frame
+even when no cell content changed. The table says the model will not tell us
+that on its own, in two different ways:
 
-So a partial paint marks the cursor's row and the row it was last drawn on, on
-top of `isRowDirty()` — at most six rows, and it removes the class. ghostty-web's
-own canvas renderer compensates the same way, and future partial-paint work has
-to keep doing so.
+*Nothing else wakes the renderer.* A same-row move or a visibility toggle
+reports NONE, and `render()` returns early on NONE — so the old inverted cell
+survives until unrelated output happens to arrive. Comparing the cursor against
+the last frame *before* that early return is the only thing standing between a
+user pressing `←` and a cursor that visibly does not move.
+
+*Nothing marks the row.* When such a move rides along with an unrelated dirty
+row the frame is PARTIAL, the cursor's own row is absent from the set, and the
+cursor is baked into that cached row, so the row keeps the cursor at its old
+column until a full paint.
+
+So the renderer compares the cursor position ahead of the early return, and a
+partial paint marks the cursor's row and the row it was last drawn on on top of
+`isRowDirty()`. A frame that exists *only* because the cursor moved has no dirty
+cells but is still a partial paint — otherwise it would fall through to
+`dirty !== DIRTY_PARTIAL` and full-paint the grid on every arrow key, which is
+the cost this whole document exists to remove. At most six rows either way.
+ghostty-web's own canvas renderer compensates the same way, and future
+partial-paint work has to keep doing so.
 
 ## Verification
 
@@ -319,3 +330,12 @@ to keep doing so.
   terminal output was dropped.
 - Cursor movement with no dirty rows repaints both the vacated and the arrived
   row; a hidden cursor moving adds no work.
+- A bare same-row move and a bare visibility toggle — both NONE dirty states —
+  each produce a three-row partial paint rather than no paint or a full one.
+  A frame where nothing at all changed still returns null.
+- Live on the packaged build (profile `cursorpaint`, 155x46 = 7,130-cell pane):
+  every paint partial, 1.54 MB retained row vertices under the 2 MiB ceiling,
+  and the `bridge-pty-bench` progress payload rebuilt 2 rows per frame with
+  `retainedRowVertexMb` 0.726 / `retainedStagingMb` 1.726. The renderer's
+  `modelPrintable` and `paintQuads` witnesses agreed (3,367 / 3,368, the extra
+  quad being the cursor).

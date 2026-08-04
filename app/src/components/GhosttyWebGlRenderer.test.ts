@@ -627,6 +627,52 @@ describe('WebGlTerminalRenderer dirty rows', () => {
     expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
   });
 
+  // A same-row move and a visibility toggle report DIRTY_NONE, so nothing else
+  // wakes the renderer. Without a cursor comparison ahead of the early return,
+  // the old inverted cell survives until unrelated output happens to arrive.
+  it('paints a bare same-row cursor move that the model reports as not dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 7, y: 10, visible: true };
+
+    // Rows 9-11: the cursor vacated and arrived on the same row. Partial, not
+    // full — a cursor move must not cost a whole-grid repaint.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('paints a bare cursor visibility toggle that the model reports as not dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 4, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('still returns null when nothing changed and the cursor stayed put', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
   it('paints nothing extra when a hidden cursor moves', () => {
     const { renderer } = makeRenderer();
     const { terminal, state } = makeControllableTerminal(50, 50);
