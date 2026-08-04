@@ -1,0 +1,8 @@
+kind: internal
+area: daemon
+change: >
+  The document query harness reads a cursor's anchor document once per corpus
+  instead of once per check. Hundreds of queries ask about the same handful of
+  anchors between two writes, and the re-reads were most of the statements the
+  exhaustive leg ran. The cache is cleared wherever the corpus moves, so the
+  moving-corpus leg still sees every write, delete and redeclaration.
