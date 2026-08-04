@@ -1101,6 +1101,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             sourceY: rect.y,
             sourceWidth: rect.width,
             sourceHeight: rect.height,
+            z: placement.z,
           });
         }
       }

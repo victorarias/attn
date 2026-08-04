@@ -85,7 +85,17 @@ export interface WebGlImageQuad {
   sourceY: number;
   sourceWidth: number;
   sourceHeight: number;
+  // The placement's kitty z-index, which picks the pass this quad draws in:
+  // over the text at z >= 0, under it below that, and under the cell
+  // backgrounds too past KITTY_Z_UNDER_BACKGROUND.
+  z: number;
 }
+
+// Kitty's deepest layer: "Negative z-index values below INT32_MIN/2
+// (-1,073,741,824) will be drawn under cells with non-default background
+// colors." Below is strict — a placement AT this value draws over the cell
+// backgrounds and under the text, like any other negative z.
+export const KITTY_Z_UNDER_BACKGROUND = -1_073_741_824;
 
 // Live GPU textures per renderer. Receipt: a stored image measured 1.9-6.5MB of
 // decoded pixels, so 16 textures is ~100MB of VRAM worst case and holds every
@@ -446,7 +456,13 @@ export class WebGlTerminalRenderer {
       ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
       : null;
     const cells = viewportCells ?? terminal.getViewport();
-    const vertices: number[] = [];
+    // Two cell passes, so an image can be drawn between them. bgVertices holds
+    // ONLY the per-cell non-default background fills; everything else a cell
+    // paints — selection/search tints, the cursor block, glyphs, underlines —
+    // is foreground, and draws after the under-text images so neither the
+    // cursor nor a selection can vanish behind one.
+    const bgVertices: number[] = [];
+    const fgVertices: number[] = [];
     const glyphCountBefore = this.glyphs.size;
     const atlasGenerationBefore = this.atlasGeneration;
     // Resolve overlays into per-row column spans once per frame so the cell
@@ -502,52 +518,47 @@ export class WebGlTerminalRenderer {
         const bg = this.cellBackground(cell);
 
         if (bg.r !== defaultBg.r || bg.g !== defaultBg.g || bg.b !== defaultBg.b) {
-          this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, bg, 1);
+          this.pushSolidQuad(bgVertices, x, y, width, this.cellHeight * scale, bg, 1);
         }
         if (rowSpans) {
           for (const span of rowSpans) {
             if (span.kind === 'background' && col >= span.startCol && col < span.endCol) {
-              this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, span.rgb, span.alpha);
+              this.pushSolidQuad(fgVertices, x, y, width, this.cellHeight * scale, span.rgb, span.alpha);
             }
           }
         }
         if (isCursor) {
-          this.pushSolidQuad(vertices, x, y, width, this.cellHeight * scale, cursorBg, 1);
+          this.pushSolidQuad(fgVertices, x, y, width, this.cellHeight * scale, cursorBg, 1);
         }
         if ((cell.flags & CellFlags.INVISIBLE) === 0 && cell.codepoint !== 0 && cell.codepoint !== 32) {
           const alpha = (cell.flags & CellFlags.FAINT) !== 0 ? 0.5 : 1;
-          if (!this.pushBlockElement(vertices, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
+          if (!this.pushBlockElement(fgVertices, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
             const text = cell.grapheme_len > 0
               ? graphemeAtViewportCell(terminal, row, col, viewportOffset)
               : String.fromCodePoint(cell.codepoint);
             const glyph = this.getGlyph(text, cell.flags);
-            this.pushTexturedQuad(vertices, x, y, glyph.width, glyph.height, glyph, fg, alpha);
+            this.pushTexturedQuad(fgVertices, x, y, glyph.width, glyph.height, glyph, fg, alpha);
           }
         }
         if ((cell.flags & CellFlags.UNDERLINE) !== 0) {
-          this.pushSolidQuad(vertices, x, y + (this.baseline + 2) * scale, width, scale, fg, 1);
+          this.pushSolidQuad(fgVertices, x, y + (this.baseline + 2) * scale, width, scale, fg, 1);
         }
         if ((cell.flags & CellFlags.STRIKETHROUGH) !== 0) {
-          this.pushSolidQuad(vertices, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
+          this.pushSolidQuad(fgVertices, x, y + Math.floor(this.cellHeight / 2) * scale, width, scale, fg, 1);
         }
         if (rowSpans) {
           for (const span of rowSpans) {
             if (span.kind === 'underline' && col >= span.startCol && col < span.endCol) {
-              this.pushSolidQuad(vertices, x, y + (this.baseline + 2) * scale, width, scale, span.rgb, span.alpha);
+              this.pushSolidQuad(fgVertices, x, y + (this.baseline + 2) * scale, width, scale, span.rgb, span.alpha);
             }
           }
         }
       }
     }
 
-    // Images draw between the cells and the outlines, so a selected block's
-    // border stays legible over one. That ordering is the only reason the two
-    // are ever separate arrays: with no images the outlines go straight into
-    // the cell vertices and the frame is the same single draw call it has
-    // always been.
-    const imageQuads = images ?? [];
+    // Outlines are the last thing on the frame, after every image pass, so a
+    // selected block's border stays legible over an image drawn above the text.
     const outlineVertices: number[] = [];
-    const outlineTarget = imageQuads.length > 0 ? outlineVertices : vertices;
 
     for (const outline of outlines) {
       const top = Math.max(0, outline.startRow) * this.cellHeight * scale;
@@ -562,13 +573,13 @@ export class WebGlTerminalRenderer {
       // look like a box wrapping the whole terminal.
       const { drawTop, drawBottom } = visibleOutlineEdges(outline.startRow, outline.endRow, terminal.rows);
       if (drawTop) {
-        this.pushSolidQuad(outlineTarget, left, top, right - left, thickness, outline.rgb, outline.alpha);
+        this.pushSolidQuad(outlineVertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
       }
       if (drawBottom) {
-        this.pushSolidQuad(outlineTarget, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
+        this.pushSolidQuad(outlineVertices, left, bottom - thickness, right - left, thickness, outline.rgb, outline.alpha);
       }
-      this.pushSolidQuad(outlineTarget, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
-      this.pushSolidQuad(outlineTarget, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
+      this.pushSolidQuad(outlineVertices, left, top, thickness, bottom - top, outline.rgb, outline.alpha);
+      this.pushSolidQuad(outlineVertices, right - thickness, top, thickness, bottom - top, outline.rgb, outline.alpha);
     }
 
     if (this.atlasGeneration !== atlasGenerationBefore && !this.retryingAtlasFrame) {
@@ -580,15 +591,27 @@ export class WebGlTerminalRenderer {
       }
     }
 
+    // Kitty's three z tiers, in draw order. The set is tiny (0 to a handful),
+    // so it is filtered rather than assumed sorted; within a tier the caller's
+    // order is kept, which is the placement store's z-then-id order.
+    const imageQuads = images ?? [];
+    const underBackground = imageQuads.filter((q) => q.z < KITTY_Z_UNDER_BACKGROUND);
+    const underText = imageQuads.filter((q) => q.z >= KITTY_Z_UNDER_BACKGROUND && q.z < 0);
+    const overText = imageQuads.filter((q) => q.z >= 0);
+
     gl.useProgram(this.program);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(vertices), gl.DYNAMIC_DRAW);
     gl.uniform2f(gl.getUniformLocation(this.program, 'u_resolution'), this.canvas.width, this.canvas.height);
-    gl.drawArrays(gl.TRIANGLES, 0, vertices.length / FLOATS_PER_VERTEX);
     let imageQuadsDrawn = 0;
-    if (imageQuads.length > 0) {
-      imageQuadsDrawn = this.drawImages(imageQuads, scale);
+    imageQuadsDrawn += this.drawImages(underBackground, scale);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(bgVertices), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, bgVertices.length / FLOATS_PER_VERTEX);
+    imageQuadsDrawn += this.drawImages(underText, scale);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(fgVertices), gl.DYNAMIC_DRAW);
+    gl.drawArrays(gl.TRIANGLES, 0, fgVertices.length / FLOATS_PER_VERTEX);
+    imageQuadsDrawn += this.drawImages(overText, scale);
+    if (outlineVertices.length > 0) {
       gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(outlineVertices), gl.DYNAMIC_DRAW);
       gl.drawArrays(gl.TRIANGLES, 0, outlineVertices.length / FLOATS_PER_VERTEX);
     }
@@ -596,7 +619,7 @@ export class WebGlTerminalRenderer {
     return {
       cpuSubmitMs: performance.now() - startedAt,
       cells: terminal.cols * terminal.rows,
-      quads: (vertices.length + outlineVertices.length) / FLOATS_PER_VERTEX / 6 + imageQuadsDrawn,
+      quads: (bgVertices.length + fgVertices.length + outlineVertices.length) / FLOATS_PER_VERTEX / 6 + imageQuadsDrawn,
       glyphUploads: this.glyphs.size - glyphCountBefore,
       cellsArrayLen: cells.length,
       printableSkippedNull,
@@ -615,16 +638,18 @@ export class WebGlTerminalRenderer {
     this.glyphs.clear();
   }
 
-  // One textured quad per image, each with its own texture, drawn after the
-  // single cell call. Placements are rare (0 to a handful), so a few extra tiny
-  // draw calls cost less than threading a second sampler through the shader the
-  // grid renderer shares. Returns how many actually drew.
+  // One textured quad per image, each with its own texture. Called once per z
+  // tier, so it must leave the GL state exactly as it found it — the cell and
+  // outline passes run between the calls. Placements are rare (0 to a handful),
+  // so a few extra tiny draw calls cost less than threading a second sampler
+  // through the shader the grid renderer shares. Returns how many actually drew.
   //
   // The image pass composites with STRAIGHT alpha: the glyph pipeline is
   // premultiplied, but UNPACK_PREMULTIPLY_ALPHA_WEBGL only applies to uploads
-  // from DOM elements, and these pixels arrive as a raw byte view. The blend is
-  // restored before returning so the outline pass that follows is unaffected.
+  // from DOM elements, and these pixels arrive as a raw byte view. The blend and
+  // the bound atlas are both restored before returning.
   private drawImages(quads: readonly WebGlImageQuad[], scale: number): number {
+    if (quads.length === 0) return 0;
     const gl = this.gl;
     gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     let drawn = 0;
@@ -656,8 +681,8 @@ export class WebGlTerminalRenderer {
       drawn += 1;
     }
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    // The outline pass samples the glyph atlas's solid texel, so hand the unit
-    // back before returning.
+    // The cell and outline passes sample the glyph atlas, so hand the unit back
+    // before returning.
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     return drawn;
   }

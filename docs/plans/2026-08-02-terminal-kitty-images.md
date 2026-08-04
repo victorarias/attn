@@ -1157,6 +1157,20 @@ three resync rows, resyncing on every delta reddens the two silent ones).
       already full". The saved fuzz input `62f19a45d7a5c8c7` replays green, and
       `FuzzKittyWireMirror` soaked 15m / 42.5M execs green with the tripwire in
       (the class had been reached 97s into the previous soak).
+- [x] **Kitty z layering, which A3 shipped without.** Every image drew above the
+      text: the wire carried each placement's `z` and the store sorted by it, but
+      the renderer had one cell draw call with nothing to slot an image into.
+      **Fixed by splitting that call in two** — non-default cell backgrounds,
+      then everything else (selection tints, the cursor block, glyphs,
+      underlines) — and drawing the three z tiers around them: below
+      `KITTY_Z_UNDER_BACKGROUND` (-1,073,741,824, the spec's INT32_MIN/2, and
+      "below" is strict) under the backgrounds, `[that, 0)` under the text, and
+      `z >= 0` above it as before. Outlines stay last. The cursor and the
+      selection tint sit in the foreground pass deliberately: in the background
+      pass an under-text image would paint over both. Pinned by the ordering
+      tests in `GhosttyWebGlRenderer.test.ts`, which read the pass order off a
+      recorded GL call log, and by the packaged scenario, which now transmits at
+      `z=-1` so the signed int32 is proved across worker → protocol → store.
 
 #### A4 verification record
 

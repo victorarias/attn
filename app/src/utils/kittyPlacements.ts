@@ -115,11 +115,13 @@ function mapPlacements(
       sourceHeight: p.source_height,
     });
   }
-  // Draw order, and the order every report of the set uses. Every image renders
-  // above the text in v1 (kitty's z<0 "under text" is deferred — it needs the
-  // cell pass split into background and glyph calls), so z only orders images
-  // against each other; the placement id breaks ties so the order never depends
-  // on how the worker's iterator happened to walk the storage.
+  // Draw order, and the order every report of the set uses. The renderer reads
+  // z again to pick which of kitty's three layers an image lands in — over the
+  // text at z >= 0, under the text below that, under non-default cell
+  // backgrounds too past KITTY_Z_UNDER_BACKGROUND — so this sort is what orders
+  // images against each other within a layer; the placement id breaks ties so
+  // the order never depends on how the worker's iterator happened to walk the
+  // storage.
   placed.sort((a, b) => (a.z - b.z) || (a.placementId - b.placementId));
   return placed;
 }
