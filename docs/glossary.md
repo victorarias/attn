@@ -178,6 +178,15 @@ locate every record:
   collection. The body is stored byte for byte and nothing ever rewrites it, so
   an author never writes a migration.
 
+Every document also carries a **revision**: a count of the writes to it, starting
+at 1, reported by every read and by every write. Handing a revision back as a
+write's **expectation** makes that write conditional — it lands only if the
+document is still at that revision, and is otherwise refused with both revisions
+named. That is what makes a read-modify-write safe between writers who cannot see
+each other; without an expectation a write always lands, which is what a caller
+setting a value rather than editing one wants. Expecting revision 0 means
+expecting no document at all, and is how a write becomes create-only.
+
 A collection carries a **declaration**: the fields it promises are queryable,
 each with a type. Declaring a field does not constrain what a document may
 contain — undeclared keys are stored and returned untouched — it only says what a

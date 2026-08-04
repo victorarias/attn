@@ -3459,9 +3459,16 @@ model DocumentQuery {
 }
 
 // One stored document. `body` is the document's JSON as written, byte for byte.
+//
+// `rev` counts writes to this document, starting at 1. Hand it back as a put's
+// or delete's `expected_rev` to make the write conditional on nobody having
+// changed the document since this read. safeint rather than int32 because int32
+// is only about two billion writes to one document, and a wrapped revision would
+// make a stale check pass — the exact failure it guards against.
 model StoredDocument {
   "id": string;
   "body": string;
+  "rev": safeint;
   "created_at": string;
   "updated_at": string;
 }
@@ -3501,18 +3508,29 @@ model DocCollectionsResult {
 }
 
 // Write a document, creating or fully replacing it. `body` is JSON object text.
+//
+// `expected_rev` is the caller's assertion about what it is overwriting: absent
+// writes unconditionally, 0 writes only if the document does not exist yet, and
+// any other value writes only if the document is still at that revision. A
+// failed assertion writes nothing and answers with an error naming both
+// revisions. Revisions start at 1, which is what makes 0 unambiguous as "must
+// not exist".
 model DocPutMessage {
   "cmd": "doc_put";
   "namespace": string;
   "collection": string;
   "id": string;
   "body": string;
+  "expected_rev"?: safeint;
 }
 
+// `rev` is the revision the document now has, so a create-then-update sequence
+// needs no read in between.
 model DocPutResult {
   "namespace": string;
   "collection": string;
   "id": string;
+  "rev": safeint;
 }
 
 model DocGetMessage {
@@ -3529,11 +3547,16 @@ model DocGetResult {
   "document"?: StoredDocument;
 }
 
+// `expected_rev` removes the document only if it is still at that revision —
+// deleting on the strength of a body you read is the same lost-update hazard as
+// overwriting one. Absent deletes unconditionally. Unlike a put, 0 is refused:
+// "delete this if it does not exist" is not an assertion a delete can act on.
 model DocDeleteMessage {
   "cmd": "doc_delete";
   "namespace": string;
   "collection": string;
   "id": string;
+  "expected_rev"?: safeint;
 }
 
 // `existed` is false when the delete removed nothing, so a caller does not
@@ -3566,10 +3589,16 @@ model DocSubscribeMessage {
 
 // One delivery of a live query's results. `documents` is always the CURRENT full
 // result set, never a patch — a subscriber renders what it is given and never
-// reconstructs state from a sequence of deliveries. `revision` counts deliveries
-// on this subscription, starting at 1 for the initial one.
+// reconstructs state from a sequence of deliveries. `delivery` counts deliveries
+// on this subscription, starting at 1 for the initial one; it is named for what
+// it counts because a document carries its own `rev` and one word for both would
+// read as though they were related.
+//
+// int32 rather than the safeint a document's revision uses: this counter is
+// bounded by how long one connection stays open, not by a document's whole
+// history.
 model DocSubscribeResult {
-  "revision": int32;
+  "delivery": int32;
   "documents": StoredDocument[];
 }
 

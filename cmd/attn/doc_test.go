@@ -114,3 +114,34 @@ func TestAfterFlagCarriesTheCursor(t *testing.T) {
 		t.Fatalf("after = %v", query.After)
 	}
 }
+
+// --expect is pulled out of the arguments before the positional ones are read,
+// so `put ns coll id body --expect 3` still finds its id and body.
+func TestExpectFlagLeavesThePositionalArgumentsAlone(t *testing.T) {
+	rest, expect := takeExpectFlag("put", []string{"r1", `{"a":1}`, "--expect", "3"}, true)
+	if len(rest) != 2 || rest[0] != "r1" || rest[1] != `{"a":1}` {
+		t.Fatalf("positional arguments = %v", rest)
+	}
+	if expect == nil || *expect != 3 {
+		t.Fatalf("expect = %v, want 3", expect)
+	}
+}
+
+// "absent" is how the CLI spells the create-only expectation, so a caller never
+// has to know that the wire encodes it as revision zero.
+func TestExpectAbsentIsTheZeroRevision(t *testing.T) {
+	_, expect := takeExpectFlag("put", []string{"r1", `{"a":1}`, "--expect", "absent"}, true)
+	if expect == nil || int64(*expect) != docstore.ExpectAbsent {
+		t.Fatalf("expect = %v, want %d", expect, docstore.ExpectAbsent)
+	}
+}
+
+func TestWithoutExpectTheWriteIsUnconditional(t *testing.T) {
+	rest, expect := takeExpectFlag("put", []string{"r1", `{"a":1}`}, true)
+	if expect != nil {
+		t.Fatalf("expect = %v, want none", *expect)
+	}
+	if len(rest) != 2 {
+		t.Fatalf("positional arguments = %v", rest)
+	}
+}

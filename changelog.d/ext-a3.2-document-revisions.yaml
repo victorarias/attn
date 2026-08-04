@@ -1,0 +1,18 @@
+kind: added
+area: daemon
+change: >
+  Every document in the document store now carries a revision, reported by every
+  read and returned by every write. Handing that revision back as `--expect`
+  makes a write conditional: `attn doc put ... --expect 4` lands only if the
+  document is still at revision 4, and is otherwise refused with both revisions
+  named rather than overwriting an edit somebody else made in between.
+  `--expect absent` writes only if the document does not exist yet, and
+  `attn doc delete ... --expect 4` removes it only at that revision. Writes with
+  no expectation still always land, which is what setting a value rather than
+  editing one wants.
+notes: >
+  This closes the one place the store could lose data silently: two writers that
+  each read a document, changed it and wrote it back would leave only the second
+  change, with no error on either side. A refused write also no longer wakes the
+  collection's live queries, since nothing changed. Documents stored before this
+  start at revision 1, so a conditional write works against them immediately.

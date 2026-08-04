@@ -2,8 +2,11 @@ package store
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,7 +36,7 @@ func storeWithRequests(t *testing.T, bodies map[string]string) (*Store, time.Tim
 	}
 	i := 0
 	for _, id := range sortedKeys(bodies) {
-		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(bodies[id]), base.Add(time.Duration(i)*time.Second)); err != nil {
+		if _, err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(bodies[id]), base.Add(time.Duration(i)*time.Second), nil); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 		i++
@@ -161,7 +164,7 @@ func TestABodyComesBackExactlyAsWritten(t *testing.T) {
 func TestReplacingADocumentKeepsCreatedAtAndMovesUpdatedAt(t *testing.T) {
 	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
 	later := base.Add(time.Hour)
-	if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), "a", []byte(`{"status":"approved"}`), later); err != nil {
+	if _, err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), "a", []byte(`{"status":"approved"}`), later, nil); err != nil {
 		t.Fatalf("replace: %v", err)
 	}
 	doc, _, err := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
@@ -372,7 +375,7 @@ func TestPagingByCreatedAtWithIdenticalTimestamps(t *testing.T) {
 		t.Fatalf("define: %v", err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
-		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(`{"status":"pending"}`), base); err != nil {
+		if _, err := s.PutDocument(declOf(t, s, "ext/approval-gate", "requests"), id, []byte(`{"status":"pending"}`), base, nil); err != nil {
 			t.Fatalf("put %s: %v", id, err)
 		}
 	}
@@ -418,7 +421,7 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 	if err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatalf("define other: %v", err)
 	}
-	if err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "shared-id", []byte(`{"status":"approved"}`), base); err != nil {
+	if _, err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "shared-id", []byte(`{"status":"approved"}`), base, nil); err != nil {
 		t.Fatalf("put other: %v", err)
 	}
 
@@ -436,7 +439,7 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 		t.Fatalf("query crossed the namespace boundary: %v", got)
 	}
 	// Deleting one namespace's document leaves the other's alone.
-	if _, err := s.DeleteDocument(declOf(t, s, "ext/other", "requests"), "shared-id"); err != nil {
+	if _, err := s.DeleteDocument(declOf(t, s, "ext/other", "requests"), "shared-id", nil); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok, _ := s.GetDocument(declOf(t, s, "ext/approval-gate", "requests"), "shared-id"); !ok {
@@ -448,13 +451,298 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 // change that did not happen.
 func TestDeleteReportsWhetherADocumentWasThere(t *testing.T) {
 	s, _ := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
-	existed, err := s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
+	existed, err := s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a", nil)
 	if err != nil || !existed {
 		t.Fatalf("first delete: existed=%v err=%v", existed, err)
 	}
-	existed, err = s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a")
+	existed, err = s.DeleteDocument(declOf(t, s, "ext/approval-gate", "requests"), "a", nil)
 	if err != nil || existed {
 		t.Fatalf("second delete: existed=%v err=%v", existed, err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Revisions and conditional writes
+// ---------------------------------------------------------------------------
+
+func rev(n int64) *int64 { return &n }
+
+// requestsDecl is the declaration every conditional-write test writes through.
+func requestsDecl(t *testing.T, s *Store) docstore.CollectionSchema {
+	t.Helper()
+	return declOf(t, s, "ext/approval-gate", "requests")
+}
+
+// A revision is what a reader is handed and what a writer hands back, so it has
+// to advance on every write and be visible on every read.
+func TestARevisionAdvancesWithEveryWrite(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	doc, _, err := s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Rev != docstore.FirstRev {
+		t.Fatalf("a freshly written document is at rev %d, want %d", doc.Rev, docstore.FirstRev)
+	}
+
+	next, err := s.PutDocument(schema, "a", []byte(`{"status":"approved"}`), base.Add(time.Second), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next != docstore.FirstRev+1 {
+		t.Fatalf("put returned rev %d, want %d", next, docstore.FirstRev+1)
+	}
+	doc, _, err = s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if doc.Rev != next {
+		t.Fatalf("read back rev %d, want the %d the write reported", doc.Rev, next)
+	}
+}
+
+// The whole point: a write built on a version somebody else has replaced is
+// refused, and the document it would have clobbered is untouched.
+func TestAWriteExpectingAStaleRevisionIsRefused(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	read, _, err := s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Somebody else writes between that read and the write below.
+	if _, err := s.PutDocument(schema, "a", []byte(`{"status":"approved"}`), base.Add(time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = s.PutDocument(schema, "a", []byte(`{"status":"rejected"}`), base.Add(2*time.Second), rev(read.Rev))
+	if !docstore.IsConflict(err) {
+		t.Fatalf("stale write returned %v, want a conflict", err)
+	}
+	var conflict *docstore.ConflictError
+	errors.As(err, &conflict)
+	if conflict.Expected != read.Rev || !conflict.Found || conflict.Actual != read.Rev+1 {
+		t.Fatalf("conflict does not name both revisions: %+v", conflict)
+	}
+	if !strings.Contains(err.Error(), "rev 1") || !strings.Contains(err.Error(), "rev 2") {
+		t.Fatalf("conflict message names neither revision: %s", err)
+	}
+
+	doc, _, err := s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(doc.Body) != `{"status":"approved"}` {
+		t.Fatalf("the refused write landed anyway: %s", doc.Body)
+	}
+	if doc.Rev != read.Rev+1 {
+		t.Fatalf("the refused write moved the revision to %d", doc.Rev)
+	}
+}
+
+func TestAWriteExpectingTheCurrentRevisionIsAccepted(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	read, _, err := s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	next, err := s.PutDocument(schema, "a", []byte(`{"status":"approved"}`), base.Add(time.Second), rev(read.Rev))
+	if err != nil {
+		t.Fatalf("write at the current revision: %v", err)
+	}
+	if next != read.Rev+1 {
+		t.Fatalf("accepted write returned rev %d, want %d", next, read.Rev+1)
+	}
+}
+
+// Expecting a revision expects a document. A missing one has to be refused
+// rather than created: the caller asked to edit something, not to write it.
+func TestExpectingARevisionOnAMissingDocumentCreatesNothing(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	_, err := s.PutDocument(schema, "gone", []byte(`{"status":"pending"}`), base, rev(1))
+	if !docstore.IsConflict(err) {
+		t.Fatalf("writing a missing document at a revision returned %v, want a conflict", err)
+	}
+	var conflict *docstore.ConflictError
+	errors.As(err, &conflict)
+	if conflict.Found {
+		t.Fatalf("conflict claims a document was there: %+v", conflict)
+	}
+	if _, found, err := s.GetDocument(schema, "gone"); err != nil || found {
+		t.Fatalf("the refused write created the document: found=%v err=%v", found, err)
+	}
+}
+
+// Create-only, out of the same field: revisions start at 1, so expecting 0 is
+// expecting nothing to be there.
+func TestExpectingAbsentCreatesOnlyOnce(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{})
+	schema := requestsDecl(t, s)
+
+	first, err := s.PutDocument(schema, "a", []byte(`{"status":"first"}`), base, rev(docstore.ExpectAbsent))
+	if err != nil {
+		t.Fatalf("first create: %v", err)
+	}
+	if first != docstore.FirstRev {
+		t.Fatalf("create returned rev %d, want %d", first, docstore.FirstRev)
+	}
+
+	_, err = s.PutDocument(schema, "a", []byte(`{"status":"second"}`), base.Add(time.Second), rev(docstore.ExpectAbsent))
+	if !docstore.IsConflict(err) {
+		t.Fatalf("second create returned %v, want a conflict", err)
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("conflict does not say the document is already there: %s", err)
+	}
+	doc, _, err := s.GetDocument(schema, "a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(doc.Body) != `{"status":"first"}` {
+		t.Fatalf("the losing create overwrote the winner: %s", doc.Body)
+	}
+}
+
+func TestDeleteExpectingAStaleRevisionKeepsTheDocument(t *testing.T) {
+	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	if _, err := s.PutDocument(schema, "a", []byte(`{"status":"approved"}`), base.Add(time.Second), nil); err != nil {
+		t.Fatal(err)
+	}
+	existed, err := s.DeleteDocument(schema, "a", rev(docstore.FirstRev))
+	if !docstore.IsConflict(err) {
+		t.Fatalf("stale delete returned existed=%v err=%v, want a conflict", existed, err)
+	}
+	if _, found, _ := s.GetDocument(schema, "a"); !found {
+		t.Fatal("the refused delete removed the document anyway")
+	}
+
+	if _, err := s.DeleteDocument(schema, "a", rev(docstore.FirstRev+1)); err != nil {
+		t.Fatalf("delete at the current revision: %v", err)
+	}
+	if _, found, _ := s.GetDocument(schema, "a"); found {
+		t.Fatal("delete at the current revision left the document")
+	}
+}
+
+// "Delete this if it is not there" cannot be honoured, and must not quietly
+// become an unconditional delete of the document the caller was protecting.
+func TestDeleteCannotExpectTheDocumentToBeAbsent(t *testing.T) {
+	s, _ := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`})
+	schema := requestsDecl(t, s)
+
+	_, err := s.DeleteDocument(schema, "a", rev(docstore.ExpectAbsent))
+	if err == nil {
+		t.Fatal("delete accepted an expectation it cannot act on")
+	}
+	if docstore.IsConflict(err) {
+		t.Fatalf("a nonsensical expectation was reported as a conflict: %v", err)
+	}
+	if _, found, _ := s.GetDocument(schema, "a"); !found {
+		t.Fatal("the refused delete removed the document")
+	}
+}
+
+// The reason revisions exist, run as the race it protects against: several
+// writers reading, changing and writing back the same document at once. Each one
+// retries on conflict, and the counter has to end at the number of increments —
+// a lost update shows up as a number that is short.
+//
+// Against a database file rather than the in-memory store the other tests use.
+// The in-memory one is pinned to a single connection, so it would serialise the
+// writers at the driver and never exercise two of them reaching SQLite at once.
+func TestConcurrentReadModifyWritesLoseNoUpdate(t *testing.T) {
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	s, err := NewWithDB(filepath.Join(t.TempDir(), "contention.db"))
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer s.Close()
+	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+		t.Fatalf("define: %v", err)
+	}
+	schema := requestsDecl(t, s)
+	if _, err := s.PutDocument(schema, "counter", []byte(`{"status":"pending","attempts":0}`), base, nil); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	const (
+		writers    = 8
+		perWriter  = 25
+		maxRetries = 1000 // A tripwire: contention this deep means the loop is wrong.
+	)
+
+	var wg sync.WaitGroup
+	errs := make(chan error, writers)
+	for w := 0; w < writers; w++ {
+		wg.Add(1)
+		go func(w int) {
+			defer wg.Done()
+			for i := 0; i < perWriter; i++ {
+				var attempt int
+				for attempt = 0; attempt < maxRetries; attempt++ {
+					doc, found, err := s.GetDocument(schema, "counter")
+					if err != nil || !found {
+						errs <- fmt.Errorf("writer %d read: found=%v err=%w", w, found, err)
+						return
+					}
+					var body map[string]any
+					if err := json.Unmarshal(doc.Body, &body); err != nil {
+						errs <- fmt.Errorf("writer %d decode: %w", w, err)
+						return
+					}
+					body["attempts"] = body["attempts"].(float64) + 1
+					next, err := json.Marshal(body)
+					if err != nil {
+						errs <- fmt.Errorf("writer %d encode: %w", w, err)
+						return
+					}
+					_, err = s.PutDocument(schema, "counter", next, base.Add(time.Second), rev(doc.Rev))
+					if err == nil {
+						break
+					}
+					if !docstore.IsConflict(err) {
+						errs <- fmt.Errorf("writer %d write: %w", w, err)
+						return
+					}
+				}
+				if attempt == maxRetries {
+					errs <- fmt.Errorf("writer %d gave up after %d conflicts on one increment", w, maxRetries)
+					return
+				}
+			}
+		}(w)
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+
+	doc, _, err := s.GetDocument(schema, "counter")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(doc.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if got := int(body["attempts"].(float64)); got != writers*perWriter {
+		t.Fatalf("counter ended at %d after %d increments; %d update(s) were lost",
+			got, writers*perWriter, writers*perWriter-got)
+	}
+	// Every accepted write advanced the revision exactly once, so the revision is
+	// an independent count of the writes that landed.
+	if want := int64(writers*perWriter) + docstore.FirstRev; doc.Rev != want {
+		t.Fatalf("document is at rev %d after %d accepted writes, want %d", doc.Rev, writers*perWriter, want)
 	}
 }
 
@@ -495,7 +783,7 @@ func TestCountIsScopedToTheCollection(t *testing.T) {
 	if err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatal(err)
 	}
-	if err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "z", []byte(`{"status":"x"}`), base); err != nil {
+	if _, err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "z", []byte(`{"status":"x"}`), base, nil); err != nil {
 		t.Fatal(err)
 	}
 	n, err := s.CountDocuments(declOf(t, s, "ext/approval-gate", "requests"))
@@ -554,7 +842,7 @@ func TestDocumentsSurviveReopeningTheDatabase(t *testing.T) {
 	if err := first.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
-	if err := first.PutDocument(declOf(t, first, "ext/approval-gate", "requests"), "a", []byte(`{"status":"pending"}`), base); err != nil {
+	if _, err := first.PutDocument(declOf(t, first, "ext/approval-gate", "requests"), "a", []byte(`{"status":"pending"}`), base, nil); err != nil {
 		t.Fatalf("put: %v", err)
 	}
 	first.Close()
@@ -797,8 +1085,8 @@ func TestCollectionsWithTheSameFieldNameDoNotShareStorage(t *testing.T) {
 		if err := s.DefineDocumentCollection(schema, now); err != nil {
 			t.Fatalf("define %s: %v", coll, err)
 		}
-		if err := s.PutDocument(declOf(t, s, "ext/approval-gate", coll), coll+"-1",
-			[]byte(`{"status":"`+coll+`"}`), now); err != nil {
+		if _, err := s.PutDocument(declOf(t, s, "ext/approval-gate", coll), coll+"-1",
+			[]byte(`{"status":"`+coll+`"}`), now, nil); err != nil {
 			t.Fatalf("put into %s: %v", coll, err)
 		}
 	}
@@ -1051,5 +1339,87 @@ func TestAPopulatedV88StoreIsCarriedIntoItsOwnTables(t *testing.T) {
 	}
 	if _, err := s.db.Exec(`SELECT 1 FROM documents LIMIT 1`); err == nil {
 		t.Fatal("the shared v88 table is still there")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Migration 90: giving documents already stored a revision
+// ---------------------------------------------------------------------------
+
+// seedPreRevisionDocuments builds a database at migration 89's shape — tables
+// per collection, but no revision column — with documents in it, and rewinds the
+// watermark so reopening replays 90 over real rows.
+func seedPreRevisionDocuments(t *testing.T, dbPath string) {
+	t.Helper()
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("open for seeding: %v", err)
+	}
+	base := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
+	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+		t.Fatalf("seed declaration: %v", err)
+	}
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+	for _, doc := range []struct{ id, body string }{
+		{"r1", `{"status":"open","attempts":2}`},
+		{"r2", `{"status":"done","attempts":9}`},
+	} {
+		if _, err := s.PutDocument(schema, doc.id, []byte(doc.body), base, nil); err != nil {
+			t.Fatalf("seed %s: %v", doc.id, err)
+		}
+	}
+	// Back to 89: drop the column this migration adds, and forget having run it.
+	if _, err := s.db.Exec(`ALTER TABLE ` + schema.Table + ` DROP COLUMN rev;
+		DELETE FROM schema_migrations WHERE version >= 90;`); err != nil {
+		t.Fatalf("rewind to migration 89: %v", err)
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("close seeded database: %v", err)
+	}
+}
+
+// Documents written before revisions existed have to come back with one, and be
+// usable as the token a conditional write hands in — otherwise the first
+// read-modify-write against an upgraded profile is refused forever.
+func TestDocumentsStoredBeforeRevisionsGetTheFirstOne(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "migration-90.db")
+	seedPreRevisionDocuments(t, dbPath)
+
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer s.Close()
+
+	schema := declOf(t, s, "ext/approval-gate", "requests")
+	doc, found, err := s.GetDocument(schema, "r1")
+	if err != nil || !found {
+		t.Fatalf("r1 after migration: found=%v err=%v", found, err)
+	}
+	if doc.Rev != docstore.FirstRev {
+		t.Fatalf("a carried document is at rev %d, want %d", doc.Rev, docstore.FirstRev)
+	}
+	if string(doc.Body) != `{"status":"open","attempts":2}` {
+		t.Fatalf("the migration rewrote a body: %s", doc.Body)
+	}
+
+	// The carried revision is a real one: writing against it is accepted, and
+	// writing against the revision it replaces is then refused.
+	next, err := s.PutDocument(schema, "r1", []byte(`{"status":"closed","attempts":2}`),
+		time.Date(2026, 8, 4, 9, 0, 0, 0, time.UTC), rev(doc.Rev))
+	if err != nil {
+		t.Fatalf("conditional write against a carried revision: %v", err)
+	}
+	if next != docstore.FirstRev+1 {
+		t.Fatalf("write returned rev %d, want %d", next, docstore.FirstRev+1)
+	}
+	if _, err := s.PutDocument(schema, "r1", []byte(`{"status":"stale"}`),
+		time.Date(2026, 8, 4, 9, 1, 0, 0, time.UTC), rev(doc.Rev)); !docstore.IsConflict(err) {
+		t.Fatalf("a second write at the carried revision returned %v, want a conflict", err)
+	}
+
+	// Every document in the collection came across, not just the one read above.
+	if got := queryIDs(t, s, docstore.Query{Namespace: "ext/approval-gate", Collection: "requests"}); len(got) != 2 {
+		t.Fatalf("documents after migration = %v, want both", got)
 	}
 }

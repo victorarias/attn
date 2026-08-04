@@ -146,8 +146,8 @@ func TestSubscribingDeliversTheCurrentResultSetImmediately(t *testing.T) {
 
 	lq := subscribe(t, d, testQuery())
 	first := lq.next(t)
-	if first.Revision != 1 {
-		t.Fatalf("first delivery revision = %d, want 1", first.Revision)
+	if first.Delivery != 1 {
+		t.Fatalf("first delivery = %d, want 1", first.Delivery)
 	}
 	if got := ids(first); len(got) != 1 || got[0] != "already-here" {
 		t.Fatalf("first delivery = %v", got)
@@ -166,8 +166,8 @@ func TestAWriteWakesTheSubscriptionWithTheWholeResultSet(t *testing.T) {
 
 	putDoc(t, d, "a", `{"status":"pending"}`)
 	second := lq.next(t)
-	if second.Revision != 2 {
-		t.Fatalf("revision = %d, want 2", second.Revision)
+	if second.Delivery != 2 {
+		t.Fatalf("delivery = %d, want 2", second.Delivery)
 	}
 	if got := ids(second); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("after write = %v", got)
@@ -193,8 +193,8 @@ func TestANoOpDeleteDoesNotWakeSubscribers(t *testing.T) {
 	putDoc(t, d, "a", `{"status":"pending"}`)
 
 	next := lq.next(t)
-	if next.Revision != 2 {
-		t.Fatalf("revision = %d, want 2 — the no-op delete delivered", next.Revision)
+	if next.Delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — the no-op delete delivered", next.Delivery)
 	}
 	if got := ids(next); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("delivery = %v", got)
@@ -253,8 +253,8 @@ func TestASubscriptionOnlyWakesForItsOwnCollection(t *testing.T) {
 	putDoc(t, d, "ours", `{"status":"pending"}`)
 
 	next := lq.next(t)
-	if next.Revision != 2 {
-		t.Fatalf("revision = %d, want 2 — the neighbouring namespace woke this subscription", next.Revision)
+	if next.Delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — the neighbouring namespace woke this subscription", next.Delivery)
 	}
 	if got := ids(next); len(got) != 1 || got[0] != "ours" {
 		t.Fatalf("delivery = %v — it crossed the namespace boundary", got)
@@ -488,5 +488,151 @@ func TestRedeclaringWithoutAFieldEndsTheLiveQueriesUsingIt(t *testing.T) {
 	}
 	if msg := protocol.Deref(final.Error); !strings.Contains(msg, "status") {
 		t.Fatalf("error does not name the field that went: %q", msg)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Conditional writes over the wire
+// ---------------------------------------------------------------------------
+
+// putDocExpecting writes with an expectation and returns the raw response, so a
+// test can assert on a refusal rather than fail on one.
+func putDocExpecting(t *testing.T, d *Daemon, id, body string, expected int) protocol.Response {
+	t.Helper()
+	return docCall(t, func(c net.Conn) {
+		d.handleDocPut(c, &protocol.DocPutMessage{
+			Cmd: protocol.CmdDocPut, Namespace: testDocNS, Collection: testDocColl,
+			ID: id, Body: body, ExpectedRev: &expected,
+		})
+	})
+}
+
+func getDoc(t *testing.T, d *Daemon, id string) *protocol.StoredDocument {
+	t.Helper()
+	resp := docCall(t, func(c net.Conn) {
+		d.handleDocGet(c, &protocol.DocGetMessage{
+			Cmd: protocol.CmdDocGet, Namespace: testDocNS, Collection: testDocColl, ID: id,
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("get %s: %v", id, protocol.Deref(resp.Error))
+	}
+	if !resp.DocGetResult.Found {
+		return nil
+	}
+	return resp.DocGetResult.Document
+}
+
+// A write reports the revision it produced, and a read reports the revision it
+// read, so a caller never has to ask for one separately.
+func TestAWriteAndAReadAgreeOnTheRevision(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+
+	resp := docCall(t, func(c net.Conn) {
+		d.handleDocPut(c, &protocol.DocPutMessage{
+			Cmd: protocol.CmdDocPut, Namespace: testDocNS, Collection: testDocColl,
+			ID: "a", Body: `{"status":"pending"}`,
+		})
+	})
+	if !resp.Ok {
+		t.Fatalf("put: %v", protocol.Deref(resp.Error))
+	}
+	if resp.DocPutResult.Rev != 1 {
+		t.Fatalf("put reported rev %d, want 1", resp.DocPutResult.Rev)
+	}
+	if doc := getDoc(t, d, "a"); doc == nil || doc.Rev != 1 {
+		t.Fatalf("get reported %+v, want rev 1", doc)
+	}
+}
+
+// The refusal has to arrive as an error a caller can act on, and the document it
+// would have replaced has to be exactly as it was.
+func TestAStaleConditionalWriteIsRefusedOverTheWire(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	putDoc(t, d, "a", `{"status":"pending"}`)
+	putDoc(t, d, "a", `{"status":"approved"}`)
+
+	resp := putDocExpecting(t, d, "a", `{"status":"rejected"}`, 1)
+	if resp.Ok {
+		t.Fatal("a write against a replaced revision was accepted")
+	}
+	msg := protocol.Deref(resp.Error)
+	if !strings.Contains(msg, "rev 1") || !strings.Contains(msg, "rev 2") {
+		t.Fatalf("refusal does not name both revisions: %s", msg)
+	}
+
+	doc := getDoc(t, d, "a")
+	if doc == nil || doc.Body != `{"status":"approved"}` || doc.Rev != 2 {
+		t.Fatalf("the refused write changed the document: %+v", doc)
+	}
+}
+
+// A refused write changed nothing, so it must not wake the collection's live
+// queries: a delivery means "this result set is new", and re-rendering an
+// identical one on every rejected write is the cost the conditional write exists
+// to avoid.
+func TestARefusedWriteDoesNotWakeSubscribers(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	putDoc(t, d, "a", `{"status":"pending"}`)
+	lq := subscribe(t, d, testQuery())
+	lq.next(t)
+
+	if resp := putDocExpecting(t, d, "a", `{"status":"rejected"}`, 99); resp.Ok {
+		t.Fatal("a write against a revision that never existed was accepted")
+	}
+	putDoc(t, d, "b", `{"status":"pending"}`)
+
+	// The next delivery is the one the accepted write caused, so it carries both
+	// documents. A delivery holding only the first means the refused write woke
+	// the subscription and this is its result set, with the real one still queued.
+	next := lq.next(t)
+	if got := ids(next); len(got) != 2 {
+		t.Fatalf("first delivery after the refused write = %v, want both documents", got)
+	}
+	if next.Delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — something delivered in between", next.Delivery)
+	}
+}
+
+// Create-only, over the wire: the second create loses and the first document
+// survives it.
+func TestCreateOnlyIsRefusedWhenTheDocumentIsAlreadyThere(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+
+	if resp := putDocExpecting(t, d, "a", `{"status":"first"}`, 0); !resp.Ok {
+		t.Fatalf("first create: %v", protocol.Deref(resp.Error))
+	}
+	resp := putDocExpecting(t, d, "a", `{"status":"second"}`, 0)
+	if resp.Ok {
+		t.Fatal("a second create was accepted")
+	}
+	if doc := getDoc(t, d, "a"); doc == nil || doc.Body != `{"status":"first"}` {
+		t.Fatalf("the losing create overwrote the winner: %+v", doc)
+	}
+}
+
+// A conditional delete refuses the same way, and leaves the document behind.
+func TestAStaleConditionalDeleteIsRefusedOverTheWire(t *testing.T) {
+	d := newDaemonForTest(t)
+	defineTestCollection(t, d)
+	putDoc(t, d, "a", `{"status":"pending"}`)
+	putDoc(t, d, "a", `{"status":"approved"}`)
+
+	stale := 1
+	resp := docCall(t, func(c net.Conn) {
+		d.handleDocDelete(c, &protocol.DocDeleteMessage{
+			Cmd: protocol.CmdDocDelete, Namespace: testDocNS, Collection: testDocColl,
+			ID: "a", ExpectedRev: &stale,
+		})
+	})
+	if resp.Ok {
+		t.Fatal("a delete against a replaced revision was accepted")
+	}
+	if doc := getDoc(t, d, "a"); doc == nil {
+		t.Fatal("the refused delete removed the document")
 	}
 }

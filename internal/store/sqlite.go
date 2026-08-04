@@ -915,6 +915,12 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// any installed profile may already hold records a user put there by hand.
 	// Applied by applyMigration89.
 	{89, "rebuild the document store as a table per collection", ``},
+	// Gives every document a revision, so a caller can say which version it
+	// meant to overwrite and a write built on a stale read is refused instead of
+	// silently winning. Existing documents start at the first revision: nothing
+	// has ever been written against a revision, so there is no earlier history to
+	// preserve. Applied by applyMigration90.
+	{90, "give every document a revision", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1185,6 +1191,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 89 {
 			if err := applyMigration89(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 90 {
+			if err := applyMigration90(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2203,6 +2214,55 @@ func applyMigration89(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec(`DROP TABLE document_collections_v88`)
 	return err
+}
+
+// applyMigration90 gives every document a revision, so a write can say which
+// version it meant to replace. Each collection is its own table, so this walks
+// the registry and alters them one by one — the registry is the only list of
+// them, and reading the schema for `doc_%` tables would pick up any table that
+// happened to be named like one.
+//
+// Existing documents start at docstore.FirstRev rather than at zero: a revision
+// is the version a reader was handed, and every document already stored has been
+// readable all along at whatever version it is on now, which is its first.
+//
+// Guarded per table rather than once, so a rewound schema_migrations table
+// finishes a run that stopped part way instead of erroring on the first table it
+// already did.
+func applyMigration90(tx *sql.Tx) error {
+	rows, err := tx.Query(`SELECT id FROM document_collections`)
+	if err != nil {
+		return err
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		ids = append(ids, id)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return err
+	}
+
+	for _, id := range ids {
+		table := docstore.TableName(id)
+		has, err := columnExists(tx, table, "rev")
+		if err != nil {
+			return fmt.Errorf("checking %s for a revision column: %w", table, err)
+		}
+		if has {
+			continue
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			`ALTER TABLE %s ADD COLUMN rev INTEGER NOT NULL DEFAULT %d`, table, docstore.FirstRev)); err != nil {
+			return fmt.Errorf("adding a revision column to %s: %w", table, err)
+		}
+	}
+	return nil
 }
 
 // v88Collection is one collection to carry across: its declaration as v88

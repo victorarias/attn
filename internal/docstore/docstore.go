@@ -30,6 +30,7 @@ package docstore
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"sort"
@@ -156,11 +157,81 @@ type Query struct {
 // Document is one stored record. Body is the document as written, byte for byte
 // — record-shape evolution is handled by the reader (parse tolerantly, render
 // tolerantly), never by migrating stored documents.
+//
+// Rev is what makes a read-modify-write safe. It comes back on every read, so a
+// caller that read a document already holds the token that names the version it
+// read; handing that token back to a write is how the store can refuse an edit
+// built on a version somebody else has since replaced.
 type Document struct {
 	ID        string          `json:"id"`
 	Body      json.RawMessage `json:"body"`
+	Rev       int64           `json:"rev"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
+}
+
+// Revisions.
+//
+// A document's revision counts writes to that document, starting at FirstRev.
+// It is per document rather than per collection or per store: what a caller
+// needs to know is whether the record they read is the record they are about to
+// overwrite, and a global counter would make every unrelated write look like a
+// conflict.
+//
+// ExpectAbsent is the one magic value, and it is unambiguous because revisions
+// start at 1: a caller that expects revision zero is a caller that expects no
+// document at all. That makes create-only fall out of the same field rather
+// than needing a second one.
+//
+// Width: the wire carries a revision as safeint (2^53-1) and the store as
+// SQLite INTEGER, which is 8 bytes whatever it is declared as. int32 would have
+// been 2.1 billion writes to ONE document — roughly seven years at ten writes a
+// second, which attn's uptime can reach — and overflowing it would silently make
+// a stale check pass, which is the exact failure this exists to prevent.
+const (
+	FirstRev     int64 = 1
+	ExpectAbsent int64 = 0
+)
+
+// ConflictError is a write refused because the document was not at the revision
+// the caller expected. It is a distinct type, not a string, because every
+// surface above has to be able to tell it apart from a failure: a conflict means
+// "read it again and retry", and everything else means "something is broken".
+//
+// Found and Actual describe what was there when the store looked, which is after
+// the write was refused — so they name the version that won rather than the
+// version that will still be current by the time the caller reads this. That is
+// what the caller wants: it says which write it lost to.
+type ConflictError struct {
+	Namespace  string
+	Collection string
+	ID         string
+	// Expected is the revision the caller asserted, or ExpectAbsent when the
+	// caller asserted the document did not exist.
+	Expected int64
+	// Found reports whether a document was there at all; Actual is its revision
+	// and is meaningless when Found is false.
+	Found  bool
+	Actual int64
+}
+
+func (e *ConflictError) Error() string {
+	addr := Address(e.Namespace, e.Collection, e.ID)
+	switch {
+	case e.Expected == ExpectAbsent:
+		return fmt.Sprintf("docstore: %s already exists at rev %d, and this write expected it not to exist yet", addr, e.Actual)
+	case !e.Found:
+		return fmt.Sprintf("docstore: %s expected rev %d but no document is there; it was removed since you read it", addr, e.Expected)
+	default:
+		return fmt.Sprintf("docstore: %s expected rev %d but is at rev %d; re-read it and apply your change to that version", addr, e.Expected, e.Actual)
+	}
+}
+
+// IsConflict reports whether an error is a lost-update refusal. It is the check
+// a retry loop makes.
+func IsConflict(err error) bool {
+	var conflict *ConflictError
+	return errors.As(err, &conflict)
 }
 
 // Compiled is a validated query as SQL. Table is the collection's table, Where

@@ -34,7 +34,11 @@ import (
 // documentColumns is the read projection; body is returned byte for byte. The
 // generated columns are never selected: they exist to be filtered and ordered
 // on, and the body already carries what they compute.
-const documentColumns = `id, body, created_at, updated_at`
+//
+// rev is in the projection rather than fetched on demand because it is the token
+// a read-modify-write hands back, and a caller that had to ask for it separately
+// would be reading a version it did not read the body of.
+const documentColumns = `id, body, rev, created_at, updated_at`
 
 // DefineDocumentCollection records a collection's declaration and brings its
 // table into line with it, creating the table on first declaration. Redeclaring
@@ -190,30 +194,78 @@ func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, err
 	return n, nil
 }
 
-// PutDocument writes a document, creating or fully replacing it. created_at
-// survives a replacement — it is when the record first appeared, which is what a
-// "newest first" query means by it — while updated_at moves on every write.
+// PutDocument writes a document, creating or fully replacing it, and returns the
+// revision it now has. created_at survives a replacement — it is when the record
+// first appeared, which is what a "newest first" query means by it — while
+// updated_at and rev move on every write.
 //
 // The schema names the table, which is why every caller reads the declaration
 // first: an undeclared collection has no storage, and that has to be an error a
 // caller reports rather than a table appearing by surprise.
-func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []byte, now time.Time) error {
+//
+// expected is the caller's assertion about what it is overwriting: nil writes
+// unconditionally, docstore.ExpectAbsent writes only if nothing is there, and a
+// revision writes only if the document is still at it. A failed assertion is a
+// *docstore.ConflictError and nothing is written.
+//
+// EACH FORM IS ONE STATEMENT, which is what makes the check atomic without a
+// transaction: SQLite runs a bare statement in its own. Reading the revision and
+// then writing would be two, and the whole point of this is the window between
+// them. The re-read below happens only on the failure path, to say what the
+// write lost to.
+func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []byte, now time.Time, expected *int64) (int64, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	ts := now.UTC().Format(docstore.TimeFormat)
-	_, err = s.db.Exec(
-		`INSERT INTO `+table+` (id, body, created_at, updated_at)
-		 VALUES (?, ?, ?, ?)
-		 ON CONFLICT(id) DO UPDATE SET
-		   body=excluded.body,
-		   updated_at=excluded.updated_at`,
-		id, string(body), ts, ts)
-	if err != nil {
-		return fmt.Errorf("store: writing %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
+
+	var (
+		stmt string
+		args []any
+	)
+	switch {
+	case expected == nil:
+		// Upsert: the insert path starts at FirstRev, the update path advances.
+		stmt = `INSERT INTO ` + table + ` (id, body, rev, created_at, updated_at)
+		        VALUES (?, ?, ?, ?, ?)
+		        ON CONFLICT(id) DO UPDATE SET
+		          body=excluded.body,
+		          rev=` + table + `.rev + 1,
+		          updated_at=excluded.updated_at
+		        RETURNING rev`
+		args = []any{id, string(body), docstore.FirstRev, ts, ts}
+	case *expected == docstore.ExpectAbsent:
+		// DO NOTHING rather than letting the primary key raise: a conflicting
+		// insert then returns no row, which is the same "no row came back" signal
+		// the conditional update gives, so both refusals arrive one way.
+		stmt = `INSERT INTO ` + table + ` (id, body, rev, created_at, updated_at)
+		        VALUES (?, ?, ?, ?, ?)
+		        ON CONFLICT(id) DO NOTHING
+		        RETURNING rev`
+		args = []any{id, string(body), docstore.FirstRev, ts, ts}
+	default:
+		// No insert path at all: expecting a revision is expecting a document,
+		// so a missing one must be refused rather than created.
+		stmt = `UPDATE ` + table + ` SET body = ?, rev = rev + 1, updated_at = ?
+		        WHERE id = ? AND rev = ?
+		        RETURNING rev`
+		args = []any{string(body), ts, id, *expected}
 	}
-	return nil
+
+	var rev int64
+	err = s.db.QueryRow(stmt, args...).Scan(&rev)
+	// No row came back is how every refusal arrives — but only an expectation can
+	// refuse one. The unconditional upsert always writes a row, so no row from it
+	// is a broken statement rather than a conflict, and reporting it as one would
+	// tell a caller to retry something that will never succeed.
+	if err == sql.ErrNoRows && expected != nil {
+		return 0, s.documentConflict(schema, table, id, *expected)
+	}
+	if err != nil {
+		return 0, fmt.Errorf("store: writing %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
+	}
+	return rev, nil
 }
 
 // GetDocument returns one document by its address.
@@ -236,12 +288,31 @@ func (s *Store) GetDocument(schema docstore.CollectionSchema, id string) (*docst
 // DeleteDocument removes a document, reporting whether one was there. The caller
 // needs the difference: a delete that removed nothing must not announce a change
 // that did not happen.
-func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string) (bool, error) {
+//
+// expected asserts which version is being removed, the same way PutDocument's
+// does — removing a record on the strength of a body you read is the same
+// lost-update hazard as overwriting one. A revision that no longer matches is a
+// *docstore.ConflictError and nothing is deleted.
+func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expected *int64) (bool, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
 		return false, err
 	}
-	res, err := s.db.Exec(`DELETE FROM `+table+` WHERE id = ?`, id)
+	if expected != nil && *expected == docstore.ExpectAbsent {
+		// "Delete this if it is not there" is not an assertion a delete can act
+		// on, and silently treating it as unconditional would delete a document
+		// the caller was trying to protect.
+		return false, fmt.Errorf("store: deleting %s/%s/%s: rev %d means the document must not exist, which a delete cannot expect; pass the revision you read, or none to delete unconditionally",
+			schema.Namespace, schema.Collection, id, docstore.ExpectAbsent)
+	}
+
+	stmt := `DELETE FROM ` + table + ` WHERE id = ?`
+	args := []any{id}
+	if expected != nil {
+		stmt += ` AND rev = ?`
+		args = append(args, *expected)
+	}
+	res, err := s.db.Exec(stmt, args...)
 	if err != nil {
 		return false, fmt.Errorf("store: deleting %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
 	}
@@ -249,7 +320,31 @@ func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string) (boo
 	if err != nil {
 		return false, err
 	}
+	if n == 0 && expected != nil {
+		return false, s.documentConflict(schema, table, id, *expected)
+	}
 	return n > 0, nil
+}
+
+// documentConflict describes a refused write. It reads the document again to
+// name the revision that won, because "your write was refused" without that is
+// an error a caller cannot act on. A read failure here is not worth losing the
+// conflict over — the refusal is the fact, the revision is the detail — so it
+// degrades to reporting the document as absent.
+func (s *Store) documentConflict(schema docstore.CollectionSchema, table, id string, expected int64) error {
+	conflict := &docstore.ConflictError{
+		Namespace: schema.Namespace, Collection: schema.Collection, ID: id, Expected: expected,
+	}
+	var rev int64
+	switch err := s.db.QueryRow(`SELECT rev FROM `+table+` WHERE id = ?`, id).Scan(&rev); {
+	case err == nil:
+		conflict.Found = true
+		conflict.Actual = rev
+	case err != sql.ErrNoRows:
+		return fmt.Errorf("store: %s/%s/%s was refused, and re-reading it to say why also failed: %w",
+			schema.Namespace, schema.Collection, id, err)
+	}
+	return conflict
 }
 
 // QueryDocuments runs a compiled query. The compiled fragments are built from a
@@ -349,23 +444,28 @@ func (s *Store) documentTable(schema docstore.CollectionSchema) (string, error) 
 // DDL
 // ---------------------------------------------------------------------------
 
-// createCollectionTable builds a collection's storage: the four stored columns,
+// createCollectionTable builds a collection's storage: the five stored columns,
 // an index for each reserved ordering column, and a generated column plus index
 // for every declared field.
 //
 // WITHOUT ROWID because a document is addressed by its id and never by position:
 // clustering the row on the id it is looked up by removes a whole B-tree and the
 // hop through it.
+//
+// rev is stored and not indexed. It is only ever read for a document already
+// being looked up by its primary key, or compared inside a write to that same
+// row, so an index over it would serve no query and cost every write.
 func createCollectionTable(tx *sql.Tx, table string, fields []docstore.FieldSpec) error {
 	if err := docstore.ValidateTableName(table); err != nil {
 		return err
 	}
-	if _, err := tx.Exec(`CREATE TABLE ` + table + ` (
+	if _, err := tx.Exec(fmt.Sprintf(`CREATE TABLE %s (
     id         TEXT NOT NULL PRIMARY KEY,
     body       TEXT NOT NULL,
+    rev        INTEGER NOT NULL DEFAULT %d,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
-) WITHOUT ROWID`); err != nil {
+) WITHOUT ROWID`, table, docstore.FirstRev)); err != nil {
 		return err
 	}
 	// created_at and updated_at are queryable without being declared, so they
@@ -510,7 +610,7 @@ func scanDocument(sc rowScanner) (*docstore.Document, error) {
 		body                   string
 		createdStr, updatedStr string
 	)
-	if err := sc.Scan(&doc.ID, &body, &createdStr, &updatedStr); err != nil {
+	if err := sc.Scan(&doc.ID, &body, &doc.Rev, &createdStr, &updatedStr); err != nil {
 		return nil, err
 	}
 	doc.Body = json.RawMessage(body)

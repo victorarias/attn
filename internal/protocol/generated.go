@@ -1083,6 +1083,9 @@ type DocDeleteMessage struct {
 	// Collection corresponds to the JSON schema field "collection".
 	Collection string `json:"collection"`
 
+	// ExpectedRev corresponds to the JSON schema field "expected_rev".
+	ExpectedRev *int `json:"expected_rev,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
@@ -1136,6 +1139,9 @@ type DocPutMessage struct {
 	// Collection corresponds to the JSON schema field "collection".
 	Collection string `json:"collection"`
 
+	// ExpectedRev corresponds to the JSON schema field "expected_rev".
+	ExpectedRev *int `json:"expected_rev,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
@@ -1152,6 +1158,9 @@ type DocPutResult struct {
 
 	// Namespace corresponds to the JSON schema field "namespace".
 	Namespace string `json:"namespace"`
+
+	// Rev corresponds to the JSON schema field "rev".
+	Rev int `json:"rev"`
 }
 
 type DocQueryMessage struct {
@@ -1176,11 +1185,11 @@ type DocSubscribeMessage struct {
 }
 
 type DocSubscribeResult struct {
+	// Delivery corresponds to the JSON schema field "delivery".
+	Delivery int `json:"delivery"`
+
 	// Documents corresponds to the JSON schema field "documents".
 	Documents []StoredDocument `json:"documents"`
-
-	// Revision corresponds to the JSON schema field "revision".
-	Revision int `json:"revision"`
 }
 
 type DocUndefineMessage struct {
@@ -5044,6 +5053,9 @@ type StoredDocument struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+
+	// Rev corresponds to the JSON schema field "rev".
+	Rev int `json:"rev"`
 
 	// UpdatedAt corresponds to the JSON schema field "updated_at".
 	UpdatedAt string `json:"updated_at"`
