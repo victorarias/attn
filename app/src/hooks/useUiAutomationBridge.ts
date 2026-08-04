@@ -173,9 +173,7 @@ async function waitForPaneWriteQuiescence(
 }
 
 async function settleUi(frames = 2) {
-  for (let index = 0; index < frames; index += 1) {
-    await nextAnimationFrame();
-  }
+  await Promise.all(Array.from({ length: frames }, () => nextAnimationFrame()));
 }
 
 function resolvePaneId(
