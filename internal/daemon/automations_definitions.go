@@ -215,8 +215,11 @@ func (d *Daemon) automationApplyLocked(ctx context.Context, spec automation.Defi
 }
 
 // rotateContinuityBindingsIfContractChanged drops definitionID's continuity
-// bindings (see A1 in docs/plans/2026-07-18-attn-automations-implementation.md)
-// when this apply changed what a resumed session would be asked to do:
+// bindings (see "Data Model" in
+// docs/plans/2026-07-21-automations-v2-simplification.md, where
+// released_reason=contract_rotated is defined and ContinuationContract is named
+// as what drives rotation) when this apply changed what a resumed session would
+// be asked to do:
 // resurrecting a soft-deleted definition always rotates (its old bindings
 // may point at threads built under an arbitrarily stale contract), and
 // otherwise rotates only when the new effective spec's

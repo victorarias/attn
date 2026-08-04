@@ -64,8 +64,8 @@ incident.** Fixed by adding orphan-pruning to the installer (below).
   before anything else.
 - **(b) The zero-signal leaf.** A *non-chief-delegated* leaf has no env marker,
   no prompt framing, and no load-trigger pointing it at any leaf reference. It
-  may never open the skill at all (the lazy-load-miss flagged in
-  `docs/plans/2026-06-28-delegated-ticket-awareness.md`). Prose alone cannot
+  may never open the skill at all (the lazy-load-miss flagged in the earlier
+  delegated-ticket-awareness plan, since deleted). Prose alone cannot
   reach it — only a spawn-time signal does. Closed by the delegate-time leaf
   line, injected into *every* delegation's initial prompt.
 

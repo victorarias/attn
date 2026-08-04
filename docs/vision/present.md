@@ -1,8 +1,8 @@
 # Vision: Present — the agent's document channel
 
-> Supersedes [docs/plans/2026-07-02-pr-tour-port.md](../plans/2026-07-02-pr-tour-port.md)
-> (the jaunt port direction plan). That plan overlaid a tour on the existing diff
-> panel; this vision replaces the panel and broadens the primitive. jaunt
+> Supersedes the earlier jaunt port direction plan, since deleted — git history
+> has it. That plan overlaid a tour on the existing diff panel; this vision
+> replaces the panel and broadens the primitive. jaunt
 > (`victorarias/jaunt`) and plannotator (`backnotprop/plannotator`) are the two
 > donor products — jaunt for the pedagogy, plannotator for the annotation
 > vocabulary — but Present is neither's port.

@@ -3,7 +3,8 @@
 Stage B1 of the [extension platform roadmap](2026-08-01-extension-platform-roadmap.md).
 North star: [docs/vision/extension-platform.md](../vision/extension-platform.md).
 
-Status: gate approved by Victor 2026-08-01. Not started.
+Status: gate approved by Victor 2026-08-01. Shipped — `internal/jobs` is in
+place and `internal/tasks` is deleted.
 
 ## Gate answers
 

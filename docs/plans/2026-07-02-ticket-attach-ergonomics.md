@@ -138,9 +138,8 @@ prompt is composed before mint, so ticket-store destination paths don't exist ye
 - **delegate() owns atomicity.** All fallible-by-user-error checks (chief source, file
   exists, not a dir, notebook root configured) run before the first side effect; the
   store's `DeleteTicket` is a dumb cascade and knows nothing about delegation.
-- **Sequencing: lands after chief-guidance-brief-craft**
-  ([2026-07-02-chief-guidance-brief-craft.md](2026-07-02-chief-guidance-brief-craft.md)),
-  which edits the same `delegatedTicketPrompt` (inserting the three-field
+- **Sequencing: lands after chief-guidance-brief-craft** (that plan has since
+  been deleted; git history has it), which edits the same `delegatedTicketPrompt` (inserting the three-field
   terminal-report contract between the status-command list and the closing paragraph,
   asserted by new substrings in `TestChiefOfStaffDelegateBindsTicketAndPrompt`) and the
   same `references/delegation.md` (checklist tighten + fork line). The edits are
@@ -276,9 +275,9 @@ prompt is composed before mint, so ticket-store destination paths don't exist ye
 ## Open Questions / Follow-ups
 
 - **Agent read-path to attachment copies:** events carry only filenames, and there is no
-  CLI that returns an attachment's stored path yet. The sibling plan
-  `docs/plans/2026-07-02-ticket-show.md` (`attn ticket show --json`) exposes attachment
-  paths and closes this for resumed/reassigned agents; until then the prompt's source
+  CLI that returns an attachment's stored path yet. The sibling ticket-show plan
+  (since deleted; git history has it) specified `attn ticket show --json`, which exposes
+  attachment paths and closes this for resumed/reassigned agents; until then the prompt's source
   paths cover birth, and the detail panel covers the human.
 - **Per-file `--note` on delegate --attach** is deferred — a single `--note` is ambiguous
   across repeated `--attach` flags; add it if a real need shows up.

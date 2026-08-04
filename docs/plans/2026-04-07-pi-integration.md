@@ -1,6 +1,6 @@
 # Pi Coding Agent Integration
 
-**Status**: SUPERSEDED on 2026-04-16 by `docs/plans/2026-04-16-plugin-system.md` and `docs/plans/2026-04-16-pi-plugin.md`.
+**Status**: SUPERSEDED on 2026-04-16 by `docs/plans/2026-04-16-plugin-system.md` and a companion pi-plugin plan that has since been deleted (git history has it).
 
 Pi is no longer an in-tree Go driver. It becomes the first consumer of attn's new plugin system — a TypeScript/Bun plugin living in its own repo, connecting over JSON-RPC on the unix socket.
 

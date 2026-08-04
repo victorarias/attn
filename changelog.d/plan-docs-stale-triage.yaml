@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  Thirty-one stale documents removed from docs/plans after a full triage of the
+  directory: per-PR trackers that outlived their PR, specs whose shipped
+  behavior is now restated in the code and AGENTS.md, and designs a later plan
+  superseded. Decision records and active plans stay. References from surviving
+  docs and one daemon comment were rewritten as plain text so nothing points at
+  a deleted file, and the B1 job-queue plan's status line now says shipped
+  instead of not started.
