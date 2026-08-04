@@ -579,14 +579,17 @@ describe('WebGlTerminalRenderer dirty rows', () => {
     expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
   });
 
-  it('repaints the row the cursor left behind, which Ghostty does not mark dirty', () => {
+  // Defensive rather than observed: the real WASM reports a cross-row move as
+  // PARTIAL with *both* rows already in the set. This pins the row selection
+  // against a model that says PARTIAL and names no rows at all. The truly bare
+  // moves — the ones the WASM reports as DIRTY_NONE — are covered further down.
+  it('repaints both cursor rows when a partial frame names no dirty rows', () => {
     const { renderer } = makeRenderer();
     const { terminal, state } = makeControllableTerminal(50, 50);
     renderer.resize(50, 50);
     state.cursor = { x: 0, y: 10, visible: true };
     renderer.render(terminal);
 
-    // A bare reposition: no cell changed, so the model reports no dirty rows.
     state.dirty = 1;
     state.rows = new Set();
     state.cursor = { x: 0, y: 30, visible: true };
