@@ -91,7 +91,7 @@ func queryIDs(t *testing.T, s *Store, q docstore.Query) []string {
 	if err != nil {
 		t.Fatalf("compile: %v", err)
 	}
-	docs, err := s.QueryDocuments(c)
+	docs, err := s.queryDocuments(c)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}
@@ -804,7 +804,7 @@ func TestAnEmptyResultIsAnEmptyList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	docs, err := s.QueryDocuments(c)
+	docs, err := s.queryDocuments(c)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -274,13 +274,17 @@ func (s *Store) GetDocument(schema docstore.CollectionSchema, id string) (*docst
 	if err != nil {
 		return nil, false, err
 	}
-	row := s.db.QueryRow(`SELECT `+documentColumns+` FROM `+table+` WHERE id = ?`, id)
+	return getDocumentWith(s.db, schema.Namespace, schema.Collection, table, id)
+}
+
+func getDocumentWith(q rowQuerier, namespace, collection, table, id string) (*docstore.Document, bool, error) {
+	row := q.QueryRow(`SELECT `+documentColumns+` FROM `+table+` WHERE id = ?`, id)
 	doc, err := scanDocument(row)
 	if err == sql.ErrNoRows {
 		return nil, false, nil
 	}
 	if err != nil {
-		return nil, false, fmt.Errorf("store: reading %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
+		return nil, false, fmt.Errorf("store: reading %s/%s/%s: %w", namespace, collection, id, err)
 	}
 	return doc, true, nil
 }
@@ -347,14 +351,24 @@ func (s *Store) documentConflict(schema docstore.CollectionSchema, table, id str
 	return conflict
 }
 
-// QueryDocuments runs a compiled query. The compiled fragments are built from a
-// validated query against a stored declaration, so the only strings spliced into
-// the statement are ones docstore produced from identifiers it checked; every
-// caller-supplied value arrives as a bound argument.
-func (s *Store) QueryDocuments(c docstore.Compiled) ([]docstore.Document, error) {
+// queryDocuments runs an already-compiled query. The compiled fragments are
+// built from a validated query against a stored declaration, so the only strings
+// spliced into the statement are ones docstore produced from identifiers it
+// checked; every caller-supplied value arrives as a bound argument.
+//
+// Unexported on purpose. A compiled query carries a table name, a column
+// affinity and a cursor value taken from the declaration it was compiled
+// against, so running one is only correct against the state it was compiled
+// from. Handing that pairing to callers is what produced three silent wrong
+// answers; ReadQuery owns both halves and is the way in from outside.
+func (s *Store) queryDocuments(c docstore.Compiled) ([]docstore.Document, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
 	}
+	return queryDocumentsWith(s.db, c)
+}
+
+func queryDocumentsWith(q rowsQuerier, c docstore.Compiled) ([]docstore.Document, error) {
 	if err := docstore.ValidateTableName(c.Table); err != nil {
 		return nil, err
 	}
@@ -364,7 +378,7 @@ func (s *Store) QueryDocuments(c docstore.Compiled) ([]docstore.Document, error)
 	}
 	stmt += ` ORDER BY ` + c.Order + ` LIMIT ?`
 
-	rows, err := s.db.Query(stmt, append(append([]any{}, c.Args...), c.Limit)...)
+	rows, err := q.Query(stmt, append(append([]any{}, c.Args...), c.Limit)...)
 	if err != nil {
 		return nil, fmt.Errorf("store: querying documents: %w", err)
 	}
@@ -378,6 +392,81 @@ func (s *Store) QueryDocuments(c docstore.Compiled) ([]docstore.Document, error)
 		out = append(out, *doc)
 	}
 	return out, rows.Err()
+}
+
+// QueryRead is one answer to one query: the documents, and the declaration they
+// were computed against. The declaration is returned rather than assumed because
+// the caller's copy may already be out of date by the time it reads this — the
+// one in here is the one the answer actually means.
+type QueryRead struct {
+	Schema    docstore.CollectionSchema
+	Documents []docstore.Document
+}
+
+// ReadQuery answers a query in a single read transaction, and is the only way
+// to run one from outside the store.
+//
+// Answering takes three reads: the declaration, which names the table and the
+// affinity of every column the SQL will compare; the cursor anchor, whose
+// presence and sort value decide which cursor clause gets compiled; and the
+// SELECT itself. Those used to be three separate transactions with the compile
+// in between, so the statement could be built against one state and executed
+// against another. That is not a narrow race — it produced a page that silently
+// came back empty when the anchor was deleted, a page that handed back the
+// anchor document itself when the anchor gained a sort value, and a filter that
+// silently matched nothing when a field's declared type changed underneath it.
+// None of the three reported an error, and each returned an answer that matched
+// no state the collection was ever in.
+//
+// One transaction removes the class rather than narrowing it: compile-time and
+// execute-time are the same instant, so there is no second state to disagree
+// with. Nothing is committed — a read transaction here buys a consistent
+// snapshot, not atomic writes. It costs one contiguous SHARED lock in place of
+// three brief ones, which is the same total work; what it denies a writer is
+// exactly the gap that produced the wrong answers.
+//
+// found reports whether the collection is declared at all, the same way
+// DocumentCollection does.
+func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
+	if s.db == nil {
+		return QueryRead{}, false, fmt.Errorf("store: no database")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return QueryRead{}, false, fmt.Errorf("store: reading %s/%s: %w", q.Namespace, q.Collection, err)
+	}
+	// Rolled back rather than committed: a read transaction has nothing to
+	// commit, and rolling back is what releases the snapshot.
+	defer func() { _ = tx.Rollback() }()
+
+	schema, table, found, err := readCollectionTx(tx, q.Namespace, q.Collection)
+	if err != nil || !found {
+		return QueryRead{}, false, err
+	}
+
+	var anchor *docstore.Document
+	if q.After != "" {
+		// A missing anchor stays nil, which is the case Compile refuses by name.
+		// Inside this transaction that refusal is now truthful: the anchor really
+		// is absent from the state the SELECT would have run against.
+		doc, ok, err := getDocumentWith(tx, schema.Namespace, schema.Collection, table, q.After)
+		if err != nil {
+			return QueryRead{}, false, err
+		}
+		if ok {
+			anchor = doc
+		}
+	}
+
+	compiled, err := q.Compile(schema, anchor)
+	if err != nil {
+		return QueryRead{}, false, err
+	}
+	docs, err := queryDocumentsWith(tx, compiled)
+	if err != nil {
+		return QueryRead{}, false, err
+	}
+	return QueryRead{Schema: schema, Documents: docs}, true, nil
 }
 
 // CountDocuments reports how many documents a collection holds. It is what the
@@ -574,6 +663,10 @@ func quoteIdent(name string) string {
 
 type rowQuerier interface {
 	QueryRow(query string, args ...any) *sql.Row
+}
+
+type rowsQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
 }
 
 // readCollection reads a declaration and the table minted for it.
