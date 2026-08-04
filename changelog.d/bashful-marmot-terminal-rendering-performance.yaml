@@ -2,8 +2,11 @@ kind: changed
 area: terminal
 change: >
   Streaming terminal output now reuses GPU-ready vertex buffers between paints,
-  reducing the allocation and copying work required to draw each frame.
+  avoids repeated per-cell color and glyph-key allocations, and limits sustained
+  output to 30 paints per second while preserving immediate interaction paints.
 notes: >
   The main terminal renderer and mission-control grid renderer now share the
-  same reusable typed vertex buffer. Terminal performance snapshots also expose
-  renderer CPU time so packaged-app benchmarks can measure paint cost directly.
+  same reusable typed vertex buffer. Continuous output keeps only the newest
+  model state for the next paint; the first output after idle, direct input, and
+  the final state are still rendered promptly. Terminal performance snapshots
+  expose renderer CPU and scheduling counters for packaged-app measurements.

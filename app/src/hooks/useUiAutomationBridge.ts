@@ -133,6 +133,12 @@ function nextAnimationFrame() {
   });
 }
 
+function waitForBenchmarkDelay(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
 async function settleUi(frames = 2) {
   for (let index = 0; index < frames; index += 1) {
     await nextAnimationFrame();
@@ -3190,6 +3196,9 @@ export function useUiAutomationBridge({
         const flushEvery = typeof payload.flushEvery === 'number' && payload.flushEvery > 0
           ? Math.floor(payload.flushEvery)
           : 1;
+        const interChunkDelayMs = typeof payload.interChunkDelayMs === 'number'
+          ? Math.max(0, payload.interChunkDelayMs)
+          : 0;
         const runtimeId =
           session.workspace.agents.find((entry) => entry.id === paneId)?.runtimeId ||
           `bench:${paneId}`;
@@ -3235,6 +3244,9 @@ export function useUiAutomationBridge({
                 await flushBufferedBytes();
               }
             }
+            if (interChunkDelayMs > 0) {
+              await waitForBenchmarkDelay(interChunkDelayMs);
+            }
             continue;
           }
 
@@ -3249,6 +3261,9 @@ export function useUiAutomationBridge({
               if (bufferedByteChunks.length >= flushEvery) {
                 await flushBufferedBytes();
               }
+            }
+            if (interChunkDelayMs > 0) {
+              await waitForBenchmarkDelay(interChunkDelayMs);
             }
             continue;
           }
@@ -3273,6 +3288,9 @@ export function useUiAutomationBridge({
               await flushBufferedBytes();
             }
           }
+          if (interChunkDelayMs > 0) {
+            await waitForBenchmarkDelay(interChunkDelayMs);
+          }
         }
         await flushBufferedBytes();
         if (!(await drainSessionPaneTerminal(sessionId, paneId))) {
@@ -3292,6 +3310,7 @@ export function useUiAutomationBridge({
           runtimeId,
           mode,
           flushEvery,
+          interChunkDelayMs,
           chunkBytes: bytes.length,
           chunkCount,
           totalPayloadBytes: bytes.length * chunkCount,
@@ -3305,6 +3324,9 @@ export function useUiAutomationBridge({
                 renderCount: rendererAfter.renderCount - rendererBefore.renderCount,
                 cpuSubmitMs: rendererAfter.renderCpuTotalMs - rendererBefore.renderCpuTotalMs,
                 lastFrameMs: rendererAfter.lastRenderCpuMs,
+                scheduledRequests: rendererAfter.scheduledRenderRequests - rendererBefore.scheduledRenderRequests,
+                scheduledCoalesced: rendererAfter.scheduledRenderCoalesced - rendererBefore.scheduledRenderCoalesced,
+                scheduledDeferred: rendererAfter.scheduledRenderDeferred - rendererBefore.scheduledRenderDeferred,
               }
             : null,
           pane: {

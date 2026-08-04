@@ -19,6 +19,16 @@ describe('TerminalVertexBuffer', () => {
     ]);
   });
 
+  it('accepts packed RGB without a color object', () => {
+    const vertices = new TerminalVertexBuffer(TERMINAL_FLOATS_PER_QUAD);
+
+    vertices.pushQuad(0, 0, 1, 1, 0, 0, 1, 1, 0xff8000, 0.5, 1);
+
+    expect(Array.from(vertices.view().slice(4, 9))).toEqual([
+      1, expect.closeTo(128 / 255), 0, 0.5, 1,
+    ]);
+  });
+
   it('reuses its allocation after reset', () => {
     const vertices = new TerminalVertexBuffer();
     vertices.pushQuad(0, 0, 1, 1, 0, 0, 1, 1, { r: 0, g: 0, b: 0 }, 1, 0);

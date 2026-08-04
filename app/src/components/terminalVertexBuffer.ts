@@ -7,6 +7,8 @@ interface Rgb {
   b: number;
 }
 
+type TerminalVertexColor = Rgb | number;
+
 // Reusable CPU-side vertex staging for terminal glyphs and solid quads. A
 // number[] plus `new Float32Array(vertices)` allocates and copies the complete
 // frame on every paint; this buffer writes the GPU's native representation once
@@ -44,15 +46,15 @@ export class TerminalVertexBuffer {
     v0: number,
     u1: number,
     v1: number,
-    color: Rgb,
+    color: TerminalVertexColor,
     alpha: number,
     mode: number,
   ): void {
     this.ensureCapacity(TERMINAL_FLOATS_PER_QUAD);
     const vertices = this.scratch;
-    const r = color.r / 255;
-    const g = color.g / 255;
-    const b = color.b / 255;
+    const r = (typeof color === 'number' ? color >>> 16 & 0xff : color.r) / 255;
+    const g = (typeof color === 'number' ? color >>> 8 & 0xff : color.g) / 255;
+    const b = (typeof color === 'number' ? color & 0xff : color.b) / 255;
     let offset = this.cursor;
 
     vertices[offset++] = x; vertices[offset++] = y; vertices[offset++] = u0; vertices[offset++] = v0; vertices[offset++] = r; vertices[offset++] = g; vertices[offset++] = b; vertices[offset++] = alpha; vertices[offset++] = mode;

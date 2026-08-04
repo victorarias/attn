@@ -19,7 +19,13 @@ function parseArgs(argv) {
   const commonArgv = [];
   for (let index = 0; index < filteredArgv.length; index += 1) {
     const arg = filteredArgv[index];
-    if (arg === '--chunk-bytes' || arg === '--chunk-count') {
+    if (
+      arg === '--chunk-bytes'
+      || arg === '--chunk-count'
+      || arg === '--chunk-delay-ms'
+      || arg === '--mode'
+      || arg === '--flush-every'
+    ) {
       index += 1;
       continue;
     }
@@ -29,11 +35,30 @@ function parseArgs(argv) {
   const options = parseCommonArgs(commonArgv);
   options.chunkBytes = 16 * 1024;
   options.chunkCount = 128;
+  options.chunkDelayMs = 0;
+  options.mode = null;
+  options.flushEvery = null;
 
   for (let index = 0; index < filteredArgv.length; index += 1) {
     const arg = filteredArgv[index];
     if (arg === '--chunk-bytes') options.chunkBytes = Number(filteredArgv[index + 1]);
     if (arg === '--chunk-count') options.chunkCount = Number(filteredArgv[index + 1]);
+    if (arg === '--chunk-delay-ms') options.chunkDelayMs = Number(filteredArgv[index + 1]);
+    if (arg === '--mode') options.mode = filteredArgv[index + 1];
+    if (arg === '--flush-every') options.flushEvery = Number(filteredArgv[index + 1]);
+  }
+
+  if (!Number.isFinite(options.chunkBytes) || options.chunkBytes <= 0) {
+    throw new Error('--chunk-bytes must be a positive number');
+  }
+  if (!Number.isFinite(options.chunkCount) || options.chunkCount <= 0) {
+    throw new Error('--chunk-count must be a positive number');
+  }
+  if (!Number.isFinite(options.chunkDelayMs) || options.chunkDelayMs < 0) {
+    throw new Error('--chunk-delay-ms must be a non-negative number');
+  }
+  if (options.flushEvery !== null && (!Number.isFinite(options.flushEvery) || options.flushEvery <= 0)) {
+    throw new Error('--flush-every must be a positive number');
   }
 
   return options;
@@ -148,6 +173,8 @@ function summarizeProcessSamples(samples) {
     totalCpuPct: sample.processes.reduce((sum, processInfo) => sum + processInfo.cpuPct, 0),
     totalRssKb: sample.processes.reduce((sum, processInfo) => sum + processInfo.rssKb, 0),
   }));
+  const cpuTotals = totals.map((item) => item.totalCpuPct).sort((a, b) => a - b);
+  const p95Index = Math.max(0, Math.ceil(cpuTotals.length * 0.95) - 1);
 
   for (const sample of samples) {
     for (const processInfo of sample.processes) {
@@ -168,6 +195,10 @@ function summarizeProcessSamples(samples) {
 
   return {
     totalCpuPctMax: totals.length > 0 ? Math.max(...totals.map((item) => item.totalCpuPct)) : 0,
+    totalCpuPctAvg: totals.length > 0
+      ? totals.reduce((sum, item) => sum + item.totalCpuPct, 0) / totals.length
+      : 0,
+    totalCpuPctP95: cpuTotals.length > 0 ? cpuTotals[p95Index] : 0,
     totalRssKbMax: totals.length > 0 ? Math.max(...totals.map((item) => item.totalRssKb)) : 0,
     byCommand: Object.fromEntries(
       [...byCommand.entries()].map(([label, entry]) => [
@@ -213,6 +244,8 @@ function compactResult(mode, bench, processSummary) {
     totalMs: Number(bench.totalMs.toFixed(2)),
     throughputMiBPerSec: Number((bench.throughputMiBPerSec || 0).toFixed(2)),
     totalCpuPctMax: Number(processSummary.totalCpuPctMax.toFixed(1)),
+    totalCpuPctAvg: Number(processSummary.totalCpuPctAvg.toFixed(1)),
+    totalCpuPctP95: Number(processSummary.totalCpuPctP95.toFixed(1)),
     totalRssMbMax: Number((processSummary.totalRssKbMax / 1024).toFixed(1)),
     wsJsonParseMs: Number((bench.pty.wsJsonParseMs || 0).toFixed(3)),
     ptyJsonParseMs: Number((bench.pty.ptyJsonParseMs || 0).toFixed(3)),
@@ -223,6 +256,9 @@ function compactResult(mode, bench, processSummary) {
     rendererAvgFrameMs: bench.renderer?.renderCount > 0
       ? Number((bench.renderer.cpuSubmitMs / bench.renderer.renderCount).toFixed(3))
       : 0,
+    scheduledRenderRequests: bench.renderer?.scheduledRequests || 0,
+    scheduledRenderCoalesced: bench.renderer?.scheduledCoalesced || 0,
+    scheduledRenderDeferred: bench.renderer?.scheduledDeferred || 0,
     ptyOutputCount: bench.pty.ptyOutputCount || 0,
     terminalWriteCount: bench.pty.terminalWriteCount || 0,
     totalPayloadBytes: bench.totalPayloadBytes,
@@ -235,6 +271,9 @@ async function main() {
     printCommonHelp('scripts/real-app-harness/bridge-pty-bench.mjs');
     console.log('  --chunk-bytes <n>          Payload bytes per chunk (default: 16384)');
     console.log('  --chunk-count <n>          Number of chunks per mode (default: 128)');
+    console.log('  --chunk-delay-ms <n>       Delay between chunks for sustained-output measurements');
+    console.log('  --mode <name>              Run only bytes, base64, or json_base64');
+    console.log('  --flush-every <n>           Run only one batching level');
     return;
   }
 
@@ -296,11 +335,16 @@ async function main() {
       throw new Error('Utility pane not found');
     }
 
-    const modes = [
-      { name: 'json_base64_x1', mode: 'json_base64', flushEvery: 1 },
-      { name: 'json_base64_x8', mode: 'json_base64', flushEvery: 8 },
-      { name: 'json_base64_x32', mode: 'json_base64', flushEvery: 32 },
-    ];
+    const selectedMode = options.mode || 'json_base64';
+    if (!['bytes', 'base64', 'json_base64'].includes(selectedMode)) {
+      throw new Error(`Unsupported benchmark mode: ${selectedMode}`);
+    }
+    const batchSizes = options.flushEvery === null ? [1, 8, 32] : [options.flushEvery];
+    const modes = batchSizes.map((flushEvery) => ({
+      name: `${selectedMode}_x${flushEvery}`,
+      mode: selectedMode,
+      flushEvery,
+    }));
     const results = [];
     for (const entry of modes) {
       const benchPromise = client.request('benchmark_pty_transport', {
@@ -309,6 +353,7 @@ async function main() {
         mode: entry.mode,
         chunkBytes: options.chunkBytes,
         chunkCount: options.chunkCount,
+        interChunkDelayMs: options.chunkDelayMs,
         flushEvery: entry.flushEvery,
       }, { timeoutMs: 120_000 });
       const measured = await sampleWhilePending(manifest.pid, extraPids, benchPromise, 100);
@@ -326,9 +371,9 @@ async function main() {
       name: entry.name,
       ...compactResult(entry.mode, entry.bench, entry.processSummary),
     }));
-    const json1 = compact.find((entry) => entry.name === 'json_base64_x1');
-    const json8 = compact.find((entry) => entry.name === 'json_base64_x8');
-    const json32 = compact.find((entry) => entry.name === 'json_base64_x32');
+    const json1 = compact.find((entry) => entry.flushEvery === 1);
+    const json8 = compact.find((entry) => entry.flushEvery === 8);
+    const json32 = compact.find((entry) => entry.flushEvery === 32);
 
     const deltas = {
       x1VsX8Ms: json1 && json8 ? Number((json1.totalMs - json8.totalMs).toFixed(2)) : null,
@@ -344,6 +389,7 @@ async function main() {
       runtimeId: utilityPane.runtime_id,
       chunkBytes: options.chunkBytes,
       chunkCount: options.chunkCount,
+      chunkDelayMs: options.chunkDelayMs,
       results,
       compact,
       deltas,

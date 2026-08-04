@@ -128,6 +128,12 @@ interface Rgb {
   b: number;
 }
 
+type PackedRgb = number;
+
+function packRgb(r: number, g: number, b: number): PackedRgb {
+  return r << 16 | g << 8 | b;
+}
+
 interface BlockRect {
   x: number;
   y: number;
@@ -319,6 +325,11 @@ export class WebGlTerminalRenderer {
   private readonly atlas: HTMLCanvasElement;
   private readonly atlasContext: CanvasRenderingContext2D;
   private readonly glyphs = new Map<string, AtlasGlyph>();
+  // Single-codepoint cells are overwhelmingly common. Their numeric key avoids
+  // rebuilding a character string plus style-prefixed cache key for every cell
+  // on every paint. It is bounded by the atlas's existing glyph set and clears
+  // whenever that atlas is reseeded.
+  private readonly codepointGlyphs = new Map<number, AtlasGlyph>();
   // One buffer per cell pass. They are separate because an image can draw
   // between them, and staying separate is also what lets each keep its own
   // grown capacity: backgrounds are one quad per non-default cell, foregrounds
@@ -338,7 +349,8 @@ export class WebGlTerminalRenderer {
   private fontSize: number;
   private readonly fontFamily: string;
   private readonly defaultBg: Rgb;
-  private readonly cursorBg: Rgb;
+  private readonly defaultBgPacked: PackedRgb;
+  private readonly cursorBgPacked: PackedRgb;
   private atlasSize = INITIAL_ATLAS_SIZE;
   private atlasX = 2;
   private atlasY = 1;
@@ -367,7 +379,9 @@ export class WebGlTerminalRenderer {
     this.fontSize = fontSize;
     this.fontFamily = fontFamily;
     this.defaultBg = parseColor(theme.background);
-    this.cursorBg = parseColor(theme.cursor);
+    this.defaultBgPacked = packRgb(this.defaultBg.r, this.defaultBg.g, this.defaultBg.b);
+    const cursorBg = parseColor(theme.cursor);
+    this.cursorBgPacked = packRgb(cursorBg.r, cursorBg.g, cursorBg.b);
     this.dpr = Math.max(window.devicePixelRatio || 1, 1);
 
     const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
@@ -464,8 +478,8 @@ export class WebGlTerminalRenderer {
     const gl = this.gl;
     const scale = this.dpr;
     const defaultBg = this.defaultBg;
-    const cursorBg = this.cursorBg;
-    const cursorFg = this.defaultBg;
+    const cursorBg = this.cursorBgPacked;
+    const cursorFg = this.defaultBgPacked;
     const cursor = terminal.getCursor();
     const cursorRow = cursor.visible
       ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
@@ -534,7 +548,7 @@ export class WebGlTerminalRenderer {
         const fg = isCursor ? cursorFg : this.cellForeground(cell);
         const bg = this.cellBackground(cell);
 
-        if (bg.r !== defaultBg.r || bg.g !== defaultBg.g || bg.b !== defaultBg.b) {
+        if (bg !== this.defaultBgPacked) {
           this.pushSolidQuad(bgVertices, x, y, width, this.cellHeight * scale, bg, 1);
         }
         if (rowSpans) {
@@ -550,10 +564,9 @@ export class WebGlTerminalRenderer {
         if ((cell.flags & CellFlags.INVISIBLE) === 0 && cell.codepoint !== 0 && cell.codepoint !== 32) {
           const alpha = (cell.flags & CellFlags.FAINT) !== 0 ? 0.5 : 1;
           if (!this.pushBlockElement(fgVertices, cell.codepoint, x, y, width, this.cellHeight * scale, fg, alpha)) {
-            const text = cell.grapheme_len > 0
-              ? graphemeAtViewportCell(terminal, row, col, viewportOffset)
-              : String.fromCodePoint(cell.codepoint);
-            const glyph = this.getGlyph(text, cell.flags);
+            const glyph = cell.grapheme_len > 0
+              ? this.getGlyph(graphemeAtViewportCell(terminal, row, col, viewportOffset), cell.flags)
+              : this.getCodepointGlyph(cell.codepoint, cell.flags);
             this.pushTexturedQuad(fgVertices, x, y, glyph.width, glyph.height, glyph, fg, alpha);
           }
         }
@@ -802,22 +815,28 @@ export class WebGlTerminalRenderer {
     this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, stride, offset);
   }
 
-  private cellForeground(cell: GhosttyCell): Rgb {
+  private cellForeground(cell: GhosttyCell): PackedRgb {
     if ((cell.flags & CellFlags.INVERSE) !== 0) {
-      return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b);
+      return packRgb(cell.bg_r, cell.bg_g, cell.bg_b);
     }
-    return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b);
+    return packRgb(cell.fg_r, cell.fg_g, cell.fg_b);
   }
 
-  private cellBackground(cell: GhosttyCell): Rgb {
+  private cellBackground(cell: GhosttyCell): PackedRgb {
     if ((cell.flags & CellFlags.INVERSE) !== 0) {
-      return this.readColor(cell.fg_r, cell.fg_g, cell.fg_b);
+      return packRgb(cell.fg_r, cell.fg_g, cell.fg_b);
     }
-    return this.readColor(cell.bg_r, cell.bg_g, cell.bg_b);
+    return packRgb(cell.bg_r, cell.bg_g, cell.bg_b);
   }
 
-  private readColor(r: number, g: number, b: number): Rgb {
-    return { r, g, b };
+  private getCodepointGlyph(codepoint: number, flags: number): AtlasGlyph {
+    const style = (flags & CellFlags.ITALIC ? 1 : 0) | (flags & CellFlags.BOLD ? 2 : 0);
+    const key = codepoint * 4 + style;
+    const existing = this.codepointGlyphs.get(key);
+    if (existing) return existing;
+    const glyph = this.getGlyph(String.fromCodePoint(codepoint), flags);
+    this.codepointGlyphs.set(key, glyph);
+    return glyph;
   }
 
   private getGlyph(text: string, flags: number): AtlasGlyph {
@@ -906,6 +925,7 @@ export class WebGlTerminalRenderer {
   // both before measuring and again after a grow, before drawing.
   private reseedAtlas(): void {
     this.glyphs.clear();
+    this.codepointGlyphs.clear();
     this.atlasX = 2;
     this.atlasY = 1;
     this.atlasRowHeight = 0;
@@ -928,14 +948,14 @@ export class WebGlTerminalRenderer {
     );
   }
 
-  private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): void {
+  private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: Rgb | PackedRgb, alpha: number): void {
     // Keep all samples within the white texel. Sampling its edges with LINEAR
     // filtering blends into transparent atlas neighbours and leaves seams. Mode
     // 0: tint the (fully-opaque) texel coverage with the quad color.
     this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha, GLYPH_MODE_TINT);
   }
 
-  private pushBlockElement(vertices: TerminalVertexBuffer, codepoint: number, x: number, y: number, width: number, height: number, color: Rgb, alpha: number): boolean {
+  private pushBlockElement(vertices: TerminalVertexBuffer, codepoint: number, x: number, y: number, width: number, height: number, color: Rgb | PackedRgb, alpha: number): boolean {
     const rects = BLOCK_ELEMENT_RECTS[codepoint];
     if (!rects) {
       return false;
@@ -954,7 +974,7 @@ export class WebGlTerminalRenderer {
     return true;
   }
 
-  private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb, alpha: number): void {
+  private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: Rgb | PackedRgb, alpha: number): void {
     // Color glyphs (emoji) carry their own colors and use mode 1 so the shader
     // passes the atlas RGBA through; monochrome glyphs use mode 0 and are tinted.
     this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
@@ -970,7 +990,7 @@ export class WebGlTerminalRenderer {
     v0: number,
     u1: number,
     v1: number,
-    color: Rgb,
+    color: Rgb | PackedRgb,
     alpha: number,
     mode: number,
   ): void {

@@ -52,6 +52,9 @@ export interface TerminalPerfSnapshot {
   renderCpuTotalMs: number;
   renderCpuMaxMs: number;
   lastRenderCpuMs: number;
+  scheduledRenderRequests: number;
+  scheduledRenderCoalesced: number;
+  scheduledRenderDeferred: number;
   writeParsedCount: number;
   lastRenderAt: number;
   lastWriteParsedAt: number;

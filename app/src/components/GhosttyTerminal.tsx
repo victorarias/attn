@@ -100,6 +100,7 @@ import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleCon
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
 import { registerTerminalPerfGetter, type TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
+import { terminalOutputDelayMs } from '../utils/terminalOutputPacing';
 import {
   applicationMouseInput,
   applicationWheelInput,
@@ -726,10 +727,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scheduledOutputRenderRef = useRef<number | null>(null);
+    const scheduledOutputRenderForceRef = useRef(false);
+    const lastScheduledOutputPaintAtRef = useRef<number | null>(null);
     const renderCountRef = useRef(0);
     const renderCpuTotalMsRef = useRef(0);
     const renderCpuMaxMsRef = useRef(0);
     const lastRenderCpuMsRef = useRef(0);
+    const scheduledRenderRequestsRef = useRef(0);
+    const scheduledRenderCoalescedRef = useRef(0);
+    const scheduledRenderDeferredRef = useRef(0);
     const writeCountRef = useRef(0);
     // Diagnostics: model instance (increments on rebuild) and last paint quads,
     // used by the blank-on-split watchdog to tell a fresh empty model and an
@@ -1155,22 +1161,40 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, []);
 
     const cancelScheduledOutputRender = useCallback(() => {
-      if (scheduledOutputRenderRef.current === null) return;
-      cancelAnimationFrame(scheduledOutputRenderRef.current);
-      scheduledOutputRenderRef.current = null;
+      if (scheduledOutputRenderRef.current !== null) {
+        cancelAnimationFrame(scheduledOutputRenderRef.current);
+        scheduledOutputRenderRef.current = null;
+      }
+      scheduledOutputRenderForceRef.current = false;
     }, []);
 
-    const scheduleOutputRender = useCallback(() => {
-      if (scheduledOutputRenderRef.current !== null) return;
-      scheduledOutputRenderRef.current = requestAnimationFrame(() => {
+    const scheduleOutputRender = useCallback((force = true) => {
+      scheduledRenderRequestsRef.current += 1;
+      scheduledOutputRenderForceRef.current ||= force;
+      if (scheduledOutputRenderRef.current !== null) {
+        scheduledRenderCoalescedRef.current += 1;
+        return;
+      }
+
+      const requestPaint = (timestamp: number) => {
+        const delayMs = terminalOutputDelayMs(timestamp, lastScheduledOutputPaintAtRef.current);
+        if (delayMs > 1) {
+          scheduledRenderDeferredRef.current += 1;
+          scheduledOutputRenderRef.current = requestAnimationFrame(requestPaint);
+          return;
+        }
         scheduledOutputRenderRef.current = null;
-        renderSurface(true);
-      });
+        lastScheduledOutputPaintAtRef.current = timestamp;
+        const forcePaint = scheduledOutputRenderForceRef.current;
+        scheduledOutputRenderForceRef.current = false;
+        renderSurface(forcePaint);
+      };
+      scheduledOutputRenderRef.current = requestAnimationFrame(requestPaint);
     }, [renderSurface]);
 
     const flushSynchronizedOutputRender = useCallback(() => {
       clearSynchronizedOutputRenderTimer();
-      scheduleOutputRender();
+      scheduleOutputRender(false);
     }, [clearSynchronizedOutputRenderTimer, scheduleOutputRender]);
 
     const scheduleSynchronizedOutputRenderFallback = useCallback(() => {
@@ -1178,7 +1202,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       synchronizedOutputRenderTimerRef.current = setTimeout(() => {
         synchronizedOutputRenderTimerRef.current = null;
         synchronizedOutputStateRef.current = { active: false, pending: '' };
-        scheduleOutputRender();
+        scheduleOutputRender(false);
       }, SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS);
     }, [scheduleOutputRender]);
 
@@ -2595,6 +2619,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           renderCpuTotalMs: renderCpuTotalMsRef.current,
           renderCpuMaxMs: renderCpuMaxMsRef.current,
           lastRenderCpuMs: lastRenderCpuMsRef.current,
+          scheduledRenderRequests: scheduledRenderRequestsRef.current,
+          scheduledRenderCoalesced: scheduledRenderCoalescedRef.current,
+          scheduledRenderDeferred: scheduledRenderDeferredRef.current,
           writeParsedCount: writeCountRef.current,
           lastRenderAt: lastRenderAtRef.current,
           lastWriteParsedAt: lastWriteAtRef.current,
