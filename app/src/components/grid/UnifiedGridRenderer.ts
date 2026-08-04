@@ -20,6 +20,11 @@ import {
   isColorGlyphBitmap,
 } from '../terminalGlyphProgram';
 import { terminalGlyphFont } from '../terminalGlyphFont';
+import {
+  TERMINAL_FLOATS_PER_VERTEX,
+  TerminalVertexBuffer,
+} from '../terminalVertexBuffer';
+import { type Rgb, packColor, parseColor } from '../terminalColor';
 import type { UISessionState } from '../../types/sessionState';
 import type {
   GridRenderer,
@@ -28,12 +33,6 @@ import type {
   TileModel,
 } from './GridRenderer';
 import type { CellMetrics } from './gridConfig';
-
-interface Rgb {
-  r: number;
-  g: number;
-  b: number;
-}
 
 interface AtlasGlyph {
   u0: number;
@@ -56,9 +55,6 @@ interface BlockRect {
 }
 
 const ATLAS_SIZE = 2048;
-// position(2) + texcoord(2) + color(4) + mode(1); see terminalGlyphProgram.
-const FLOATS_PER_VERTEX = 9;
-const FLOATS_PER_QUAD = FLOATS_PER_VERTEX * 6;
 const SOLID_TEXEL_CENTER = 0.5 / ATLAS_SIZE;
 // Blue accent for the focused (zoomed/input-target) tile, so it is obvious which
 // tile keyboard input is going to. Distinct from the semantic session state.
@@ -141,15 +137,6 @@ const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
   ],
 };
 
-function parseColor(value: string): Rgb {
-  const normalized = value.replace('#', '');
-  return {
-    r: Number.parseInt(normalized.slice(0, 2), 16),
-    g: Number.parseInt(normalized.slice(2, 4), 16),
-    b: Number.parseInt(normalized.slice(4, 6), 16),
-  };
-}
-
 function compileShader(gl: WebGL2RenderingContext, type: number, source: string): WebGLShader {
   const shader = gl.createShader(type);
   if (!shader) throw new Error('grid: unable to allocate shader');
@@ -210,9 +197,7 @@ export class UnifiedGridRenderer implements GridRenderer {
   private models = new Map<string, GhosttyTerminal>();
 
   // The single shared vertex scratch. Grown (rarely) on demand; reused forever.
-  private scratch = new Float32Array(1 << 18);
-  private p = 0;
-  private quads = 0;
+  private readonly vertices = new TerminalVertexBuffer(1 << 18);
   private glyphUploads = 0;
   private atlasResets = 0;
   private canvasW = 0;
@@ -279,7 +264,7 @@ export class UnifiedGridRenderer implements GridRenderer {
 
     gl.useProgram(this.program);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    const stride = FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
+    const stride = TERMINAL_FLOATS_PER_VERTEX * Float32Array.BYTES_PER_ELEMENT;
     this.configureAttribute('a_position', 2, stride, 0);
     this.configureAttribute('a_texcoord', 2, stride, 2 * Float32Array.BYTES_PER_ELEMENT);
     this.configureAttribute('a_color', 4, stride, 4 * Float32Array.BYTES_PER_ELEMENT);
@@ -327,13 +312,13 @@ export class UnifiedGridRenderer implements GridRenderer {
     gl.useProgram(this.program);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, this.scratch.subarray(0, this.p), gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, this.vertices.view(), gl.DYNAMIC_DRAW);
     gl.uniform2f(this.uResolution, canvas.width, canvas.height);
-    gl.drawArrays(gl.TRIANGLES, 0, this.p / FLOATS_PER_VERTEX);
+    gl.drawArrays(gl.TRIANGLES, 0, this.vertices.length / TERMINAL_FLOATS_PER_VERTEX);
 
     return {
       drawCalls: 1,
-      quads: this.quads,
+      quads: this.vertices.quadCount,
       atlasUploads: this.glyphUploads,
       atlasResets: this.atlasResets,
       liveContexts: 1,
@@ -372,8 +357,7 @@ export class UnifiedGridRenderer implements GridRenderer {
   }
 
   private walkAll(frames: TileFrame[], now: number): void {
-    this.p = 0;
-    this.quads = 0;
+    this.vertices.reset();
     for (const frame of frames) {
       if (frame.hidden || frame.alpha <= 0.001) continue;
       const model = this.models.get(frame.id);
@@ -648,8 +632,6 @@ export class UnifiedGridRenderer implements GridRenderer {
     return true;
   }
 
-  // The hot path: write 54 floats (6 verts × 9) straight into the preallocated
-  // scratch. The trailing float per vertex is a_mode (see terminalGlyphProgram).
   private pushQuad(
     x: number,
     y: number,
@@ -663,27 +645,6 @@ export class UnifiedGridRenderer implements GridRenderer {
     alpha: number,
     mode: number,
   ): void {
-    if (this.p + FLOATS_PER_QUAD > this.scratch.length) {
-      const next = new Float32Array(this.scratch.length * 2);
-      next.set(this.scratch.subarray(0, this.p));
-      this.scratch = next;
-    }
-    const s = this.scratch;
-    const r = color.r / 255;
-    const g = color.g / 255;
-    const b = color.b / 255;
-    const a = alpha;
-    const e = mode;
-    let p = this.p;
-    // tri 1
-    s[p++] = x; s[p++] = y; s[p++] = u0; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    // tri 2
-    s[p++] = x; s[p++] = y + h; s[p++] = u0; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    s[p++] = x + w; s[p++] = y; s[p++] = u1; s[p++] = v0; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    s[p++] = x + w; s[p++] = y + h; s[p++] = u1; s[p++] = v1; s[p++] = r; s[p++] = g; s[p++] = b; s[p++] = a; s[p++] = e;
-    this.p = p;
-    this.quads += 1;
+    this.vertices.pushQuad(x, y, w, h, u0, v0, u1, v1, packColor(color), alpha, mode);
   }
 }

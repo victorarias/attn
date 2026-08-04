@@ -100,6 +100,7 @@ import type { TerminalVisibleContentSnapshot } from '../utils/terminalVisibleCon
 import { analyzeTerminalVisibleLines } from '../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot, TerminalVisibleStyleLineSnapshot } from '../utils/terminalStyleSummary';
 import { registerTerminalPerfGetter, type TerminalPerfStartupSnapshot } from '../utils/terminalPerf';
+import { terminalOutputDelayMs } from '../utils/terminalOutputPacing';
 import {
   applicationMouseInput,
   applicationWheelInput,
@@ -576,6 +577,13 @@ function colorNumber(value: string): number {
 // Count printable cells in the live viewport window. getViewport() returns a
 // fixed-capacity buffer whose tail can hold stale cells from a larger pre-resize
 // grid, so only the first cols*rows entries are counted.
+//
+// This is deliberately a second, renderer-independent witness. The blank-on-
+// split watchdog compares "how much the model holds" against "how many quads
+// the renderer drew"; if both numbers come out of the same render pass they
+// move together and an under-drawing renderer can never be caught. Too
+// expensive for every paint, which is why renderSurface uses the render
+// sample's own count and only the watchdog probe re-scans.
 function countModelPrintable(terminal: GhosttyModel): number {
   const viewport = terminal.getViewport();
   const windowLen = terminal.cols * terminal.rows;
@@ -726,13 +734,28 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const synchronizedOutputStateRef = useRef<SynchronizedOutputState>({ active: false, pending: '' });
     const synchronizedOutputRenderTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const scheduledOutputRenderRef = useRef<number | null>(null);
+    const scheduledOutputRenderForceRef = useRef(false);
+    const lastScheduledOutputPaintAtRef = useRef<number | null>(null);
     const renderCountRef = useRef(0);
+    const renderCpuTotalMsRef = useRef(0);
+    const renderCpuMaxMsRef = useRef(0);
+    const lastRenderCpuMsRef = useRef(0);
+    const renderFullCountRef = useRef(0);
+    const renderPartialCountRef = useRef(0);
+    const renderRowsPaintedRef = useRef(0);
+    const renderSubmittedQuadsRef = useRef(0);
+    const renderRetainedRowVertexBytesRef = useRef(0);
+    const renderRetainedStagingBytesRef = useRef(0);
+    const scheduledRenderRequestsRef = useRef(0);
+    const scheduledRenderCoalescedRef = useRef(0);
+    const scheduledRenderDeferredRef = useRef(0);
     const writeCountRef = useRef(0);
     // Diagnostics: model instance (increments on rebuild) and last paint quads,
     // used by the blank-on-split watchdog to tell a fresh empty model and an
     // under-drawn surface apart.
     const modelInstanceRef = useRef(0);
     const lastPaintQuadsRef = useRef(0);
+    const lastModelPrintableRef = useRef(0);
     const lastRenderAtRef = useRef(0);
     const lastWriteAtRef = useRef(0);
     const readyRef = useRef(false);
@@ -1108,8 +1131,18 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const sample = renderer.render(terminal, force, getViewportCells(), overlays, viewportOffsetRef.current, imageQuads);
       if (sample) {
         renderCountRef.current += 1;
+        renderCpuTotalMsRef.current += sample.cpuSubmitMs;
+        renderCpuMaxMsRef.current = Math.max(renderCpuMaxMsRef.current, sample.cpuSubmitMs);
+        lastRenderCpuMsRef.current = sample.cpuSubmitMs;
+        renderRowsPaintedRef.current += sample.paintedRows;
+        renderSubmittedQuadsRef.current += sample.submittedQuads;
+        renderRetainedRowVertexBytesRef.current = sample.retainedRowVertexBytes;
+        renderRetainedStagingBytesRef.current = sample.retainedStagingBytes;
+        if (sample.fullPaint) renderFullCountRef.current += 1;
+        else renderPartialCountRef.current += 1;
         lastRenderAtRef.current = Date.now();
         lastPaintQuadsRef.current = sample.quads;
+        lastModelPrintableRef.current = sample.modelPrintable;
       }
       recordPaint({
         pane: diagKeyRef.current,
@@ -1118,7 +1151,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         rows: terminal.rows,
         force,
         offset: viewportOffsetRef.current,
-        modelPrintable: countModelPrintable(terminal),
+        // A clean-model render is a no-op. Preserve the last painted model
+        // count in diagnostics so a later no-op record cannot make a healthy
+        // surface look blank without re-scanning the complete grid.
+        modelPrintable: sample?.modelPrintable ?? lastModelPrintableRef.current,
         quads: sample ? sample.quads : null,
         cellsArrayLen: sample ? sample.cellsArrayLen : null,
         skipNull: sample ? sample.printableSkippedNull : null,
@@ -1149,22 +1185,44 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, []);
 
     const cancelScheduledOutputRender = useCallback(() => {
-      if (scheduledOutputRenderRef.current === null) return;
-      cancelAnimationFrame(scheduledOutputRenderRef.current);
-      scheduledOutputRenderRef.current = null;
+      if (scheduledOutputRenderRef.current !== null) {
+        cancelAnimationFrame(scheduledOutputRenderRef.current);
+        scheduledOutputRenderRef.current = null;
+      }
+      scheduledOutputRenderForceRef.current = false;
     }, []);
 
-    const scheduleOutputRender = useCallback(() => {
-      if (scheduledOutputRenderRef.current !== null) return;
-      scheduledOutputRenderRef.current = requestAnimationFrame(() => {
+    // `force` is not optional on purpose. A forced paint repaints a clean model
+    // (what an image placement needs); an unforced one is a no-op when nothing
+    // changed (what streamed output wants, so the row cache can serve it). A
+    // default here would silently pick one for the next caller.
+    const scheduleOutputRender = useCallback((force: boolean) => {
+      scheduledRenderRequestsRef.current += 1;
+      scheduledOutputRenderForceRef.current ||= force;
+      if (scheduledOutputRenderRef.current !== null) {
+        scheduledRenderCoalescedRef.current += 1;
+        return;
+      }
+
+      const requestPaint = (timestamp: number) => {
+        const delayMs = terminalOutputDelayMs(timestamp, lastScheduledOutputPaintAtRef.current);
+        if (delayMs > 1) {
+          scheduledRenderDeferredRef.current += 1;
+          scheduledOutputRenderRef.current = requestAnimationFrame(requestPaint);
+          return;
+        }
         scheduledOutputRenderRef.current = null;
-        renderSurface(true);
-      });
+        lastScheduledOutputPaintAtRef.current = timestamp;
+        const forcePaint = scheduledOutputRenderForceRef.current;
+        scheduledOutputRenderForceRef.current = false;
+        renderSurface(forcePaint);
+      };
+      scheduledOutputRenderRef.current = requestAnimationFrame(requestPaint);
     }, [renderSurface]);
 
     const flushSynchronizedOutputRender = useCallback(() => {
       clearSynchronizedOutputRenderTimer();
-      scheduleOutputRender();
+      scheduleOutputRender(false);
     }, [clearSynchronizedOutputRenderTimer, scheduleOutputRender]);
 
     const scheduleSynchronizedOutputRenderFallback = useCallback(() => {
@@ -1172,7 +1230,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       synchronizedOutputRenderTimerRef.current = setTimeout(() => {
         synchronizedOutputRenderTimerRef.current = null;
         synchronizedOutputStateRef.current = { active: false, pending: '' };
-        scheduleOutputRender();
+        scheduleOutputRender(false);
       }, SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS);
     }, [scheduleOutputRender]);
 
@@ -1877,7 +1935,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
         requestPlacementBlobs();
-        scheduleOutputRender();
+        scheduleOutputRender(true);
       });
     }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
 
@@ -1892,7 +1950,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         placementSessionRef.current = sessionId;
         placementStoreRef.current.seed(placements, terminal.getScrollbackLength());
         requestPlacementBlobs();
-        scheduleOutputRender();
+        scheduleOutputRender(true);
       });
     }, [enqueueOperation, requestPlacementBlobs, scheduleOutputRender]);
 
@@ -1902,7 +1960,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     useEffect(() => kittyImageCache.subscribe((sessionId, imageId) => {
       if (sessionId !== placementSessionRef.current) return;
       if (!placementStoreRef.current.placements().some((p) => p.imageId === imageId)) return;
-      scheduleOutputRender();
+      scheduleOutputRender(true);
     }), [scheduleOutputRender]);
 
     // Live placement-store snapshot for the get_pane_placement_state bridge
@@ -2586,6 +2644,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           writeQueueChunks: 0,
           writeQueueBytes: 0,
           renderCount: renderCountRef.current,
+          renderCpuTotalMs: renderCpuTotalMsRef.current,
+          renderCpuMaxMs: renderCpuMaxMsRef.current,
+          lastRenderCpuMs: lastRenderCpuMsRef.current,
+          renderFullCount: renderFullCountRef.current,
+          renderPartialCount: renderPartialCountRef.current,
+          renderRowsPainted: renderRowsPaintedRef.current,
+          renderSubmittedQuads: renderSubmittedQuadsRef.current,
+          renderRetainedRowVertexBytes: renderRetainedRowVertexBytesRef.current,
+          renderRetainedStagingBytes: renderRetainedStagingBytesRef.current,
+          modelPrintable: lastModelPrintableRef.current,
+          lastPaintQuads: lastPaintQuadsRef.current,
+          scheduledRenderRequests: scheduledRenderRequestsRef.current,
+          scheduledRenderCoalesced: scheduledRenderCoalescedRef.current,
+          scheduledRenderDeferred: scheduledRenderDeferredRef.current,
           writeParsedCount: writeCountRef.current,
           lastRenderAt: lastRenderAtRef.current,
           lastWriteParsedAt: lastWriteAtRef.current,

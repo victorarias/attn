@@ -12,6 +12,10 @@ function decodeBase64Utf8(value) {
   return Buffer.from(value, 'base64').toString('utf8');
 }
 
+export function attachSnapshotText(message) {
+  return decodeBase64Utf8(message?.snapshot?.vt_dump_b64 ?? message?.scrollback);
+}
+
 function workspacePaneIds(workspace) {
   return (workspace?.panes || []).map((pane) => pane.pane_id);
 }
@@ -479,7 +483,12 @@ export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
         reject(new Error(data.error || `attach_session failed for ${runtimeId}`));
         return;
       }
-      resolve(decodeBase64Utf8(data.scrollback));
+      // Restore is server-authoritative: attach carries the parsed terminal as
+      // a self-contained VT dump, and its rendered text is what the harness
+      // completion/token checks read. `scrollback` is not a product fallback —
+      // the daemon no longer sends it (see AGENTS.md, "Terminal") — it only
+      // lets this script read a packaged build predating that change.
+      resolve(attachSnapshotText(data));
     });
 
     ws.once('error', (error) => {

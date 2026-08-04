@@ -353,12 +353,12 @@ function formatCheckpointSummary(checkpoint) {
   };
 }
 
-function getShellPanes(workspace) {
-  return (workspace.panes || []).filter((pane) => pane.kind === 'shell' && pane.runtime_id);
-}
-
 async function createUtilityPanes(client, observer, sessionId, count) {
   let workspace = await client.request('get_workspace', { sessionId });
+  const excludedPaneIds = new Set(
+    (observer.getWorkspace(sessionId)?.panes || []).map((pane) => pane.pane_id),
+  );
+  const utilityPanes = [];
   for (let index = 0; index < count; index += 1) {
     const targetPaneId = workspace.activePaneId || workspace.panes?.[0]?.paneId;
     if (!targetPaneId) {
@@ -369,14 +369,19 @@ async function createUtilityPanes(client, observer, sessionId, count) {
       targetPaneId,
       direction: 'vertical',
     });
-    workspace = await observer.waitForWorkspace(
+    const utilityPane = await observer.waitForUtilityPane(
       sessionId,
-      (entry) => getShellPanes(entry).length >= index + 1,
-      `shell pane count >= ${index + 1}`,
       20_000,
+      excludedPaneIds,
     );
+    if (!utilityPane) {
+      throw new Error(`Utility pane ${index + 1} not found for ${sessionId}`);
+    }
+    excludedPaneIds.add(utilityPane.pane_id);
+    utilityPanes.push(utilityPane);
+    workspace = await client.request('get_workspace', { sessionId });
   }
-  return getShellPanes(workspace);
+  return utilityPanes;
 }
 
 function countOccurrences(haystack, needle) {
@@ -422,8 +427,11 @@ async function runTerminalLoad(client, observer, sessionId, shellPanes, lineCoun
   const paneRuns = [];
   for (let index = 0; index < shellPanes.length; index += 1) {
     const pane = shellPanes[index];
-    const token = `__ATTN_PERF_PANE_${index}_${Date.now()}__`;
-    const doneToken = `${token} DONE`;
+    // Keep markers shorter than a deeply split pane. The VT dump preserves
+    // rendered wrapping, so a long logical token can contain a newline in the
+    // snapshot and never match even though the command completed.
+    const token = `P${index}${Date.now().toString(36).slice(-6)}`;
+    const doneToken = `${token}D`;
     const python = [
       `token=${JSON.stringify(token)}`,
       `done=${JSON.stringify(doneToken)}`,

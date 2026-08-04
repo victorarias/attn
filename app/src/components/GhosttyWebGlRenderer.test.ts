@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GhosttyCell, GhosttyTerminal } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { TERMINAL_FLOATS_PER_QUAD } from './terminalVertexBuffer';
 import {
   graphemeAtViewportCell,
   nextAtlasSize,
@@ -466,6 +467,288 @@ describe('WebGlTerminalRenderer kitty z layering', () => {
     // of the image the selection was dragged across.
     expect(draws[0].floats).toBe(0);
     expect(draws[2].floats).toBe(FLOATS_PER_QUAD);
+  });
+});
+
+// The row cache keeps a buffer per row per cell pass. This fixture's cells all
+// carry the default background, so every foreground row fills to one quad per
+// column while every background row stays at the one-quad minimum it was
+// allocated with.
+const QUAD_BYTES = TERMINAL_FLOATS_PER_QUAD * Float32Array.BYTES_PER_ELEMENT;
+const ROW_FG_BYTES = 50 * 50 * QUAD_BYTES;
+const ROW_BG_MIN_BYTES = 50 * QUAD_BYTES;
+
+function makeControllableTerminal(cols: number, rows: number) {
+  const cells = Array.from({ length: cols * rows }, () => ({
+    codepoint: 65,
+    grapheme_len: 0,
+    width: 1,
+    flags: 0,
+    fg_r: 255, fg_g: 255, fg_b: 255,
+    bg_r: 0, bg_g: 0, bg_b: 0,
+  }));
+  const state = {
+    dirty: 2,
+    rows: new Set(Array.from({ length: rows }, (_, row) => row)),
+    cursor: { x: 0, y: 0, visible: false },
+  };
+  const markClean = vi.fn();
+  const terminal = {
+    cols,
+    rows,
+    update: () => state.dirty,
+    isRowDirty: (row: number) => state.rows.has(row),
+    markClean,
+    getCursor: () => state.cursor,
+    getViewport: () => cells,
+    getScrollbackLength: () => 0,
+    getGraphemeString: () => '',
+    getScrollbackGraphemeString: () => '',
+  } as unknown as GhosttyTerminal;
+  return { terminal, cells, state, markClean };
+}
+
+describe('WebGlTerminalRenderer dirty rows', () => {
+  it('rebuilds small grids directly instead of paying to copy a row cache', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(4, 5);
+    renderer.resize(4, 5);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([2]);
+
+    expect(renderer.render(terminal)).toMatchObject({
+      fullPaint: true,
+      paintedRows: 5,
+      retainedRowVertexBytes: 0,
+    });
+  });
+
+  it('rebuilds only a dirty row and its neighbors while submitting a complete cached frame', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, cells, state, markClean } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+
+    const initial = renderer.render(terminal);
+    expect(initial).toMatchObject({
+      fullPaint: true,
+      paintedRows: 50,
+      submittedQuads: 2500,
+      retainedRowVertexBytes: ROW_FG_BYTES + ROW_BG_MIN_BYTES,
+      modelPrintable: 2500,
+      quads: 2500,
+    });
+
+    // Clear the middle row. Ghostty marks that row dirty; the renderer expands
+    // by one row on either side for cross-row grapheme pixels.
+    for (let col = 0; col < 50; col += 1) cells[25 * 50 + col].codepoint = 0;
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    const partial = renderer.render(terminal);
+
+    expect(partial).toMatchObject({
+      fullPaint: false,
+      paintedRows: 3,
+      paintedCells: 150,
+      submittedQuads: 2450,
+      retainedRowVertexBytes: ROW_FG_BYTES + ROW_BG_MIN_BYTES,
+      modelPrintable: 2450,
+      quads: 2450,
+    });
+    expect(markClean).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps overlays on the full-frame path even when Ghostty is partially dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    const sample = renderer.render(terminal, false, undefined, [
+      { startRow: 25, startCol: 0, endRow: 25, endCol: 1, color: '#ffffff', kind: 'underline' },
+    ]);
+
+    expect(sample).toMatchObject({ fullPaint: true, paintedRows: 50 });
+
+    // Removing an overlay also changes pixels outside the model's dirty set.
+    // One full frame retires that composited surface before partial paints resume.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: true, paintedRows: 50 });
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  // Defensive rather than observed: the real WASM reports a cross-row move as
+  // PARTIAL with *both* rows already in the set. This pins the row selection
+  // against a model that says PARTIAL and names no rows at all. The truly bare
+  // moves — the ones the WASM reports as DIRTY_NONE — are covered further down.
+  it('repaints both cursor rows when a partial frame names no dirty rows', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set();
+    state.cursor = { x: 0, y: 30, visible: true };
+
+    // Rows 9-11 (vacated) and 29-31 (arrived), each expanded by one neighbor.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  // The regressing case: Ghostty reports DIRTY_NONE for a move within one row,
+  // so such a move only reaches the renderer riding along with an unrelated
+  // dirty row. The cursor's own row is absent from that set.
+  it('repaints the cursor row on a same-row move that rides along with another dirty row', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([40]);
+    state.cursor = { x: 7, y: 10, visible: true };
+
+    // Rows 39-41 for the dirty row, 9-11 for the cursor's unmarked row.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  it('repaints the row a hidden cursor was drawn on', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([40]);
+    state.cursor = { x: 0, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 6 });
+  });
+
+  // A same-row move and a visibility toggle report DIRTY_NONE, so nothing else
+  // wakes the renderer. Without a cursor comparison ahead of the early return,
+  // the old inverted cell survives until unrelated output happens to arrive.
+  it('paints a bare same-row cursor move that the model reports as not dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 0, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 7, y: 10, visible: true };
+
+    // Rows 9-11: the cursor vacated and arrived on the same row. Partial, not
+    // full — a cursor move must not cost a whole-grid repaint.
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('paints a bare cursor visibility toggle that the model reports as not dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 4, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('still returns null when nothing changed and the cursor stayed put', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: true };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
+  // A hidden cursor paints nothing, so moving it changes no pixels. Treating
+  // that as a render reason is worse than missing it: the frame has no row to
+  // mark, so the zero-row guard escalates it to a full-grid paint — on the one
+  // path (a TUI redrawing with the cursor hidden) that must stay cheap.
+  it('does not paint at all when a hidden cursor moves with nothing else dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: false };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 31, y: 10, visible: false };
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
+  it('does not paint when a hidden cursor changes row with nothing else dirty', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    state.cursor = { x: 4, y: 10, visible: false };
+    renderer.render(terminal);
+
+    state.dirty = 0;
+    state.rows = new Set();
+    state.cursor = { x: 4, y: 44, visible: false };
+
+    expect(renderer.render(terminal)).toBeNull();
+  });
+
+  it('paints nothing extra when a hidden cursor moves', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    state.cursor = { x: 40, y: 40, visible: false };
+
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false, paintedRows: 3 });
+  });
+
+  it('releases a row cache that grows beyond the two MiB guardrail', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, cells, state } = makeControllableTerminal(100, 30);
+    for (const cell of cells) {
+      cell.bg_r = 64;
+      cell.flags = CellFlags.UNDERLINE | CellFlags.STRIKETHROUGH;
+    }
+    renderer.resize(100, 30);
+
+    const built = renderer.render(terminal);
+    expect(built).toMatchObject({
+      fullPaint: true,
+      retainedRowVertexBytes: 0,
+      modelPrintable: 3000,
+    });
+
+    state.dirty = 1;
+    state.rows = new Set([15]);
+    const afterRelease = renderer.render(terminal);
+    expect(afterRelease).toMatchObject({
+      fullPaint: true,
+      paintedRows: 30,
+      retainedRowVertexBytes: 0,
+    });
+    // The frame buffer is what a direct-path paint stages regardless, so the
+    // reported total stays non-zero after the cache is gone.
+    expect(afterRelease!.retainedRowVertexBytes).toBe(0);
+    expect(afterRelease!.retainedStagingBytes).toBeGreaterThan(0);
   });
 });
 

@@ -133,6 +133,50 @@ function nextAnimationFrame() {
   });
 }
 
+function waitForBenchmarkDelay(delayMs: number) {
+  return new Promise<void>((resolve) => {
+    window.setTimeout(resolve, delayMs);
+  });
+}
+
+// The seed is written to the model, but output paints are paced at 30 Hz, so
+// the dense surface may not have reached the GPU yet. Wait for a paint that
+// happened after the seed instead of for a fixed interval.
+async function waitForSeededPaint(
+  readPerf: () => { renderCount: number } | undefined,
+  renderCountBeforeSeed: number,
+  maxFrames = 120,
+): Promise<void> {
+  for (let frame = 0; frame < maxFrames; frame += 1) {
+    if ((readPerf()?.renderCount ?? 0) > renderCountBeforeSeed) return;
+    await nextAnimationFrame();
+  }
+}
+
+// A freshly created utility shell keeps emitting its prompt after the reset
+// request returns, and there is no event for "the shell is done talking". Wait
+// on the real signal instead of a fixed sleep: the pane's parsed-write counter
+// going unchanged across consecutive frames means nothing more arrived.
+async function waitForPaneWriteQuiescence(
+  readWriteCount: () => number | null,
+  quietFrames = 3,
+  maxFrames = 120,
+): Promise<void> {
+  let last = readWriteCount();
+  let quiet = 0;
+  for (let frame = 0; frame < maxFrames && quiet < quietFrames; frame += 1) {
+    await nextAnimationFrame();
+    const current = readWriteCount();
+    quiet = current === last ? quiet + 1 : 0;
+    last = current;
+  }
+}
+
+// Let `frames` frames actually elapse, so a React commit, the layout it
+// triggers, and the paint that follows each get their own frame to happen in.
+// The awaits have to be sequential: nextAnimationFrame() registers its callback
+// when it is constructed, so building them all up front queues them onto the
+// same frame and Promise.all would return after one, whatever `frames` says.
 async function settleUi(frames = 2) {
   for (let index = 0; index < frames; index += 1) {
     await nextAnimationFrame();
@@ -1679,16 +1723,28 @@ async function capturePerfSnapshot(
   };
 }
 
-function buildBenchmarkBytes(chunkBytes: number): Uint8Array {
+function buildBenchmarkBytes(chunkBytes: number, payload: 'scroll' | 'progress'): Uint8Array {
   const safeChunkBytes = Math.max(64, Math.floor(chunkBytes));
-  const linePayloadWidth = 112;
   let output = '';
   let lineNumber = 0;
   while (output.length < safeChunkBytes) {
-    output += `bench ${String(lineNumber).padStart(6, '0')} ${'x'.repeat(linePayloadWidth)}\r\n`;
+    output += payload === 'progress'
+      ? `\r\x1b[2Kp ${String(lineNumber).padStart(6, '0')} xx`
+      : `bench ${String(lineNumber).padStart(6, '0')} ${'x'.repeat(112)}\r\n`;
     lineNumber += 1;
   }
   return new TextEncoder().encode(output.slice(0, safeChunkBytes));
+}
+
+function buildBenchmarkProgressSeed(cols: number, rows: number): Uint8Array {
+  const width = Math.max(1, cols - 1);
+  let output = '';
+  for (let row = 0; row < rows; row += 1) {
+    const prefix = `${String(row).padStart(3, '0')} `;
+    output += `\x1b[${row + 1};1H${(prefix + '.'.repeat(width)).slice(0, width)}`;
+  }
+  output += '\x1b[1;1H';
+  return new TextEncoder().encode(output);
 }
 
 function encodeBytesToBase64(bytes: Uint8Array): string {
@@ -3187,13 +3243,17 @@ export function useUiAutomationBridge({
           : 'json_base64';
         const chunkBytes = typeof payload.chunkBytes === 'number' ? payload.chunkBytes : 16 * 1024;
         const chunkCount = typeof payload.chunkCount === 'number' ? payload.chunkCount : 128;
+        const benchmarkPayload = payload.payload === 'progress' ? 'progress' : 'scroll';
         const flushEvery = typeof payload.flushEvery === 'number' && payload.flushEvery > 0
           ? Math.floor(payload.flushEvery)
           : 1;
+        const interChunkDelayMs = typeof payload.interChunkDelayMs === 'number'
+          ? Math.max(0, payload.interChunkDelayMs)
+          : 0;
         const runtimeId =
           session.workspace.agents.find((entry) => entry.id === paneId)?.runtimeId ||
           `bench:${paneId}`;
-        const bytes = buildBenchmarkBytes(chunkBytes);
+        const bytes = buildBenchmarkBytes(chunkBytes, benchmarkPayload);
         const base64Payload = encodeBytesToBase64(bytes);
 
         selectSession(sessionId);
@@ -3202,7 +3262,49 @@ export function useUiAutomationBridge({
         if (!resetSessionPaneTerminal(sessionId, paneId)) {
           throw new Error(`Pane terminal not ready for ${paneId}`);
         }
+        const paneTerminalPerf = () => getTerminalPerfSnapshot().find(
+          (terminal) => terminal.runtimeId === runtimeId || (
+            terminal.sessionId === sessionId && terminal.paneId === paneId
+          ),
+        );
+
+        if (benchmarkPayload === 'progress') {
+          // The shell's own prompt can move the cursor or erase rows right
+          // after the seed, so let it finish before building the fixture.
+          await waitForPaneWriteQuiescence(() => paneTerminalPerf()?.writeParsedCount ?? null);
+          await drainSessionPaneTerminal(sessionId, paneId);
+          await settleUi(2);
+
+          const beforeSeed = paneTerminalPerf();
+          if (!beforeSeed) {
+            throw new Error(`Pane terminal disappeared before seeding ${paneId}`);
+          }
+          const seed = buildBenchmarkProgressSeed(beforeSeed.cols, beforeSeed.rows);
+          if (!(await injectSessionPaneBytes(sessionId, paneId, seed))) {
+            throw new Error(`Failed to seed progress fixture in pane ${paneId}`);
+          }
+          if (!(await drainSessionPaneTerminal(sessionId, paneId))) {
+            throw new Error(`Failed to drain progress fixture in pane ${paneId}`);
+          }
+          // Output paints are paced at 30 Hz, so the seed is written but not
+          // necessarily painted yet. Wait for a paint that actually covers it
+          // rather than for a fixed interval, or the measured writes overwrite
+          // a fixture whose dense surface never rendered.
+          await waitForSeededPaint(paneTerminalPerf, beforeSeed.renderCount);
+          await settleUi(2);
+        }
+        await settleUi(2);
         clearPtyPerfSnapshot();
+        const rendererBefore = paneTerminalPerf();
+        if (
+          benchmarkPayload === 'progress'
+          && rendererBefore
+          && rendererBefore.modelPrintable < rendererBefore.cols * rendererBefore.rows * 0.5
+        ) {
+          throw new Error(
+            `Progress fixture is not dense: ${rendererBefore.modelPrintable} printable cells in ${rendererBefore.cols}x${rendererBefore.rows}`,
+          );
+        }
 
         const startedAt = performance.now();
         let bufferedByteChunks: Uint8Array[] = [];
@@ -3230,6 +3332,9 @@ export function useUiAutomationBridge({
                 await flushBufferedBytes();
               }
             }
+            if (interChunkDelayMs > 0) {
+              await waitForBenchmarkDelay(interChunkDelayMs);
+            }
             continue;
           }
 
@@ -3244,6 +3349,9 @@ export function useUiAutomationBridge({
               if (bufferedByteChunks.length >= flushEvery) {
                 await flushBufferedBytes();
               }
+            }
+            if (interChunkDelayMs > 0) {
+              await waitForBenchmarkDelay(interChunkDelayMs);
             }
             continue;
           }
@@ -3268,6 +3376,9 @@ export function useUiAutomationBridge({
               await flushBufferedBytes();
             }
           }
+          if (interChunkDelayMs > 0) {
+            await waitForBenchmarkDelay(interChunkDelayMs);
+          }
         }
         await flushBufferedBytes();
         if (!(await drainSessionPaneTerminal(sessionId, paneId))) {
@@ -3276,12 +3387,15 @@ export function useUiAutomationBridge({
 
         await settleUi(2);
         const totalMs = performance.now() - startedAt;
+        const rendererAfter = paneTerminalPerf();
         return {
           sessionId,
           paneId,
           runtimeId,
           mode,
+          payload: benchmarkPayload,
           flushEvery,
+          interChunkDelayMs,
           chunkBytes: bytes.length,
           chunkCount,
           totalPayloadBytes: bytes.length * chunkCount,
@@ -3290,6 +3404,26 @@ export function useUiAutomationBridge({
             ? ((bytes.length * chunkCount) / (1024 * 1024)) / (totalMs / 1000)
             : null,
           pty: getPtyPerfSnapshot(),
+          renderer: rendererBefore && rendererAfter
+            ? {
+                renderCount: rendererAfter.renderCount - rendererBefore.renderCount,
+                cpuSubmitMs: rendererAfter.renderCpuTotalMs - rendererBefore.renderCpuTotalMs,
+                lastFrameMs: rendererAfter.lastRenderCpuMs,
+                fullPaintCount: rendererAfter.renderFullCount - rendererBefore.renderFullCount,
+                partialPaintCount: rendererAfter.renderPartialCount - rendererBefore.renderPartialCount,
+                rowsPainted: rendererAfter.renderRowsPainted - rendererBefore.renderRowsPainted,
+                submittedQuads: rendererAfter.renderSubmittedQuads - rendererBefore.renderSubmittedQuads,
+                retainedRowVertexBytes: rendererAfter.renderRetainedRowVertexBytes,
+                retainedStagingBytes: rendererAfter.renderRetainedStagingBytes,
+                fixturePrintable: rendererBefore.modelPrintable,
+                finalModelPrintable: rendererAfter.modelPrintable,
+                finalPaintQuads: rendererAfter.lastPaintQuads,
+                scheduledRequests: rendererAfter.scheduledRenderRequests - rendererBefore.scheduledRenderRequests,
+                scheduledCoalesced: rendererAfter.scheduledRenderCoalesced - rendererBefore.scheduledRenderCoalesced,
+                scheduledDeferred: rendererAfter.scheduledRenderDeferred - rendererBefore.scheduledRenderDeferred,
+                writeParsedCount: rendererAfter.writeParsedCount - rendererBefore.writeParsedCount,
+              }
+            : null,
           pane: {
             size: getPaneSize(sessionId, paneId),
             textLength: getPaneText(sessionId, paneId).length,

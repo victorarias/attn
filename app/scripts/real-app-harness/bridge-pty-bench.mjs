@@ -6,6 +6,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
+import { setFrontWindowBounds } from './nativeWindowCapture.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 
 const execFileAsync = promisify(execFile);
@@ -19,7 +20,16 @@ function parseArgs(argv) {
   const commonArgv = [];
   for (let index = 0; index < filteredArgv.length; index += 1) {
     const arg = filteredArgv[index];
-    if (arg === '--chunk-bytes' || arg === '--chunk-count') {
+    if (
+      arg === '--chunk-bytes'
+      || arg === '--chunk-count'
+      || arg === '--chunk-delay-ms'
+      || arg === '--mode'
+      || arg === '--payload'
+      || arg === '--flush-every'
+      || arg === '--window-width'
+      || arg === '--window-height'
+    ) {
       index += 1;
       continue;
     }
@@ -29,11 +39,42 @@ function parseArgs(argv) {
   const options = parseCommonArgs(commonArgv);
   options.chunkBytes = 16 * 1024;
   options.chunkCount = 128;
+  options.chunkDelayMs = 0;
+  options.mode = null;
+  options.payload = 'scroll';
+  options.flushEvery = null;
+  options.windowWidth = null;
+  options.windowHeight = null;
 
   for (let index = 0; index < filteredArgv.length; index += 1) {
     const arg = filteredArgv[index];
     if (arg === '--chunk-bytes') options.chunkBytes = Number(filteredArgv[index + 1]);
     if (arg === '--chunk-count') options.chunkCount = Number(filteredArgv[index + 1]);
+    if (arg === '--chunk-delay-ms') options.chunkDelayMs = Number(filteredArgv[index + 1]);
+    if (arg === '--mode') options.mode = filteredArgv[index + 1];
+    if (arg === '--payload') options.payload = filteredArgv[index + 1];
+    if (arg === '--flush-every') options.flushEvery = Number(filteredArgv[index + 1]);
+    if (arg === '--window-width') options.windowWidth = Number(filteredArgv[index + 1]);
+    if (arg === '--window-height') options.windowHeight = Number(filteredArgv[index + 1]);
+  }
+
+  if (!Number.isFinite(options.chunkBytes) || options.chunkBytes <= 0) {
+    throw new Error('--chunk-bytes must be a positive number');
+  }
+  if (!Number.isFinite(options.chunkCount) || options.chunkCount <= 0) {
+    throw new Error('--chunk-count must be a positive number');
+  }
+  if (!Number.isFinite(options.chunkDelayMs) || options.chunkDelayMs < 0) {
+    throw new Error('--chunk-delay-ms must be a non-negative number');
+  }
+  if (options.flushEvery !== null && (!Number.isFinite(options.flushEvery) || options.flushEvery <= 0)) {
+    throw new Error('--flush-every must be a positive number');
+  }
+  if (!['scroll', 'progress'].includes(options.payload)) {
+    throw new Error('--payload must be scroll or progress');
+  }
+  if ((options.windowWidth === null) !== (options.windowHeight === null)) {
+    throw new Error('--window-width and --window-height must be provided together');
   }
 
   return options;
@@ -148,6 +189,8 @@ function summarizeProcessSamples(samples) {
     totalCpuPct: sample.processes.reduce((sum, processInfo) => sum + processInfo.cpuPct, 0),
     totalRssKb: sample.processes.reduce((sum, processInfo) => sum + processInfo.rssKb, 0),
   }));
+  const cpuTotals = totals.map((item) => item.totalCpuPct).sort((a, b) => a - b);
+  const p95Index = Math.max(0, Math.ceil(cpuTotals.length * 0.95) - 1);
 
   for (const sample of samples) {
     for (const processInfo of sample.processes) {
@@ -168,6 +211,10 @@ function summarizeProcessSamples(samples) {
 
   return {
     totalCpuPctMax: totals.length > 0 ? Math.max(...totals.map((item) => item.totalCpuPct)) : 0,
+    totalCpuPctAvg: totals.length > 0
+      ? totals.reduce((sum, item) => sum + item.totalCpuPct, 0) / totals.length
+      : 0,
+    totalCpuPctP95: cpuTotals.length > 0 ? cpuTotals[p95Index] : 0,
     totalRssKbMax: totals.length > 0 ? Math.max(...totals.map((item) => item.totalRssKb)) : 0,
     byCommand: Object.fromEntries(
       [...byCommand.entries()].map(([label, entry]) => [
@@ -209,15 +256,36 @@ async function sampleWhilePending(rootPid, extraPids, promise, intervalMs = 100)
 function compactResult(mode, bench, processSummary) {
   return {
     mode,
+    payload: bench.payload || 'scroll',
     flushEvery: bench.flushEvery || 1,
     totalMs: Number(bench.totalMs.toFixed(2)),
     throughputMiBPerSec: Number((bench.throughputMiBPerSec || 0).toFixed(2)),
     totalCpuPctMax: Number(processSummary.totalCpuPctMax.toFixed(1)),
+    totalCpuPctAvg: Number(processSummary.totalCpuPctAvg.toFixed(1)),
+    totalCpuPctP95: Number(processSummary.totalCpuPctP95.toFixed(1)),
     totalRssMbMax: Number((processSummary.totalRssKbMax / 1024).toFixed(1)),
     wsJsonParseMs: Number((bench.pty.wsJsonParseMs || 0).toFixed(3)),
     ptyJsonParseMs: Number((bench.pty.ptyJsonParseMs || 0).toFixed(3)),
     decodeMs: Number((bench.pty.decodeMs || 0).toFixed(3)),
     terminalWriteCallMs: Number((bench.pty.terminalWriteCallMs || 0).toFixed(3)),
+    rendererPaintCount: bench.renderer?.renderCount || 0,
+    rendererCpuSubmitMs: Number((bench.renderer?.cpuSubmitMs || 0).toFixed(3)),
+    rendererAvgFrameMs: bench.renderer?.renderCount > 0
+      ? Number((bench.renderer.cpuSubmitMs / bench.renderer.renderCount).toFixed(3))
+      : 0,
+    rendererFullPaintCount: bench.renderer?.fullPaintCount || 0,
+    rendererPartialPaintCount: bench.renderer?.partialPaintCount || 0,
+    rendererRowsPainted: bench.renderer?.rowsPainted || 0,
+    rendererSubmittedQuads: bench.renderer?.submittedQuads || 0,
+    rendererRetainedRowVertexMb: Number(((bench.renderer?.retainedRowVertexBytes || 0) / (1024 * 1024)).toFixed(3)),
+    rendererRetainedStagingMb: Number(((bench.renderer?.retainedStagingBytes || 0) / (1024 * 1024)).toFixed(3)),
+    fixturePrintable: bench.renderer?.fixturePrintable || 0,
+    finalModelPrintable: bench.renderer?.finalModelPrintable || 0,
+    finalPaintQuads: bench.renderer?.finalPaintQuads || 0,
+    scheduledRenderRequests: bench.renderer?.scheduledRequests || 0,
+    scheduledRenderCoalesced: bench.renderer?.scheduledCoalesced || 0,
+    scheduledRenderDeferred: bench.renderer?.scheduledDeferred || 0,
+    writeParsedCount: bench.renderer?.writeParsedCount || 0,
     ptyOutputCount: bench.pty.ptyOutputCount || 0,
     terminalWriteCount: bench.pty.terminalWriteCount || 0,
     totalPayloadBytes: bench.totalPayloadBytes,
@@ -230,6 +298,12 @@ async function main() {
     printCommonHelp('scripts/real-app-harness/bridge-pty-bench.mjs');
     console.log('  --chunk-bytes <n>          Payload bytes per chunk (default: 16384)');
     console.log('  --chunk-count <n>          Number of chunks per mode (default: 128)');
+    console.log('  --chunk-delay-ms <n>       Delay between chunks for sustained-output measurements');
+    console.log('  --mode <name>              Run only bytes, base64, or json_base64');
+    console.log('  --payload <name>           Run scrolling output or in-place progress updates');
+    console.log('  --flush-every <n>           Run only one batching level');
+    console.log('  --window-width <n>          Resize the isolated benchmark window before creating panes');
+    console.log('  --window-height <n>         Resize the isolated benchmark window before creating panes');
     return;
   }
 
@@ -248,6 +322,13 @@ async function main() {
     await client.waitForManifest(20_000);
     await client.waitForReady(20_000);
     await client.waitForFrontendResponsive(20_000);
+    if (options.windowWidth !== null && options.windowHeight !== null) {
+      await setFrontWindowBounds(
+        { x: 60, y: 60, width: options.windowWidth, height: options.windowHeight },
+        { client },
+      );
+      await client.waitForFrontendResponsive(20_000);
+    }
     await observer.connect();
     await observer.unregisterMatchingSessions(
       (session) => typeof session.label === 'string' && session.label.startsWith('attn-pty-bench-'),
@@ -282,22 +363,25 @@ async function main() {
       direction: 'vertical',
     }, { timeoutMs: 30_000 });
 
-    const workspace = await observer.waitForWorkspace(
+    const utilityPane = await observer.waitForUtilityPane(
       sessionId,
-      (entry) => (entry.panes || []).some((pane) => pane.kind === 'shell' && pane.runtime_id),
-      `utility pane for ${sessionId}`,
       20_000,
+      new Set([targetPaneId]),
     );
-    const utilityPane = (workspace.panes || []).find((pane) => pane.kind === 'shell' && pane.runtime_id);
     if (!utilityPane?.runtime_id) {
       throw new Error('Utility pane not found');
     }
 
-    const modes = [
-      { name: 'json_base64_x1', mode: 'json_base64', flushEvery: 1 },
-      { name: 'json_base64_x8', mode: 'json_base64', flushEvery: 8 },
-      { name: 'json_base64_x32', mode: 'json_base64', flushEvery: 32 },
-    ];
+    const selectedMode = options.mode || 'json_base64';
+    if (!['bytes', 'base64', 'json_base64'].includes(selectedMode)) {
+      throw new Error(`Unsupported benchmark mode: ${selectedMode}`);
+    }
+    const batchSizes = options.flushEvery === null ? [1, 8, 32] : [options.flushEvery];
+    const modes = batchSizes.map((flushEvery) => ({
+      name: `${selectedMode}_x${flushEvery}`,
+      mode: selectedMode,
+      flushEvery,
+    }));
     const results = [];
     for (const entry of modes) {
       const benchPromise = client.request('benchmark_pty_transport', {
@@ -306,6 +390,8 @@ async function main() {
         mode: entry.mode,
         chunkBytes: options.chunkBytes,
         chunkCount: options.chunkCount,
+        payload: options.payload,
+        interChunkDelayMs: options.chunkDelayMs,
         flushEvery: entry.flushEvery,
       }, { timeoutMs: 120_000 });
       const measured = await sampleWhilePending(manifest.pid, extraPids, benchPromise, 100);
@@ -323,9 +409,9 @@ async function main() {
       name: entry.name,
       ...compactResult(entry.mode, entry.bench, entry.processSummary),
     }));
-    const json1 = compact.find((entry) => entry.name === 'json_base64_x1');
-    const json8 = compact.find((entry) => entry.name === 'json_base64_x8');
-    const json32 = compact.find((entry) => entry.name === 'json_base64_x32');
+    const json1 = compact.find((entry) => entry.flushEvery === 1);
+    const json8 = compact.find((entry) => entry.flushEvery === 8);
+    const json32 = compact.find((entry) => entry.flushEvery === 32);
 
     const deltas = {
       x1VsX8Ms: json1 && json8 ? Number((json1.totalMs - json8.totalMs).toFixed(2)) : null,
@@ -341,6 +427,8 @@ async function main() {
       runtimeId: utilityPane.runtime_id,
       chunkBytes: options.chunkBytes,
       chunkCount: options.chunkCount,
+      chunkDelayMs: options.chunkDelayMs,
+      payload: options.payload,
       results,
       compact,
       deltas,
