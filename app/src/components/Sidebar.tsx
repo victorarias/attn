@@ -36,6 +36,7 @@ interface LocalSession {
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
   autoSettleFiresAt?: string;
+  autoSettleHeld?: boolean;
   state_reason?: string;
   turnOwed?: boolean;
   turnOpenedAt?: string;
@@ -1175,8 +1176,8 @@ export function Sidebar({
                         •••
                       </button>
                     </div>
-                    {session.autoSettleFiresAt && !onScreenSessionIds?.has(session.id) ? (
-                      <SidebarSettlingBar firesAt={session.autoSettleFiresAt} />
+                    {(session.autoSettleFiresAt || session.autoSettleHeld) && !onScreenSessionIds?.has(session.id) ? (
+                      <SidebarSettlingBar firesAt={session.autoSettleFiresAt} held={session.autoSettleHeld} />
                     ) : null}
                     {(() => {
                       const nudgeMode = deriveNudgeMode({

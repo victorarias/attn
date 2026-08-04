@@ -51,6 +51,29 @@ describe('HeaderSettlingIndicator', () => {
 
     expect(onPointerDown).not.toHaveBeenCalled();
   });
+
+  describe('held — the user is typing and the daemon has frozen the countdown', () => {
+    it('says it is paused, and animates nothing', () => {
+      const { container } = render(<HeaderSettlingIndicator held />);
+      expect(screen.getByTestId('settling-indicator')).toHaveTextContent('Settling paused');
+      // No deadline arrives while held, so there is nothing to animate against —
+      // a bar still transitioning here would be counting down to a time the
+      // daemon has withdrawn.
+      const fill = container.querySelector('.settling-header-track-fill') as HTMLElement;
+      expect(fill).toBeTruthy();
+      expect(fill.style.transition).toBe('');
+      expect(fill.classList.contains('settling-track-fill--held')).toBe(true);
+    });
+
+    it('still names the key that stops it for good', () => {
+      // A hold expires by itself; ⌘. is how the user says never mind at all.
+      const onCancel = vi.fn();
+      render(<HeaderSettlingIndicator held onCancel={onCancel} />);
+      expect(screen.getByText('keep')).toBeTruthy();
+      fireEvent.click(screen.getByTestId('settling-indicator'));
+      expect(onCancel).toHaveBeenCalledTimes(1);
+    });
+  });
 });
 
 describe('SidebarSettlingBar', () => {
@@ -59,6 +82,17 @@ describe('SidebarSettlingBar', () => {
     const bar = screen.getByTestId('settling-sidebar-bar');
     expect(bar).toBeInTheDocument();
     expect(bar.textContent).toBe('');
+  });
+
+  it('holds the bar full and still while the user types, rather than dropping it', () => {
+    // The row is the only thing on screen representing an off-tile session. A bar
+    // that vanished on the first keystroke and reappeared seconds later would read
+    // as the settle being called off, which it is not.
+    const { container } = render(<SidebarSettlingBar held />);
+    expect(screen.getByTestId('settling-sidebar-bar')).toBeInTheDocument();
+    const fill = container.querySelector('.settling-sidebar-bar-fill') as HTMLElement;
+    expect(fill.style.transition).toBe('');
+    expect(fill.classList.contains('settling-track-fill--held')).toBe(true);
   });
 });
 

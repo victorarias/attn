@@ -1,0 +1,16 @@
+kind: changed
+area: queue
+change: >
+  Typing to an agent pauses its settling countdown. attn closes a turn for you
+  once you've steered an agent and it has gone back to work, but until now the
+  countdown ran regardless of what you were doing — so a turn could close while
+  you were still at the keyboard writing the next thing. Any key you send to an
+  agent now freezes its countdown where it stands, and the indicator says
+  "Settling paused" instead of draining. Five quiet seconds after your last
+  keystroke it releases and you get the whole countdown back, not the sliver
+  that was left. attn can't see inside an agent's interface, so it doesn't try
+  to tell composing from erasing from pressing Escape — a keystroke means your
+  hands are on that session, which is the only thing the countdown was asking.
+  What it does tell apart is you from attn: a nudge, a delegation brief, or a
+  reattach typing into a session doesn't hold anything open. The pause expires
+  on its own, where Cmd+. still keeps the turn for good.

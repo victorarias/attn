@@ -596,6 +596,13 @@ function collectSessionUiState(
   const firstAgentPane = firstAgentPaneId
     ? document.querySelector(`[data-pane-session-id="${session.id}"][data-pane-id="${firstAgentPaneId}"]`)
     : null;
+  // The auto-settle indicator as the pane header actually drew it. The wire
+  // carries either a deadline or the frozen flag, never both, and only the DOM
+  // can testify that the tile drew the one it was sent — a running countdown
+  // animating against a deadline, or a still full bar that says attn is waiting
+  // for the user to stop typing.
+  const settlingChip = firstAgentPane?.querySelector('[data-testid="settling-indicator"]') ?? null;
+  const settlingFill = firstAgentPane?.querySelector('.settling-header-track-fill') ?? null;
   const workspaceId = session.workspaceId;
   const workspaceDom = collectWorkspaceShellMetrics(workspaceId);
   const workspaceView = collectWorkspaceViewState(workspaceId);
@@ -623,6 +630,16 @@ function collectSessionUiState(
       splits: collectSplitDomMetrics(workspaceId),
     },
     agentPaneBounds: rectSnapshot(firstAgentPane),
+    settling: settlingChip instanceof HTMLElement
+      ? {
+          text: settlingChip.textContent?.trim() || '',
+          held: settlingChip.classList.contains('settling-header--held'),
+          // A frozen bar carries no width transition, because there is no
+          // deadline to animate toward. That absence is the assertion.
+          frozenBar: Boolean(settlingFill instanceof HTMLElement
+            && settlingFill.classList.contains('settling-track-fill--held')),
+        }
+      : null,
   };
 }
 

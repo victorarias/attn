@@ -911,6 +911,7 @@ export enum BranchChangedMessageEvent {
 export interface SessionElement {
     agent:                 string;
     auto_settle_fires_at?: string;
+    auto_settle_held?:     boolean;
     branch?:               string;
     chief_of_staff?:       boolean;
     delegated_from_chief?: boolean;
@@ -4551,6 +4552,7 @@ export enum RuntimeRespawnedMessageEvent {
 export interface Session {
     agent:                 string;
     auto_settle_fires_at?: string;
+    auto_settle_held?:     boolean;
     branch?:               string;
     chief_of_staff?:       boolean;
     delegated_from_chief?: boolean;
@@ -10263,6 +10265,7 @@ const typeMap: any = {
     "SessionElement": o([
         { json: "agent", js: "agent", typ: "" },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
+        { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
@@ -12459,6 +12462,7 @@ const typeMap: any = {
     "Session": o([
         { json: "agent", js: "agent", typ: "" },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
+        { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },

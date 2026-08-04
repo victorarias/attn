@@ -1182,6 +1182,7 @@ function AppContent({
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
+      autoSettleHeld: daemonSession?.auto_settle_held ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -2918,7 +2919,7 @@ function AppContent({
     const ids: string[] = [];
     for (const session of enrichedLocalSessions) {
       if (!onScreenSessionIds.has(session.id)) continue;
-      if (session.autoSettleFiresAt || session.nudgeFiresAt) ids.push(session.id);
+      if (session.autoSettleFiresAt || session.autoSettleHeld || session.nudgeFiresAt) ids.push(session.id);
     }
     return ids;
   }, [enrichedLocalSessions, onScreenSessionIds]);
@@ -3751,6 +3752,7 @@ function AppContent({
                       ticketUnread: entry.ticketUnread,
                       nudgeFiresAt: entry.nudgeFiresAt,
                       autoSettleFiresAt: entry.autoSettleFiresAt,
+                      autoSettleHeld: entry.autoSettleHeld,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),

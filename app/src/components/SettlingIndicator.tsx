@@ -15,6 +15,12 @@ import { CountdownCancelHint } from './CountdownCancelHint';
  * is something you notice from across the screen, which is the only way an
  * indicator on a tile you are not focused on does its job.
  *
+ * `auto_settle_held` is the same countdown with the user's hands on the keyboard:
+ * the daemon has frozen it and sent no deadline, so the bar draws full and still.
+ * A full bar rather than a partial one because there is nothing to be partial
+ * about — the deadline is gone, and when typing stops the daemon sends a whole new
+ * one, which is exactly what a full frozen bar promises.
+ *
  * Two homes, so a countdown is never invisible. The pane header is the primary
  * one — the tile is where you are looking when you steered the agent. The sidebar
  * row carries it only for sessions with no rendered tile, since an unwatched
@@ -26,16 +32,18 @@ import { CountdownCancelHint } from './CountdownCancelHint';
 
 export function HeaderSettlingIndicator({
   firesAt,
+  held,
   onCancel,
 }: {
-  firesAt: string;
+  firesAt?: string;
+  held?: boolean;
   onCancel?: () => void;
 }) {
   return (
     <>
       <button
         type="button"
-        className="settling-header"
+        className={held ? 'settling-header settling-header--held' : 'settling-header'}
         // Stop the pane header's pointerdown drag from starting on this button:
         // in a split the header is a leaf-drag handle, so a sloppy click that
         // drifts would relocate the pane instead of keeping the turn.
@@ -49,11 +57,15 @@ export function HeaderSettlingIndicator({
         data-testid="settling-indicator"
       >
         <span className="settling-dot" aria-hidden="true" />
-        <span className="settling-header-label">Settling…</span>
+        <span className="settling-header-label">{held ? 'Settling paused' : 'Settling…'}</span>
         <CountdownCancelHint verb="keep" />
       </button>
       <div className="settling-header-track" aria-hidden="true">
-        <CountdownFill firesAt={firesAt} className="settling-header-track-fill" direction="drain" />
+        {firesAt ? (
+          <CountdownFill firesAt={firesAt} className="settling-header-track-fill" direction="drain" />
+        ) : (
+          <div className="settling-header-track-fill settling-track-fill--held" />
+        )}
       </div>
     </>
   );
@@ -64,14 +76,19 @@ export function HeaderSettlingIndicator({
  * bar on the row plus nothing else — the row is small, and the point here is only
  * that a turn about to close somewhere off-screen is not closed silently.
  */
-export function SidebarSettlingBar({ firesAt }: { firesAt: string }) {
+export function SidebarSettlingBar({ firesAt, held }: { firesAt?: string; held?: boolean }) {
   return (
     <div
       className="settling-sidebar-bar"
       aria-hidden="true"
       data-testid="settling-sidebar-bar"
+      data-held={held ? 'true' : undefined}
     >
-      <CountdownFill firesAt={firesAt} className="settling-sidebar-bar-fill" direction="drain" />
+      {firesAt ? (
+        <CountdownFill firesAt={firesAt} className="settling-sidebar-bar-fill" direction="drain" />
+      ) : (
+        <div className="settling-sidebar-bar-fill settling-track-fill--held" />
+      )}
     </div>
   );
 }
