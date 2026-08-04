@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  pi vision updated — attn renders the conversation via a headless SDK host
+  (plugin entrypoint, daemon-owned process group, React conversation surface;
+  PTY path stays for claude/codex/shell) — plus a vertical-slice
+  implementation plan grounded in the 2026-08-04 pi SDK spike receipts.
