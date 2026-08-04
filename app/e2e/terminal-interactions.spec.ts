@@ -34,6 +34,32 @@ async function writeTerminalOutput(
   }, { id: sessionId, data: output });
 }
 
+async function dispatchStationaryCmdClick(
+  terminal: import('@playwright/test').Locator,
+  position: { x: number; y: number },
+) {
+  const box = await terminal.boundingBox();
+  expect(box).not.toBeNull();
+  await terminal.evaluate((element, point) => {
+    element.dispatchEvent(new MouseEvent('mousedown', {
+      bubbles: true,
+      button: 0,
+      buttons: 1,
+      clientX: point.clientX,
+      clientY: point.clientY,
+      metaKey: true,
+    }));
+    element.dispatchEvent(new MouseEvent('mouseup', {
+      bubbles: true,
+      button: 0,
+      buttons: 0,
+      clientX: point.clientX,
+      clientY: point.clientY,
+      metaKey: true,
+    }));
+  }, { clientX: box!.x + position.x, clientY: box!.y + position.y });
+}
+
 async function installOpenerProbe(page: import('@playwright/test').Page) {
   await page.addInitScript(() => {
     (window as Window & { __OPENED_TERMINAL_URLS?: string[] }).__OPENED_TERMINAL_URLS = [];
@@ -416,6 +442,12 @@ test.describe('Ghostty terminal interactions', () => {
     await page.keyboard.down('Meta');
     await expect(terminal).toHaveCSS('cursor', 'pointer', { timeout: 3000 });
 
+    const renderCountBefore = await page.evaluate((sessionId) => {
+      const snapshots = window.__ATTN_TERMINAL_PERF_DUMP?.() ?? [];
+      return snapshots.find((snapshot) => snapshot.sessionId === sessionId)?.renderCount ?? null;
+    }, 's-file-link-stream');
+    expect(renderCountBefore).not.toBeNull();
+
     // An agent TUI repaints constantly (spinner frames, status line). The
     // pointer does not move while unrelated writes land on another row; the
     // hovered link must stay resolved and clickable.
@@ -428,8 +460,21 @@ test.describe('Ghostty terminal interactions', () => {
       await page.waitForTimeout(120);
     }
 
+    const renderCountAfter = await page.evaluate((sessionId) => {
+      const snapshots = window.__ATTN_TERMINAL_PERF_DUMP?.() ?? [];
+      return snapshots.find((snapshot) => snapshot.sessionId === sessionId)?.renderCount ?? null;
+    }, 's-file-link-stream');
+    expect(renderCountAfter).not.toBeNull();
+    // Revalidation runs inside the output paint. It must not add another paint
+    // per packet on top of the terminal's animation-frame-coalesced renderer.
+    expect(renderCountAfter! - renderCountBefore!).toBeLessThanOrEqual(6);
+
     await expect(terminal).toHaveCSS('cursor', 'pointer');
-    await terminal.click({ position: { x: 55, y: 8 } });
+
+    // Dispatch at the stationary pointer coordinates. locator.click() moves the
+    // synthetic mouse before pressing, which used to hide this regression by
+    // refreshing the stale hover cache immediately before mousedown.
+    await dispatchStationaryCmdClick(terminal, { x: 55, y: 8 });
     await page.keyboard.up('Meta');
 
     await expect
@@ -440,6 +485,28 @@ test.describe('Ghostty terminal interactions', () => {
         { timeout: 3000 },
       )
       .toContain('/tmp/test/terminal-links/src/main.go');
+
+    // Revalidation must still reject a genuinely stale target. Replace the
+    // hovered row without moving the pointer, then prove the old path neither
+    // advertises nor opens.
+    await writeTerminalOutput(page, 's-file-link-stream', '[1;1H[2Kplain text');
+    await expect
+      .poll(
+        async () => page.evaluate(() => window.__TEST_GET_SESSION_PANE_TEXT?.('s-file-link-stream') ?? ''),
+        { timeout: 3000 },
+      )
+      .toContain('plain text');
+    await page.keyboard.down('Meta');
+    await expect(terminal).toHaveCSS('cursor', 'text');
+    await dispatchStationaryCmdClick(terminal, { x: 55, y: 8 });
+    await page.keyboard.up('Meta');
+    await expect
+      .poll(
+        async () => page.evaluate(
+          () => (window as Window & { __OPENED_TERMINAL_PATHS?: string[] }).__OPENED_TERMINAL_PATHS ?? [],
+        ),
+      )
+      .toEqual(['/tmp/test/terminal-links/src/main.go']);
   });
 
   test('does not mark non-existing path-like words as links', async ({ page, daemon }) => {

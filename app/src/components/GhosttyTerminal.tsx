@@ -663,6 +663,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const cwdRef = useRef(cwd);
     const hoverGenerationRef = useRef(0);
     const hoverLinkRef = useRef<HoverLinkState | null>(null);
+    // Model writes and viewport changes happen above the hover-link callbacks in
+    // this module. They invalidate by generation; the next paint (or click)
+    // crosses this seam to re-read the one logical line under the stationary
+    // pointer before trusting or drawing the cached link.
+    const refreshHoverLinkRef = useRef<(() => void) | null>(null);
     // undefined = not fetched yet; null = unavailable (non-Tauri host).
     const homeDirRef = useRef<string | null | undefined>(undefined);
     const pathExistsCacheRef = useRef(new Map<string, boolean | Promise<boolean>>());
@@ -914,6 +919,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       if (!terminal || !renderer) return true;
       if (runtimeMetaRef.current && !runtimeMetaRef.current.isActiveSession) return true;
       try {
+      refreshHoverLinkRef.current?.();
       const range = selectionRef.current ? normalizeSelection(selectionRef.current) : null;
       const scrollbackLength = terminal.getScrollbackLength();
       const overlays: WebGlOverlay[] = [];
@@ -2870,6 +2876,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return pending;
     }, []);
 
+    const knownPathExists = useCallback((absolutePath: string): boolean | undefined => {
+      const cached = pathExistsCacheRef.current.get(absolutePath);
+      return typeof cached === 'boolean' ? cached : undefined;
+    }, []);
+
     const ensureHomeDir = useCallback(async (): Promise<string | null> => {
       if (homeDirRef.current === undefined) {
         try {
@@ -2900,21 +2911,29 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // hovered row joined with its soft-wrapped neighbors). Movement inside the
     // cached fragment exits immediately; URLs resolve synchronously; file
     // paths are validated asynchronously against the filesystem (cached).
-    const detectHoverLink = useCallback((cell: { row: number; col: number } | null) => {
+    const detectHoverLink = useCallback((
+      cell: { row: number; col: number } | null,
+      options: { force?: boolean; repaint?: boolean } = {},
+    ) => {
+      const force = options.force ?? false;
+      const repaint = options.repaint ?? true;
       const generation = hoverGenerationRef.current;
       const current = hoverLinkRef.current;
-      if (cell && current && current.generation === generation) {
+      if (!force && cell && current && current.generation === generation) {
         const cachedIndex = logicalIndexForCell(current.line, cell.row, cell.col);
         if (cachedIndex !== null && cachedIndex >= current.startIndex && cachedIndex < current.endIndex) {
           return;
         }
       }
-      const hadUnderline = Boolean(current?.link && current.generation === generation);
+      // A stale generation can still be the underline currently painted on the
+      // canvas. Treat it as visible until this revalidation and the following
+      // paint replace it.
+      const hadUnderline = Boolean(current?.link);
       const clearHover = () => {
         hoverLinkRef.current = null;
+        setLinkCursorActive(false);
         if (hadUnderline) {
-          renderSurface(true);
-          setLinkCursorActive(false);
+          if (repaint) renderSurface(true);
         }
       };
       const terminal = terminalRef.current;
@@ -2945,7 +2964,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           link: { kind: 'url', uri: hyperlink.uri, startCol: hyperlink.startCol, endCol: hyperlink.endCol },
           linkSpan: spanFromLogicalRange(logical, hyperlink.startCol, hyperlink.endCol),
         };
-        renderSurface(true);
+        if (repaint) renderSurface(true);
         updateLinkCursor(cell, acceleratorHeldRef.current);
         return;
       }
@@ -2959,7 +2978,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           link: { kind: 'url', uri: url.uri, startCol: url.startCol, endCol: url.endCol },
           linkSpan: spanFromLogicalRange(logical, url.startCol, url.endCol),
         };
-        renderSurface(true);
+        if (repaint) renderSurface(true);
         updateLinkCursor(cell, acceleratorHeldRef.current);
         return;
       }
@@ -2978,21 +2997,65 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       };
       hoverLinkRef.current = entry;
       if (hadUnderline) {
-        renderSurface(true);
         setLinkCursorActive(false);
+        if (repaint) renderSurface(true);
       }
       const candidates = pathCandidatesForFragment(
         logical.text.slice(fragment.startCol, fragment.endCol),
         fragment.startCol,
       );
       if (candidates.length === 0) return;
+
+      // A write elsewhere in the terminal must not turn an already-validated
+      // path back into an asynchronous question. Re-read the candidate beneath
+      // the pointer and carry the resolution forward only when its target and
+      // text range are still identical. A positive filesystem cache answer is
+      // equally safe to promote synchronously.
+      const previousPath = current?.link?.kind === 'path' ? current.link : null;
+      for (const candidate of candidates) {
+        const absolutePath = resolveDetectedPath(
+          candidate.path,
+          cwdRef.current,
+          homeDirRef.current ?? undefined,
+        );
+        if (!absolutePath) continue;
+        const reusesPrevious = Boolean(
+          previousPath
+          && previousPath.absolutePath === absolutePath
+          && previousPath.startCol === candidate.startCol
+          && previousPath.endCol === candidate.endCol,
+        );
+        if (!reusesPrevious && knownPathExists(absolutePath) !== true) continue;
+        entry.link = {
+          kind: 'path',
+          absolutePath,
+          line: candidate.line,
+          column: candidate.column,
+          startCol: candidate.startCol,
+          endCol: candidate.endCol,
+        };
+        entry.linkSpan = spanFromLogicalRange(logical, candidate.startCol, candidate.endCol);
+        if (repaint) renderSurface(true);
+        updateLinkCursor(cell, acceleratorHeldRef.current);
+        return;
+      }
+
       void (async () => {
         const home = await ensureHomeDir();
         for (const candidate of candidates) {
           const absolutePath = resolveDetectedPath(candidate.path, cwdRef.current, home ?? undefined);
           if (!absolutePath) continue;
-          if (!(await cachedPathExists(absolutePath))) continue;
-          if (hoverLinkRef.current !== entry || hoverGenerationRef.current !== generation) return;
+          const known = knownPathExists(absolutePath);
+          if (known === false) continue;
+          if (known !== true && !(await cachedPathExists(absolutePath))) continue;
+          if (hoverLinkRef.current !== entry) return;
+          if (hoverGenerationRef.current !== generation) {
+            // The model changed while validation was in flight. Re-read the
+            // current cell; the now-cached answer is promoted synchronously if
+            // this exact candidate survived the write.
+            refreshHoverLinkRef.current?.();
+            return;
+          }
           entry.link = {
             kind: 'path',
             absolutePath,
@@ -3007,12 +3070,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
       })();
-    }, [cachedPathExists, ensureHomeDir, hyperlinkUriAtViewportCell, isContinuationRow, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+    }, [cachedPathExists, ensureHomeDir, hyperlinkUriAtViewportCell, isContinuationRow, knownPathExists, lineAtVisibleRow, renderSurface, updateLinkCursor]);
+
+    refreshHoverLinkRef.current = () => {
+      const current = hoverLinkRef.current;
+      if (!current || current.generation === hoverGenerationRef.current) return;
+      detectHoverLink(hoveredCellRef.current, { force: true, repaint: false });
+    };
 
     // Link under a cell for click handling: prefer the resolved hover state
     // (paths require it — existence was already validated), fall back to a
     // synchronous URL scan for clicks that arrive before any hover.
     const linkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
+      refreshHoverLinkRef.current?.();
       const hovered = hoverLinkAtCell(cell);
       if (hovered) return hovered;
       if (!cell) return null;

@@ -1,0 +1,14 @@
+kind: fixed
+area: terminal
+change: >
+  Links under the pointer now stay highlighted and clickable while an agent is
+  streaming output elsewhere in the terminal.
+symptom: >
+  Holding Command over a URL or file path made its underline and pointer flash,
+  and file-path clicks could stop working whenever a spinner or status line
+  redrew the terminal.
+notes: >
+  The terminal revalidates the logical line under the stationary pointer inside
+  the existing output paint, retains an unchanged validated path without new
+  filesystem work, and still drops the link immediately when that text moves or
+  changes.
