@@ -64,6 +64,11 @@ const IMAGE_HEIGHT = 48;
 // multi-escape path rather than a single-escape shape no real emitter sends.
 const PAYLOAD_CHUNK = 4096;
 const IMAGE_ID = 8801;
+// A negative z-index, which kitty defines as "draw this under the text". It is
+// the one placement field that is a SIGNED int32 all the way from ghostty's
+// storage through the protocol to the client's store, so asserting it comes
+// back as -1 is what proves nothing on that path widened or truncated it.
+const IMAGE_Z = -1;
 
 const BLOB_TIMEOUT_MS = 20_000;
 const PLACEMENT_TIMEOUT_MS = 20_000;
@@ -130,7 +135,7 @@ function checkerboardRGB(width, height) {
 // and eats the next command. That is faithful terminal behavior, not a defect
 // (kitty does the same); real emitters either set q or read the reply
 // themselves. Silencing it keeps the assertions about placements.
-function kittyTransmitAndDisplay(id, width, height) {
+function kittyTransmitAndDisplay(id, width, height, z) {
   const encoded = checkerboardRGB(width, height).toString('base64');
   let out = '';
   let offset = 0;
@@ -140,7 +145,7 @@ function kittyTransmitAndDisplay(id, width, height) {
     offset += part.length;
     const more = offset < encoded.length ? 1 : 0;
     out += first
-      ? `\x1b_Ga=T,i=${id},f=24,t=d,s=${width},v=${height},q=2,m=${more};${part}\x1b\\`
+      ? `\x1b_Ga=T,i=${id},f=24,t=d,s=${width},v=${height},z=${z},q=2,m=${more};${part}\x1b\\`
       : `\x1b_Gm=${more};${part}\x1b\\`;
     first = false;
   }
@@ -231,7 +236,7 @@ async function main() {
   // ESC through shell quoting is how these escapes get silently corrupted.
   const imageFile = path.join(runner.sessionDir, 'kitty-image.bin');
   const deleteFile = path.join(runner.sessionDir, 'kitty-delete.bin');
-  fs.writeFileSync(imageFile, `\n${kittyTransmitAndDisplay(IMAGE_ID, IMAGE_WIDTH, IMAGE_HEIGHT)}\n`, 'binary');
+  fs.writeFileSync(imageFile, `\n${kittyTransmitAndDisplay(IMAGE_ID, IMAGE_WIDTH, IMAGE_HEIGHT, IMAGE_Z)}\n`, 'binary');
   fs.writeFileSync(deleteFile, '\x1b_Ga=d,q=2\x1b\\\n', 'binary');
 
   const defaultEnv = profileEnv(profile);
@@ -355,6 +360,11 @@ async function main() {
         placed.placement,
       );
       runner.assert(placed.placement.visible === true, 'placement is not inside the grid rectangle', placed.placement);
+      runner.assert(
+        placed.placement.z === IMAGE_Z,
+        `placement z = ${placed.placement.z}, want ${IMAGE_Z} — a negative z-index survives ghostty's storage, the wire, and the client's store as a signed int32, and the renderer draws it under the text`,
+        placed.placement,
+      );
       runner.assert(
         placed.state.placements.length === 1,
         `placement set carries ${placed.state.placements.length} entries, want exactly the one image`,

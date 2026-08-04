@@ -1,12 +1,14 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { GhosttyTerminal } from 'ghostty-web';
+import type { GhosttyCell, GhosttyTerminal } from 'ghostty-web';
 import {
   graphemeAtViewportCell,
   nextAtlasSize,
   visibleOutlineEdges,
   INITIAL_ATLAS_SIZE,
+  KITTY_Z_UNDER_BACKGROUND,
   MAX_ATLAS_SIZE,
   WebGlTerminalRenderer,
+  type WebGlImageQuad,
 } from './GhosttyWebGlRenderer';
 
 function terminalWithHistory(history: number) {
@@ -139,22 +141,96 @@ function makeRecordingContext() {
 
 type RecordingContext = ReturnType<typeof makeRecordingContext>;
 
+// An ordered log of the GL calls that tell the render passes apart. The glyph
+// atlas texture is the first one the renderer creates, so a draw is an image
+// draw exactly when a different texture is bound in front of it — which is how
+// a test reads the pass order out of a frame without owning renderer internals.
+interface RecordedDraw {
+  kind: 'atlas' | 'image';
+  floats: number;
+  vertices: number;
+  firstFloat: number | null;
+}
+
+function makeGlRecorder() {
+  const textures: object[] = [];
+  const calls: Array<
+    | { op: 'bufferData'; floats: number; firstFloat: number | null }
+    | { op: 'drawArrays'; vertices: number }
+    | { op: 'bindTexture'; atlas: boolean }
+  > = [];
+  return {
+    textures,
+    calls,
+    reset() {
+      calls.length = 0;
+    },
+    // One entry per drawArrays, tagged with the texture bound at the time and
+    // the buffer uploaded just before it.
+    draws(): RecordedDraw[] {
+      const draws: RecordedDraw[] = [];
+      let atlasBound = true;
+      let pending: { floats: number; firstFloat: number | null } = { floats: 0, firstFloat: null };
+      for (const call of calls) {
+        if (call.op === 'bindTexture') atlasBound = call.atlas;
+        else if (call.op === 'bufferData') pending = { floats: call.floats, firstFloat: call.firstFloat };
+        else {
+          draws.push({
+            kind: atlasBound ? 'atlas' : 'image',
+            floats: pending.floats,
+            vertices: call.vertices,
+            firstFloat: pending.firstFloat,
+          });
+        }
+      }
+      return draws;
+    },
+  };
+}
+
+type GlRecorder = ReturnType<typeof makeGlRecorder>;
+
 // Any property accessed as a constant (gl.TEXTURE_2D) or called as a no-op
 // method resolves to a throwaway function; only the handful of calls whose
 // return value the renderer actually inspects get real-ish values.
-function makeFakeGl() {
+function makeFakeGl(recorder?: GlRecorder) {
   const truthy = new Set(['getShaderParameter', 'getProgramParameter']);
   const handles = new Set([
     'createShader',
     'createProgram',
     'createBuffer',
-    'createTexture',
     'getUniformLocation',
   ]);
   return new Proxy(
     {},
     {
       get(_target, prop: string) {
+        if (prop === 'createTexture') {
+          return () => {
+            const texture = {};
+            recorder?.textures.push(texture);
+            return texture;
+          };
+        }
+        if (recorder && prop === 'bufferData') {
+          return (_target2: unknown, data: Float32Array) => {
+            recorder.calls.push({
+              op: 'bufferData',
+              floats: data.length,
+              firstFloat: data.length > 0 ? data[0] : null,
+            });
+          };
+        }
+        if (recorder && prop === 'drawArrays') {
+          return (_mode: unknown, _first: number, count: number) => {
+            recorder.calls.push({ op: 'drawArrays', vertices: count });
+          };
+        }
+        if (recorder && prop === 'bindTexture') {
+          return (_target2: unknown, texture: object) => {
+            recorder.calls.push({ op: 'bindTexture', atlas: texture === recorder.textures[0] });
+          };
+        }
         if (truthy.has(prop)) return () => true;
         if (handles.has(prop)) return () => ({});
         if (prop === 'getAttribLocation') return () => 0;
@@ -164,7 +240,7 @@ function makeFakeGl() {
   );
 }
 
-function makeFakeCanvas() {
+function makeFakeCanvas(recorder?: GlRecorder) {
   let ctx2d: RecordingContext | null = null;
   return {
     _w: 0,
@@ -190,7 +266,7 @@ function makeFakeCanvas() {
         return ctx2d;
       }
       if (type === 'webgl2') {
-        return makeFakeGl();
+        return makeFakeGl(recorder);
       }
       return null;
     },
@@ -200,7 +276,7 @@ function makeFakeCanvas() {
   };
 }
 
-function makeRenderer(fontSize = 14, fontFamily = 'monospace') {
+function makeRenderer(fontSize = 14, fontFamily = 'monospace', recorder?: GlRecorder) {
   // Constructor creates two canvases via document.createElement: [0] metrics,
   // [1] atlas. Intercept those; the main canvas is supplied directly.
   const created: ReturnType<typeof makeFakeCanvas>[] = [];
@@ -217,7 +293,7 @@ function makeRenderer(fontSize = 14, fontFamily = 'monospace') {
 
   let renderer: WebGlTerminalRenderer;
   try {
-    const mainCanvas = makeFakeCanvas() as unknown as HTMLCanvasElement;
+    const mainCanvas = makeFakeCanvas(recorder) as unknown as HTMLCanvasElement;
     renderer = new WebGlTerminalRenderer(mainCanvas, fontSize, fontFamily, {
       background: '#000000',
       foreground: '#ffffff',
@@ -232,7 +308,14 @@ function makeRenderer(fontSize = 14, fontFamily = 'monospace') {
   return { renderer: renderer as any, atlasContext };
 }
 
-function makeFakeTerminal(cols: number, rows: number) {
+function makeFakeTerminal(
+  cols: number,
+  rows: number,
+  options: {
+    cell?: (row: number, col: number) => Partial<GhosttyCell>;
+    cursor?: { x: number; y: number; visible: boolean };
+  } = {},
+) {
   const cell = () => ({
     codepoint: 0,
     grapheme_len: 0,
@@ -246,13 +329,145 @@ function makeFakeTerminal(cols: number, rows: number) {
     rows,
     update: () => 1,
     markClean: () => {},
-    getCursor: () => ({ x: 0, y: 0, visible: false }),
-    getViewport: () => Array.from({ length: cols * rows }, cell),
+    getCursor: () => options.cursor ?? { x: 0, y: 0, visible: false },
+    getViewport: () => Array.from({ length: cols * rows }, (_unused, index) => ({
+      ...cell(),
+      ...(options.cell?.(Math.floor(index / cols), index % cols) ?? {}),
+    })),
     getScrollbackLength: () => 0,
     getGraphemeString: () => '',
     getScrollbackGraphemeString: () => '',
   } as unknown as GhosttyTerminal;
 }
+
+// Floats one quad contributes to a vertex buffer: 6 vertices of
+// position(2) + texcoord(2) + color(4) + mode(1).
+const FLOATS_PER_QUAD = 6 * 9;
+
+function makeImageQuad(z: number, x: number, imageId: number): WebGlImageQuad {
+  const width = 2;
+  const height = 2;
+  return {
+    source: {
+      imageId,
+      generation: 1,
+      width,
+      height,
+      format: 'rgba',
+      // byteLength has to match width*height*bytes-per-pixel or the renderer
+      // refuses the blob instead of uploading a texture with a wrong stride.
+      pixels: new Uint8Array(width * height * 4),
+    },
+    x,
+    y: 0,
+    width: 8,
+    height: 8,
+    sourceX: 0,
+    sourceY: 0,
+    sourceWidth: width,
+    sourceHeight: height,
+    z,
+  };
+}
+
+// Kitty's three z layers, read off the frame's draw order. Each case names the
+// bug it catches; all of them are invisible to a quad-count assertion, because
+// the same quads are drawn either way — only the order differs.
+describe('WebGlTerminalRenderer kitty z layering', () => {
+  it('draws a z<0 image between the cell backgrounds and the text', () => {
+    const recorder = makeGlRecorder();
+    const { renderer } = makeRenderer(14, 'monospace', recorder);
+    // One glyph cell and one cell with a non-default background, so both cell
+    // passes carry exactly one quad and the image has to land between them.
+    const terminal = makeFakeTerminal(2, 1, {
+      cell: (_row, col) => (col === 0 ? { codepoint: 65 } : { bg_r: 40, bg_g: 40, bg_b: 40 }),
+    });
+    renderer.resize(2, 1);
+    recorder.reset();
+
+    renderer.render(terminal, true, undefined, undefined, 0, [makeImageQuad(-1, 7, 1)]);
+
+    const draws = recorder.draws();
+    expect(draws.map((draw) => draw.kind)).toEqual(['atlas', 'image', 'atlas']);
+    expect(draws[0].floats).toBe(FLOATS_PER_QUAD); // background pass: the colored cell
+    expect(draws[2].floats).toBe(FLOATS_PER_QUAD); // foreground pass: the glyph
+  });
+
+  it('splits the two deepest layers at the spec constant, exclusive', () => {
+    const recorder = makeGlRecorder();
+    const { renderer } = makeRenderer(14, 'monospace', recorder);
+    const terminal = makeFakeTerminal(1, 1);
+    renderer.resize(1, 1);
+    recorder.reset();
+
+    // Distinct x per quad so the two image draws are told apart by their
+    // vertex data rather than by the order under test.
+    renderer.render(terminal, true, undefined, undefined, 0, [
+      makeImageQuad(KITTY_Z_UNDER_BACKGROUND - 1, 11, 1),
+      makeImageQuad(KITTY_Z_UNDER_BACKGROUND, 22, 2),
+    ]);
+
+    const draws = recorder.draws();
+    expect(draws.map((draw) => draw.kind)).toEqual(['image', 'atlas', 'image', 'atlas']);
+    // Only the one strictly BELOW the constant goes under the backgrounds; the
+    // one at it draws over them, like any other negative z.
+    expect(draws[0].firstFloat).toBe(11 * renderer.dpr);
+    expect(draws[2].firstFloat).toBe(22 * renderer.dpr);
+  });
+
+  it('keeps a z>=0 image above both cell passes', () => {
+    const recorder = makeGlRecorder();
+    const { renderer } = makeRenderer(14, 'monospace', recorder);
+    const terminal = makeFakeTerminal(1, 1);
+    renderer.resize(1, 1);
+    recorder.reset();
+
+    renderer.render(terminal, true, undefined, undefined, 0, [makeImageQuad(0, 0, 1)]);
+
+    expect(recorder.draws().map((draw) => draw.kind)).toEqual(['atlas', 'atlas', 'image']);
+  });
+
+  it('draws the cursor after an under-text image covering its cell', () => {
+    const recorder = makeGlRecorder();
+    const { renderer } = makeRenderer(14, 'monospace', recorder);
+    const terminal = makeFakeTerminal(1, 1, { cursor: { x: 0, y: 0, visible: true } });
+    renderer.resize(1, 1);
+    recorder.reset();
+
+    renderer.render(terminal, true, undefined, undefined, 0, [makeImageQuad(-1, 0, 1)]);
+
+    const draws = recorder.draws();
+    expect(draws.map((draw) => draw.kind)).toEqual(['atlas', 'image', 'atlas']);
+    // The cursor block is a foreground quad, not a cell background: in the
+    // background buffer it would be painted over by the image and disappear.
+    expect(draws[0].floats).toBe(0);
+    expect(draws[2].floats).toBe(FLOATS_PER_QUAD);
+  });
+
+  it('draws a selection tint after an under-text image covering the selection', () => {
+    const recorder = makeGlRecorder();
+    const { renderer } = makeRenderer(14, 'monospace', recorder);
+    const terminal = makeFakeTerminal(1, 1);
+    renderer.resize(1, 1);
+    recorder.reset();
+
+    renderer.render(
+      terminal,
+      true,
+      undefined,
+      [{ startRow: 0, startCol: 0, endRow: 0, endCol: 1, color: '#3366ff', alpha: 0.4, kind: 'background' }],
+      0,
+      [makeImageQuad(-1, 0, 1)],
+    );
+
+    const draws = recorder.draws();
+    expect(draws.map((draw) => draw.kind)).toEqual(['atlas', 'image', 'atlas']);
+    // The tint is an overlay, not a cell background — it has to survive on top
+    // of the image the selection was dragged across.
+    expect(draws[0].floats).toBe(0);
+    expect(draws[2].floats).toBe(FLOATS_PER_QUAD);
+  });
+});
 
 describe('WebGlTerminalRenderer overlays', () => {
   it('emits one background quad per covered cell with full-width middle rows', () => {

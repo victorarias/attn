@@ -1,0 +1,13 @@
+kind: added
+area: terminal
+change: >
+  Kitty images now honor their z-index. An image sent with a negative z draws
+  under the terminal's text instead of on top of it, and one sent below
+  -1073741824 draws under colored cell backgrounds too, matching the kitty
+  spec's three layers. Selections and the cursor stay visible over an image
+  that sits under the text.
+notes: >
+  The wire already carried each placement's z and the client already sorted by
+  it; only the renderer's draw order was missing. The cell pass is now two
+  passes — cell backgrounds, then everything else — so images can be drawn
+  between them.
