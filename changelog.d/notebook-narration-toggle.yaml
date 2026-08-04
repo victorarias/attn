@@ -1,0 +1,7 @@
+kind: changed
+area: notebook
+change: >
+  Journal narration can now be switched off independently in Settings. Disabling
+  it stops routine, nightly, final-removal, and already queued narration jobs from
+  launching their agent, without turning off session summaries or context
+  compaction; the selected narration agent and model stay ready for re-enabling.

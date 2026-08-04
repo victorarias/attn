@@ -254,8 +254,9 @@ schema at 52; app connects at protocol 115.
 ## Group B — Agentic narration & compaction (real model spend)
 
 > These spawn **real headless agents**. Keep `tail -f … daemon.log | grep …` (0.4) running.
-> Default tiers: summarize = Claude **Haiku**, narrate = Claude **Sonnet**. Narration is
-> always on (no enable step). Debounce is **2 min** after a session stop.
+> Default tiers: summarize = Claude **Haiku**, narrate = Claude **Sonnet**. Both duties
+> are enabled by default and can be switched off independently. Debounce is **2 min**
+> after a session stop.
 
 ### B1 — Per-session digest (`summarize_session`) **[LLM]**
 **Proves:** a finished session is digested to the raw tier by the cheap-tier agent.
