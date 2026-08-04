@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
 } from 'react';
@@ -3072,11 +3073,19 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       })();
     }, [cachedPathExists, ensureHomeDir, hyperlinkUriAtViewportCell, isContinuationRow, knownPathExists, lineAtVisibleRow, renderSurface, updateLinkCursor]);
 
-    refreshHoverLinkRef.current = () => {
-      const current = hoverLinkRef.current;
-      if (!current || current.generation === hoverGenerationRef.current) return;
-      detectHoverLink(hoveredCellRef.current, { force: true, repaint: false });
-    };
+    useLayoutEffect(() => {
+      const refreshHoverLink = () => {
+        const current = hoverLinkRef.current;
+        if (!current || current.generation === hoverGenerationRef.current) return;
+        detectHoverLink(hoveredCellRef.current, { force: true, repaint: false });
+      };
+      refreshHoverLinkRef.current = refreshHoverLink;
+      return () => {
+        if (refreshHoverLinkRef.current === refreshHoverLink) {
+          refreshHoverLinkRef.current = null;
+        }
+      };
+    }, [detectHoverLink]);
 
     // Link under a cell for click handling: prefer the resolved hover state
     // (paths require it — existence was already validated), fall back to a
