@@ -527,6 +527,13 @@ func (d *Daemon) recentUserInput(sessionID string, within time.Duration) bool {
 func (d *Daemon) userInputQuietRemaining(sessionID string, within time.Duration) time.Duration {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
+	return d.userInputQuietRemainingLocked(sessionID, within)
+}
+
+// userInputQuietRemainingLocked is the same reading, for a caller that already
+// holds lastInputMu because it needs the answer and its own next step to be
+// indivisible from recording a keystroke. See settleIfQuiet.
+func (d *Daemon) userInputQuietRemainingLocked(sessionID string, within time.Duration) time.Duration {
 	last, ok := d.lastUserInputAt[sessionID]
 	if !ok {
 		return 0
@@ -536,6 +543,35 @@ func (d *Daemon) userInputQuietRemaining(sessionID string, within time.Duration)
 		return 0
 	}
 	return remaining
+}
+
+// settleIfQuiet is auto-settle's commit: the only place a timer closes a turn,
+// and the reason the typing hold is airtight rather than merely likely.
+//
+// The quiet check and the store write happen in one critical section, under the
+// same lock noteUserInput records a keystroke with. That is what makes the two
+// indivisible. Checking first and settling afterwards — however few instructions
+// apart — leaves a gap a real keystroke can land in: it would be stamped after
+// the guard had already looked, and the hold that follows it finds the timer
+// gone from the map and does nothing, so the turn closes with the user's hands
+// on the keyboard. Serialized, a key pressed before the settle commits is always
+// seen by the check that guards it, and a key that loses was pressed after the
+// turn had already closed — which is honest, and unavoidable in any design.
+//
+// The lock spans a store write, so the scope is worth stating plainly: the only
+// way to contend for it is to type in the instant a settle commits, and a settle
+// only commits after `within` of silence. The single keystroke that could ever
+// wait on one primary-key update is the one this exists to protect.
+//
+// Reports the remaining quiet time when it refuses, so the caller can reschedule
+// exactly to the end of the window, and whether the turn was actually settled.
+func (d *Daemon) settleIfQuiet(sessionID string, within time.Duration) (quiet time.Duration, settled bool) {
+	d.lastInputMu.Lock()
+	defer d.lastInputMu.Unlock()
+	if remaining := d.userInputQuietRemainingLocked(sessionID, within); remaining > 0 {
+		return remaining, false
+	}
+	return 0, d.store.SettleTurn(sessionID, time.Now())
 }
 
 // isUserKeystrokeSource reports whether a pty_input source tag represents the user

@@ -395,59 +395,71 @@ func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) 
 		return "not-owed"
 	}
 
-	// The typing hold, at fire time. Two timers arrive here: a held session's own
-	// quiet check, and — the reason this guard is not only in holdAutoSettle — an
-	// arm or countdown timer that fired in the microseconds around a keystroke,
-	// before the hold could stop it. That race is the one interleaving where a
-	// turn would be closed under the user's hands, so the check is repeated where
-	// the settle actually happens rather than trusted upstream.
-	if quiet := d.userInputQuietRemaining(sessionID, autoSettleHoldQuietWindow); quiet > 0 {
+	// A phase that only moves the timer along can take the typing hold as a plain
+	// check: nothing is committed on the far side of it, so a keystroke that
+	// arrives a moment later still meets a pending timer and freezes it there.
+	if phase == autoSettleHeld || phase == autoSettleArming {
 		hold := phase
 		if phase == autoSettleHeld {
 			hold = resume
 		}
-		d.autoSettleMu.Lock()
-		d.startAutoSettleHeldLocked(sessionID, hold, quiet)
-		d.autoSettleMu.Unlock()
-		return "held"
-	}
-
-	if phase == autoSettleHeld {
-		// Quiet again. The window is read fresh from settings and starts full: a
-		// frozen bar is drawn full, so resuming anything less would drop the bar
-		// on release, and the user has just been typing at this agent — the
-		// countdown they get back is the whole one they would have got by
-		// steering it now.
-		window := cfg.arm
-		if resume == autoSettleCounting {
-			window = cfg.countdown
+		if quiet := d.userInputQuietRemaining(sessionID, autoSettleHoldQuietWindow); quiet > 0 {
+			d.holdFromFire(sessionID, hold, quiet)
+			return "held"
 		}
-		d.autoSettleMu.Lock()
-		d.startAutoSettleLocked(sessionID, resume, window)
-		d.autoSettleMu.Unlock()
-		return "resumed"
-	}
-
-	if phase == autoSettleArming {
+		if phase == autoSettleHeld {
+			// Quiet again. The window is read fresh from settings and starts
+			// full: a frozen bar is drawn full, so resuming anything less would
+			// drop the bar on release, and the user has just been typing at this
+			// agent — the countdown they get back is the whole one they would
+			// have got by steering it now.
+			window := cfg.arm
+			if resume == autoSettleCounting {
+				window = cfg.countdown
+			}
+			d.autoSettleMu.Lock()
+			d.startAutoSettleLocked(sessionID, resume, window)
+			d.autoSettleMu.Unlock()
+			return "resumed"
+		}
 		d.autoSettleMu.Lock()
 		d.startAutoSettleLocked(sessionID, autoSettleCounting, cfg.countdown)
 		d.autoSettleMu.Unlock()
 		return "counting"
 	}
 
-	// Test seam: the instant between "this turn is still owed" and the settle.
-	// Nil in production. It exists because the interleaving that makes this
-	// function dangerous is far too narrow to hit by chance, so the regression
-	// test has to stand in it deliberately.
+	// Test seam: the instant before the settle commits. Nil in production. It
+	// exists because the interleaving that makes this function dangerous — a real
+	// keystroke arriving here, with the timer already pulled out of the map so
+	// the hold it triggers has nothing to freeze — is far too narrow to hit by
+	// chance, and the regression has to stand in it deliberately.
 	if d.autoSettlePreSettleHook != nil {
 		d.autoSettlePreSettleHook()
 	}
 
-	if !d.store.SettleTurn(sessionID, time.Now()) {
+	// The countdown ran out, so this is where the turn closes. The typing hold is
+	// re-asked here rather than above because it has to be indivisible from the
+	// write it guards — settleIfQuiet holds the keystroke lock across both — and
+	// because the countdown timer can have fired in the microseconds around a
+	// keystroke, before holdAutoSettle could stop it.
+	quiet, settled := d.settleIfQuiet(sessionID, autoSettleHoldQuietWindow)
+	if quiet > 0 {
+		d.holdFromFire(sessionID, autoSettleCounting, quiet)
+		return "held"
+	}
+	if !settled {
 		return "settle-failed"
 	}
 	d.traceSettle(sessionID)
 	return "settled"
+}
+
+// holdFromFire parks a session the fire path found the user typing into, with a
+// quiet check exactly at the end of the window their last keystroke opened.
+func (d *Daemon) holdFromFire(sessionID string, resume autoSettlePhase, quiet time.Duration) {
+	d.autoSettleMu.Lock()
+	d.startAutoSettleHeldLocked(sessionID, resume, quiet)
+	d.autoSettleMu.Unlock()
 }
 
 // cancelAutoSettleByUser is the user calling off a pending settle: keep this

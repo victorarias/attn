@@ -587,6 +587,49 @@ func TestAutoSettle_KeystrokeRacingTheFireHoldsInsteadOfSettling(t *testing.T) {
 	}
 }
 
+// The narrower half of the same race, and the one a timestamp placed beforehand
+// never reaches: the keystroke arrives *inside* the fire, after the guard has
+// already looked and while the turn is on its way to being closed. The timer is
+// out of the map by then, so the hold the keystroke triggers finds nothing to
+// freeze and the only thing standing between the user and a settled turn is that
+// the check and the write are one step.
+//
+// A whole pty_input, not a hand-placed stamp: the point is that the real path —
+// source filter, stamp, write, hold — cannot slip through the gap.
+func TestAutoSettle_KeystrokeInsideTheSettleStillHoldsIt(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id) // into the visible countdown
+
+	typed := false
+	d.autoSettlePreSettleHook = func() {
+		if typed {
+			return
+		}
+		typed = true
+		typeInto(d, id)
+	}
+	var outcome string
+	d.autoSettleFireHook = func(_, action string) { outcome = action }
+	fireAutoSettleNow(t, d, id)
+
+	if !typed {
+		t.Fatal("the countdown never reached the settle; the test stood in the wrong gap")
+	}
+	if outcome != "held" {
+		t.Fatalf("outcome = %q, want held", outcome)
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn settled around a keystroke that landed before the settle committed")
+	}
+	held, ok := autoSettlePending(d, id)
+	if !ok || held.phase != autoSettleHeld || held.resume != autoSettleCounting {
+		t.Fatalf("after the racing keystroke: pending=%v entry=%+v, want held(resume=counting)", ok, held)
+	}
+}
+
 // Typing during the arm delay holds it too, but invisibly: the arming phase was
 // never announced, and a paused indicator for a settle nobody has decided on is
 // exactly what the two-phase split exists to avoid. It resumes into arming, not
