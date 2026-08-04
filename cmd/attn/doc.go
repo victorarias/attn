@@ -83,11 +83,20 @@ commands:
   collections [--json]
         list every declared collection, and the indexed field each one offers.
 
-  put <namespace> <collection> <id> <body|->
+  put <namespace> <collection> <id> <body|-> [--expect <rev|absent>]
         write a document. The body is a JSON object, or - to read stdin.
+        Prints the revision the document now has.
+
+        --expect makes the write conditional. Every read reports a document's
+        revision, so pass the one you read to change a document only if nobody
+        has changed it since; the write is refused, naming both revisions, if
+        they have. --expect absent writes only if the document does not exist
+        yet. Without --expect the write always wins, which is what you want for
+        a value you are setting rather than editing.
 
   get <namespace> <collection> <id> [--json]
-  delete <namespace> <collection> <id>
+  delete <namespace> <collection> <id> [--expect <rev>]
+        --expect removes the document only if it is still at that revision.
 
   query <namespace> <collection> [query flags] [--json]
         run a query once.
@@ -194,6 +203,7 @@ func runDocCollections(args []string) {
 
 func runDocPut(args []string) {
 	namespace, collection, rest := docTarget("put", args)
+	rest, expect := takeExpectFlag("put", rest, true)
 	if len(rest) < 2 {
 		docFail("put", fmt.Errorf("needs <id> and a JSON body (or - for stdin)"))
 	}
@@ -205,10 +215,51 @@ func runDocPut(args []string) {
 		}
 		body = string(raw)
 	}
-	if _, err := docClient().DocPut(namespace, collection, id, body); err != nil {
+	result, err := docClient().DocPut(namespace, collection, id, body, expect)
+	if err != nil {
 		docFail("put", err)
 	}
-	fmt.Printf("wrote %s/%s/%s\n", namespace, collection, id)
+	fmt.Printf("wrote %s/%s/%s (rev %d)\n", namespace, collection, id, result.Rev)
+}
+
+// takeExpectFlag pulls `--expect <rev|absent>` out of a command's arguments and
+// returns what is left, so the positional arguments can still be read by
+// position. absent is offered only where "must not exist" is something the
+// command can act on.
+func takeExpectFlag(verb string, args []string, allowAbsent bool) ([]string, *int) {
+	rest := make([]string, 0, len(args))
+	var expect *int
+	for i := 0; i < len(args); i++ {
+		if args[i] != "--expect" {
+			rest = append(rest, args[i])
+			continue
+		}
+		if i+1 >= len(args) {
+			docFail(verb, fmt.Errorf("--expect needs a revision%s", expectAbsentHint(allowAbsent)))
+		}
+		i++
+		if args[i] == "absent" {
+			if !allowAbsent {
+				docFail(verb, fmt.Errorf("--expect absent asks to act on a document that is not there, which %s cannot do", verb))
+			}
+			absent := int(docstore.ExpectAbsent)
+			expect = &absent
+			continue
+		}
+		rev, err := strconv.Atoi(args[i])
+		if err != nil || rev < int(docstore.FirstRev) {
+			docFail(verb, fmt.Errorf("--expect %q is not a revision%s", args[i], expectAbsentHint(allowAbsent)))
+		}
+		expect = &rev
+	}
+	return rest, expect
+}
+
+func expectAbsentHint(allowAbsent bool) string {
+	if allowAbsent {
+		return ` (a number from a previous read, or "absent")`
+	}
+	return " (a number from a previous read)"
 }
 
 func runDocGet(args []string) {
@@ -233,10 +284,11 @@ func runDocGet(args []string) {
 
 func runDocDelete(args []string) {
 	namespace, collection, rest := docTarget("delete", args)
+	rest, expect := takeExpectFlag("delete", rest, false)
 	if len(rest) < 1 {
 		docFail("delete", fmt.Errorf("needs <id>"))
 	}
-	result, err := docClient().DocDelete(namespace, collection, rest[0])
+	result, err := docClient().DocDelete(namespace, collection, rest[0], expect)
 	if err != nil {
 		docFail("delete", err)
 	}
@@ -263,11 +315,11 @@ func runDocWatch(args []string) {
 	err := docClient().DocSubscribe(query, func(result *protocol.DocSubscribeResult) bool {
 		if asJSON {
 			writeJSON(struct {
-				Revision  int            `json:"revision"`
+				Delivery  int            `json:"delivery"`
 				Documents []jsonDocument `json:"documents"`
-			}{result.Revision, docsForJSON(result.Documents)})
+			}{result.Delivery, docsForJSON(result.Documents)})
 		} else {
-			fmt.Printf("--- revision %d (%d document(s)) ---\n", result.Revision, len(result.Documents))
+			fmt.Printf("--- delivery %d (%d document(s)) ---\n", result.Delivery, len(result.Documents))
 			printDocuments(result.Documents, false)
 		}
 		return true
@@ -379,6 +431,7 @@ func docBoundAsJSON(raw string) string {
 type jsonDocument struct {
 	ID        string          `json:"id"`
 	Body      json.RawMessage `json:"body"`
+	Rev       int             `json:"rev"`
 	CreatedAt string          `json:"created_at"`
 	UpdatedAt string          `json:"updated_at"`
 }
@@ -389,6 +442,7 @@ func docsForJSON(docs []protocol.StoredDocument) []jsonDocument {
 		out = append(out, jsonDocument{
 			ID:        doc.ID,
 			Body:      json.RawMessage(doc.Body),
+			Rev:       doc.Rev,
 			CreatedAt: doc.CreatedAt,
 			UpdatedAt: doc.UpdatedAt,
 		})
@@ -406,9 +460,9 @@ func printDocuments(docs []protocol.StoredDocument, asJSON bool) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tUPDATED\tBODY")
+	fmt.Fprintln(w, "ID\tREV\tUPDATED\tBODY")
 	for _, doc := range docs {
-		fmt.Fprintf(w, "%s\t%s\t%s\n", doc.ID, doc.UpdatedAt, doc.Body)
+		fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", doc.ID, doc.Rev, doc.UpdatedAt, doc.Body)
 	}
 	w.Flush()
 }

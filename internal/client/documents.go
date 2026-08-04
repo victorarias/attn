@@ -40,9 +40,13 @@ func (c *Client) DocCollections() (*protocol.DocCollectionsResult, error) {
 	return resp.DocCollectionsResult, nil
 }
 
-func (c *Client) DocPut(namespace, collection, id, body string) (*protocol.DocPutResult, error) {
+// DocPut writes a document. expectedRev is the revision the caller believes it
+// is replacing — nil writes unconditionally, and see DocPutMessage for what a
+// value means.
+func (c *Client) DocPut(namespace, collection, id, body string, expectedRev *int) (*protocol.DocPutResult, error) {
 	resp, err := c.send(protocol.DocPutMessage{
 		Cmd: protocol.CmdDocPut, Namespace: namespace, Collection: collection, ID: id, Body: body,
+		ExpectedRev: expectedRev,
 	})
 	if err != nil {
 		return nil, err
@@ -60,9 +64,10 @@ func (c *Client) DocGet(namespace, collection, id string) (*protocol.DocGetResul
 	return resp.DocGetResult, nil
 }
 
-func (c *Client) DocDelete(namespace, collection, id string) (*protocol.DocDeleteResult, error) {
+func (c *Client) DocDelete(namespace, collection, id string, expectedRev *int) (*protocol.DocDeleteResult, error) {
 	resp, err := c.send(protocol.DocDeleteMessage{
 		Cmd: protocol.CmdDocDelete, Namespace: namespace, Collection: collection, ID: id,
+		ExpectedRev: expectedRev,
 	})
 	if err != nil {
 		return nil, err

@@ -346,15 +346,30 @@ func (d *Daemon) handleDocPut(conn net.Conn, msg *protocol.DocPutMessage) {
 		d.sendError(conn, err.Error())
 		return
 	}
-	if err := d.store.PutDocument(*schema, msg.ID, []byte(msg.Body), time.Now()); err != nil {
+	// A refused write publishes nothing: the store did not change, and waking
+	// every live query on the collection to re-render an identical result set is
+	// exactly the cost the conditional write exists to avoid.
+	rev, err := d.store.PutDocument(*schema, msg.ID, []byte(msg.Body), time.Now(), expectedRev(msg.ExpectedRev))
+	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
 	d.publishDocumentChanged(msg.Namespace, msg.Collection, msg.ID, false)
 	d.sendDocResponse(conn, protocol.Response{
 		Ok:           true,
-		DocPutResult: &protocol.DocPutResult{Namespace: msg.Namespace, Collection: msg.Collection, ID: msg.ID},
+		DocPutResult: &protocol.DocPutResult{Namespace: msg.Namespace, Collection: msg.Collection, ID: msg.ID, Rev: int(rev)},
 	})
+}
+
+// expectedRev converts the wire's optional revision to the store's. The wire
+// carries safeint, which generates as int; the store keeps int64 so the SQL side
+// is the same width on every platform.
+func expectedRev(wire *int) *int64 {
+	if wire == nil {
+		return nil
+	}
+	rev := int64(*wire)
+	return &rev
 }
 
 func (d *Daemon) handleDocGet(conn net.Conn, msg *protocol.DocGetMessage) {
@@ -382,7 +397,7 @@ func (d *Daemon) handleDocDelete(conn net.Conn, msg *protocol.DocDeleteMessage) 
 		d.sendError(conn, err.Error())
 		return
 	}
-	existed, err := d.store.DeleteDocument(*schema, msg.ID)
+	existed, err := d.store.DeleteDocument(*schema, msg.ID, expectedRev(msg.ExpectedRev))
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
@@ -459,7 +474,7 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 	}()
 
 	encoder := json.NewEncoder(conn)
-	for revision := 1; ; revision++ {
+	for delivery := 1; ; delivery++ {
 		// The declaration is re-read per delivery rather than captured, because
 		// it can go out from under a subscription in two ways and both have to
 		// end the subscription rather than mislead it. Undefining drops the
@@ -482,7 +497,7 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 		d.logSlowDocFanOut(sub, *live, took)
 		resp := protocol.Response{
 			Ok:                 true,
-			DocSubscribeResult: &protocol.DocSubscribeResult{Revision: revision, Documents: docs},
+			DocSubscribeResult: &protocol.DocSubscribeResult{Delivery: delivery, Documents: docs},
 		}
 		if err := encoder.Encode(resp); err != nil {
 			return
@@ -557,6 +572,7 @@ func storedDocumentToProtocol(doc docstore.Document) protocol.StoredDocument {
 	return protocol.StoredDocument{
 		ID:        doc.ID,
 		Body:      string(doc.Body),
+		Rev:       int(doc.Rev),
 		CreatedAt: doc.CreatedAt.UTC().Format(docstore.TimeFormat),
 		UpdatedAt: doc.UpdatedAt.UTC().Format(docstore.TimeFormat),
 	}

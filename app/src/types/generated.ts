@@ -1413,10 +1413,11 @@ export interface DocDefineResult {
 }
 
 export interface DocDeleteMessage {
-    cmd:        DocDeleteMessageCmd;
-    collection: string;
-    id:         string;
-    namespace:  string;
+    cmd:           DocDeleteMessageCmd;
+    collection:    string;
+    expected_rev?: number;
+    id:            string;
+    namespace:     string;
     [property: string]: any;
 }
 
@@ -1454,16 +1455,18 @@ export interface Document {
     body:       string;
     created_at: string;
     id:         string;
+    rev:        number;
     updated_at: string;
     [property: string]: any;
 }
 
 export interface DocPutMessage {
-    body:       string;
-    cmd:        DocPutMessageCmd;
-    collection: string;
-    id:         string;
-    namespace:  string;
+    body:          string;
+    cmd:           DocPutMessageCmd;
+    collection:    string;
+    expected_rev?: number;
+    id:            string;
+    namespace:     string;
     [property: string]: any;
 }
 
@@ -1475,6 +1478,7 @@ export interface DocPutResult {
     collection: string;
     id:         string;
     namespace:  string;
+    rev:        number;
     [property: string]: any;
 }
 
@@ -1527,8 +1531,8 @@ export enum DocSubscribeMessageCmd {
 }
 
 export interface DocSubscribeResult {
+    delivery:  number;
     documents: Document[];
-    revision:  number;
     [property: string]: any;
 }
 
@@ -4272,6 +4276,7 @@ export interface DocPutResultObject {
     collection: string;
     id:         string;
     namespace:  string;
+    rev:        number;
     [property: string]: any;
 }
 
@@ -4281,8 +4286,8 @@ export interface DocQueryResultObject {
 }
 
 export interface DocSubscribeResultObject {
+    delivery:  number;
     documents: Document[];
-    revision:  number;
     [property: string]: any;
 }
 
@@ -5098,6 +5103,7 @@ export interface StoredDocument {
     body:       string;
     created_at: string;
     id:         string;
+    rev:        number;
     updated_at: string;
     [property: string]: any;
 }
@@ -10550,6 +10556,7 @@ const typeMap: any = {
     "DocDeleteMessage": o([
         { json: "cmd", js: "cmd", typ: r("DocDeleteMessageCmd") },
         { json: "collection", js: "collection", typ: "" },
+        { json: "expected_rev", js: "expected_rev", typ: u(undefined, 0) },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
     ], "any"),
@@ -10573,12 +10580,14 @@ const typeMap: any = {
         { json: "body", js: "body", typ: "" },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "rev", js: "rev", typ: 0 },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
     "DocPutMessage": o([
         { json: "body", js: "body", typ: "" },
         { json: "cmd", js: "cmd", typ: r("DocPutMessageCmd") },
         { json: "collection", js: "collection", typ: "" },
+        { json: "expected_rev", js: "expected_rev", typ: u(undefined, 0) },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
     ], "any"),
@@ -10586,6 +10595,7 @@ const typeMap: any = {
         { json: "collection", js: "collection", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
+        { json: "rev", js: "rev", typ: 0 },
     ], "any"),
     "DocQueryMessage": o([
         { json: "cmd", js: "cmd", typ: r("DocQueryMessageCmd") },
@@ -10616,8 +10626,8 @@ const typeMap: any = {
         { json: "query", js: "query", typ: r("Query") },
     ], "any"),
     "DocSubscribeResult": o([
+        { json: "delivery", js: "delivery", typ: 0 },
         { json: "documents", js: "documents", typ: a(r("Document")) },
-        { json: "revision", js: "revision", typ: 0 },
     ], "any"),
     "DocumentCollectionSchema": o([
         { json: "collection", js: "collection", typ: "" },
@@ -12254,13 +12264,14 @@ const typeMap: any = {
         { json: "collection", js: "collection", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
+        { json: "rev", js: "rev", typ: 0 },
     ], "any"),
     "DocQueryResultObject": o([
         { json: "documents", js: "documents", typ: a(r("Document")) },
     ], "any"),
     "DocSubscribeResultObject": o([
+        { json: "delivery", js: "delivery", typ: 0 },
         { json: "documents", js: "documents", typ: a(r("Document")) },
-        { json: "revision", js: "revision", typ: 0 },
     ], "any"),
     "DocUndefineResultObject": o([
         { json: "collection", js: "collection", typ: "" },
@@ -12762,6 +12773,7 @@ const typeMap: any = {
         { json: "body", js: "body", typ: "" },
         { json: "created_at", js: "created_at", typ: "" },
         { json: "id", js: "id", typ: "" },
+        { json: "rev", js: "rev", typ: 0 },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
     "SubscribeGitStatusMessage": o([
