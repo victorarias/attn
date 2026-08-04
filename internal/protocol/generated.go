@@ -4309,6 +4309,9 @@ type Session struct {
 	// AutoSettleFiresAt corresponds to the JSON schema field "auto_settle_fires_at".
 	AutoSettleFiresAt *string `json:"auto_settle_fires_at,omitempty,omitzero"`
 
+	// AutoSettleHeld corresponds to the JSON schema field "auto_settle_held".
+	AutoSettleHeld *bool `json:"auto_settle_held,omitempty,omitzero"`
+
 	// Branch corresponds to the JSON schema field "branch".
 	Branch *string `json:"branch,omitempty,omitzero"`
 

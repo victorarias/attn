@@ -123,6 +123,30 @@
   box-shadow: 0 0 9px 1px rgba(var(--settling-accent), 0.7);
 }
 
+/* ---- Held: the user is typing, so the countdown is frozen ----
+
+   The bar keeps its full width and stops moving; the chip dims and its dot stops
+   pulsing. Frozen has to read as "still here, not running" rather than as a
+   countdown at 100%, and stillness is what carries that — the pulsing dot is the
+   only thing on the chip that says a clock is going. */
+
+.settling-header--held {
+  background: rgba(var(--settling-accent), 0.1);
+  border-color: rgba(var(--settling-accent), 0.35);
+  color: #c8bcf0;
+}
+
+.settling-header--held .settling-dot {
+  animation: none;
+  opacity: 0.55;
+  box-shadow: none;
+}
+
+.settling-track-fill--held {
+  opacity: 0.45;
+  box-shadow: none;
+}
+
 @keyframes settling-dot-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.75); }

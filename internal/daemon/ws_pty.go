@@ -619,7 +619,7 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 	source := strings.TrimSpace(protocol.Deref(msg.Source))
 	// Record genuine user keystrokes for the nudge splice guard. A doorbell that fires
 	// within userInputGuardWindow of a keystroke would splice onto the half-typed line.
-	d.noteUserInput(msg.ID, source)
+	userTyped := d.noteUserInput(msg.ID, source)
 	if d.debugLogging {
 		d.logf(
 			"pty_input: id=%s bytes=%d preview=%q source=%s",
@@ -637,6 +637,14 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 		}
 	} else if d.debugLogging {
 		d.logf("pty_input ok: id=%s bytes=%d", msg.ID, len(msg.Data))
+	}
+
+	// After the bytes are away, never before: freezing a pending settle can
+	// broadcast a snapshot, and a keystroke must not wait on one to reach the
+	// agent. Nothing about the hold is ordered against the write — it moves a
+	// deadline seconds out.
+	if userTyped {
+		d.holdAutoSettle(msg.ID)
 	}
 }
 

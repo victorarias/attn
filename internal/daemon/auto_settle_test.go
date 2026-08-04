@@ -454,3 +454,235 @@ func TestAutoSettle_ConcurrentApprovalKeepsTheTurn(t *testing.T) {
 		t.Fatal("the turn was settled while the session was asking for approval")
 	}
 }
+
+// ---- Typing holds the settle ----
+//
+// attn cannot see inside the agent's TUI, so it cannot tell composing a message
+// from erasing one from pressing Escape. It does not need to: every keystroke
+// means the user's hands are on this session, which is the whole question a
+// pending settle is asking. These cover what that costs and where it stops.
+
+// typeInto is a genuine keystroke arriving from an interactive client, driven
+// through the real pty_input handler so the wiring between typing and the hold
+// is part of what these cover — not just the hold in isolation.
+func typeInto(d *Daemon, sessionID string) {
+	typeIntoAs(d, sessionID, "")
+}
+
+// typeIntoAs is the same with an explicit source tag, for the writes that are
+// attn typing rather than the user.
+func typeIntoAs(d *Daemon, sessionID, source string) {
+	msg := &protocol.PtyInputMessage{Cmd: protocol.CmdPtyInput, ID: sessionID, Data: "x"}
+	if source != "" {
+		msg.Source = protocol.Ptr(source)
+	}
+	d.handlePtyInput(nil, msg)
+}
+
+// goQuiet backdates the session's last keystroke so the quiet window has
+// elapsed, standing in for the user taking their hands off the keyboard.
+func goQuiet(d *Daemon, sessionID string) {
+	d.lastInputMu.Lock()
+	defer d.lastInputMu.Unlock()
+	d.lastUserInputAt[sessionID] = time.Now().Add(-2 * autoSettleHoldQuietWindow)
+}
+
+// The feature in one pass: typing freezes a running countdown, the freeze is
+// what rides the wire in place of a deadline, and going quiet hands back a whole
+// countdown rather than the sliver that was left.
+func TestAutoSettle_TypingFreezesTheCountdownAndQuietResumesIt(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id) // into the visible countdown
+	counting, _ := autoSettlePending(d, id)
+
+	typeInto(d, id)
+
+	held, ok := autoSettlePending(d, id)
+	if !ok || held.phase != autoSettleHeld {
+		t.Fatalf("after a keystroke: pending=%v entry=%+v, want the held phase", ok, held)
+	}
+	if held.resume != autoSettleCounting {
+		t.Fatalf("resume phase = %v, want counting", held.resume)
+	}
+	if held.timer == counting.timer {
+		t.Fatal("the countdown's own timer is still running; it would settle the turn mid-keystroke")
+	}
+	clone := d.sessionForBroadcast(d.store.Get(id))
+	if clone.AutoSettleFiresAt != nil {
+		t.Fatalf("auto_settle_fires_at = %q while held; a frozen countdown has no deadline to animate against", *clone.AutoSettleFiresAt)
+	}
+	if !protocol.Deref(clone.AutoSettleHeld) {
+		t.Fatal("auto_settle_held absent while frozen; the tile has nothing to freeze on")
+	}
+
+	// Still typing when the quiet check comes round: hold again, settle nothing.
+	fireAutoSettleNow(t, d, id)
+	again, ok := autoSettlePending(d, id)
+	if !ok || again.phase != autoSettleHeld {
+		t.Fatalf("quiet check with a fresh keystroke: pending=%v entry=%+v, want still held", ok, again)
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn settled while the user was still typing")
+	}
+
+	goQuiet(d, id)
+	fireAutoSettleNow(t, d, id)
+
+	resumed, ok := autoSettlePending(d, id)
+	if !ok || resumed.phase != autoSettleCounting {
+		t.Fatalf("after the quiet window: pending=%v entry=%+v, want counting again", ok, resumed)
+	}
+	if window := time.Until(resumed.firesAt); window < 3500*time.Second {
+		// The fixture's countdown is 3600s. A resumed countdown is a whole one:
+		// the frozen bar is drawn full, so releasing into a remainder would drop
+		// the bar the instant the user stopped typing.
+		t.Fatalf("resumed countdown = %v, want the full configured window", window)
+	}
+	clone = d.sessionForBroadcast(d.store.Get(id))
+	if clone.AutoSettleFiresAt == nil {
+		t.Fatal("auto_settle_fires_at absent after the hold released")
+	}
+	if clone.AutoSettleHeld != nil {
+		t.Fatal("auto_settle_held still set after the hold released")
+	}
+
+	fireAutoSettleNow(t, d, id)
+	if turnIsOwed(d, id) {
+		t.Fatal("turn still owed after the resumed countdown elapsed")
+	}
+}
+
+// The race the hold cannot cover on its own: the countdown timer fires in the
+// microseconds around a keystroke, before holdAutoSettle can stop it. This is
+// the one interleaving that would close a turn under the user's hands, so the
+// fire path re-checks rather than trusting that the hold got there first.
+func TestAutoSettle_KeystrokeRacingTheFireHoldsInsteadOfSettling(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+
+	// Record the keystroke without holding: exactly the window in which the timer
+	// has already been pulled out of the map and is on its way to the settle.
+	d.lastInputMu.Lock()
+	if d.lastUserInputAt == nil {
+		d.lastUserInputAt = make(map[string]time.Time)
+	}
+	d.lastUserInputAt[id] = time.Now()
+	d.lastInputMu.Unlock()
+
+	var outcome string
+	d.autoSettleFireHook = func(_, action string) { outcome = action }
+	fireAutoSettleNow(t, d, id)
+
+	if outcome != "held" {
+		t.Fatalf("outcome = %q, want held", outcome)
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn settled by a countdown that fired into a keystroke")
+	}
+}
+
+// Typing during the arm delay holds it too, but invisibly: the arming phase was
+// never announced, and a paused indicator for a settle nobody has decided on is
+// exactly what the two-phase split exists to avoid. It resumes into arming, not
+// into a countdown it never earned.
+func TestAutoSettle_TypingDuringTheArmDelayHoldsItInvisibly(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+
+	typeInto(d, id)
+
+	held, ok := autoSettlePending(d, id)
+	if !ok || held.phase != autoSettleHeld || held.resume != autoSettleArming {
+		t.Fatalf("after typing during the arm delay: pending=%v entry=%+v, want held(resume=arming)", ok, held)
+	}
+	clone := d.sessionForBroadcast(d.store.Get(id))
+	if clone.AutoSettleHeld != nil {
+		t.Fatal("auto_settle_held rode the wire for a frozen arm delay; nothing was on screen to freeze")
+	}
+	if clone.AutoSettleFiresAt != nil {
+		t.Fatalf("auto_settle_fires_at = %q during a held arm delay", *clone.AutoSettleFiresAt)
+	}
+
+	goQuiet(d, id)
+	fireAutoSettleNow(t, d, id)
+
+	resumed, ok := autoSettlePending(d, id)
+	if !ok || resumed.phase != autoSettleArming {
+		t.Fatalf("after the quiet window: pending=%v entry=%+v, want the arm delay back", ok, resumed)
+	}
+}
+
+// A hold is not a cancel. The user going quiet is not the user answering, so the
+// countdown comes back on its own — where ⌘. stands until the session leaves
+// `working`.
+func TestAutoSettle_HoldExpiresWhereCancelStands(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+	typeInto(d, id)
+
+	if d.autoSettleSuppressedFor(id) {
+		t.Fatal("typing set the cancel suppression; a hold must expire on its own")
+	}
+	goQuiet(d, id)
+	fireAutoSettleNow(t, d, id)
+	if entry, ok := autoSettlePending(d, id); !ok || entry.phase != autoSettleCounting {
+		t.Fatalf("countdown did not come back after the hold: pending=%v entry=%+v", ok, entry)
+	}
+}
+
+// The agent wanting the user beats everything, including a hold. A held session
+// that leaves `working` drops its timer and its wire flag, the same as a running
+// countdown does.
+func TestAutoSettle_LeavingWorkingClearsAHold(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+	typeInto(d, id)
+
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StatePendingApproval, cause: liveSignal{}}) {
+		t.Fatal("applyState(pending_approval) = false")
+	}
+
+	if _, ok := autoSettlePending(d, id); ok {
+		t.Fatal("a hold survived the session leaving working")
+	}
+	clone := d.sessionForBroadcast(d.store.Get(id))
+	if clone.AutoSettleHeld != nil {
+		t.Fatal("auto_settle_held survived the session leaving working")
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn was settled on the move to pending_approval")
+	}
+}
+
+// attn typing on the user's behalf is not the user typing. A doorbell, a
+// delegation brief, or an attach replay must not hold a countdown open — the
+// hold exists to notice a human at the keyboard.
+func TestAutoSettle_AutomationInputDoesNotHold(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+
+	for _, source := range []string{"automation", "attach_replay"} {
+		typeIntoAs(d, id, source)
+		entry, ok := autoSettlePending(d, id)
+		if !ok || entry.phase != autoSettleCounting {
+			t.Fatalf("source %q: pending=%v entry=%+v, want the countdown still running", source, ok, entry)
+		}
+	}
+}

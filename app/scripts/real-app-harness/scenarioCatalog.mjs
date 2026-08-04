@@ -103,6 +103,14 @@ export const scenarioCatalog = [
     timeoutMs: 420_000,
   },
   {
+    id: 'settle-typing-hold',
+    label: 'Settle typing hold: typing to an agent freezes its settling countdown, and going quiet hands back a whole one',
+    command: ['pnpm', 'run', 'real-app:scenario-settle-typing-hold'],
+    // Boots a real Claude agent, waits out an auto-settle arm window, then types
+    // across two quiet windows; more than the default budget.
+    timeoutMs: 300_000,
+  },
+  {
     id: 'agent-queue',
     label: 'Agent queue: a turn opens on a state and closes only when the user settles it',
     command: ['pnpm', 'run', 'real-app:scenario-agent-queue'],

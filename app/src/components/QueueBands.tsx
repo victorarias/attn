@@ -19,6 +19,7 @@ export interface QueueBandSessionView {
   turnOpenedAt?: string;
   turnSnoozedUntil?: string;
   autoSettleFiresAt?: string;
+  autoSettleHeld?: boolean;
 }
 
 interface QueueBandsProps {
@@ -199,8 +200,8 @@ function QueueRowView({
           )}
         </div>
       )}
-      {showSettling && session.autoSettleFiresAt && (
-        <SidebarSettlingBar firesAt={session.autoSettleFiresAt} />
+      {showSettling && (session.autoSettleFiresAt || session.autoSettleHeld) && (
+        <SidebarSettlingBar firesAt={session.autoSettleFiresAt} held={session.autoSettleHeld} />
       )}
     </div>
   );

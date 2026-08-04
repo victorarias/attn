@@ -38,6 +38,20 @@ const (
 	// before the turn is settled.
 	defaultAutoSettleCountdownSeconds = 15
 
+	// autoSettleHoldQuietWindow is how long a session must go without a keystroke
+	// before a held countdown resumes. It is the whole of the typing hold's
+	// tuning, and it is not a setting: it measures the user's hands, not the
+	// agent's behavior, so it is orthogonal to the two windows above.
+	//
+	// Five seconds rather than the nudge guard's three, and rather than something
+	// generous. It only has to span the gaps *between* keystrokes while composing
+	// — pausing to read the screen mid-prompt — because the countdown it resumes
+	// into is itself the grace period, visible and cancellable. Stacking a long
+	// quiet window on top of that pays twice for the same protection, and being
+	// wrong here does not settle a turn silently: it unfreezes a bar the user
+	// still has the whole countdown to stop.
+	autoSettleHoldQuietWindow = 5 * time.Second
+
 	// Bounds. The floors keep a countdown watchable and an arm delay long enough
 	// to outlast the resolver's own settle latency (`HeartbeatSettleAfter`, 5s),
 	// so a turn is never closed on an agent the resolver has not finished making
@@ -58,16 +72,40 @@ const (
 	autoSettleArming autoSettlePhase = iota
 	// autoSettleCounting: the countdown is running and its deadline is broadcast.
 	autoSettleCounting
+	// autoSettleHeld: the user is typing into this session, so nothing is
+	// counting. The pending timer is a quiet check, not a deadline — it asks
+	// "have the keystrokes stopped?" and either re-holds or resumes. No deadline
+	// rides the wire; `auto_settle_held` does, and the tile freezes on it.
+	autoSettleHeld
 )
 
 // autoSettleTimer is a session's pending auto-settle. firesAt is stored beside
 // the timer because time.Timer exposes no deadline accessor, and in the counting
 // phase the absolute deadline is what rides the wire for clients to animate
 // against.
+//
+// resume is meaningful only while held: it is the phase the hold came from and
+// will return to, so that typing during the invisible arm delay restarts the arm
+// delay rather than promoting the session to a countdown it never earned.
 type autoSettleTimer struct {
 	timer   *time.Timer
 	phase   autoSettlePhase
+	resume  autoSettlePhase
 	firesAt time.Time
+}
+
+// visible reports whether clients can see this entry, and so whether its
+// appearance or removal owes a broadcast. Arming is silent, and so is a hold of
+// an arm delay: freezing something never announced announces it. Only a
+// countdown — running or frozen — is on screen.
+func (e *autoSettleTimer) visible() bool {
+	switch e.phase {
+	case autoSettleCounting:
+		return true
+	case autoSettleHeld:
+		return e.resume == autoSettleCounting
+	}
+	return false
 }
 
 // autoSettleConfig is the resolved policy: whether the feature is on and the two
@@ -162,6 +200,52 @@ func (d *Daemon) armAutoSettle(sessionID string) {
 	// No broadcast: the arming phase is deliberately invisible.
 }
 
+// holdAutoSettle freezes a pending settle because the user just typed into this
+// session. Called for every genuine keystroke, so its cost on a no-op is one map
+// lookup.
+//
+// Typing is the one thing attn can see through a TUI it has no visibility into.
+// It cannot tell composing from erasing from pressing Escape, and it does not
+// need to: every one of them means the user's hands are on this session, which
+// is the whole question a pending settle is asking. What it must tell apart is
+// the user from attn typing on their behalf, and that distinction is already
+// drawn — noteUserInput drops automation and replay writes before this is
+// reached.
+//
+// A hold is not a cancel. ⌘. means "keep this turn" and stands until the session
+// leaves `working` (autoSettleSuppressed); a hold expires on its own, five quiet
+// seconds later, because the user stopping typing is not the user answering.
+func (d *Daemon) holdAutoSettle(sessionID string) {
+	d.autoSettleMu.Lock()
+	entry, ok := d.autoSettleTimers[sessionID]
+	if !ok || entry.phase == autoSettleHeld {
+		// Nothing pending, or already held. The second case is what keeps a burst
+		// of keystrokes free: the quiet check reschedules itself from the recorded
+		// keystroke time, so only the first key of a burst does any work here.
+		d.autoSettleMu.Unlock()
+		return
+	}
+	resume := entry.phase
+	d.startAutoSettleHeldLocked(sessionID, resume, autoSettleHoldQuietWindow)
+	d.autoSettleMu.Unlock()
+
+	if d.debugLogging {
+		d.logf("auto-settle held: session=%s resume_phase=%d", sessionID, resume)
+	}
+	// Only a countdown was on screen; freezing an arm delay changes nothing a
+	// client can see.
+	if resume == autoSettleCounting {
+		d.broadcastSessionStateChanged(sessionID)
+	}
+}
+
+// startAutoSettleHeldLocked parks the session in the held phase with a quiet
+// check `window` away. Caller holds autoSettleMu.
+func (d *Daemon) startAutoSettleHeldLocked(sessionID string, resume autoSettlePhase, window time.Duration) {
+	d.startAutoSettleLocked(sessionID, autoSettleHeld, window)
+	d.autoSettleTimers[sessionID].resume = resume
+}
+
 // startAutoSettleLocked replaces whatever is pending with a fresh timer in the
 // given phase. Caller holds autoSettleMu.
 //
@@ -199,7 +283,7 @@ func (d *Daemon) stopAutoSettleLocked(sessionID string) (removed, wasVisible boo
 	}
 	entry.timer.Stop()
 	delete(d.autoSettleTimers, sessionID)
-	return true, entry.phase == autoSettleCounting
+	return true, entry.visible()
 }
 
 // cancelAutoSettle drops a pending settle. Broadcasts only when a visible
@@ -248,25 +332,34 @@ func (d *Daemon) autoSettleFire(sessionID string, self *time.Timer) {
 		d.autoSettleMu.Unlock()
 		return
 	}
-	phase := entry.phase
+	phase, resume := entry.phase, entry.resume
 	delete(d.autoSettleTimers, sessionID)
 	d.autoSettleMu.Unlock()
 
-	action := d.runAutoSettle(sessionID, phase)
+	action := d.runAutoSettle(sessionID, phase, resume)
 	if d.debugLogging {
 		d.logf("auto-settle fire: session=%s phase=%d outcome=%s", sessionID, phase, action)
 	}
 	if d.autoSettleFireHook != nil {
 		d.autoSettleFireHook(sessionID, action)
 	}
-	// Broadcast either way: the countdown's deadline has either just appeared
-	// (arm elapsed) or just gone (settled, or the preconditions lapsed).
+	// A hold that froze a running countdown is a picture change and rides the
+	// wire. A re-hold, or a hold of the invisible arm delay, is not: while the
+	// user keeps typing this fires every five seconds, and a snapshot push per
+	// quiet check is traffic for a picture that never moved.
+	if action == "held" && phase != autoSettleCounting {
+		return
+	}
+	// Otherwise broadcast either way: the countdown's deadline has just appeared
+	// (arm elapsed, or a hold released), just gone (settled, frozen, or the
+	// preconditions lapsed), or the turn itself has closed.
 	d.broadcastSessionStateChanged(sessionID)
 }
 
 // runAutoSettle is the fire-time decision, separated so its outcome is a single
-// string a test hook can assert.
-func (d *Daemon) runAutoSettle(sessionID string, phase autoSettlePhase) string {
+// string a test hook can assert. `resume` is the phase a held session goes back
+// to, and is read only in that phase.
+func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) string {
 	// Held across the whole decision — reading the state, confirming the turn is
 	// still owed, and settling it — so no state write can land between the check
 	// and the settle. Without this the timer could settle a turn that a
@@ -300,6 +393,39 @@ func (d *Daemon) runAutoSettle(sessionID string, phase autoSettlePhase) string {
 		// Settled by hand, or excluded (workspace pinned or muted mid-window).
 		// Either way there is nothing left to close.
 		return "not-owed"
+	}
+
+	// The typing hold, at fire time. Two timers arrive here: a held session's own
+	// quiet check, and — the reason this guard is not only in holdAutoSettle — an
+	// arm or countdown timer that fired in the microseconds around a keystroke,
+	// before the hold could stop it. That race is the one interleaving where a
+	// turn would be closed under the user's hands, so the check is repeated where
+	// the settle actually happens rather than trusted upstream.
+	if quiet := d.userInputQuietRemaining(sessionID, autoSettleHoldQuietWindow); quiet > 0 {
+		hold := phase
+		if phase == autoSettleHeld {
+			hold = resume
+		}
+		d.autoSettleMu.Lock()
+		d.startAutoSettleHeldLocked(sessionID, hold, quiet)
+		d.autoSettleMu.Unlock()
+		return "held"
+	}
+
+	if phase == autoSettleHeld {
+		// Quiet again. The window is read fresh from settings and starts full: a
+		// frozen bar is drawn full, so resuming anything less would drop the bar
+		// on release, and the user has just been typing at this agent — the
+		// countdown they get back is the whole one they would have got by
+		// steering it now.
+		window := cfg.arm
+		if resume == autoSettleCounting {
+			window = cfg.countdown
+		}
+		d.autoSettleMu.Lock()
+		d.startAutoSettleLocked(sessionID, resume, window)
+		d.autoSettleMu.Unlock()
+		return "resumed"
 	}
 
 	if phase == autoSettleArming {
@@ -354,8 +480,11 @@ func (d *Daemon) cancelAutoSettleByUser(sessionID string) bool {
 }
 
 // decorateSessionWithAutoSettle stamps the broadcast clone with the countdown
-// deadline, when one is running. Read under autoSettleMu; callers must not
-// already hold it.
+// deadline while one is running, or the held flag while the user is typing. The
+// two are mutually exclusive by construction — a frozen countdown has no
+// deadline to animate against, and that is the point — so a client never has to
+// decide which one wins. Read under autoSettleMu; callers must not already hold
+// it.
 func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 	if clone == nil {
 		return
@@ -363,8 +492,14 @@ func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 	d.autoSettleMu.Lock()
 	entry, ok := d.autoSettleTimers[clone.ID]
 	firesAt := ""
-	if ok && entry.phase == autoSettleCounting {
-		firesAt = entry.firesAt.UTC().Format(time.RFC3339Nano)
+	held := false
+	if ok {
+		switch {
+		case entry.phase == autoSettleCounting:
+			firesAt = entry.firesAt.UTC().Format(time.RFC3339Nano)
+		case entry.visible():
+			held = true
+		}
 	}
 	d.autoSettleMu.Unlock()
 
@@ -372,6 +507,11 @@ func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 		clone.AutoSettleFiresAt = protocol.Ptr(firesAt)
 	} else {
 		clone.AutoSettleFiresAt = nil
+	}
+	if held {
+		clone.AutoSettleHeld = protocol.Ptr(true)
+	} else {
+		clone.AutoSettleHeld = nil
 	}
 }
 
@@ -418,7 +558,7 @@ func (d *Daemon) cancelAllAutoSettle() {
 	visible := make([]string, 0, len(d.autoSettleTimers))
 	for id, entry := range d.autoSettleTimers {
 		entry.timer.Stop()
-		if entry.phase == autoSettleCounting {
+		if entry.visible() {
 			visible = append(visible, id)
 		}
 		delete(d.autoSettleTimers, id)

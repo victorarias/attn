@@ -124,6 +124,9 @@ interface SessionTerminalWorkspaceProps {
     // The deadline an auto-settle countdown will close this session's turn at.
     // Present only while one is running; the daemon owns the timer.
     autoSettleFiresAt?: string;
+    // True while that countdown is frozen because the user is typing into this
+    // session. Mutually exclusive with the deadline above.
+    autoSettleHeld?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
     // The board row for the ticket bound to this session (assignee == id), when
@@ -906,6 +909,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         // Only dragging stays split-only: a lone tile has nowhere to move to, so
         // it gets the non-draggable variant.
         const autoSettleFiresAt = paneSession?.autoSettleFiresAt;
+        const autoSettleHeld = paneSession?.autoSettleHeld;
         return (
           <div
             key={agentPane.id}
@@ -965,9 +969,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onOpen={(presentationId) => onOpenPresentation?.(presentationId)}
                 />
               ) : null}
-              {autoSettleFiresAt ? (
+              {autoSettleFiresAt || autoSettleHeld ? (
                 <HeaderSettlingIndicator
                   firesAt={autoSettleFiresAt}
+                  held={autoSettleHeld}
                   onCancel={() => onCancelCountdown?.(agentPane.sessionId)}
                 />
               ) : null}

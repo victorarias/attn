@@ -491,11 +491,18 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	d.broadcastSessionStateChanged(sessionID)
 }
 
-// noteUserInput records a genuine user keystroke for the splice guard. Automation and
-// attach-replay writes are not the user typing, so they do not count.
-func (d *Daemon) noteUserInput(sessionID, source string) {
+// noteUserInput records a genuine user keystroke, and is the only place the
+// source filter is applied — automation and attach-replay writes are not the
+// user typing, so they do not count. It reports whether it recorded one, so a
+// caller can hang further reactions off the same verdict instead of re-deriving
+// who typed.
+//
+// Two mechanisms read the stamp, for opposite reasons: the nudge splice guard,
+// so a doorbell never lands on a half-typed line, and auto-settle's typing hold,
+// so a turn is not closed under the user's hands.
+func (d *Daemon) noteUserInput(sessionID, source string) bool {
 	if sessionID == "" || !isUserKeystrokeSource(source) {
-		return
+		return false
 	}
 	now := time.Now()
 	d.lastInputMu.Lock()
@@ -504,18 +511,31 @@ func (d *Daemon) noteUserInput(sessionID, source string) {
 	}
 	d.lastUserInputAt[sessionID] = now
 	d.lastInputMu.Unlock()
+	return true
 }
 
 // recentUserInput reports whether a genuine user keystroke hit this session within
 // the window.
 func (d *Daemon) recentUserInput(sessionID string, within time.Duration) bool {
+	return d.userInputQuietRemaining(sessionID, within) > 0
+}
+
+// userInputQuietRemaining reports how much of `within` is left to run before this
+// session counts as quiet — zero once the window has elapsed, or when the user
+// has never typed here. It is what lets a waiting timer reschedule exactly to the
+// end of the window instead of re-polling it.
+func (d *Daemon) userInputQuietRemaining(sessionID string, within time.Duration) time.Duration {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
 	last, ok := d.lastUserInputAt[sessionID]
 	if !ok {
-		return false
+		return 0
 	}
-	return time.Since(last) < within
+	remaining := within - time.Since(last)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 // isUserKeystrokeSource reports whether a pty_input source tag represents the user
