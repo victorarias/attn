@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "github.com/mattn/go-sqlite3"
 
@@ -921,6 +922,13 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// has ever been written against a revision, so there is no earlier history to
 	// preserve. Applied by applyMigration90.
 	{90, "give every document a revision", ``},
+	// Rewrites every stored document stamp into docstore.TimeFormat's
+	// fixed-width encoding. The stamps are TEXT columns ordered and filtered as
+	// text, and the encoding they were written in stripped trailing zeros from
+	// the fraction, so within any one second text order and time order disagreed
+	// — sorts came back scrambled and "changed since" filters dropped rows in
+	// silence. Applied by applyMigration91.
+	{91, "store document timestamps in an encoding that sorts", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1196,6 +1204,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 90 {
 			if err := applyMigration90(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 91 {
+			if err := applyMigration91(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2263,6 +2276,130 @@ func applyMigration90(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration91 rewrites every stored document stamp into
+// docstore.TimeFormat's fixed-width encoding, so that comparing the stamps as
+// text — which is the only way a TEXT column is compared, and what every sort
+// and "changed since" filter on created_at/updated_at does — orders them by
+// time. The encoding they were written in stripped trailing zeros, so within one
+// second the two orders disagreed.
+//
+// The rewrite is a decode and re-encode rather than SQL string surgery: the
+// stamps that need fixing are exactly the ones whose shape varies, which is what
+// makes them awkward to recognise in SQL and trivial to normalize in Go.
+//
+// Idempotent by construction — re-encoding an already-converted stamp yields
+// itself — so a rewound schema_migrations table re-runs it harmlessly and a run
+// that stopped part way finishes.
+//
+// A stamp that does not decode is left alone and reported. Nothing the store
+// writes can produce one, so it means a hand-edited database, and turning an
+// unreadable stamp into year 1 loses more than leaving it unreadable does.
+func applyMigration91(tx *sql.Tx) error {
+	ids, err := collectionTableIDs(tx)
+	if err != nil {
+		return err
+	}
+	unreadable := 0
+	for _, id := range ids {
+		table := docstore.TableName(id)
+		n, err := restampTable(tx, table, "id", []string{"created_at", "updated_at"})
+		if err != nil {
+			return fmt.Errorf("restamping %s: %w", table, err)
+		}
+		unreadable += n
+	}
+	n, err := restampTable(tx, "document_collections", "id", []string{"updated_at"})
+	if err != nil {
+		return fmt.Errorf("restamping document_collections: %w", err)
+	}
+	unreadable += n
+	if unreadable > 0 {
+		log.Printf("[store] migration 91: left %d document timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+	}
+	return nil
+}
+
+// collectionTableIDs lists the collections the registry knows about. The
+// registry is the only list of them: reading the schema for `doc_%` tables would
+// pick up anything that happened to be named like one.
+func collectionTableIDs(tx *sql.Tx) ([]int64, error) {
+	rows, err := tx.Query(`SELECT id FROM document_collections`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
+}
+
+// restampTable re-encodes the named stamp columns of every row, returning how
+// many values it could not decode and therefore did not touch. Rows are read out
+// before any are written back, because the driver holds one connection and a
+// write issued while a read is still streaming deadlocks against it.
+func restampTable(tx *sql.Tx, table, key string, columns []string) (int, error) {
+	rows, err := tx.Query(fmt.Sprintf(`SELECT %s, %s FROM %s`, key, strings.Join(columns, ", "), table))
+	if err != nil {
+		return 0, err
+	}
+	type row struct {
+		key    any
+		stamps []string
+	}
+	var pending []row
+	for rows.Next() {
+		r := row{stamps: make([]string, len(columns))}
+		dest := make([]any, 0, len(columns)+1)
+		dest = append(dest, &r.key)
+		for i := range r.stamps {
+			dest = append(dest, &r.stamps[i])
+		}
+		if err := rows.Scan(dest...); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		pending = append(pending, r)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		return 0, err
+	}
+
+	unreadable := 0
+	for _, r := range pending {
+		sets := make([]string, 0, len(columns))
+		args := make([]any, 0, len(columns)+1)
+		for i, c := range columns {
+			t, err := docstore.ParseTime(r.stamps[i])
+			if err != nil {
+				unreadable++
+				continue
+			}
+			encoded := t.Format(docstore.TimeFormat)
+			if encoded == r.stamps[i] {
+				continue
+			}
+			sets = append(sets, c+" = ?")
+			args = append(args, encoded)
+		}
+		if len(sets) == 0 {
+			continue
+		}
+		args = append(args, r.key)
+		if _, err := tx.Exec(fmt.Sprintf(`UPDATE %s SET %s WHERE %s = ?`,
+			table, strings.Join(sets, ", "), key), args...); err != nil {
+			return 0, err
+		}
+	}
+	return unreadable, nil
 }
 
 // v88Collection is one collection to carry across: its declaration as v88

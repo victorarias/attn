@@ -1,0 +1,11 @@
+kind: fixed
+area: daemon
+change: >
+  Document queries no longer return answers describing a collection that never
+  existed. Answering a query reads the declaration, the pagination anchor and
+  then the rows, and those were three separate reads with the SQL built in
+  between — so a write landing mid-read could silently empty a page whose anchor
+  had just been deleted, hand back the anchor document itself, or make a filter
+  match nothing after a field's declared type changed. None of the three
+  reported an error. All three reads now happen in one transaction, so a query
+  is always answered against a single state of the collection.

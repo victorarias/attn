@@ -167,23 +167,34 @@ func (d *Daemon) compileDocQuery(q docstore.Query, schema docstore.CollectionSch
 	return q.Compile(schema, anchor)
 }
 
-// runDocQuery compiles and runs a query, returning its documents on the wire
-// and how long the statement took. The caller decides what a slow one means:
-// once for a one-shot query, per write for a live one.
-func (d *Daemon) runDocQuery(q docstore.Query, schema docstore.CollectionSchema) ([]protocol.StoredDocument, time.Duration, error) {
+// runDocQuery answers a query, returning its documents on the wire, the
+// declaration they were computed against, and how long the read took. The
+// caller decides what a slow one means: once for a one-shot query, per write
+// for a live one.
+//
+// The declaration comes back from the read rather than being passed in. Reading
+// it separately first is what let a redeclare land between the schema and the
+// SELECT; the store now resolves it inside the same transaction, so the schema
+// returned here is the one the answer actually means.
+func (d *Daemon) runDocQuery(q docstore.Query) ([]protocol.StoredDocument, docstore.CollectionSchema, time.Duration, error) {
 	if d.store == nil {
-		return nil, 0, fmt.Errorf("no database")
+		return nil, docstore.CollectionSchema{}, 0, fmt.Errorf("no database")
 	}
-	compiled, err := d.compileDocQuery(q, schema)
-	if err != nil {
-		return nil, 0, err
+	if err := docstore.ValidateNamespace(q.Namespace); err != nil {
+		return nil, docstore.CollectionSchema{}, 0, err
+	}
+	if err := docstore.ValidateCollection(q.Collection); err != nil {
+		return nil, docstore.CollectionSchema{}, 0, err
 	}
 	started := time.Now()
-	docs, err := d.store.QueryDocuments(compiled)
+	read, found, err := d.store.ReadQuery(q)
 	if err != nil {
-		return nil, 0, err
+		return nil, docstore.CollectionSchema{}, 0, err
 	}
-	return storedDocumentsToProtocol(docs), time.Since(started), nil
+	if !found {
+		return nil, docstore.CollectionSchema{}, 0, undeclaredCollectionError(q.Namespace, q.Collection)
+	}
+	return storedDocumentsToProtocol(read.Documents), read.Schema, time.Since(started), nil
 }
 
 // Two tripwires, because a document query has two costs and only one of them is
@@ -259,10 +270,17 @@ func (d *Daemon) collectionFor(namespace, collection string) (*docstore.Collecti
 		return nil, err
 	}
 	if !ok {
-		return nil, fmt.Errorf("docstore: %s/%s is not declared; declare it with `attn doc define` before reading or writing it",
-			namespace, collection)
+		return nil, undeclaredCollectionError(namespace, collection)
 	}
 	return schema, nil
+}
+
+// undeclaredCollectionError is what every caller reports for a collection that
+// was never declared, whether it read the declaration itself or had a query come
+// back saying there was none.
+func undeclaredCollectionError(namespace, collection string) error {
+	return fmt.Errorf("docstore: %s/%s is not declared; declare it with `attn doc define` before reading or writing it",
+		namespace, collection)
 }
 
 // ---------------------------------------------------------------------------
@@ -421,17 +439,12 @@ func (d *Daemon) handleDocQuery(conn net.Conn, msg *protocol.DocQueryMessage) {
 		d.sendError(conn, err.Error())
 		return
 	}
-	schema, err := d.collectionFor(q.Namespace, q.Collection)
+	docs, schema, took, err := d.runDocQuery(q)
 	if err != nil {
 		d.sendError(conn, err.Error())
 		return
 	}
-	docs, took, err := d.runDocQuery(q, *schema)
-	if err != nil {
-		d.sendError(conn, err.Error())
-		return
-	}
-	d.logSlowDocQuery(*schema, took)
+	d.logSlowDocQuery(schema, took)
 	d.sendDocResponse(conn, protocol.Response{Ok: true, DocQueryResult: &protocol.DocQueryResult{Documents: docs}})
 }
 
@@ -475,26 +488,23 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 
 	encoder := json.NewEncoder(conn)
 	for delivery := 1; ; delivery++ {
-		// The declaration is re-read per delivery rather than captured, because
-		// it can go out from under a subscription in two ways and both have to
-		// end the subscription rather than mislead it. Undefining drops the
-		// collection's table, and an empty result set would tell a watcher the
-		// collection is still there holding nothing; redeclaring without a field
-		// this query uses drops that field's column, and the query stops meaning
-		// what the caller asked. Either way the caller is told which, and the
-		// subscription ends instead of hanging on a collection it can never
-		// serve again.
-		live, err := d.collectionFor(q.Namespace, q.Collection)
+		// Every delivery re-reads the declaration rather than capturing it,
+		// because it can go out from under a subscription in two ways and both
+		// have to end the subscription rather than mislead it. Undefining drops
+		// the collection's table, and an empty result set would tell a watcher
+		// the collection is still there holding nothing; redeclaring without a
+		// field this query uses drops that field's column, and the query stops
+		// meaning what the caller asked. Either way the caller is told which, and
+		// the subscription ends instead of hanging on a collection it can never
+		// serve again. The re-read happens inside the query's own transaction, so
+		// a redeclare cannot land between reading the declaration and running the
+		// statement compiled from it.
+		docs, live, took, err := d.runDocQuery(q)
 		if err != nil {
 			d.sendError(conn, err.Error())
 			return
 		}
-		docs, took, err := d.runDocQuery(q, *live)
-		if err != nil {
-			d.sendError(conn, err.Error())
-			return
-		}
-		d.logSlowDocFanOut(sub, *live, took)
+		d.logSlowDocFanOut(sub, live, took)
 		resp := protocol.Response{
 			Ok:                 true,
 			DocSubscribeResult: &protocol.DocSubscribeResult{Delivery: delivery, Documents: docs},

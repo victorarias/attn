@@ -382,7 +382,7 @@ func (w *modelWorld) realIDs(q docstore.Query) ([]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	docs, err := w.s.QueryDocuments(c)
+	docs, err := w.s.queryDocuments(c)
 	if err != nil {
 		return nil, err
 	}

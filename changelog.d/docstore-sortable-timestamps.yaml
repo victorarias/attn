@@ -1,0 +1,11 @@
+kind: fixed
+area: daemon
+change: >
+  Sorting or filtering documents on created_at or updated_at now orders them by
+  time. The stamps are stored as text and compared as text, and the encoding they
+  were written in dropped trailing zeros from the fraction of a second — so
+  within any one second the text order and the time order disagreed. Sorting by
+  newest came back scrambled, and a "changed since" filter written on a whole
+  second silently found none of the documents changed during that second.
+  Existing stamps are rewritten on upgrade, and a timestamp bound may now be
+  written in any RFC3339 form, including one an older version handed back.
