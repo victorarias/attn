@@ -657,11 +657,21 @@ func (q Query) bindValue(f Filter, spec FieldSpec) (any, error) {
 	if f.Value == nil {
 		return nil, fmt.Errorf("docstore: %s/%s filter on %q has no value", q.Namespace, q.Collection, f.Field)
 	}
-	// A reserved field is a stored timestamp column, compared as text.
+	// A reserved field is a stored timestamp column, compared as text. The bound
+	// is re-encoded rather than passed through, because text comparison only
+	// means what the caller intends when both sides carry the same encoding: a
+	// bound of "…T10:00:00Z" compared raw against stored stamps sorts above every
+	// stamp in that second. A caller may write any RFC3339 form — including the
+	// one an older store handed them — and get the comparison they asked for.
 	if reservedField[f.Field] {
 		switch v := f.Value.(type) {
 		case string:
-			return v, nil
+			t, err := ParseTime(v)
+			if err != nil {
+				return nil, fmt.Errorf("docstore: %s/%s filter on %q needs an RFC3339 timestamp, got %q",
+					q.Namespace, q.Collection, f.Field, v)
+			}
+			return t.Format(TimeFormat), nil
 		case time.Time:
 			return v.UTC().Format(TimeFormat), nil
 		default:
@@ -709,10 +719,34 @@ func (q Query) bindValue(f Filter, spec FieldSpec) (any, error) {
 	return nil, fmt.Errorf("docstore: %s/%s filter on %q has undeclared type %q", q.Namespace, q.Collection, f.Field, spec.Type)
 }
 
-// TimeFormat is the stored timestamp encoding, matching the job queue's: it
-// keeps sub-second precision and sorts lexicographically, which is what lets
-// created_at and updated_at be ordering terms as plain text columns.
-const TimeFormat = time.RFC3339Nano
+// TimeFormat is the stored timestamp encoding. Stamps live in TEXT columns and
+// are ordered and filtered as text, so the encoding has to make text order and
+// time order the same thing — which takes a fraction of a fixed width, always
+// present and always nine digits.
+//
+// time.RFC3339Nano, which this used to be, does not: it strips trailing zeros,
+// so widths vary and "…:00.5Z" sorts below "…:00.1234Z" while "…:00Z" sorts
+// above both ('Z' is 0x5A, above '.' and every digit). Only stamps inside the
+// same second compared wrongly, which is exactly where bursty writes land, and
+// it made every "changed since" filter drop rows in silence. Migration 91
+// rewrote the stored stamps.
+//
+// Always formatted from a UTC time, so the zone is always "Z" and every stored
+// stamp is the same 30 characters wide.
+const TimeFormat = "2006-01-02T15:04:05.000000000Z07:00"
+
+// ParseTime decodes a stamp in any RFC3339 form — TimeFormat's own, the
+// trailing-zero-stripped form stored before migration 91, a whole second with no
+// fraction at all, or a non-UTC offset — and normalizes it to UTC. Callers hand
+// timestamps in as strings from JSON, and the one they most often hand in is one
+// this store gave them, so the accepted set has to be wider than the stored one.
+func ParseTime(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return t.UTC(), nil
+}
 
 // Target is the subject a change to this collection is published under, and the
 // key a subscription is matched on. Collection-grained rather than
