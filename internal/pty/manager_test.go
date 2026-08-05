@@ -33,7 +33,7 @@ func TestParseNullSeparatedEnv(t *testing.T) {
 func TestMergeEnvironment_OverlayWins(t *testing.T) {
 	base := []string{"FOO=base", "BAR=1"}
 	overlay := []string{"FOO=overlay", "BAZ=2"}
-	got := mergeEnvironment(base, overlay)
+	got := MergeEnvironment(base, overlay)
 
 	joined := strings.Join(got, "\n")
 	if !strings.Contains(joined, "FOO=overlay") {

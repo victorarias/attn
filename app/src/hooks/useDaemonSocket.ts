@@ -80,6 +80,8 @@ import { pendingRequestKey, type PendingRequests } from './daemonPendingRequests
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
+import { useConversationsStore } from '../store/conversations';
+import { conversationAgents } from '../utils/agentAvailability';
 import { useAutomationsStore } from '../store/automations';
 
 // Short names for daemon payloads used throughout the app.
@@ -197,7 +199,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '211';
+export const PROTOCOL_VERSION = '212';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2152,6 +2154,21 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'agent_event': {
+            // One envelope from a conversation session's host. The daemon does
+            // not read the render kinds, so this is the only place they are
+            // understood; the store owns what each kind means.
+            if (data.id && typeof data.kind === 'string') {
+              useConversationsStore.getState().applyEnvelope(
+                data.id,
+                typeof data.seq === 'number' ? data.seq : 0,
+                data.kind,
+                (data.body ?? {}) as Record<string, unknown>,
+              );
+            }
+            break;
+          }
+
           case 'kitty_placements': {
             // The whole placement set of a session's active screen, measured on
             // the chunk stamped `seq`. It rides the pty event chain so it lands
@@ -2981,6 +2998,15 @@ export function useDaemonSocket({
     );
   }, [sendOrQueueCommand]);
 
+  // Sends a prompt to a conversation session's host. Fire-and-forget in the
+  // same sense as pty_input: the answer is not a result message but the
+  // envelope stream the host starts producing, which lands in the conversations
+  // store. A failure the daemon can name (no live host) comes back as a
+  // command error and is surfaced there, not awaited here.
+  const sendAgentPrompt = useCallback((id: string, text: string) => {
+    sendOrQueueCommand({ cmd: 'agent_prompt', id, text }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
   // Pushes the app's resolved terminal theme colors to the daemon, which uses
   // them to seed the worker's authoritative color model and answer OSC
   // 10/11/12 (foreground/background/cursor) queries on behalf of every session
@@ -3420,6 +3446,15 @@ export function useDaemonSocket({
   useEffect(() => {
     setPtyBackend({
       spawn: async (args: PtySpawnArgs) => {
+        // A conversation session's runtime is a host process, not a PTY, so
+        // spawn_session is the whole of its launch. The rest of this path is
+        // terminal work — a bootstrap resize, then an attach — and the attach
+        // would ask the PTY backend for a session it never created, whose
+        // rejection rolls the session creation back.
+        if (conversationAgents(settingsRef.current).has(args.agent ?? '')) {
+          await sendSpawnSession(args);
+          return;
+        }
         const existingSession = sessionsRef.current.find((session) => session.id === args.id);
         await spawnPtyRuntime(
           args,
@@ -5100,6 +5135,7 @@ export function useDaemonSocket({
     sendSubscribeGitStatus,
     sendUnsubscribeGitStatus,
     sendSessionSelected,
+    sendAgentPrompt,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

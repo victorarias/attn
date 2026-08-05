@@ -36,6 +36,7 @@ import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
 import type { PaneRuntimeEventRouter } from './paneRuntimeEventRouter';
 import { isSuspiciousTerminalSize } from '../../utils/terminalDebug';
 import { lockTextSelection } from '../../utils/dragLock';
+import { ConversationPane } from '../ConversationPane';
 import './SessionTerminalWorkspace.css';
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
@@ -147,6 +148,11 @@ interface SessionTerminalWorkspaceProps {
     onOpenArtifact?: (path: string) => void;
     onResume: (ticketId: string) => void;
   };
+  // Agents whose sessions are conversations, not terminals: their panes draw
+  // the host's message stream instead of a PTY. The daemon decides this (the
+  // driver's `conversation` capability) and publishes it in settings; this is
+  // that answer, not a second one.
+  conversationAgents?: ReadonlySet<string>;
   // Reads a session's last assistant message for annotation. Absent means the
   // pane's terminal offers no annotation surface at all.
   // The daemon calls the annotation surface needs. Absent disables it.
@@ -211,6 +217,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     workspaceDirectory,
     workspaceSessions = [],
     ticketActions,
+    conversationAgents,
     annotationApi,
     workspace,
     workspaceSelectionStyle = 'rail',
@@ -390,10 +397,17 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     const activeLeafId = focusedTileId || activePaneId || firstTileId || '';
     const activeLeafIsTile = tileLeafById.has(activeLeafId);
 
-    const runtimePanes = useMemo(() => ([
-      ...agentPanes.filter((pane) => !pane.status || pane.status === 'ready').map((pane) => {
+    // Conversation panes are deliberately absent: the runtime's whole job is
+    // attaching a terminal to a PTY, and a conversation session has neither.
+    // Leaving one in would attach against a session the daemon has no PTY for,
+    // which fails and takes the pane down with it.
+    const runtimePanes = useMemo(() => {
+      const panes = [];
+      for (const pane of agentPanes) {
+        if (pane.status && pane.status !== 'ready') continue;
         const paneSession = sessionById.get(pane.sessionId);
-        return {
+        if (conversationAgents?.has(paneSession?.agent ?? '')) continue;
+        panes.push({
           paneId: pane.id,
           runtimeId: pane.runtimeId,
           paneKind: 'agent' as const,
@@ -401,9 +415,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           sessionId: pane.sessionId,
           testSessionId: pane.sessionId,
           state: paneSession?.state,
-        };
-      }),
-    ]), [agentPanes, sessionById]);
+        });
+      }
+      return panes;
+    }, [agentPanes, conversationAgents, sessionById]);
 
     const runtime = useGhosttyPaneRuntime(
       runtimePanes,
@@ -1008,6 +1023,15 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   <span className="workspace-pane-status-spinner" aria-hidden="true" />
                   <span>{isPaneFailed ? (agentPane.error || 'Session failed to start') : `Starting ${paneTitle}...`}</span>
                 </div>
+              ) : conversationAgents?.has(paneSession?.agent ?? '') ? (
+                // A conversation session: no PTY, no grid, nothing to
+                // virtualize. Its whole surface is the host's message stream,
+                // which lives in a store rather than in a terminal model, so it
+                // costs nothing to keep mounted.
+                <ConversationPane
+                  sessionId={agentPane.sessionId}
+                  paneActive={isActiveSession && sessionVisible && activeLeafId === agentPane.id}
+                />
               ) : !terminalsLive ? (
                 // Virtualized: terminal unmounted to free WASM model + WebGL
                 // renderer. Rehydrates from daemon replay when it remounts.
@@ -1149,6 +1173,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       showPaneHeader,
       ticketOverlayPaneId,
       ticketActions,
+      conversationAgents,
       annotationApi,
       closeTicketOverlay,
       onCancelCountdown,

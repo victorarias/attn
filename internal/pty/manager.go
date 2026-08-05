@@ -720,10 +720,10 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		shellEnv = readCachedShellEnvFromProcess()
 	}
 	if len(shellEnv) > 0 {
-		env = mergeEnvironment(env, shellEnv)
+		env = MergeEnvironment(env, shellEnv)
 	} else if loginShell != "" {
 		if captured, err := ReadLoginShellEnv(loginShell); err == nil {
-			env = mergeEnvironment(env, captured)
+			env = MergeEnvironment(env, captured)
 		} else if logf != nil {
 			logf("pty spawn: failed to capture login shell env from %s: %v", loginShell, err)
 		}
@@ -731,7 +731,7 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	// Cached login-shell data can contain a parent agent's one-shot launch pins.
 	// Strip them first, then overlay only this session's explicit contract.
 	env = filterEnvKeys(env, launchKeys...)
-	env = mergeEnvironment(env, launchEnv)
+	env = MergeEnvironment(env, launchEnv)
 	// Don't leak worker-only configuration transport vars into spawned shells.
 	env = filterEnvKeys(env, "ATTN_PTY_WORKER", "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV")
 
@@ -750,7 +750,7 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	// TUIs gate OSC 8 hyperlink emission on TERM_PROGRAM; attn's terminal
 	// core is ghostty and now supports OSC 8, so advertise that deterministically.
 	env = filterEnvKeys(env, "TERM_PROGRAM_VERSION")
-	env = mergeEnvironment(env, []string{"TERM=xterm-256color", "TERM_PROGRAM=ghostty"})
+	env = MergeEnvironment(env, []string{"TERM=xterm-256color", "TERM_PROGRAM=ghostty"})
 	env = launchenv.WithActiveAttnFirst(env, wrapperPath)
 	if agent == "shell" {
 		// A terminal pane gets the same CLI resolution guarantee as an agent, but
@@ -759,36 +759,36 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		env = filterEnvKeys(env, "ATTN_SESSION_ID", "ATTN_AGENT")
 	}
 	if agent != "shell" {
-		env = mergeEnvironment(env, []string{
+		env = MergeEnvironment(env, []string{
 			"ATTN_INSIDE_APP=1",
 			"ATTN_DAEMON_MANAGED=1",
 			"ATTN_SESSION_ID=" + opts.ID,
 			"ATTN_AGENT=" + agent,
 		})
 		if wrapperPath != "" {
-			env = mergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
+			env = MergeEnvironment(env, []string{"ATTN_WRAPPER_PATH=" + wrapperPath})
 		}
 
 		executable := configuredExecutableForAgent(opts, agent)
 		if d := agentdriver.Get(agent); d != nil {
 			envKey := strings.TrimSpace(d.ExecutableEnvVar())
 			if envKey != "" && executable != "" && executable != d.DefaultExecutable() {
-				env = mergeEnvironment(env, []string{envKey + "=" + executable})
+				env = MergeEnvironment(env, []string{envKey + "=" + executable})
 			}
 		} else {
 			if opts.ClaudeExecutable != "" && opts.ClaudeExecutable != "claude" {
-				env = mergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
+				env = MergeEnvironment(env, []string{"ATTN_CLAUDE_EXECUTABLE=" + opts.ClaudeExecutable})
 			}
 			if opts.CodexExecutable != "" && opts.CodexExecutable != "codex" {
-				env = mergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
+				env = MergeEnvironment(env, []string{"ATTN_CODEX_EXECUTABLE=" + opts.CodexExecutable})
 			}
 			if opts.CopilotExecutable != "" && opts.CopilotExecutable != "copilot" {
-				env = mergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
+				env = MergeEnvironment(env, []string{"ATTN_COPILOT_EXECUTABLE=" + opts.CopilotExecutable})
 			}
 		}
 	}
 	if len(opts.ExternalEnv) > 0 {
-		env = mergeEnvironment(env, opts.ExternalEnv)
+		env = MergeEnvironment(env, opts.ExternalEnv)
 	}
 	return env
 }
@@ -848,7 +848,11 @@ func parseNullSeparatedEnv(output []byte) []string {
 	return env
 }
 
-func mergeEnvironment(base, overlay []string) []string {
+// MergeEnvironment overlays entries onto a base environment, last writer winning
+// per key and the base order preserved. Both spawn paths build their child's
+// environment this way — the PTY manager here, and the daemon's conversation
+// hosts.
+func MergeEnvironment(base, overlay []string) []string {
 	if len(overlay) == 0 {
 		return append([]string(nil), base...)
 	}

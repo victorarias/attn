@@ -1896,6 +1896,19 @@ model PtyInputMessage {
   source?: string;
 }
 
+// Sends a prompt to a conversation session — one whose agent runs in a headless
+// host process rather than a PTY, so there is no keystroke to type. `id` is the
+// attn session id, exactly as pty_input uses it.
+//
+// The host takes one prompt at a time in this protocol version: mid-run
+// steering is its own verb and does not exist yet, so a prompt sent while a run
+// is open is refused and logged rather than queued.
+model AgentPromptMessage {
+  cmd: "agent_prompt";
+  id: string;
+  text: string;
+}
+
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
 // TIOCGWINSZ's ws_xpixel/ws_ypixel and XTWINOPS speak, so image emitters can
 // size an image to the space they were given. Absent or 0 means the client has
@@ -3308,6 +3321,29 @@ model PtyOutputMessage {
   seq: int32;
 }
 
+// One event from a conversation session's headless host. Two streams share one
+// envelope and one `seq` spine, so a render delta and the semantic event that
+// brackets it stay ordered against each other.
+//
+// `kind` is either SEMANTIC — attn's own vocabulary, which the daemon reads and
+// features integrate on (`session_ready`, `run_started`, `run_settled`) — or
+// RENDER, which exists only so the app can paint (`message_start`,
+// `message_delta`, `message_end`). The daemon forwards render bodies without
+// reading them: their shape is agreed between the host and the app and is
+// versioned by the plugin, not by ProtocolVersion. Do not add daemon behavior
+// keyed on a render kind; if the daemon needs to know something, it needs a
+// semantic kind.
+//
+// `body` is therefore untyped here on purpose. A client that meets an unknown
+// kind ignores it — the host's kind set grows with the plugin.
+model AgentEventMessage {
+  event: "agent_event";
+  id: string;
+  seq: int32;
+  kind: string;
+  body: Record<unknown>;
+}
+
 model SessionExitedMessage {
   event: "session_exited";
   id: string;
@@ -4348,6 +4384,7 @@ alias DaemonEvent =
   | AttachResultMessage
   | GetScreenSnapshotResultMessage
   | PtyOutputMessage
+  | AgentEventMessage
   | SessionExitedMessage
   | PtyDesyncMessage
   | KittyPlacementsMessage

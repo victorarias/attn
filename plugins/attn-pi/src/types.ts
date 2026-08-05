@@ -65,6 +65,9 @@ export type DriverRegisterResult = {
 };
 
 export type DriverSpawnParams = {
+  // Which of this plugin's registered agents attn is launching. A plugin may
+  // register more than one; without it a two-agent plugin has to guess.
+  agent?: string;
   session_id: string;
   run_id: string;
   cwd: string;

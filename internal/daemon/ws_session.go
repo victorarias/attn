@@ -112,7 +112,7 @@ func (d *Daemon) clearAllSessions() {
 				report.Failed,
 			)
 		}
-		for _, sessionID := range d.ptyBackend.SessionIDs(context.Background()) {
+		for _, sessionID := range d.liveRuntimeSessionIDs(context.Background()) {
 			sessionIDs[sessionID] = struct{}{}
 		}
 	}

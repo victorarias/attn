@@ -40,6 +40,11 @@ type activePluginRun struct {
 }
 
 type pluginDriverSpawnParams struct {
+	// Agent names which of the plugin's registered drivers this launch is for.
+	// A plugin may register more than one — attn-pi registers both a PTY-backed
+	// `pi` and a conversation `pi-host` — and without it the plugin cannot tell
+	// which one attn is asking to launch.
+	Agent         string                    `json:"agent"`
 	SessionID     string                    `json:"session_id"`
 	RunID         string                    `json:"run_id"`
 	CWD           string                    `json:"cwd"`
@@ -195,6 +200,7 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 		"model_pin":           {},
 		"effort_pin":          {},
 		"launch_instructions": {},
+		"conversation":        {},
 	}
 	out := make(map[string]bool, len(values))
 	for name, enabled := range values {

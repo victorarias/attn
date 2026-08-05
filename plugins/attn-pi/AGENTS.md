@@ -69,6 +69,64 @@ vision: `docs/vision/pi-attn-plugins.md`. Full grounding evidence with citations
   without classifying. Never add screen-scraping state detectors for pi, and
   never fall back to PTY typing for message delivery.
 
+## The headless host (`pi-host`)
+
+This plugin registers two agents. `pi` launches the pi TUI in an attn PTY (the
+driver pattern above). `pi-host` is a **conversation session**: pi runs headless
+through its SDK in `host/index.ts`, a process attn's daemon spawns and owns.
+See `docs/glossary.md` for the vocabulary and
+`docs/plans/2026-08-05-pi-headless-host.md` for the slices.
+
+- Three channels, and they must stay separate. **fd 3** is the envelope stream
+  out (NDJSON), **stdin** is verbs in (`prompt`, `shutdown`), **stdout/stderr**
+  are pi's and the host's own output, captured to
+  `<data-dir>/hosts/log/<session>.log`. Envelopes never go on stdout: pi loads
+  the user's own extensions and any one of them printing a line would corrupt a
+  shared stream.
+- Two envelope families. **Declarations** (`session_ready`, `run_started`,
+  `run_settled`) are attn's vocabulary and the daemon may read them.
+  **Renderings** (`message_start`, `message_delta`, `message_end`) are drawn by
+  the app and forwarded opaquely. Adding a rendering is a host + app change; a
+  new declaration is a protocol conversation.
+- `seq` is one monotonic spine across both families, minted only by
+  `EnvelopeStream`.
+- The mapper never claims exhaustiveness over pi's event union — pi added four
+  event types between 0.80.10 and 0.83.0 with no changelog entry. Unknown types
+  are logged once each and dropped.
+- Deltas are coalesced on a 30 ms window (receipt in `DeltaCoalescer`'s comment:
+  pi bursts to 1,970 events/s and attn's WebSocket clients buffer 256 messages).
+  Flush before any `message_end` or declaration, so nothing overtakes the text
+  it follows.
+- **Every prompt settles.** `session.prompt` can reject before pi opens a run at
+  all — an unauthenticated provider is the common one — so the catch emits
+  `run_settled` with the reason. Without it the app's composer stays shut
+  forever waiting for a reply nobody is writing. The app closes that composer at
+  send time rather than on `run_started` — the acknowledgement is a round trip
+  away and the host refuses a second prompt mid-run with only a log line — so
+  the daemon settles a prompt that reached no host at all for the same reason.
+- `bindExtensions` is required. Without it `session_start` never fires and
+  resource discovery never runs, so extensions silently do nothing.
+- The compiled binary cannot read pi's `VERSION`: pi reads its own package.json
+  off disk at runtime and a `bun build --compile` binary has no copy, so
+  `VERSION` degrades to `"0.0.0"`. The pin is inlined from this plugin's exact
+  dependency entry instead, and a disagreement with a runtime-readable VERSION
+  is spawn-fatal.
+- Session storage is attn's (`<data-dir>/hosts/state/<session>`), never
+  `~/.pi/agent/sessions`. Auth and resource discovery still resolve against the
+  real `~/.pi/agent`, exactly as a bare `pi` invocation does.
+- The daemon spawns the host as a **process-group leader** and gives it SIGTERM
+  before killing the group. The SIGTERM is the load-bearing half: pi spawns each
+  tool subprocess into its own process group (measured 2026-08-05), so only pi's
+  own dispose — which the host runs on SIGTERM — tears the tools down. A hard
+  kill orphans them (receipt: 3x reproduced, 2026-08-04 spike), and so would a
+  host wedged past the grace window. Never "simplify" the teardown to a group
+  kill.
+- A host gets the same environment a PTY agent gets — the daemon's own plus the
+  user's login shell — because that is where an agent's credentials live.
+
+`spike-harness/` drives pi's SDK without attn and is the gate a pi version bump
+has to pass; see its README.
+
 ## Suite invariants
 
 - The suite (`plugins/attn-pi/suite/`, staged as a single `suite.js` next to

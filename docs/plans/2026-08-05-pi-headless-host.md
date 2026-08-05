@@ -81,21 +81,21 @@ Goal: type a prompt in the app, watch the reply stream, send the next prompt.
 
 Ships:
 
-- [ ] Host entrypoint (`createAgentSession`, sessions under attn's data dir,
+- [x] Host entrypoint (`createAgentSession`, sessions under attn's data dir,
       explicit model, `bindExtensions` called, no suite yet).
-- [ ] Daemon spawn/kill of host as pgid leader.
-- [ ] Minimal envelope with semantic kinds `session_ready`/`run_started`/
+- [x] Daemon spawn/kill of host as pgid leader.
+- [x] Minimal envelope with semantic kinds `session_ready`/`run_started`/
       `run_settled` and render kind `message_delta` (coalesced ~30 ms).
-- [ ] Minimal React pane (message list + input, input disabled while running).
-- [ ] `prompt` verb.
-- [ ] Exact pin committed; spike harness committed beside the plugin as the
+- [x] Minimal React pane (message list + input, input disabled while running).
+- [x] `prompt` verb.
+- [x] Exact pin committed; spike harness committed beside the plugin as the
       pin-bump gate.
 
 Acceptance:
 
-- [ ] Full round trip in a running dev app.
-- [ ] Killing the session leaves no orphan processes (verify with `ps`).
-- [ ] A second prompt works after settle.
+- [x] Full round trip in a running dev app.
+- [x] Killing the session leaves no orphan processes (verify with `ps`).
+- [x] A second prompt works after settle.
 
 ### Slice 2 — a real attn citizen: state and nudges
 

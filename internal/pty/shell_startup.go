@@ -103,7 +103,7 @@ func prepareZshShellPaneLaunch(shellPath string, env []string) (shellPaneLaunch,
 		return shellPaneLaunch{}, fmt.Errorf("write zsh shell integration: %w", err)
 	}
 
-	launchEnv := mergeEnvironment(env, []string{
+	launchEnv := MergeEnvironment(env, []string{
 		"ZDOTDIR=" + overlay,
 		"ATTN_SHELL_INIT_DIR=" + overlay,
 		"ATTN_SHELL_LAUNCH_PATH=" + path,
@@ -334,7 +334,7 @@ func preparePOSIXShellPaneLaunch(shellPath string, env []string) (shellPaneLaunc
 		}
 	}
 
-	launchEnv := mergeEnvironment(env, []string{
+	launchEnv := MergeEnvironment(env, []string{
 		"HOME=" + overlay,
 		"ATTN_SHELL_USER_HOME=" + userHome,
 		"ATTN_SHELL_LAUNCH_PATH=" + path,

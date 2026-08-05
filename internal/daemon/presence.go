@@ -11,13 +11,15 @@ import (
 // agent driving the daemon over the unix socket, which never reaches this
 // path). Keep this list in sync with the design in the ticket-inbox presence
 // feature: session/workspace selection, PR views, and terminal
-// input/resize are the actions a human takes while looking at the app.
+// input/resize (and a conversation session's prompt) are the actions a human
+// takes while looking at the app.
 func isUserPresenceCommand(cmd string) bool {
 	switch cmd {
 	case protocol.CmdSessionSelected,
 		protocol.CmdWorkspaceSelected,
 		protocol.CmdPRVisited,
 		protocol.CmdPtyInput,
+		protocol.CmdAgentPrompt,
 		protocol.CmdPtyResize:
 		return true
 	default:

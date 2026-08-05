@@ -88,7 +88,8 @@
     "e2e": "playwright test",
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
     "e2e:headed": "playwright test --headed",
-    "doctor": "npx react-doctor@latest"
+    "doctor": "npx react-doctor@latest",
+    "real-app:scenario-pi-host-conversation": "node scripts/real-app-harness/scenario-pi-host-conversation.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

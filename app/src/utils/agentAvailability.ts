@@ -139,6 +139,20 @@ export function getAgentCapabilities(settings: Record<string, string>): AgentCap
   return capabilities;
 }
 
+/**
+ * The capability a plugin driver registers to say its agent has no terminal.
+ * Its sessions are conversations: an envelope stream the app draws from and a
+ * prompt verb going the other way, with no PTY behind either.
+ */
+export const CONVERSATION_CAPABILITY = 'conversation';
+
+export function conversationAgents(settings: Record<string, string>): Set<string> {
+  const capabilities = getAgentCapabilities(settings);
+  return new Set(
+    Object.keys(capabilities).filter((agent) => capabilities[agent]?.[CONVERSATION_CAPABILITY]),
+  );
+}
+
 export function agentCapabilityLabel(capability: string): string {
   return AGENT_CAPABILITY_LABELS[capability] || capability.replace(/[_-]+/g, ' ');
 }

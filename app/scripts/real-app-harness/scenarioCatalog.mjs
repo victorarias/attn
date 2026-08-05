@@ -255,6 +255,16 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-present-submit-closes-window'],
   },
   {
+    id: 'pi-host-conversation',
+    label: 'Conversation session: pi-host round trip, second prompt after settle, no orphans on close',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-conversation'],
+    // Needs the attn-pi plugin installed in the target profile
+    // (`attn plugin install-bundled attn-pi`) and pi credentials, the same way
+    // the codex/claude scenarios need theirs. Boots a real agent and runs three
+    // prompts, the last of which holds a `sleep 45` open.
+    timeoutMs: 300_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],
