@@ -229,7 +229,7 @@ func TestDocumentFailuresCarryTheirOwnCodes(t *testing.T) {
 
 	undeclared := docCall(t, func(c net.Conn) {
 		d.handleDocQuery(c, &protocol.DocQueryMessage{
-			Cmd: protocol.CmdDocQuery,
+			Cmd:   protocol.CmdDocQuery,
 			Query: protocol.DocumentQuery{Namespace: testDocNS, Collection: "nothing-here"},
 		})
 	})
