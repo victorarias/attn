@@ -785,6 +785,17 @@ func parseSignal(name string) syscall.Signal {
 func (d *Daemon) handleKillSession(client *wsClient, msg *protocol.KillSessionMessage) {
 	d.detachSession(client, msg.ID)
 	sig := parseSignal(protocol.Deref(msg.Signal))
+	// A conversation session has no PTY to signal. Its host gets the same
+	// cooperative-then-group teardown whatever signal was asked for: the
+	// escalation is the host's contract, not the caller's choice.
+	if d.isHostSession(msg.ID) {
+		if err := d.killSessionRuntime(msg.ID); err != nil {
+			d.logf("kill_session failed for host %s: %v", msg.ID, err)
+			return
+		}
+		d.closePluginDriverSession(msg.ID, "killed", nil, signalName(sig))
+		return
+	}
 	err := d.ptyBackend.Kill(context.Background(), msg.ID, sig)
 	if err == nil || errors.Is(err, pty.ErrSessionNotFound) {
 		// Production backends return from Kill only once the child has exited.

@@ -1,0 +1,9 @@
+kind: added
+area: sessions
+change: >
+  New session kind: a conversation. The `pi-host` agent runs pi headless
+  through its SDK in a host process attn owns, and its pane is a message list
+  and a composer instead of a terminal — type a prompt, watch the reply stream
+  in, send the next one when it settles. attn owns that host's lifetime the way
+  it owns a terminal session's, so closing the session takes down everything
+  the agent started with it.

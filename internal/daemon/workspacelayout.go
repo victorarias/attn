@@ -1295,10 +1295,8 @@ func (d *Daemon) reconcileWorkspaceLayoutsWithPTYBackend(ctx context.Context) {
 	}
 
 	liveIDs := make(map[string]struct{})
-	if d.ptyBackend != nil {
-		for _, id := range d.ptyBackend.SessionIDs(ctx) {
-			liveIDs[id] = struct{}{}
-		}
+	for _, id := range d.liveRuntimeSessionIDs(ctx) {
+		liveIDs[id] = struct{}{}
 	}
 
 	for _, workspace := range d.workspaces.list() {

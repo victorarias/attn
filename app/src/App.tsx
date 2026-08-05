@@ -75,6 +75,7 @@ import type { HiddenGridSession } from './components/grid/GridHiddenSessions';
 import { normalizeSessionAgent, type SessionAgent } from './types/sessionAgent';
 import { hasPane, workspaceSnapshotFromDaemonWorkspace, resolveEditorTileRoot, localWorkspaceDirectory, soleWorkspaceForId, serializeNotebookTileParams, type TerminalSplitDirection } from './types/workspace';
 import { useDaemonStore } from './store/daemonSessions';
+import { useConversationsStore } from './store/conversations';
 import { usePRsNeedingAttention } from './hooks/usePRsNeedingAttention';
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import { useWhatsNew } from './hooks/useWhatsNew';
@@ -101,6 +102,7 @@ import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } f
 import { probeUiAfterSwitch, UI_DIAGNOSTICS_FILE_DISPLAY } from './utils/uiDiagnosticsLog';
 import {
   agentLabel,
+  conversationAgents,
   getAgentAvailability,
   getAgentExecutableSettings,
   hasAnyAvailableAgents,
@@ -547,7 +549,12 @@ function App() {
   // below, for everything under AppContent; App destructures only the names
   // its own effects use.
   const daemon = useDaemonSocket({
-    onSessionsUpdate: setDaemonSessions,
+    onSessionsUpdate: (sessions) => {
+      setDaemonSessions(sessions);
+      // Conversation transcripts live only in the app; the sessions list is
+      // what says which ones still have a session to belong to.
+      useConversationsStore.getState().retainConversations(sessions.map((session) => session.id));
+    },
     onPresentationAdded: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     onPresentationUpdated: (p) => setPresentationNotices((prev) => upsertPresentationNotice(prev, p)),
     // The daemon tags each fs_changed with an origin ("ui"/"agent"/"external"), but
@@ -1056,6 +1063,11 @@ function AppContent({
     () => hasAnyAvailableAgents(agentAvailability),
     [agentAvailability],
   );
+
+  // Which agents draw a conversation instead of a terminal. The daemon publishes
+  // a driver's `conversation` capability like any other; the app just reads it,
+  // so a plugin registering a new conversation agent needs no app change.
+  const conversationPaneAgents = useMemo(() => conversationAgents(settings), [settings]);
 
   useEffect(() => {
     setLauncherConfig({
@@ -3790,6 +3802,7 @@ function AppContent({
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
                     ticketActions={ticketActions}
+                    conversationAgents={conversationPaneAgents}
                     annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
                     onCancelCountdown={sendCancelCountdown}

@@ -241,3 +241,39 @@ current result set, so a subscriber renders what it is handed and never
 accumulates state across deliveries; the daemon re-runs the query when a write to
 the collection says the answer may have moved. A skipped delivery is not a lost
 update — the next one supersedes it.
+
+## Conversation session
+
+A **conversation session** is an attn session whose agent runs headless in a
+process attn spawns, instead of a terminal program driven through a PTY. It is a
+session in every other respect — it has a workspace, a pane, a state, turns, and
+a ticket binding — so nothing that reasons about sessions has to know which kind
+it is looking at.
+
+What differs is the surface. A PTY session's surface is a byte stream and a
+terminal grid; a conversation session's is an **envelope** stream going out and a
+**prompt** verb coming in. There is no grid, no scrollback, and no attach.
+
+The process running the agent is its **host**. The daemon owns a host's lifetime
+exactly as it owns a PTY worker's: it signals the host to tear down, and kills
+its process group as the backstop, so nothing the agent started outlives the
+session.
+
+An **envelope** is one message from a host: a session id, a monotonic sequence
+number, a `kind`, and a body. Kinds fall in two families, and the split is what
+lets an agent's own vocabulary grow without the daemon changing:
+
+- **Declarations** are what the daemon understands and acts on — `session_ready`,
+  `run_started`, `run_settled`. These are the host telling attn something true
+  about the session.
+- **Renderings** are what the app draws — `message_start`, `message_delta`,
+  `message_end`. The daemon forwards them opaquely and holds no opinion about
+  them.
+
+A **run** is one prompt and everything the agent does in response to it, from
+`run_started` to `run_settled`. A run is what a turn is opened and settled
+around, the same way a PTY agent's stop is.
+
+An agent becomes a conversation agent by its plugin driver registering the
+`conversation` capability. Everything else about launching it — argv, env, cwd —
+comes back from the same `driver.spawn` call a PTY-backed agent uses.

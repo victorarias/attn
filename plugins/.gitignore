@@ -1,0 +1,6 @@
+node_modules/
+
+# Spike-harness run artifacts. The scenarios are the pin-bump gate and are
+# committed; what they produce (JSONL logs, pi session files) is per-run.
+attn-pi/spike-harness/logs/
+attn-pi/spike-harness/sessions/

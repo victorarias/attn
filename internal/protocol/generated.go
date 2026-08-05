@@ -16,6 +16,34 @@ type AddEndpointMessage struct {
 	SshTarget string `json:"ssh_target"`
 }
 
+type AgentEventMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body RecordUnknown `json:"body"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
+}
+
+type AgentPromptMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+}
+
 type ApprovePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3952,6 +3980,8 @@ type RecentLocationsResultMessage struct {
 }
 
 type RecordString map[string]interface{}
+
+type RecordUnknown map[string]interface{}
 
 type RefreshPRsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".

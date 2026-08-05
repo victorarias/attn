@@ -70,6 +70,10 @@ should_exclude_path() {
     plugins/attn-opencode/package.json|plugins/attn-opencode/bun.lock|plugins/attn-opencode/attn-plugin.toml|plugins/attn-opencode/README.md) return 1 ;;
     plugins/attn-pi/src/*) return 1 ;;
     plugins/attn-pi/suite/*) return 1 ;;
+    plugins/attn-pi/host/*) return 1 ;;
+    # The spike harness is the pin-bump gate, run by hand against a checkout.
+    # Nothing in it is staged into the bundle.
+    plugins/attn-pi/spike-harness/*) return 0 ;;
     plugins/attn-pi/package.json|plugins/attn-pi/bun.lock|plugins/attn-pi/attn-plugin.toml|plugins/attn-pi/README.md) return 1 ;;
     scripts/build-app-profile.sh|scripts/build-bundled-plugins.sh) return 1 ;;
     app/scripts/real-app-harness/*) return 0 ;;

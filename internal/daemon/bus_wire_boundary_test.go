@@ -49,6 +49,7 @@ var wireSenderExceptions = map[string]string{
 	// express.
 	"broadcastFsChanged":   "filesystem change bursts, coalesced per watcher rather than per file",
 	"broadcastTileContent": "workspace tile content bytes, sent only to the clients subscribed to that tile",
+	"handleHostEvent":      "a conversation host's envelope stream: render deltas the daemon never reads, on the same direct path as pty_output. The daemon's picture of the session is built from its own state, never from one of these",
 }
 
 // TestWireTrafficComesFromProjections pins the boundary A2 establishes: a state

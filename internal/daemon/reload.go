@@ -444,6 +444,7 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 		d: d, sessionID: session.ID, pluginName: reg.PluginName, runID: runID, rollback: rollback,
 	}
 	params := pluginDriverSpawnParams{
+		Agent:        reg.Agent,
 		SessionID:    session.ID,
 		RunID:        runID,
 		CWD:          session.Directory,

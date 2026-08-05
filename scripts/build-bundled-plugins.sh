@@ -104,6 +104,15 @@ stage_plugin() {
     # must stay an external import.
     bun build "${source_dir}/suite/index.ts" --target=node --format=esm --minify \
       --external "@earendil-works/pi-coding-agent" --outfile "${stage_dir}/suite.js"
+    # The headless host is its own process: attn's daemon spawns one per
+    # conversation session and talks to it over pipes, so it is a second
+    # executable beside the driver rather than code inside it. pi is bundled in
+    # (not external) because this one runs pi's SDK itself.
+    bun build "${source_dir}/host/index.ts" --compile --minify --outfile "${stage_dir}/bin/${name}-host"
+    find "${stage_dir}/bin" -maxdepth 1 -name '*.bun-build' -delete
+    remove_bun_linker_signature "${stage_dir}/bin/${name}-host"
+    chmod 0755 "${stage_dir}/bin/${name}-host"
+    fix_bun_compile_codesign "${stage_dir}/bin/${name}-host"
   fi
   cp "${source_dir}/README.md" "${stage_dir}/README.md"
   cat >"${stage_dir}/attn-plugin.toml" <<EOF

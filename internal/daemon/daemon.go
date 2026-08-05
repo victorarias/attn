@@ -28,6 +28,7 @@ import (
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
+	"github.com/victorarias/attn/internal/hostsession"
 	"github.com/victorarias/attn/internal/hub"
 	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/logging"
@@ -139,11 +140,15 @@ type Daemon struct {
 	warnings               []protocol.DaemonWarning
 	warningsMu             sync.RWMutex
 	ptyBackend             ptybackend.Backend
-	watchersMu             sync.Mutex
-	transcriptWatch        map[string]*transcriptWatcher
-	classifiedMu           sync.Mutex
-	classifiedTurn         map[string]string
-	classifyingTurn        map[string]string
+	// hostSessions runs the conversation sessions — the ones whose agent lives
+	// in a headless host process rather than a PTY. See host_session.go.
+	hostSessions    *hostsession.Manager
+	hostSessionsMu  sync.Mutex
+	watchersMu      sync.Mutex
+	transcriptWatch map[string]*transcriptWatcher
+	classifiedMu    sync.Mutex
+	classifiedTurn  map[string]string
+	classifyingTurn map[string]string
 	// classificationTranscriptExtractor is a private test seam for exercising
 	// classification outcomes without waiting on an agent driver's retry policy.
 	// Production leaves it nil and uses extractLastAssistantMessage below.
@@ -1114,10 +1119,8 @@ func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 	}
 
 	liveIDs := make(map[string]struct{})
-	if d.ptyBackend != nil {
-		for _, id := range d.ptyBackend.SessionIDs(context.Background()) {
-			liveIDs[id] = struct{}{}
-		}
+	for _, id := range d.liveRuntimeSessionIDs(context.Background()) {
+		liveIDs[id] = struct{}{}
 	}
 
 	sessions := d.store.List("")
@@ -1659,6 +1662,9 @@ func (d *Daemon) Stop() {
 	if d.ptyBackend != nil {
 		_ = d.ptyBackend.Shutdown(context.Background())
 	}
+	// No host outlives the daemon that owns it, and no tool subprocess outlives
+	// the host: Shutdown group-kills every one.
+	d.ensureHostSessions().Shutdown()
 	if d.httpServer != nil {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
@@ -1830,6 +1836,22 @@ func (d *Daemon) terminateSessionChecked(sessionID string, sig syscall.Signal) e
 	// crash-stamped (ticket_reconcile.go).
 	if d.store != nil {
 		d.store.MarkSessionIntentionalClose(sessionID, time.Now())
+	}
+
+	// A conversation session has no PTY to signal: its runtime is a host process
+	// group the daemon owns outright. Kill returns only once that group is gone,
+	// so there is nothing left to Remove afterwards.
+	if d.isHostSession(sessionID) {
+		if err := d.ensureHostSessions().Kill(sessionID); err != nil && !errors.Is(err, hostsession.ErrNotFound) {
+			d.clearForcedStopClassification(sessionID)
+			if d.store != nil {
+				d.store.ClearSessionIntentionalClose(sessionID)
+			}
+			return err
+		}
+		d.stopTranscriptWatcher(sessionID)
+		d.closePluginDriverSession(sessionID, "killed", nil, signalName(sig))
+		return nil
 	}
 
 	if d.ptyBackend == nil {

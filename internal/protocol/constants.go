@@ -208,6 +208,7 @@ const (
 	CmdGetScreenSnapshot                     = "get_screen_snapshot"
 	CmdGetKittyImage                         = "get_kitty_image"
 	CmdPtyInput                              = "pty_input"
+	CmdAgentPrompt                           = "agent_prompt"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -354,6 +355,7 @@ const (
 	EventWorkflowRunUpdated              = "workflow_run_updated"
 	EventWorkflowActionResult            = "workflow_action_result"
 	EventPtyOutput                       = "pty_output"
+	EventAgentEvent                      = "agent_event"
 	EventSpawnResult                     = "spawn_result"
 	EventReloadSessionResult             = "reload_session_result"
 	EventAttachResult                    = "attach_result"
@@ -1509,6 +1511,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg PtyInputMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal pty_input: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentPrompt:
+		var msg AgentPromptMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_prompt: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

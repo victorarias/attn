@@ -3021,6 +3021,38 @@ export function useUiAutomationBridge({
           ).sessions[0]?.panes.find((pane) => pane.paneId === paneId) || null,
         };
       }
+      // --- Conversation pane (host-backed sessions) ------------------------
+      // Read straight off the rendered DOM rather than the store: what a
+      // conversation session shows is the thing under test, and a store that
+      // is right while the pane draws nothing is exactly the bug this has to
+      // be able to catch.
+      case 'conversation_get_state': {
+        const sessionId = typeof payload.sessionId === 'string' ? payload.sessionId : '';
+        const root = sessionId
+          ? document.querySelector(`[data-testid="conversation-pane-${sessionId}"]`)
+          : document.querySelector('.conversation-pane');
+        if (!root) {
+          throw new Error(`conversation pane not found${sessionId ? ` for session ${sessionId}` : ''}`);
+        }
+        const input = root.querySelector('[data-testid="conversation-input"]');
+        const textarea = input instanceof HTMLTextAreaElement ? input : null;
+        const messages = Array.from(root.querySelectorAll('.conversation-message')).map((node) => {
+          const element = node as HTMLElement;
+          return {
+            id: (element.dataset.testid || '').replace('conversation-message-', ''),
+            role: element.dataset.role || '',
+            streaming: element.dataset.streaming === 'true',
+            text: element.querySelector('.conversation-message-text')?.textContent || '',
+          };
+        });
+        return {
+          sessionId,
+          messages,
+          inputDisabled: Boolean(textarea?.disabled),
+          placeholder: textarea?.placeholder || '',
+          draft: textarea?.value || '',
+        };
+      }
       // --- Ticket detail panel (work-tracker) ------------------------------
       // Read-only board snapshot (foundation for the slice-5 board scenario).
       case 'ticket_list':

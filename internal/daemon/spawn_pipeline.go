@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
@@ -260,7 +259,7 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 	msg := req.msg
 	if req.existingSession != nil {
-		for _, liveID := range d.ptyBackend.SessionIDs(context.Background()) {
+		for _, liveID := range d.liveRuntimeSessionIDs(context.Background()) {
 			if liveID == msg.ID {
 				plan.rollback(d, msg.ID)
 				return &spawnOutcome{alreadyLive: true}
@@ -272,6 +271,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		plan.spawnOpts.LifecycleID = plan.pluginRunID
 		d.beginPluginSessionLaunch(msg.ID, req.pluginDriver.PluginName, plan.pluginRunID)
 		params := pluginDriverSpawnParams{
+			Agent:         req.agent,
 			SessionID:     msg.ID,
 			RunID:         plan.pluginRunID,
 			CWD:           req.cwd,
@@ -338,7 +338,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		ChiefOfStaff:     plan.isChief,
 		UnattendedLaunch: plan.spawnOpts.UnattendedLaunch,
 	})
-	if err := d.ptyBackend.Spawn(context.Background(), plan.spawnOpts); err != nil {
+	if err := d.spawnSessionRuntime(req, plan.spawnOpts); err != nil {
 		if req.existingSession == nil {
 			d.store.Remove(msg.ID)
 		} else if restoreErr := d.store.AddChecked(req.existingSession); restoreErr != nil {
@@ -387,8 +387,8 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		if plan.chiefAssigned {
 			d.clearChiefOfStaffIfSession(msg.ID)
 		}
-		killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
-		removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
+		killErr := d.killSessionRuntime(msg.ID)
+		removeErr := d.removeSessionRuntime(msg.ID)
 		persistErr := fmt.Errorf("persist spawned session: %w", err)
 		if killErr != nil {
 			persistErr = fmt.Errorf("%w; kill spawned runtime: %v", persistErr, killErr)
@@ -407,8 +407,8 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		if plan.chiefAssigned {
 			d.clearChiefOfStaffIfSession(msg.ID)
 		}
-		killErr := d.ptyBackend.Kill(context.Background(), msg.ID, syscall.SIGTERM)
-		removeErr := d.ptyBackend.Remove(context.Background(), msg.ID)
+		killErr := d.killSessionRuntime(msg.ID)
+		removeErr := d.removeSessionRuntime(msg.ID)
 		if req.existingSession == nil {
 			d.store.Remove(session.ID)
 		} else {
