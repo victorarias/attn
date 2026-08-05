@@ -929,6 +929,10 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// — sorts came back scrambled and "changed since" filters dropped rows in
 	// silence. Applied by applyMigration91.
 	{91, "store document timestamps in an encoding that sorts", ``},
+	// The queue's two per-session columns: the pin that takes one agent out of
+	// the queue without dragging its workspace along, and the satellite link
+	// from a shell to the agent it was split from. Applied by applyMigration92.
+	{92, "add the session pin and the satellite parent to sessions", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1209,6 +1213,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 91 {
 			if err := applyMigration91(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 92 {
+			if err := applyMigration92(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2276,6 +2285,39 @@ func applyMigration90(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration92 adds the two per-session queue columns.
+//
+// pinned_at is the individual pin: presence means pinned out of the queue, and
+// the instant is the pinned band's sort key, so one column answers both
+// questions. parent_session_id is the satellite link a shell carries to the
+// agent session it was split from — spawn-time provenance, always an agent id,
+// so there is never a chain to walk.
+//
+// Nothing is backfilled in either direction. No pin has ever been expressed, so
+// every existing session is correctly unpinned; and which agent an existing
+// shell was opened beside is unknowable after the fact, so every shell alive at
+// migration time is correctly an orphan and keeps its own row.
+//
+// Each ALTER is guarded on the column existing, so a rewound schema_migrations
+// table re-runs the migration without erroring on the duplicate.
+func applyMigration92(tx *sql.Tx) error {
+	hasPinned, err := columnExists(tx, "sessions", "pinned_at")
+	if err != nil {
+		return err
+	}
+	if !hasPinned {
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN pinned_at TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	hasParent, err := columnExists(tx, "sessions", "parent_session_id")
+	if err != nil || hasParent {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''")
+	return err
 }
 
 // applyMigration91 rewrites every stored document stamp into

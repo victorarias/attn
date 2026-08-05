@@ -106,6 +106,12 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	if session.MainRepo != nil {
 		cloned.MainRepo = protocol.Ptr(protocol.Deref(session.MainRepo))
 	}
+	if session.PinnedAt != nil {
+		cloned.PinnedAt = protocol.Ptr(protocol.Deref(session.PinnedAt))
+	}
+	if session.ParentSessionID != nil {
+		cloned.ParentSessionID = protocol.Ptr(protocol.Deref(session.ParentSessionID))
+	}
 	if session.Todos != nil {
 		cloned.Todos = append([]string(nil), session.Todos...)
 	}
@@ -169,7 +175,15 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 		if s.sessions == nil {
 			s.sessions = make(map[string]*protocol.Session)
 		}
-		s.sessions[session.ID] = cloneSession(session)
+		stored := cloneSession(session)
+		// pinned_at is absent from the SQLite upsert below, so a re-add never
+		// disturbs it there. Carrying the stored value forward here is what makes
+		// the memory branch say the same thing: the pin is owned by
+		// SetSessionPinned alone, and a respawn cannot silently clear it.
+		if existing := s.sessions[session.ID]; existing != nil && existing.PinnedAt != nil {
+			stored.PinnedAt = protocol.Ptr(protocol.Deref(existing.PinnedAt))
+		}
+		s.sessions[session.ID] = stored
 		return nil
 	}
 
@@ -182,10 +196,13 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 		normalizedAgent = string(protocol.SessionAgentCodex)
 	}
 	session.Agent = protocol.SessionAgent(normalizedAgent)
+	// pinned_at is deliberately absent from both the column list and the
+	// conflict update: the pin is owned by SetSessionPinned, and leaving it out
+	// is what makes a respawn or a state re-add unable to clear it.
 	_, err = s.db.Exec(`
 		INSERT INTO sessions
-		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		(id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, parent_session_id, todos, last_seen)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
 			label = excluded.label,
 			agent = excluded.agent,
@@ -198,6 +215,7 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 			state = excluded.state,
 			state_since = excluded.state_since,
 			state_updated_at = excluded.state_updated_at,
+			parent_session_id = excluded.parent_session_id,
 			todos = excluded.todos,
 			last_seen = excluded.last_seen`,
 		session.ID,
@@ -212,6 +230,7 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 		string(session.State),
 		session.StateSince,
 		session.StateUpdatedAt,
+		protocol.Deref(session.ParentSessionID),
 		string(todosJSON),
 		session.LastSeen,
 	)
@@ -234,10 +253,10 @@ func (s *Store) Get(id string) *protocol.Session {
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var isWorktree int
-	var endpointID, workspaceID, branch, mainRepo sql.NullString
+	var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -251,11 +270,20 @@ func (s *Store) Get(id string) *protocol.Session {
 		&session.State,
 		&stateSince,
 		&stateUpdatedAt,
+		&pinnedAt,
+		&parentSessionID,
 		&todosJSON,
 		&lastSeen,
 	)
 	if err != nil {
 		return nil
+	}
+
+	if pinnedAt.Valid && pinnedAt.String != "" {
+		session.PinnedAt = protocol.Ptr(pinnedAt.String)
+	}
+	if parentSessionID.Valid && parentSessionID.String != "" {
+		session.ParentSessionID = protocol.Ptr(parentSessionID.String)
 	}
 
 	if endpointID.Valid && endpointID.String != "" {
@@ -365,11 +393,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -383,7 +411,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var isWorktree int
-		var endpointID, workspaceID, branch, mainRepo sql.NullString
+		var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
@@ -398,11 +426,20 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&session.State,
 			&stateSince,
 			&stateUpdatedAt,
+			&pinnedAt,
+			&parentSessionID,
 			&todosJSON,
 			&lastSeen,
 		)
 		if err != nil {
 			continue
+		}
+
+		if pinnedAt.Valid && pinnedAt.String != "" {
+			session.PinnedAt = protocol.Ptr(pinnedAt.String)
+		}
+		if parentSessionID.Valid && parentSessionID.String != "" {
+			session.ParentSessionID = protocol.Ptr(parentSessionID.String)
 		}
 
 		if endpointID.Valid && endpointID.String != "" {

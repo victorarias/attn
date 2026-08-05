@@ -13,6 +13,8 @@ interface TestSession {
   turnOwed?: boolean;
   turnOpenedAt?: string;
   turnSnoozedUntil?: string;
+  pinnedAt?: string;
+  parentSessionId?: string;
 }
 
 const baseProps = {
@@ -74,6 +76,22 @@ describe('the queue arrangement', () => {
   it('renders nothing extra while the arrangement is off', () => {
     renderSidebar(sessions, false);
     expect(screen.queryByTestId('sidebar-queue')).toBeNull();
+  });
+
+  it('leaves the tree alone while the arrangement is off, pins and satellites included', () => {
+    // Both new fields are queue vocabulary. The tree predates the queue and is
+    // the arrangement people who never turn it on live in, so a session that
+    // carries either one has to draw exactly where it always did.
+    const tagged: TestSession[] = [
+      ...sessions,
+      { id: 'held', label: 'held', state: 'working', workspaceId: 'ws-b', pinnedAt: '2026-07-26T12:00:00Z' },
+      { id: 'shell', label: 'shell', state: 'idle', workspaceId: 'ws-b', parentSessionId: 'older' },
+    ];
+    renderSidebar(tagged, false);
+
+    for (const id of ['chief', 'newer', 'older', 'settled', 'held', 'shell']) {
+      expect(screen.getByTestId(`sidebar-session-${id}`)).toBeTruthy();
+    }
   });
 
   it('lists owed turns oldest first, then the settled rest, with the chief anchored above both', () => {
@@ -149,20 +167,62 @@ describe('the queue arrangement', () => {
     expect(onSelectSession).not.toHaveBeenCalled();
   });
 
-  it('pins a row\'s workspace without selecting it, from either band', () => {
-    // The workspace group header owns pin in the tree, and queue mode does not
-    // draw the group for these workspaces. Without this the queue would be a
-    // one-way door: pinning is how an agent leaves it for good.
-    const onPinWorkspace = vi.fn();
+  it('pins the row\'s own agent without selecting it, from either band', () => {
+    // A gesture aimed at a row acts on that row. `older` and `settled` share a
+    // workspace, so the old behavior — pin the workspace — would have taken the
+    // sibling out too, which is the friction this replaced.
+    const onPinSession = vi.fn();
     const onSelectSession = vi.fn();
-    renderSidebar(sessions, true, { onPinWorkspace, onSelectSession });
+    renderSidebar(sessions, true, { onPinSession, onSelectSession });
 
     fireEvent.click(screen.getByTestId('queue-pin-older'));
-    expect(onPinWorkspace).toHaveBeenCalledWith('ws-b', true);
+    expect(onPinSession).toHaveBeenCalledWith('older', true);
 
     fireEvent.click(screen.getByTestId('queue-pin-settled'));
-    expect(onPinWorkspace).toHaveBeenLastCalledWith('ws-b', true);
+    expect(onPinSession).toHaveBeenLastCalledWith('settled', true);
     expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('draws a pinned agent in its own band below settled, and unpins it there', () => {
+    // Pinning has to be reversible from where the row lands, or it is a one-way
+    // door out of the queue.
+    const onPinSession = vi.fn();
+    const onSelectSession = vi.fn();
+    const withPin: TestSession[] = [
+      ...sessions,
+      { id: 'held', label: 'held', state: 'working', workspaceId: 'ws-b', pinnedAt: '2026-07-26T12:00:00Z' },
+    ];
+    const { container } = renderSidebar(withPin, true, { onPinSession, onSelectSession });
+
+    const bandRows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(bandRows).toContain('queue-pinned-held');
+    expect(bandRows.indexOf('queue-pinned-held')).toBeGreaterThan(bandRows.indexOf('queue-settled-settled'));
+
+    // Neither settle nor snooze: both answer "whose turn is it", and a pinned
+    // agent has stepped out of that question.
+    expect(screen.queryByTestId('queue-settle-held')).toBeNull();
+    expect(screen.queryByTestId('queue-snooze-held')).toBeNull();
+
+    fireEvent.click(screen.getByTestId('queue-unpin-held'));
+    expect(onPinSession).toHaveBeenCalledWith('held', false);
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('gives a shell no row of its own while it sits beside its agent', () => {
+    const withShell: TestSession[] = [
+      ...sessions,
+      { id: 'shell', label: 'shell', state: 'idle', workspaceId: 'ws-b', parentSessionId: 'older' },
+      { id: 'orphan', label: 'orphan', state: 'idle', workspaceId: 'ws-b' },
+    ];
+    const { container } = renderSidebar(withShell, true);
+
+    const bandRows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(bandRows).not.toContain('queue-settled-shell');
+    // A shell with no agent to be reached through keeps its row: the queue
+    // reorders, it never hides.
+    expect(bandRows).toContain('queue-settled-orphan');
   });
 
   it('draws the chief once when its own workspace stays in the tree', () => {

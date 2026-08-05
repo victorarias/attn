@@ -3360,6 +3360,17 @@ type PathInspection struct {
 	ResolvedPath string `json:"resolved_path"`
 }
 
+type PinSessionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Pinned corresponds to the JSON schema field "pinned".
+	Pinned bool `json:"pinned"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
 type PinWorkspaceMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -4345,6 +4356,12 @@ type Session struct {
 	// NudgeFiresAt corresponds to the JSON schema field "nudge_fires_at".
 	NudgeFiresAt *string `json:"nudge_fires_at,omitempty,omitzero"`
 
+	// ParentSessionID corresponds to the JSON schema field "parent_session_id".
+	ParentSessionID *string `json:"parent_session_id,omitempty,omitzero"`
+
+	// PinnedAt corresponds to the JSON schema field "pinned_at".
+	PinnedAt *string `json:"pinned_at,omitempty,omitzero"`
+
 	// State corresponds to the JSON schema field "state".
 	State SessionState `json:"state"`
 
@@ -4952,6 +4969,9 @@ type SpawnSessionMessage struct {
 
 	// Rows corresponds to the JSON schema field "rows".
 	Rows int `json:"rows"`
+
+	// SpawnedFrom corresponds to the JSON schema field "spawned_from".
+	SpawnedFrom *string `json:"spawned_from,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`

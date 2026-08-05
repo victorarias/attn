@@ -136,6 +136,34 @@ The chief is **keeper-aware**: because the keeper already narrates each workspac
 own work into the journal, the chief does not duplicate per-workspace play-by-play.
 It writes the cross-workspace layer the keeper cannot see.
 
+## Turn, and the queue
+
+A **turn** is the user owing an agent their attention. It **opens** when a session
+reaches a state that wants the user, and it **closes** only when the user settles
+it — steering, approving, snoozing, or pressing settle. Nothing else ever closes
+one; in particular, looking at an agent is not acting on it. `turn_owed` is derived
+at broadcast from the persisted `turn_opened_at`/`turn_settled_at` stamps and is
+never stored. The predicates live in `internal/attention`.
+
+The **queue** is the sidebar arrangement built on turns (queue mode; off by
+default). Its standing order is the chief's anchored slot, the turns you owe
+(oldest first), the settled rest, pinned agents, pinned workspaces, muted.
+
+**Pinned** — the user saying "I'll come to this one myself". A **pinned agent**
+(`sessions.pinned_at`) leaves the queue on its own and leaves its siblings in it; a
+**pinned workspace** takes the whole workspace. Pinning is not settling: the turn
+goes on accruing underneath, so unpinning surfaces whatever is outstanding at its
+true age.
+
+**Satellite** — a shell split out of an agent, recorded at spawn as
+`sessions.parent_session_id`. It gets no sidebar row of its own: you reach it by
+going to its agent, where it is a pane. Splitting a shell out of a shell inherits
+the same agent, so the link always names an agent and never another shell.
+Attachment is judged at read — the parent must still exist and still be in the same
+workspace — so a satellite whose agent closed, or whose pane moved, gets its own
+row back with no cascade. A satellite with no live parent is an **orphan**, and
+orphans keep their rows.
+
 ## Ticket
 
 The chief delegates a unit of work to a sub-agent, and that work is tracked as a

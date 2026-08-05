@@ -95,6 +95,11 @@ type Input struct {
 	// queue rather than a place in it.
 	ChiefOfStaff bool
 
+	// SessionPinned excludes one individually pinned session, leaving its
+	// workspace and its siblings in the queue. It is the finer-grained half of
+	// WorkspacePinned and filters the same way, for the same reason.
+	SessionPinned bool
+
 	// WorkspacePinned and WorkspaceMuted filter at read, not at open: a pinned or
 	// muted session still accumulates OpenedAt, so un-pinning surfaces whatever
 	// was outstanding at its true age instead of starting it from nothing.
@@ -104,7 +109,7 @@ type Input struct {
 
 // Owed reports whether the user owes this session a turn.
 func Owed(in Input) bool {
-	if in.IsShell || in.ChiefOfStaff || in.WorkspacePinned || in.WorkspaceMuted {
+	if in.IsShell || in.ChiefOfStaff || in.SessionPinned || in.WorkspacePinned || in.WorkspaceMuted {
 		return false
 	}
 	return in.OpenedAt.After(in.SettledAt)

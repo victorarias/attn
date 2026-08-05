@@ -30,6 +30,58 @@ func (d *Daemon) handleSettleTurn(msg *protocol.SettleTurnMessage) {
 	d.broadcastSessionStateChanged(sessionID)
 }
 
+// handlePinSession takes one session out of the queue, or puts it back, leaving
+// its workspace and every sibling in it where they are.
+//
+// Unlike settle it does not close the turn: the stamps go on accruing while the
+// session is pinned, so releasing the pin surfaces whatever was outstanding at
+// its true age. Pinning is "I will come to this myself", not "I am done".
+func (d *Daemon) handlePinSession(client *wsClient, msg *protocol.PinSessionMessage) {
+	if msg == nil {
+		return
+	}
+	if errMsg := d.setSessionPinned(msg.SessionID, msg.Pinned); errMsg != "" {
+		d.sendCommandError(client, protocol.CmdPinSession, errMsg)
+	}
+}
+
+// setSessionPinned is the one place the pin is written, shared by the WebSocket
+// and unix-socket entry points. It returns a message when nothing was pinned.
+func (d *Daemon) setSessionPinned(sessionID string, pinned bool) string {
+	if d == nil || d.store == nil {
+		return "store unavailable"
+	}
+	id := strings.TrimSpace(sessionID)
+	if id == "" {
+		return "missing session_id"
+	}
+	session := d.store.Get(id)
+	if session == nil {
+		return "session not found"
+	}
+	// The chief already has an anchored slot above the queue, so it has nothing
+	// to be pinned out of; accepting the pin would hide it from the one place it
+	// is guaranteed to be visible.
+	//
+	// Asked of the role registry, not of the session record: chief_of_staff is
+	// decorated onto a session at broadcast and is never stored, so a stored
+	// record's copy of it is always nil.
+	if d.isChiefOfStaffSession(id) {
+		return "the chief of staff is already anchored above the queue"
+	}
+	// Idempotent, so a repeated pin neither re-stamps the band order nor emits a
+	// fact nothing acts on.
+	alreadyPinned := strings.TrimSpace(protocol.Deref(session.PinnedAt)) != ""
+	if alreadyPinned == pinned {
+		return ""
+	}
+	if !d.store.SetSessionPinned(id, pinned, time.Now()) {
+		return "persist session pin failed"
+	}
+	d.publishFact(FactSessionPinChanged, id, nil)
+	return ""
+}
+
 // traceSettle records the settle beside the state it settled. A turn the user
 // closed while the daemon could not explain the state it opened on is a
 // detection failure with a witness — the trace is where that pairing survives.
@@ -53,7 +105,7 @@ func (d *Daemon) traceSettle(sessionID string) {
 
 // decorateSessionWithTurn derives whether the user owes this session a turn.
 // It is derived at broadcast rather than stored because it depends on two
-// stamps plus four exclusions; deriving it in the decoration seam makes every
+// stamps plus five exclusions; deriving it in the decoration seam makes every
 // path that already broadcasts a session correct for free.
 //
 // It runs whether or not queue mode is enabled: the mode gates the band in the
@@ -68,10 +120,11 @@ func (d *Daemon) decorateSessionWithTurn(session *protocol.Session) {
 
 	stamps := d.store.TurnStamps(session.ID)
 	in := attention.Input{
-		OpenedAt:     stamps.OpenedAt,
-		SettledAt:    stamps.SettledAt,
-		IsShell:      string(session.Agent) == protocol.AgentShellValue,
-		ChiefOfStaff: protocol.Deref(session.ChiefOfStaff),
+		OpenedAt:      stamps.OpenedAt,
+		SettledAt:     stamps.SettledAt,
+		IsShell:       string(session.Agent) == protocol.AgentShellValue,
+		ChiefOfStaff:  protocol.Deref(session.ChiefOfStaff),
+		SessionPinned: strings.TrimSpace(protocol.Deref(session.PinnedAt)) != "",
 	}
 	if workspace := d.store.GetWorkspace(session.WorkspaceID); workspace != nil {
 		in.WorkspacePinned = workspace.Pinned

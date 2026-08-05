@@ -16,6 +16,11 @@ export interface PtySpawnArgs {
   resume_picker?: boolean | null;
   yolo_mode?: boolean | null;
   chief_of_staff?: boolean | null;
+  /**
+   * The session this one was split from. Only meaningful for a shell: the daemon
+   * resolves it to the owning agent and stores that as the satellite's parent.
+   */
+  spawned_from?: string;
   agent?: string;
   label?: string;
   executable?: string;

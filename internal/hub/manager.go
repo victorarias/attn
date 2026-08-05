@@ -1368,6 +1368,13 @@ func sessionsMatch(left, right protocol.Session) bool {
 		// the hub compares, so the re-broadcast is suppressed and the row never
 		// moves into the snoozed section.
 		protocol.Deref(left.TurnSnoozedUntil) == protocol.Deref(right.TurnSnoozedUntil) &&
+		// Same reason as the snooze stamp above: a remote agent pinned on its own
+		// daemon changes nothing else the hub compares, so without this the
+		// re-broadcast is suppressed and the row never leaves the queue. The
+		// satellite link rides along because a shell's parent decides whether it
+		// gets a row at all.
+		protocol.Deref(left.PinnedAt) == protocol.Deref(right.PinnedAt) &&
+		protocol.Deref(left.ParentSessionID) == protocol.Deref(right.ParentSessionID) &&
 		protocol.Deref(left.TicketUnread) == protocol.Deref(right.TicketUnread) &&
 		protocol.Deref(left.NudgeFiresAt) == protocol.Deref(right.NudgeFiresAt) &&
 		strings.Join(left.Todos, "\x00") == strings.Join(right.Todos, "\x00") &&

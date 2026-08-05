@@ -197,7 +197,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '210';
+export const PROTOCOL_VERSION = '211';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2873,6 +2873,7 @@ export function useDaemonSocket({
       ...(args.resume_picker && { resume_picker: args.resume_picker }),
       ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
       ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
+      ...(args.spawned_from && { spawned_from: args.spawned_from }),
       ...(args.executable && { executable: args.executable }),
       ...(args.claude_executable && { claude_executable: args.claude_executable }),
       ...(args.codex_executable && { codex_executable: args.codex_executable }),
@@ -3697,6 +3698,17 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({
       cmd: 'pin_workspace',
       workspace_id: workspaceId,
+      pinned,
+    }));
+  }, []);
+
+  // Pins one session out of the queue, leaving its workspace and siblings in it.
+  const sendPinSession = useCallback((sessionId: string, pinned: boolean) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({
+      cmd: 'pin_session',
+      session_id: sessionId,
       pinned,
     }));
   }, []);
@@ -5019,6 +5031,7 @@ export function useDaemonSocket({
     sendMuteAuthor,
     sendMuteWorkspace,
     sendPinWorkspace,
+    sendPinSession,
     sendRefreshPRs,
     sendFetchPRDetails,
     sendClearSessions,

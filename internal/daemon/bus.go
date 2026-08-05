@@ -86,6 +86,10 @@ const (
 	FactSessionPTYExited = "session.pty.exited"
 	// FactSessionWorkspaceChanged: this session moved to another workspace.
 	FactSessionWorkspaceChanged = "session.workspace.changed"
+	// FactSessionPinChanged: this session was pinned out of the queue, or
+	// released back into it. Distinct from FactWorkspacePinChanged, which moves
+	// a whole workspace and its siblings.
+	FactSessionPinChanged = "session.pin.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -258,6 +262,13 @@ func buildWireProjections() []projection {
 			apply: func(d *Daemon, ev bus.Event) {
 				d.projectSessionEvent(protocol.EventSessionRegistered, ev.Subject)
 			},
+		},
+		{
+			// A pin changes what the session says about itself (turn_owed and
+			// pinned_at), and nothing about its workspace, so it re-pushes the one
+			// session rather than recomputing the group around it.
+			filter: bus.Filter{FactSessionPinChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
 			// A re-announced session and a renamed one both reach clients as a state

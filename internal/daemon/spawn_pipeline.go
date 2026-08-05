@@ -38,6 +38,7 @@ type spawnRequest struct {
 	spawnStartedAt  time.Time
 	driver          agentdriver.Driver
 	resumeSessionID string
+	parentSessionID string
 }
 
 type spawnPlan struct {
@@ -147,6 +148,13 @@ func (d *Daemon) normalizeSpawnRequest(req *spawnRequest) *spawnRejection {
 	}
 	req.resumeSessionID = protocol.Deref(req.msg.ResumeSessionID)
 	req.driver = agentdriver.Get(req.agent)
+	req.parentSessionID = d.resolveSpawnParent(protocol.Deref(req.msg.SpawnedFrom), req.workspaceID, req.isShell)
+	// A respawn or a revive carries no spawned_from — the client is not splitting
+	// anything, it is bringing a session back — so the stored link is the
+	// authority there, exactly as the stored label is above.
+	if req.parentSessionID == "" && req.existingSession != nil {
+		req.parentSessionID = strings.TrimSpace(protocol.Deref(req.existingSession.ParentSessionID))
+	}
 	return nil
 }
 
@@ -306,7 +314,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 	// dies after Spawn, startup recovery can now associate that worker with its
 	// workspace, pane, ticket, and automation run instead of seeing an anonymous
 	// process with no durable session row.
-	plan.launchSession = buildSpawnSessionRecord(msg, req.agent, req.cwd, req.label, req.existingSession, req.isShell, req.hasPluginDriver && !req.pluginDriver.Capabilities["state_reporting"])
+	plan.launchSession = buildSpawnSessionRecord(msg, req.agent, req.cwd, req.label, req.existingSession, req.isShell, req.hasPluginDriver && !req.pluginDriver.Capabilities["state_reporting"], req.parentSessionID)
 	session := plan.launchSession
 	if err := d.store.AddChecked(session); err != nil {
 		if req.hasPluginDriver {

@@ -1003,6 +1003,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleMuteWorkspaceWS(client, msg.(*protocol.MuteWorkspaceMessage))
 	case protocol.CmdPinWorkspace: // wire: pin_workspace
 		d.handlePinWorkspaceWS(client, msg.(*protocol.PinWorkspaceMessage))
+	case protocol.CmdPinSession: // wire: pin_session
+		d.handlePinSession(client, msg.(*protocol.PinSessionMessage))
 	case protocol.CmdRefreshPRs: // wire: refresh_prs
 		d.handleRefreshPRsWS(client)
 	case protocol.CmdFetchPRDetails: // wire: fetch_pr_details
@@ -1360,6 +1362,14 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdWakeTurn: // wire: wake_turn
 		if typed, ok := msg.(*protocol.WakeTurnMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdPinSession: // wire: pin_session
+		// The pin is a column on the session row, and turn_owed is derived from
+		// it by the daemon that owns that row. Pinned on the hub instead, it
+		// would write to a session the hub does not have and the next snapshot
+		// from the endpoint would put the row straight back in the queue.
+		if typed, ok := msg.(*protocol.PinSessionMessage); ok {
 			return typed.SessionID
 		}
 	case protocol.CmdSessionMessagesGet: // wire: session_messages_get
