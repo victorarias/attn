@@ -10,7 +10,10 @@ layer is built ahead of the slice that needs it. Chatbox first, then expand.
 
 ## Grounding (receipts)
 
-Measured in the 2026-08-04 SDK spike / source read at pi 0.80.10:
+Measured in the 2026-08-04 SDK spike / source read at pi 0.80.10, and
+re-validated on 2026-08-05 at pi 0.83.0 (source diff of the 204 commits in
+between plus a full re-run of the spike harness — every scenario passed with
+unmodified scripts):
 
 - `agent_settled` fires last on every path (success, abort, error,
   retry-drain); attn's turn = pi run (`agent_start` -> `agent_settled`); pi's
@@ -27,9 +30,9 @@ Measured in the 2026-08-04 SDK spike / source read at pi 0.80.10:
   leaves zero disk trace.
 - Session files are versioned (v3) with automatic in-place migration on open;
   entries form a parent-linked tree.
-- Thinking-model streams measured ~480 `message_update` events / ~45 KB per
-  ~5 s reply, bursty (observed peaks 250-1,490 events/s); WS clients buffer
-  256 messages -> host coalesces deltas (~30 ms flush) before the wire.
+- Thinking-model streams measured ~480-550 `message_update` events / ~45-52 KB
+  per ~5 s reply, bursty (observed peaks 250-1,970 events/s); WS clients
+  buffer 256 messages -> host coalesces deltas (~30 ms flush) before the wire.
 - Transcript corpus: p50 0.15 MB, p99 11.6 MB, max 128 MB with ~0.4% message
   text -> attach snapshot is windowed with collapsed tool cards from day one;
   pi's bash tool already truncates at 2000 lines/50 KB and writes full output
@@ -37,10 +40,20 @@ Measured in the 2026-08-04 SDK spike / source read at pi 0.80.10:
 - pi releases ~3.6x/week with labeled breaking changes every 1-2 releases plus
   unlabeled type-level growth of the event union -> exact pin; a pin bump
   means re-running the spike scenarios; never exhaustively switch on pi's
-  unions.
+  unions. The 0.80.10 -> 0.83.0 diff showed both failure modes live: the
+  event union gained four types unannounced (`summarization_retry_*`,
+  `bash_execution_update`) and agent-core took a labeled break (0.81.0,
+  `streamFn` required) that the SDK path absorbs internally.
 - `bindExtensions()` is required or `session_start` (and resource discovery)
   never fires.
-- Auth is fully headless; a failed OAuth refresh throws with no env fallback.
+- Auth is fully headless; a failed OAuth refresh throws with no env fallback
+  (since 0.82.1 the error carries the provider's response; 0.83.0 adds
+  `pi auth print-api-key`/`print-bearer-token` for credential export).
+- New since the pin was first taken, useful to later slices:
+  summarization/compaction retry lifecycle events reach SDK subscribers
+  (slice 5), `bash_execution_update` streams bash output deltas (a slice 3
+  render candidate), and a non-terminal `"pending"` stop reason exists on
+  partial streaming messages.
 
 ## Design decisions (cross-slice)
 
@@ -57,7 +70,7 @@ Measured in the 2026-08-04 SDK spike / source read at pi 0.80.10:
   own types.
 - State is declared by the host (it is attn code); the pi-side suite remains
   for in-loop powers only.
-- Exact pin `@earendil-works/pi-coding-agent` 0.80.10; the committed spike
+- Exact pin `@earendil-works/pi-coding-agent` 0.83.0; the committed spike
   harness is the bump gate.
 
 ## Slices

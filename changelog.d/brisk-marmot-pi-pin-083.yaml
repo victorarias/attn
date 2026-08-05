@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  The pi headless-host plan now pins pi 0.83.0: every spike receipt was
+  re-validated against it (source diff plus a full harness re-run with
+  unmodified scripts), the grounding numbers were refreshed, and the new
+  SDK-visible events useful to later slices are recorded.
