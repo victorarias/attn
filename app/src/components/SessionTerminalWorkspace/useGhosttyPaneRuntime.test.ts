@@ -153,7 +153,6 @@ describe('useGhosttyPaneRuntime', () => {
       expect.any(Uint8Array),
       {
         suppressResponses: true,
-        yieldBefore: true,
         deferRender: true,
         historicalReplay: true,
       },
@@ -189,13 +188,11 @@ describe('useGhosttyPaneRuntime', () => {
     expect((secondWrite[0] as Uint8Array)).toEqual(Uint8Array.of(66));
     expect(firstWrite[1]).toEqual({
       suppressResponses: true,
-      yieldBefore: true,
       deferRender: true,
       historicalReplay: true,
     });
     expect(secondWrite[1]).toEqual({
       suppressResponses: true,
-      yieldBefore: true,
       deferRender: true,
       historicalReplay: true,
     });

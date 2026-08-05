@@ -7,8 +7,9 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Ghostty, InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
-import { ghosttyWasmUrl } from '../ghostty/wasm';
+import { InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
+import { loadGhostty } from '../ghostty/wasm';
+import { CooperativeReplayBudget } from '../utils/cooperativeReplay';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { exists } from '@tauri-apps/plugin-fs';
 import { homeDir } from '@tauri-apps/api/path';
@@ -214,7 +215,6 @@ export interface GhosttyTerminalHandle {
     data: string | Uint8Array,
     options?: {
       suppressResponses?: boolean;
-      yieldBefore?: boolean;
       deferRender?: boolean;
       historicalReplay?: boolean;
     },
@@ -717,6 +717,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const [modelOpRing] = useState(createGhosttyModelOpRing);
     const modelOpRingRef = useRef(modelOpRing);
     const historicalReplayGenerationRef = useRef(0);
+    // Allocated once per pane through useState's lazy initializer, like the op
+    // ring above; the ref only carries it.
+    const [cooperativeReplayBudget] = useState(() => new CooperativeReplayBudget());
+    const cooperativeReplayBudgetRef = useRef(cooperativeReplayBudget);
     const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
     // Queued historical-replay operations (writes + resizes) not yet applied.
     // Used to detect that a generation bump actually discarded history.
@@ -1705,7 +1709,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       data: string | Uint8Array,
       options?: {
         suppressResponses?: boolean;
-        yieldBefore?: boolean;
         deferRender?: boolean;
         historicalReplay?: boolean;
       },
@@ -1730,15 +1733,23 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
         ) {
+          if (pendingReplayOpsRef.current === 0) {
+            cooperativeReplayBudgetRef.current.reset();
+          }
           return;
         }
-        if (options?.yieldBefore) {
-          await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+        if (options?.historicalReplay) {
+          await cooperativeReplayBudgetRef.current.beforeOperation();
+        } else {
+          cooperativeReplayBudgetRef.current.reset();
         }
         if (
           options?.historicalReplay
           && historicalReplayGeneration !== historicalReplayGenerationRef.current
         ) {
+          if (pendingReplayOpsRef.current === 0) {
+            cooperativeReplayBudgetRef.current.reset();
+          }
           return;
         }
         const terminal = terminalRef.current;
@@ -1876,6 +1887,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           cols: terminal.cols,
           rows: terminal.rows,
         });
+        if (options?.historicalReplay && pendingReplayOpsRef.current === 0) {
+          cooperativeReplayBudgetRef.current.reset();
+        }
         if (options?.deferRender && synchronizedOutput.shouldRender) {
           return;
         }
@@ -2116,6 +2130,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       return enqueueOperation('resizeLocal', () => {
         if (options?.historicalReplay) {
           pendingReplayOpsRef.current = Math.max(0, pendingReplayOpsRef.current - 1);
+          if (pendingReplayOpsRef.current === 0) {
+            cooperativeReplayBudgetRef.current.reset();
+          }
           if (pendingReplayGeometryRef.current) {
             pendingReplayGeometryRef.current.resizes = Math.max(
               0,
@@ -2430,7 +2447,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           setRendererEpoch((value) => value + 1);
         }, delay);
       };
-      void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
+      void loadGhostty().then((ghostty) => {
         if (!active) return;
         const theme = getTerminalTheme(resolvedTheme);
         const initialSize = modelSizeRef.current;

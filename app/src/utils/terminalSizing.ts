@@ -68,6 +68,11 @@ export function getTerminalTheme(resolvedTheme: ResolvedTheme) {
 }
 
 export function getTerminalAnsiPalette(resolvedTheme: ResolvedTheme): number[] {
+  return getTerminalAnsiPaletteColors(resolvedTheme)
+    .map((color) => Number.parseInt(color.slice(1), 16));
+}
+
+export function getTerminalAnsiPaletteColors(resolvedTheme: ResolvedTheme): string[] {
   const theme = getTerminalTheme(resolvedTheme);
   return [
     theme.black,
@@ -86,5 +91,5 @@ export function getTerminalAnsiPalette(resolvedTheme: ResolvedTheme): number[] {
     theme.brightMagenta,
     theme.brightCyan,
     theme.brightWhite,
-  ].map((color) => Number.parseInt(color.slice(1), 16));
+  ];
 }

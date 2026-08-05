@@ -4801,6 +4801,9 @@ type SetSettingMessage struct {
 }
 
 type SetTerminalThemeMessage struct {
+	// AnsiPalette corresponds to the JSON schema field "ansi_palette".
+	AnsiPalette []string `json:"ansi_palette"`
+
 	// Background corresponds to the JSON schema field "background".
 	Background string `json:"background"`
 

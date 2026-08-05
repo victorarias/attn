@@ -330,6 +330,20 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		return fmt.Errorf("ghostty terminal construction failed: %w", err)
 	}
 	session.ghostty = gt
+	if err := session.SetTheme(opts.Theme); err != nil {
+		gt.Close()
+		if ptmx != nil {
+			_ = ptmx.Close()
+		}
+		if cmd != nil && cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_ = cmd.Wait()
+		}
+		if deferCleanup != nil {
+			deferCleanup()
+		}
+		return fmt.Errorf("ghostty terminal theme failed: %w", err)
+	}
 	// One epoch per terminal, held by both halves that hand a generation out:
 	// the placement read and the image serve. A worker that replaces another
 	// under the same session id gets a different one, which is what keeps a
@@ -406,14 +420,14 @@ func (m *Manager) KittyImage(sessionID string, imageID uint32) (KittyImage, erro
 	return session.kittyImage(imageID)
 }
 
-// SetTheme replaces the colors sessionID answers OSC 10/11/12 queries with.
+// SetTheme replaces the embedder-owned terminal colors and the colors sessionID
+// answers OSC 10/11/12 queries with.
 func (m *Manager) SetTheme(sessionID string, theme TerminalTheme) error {
 	session, err := m.getSession(sessionID)
 	if err != nil {
 		return err
 	}
-	session.SetTheme(theme)
-	return nil
+	return session.SetTheme(theme)
 }
 
 // Snapshot returns the current rendered screen and sequence watermark for a

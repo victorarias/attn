@@ -401,6 +401,13 @@ func (b *WorkerBackend) spawnArgs(opts SpawnOptions, session *workerSession) ([]
 	if opts.Theme.Cursor != "" {
 		args = append(args, "--theme-cursor", opts.Theme.Cursor)
 	}
+	if opts.Theme.ANSIPalette != ([16]string{}) {
+		paletteJSON, err := json.Marshal(opts.Theme.ANSIPalette)
+		if err != nil {
+			return nil, fmt.Errorf("marshal terminal ANSI palette: %w", err)
+		}
+		args = append(args, "--theme-ansi-palette-json", string(paletteJSON))
+	}
 	if opts.Executable != "" {
 		args = append(args, "--executable", opts.Executable)
 	}
@@ -769,9 +776,10 @@ func (b *WorkerBackend) SetTheme(ctx context.Context, sessionID string, theme pt
 		return err
 	}
 	err = b.callSimple(ctx, session, ptyworker.MethodSetTheme, ptyworker.SetThemeParams{
-		Foreground: theme.Foreground,
-		Background: theme.Background,
-		Cursor:     theme.Cursor,
+		Foreground:  theme.Foreground,
+		Background:  theme.Background,
+		Cursor:      theme.Cursor,
+		ANSIPalette: theme.ANSIPalette,
 	})
 	if err == nil {
 		return nil

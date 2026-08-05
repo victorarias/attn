@@ -723,18 +723,33 @@ func sanitizeThemeColor(value string) string {
 	return ""
 }
 
+func sanitizeANSIPalette(values []string) (palette [16]string, ok bool) {
+	if len(values) != len(palette) {
+		return palette, false
+	}
+	for i, value := range values {
+		if !hexColorPattern.MatchString(value) {
+			return [16]string{}, false
+		}
+		palette[i] = value
+	}
+	return palette, true
+}
+
 // handleSetTerminalTheme stores the daemon-global terminal theme and fans it
 // out best-effort to every live session so already-running agents answer OSC
 // 10/11/12 color queries with the new colors immediately. Fire-and-forget, no
 // result event — mirrors pty_resize.
 func (d *Daemon) handleSetTerminalTheme(client *wsClient, msg *protocol.SetTerminalThemeMessage) {
+	ansiPalette, paletteOK := sanitizeANSIPalette(msg.AnsiPalette)
 	theme := pty.TerminalTheme{
-		Foreground: sanitizeThemeColor(msg.Foreground),
-		Background: sanitizeThemeColor(msg.Background),
-		Cursor:     sanitizeThemeColor(msg.Cursor),
+		Foreground:  sanitizeThemeColor(msg.Foreground),
+		Background:  sanitizeThemeColor(msg.Background),
+		Cursor:      sanitizeThemeColor(msg.Cursor),
+		ANSIPalette: ansiPalette,
 	}
-	if theme.Foreground != msg.Foreground || theme.Background != msg.Background || theme.Cursor != msg.Cursor {
-		d.logf("set_terminal_theme: invalid color field(s) blanked, got fg=%q bg=%q cursor=%q", msg.Foreground, msg.Background, msg.Cursor)
+	if theme.Foreground != msg.Foreground || theme.Background != msg.Background || theme.Cursor != msg.Cursor || !paletteOK {
+		d.logf("set_terminal_theme: invalid color field(s) blanked, got fg=%q bg=%q cursor=%q palette_len=%d", msg.Foreground, msg.Background, msg.Cursor, len(msg.AnsiPalette))
 	}
 	d.setCurrentTerminalTheme(theme)
 

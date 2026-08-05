@@ -95,9 +95,10 @@ type Config struct {
 	YoloMode          bool
 	InitialPromptFile string
 
-	ThemeForeground string
-	ThemeBackground string
-	ThemeCursor     string
+	ThemeForeground  string
+	ThemeBackground  string
+	ThemeCursor      string
+	ThemeANSIPalette [16]string
 
 	Executable string
 
@@ -294,9 +295,10 @@ func (r *Runtime) run(ctx context.Context) error {
 		YoloMode:          r.cfg.YoloMode,
 		InitialPromptFile: r.cfg.InitialPromptFile,
 		Theme: pty.TerminalTheme{
-			Foreground: r.cfg.ThemeForeground,
-			Background: r.cfg.ThemeBackground,
-			Cursor:     r.cfg.ThemeCursor,
+			Foreground:  r.cfg.ThemeForeground,
+			Background:  r.cfg.ThemeBackground,
+			Cursor:      r.cfg.ThemeCursor,
+			ANSIPalette: r.cfg.ThemeANSIPalette,
 		},
 		Executable:        r.cfg.Executable,
 		ClaudeExecutable:  r.cfg.ClaudeExecutable,
@@ -1005,9 +1007,10 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			return
 		}
 		if err := c.runtime.manager.SetTheme(c.runtime.cfg.SessionID, pty.TerminalTheme{
-			Foreground: params.Foreground,
-			Background: params.Background,
-			Cursor:     params.Cursor,
+			Foreground:  params.Foreground,
+			Background:  params.Background,
+			Cursor:      params.Cursor,
+			ANSIPalette: params.ANSIPalette,
 		}); err != nil {
 			if errors.Is(err, pty.ErrSessionNotFound) {
 				c.sendError(req.ID, ErrSessionNotFound, err.Error())

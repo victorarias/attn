@@ -4925,10 +4925,11 @@ export enum SetSettingMessageCmd {
 }
 
 export interface SetTerminalThemeMessage {
-    background: string;
-    cmd:        SetTerminalThemeMessageCmd;
-    cursor:     string;
-    foreground: string;
+    ansi_palette: string[];
+    background:   string;
+    cmd:          SetTerminalThemeMessageCmd;
+    cursor:       string;
+    foreground:   string;
     [property: string]: any;
 }
 
@@ -12675,6 +12676,7 @@ const typeMap: any = {
         { json: "value", js: "value", typ: "" },
     ], "any"),
     "SetTerminalThemeMessage": o([
+        { json: "ansi_palette", js: "ansi_palette", typ: a("") },
         { json: "background", js: "background", typ: "" },
         { json: "cmd", js: "cmd", typ: r("SetTerminalThemeMessageCmd") },
         { json: "cursor", js: "cursor", typ: "" },

@@ -122,7 +122,6 @@ export function useGhosttyPaneRuntime(
               bytes.subarray(offset, offset + HISTORICAL_REPLAY_CHUNK_BYTES),
               {
                 suppressResponses,
-                yieldBefore: true,
                 deferRender: true,
                 historicalReplay: true,
               },

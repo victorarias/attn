@@ -1,0 +1,14 @@
+kind: fixed
+area: terminal
+change: >
+  Returning to a terminal that was released from the three-pane warm cache is
+  faster, and restored ANSI colors now match the app theme.
+symptom: >
+  Cold terminal remounts could leave the pane blank for one to two seconds, and
+  terminal colors looked muted after the Ghostty VT upgrade.
+notes: >
+  Historical replay now yields only when it consumes its frame budget, and all
+  panes share one compiled WASM module while keeping separate runtime instances.
+  The app also sends its ANSI 0-15 palette to the daemon so server-authored
+  restore snapshots use the same defaults as the browser terminal without
+  overriding colors explicitly selected by terminal programs.

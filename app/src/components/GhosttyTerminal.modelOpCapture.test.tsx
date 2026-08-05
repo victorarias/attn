@@ -91,7 +91,7 @@ vi.mock('ghostty-web', () => ({
   Ghostty: { load: async () => ({ createTerminal: mocks.createTerminal }) },
   InputHandler: class { dispose() {} },
 }));
-vi.mock('../ghostty/wasm', () => ({ ghosttyWasmUrl: 'mock-wasm-url' }));
+vi.mock('../ghostty/wasm', () => ({ loadGhostty: async () => ({ createTerminal: mocks.createTerminal }) }));
 vi.mock('./GhosttyWebGlRenderer', () => ({ WebGlTerminalRenderer: mocks.MockRenderer }));
 vi.mock('../utils/terminalIconFont', () => ({
   ensureTerminalIconFont: () => new Promise<void>(() => undefined),

@@ -55,6 +55,52 @@ static GhosttyResult ghosttyvt_set_kitty_limit(GhosttyTerminal t, uint64_t v) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &v);
 }
 
+static GhosttyColorRgb ghosttyvt_rgb(uint32_t value) {
+	GhosttyColorRgb color = {
+		.r = (uint8_t)(value >> 16),
+		.g = (uint8_t)(value >> 8),
+		.b = (uint8_t)value,
+	};
+	return color;
+}
+
+// Set embedder defaults while preserving any program-owned OSC overrides.
+// Ghostty's palette setter takes all 256 entries, so begin with its current
+// default palette and replace only the 16 ANSI colors attn configures.
+static GhosttyResult ghosttyvt_set_color_theme(
+	GhosttyTerminal t,
+	bool has_foreground, uint32_t foreground,
+	bool has_background, uint32_t background,
+	bool has_cursor, uint32_t cursor,
+	bool has_ansi_palette, const uint32_t* ansi_palette
+) {
+	GhosttyResult rc;
+	if (has_foreground) {
+		GhosttyColorRgb color = ghosttyvt_rgb(foreground);
+		rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_COLOR_FOREGROUND, &color);
+		if (rc != GHOSTTY_SUCCESS) return rc;
+	}
+	if (has_background) {
+		GhosttyColorRgb color = ghosttyvt_rgb(background);
+		rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_COLOR_BACKGROUND, &color);
+		if (rc != GHOSTTY_SUCCESS) return rc;
+	}
+	if (has_cursor) {
+		GhosttyColorRgb color = ghosttyvt_rgb(cursor);
+		rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_COLOR_CURSOR, &color);
+		if (rc != GHOSTTY_SUCCESS) return rc;
+	}
+	if (has_ansi_palette) {
+		GhosttyColorRgb palette[256];
+		rc = ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_COLOR_PALETTE_DEFAULT, palette);
+		if (rc != GHOSTTY_SUCCESS) return rc;
+		for (size_t i = 0; i < 16; i++) palette[i] = ghosttyvt_rgb(ansi_palette[i]);
+		rc = ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_COLOR_PALETTE, palette);
+		if (rc != GHOSTTY_SUCCESS) return rc;
+	}
+	return GHOSTTY_SUCCESS;
+}
+
 // Build formatter options: one self-contained VT (or plain) stream with all
 // "extra" state on and unwrap=false so soft-wrap survives the dump. NULL
 // selection = the entire screen including scrollback history.
@@ -302,6 +348,32 @@ func (t *Terminal) Write(p []byte) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.writeLocked(p)
+}
+
+// SetColorTheme replaces the embedder-owned color defaults. Ghostty preserves
+// program-issued OSC overrides, so a later theme change does not erase an
+// application's deliberate palette mutation.
+func (t *Terminal) SetColorTheme(theme ColorTheme) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.closed {
+		return nil
+	}
+	palette := [16]C.uint32_t{}
+	for i, color := range theme.ANSIPalette {
+		palette[i] = C.uint32_t(color)
+	}
+	rc := C.ghosttyvt_set_color_theme(
+		t.term,
+		C.bool(theme.HasForeground), C.uint32_t(theme.Foreground),
+		C.bool(theme.HasBackground), C.uint32_t(theme.Background),
+		C.bool(theme.HasCursor), C.uint32_t(theme.Cursor),
+		C.bool(theme.HasANSIPalette), &palette[0],
+	)
+	if rc != C.GHOSTTY_SUCCESS {
+		return fmt.Errorf("ghosttyvt: set color theme failed: rc=%d", int(rc))
+	}
+	return nil
 }
 
 // Resize changes the terminal dimensions; the primary screen reflows when
