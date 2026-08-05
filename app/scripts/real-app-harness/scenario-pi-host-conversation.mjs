@@ -269,6 +269,13 @@ async function main() {
   } catch (error) {
     await runner.finishFailure(error, { sessionId, hostPid, hostPgid: hostGroup });
     throw error;
+  } finally {
+    // The app and the observer socket outlive the assertions, and an open
+    // socket holds node's event loop open — without this the scenario prints
+    // its verdict and then never exits, leaving the app running for whoever
+    // runs next.
+    await client.quitApp().catch(() => {});
+    await observer.close().catch(() => {});
   }
 }
 

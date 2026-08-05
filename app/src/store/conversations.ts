@@ -35,6 +35,8 @@ const emptyConversation: ConversationState = { messages: [], running: false, rea
 interface ConversationsStore {
   conversations: Record<string, ConversationState>;
   applyEnvelope: (sessionId: string, seq: number, kind: string, body: Record<string, unknown>) => void;
+  // Opens the run at send time, before the host has said anything about it.
+  promptSent: (sessionId: string) => void;
   clearConversation: (sessionId: string) => void;
   // Drops every conversation whose session is gone. A transcript outlives its
   // host on purpose — an exited session stays readable — so the sessions list
@@ -125,6 +127,19 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
     return {
       conversations: { ...state.conversations, [sessionId]: { ...next, lastSeq: Math.max(current.lastSeq, seq) } },
     };
+  }),
+
+  // A prompt's round trip to the host is long enough to press Enter twice in,
+  // and the host answers a second prompt mid-run with a log line and nothing
+  // else — the draft would be gone and the user would be told nothing. So the
+  // run opens here, when the prompt is sent, and the composer is shut for the
+  // whole of it. run_started then finds it already open and changes nothing;
+  // every way a run can end reopens it, including the daemon's settle for a
+  // prompt that reached no host at all.
+  promptSent: (sessionId) => set((state) => {
+    const current = state.conversations[sessionId] ?? emptyConversation;
+    if (!current.ready || current.running) return state;
+    return { conversations: { ...state.conversations, [sessionId]: { ...current, running: true } } };
   }),
 
   clearConversation: (sessionId) => set((state) => {

@@ -19,6 +19,7 @@ interface ConversationPaneProps {
  */
 export function ConversationPane({ sessionId, paneActive }: ConversationPaneProps) {
   const conversation = useConversationsStore(selectConversation(sessionId));
+  const promptSent = useConversationsStore((state) => state.promptSent);
   const { sendAgentPrompt } = useDaemonApi();
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -48,8 +49,12 @@ export function ConversationPane({ sessionId, paneActive }: ConversationPaneProp
     const text = draft.trim();
     if (!text || !canSend) return;
     sendAgentPrompt(sessionId, text);
+    // Shut the composer now, not when the host reports the run open: the
+    // acknowledgement is a round trip away and a second Enter inside it is
+    // refused by the host with only a log line. See promptSent.
+    promptSent(sessionId);
     setDraft('');
-  }, [canSend, draft, sendAgentPrompt, sessionId]);
+  }, [canSend, draft, promptSent, sendAgentPrompt, sessionId]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // Enter sends, Shift+Enter breaks the line. Same bargain every chat

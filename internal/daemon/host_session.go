@@ -202,5 +202,14 @@ func (d *Daemon) handleAgentPrompt(client *wsClient, msg *protocol.AgentPromptMe
 	if err := d.ensureHostSessions().Prompt(sessionID, text); err != nil {
 		d.logf("agent_prompt for session %s failed: %v", sessionID, err)
 		d.sendCommandError(client, protocol.CmdAgentPrompt, "no live conversation host for session "+sessionID)
+		// The app closes its composer the moment it sends, so a prompt that
+		// never reached a host has to come back as the run it will never open.
+		// seq 0 says this is the daemon's own envelope rather than a point on
+		// the host's spine, which is why it cannot collide with one.
+		d.handleHostEvent(hostsession.Event{
+			SessionID: sessionID,
+			Kind:      "run_settled",
+			Body:      map[string]interface{}{"error": "this conversation's agent is no longer running"},
+		})
 	}
 }

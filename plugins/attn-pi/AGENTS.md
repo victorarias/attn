@@ -100,7 +100,10 @@ See `docs/glossary.md` for the vocabulary and
 - **Every prompt settles.** `session.prompt` can reject before pi opens a run at
   all — an unauthenticated provider is the common one — so the catch emits
   `run_settled` with the reason. Without it the app's composer stays shut
-  forever waiting for a reply nobody is writing.
+  forever waiting for a reply nobody is writing. The app closes that composer at
+  send time rather than on `run_started` — the acknowledgement is a round trip
+  away and the host refuses a second prompt mid-run with only a log line — so
+  the daemon settles a prompt that reached no host at all for the same reason.
 - `bindExtensions` is required. Without it `session_start` never fires and
   resource discovery never runs, so extensions silently do nothing.
 - The compiled binary cannot read pi's `VERSION`: pi reads its own package.json
