@@ -24,13 +24,10 @@ on both sides means server snapshots are faithful to what the client would
 have rendered — the property today's vt10x oracle lacks (visible frame only,
 partial attributes, no scrollback).
 
-**Pin caveat (verified 2026-07-22):** the Terminal C API does NOT exist at the
-WASM pin `29d4aba` (that commit has parser-only headers: osc/key/sgr/paste).
-It exists on ghostty main — verified working at `ab0b9da03...` (2026-07-22).
-The native lib therefore pins its OWN recent commit (`ghostty-vt-native.pin`),
-separate from the WASM pin, until the frontend's ghostty-web dependency can
-move forward. Both are Ghostty; version skew between them is bounded and
-acceptable for restores (see Decisions).
+**Pin update (2026-08-05):** Phase 0 originally required a separate native pin
+because the old WASM shim predated Ghostty's Terminal C API. The frontend now
+uses a WASM-only adapter over that API, and both builds read `ghostty-vt.pin`
+at `ab0b9da03...`. There is no source-version skew.
 
 **Phase 0 has been spiked and is GO** — results are recorded inline in
 Phase 0 below and in Decisions. Phase 1+ can start immediately; the remaining
@@ -163,14 +160,11 @@ attach_result gains (alongside the existing replay fields during transition):
   bytes + geometry, writes them into a fresh model with responses suppressed,
   and applies the existing seq dedup. All replay *decision* logic
   (`attachPlanning.ts` classify/plan functions) shrinks; it must not grow.
-- The build script for the native lib mirrors
-  `app/scripts/build-ghostty-vt-wasm.sh` but reads its OWN pin file
-  (`ghostty-vt-native.pin`) — the Terminal C API does not exist at the WASM
-  pin (see Goal). Never float either commit. Build command at the native pin:
+- The native and WASM build scripts read the shared `ghostty-vt.pin`. Build
+  command at the shared pin:
   `zig build -Demit-lib-vt=true -Dtarget=aarch64-macos` (the `lib-vt` build
   step from the WASM era was renamed; it is now an option, not a step). Zig
-  0.16.0 required (installed via asdf; the WASM pin uses 0.15.x — both live
-  side by side). Converging the two pins is a follow-up.
+  0.16.0 required for both targets (installed via asdf).
 
 ## Implementation Steps
 
@@ -222,7 +216,7 @@ Known upstream nits found (neither is gating):
 
 Residual items to productionize (not research):
 
-- [x] `scripts/build-libghostty-vt.sh` + `ghostty-vt-native.pin` (pinned
+- [x] `scripts/build-libghostty-vt.sh` + `ghostty-vt.pin` (pinned
       `ab0b9da`) — DONE 2026-07-22. Clones ghostty at the pin, applies
       `ghostty-vt-native.patch` if present, runs
       `zig build -Demit-lib-vt=true -Dtarget=aarch64-macos` (zig 0.16),
@@ -687,12 +681,9 @@ snapshot default on, and deleted raw replay. Go + frontend suites green
   Live streaming still renders them; restores are text-only where images
   were. CHANGELOG note when Phase 3 ships; image-preserving restore is a
   follow-up, not a gate.
-- **Two ghostty pins, not one.** The Terminal C API doesn't exist at the
-  frontend WASM pin `29d4aba`; the native lib pins recent main (verified at
-  `ab0b9da`). Rejected alternative: bumping the WASM pin in the same project
-  — it drags the ghostty-web compat patch along and couples a renderer
-  upgrade into this plan. Restore fidelity is still emulator-verified by the
-  round-trip tests; pin convergence is a follow-up.
+- **One Ghostty source pin (updated 2026-08-05).** Native and WASM now share
+  `ab0b9da` through `ghostty-vt.pin`; a target-specific WASM adapter preserves
+  ghostty-web 0.4.0 without coupling the source revision to that old API.
 - **vt10x stays (for now)** as the state-classifier's text source. Swapping
   the classifier input mid-plan couples an approval-detection regression risk
   into a terminal-fidelity project. Follow-up owns that swap.

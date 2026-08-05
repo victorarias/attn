@@ -1,7 +1,7 @@
 #!/bin/bash
 # Build the NATIVE libghostty-vt archives for EVERY supported target from pinned
 # source and publish them as prebuilt assets so ordinary contributors and CI
-# never need zig. Run this whenever you change ghostty-vt-native.pin or
+# never need zig. Run this whenever you change the shared ghostty-vt.pin or
 # ghostty-vt-native.patch.
 #
 #   make publish-native-vt        # or: ./scripts/publish-libghostty-vt.sh

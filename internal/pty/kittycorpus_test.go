@@ -603,21 +603,9 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			chunks: []string{strings.Repeat("0", 21) + "\xe1", kittyDirectRGB, "\xa5 done"},
 		},
 		{
-			// The same leak running the other way, and the reason the worker
-			// gets an ST where a marker is withheld from it.
-			//
-			// A marker goes to the WIRE and not to the worker terminal, so its
-			// leading ESC ends the client's part-built character and not the
-			// worker's. Left alone, the worker keeps decoding: it joins
-			// `\xe1\xa5` and the following space into ONE replacement
-			// character, while the client — which saw the ESC — resolves two.
-			// One extra cell on the client, one column of cursor drift,
-			// permanent until the next attach.
-			//
-			// The wasm replay is the authority here rather than a convenience:
-			// the wire carries the marker bytes verbatim, so this entry asserts
-			// that the worker's grid matches what the REAL client's decoder
-			// does with them.
+			// The marker's leading ESC ends a part-built character. Both models
+			// receive the same marker bytes, so this entry asserts their decoders
+			// resolve the two replacement characters identically.
 			name: "a prompt marker splitting a character",
 			cols: 20, rows: 8,
 			chunks: []string{"000\xe1", "\x1b]133;A\x1b\\", "\xa5 done"},
@@ -642,27 +630,12 @@ func kittyCorpusInputs() []kittyCorpusInput {
 		{
 			// A prompt drawn straight after output that did not end in a
 			// newline — the shape every shell produces when a command's last
-			// write has no trailing \n, and the one case where the worker's
-			// stripping is load-bearing rather than incidental.
+			// write has no trailing \n.
 			//
-			// `OSC 133;A` is not inert in the NATIVE ghostty the worker links:
-			// with the cursor mid-line it breaks the line, because a prompt
-			// starts on a fresh one. The wasm build the app renders is a
-			// different pin and does not. Stripping is what bridges the two, so
-			// this entry records a worker that did NOT break the line
-			// (`out$ ls`).
-			//
-			// This is the tripwire for that asymmetry, and it is the one place
-			// it is checked against the real thing. The wire here carries the
-			// marker verbatim, and the wasm parity test replays the wire RAW —
-			// no writeAsClient, no filtering — into the shipped ghostty-web
-			// module. So the entry passes only while the actual shipped wasm
-			// still treats `133;A` as grid-inert. Bump ghostty-web to a pin that
-			// implements prompt-start and this goes red immediately, which is
-			// the signal to reopen the disposal question with evidence rather
-			// than discover it as a drifting grid. Feeding the marker to the
-			// worker terminal fails it from the other direction, reddening the
-			// Go recording and the wasm replay at once.
+			// `OSC 133;A` is not grid-inert: with the cursor mid-line it breaks
+			// the line because a prompt starts on a fresh one. The worker and
+			// app share a Ghostty source pin and both consume the marker, so this
+			// entry tripwires that agreement against the real WASM model.
 			name: "a prompt marker after output with no trailing newline",
 			cols: 20, rows: 8,
 			chunks: []string{"out", "\x1b]133;A\x1b\\", "$ ls\r\n", "\x1b]133;D;0\x07"},
@@ -671,7 +644,7 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			// A marker split across feed chunks in every state it can hold
 			// bytes in — mid-introducer, mid-payload, and on a partial
 			// terminator — beside a real image, so the wire rewrite and the
-			// marker stripping have to interleave correctly.
+			// marker handling have to interleave correctly.
 			name: "markers split across feed chunks around an image",
 			cols: 20, rows: 8,
 			chunks: []string{
@@ -734,44 +707,10 @@ func runKittyCorpusEntry(t *testing.T, in kittyCorpusInput) kittyCorpusEntry {
 }
 
 // writeAsClient writes wire bytes into a native terminal standing in for the
-// frontend's model, replacing each OSC 133 marker with an ST on the way in.
-//
-// The substitution is what makes the stand-in honest, and it is two claims, not
-// one.
-//
-// Not the marker's bytes, because of the pin skew. The worker links
-// libghostty-vt at one ghostty commit and the app renders ghostty-web at an
-// older one (see ghostty-vt-native.pin, which records that converging them is a
-// follow-up), and the two do not agree about OSC 133: the native build breaks
-// the line on a mid-line `OSC 133;A`, the wasm build does not. A native terminal
-// handed the raw wire therefore diverges from the worker on correct code, which
-// is a defect in the model and not in the feed path.
-//
-// But an ST rather than nothing, because the marker is not inert to the real
-// client either. Its leading ESC ends a part-built character, and the shipped
-// wasm does perform that abort — measured — even though it ignores the marker's
-// meaning. Dropping the bytes outright modelled a client whose decoder never
-// flinches, and that blindness hid a real divergence: the worker withholds the
-// marker, so without a substitute on its side it kept a decode the client had
-// already resolved. Feeding the ST here is what makes the mirror fuzzer able to
-// see that, so a missing worker-side substitute fails instead of passing.
-//
-// The wasm replay in kittyWireRewrite.parity.test.ts remains the authority on
-// what the client does; this keeps the Go-side model agreeing with it.
-//
-// Only markers the segmenter recognises are substituted. One the feed path
-// replays as plain — a malformed terminator, an introducer that was never in
-// ground — stays in, and this model will act on it exactly as the worker did.
-// That is a known limit of the stand-in, not a claim about the real client; see
-// the pin skew note in the plan.
-func writeAsClient(client *ghosttyvt.Terminal, seg *feedSegmenter, wire []byte) {
-	seg.Feed(wire, func(s feedSegment) {
-		if s.Kind == feedSegOSC133 {
-			client.Write(wireST)
-			return
-		}
-		client.Write(s.Bytes)
-	})
+// frontend's model. The two runtimes share ghostty-vt.pin, so the honest model
+// is the raw wire. The real WASM replay remains the authority.
+func writeAsClient(client *ghosttyvt.Terminal, wire []byte) {
+	client.Write(wire)
 }
 
 // replayKittyWire writes the recorded wire into a terminal that cannot parse
@@ -779,7 +718,6 @@ func writeAsClient(client *ghosttyvt.Terminal, seg *feedSegmenter, wire []byte) 
 func replayKittyWire(t *testing.T, entry kittyCorpusEntry) *ghosttyvt.Terminal {
 	t.Helper()
 	client := newKittyTerminal(t, entry.Cols, entry.Rows, ghosttyvt.Options{})
-	var seg feedSegmenter
 	for i, encoded := range entry.Wire {
 		if encoded == "" {
 			continue
@@ -788,7 +726,7 @@ func replayKittyWire(t *testing.T, entry kittyCorpusEntry) *ghosttyvt.Terminal {
 		if err != nil {
 			t.Fatalf("decode wire chunk %d of %q: %v", i, entry.Name, err)
 		}
-		writeAsClient(client, &seg, wire)
+		writeAsClient(client, wire)
 	}
 	return client
 }

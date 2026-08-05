@@ -123,8 +123,8 @@ func TestOSCScannerRejectsAnAbsurdCode(t *testing.T) {
 	}
 }
 
-// OSC 133 rides the same stream and is parsed elsewhere (and stripped there);
-// this scanner must report it without disturbing anything, since it only reads.
+// OSC 133 rides the same stream and is parsed elsewhere; this scanner must
+// report it without disturbing anything, since it only reads.
 func TestOSCScannerSeesOSC133WithoutConsumingIt(t *testing.T) {
 	chunk := []byte("\x1b]133;A\x07prompt")
 	before := string(chunk)

@@ -5,11 +5,34 @@
 Root-cause and fix the recurring frontend terminal crashes behind the
 "Terminal issue recovered. We reloaded it for you." toast. The crash is a WASM
 trap inside the vendored ghostty VT core (`app/vendor/ghostty-vt/ghostty-vt.wasm`,
-pinned at `29d4aba` when this plan opened; now `56237efee`), not a rendering
+pinned at `29d4aba` when this plan opened; now sharing `ab0b9da` with the native
+worker through `ghostty-vt.pin`), not a rendering
 or lifecycle bug in the React layer. Recovery already works
 (server-authoritative snapshot remount in ~20ms, no data loss);
 the goal is that the model stops faulting, plus permanent instrumentation so
 any future fault of this class arrives with its own repro.
+
+## Resolution (2026-08-05)
+
+The capture ring made the production trap deterministic. The latest fault
+carried a complete 101,873-byte restore dump plus 11 live operations containing
+256,617 write bytes; the earlier complete capture carried a 59,390-byte restore
+plus five operations / 99,806 write bytes.
+
+The root cause was Ghostty's `ReleaseSmall` page allocator. Reused page buffers
+were not always zeroed. After scroll/reflow, `cursorScrollAbove` could expose a
+recycled row whose stale cells still carried hyperlink flags even though the
+new page had no corresponding hyperlink map. Later hyperlink capacity growth
+hit an internal invariant and trapped as `unreachable`; render traversal of the
+same corrupt state explains the out-of-bounds variant. Upstream commit
+`420de124` makes the allocator always zero reused buffers.
+
+The frontend now builds from the worker's existing `ab0b9da` source revision,
+which contains that fix. A WASM-only adapter preserves the
+`ghostty-web@0.4.0` JavaScript ABI over Ghostty's current terminal C API. The
+latest capture replayed cleanly five consecutive times on the resulting binary;
+the earlier capture also replayed cleanly. The minimized resize-hang regression
+and the native-to-WASM kitty/OSC 133 parity corpus are green.
 
 ## Evidence (2026-07-27, production profile)
 
@@ -168,12 +191,9 @@ Bisect result (2026-08-02) — **the pin itself introduced the hang**:
       textual — the ghostty-web wasm-api patch stops applying at `1844a5f7b`
       (broken by #11506); build — the last commit that builds in this
       configuration is `4244c38be` (broken by #10383).
-- [ ] Hang vs. traps: the hang repro was the bisect vehicle, but the
-      production faults are traps. Run a long fuzz soak + the live
-      divider-drag soak (Phase 4) against the new pin to test whether the trap
-      family disappears with it. If traps persist, the capture-on-fault ring
-      (Phase 1) produces their own repro and the bisect repeats with that
-      fixture.
+- [x] Hang vs. traps: two complete production captures now replay the trap
+      family. The shared `ab0b9da` build applies both cleanly; the latest was
+      repeated five times.
 
 ## Phase 3 — Fix options, ranked
 
@@ -188,6 +208,11 @@ Bisect result (2026-08-02) — **the pin itself introduced the hang**:
   reproducible sha256
   `6c4f21f514be21b13ff0911817458c69f26d22fb41469c10b68c322627266e85`), README
   pin/sha/rationale updated.
+- [x] **Pin convergence — shared `ab0b9da` source.** `ghostty-vt.pin` is now
+  the only source revision for native and WASM builds. The WASM build moved to
+  Zig 0.16 and Ghostty's current `-Demit-lib-vt=true` build; the carried
+  compatibility adapter implements the stable ghostty-web 0.4.0 surface over
+  the current C API. The old ghostty-web source patch is no longer fetched.
 - **3C. Client-side avoidance** — *demoted by Phase 2*: the hang reproduces
   through both resize call sites, so changing the mode-7 dance cannot be the
   fix for this bug. Retained only as a shape for any future fault that Phase 2
@@ -209,22 +234,26 @@ Bisect result (2026-08-02) — **the pin itself introduced the hang**:
       — startup hyperlink corruption in June, `bottom_clip`/`blank_after_resize`
       incidents ongoing, now this). *In flight as a separate change; not in
       the pin-bump PR.*
-- [ ] Live verification (dev profile, `make dev`): codex session in
-      `~/projects/thunk`, divider-drag resize soak across single-column steps
-      at 58 rows; confirm zero `model_fault` records in the profile's
-      `terminal-diagnostics.jsonl` after a soak that previously trapped twice
-      in 23s. Existing packaged scenario `terminal-block-resize` must stay
-      green (it exercises the no-reflow path's block semantics).
+- [x] Live verification (isolated `ghostty-pin` profile, 2026-08-05): bundled
+      preflight passed; `terminal-block-resize` passed across fish/bash/zsh
+      resize and relaunch; `terminal-osc8-link` and `webgl-recovery` passed;
+      and the real-agent `TR-401-CODEX-MAIN` scenario preserved Codex's complete
+      frame through a 1280→704→1280 window cycle. Slow user-configured MCP
+      servers were disabled for the final deterministic Codex startup. The
+      profile diagnostics contained 316 events with zero `model_fault` records
+      and zero model-fault recoveries before cleanup.
 - [x] Changelog fragment (`changelog.d/ghostty-wasm-hang-pin-bump.yaml`).
+- [x] Trap root-cause and shared-pin changelog fragment
+      (`changelog.d/ghostty-vt-shared-pin-crash-fix.yaml`).
 
 ## Decisions
 
 - **Not upgrading to ghostty-web `-next`**: no stable release; the one merged
   crash fix (#132) addresses a wrapper mechanism attn doesn't use; wrapper
   churn without evidence.
-- **Not converging pins now**: trial build proved `ab0b9da` needs a new
-  ~15-function wasm shim against the redesigned C API (`render.h`,
-  `grid_ref.h`) — a scoped project, tracked as a follow-up, not this fix.
+- **Pin convergence completed on 2026-08-05**: the trial's compatibility seam
+  became the WASM-only adapter. A single `ghostty-vt.pin` now prevents the
+  browser and worker cores from drifting independently.
 - **Root-cause over live-with-recovery**: recovery masks the trap but the
   model state is corrupt *before* the trap fires — silent misrendering may
   precede the crash (see render-OOB variant and the open upstream #139), and
@@ -235,16 +264,9 @@ Bisect result (2026-08-02) — **the pin itself introduced the hang**:
 
 ## Open questions
 
-- Does fixing the hang also fix the production traps? **Still open.** Same
-  resize/reflow+OSC-8 territory, but unproven — Phase 2's post-fix soak and
-  the capture-on-fault ring answer this empirically. The new pin does ship
-  #10337's PageList overflow detection and protection, which is aimed at
-  exactly the page-state corruption class the traps come from, so the odds
-  improved; that is not evidence, and the capture ring is what will settle it.
-- Is the render-OOB fault (11:52) the same corruption observed at a different
-  entry point, or a second bug (upstream #139's page-boundary shape is
-  column-width dependent — 120/130 repro, 80/140 don't — suspicious for our
-  134-col pane)?
+- Does the render-OOB fault share the same stale-page root? The allocator
+  violation explains both signatures and the captured write traps are fixed,
+  but no self-contained render-OOB capture exists to prove identity.
 - Why does a synchronous wasm infinite loop in production manifest as a trap
   instead of a frozen UI? (Or does it — are there unexplained UI freezes?) If
   the hang can fire in production, the write chain never drains and the pane
@@ -253,10 +275,6 @@ Bisect result (2026-08-02) — **the pin itself introduced the hang**:
 
 ## Follow-ups
 
-- **Pin convergence** (single ghostty commit for native + WASM): rewrite the
-  wasm-api shim against ghostty's new Terminal C API, dropping the
-  ghostty-web patch dependency; zig 0.16; `-Demit-lib-vt=true` build form.
-  Deserves its own plan; the trial-build mapping table is the starting point.
 - Report the resize-hang repro upstream to coder/ghostty-web (and ghostty-org
   once the culprit/fixing commit is identified) — also nudges #137 (stable
   release). The frozen repro is self-contained and ready to attach.

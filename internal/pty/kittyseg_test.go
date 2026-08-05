@@ -253,8 +253,8 @@ var kittySegBattery = []kittySegCase{
 	},
 	{
 		// An unknown subtype is still a marker sequence: consumed, with no
-		// block event to record. Leaving its bytes in would put an OSC 133 on
-		// the terminal the stripping contract says never carries one.
+		// block event to record. It remains a distinct emission so wirefeed can
+		// send the bytes to both terminal models without inventing a block.
 		name:  "a marker with an unknown subtype is still consumed",
 		input: "a\x1b]133;Z;stuff\x07b",
 		want: []kittyEmission{

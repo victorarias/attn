@@ -8,11 +8,9 @@ package pty
 // consumed by BOTH osc133_test.go here and a frontend parity test. The client
 // parser is the reference; keep the two in lockstep (see the corpus header).
 //
-// The two parsers dispose of a marker's bytes differently, which is why only
-// the meaning is shared. The client keeps the bytes in its stream and writes
-// them through to its terminal; the worker strips them, so the marker never
-// reaches the terminal the VT dump is serialized from. OSC 133 produces no
-// cells, so the two grids are identical either way.
+// Both parsers keep a marker's bytes in the terminal stream and separately
+// apply its structured meaning. Native and WASM share ghostty-vt.pin, so the
+// terminal effect and extracted block lifecycle stay aligned.
 
 import (
 	"net/url"

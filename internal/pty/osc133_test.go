@@ -111,8 +111,8 @@ func mustJSON(v any) string {
 
 // TestOsc133SegmenterCorpus proves the Go segmenter extracts the same markers
 // as the shared corpus (which a frontend parity test proves against the client
-// parseOsc133). It also asserts the worker's stripping contract: no OSC 133
-// introducer ever survives into the bytes written to the terminal.
+// parseOsc133). It also asserts the segmenter's extraction contract: no OSC 133
+// introducer remains in the plain segments beside the marker emissions.
 func TestOsc133SegmenterCorpus(t *testing.T) {
 	for _, c := range loadSegCorpus(t) {
 		t.Run(c.Name, func(t *testing.T) {

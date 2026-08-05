@@ -85,10 +85,10 @@ Honest costs of the chosen design, and their mitigations:
 
 The worker is already a semantic tap on the byte stream, with two scanner
 classes in production: **look-only** (`oscscan.go`: OSC 0 titles, OSC 777
-notifications — the wire is untouched) and **strip-and-structure**
-(`osc133.go`: markers stripped from the terminal feed, blocks shipped as
-structure). Kitty adds the third class: **keep-for-terminal,
-rewrite-on-wire, structure-out**.
+notifications — the wire is untouched) and **keep-and-structure**
+(`osc133.go`: markers reach both terminal models and also update the block
+table). Kitty adds the third class: **keep-for-terminal, rewrite-on-wire,
+structure-out**.
 
 Future tenants that reuse the same seams (scanner slot in the feed path,
 structured event out, app-native surface) and are explicitly *not* built now:
@@ -408,11 +408,11 @@ until the storage limit flips in A4.
       grid is byte-identical with and without the pre-ST in all four cases —
       pinned by `TestWireFeedPreSTOnlyEndsTheDecode` rather than asserted.
 
-      **3. The marker ST, written to the worker (class 3).** The mirror image,
-      and a defect that predates this branch: `main:internal/pty/blockfeed.go`
-      writes only the pre-marker bytes to the terminal, so a marker arriving
-      mid-character ends the CLIENT's decode and not the worker's. Measured
-      against the shipped wasm, feeding `000\xe1`, `OSC 133;A`, `\xa5 done`:
+      **3. The marker bytes, written to the worker (class 3).** The mirror image
+      exposed a defect that predated this branch: the worker used to write only
+      a substitute ST for an OSC 133 marker, so the two terminal models could
+      disagree once their source pins converged. Measured against the old WASM,
+      feeding `000\xe1`, `OSC 133;A`, `\xa5 done`:
 
       | | cursor | row |
       | --- | --- | --- |
@@ -428,15 +428,14 @@ until the storage limit flips in A4.
       exists here. It gets its own user-facing changelog fragment; the rest of
       A2 stays feature-dark.
 
-      The substitute must be an ST and NOT the marker itself. Feeding a real
-      `133;A` to the native worker breaks the line (see the pin-skew section),
-      which is the divergence this whole file exists to prevent.
+      At the old split pins the substitute had to be an ST: feeding `133;A` to
+      only the native worker broke the line. Pin convergence on 2026-08-05
+      replaced that workaround with the marker itself on both models.
 
       **Ordering, twice.** The worker ST precedes the cursor pin AND the tracked
       ref in `writeAPC`, or the abort is back inside the measured window. The
-      marker ST precedes `blocks.mark`, or the block pins the row the cursor
-      left rather than the row the prompt renders on — the grids agree either
-      way there, so that one is asserted on the pin.
+      marker bytes precede `blocks.mark`, so the block pins Ghostty's
+      post-marker row.
 
       **Why this and not codepoint-boundary refusal.** The considered
       alternative was to make extraction require true ground — VT ground AND not
@@ -504,7 +503,7 @@ until the storage limit flips in A4.
       | --- | --- |
       | the wire ST | `TestWireFeedStripsAPCsWithKittyDisabled`, on exact bytes |
       | the worker pre-ST, or pinning before it | `TestWireFeedPinsTheCursorAfterTheDecodeEnds` — wire back to `\x1b\\\x1b[1B\x1b[2G` and client `(1,2)` vs worker `(1,1)` |
-      | the marker ST | the mirror battery's `a prompt marker splitting a character on the wrap column`, and both wasm witnesses |
+      | the marker bytes | the mirror battery's `a prompt marker splitting a character on the wrap column`, and both wasm witnesses |
       | `blocks.mark` before the substitute | `TestWireFeedPinsTheBlockAfterTheDecodeEnds`, prompt row 0 for 1 |
 
       The class-3 receipt is the authoritative one: regenerating the corpus with
@@ -534,72 +533,29 @@ until the storage limit flips in A4.
       production daemon. Only `ATTN_PROFILE` relocates it. Resolve and check
       before any lifecycle command, not after.
 
-      **Harness fidelity.** `writeAsClient` now substitutes an ST for each
-      dropped marker instead of dropping the bytes outright. Dropping them
-      modelled a client whose decoder never flinches, and that blindness is what
-      hid class 3 from the mirror gate; the substitution keeps `133;A`
-      grid-inert (the pin skew) while reproducing the abort the real wasm
-      performs.
+      **Harness fidelity update (2026-08-05).** The old client stand-in
+      substituted an ST for each OSC 133 marker because the two Ghostty pins
+      disagreed. With `ghostty-vt.pin` shared by native and WASM, `writeAsClient`
+      now writes the raw wire and the worker feeds the marker itself before
+      pinning the structured block.
 
-#### Pin skew: `OSC 133;A` is not grid-neutral, and the two ghosttys disagree
+#### Pin convergence: `OSC 133;A` reaches both models
 
-Stripping markers from the worker terminal used to rest on the claim that they
-produce no cells, so both grids land in the same place either way. Half of that
-is false. Measured against the NATIVE ghostty the worker links, `OSC 133;A` with
-the cursor mid-line performs a line break — ghostty's "a prompt starts on a fresh
-line" rule. `0\x1b]133;A\x1b\\` leaves the cursor at `(0,1)`; the same stream
-without the marker leaves it at `(1,0)`. `B`, `C`, `D` and unknown subtypes are
-neutral; only `A` is not.
+`OSC 133;A` is not grid-neutral: with the cursor mid-line it applies Ghostty's
+"a prompt starts on a fresh line" rule. The old WASM pin ignored that behavior,
+so the worker withheld recognized markers and used an ST only to keep decoder
+state aligned.
 
-The conclusion that first looked obvious — that the worker should therefore be
-fed the marker so both sides break together — is WRONG, and the corpus caught it.
-The app does not render the ghostty the worker links. `ghostty-vt-native.pin`
-records a native pin of `ab0b9da` against the frontend's ghostty-web at `29d4aba`
-and says converging them is a follow-up, and at that older pin the wasm model
-does NOT break the line. Feeding markers to the worker terminal makes the worker
-break where the real client does not, which is the divergence this phase exists
-to remove. Verified both directions: with the marker withheld the wasm replay
-agrees with the worker; with it written, the same entry goes red in the Go
-recording and the wasm replay at once.
+That disposal closed on 2026-08-05. Native and WASM now share `ab0b9da` through
+`ghostty-vt.pin`, and both consume the marker bytes. The worker still parses the
+same marker into the structured block table, after Ghostty applies it, so the
+pin names the post-marker cursor. The wire carries the original bytes and the
+browser model applies the same terminal behavior.
 
-The client's indifference is the wasm build's own, not something the app arranges:
-the frontend never filters markers out before writing. `terminalOsc133.ts` tees —
-its segments span the whole `ESC ] 133 ; … BEL`, and `GhosttyTerminal.tsx` writes
-`segment.bytes` through to the wasm terminal and calls `blockStore.applyMarker`
-separately. So the marker bytes do reach the model, and it simply does not act on
-them at this pin.
-
-So today's disposal is correct and load-bearing rather than incidental, and
-`internal/pty/testdata/kitty_rewrite_corpus.json` pins it under
-"a prompt marker after output with no trailing newline" — output with no
-trailing newline, then a prompt marker, recorded with the worker NOT breaking
-the line and replayed into real wasm to prove the client agrees.
-
-Three consequences worth carrying forward:
-
-- **The Go-side client model had to be corrected, not the feed path.** The
-  corpus replay and the mirror fuzz targets stand a native terminal in for the
-  frontend, and a native terminal handed the raw wire acts on OSC 133 when the
-  real client would not. `writeAsClient` now drops recognised markers on the way
-  into that stand-in. The wasm replay is the authority; the Go model exists to
-  agree with it.
-- **A bounded live divergence remains, and it is the pin skew, not the design.**
-  A marker the segmenter replays as plain rather than extracting — a malformed
-  terminator (CAN, SUB, a stray ESC), or an introducer that was never in ground
-  — reaches the worker terminal as ordinary bytes, and the native build acts on
-  it while the wasm client does not. Only `A` matters, only mid-line, and only on
-  a malformed stream. It closes when the pins converge; until then it is a known
-  limit rather than a bug to chase, and `writeAsClient` deliberately does not
-  paper over it.
-- **A wasm pin bump can flip the whole conclusion, so it is tripwired.** Every
-  argument above rests on the shipped ghostty-web ignoring `133;A`, which is a
-  property of one pin and not a guarantee. The corpus entry is the guard: its
-  WIRE carries the marker, and the wasm parity test replays that wire RAW — no
-  `writeAsClient`, no filtering — into the real shipped module, so it passes only
-  while the actual wasm still treats the marker as grid-inert. A pin that
-  implements prompt-start reddens it on the next run, which reopens the disposal
-  question with evidence instead of letting a grid drift in production. Note the
-  asymmetry on purpose: the Go-side stand-in is shimmed, the wasm witness is not.
+The corpus entry "a prompt marker after output with no trailing newline" now
+records the line break on the worker and replays the raw marker into the real
+WASM model. The Go mirror also writes raw wire. Together they tripwire any
+future source or adapter change that makes the two targets disagree again.
 
 ### A3 — protocol + frontend rendering
 
@@ -753,8 +709,8 @@ item by describing the column relatively, and the two MEASUREMENT items the late
 soaks turned up (the over-tall scroll and the margin-box scroll) by tripwire
 resyncs rather than cleverer synthesis. Soaking is part of this phase's work, not
 A2's.
-(The pin skew noted under A2 is NOT one of these — it is a live limit today,
-and gated on the two ghostty pins converging rather than on the storage flip.)
+(The pin skew formerly noted under A2 closed when both targets moved to
+`ghostty-vt.pin` on 2026-08-05.)
 
 - [x] **CHA is wrong under DECLRMM + origin mode.** Synthesis ended with an
       absolute column move, and a client with left/right margins enabled

@@ -1,6 +1,6 @@
 import type { GhosttyTerminal } from 'ghostty-web';
 
-// The vendored wasm (app/vendor/ghostty-vt/ghostty-web-v0.4.0-compat.patch) adds
+// The vendored wasm adapter (app/vendor/ghostty-vt/ghostty-web-v0.4.0-compat.zig) adds
 // ghostty_render_state_get_hyperlink_uri and ghostty_terminal_get_scrollback_hyperlink_uri
 // exports, but ghostty-web@0.4.0's JS API has no accessor for them —
 // GhosttyTerminal.getHyperlinkUri is a null stub. Patching the minified dist via

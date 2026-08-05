@@ -1,0 +1,17 @@
+kind: fixed
+area: terminal
+change: >
+  Codex output no longer crashes the browser terminal after scrollback reflow
+  exposes hyperlink-heavy rows. The app and daemon now build Ghostty's terminal
+  core from one shared source pin so their parsing and grid behavior stay in
+  sync.
+symptom: >
+  A terminal pane can show “Terminal issue recovered” and reload while Codex is
+  rendering output, sometimes repeatedly in the same session.
+notes: >
+  Production fault captures reproduced a ReleaseSmall allocator bug in the old
+  WASM revision: a reused page retained stale hyperlink flags without the
+  corresponding hyperlink map, and later capacity growth trapped. The shared
+  pin includes Ghostty's page-zeroing fix. Both captured sessions replay cleanly
+  against the rebuilt WASM terminal, including five consecutive runs of the
+  latest capture.

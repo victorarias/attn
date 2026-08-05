@@ -1,0 +1,9 @@
+# Ghostty commit shared by the native worker and frontend WASM builds.
+#
+# Keep both runtimes on this single source revision. Target-specific patches may
+# expose different embedding APIs, but terminal parsing and storage come from
+# this exact commit on every supported platform.
+#
+# Verified for native darwin/arm64 + linux/amd64 + linux/arm64 and frontend
+# wasm32-freestanding at ab0b9da (2026-08-05). Never float this commit.
+ab0b9da9e88fcb4b0533a1854e84628f663930af
