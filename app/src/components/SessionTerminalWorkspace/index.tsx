@@ -401,13 +401,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     // attaching a terminal to a PTY, and a conversation session has neither.
     // Leaving one in would attach against a session the daemon has no PTY for,
     // which fails and takes the pane down with it.
-    const runtimePanes = useMemo(() => ([
-      ...agentPanes
-        .filter((pane) => !pane.status || pane.status === 'ready')
-        .filter((pane) => !conversationAgents?.has(sessionById.get(pane.sessionId)?.agent ?? ''))
-        .map((pane) => {
+    const runtimePanes = useMemo(() => {
+      const panes = [];
+      for (const pane of agentPanes) {
+        if (pane.status && pane.status !== 'ready') continue;
         const paneSession = sessionById.get(pane.sessionId);
-        return {
+        if (conversationAgents?.has(paneSession?.agent ?? '')) continue;
+        panes.push({
           paneId: pane.id,
           runtimeId: pane.runtimeId,
           paneKind: 'agent' as const,
@@ -415,9 +415,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
           sessionId: pane.sessionId,
           testSessionId: pane.sessionId,
           state: paneSession?.state,
-        };
-      }),
-    ]), [agentPanes, conversationAgents, sessionById]);
+        });
+      }
+      return panes;
+    }, [agentPanes, conversationAgents, sessionById]);
 
     const runtime = useGhosttyPaneRuntime(
       runtimePanes,
