@@ -7,9 +7,9 @@
 // decoding, same exit-code parsing — in both parsers. The client parser is the
 // reference; the Go port is written to match it here.
 //
-// Segment/plain-byte layout is deliberately NOT part of this corpus: the client
-// writes marker bytes through to the terminal while the worker strips them, so
-// only the extracted markers are comparable across the two.
+// Segment/plain-byte layout is deliberately NOT part of this corpus. Both
+// runtimes now feed marker bytes into Ghostty from the shared pin; this fixture
+// compares the separate structured-marker parsers.
 // @types/node isn't a direct dependency of this package (only a transitive peer
 // of vite/vitest), matching terminalBlocks.corpus.test.ts's pattern.
 // @ts-expect-error -- see above

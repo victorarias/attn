@@ -58,13 +58,9 @@ func undescribed(apc string) string { return "\x1b[1" + apc }
 
 // mirror holds the two terminals and the feeder under test.
 type mirror struct {
-	worker *ghosttyvt.Terminal
-	client *ghosttyvt.Terminal
-	feed   *wireFeeder
-	// clientSeg is the stand-in's own segmenter, used only to keep OSC 133 out
-	// of the client terminal — see writeAsClient.
-	clientSeg feedSegmenter
-
+	worker     *ghosttyvt.Terminal
+	client     *ghosttyvt.Terminal
+	feed       *wireFeeder
 	lastWire   []byte
 	lastResync string
 }
@@ -104,7 +100,7 @@ func (m *mirror) write(chunk string) {
 	wire, resync := m.feed.feed([]byte(chunk))
 	m.lastWire = append([]byte(nil), wire...)
 	m.lastResync = resync
-	writeAsClient(m.client, &m.clientSeg, wire)
+	writeAsClient(m.client, wire)
 }
 
 func (m *mirror) agree(t *testing.T, when string) {
@@ -272,17 +268,9 @@ var mirrorCases = []mirrorCase{
 		chunks: []string{strings.Repeat("0", 19) + "\xe1", "\x1b_Ga=d\x1b\\", "\xa5 done"},
 	},
 	{
-		// The leak in the marker direction. The wire carries the marker and the
-		// worker terminal does not, so the marker's leading ESC ends the
-		// client's part-built character and would leave the worker still
-		// decoding — joining the continuation and the space into one
-		// replacement character where the client resolved two. The worker-side
-		// ST substitute is what keeps them equal.
-		//
-		// On the wrap column, so a missing substitute costs a row as well as a
-		// cell. The client model in writeAsClient substitutes an ST for the
-		// marker rather than dropping it, which is what lets this case — and the
-		// mirror fuzzer — see the difference at all.
+		// The marker's leading ESC ends a part-built character. Both models must
+		// receive the marker itself: on the wrap column, dropping it from either
+		// side costs a row as well as a cell.
 		name: "a prompt marker splitting a character on the wrap column",
 		cols: 20, rows: 8,
 		chunks: []string{strings.Repeat("0", 20) + "\xe1", "\x1b]133;A\x1b\\", "\xa5 done"},
@@ -993,17 +981,16 @@ func TestWireFeedPinsTheCursorAfterTheDecodeEnds(t *testing.T) {
 	m.agree(t, "after an APC on the wrap column")
 }
 
-// The worker-side substitute for a withheld marker must be written BEFORE the
-// block table pins its position, or the block records the cell the cursor sat on
-// before the decode ended rather than the one the marker refers to.
+// The marker must be written BEFORE the block table pins its position, or the
+// block records the cell the cursor sat on before Ghostty applies prompt-start.
 //
 // Asserted on the pin, not on the grid: the grid agrees either way here, so a
 // text-only check would pass with the write and the pin in the wrong order.
 func TestWireFeedPinsTheBlockAfterTheDecodeEnds(t *testing.T) {
 	m := newMirror(t, 20, 8, ghosttyvt.Options{})
 
-	// A character left part-built on the wrap column, so ending it moves the
-	// cursor to the next row — which is the row the prompt renders on.
+	// A character left part-built on the wrap column: the marker's ESC commits
+	// the pending wrap to row 1, then prompt-start advances to fresh row 2.
 	m.write(strings.Repeat("0", 20) + "\xe1")
 	m.write("\x1b]133;A\x1b\\")
 
@@ -1011,8 +998,8 @@ func TestWireFeedPinsTheBlockAfterTheDecodeEnds(t *testing.T) {
 	if len(blocks) != 1 {
 		t.Fatalf("snapshotBlocks() = %+v, want the one open prompt", blocks)
 	}
-	if got := blocks[0].PromptRow; got != 1 {
-		t.Errorf("prompt row = %d, want 1: the marker refers to the row the cursor reached after the decode ended, not the row it left", got)
+	if got := blocks[0].PromptRow; got != 2 {
+		t.Errorf("prompt row = %d, want 2: the pin must observe Ghostty's post-marker cursor", got)
 	}
 	m.agree(t, "after a marker on the wrap column")
 }

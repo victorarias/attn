@@ -7,8 +7,8 @@
 # path fetches the prebuilt asset for the TARGET platform (keyed by pin+patch)
 # from the repo's rolling release and verifies it against ghostty-vt-native.lock.
 # A source build (zig 0.16.x, see scripts/lib/libghostty-vt.sh) runs only when
-# there is no published asset for the current key — i.e. you have edited
-# ghostty-vt-native.pin/.patch — or when ATTN_VT_FROM_SOURCE=1 forces it.
+# there is no published asset for the current key — i.e. you have edited the
+# shared ghostty-vt.pin or native patch — or when ATTN_VT_FROM_SOURCE=1 forces it.
 # Maintainers publish new assets with `make publish-native-vt`.
 #
 # The target platform defaults to the effective Go target; the Makefile passes

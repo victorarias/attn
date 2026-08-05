@@ -7,22 +7,22 @@ package pty
 // OSC 133 markers. This file decides where each of those goes, turning one
 // arriving chunk into two different things:
 //
-//   - the TERMINAL feed: the plain runs and every complete kitty APC, because
-//     ghostty is the system's only kitty parser. OSC 133 markers are WITHHELD —
-//     they are not grid-inert in the ghostty the worker links — and an ST goes
-//     in their place, with blockfeed.go pinning a block-table entry there.
+//   - the TERMINAL feed: the plain runs, every complete kitty APC, and every
+//     OSC 133 marker. The worker and app use the same Ghostty source pin, so the
+//     marker must reach both models; blockfeed.go pins a block-table entry after
+//     Ghostty applies it.
 //   - the WIRE bytes: the same stream with each APC replaced, in position, by
 //     bytes that leave a kitty-ignorant terminal on the same grid — an ST, then
 //     the scroll and the cursor the placement caused. In the shipping
 //     configuration the ST is all of it. Markers go out untouched; the client
 //     parses its own.
 //
-// So each stream is missing something the other has, and in both directions the
-// gap is filled with an ST. That is one rule, not two accidents: an ESC ends a
-// part-built UTF-8 character, so a side that loses the bytes must be given an
-// ESC in their place or the two decoders resolve the same character differently.
-// The APC also needs its ST on the WORKER, ahead of everything measured, because
-// ending a decode is itself a grid event. See wireST and writeAPC.
+// Only the wire is missing something the terminal has: a kitty APC. Its gap is
+// filled with an ST because an ESC ends a part-built UTF-8 character; losing
+// those bytes without a substitute would let the decoders resolve the same
+// character differently. The APC also needs its ST on the WORKER, ahead of
+// everything measured, because ending a decode is itself a grid event. See
+// wireST and writeAPC.
 //
 // Both are produced in one call, under the caller's replayMu, in the same
 // critical section that advances the seq watermark. That is what keeps the
@@ -266,37 +266,12 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 		case feedSegKittyAPC:
 			f.writeAPC(seg.Bytes)
 		case feedSegOSC133:
-			// The wire carries the marker and the terminal does not: the client
-			// runs its own OSC 133 parser over the wire, and the worker's block
-			// table takes the parsed marker in place of the bytes.
-			//
-			// Withholding the bytes is what keeps the two grids equal, and it
-			// is load-bearing rather than incidental. A marker is NOT inert in
-			// the native ghostty the worker links: measured, `OSC 133;A` with
-			// the cursor mid-line breaks the line, because a prompt starts on a
-			// fresh one. The wasm ghostty the app renders is a different pin and
-			// does not — and it is fed the marker bytes, unfiltered, by
-			// GhosttyTerminal; it simply does not act on them. So writing
-			// markers to the worker terminal would move the worker's grid and
-			// not the client's, the exact divergence this file exists to
-			// prevent. The corpus entry "a prompt marker after output with no
-			// trailing newline" is the witness, and is tripwired against a wasm
-			// pin bump: see the pin-skew note in the plan.
-			//
-			// But the marker's own ESC is not grid-inert on either side: it ends
-			// a part-built character. The client gets that ESC and the worker
-			// does not, so a marker arriving mid-character left the worker
-			// holding a decode the client had already resolved — one extra cell
-			// on the client, permanently. This is the same leak as the APC's,
-			// running the other way, so it takes the same substitute: an ST to
-			// the WORKER in the marker's place.
-			//
-			// Written before mark(), so the pin the block table takes lands on
-			// the cursor as it is AFTER the abort — the cell the marker actually
-			// refers to. Pinning first would record the pre-abort cell and put
-			// the block on the wrong row at the wrap column.
+			// Both models consume the same marker bytes from the same Ghostty
+			// source revision. Write before mark() so the block-table pin lands
+			// on Ghostty's post-marker cursor — the row the prompt, command, or
+			// output will render on next.
 			f.wire = append(f.wire, seg.Bytes...)
-			f.blocks.write(wireST)
+			f.blocks.write(seg.Bytes)
 			f.blocks.mark(seg.Marker)
 		}
 		first = false
@@ -350,10 +325,9 @@ func (f *wireFeeder) feed(data []byte) ([]byte, string) {
 // bytes must be given an ESC in their place, or the two decoders resolve the
 // same character differently and nothing later heals it.
 //
-// Both directions occur. A kitty APC reaches the worker and not the wire, so the
-// WIRE gets one (see writeAPC). An OSC 133 marker reaches the wire and not the
-// worker, so the WORKER gets one (see feed). The APC case needs it on the worker
-// too, for a reason that is about measurement rather than decoding: see writeAPC.
+// A kitty APC reaches the worker and not the wire, so the WIRE gets one (see
+// writeAPC). The APC also needs it on the worker for a reason that is about
+// measurement rather than decoding: see writeAPC.
 var wireST = []byte{0x1b, '\\'}
 
 // writeAPC feeds one complete kitty APC to the terminal and appends whatever

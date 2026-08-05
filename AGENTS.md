@@ -405,8 +405,8 @@ Design and gate decisions:
   See
   [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
 - OSC 133 command blocks are worker-owned state carried beside the dump as
-  structured `attach_result.snapshot.blocks` (the marker-stripped dump rebuilds
-  none); the frontend seeds `TerminalBlockStore` from them after the dump write
+  structured `attach_result.snapshot.blocks` (the VT dump rebuilds none); the
+  frontend seeds `TerminalBlockStore` from them after the dump write
   (Phase 3a).
 - Do not use restore as redraw repair or infer PTY correctness from local `fit()`.
 - Restored terminal queries must not generate fresh PTY input; the worker
@@ -482,7 +482,7 @@ or `GOOS=… GOARCH=… make build`).
 **Download-first (no zig for most contributors, and none in CI/release).** The
 script fetches the prebuilt archive **for the target platform** — assets are
 named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
-(`ghostty-vt-native.pin`) plus the carried `ghostty-vt-native.patch` — from the
+(`ghostty-vt.pin`) plus the carried `ghostty-vt-native.patch` — from the
 rolling `native-vt-prebuilts` GitHub release and verifies it against the
 matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
 key is shared across platforms (same source); the lock carries one sha per
@@ -492,12 +492,16 @@ published asset for the new key yet), when the download/verify fails, or when
 `ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
 script to a target when cross-building (the Makefile sets them).
 
-**Changing the VT source.** After editing `ghostty-vt-native.pin` or
-`ghostty-vt-native.patch`, run `make publish-native-vt`
-(`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported target
-from one host (needs zig 0.16.x and an authenticated `gh`), uploads all the keyed
-assets, and rewrites `ghostty-vt-native.lock` with the shared key + per-platform
-shas. **Commit the regenerated lock** — the Makefile depends on it, so committing
-it is what makes every other checkout re-fetch. Shared logic lives in
+**Changing the VT source.** After editing the shared `ghostty-vt.pin`, rebuild
+the vendored browser core with `app/scripts/build-ghostty-vt-wasm.sh`; it also
+rewrites `app/vendor/ghostty-vt/ghostty-vt.lock`, which normal builds and tests
+verify against the pin, adapter, patch, recipe, and binary. Then run
+`make publish-native-vt` (`scripts/publish-libghostty-vt.sh`) after editing the
+shared pin or `ghostty-vt-native.patch`: it cross-builds **every** supported
+native target from one host (needs zig 0.16.x and an authenticated `gh`), uploads
+all the keyed assets, and rewrites `ghostty-vt-native.lock` with the shared key +
+per-platform shas. **Commit both regenerated locks when the shared pin changes**
+— the build depends on them, so committing them is what makes every checkout
+reject stale artifacts. Shared native logic lives in
 `scripts/lib/libghostty-vt.sh`. See
 [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).

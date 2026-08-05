@@ -18,7 +18,7 @@
 # This file lives at <repo>/scripts/lib/libghostty-vt.sh; repo root is two up.
 vt_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 vt_repo_dir="$(cd "$vt_lib_dir/../.." && pwd)"
-vt_pin_file="$vt_repo_dir/ghostty-vt-native.pin"
+vt_pin_file="$vt_repo_dir/ghostty-vt.pin"
 vt_patch_file="$vt_repo_dir/ghostty-vt-native.patch"
 vt_lock_file="$vt_repo_dir/ghostty-vt-native.lock"
 
@@ -112,11 +112,18 @@ vt_build_from_source() {
   ztarget="$(vt_zig_target "$platform")"
   outdir="$(vt_output_dir_for "$platform")"
 
-  zig="${ZIG:-$(command -v zig || true)}"
+  zig="${ZIG:-}"
+  if [[ -z "$zig" ]] && command -v asdf >/dev/null 2>&1; then
+    zig="$(asdf which zig 2>/dev/null || true)"
+  fi
+  if [[ -z "$zig" ]]; then
+    zig="$(command -v zig || true)"
+  fi
   if [[ -z "$zig" ]]; then
     echo "error: zig not found on PATH; need zig 0.16.x to build libghostty-vt from source" >&2
     echo "       (consumers normally download a prebuilt asset — this path only runs when" >&2
-    echo "        you have changed ghostty-vt-native.pin/.patch or forced ATTN_VT_FROM_SOURCE=1)" >&2
+    echo "        you have changed ghostty-vt.pin or ghostty-vt-native.patch, or forced" >&2
+    echo "        ATTN_VT_FROM_SOURCE=1)" >&2
     return 1
   fi
   zig_version="$("$zig" version)"

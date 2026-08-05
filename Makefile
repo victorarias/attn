@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -35,7 +35,9 @@ SOURCE_FINGERPRINT ?= $(shell bash ./scripts/source-fingerprint.sh --field finge
 GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
 OUTPUT ?= $(BINARY_NAME)
 GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
-ZIG ?= zig
+# Honor the repository's .tool-versions even when an older standalone Zig is
+# earlier on PATH (the app's WASM builder follows the same order).
+ZIG ?= $(shell if command -v asdf >/dev/null 2>&1; then asdf which zig 2>/dev/null || command -v zig; else command -v zig; fi)
 # Prefer a stable local development identity so macOS privacy grants survive
 # source rebuilds. Contributors without a certificate retain the ad-hoc
 # fallback; callers may override this with a pinned identity or fingerprint.
@@ -81,11 +83,11 @@ endif
 # asset (new sha) forces everyone to re-fetch. GHOSTTY_VT_GOOS/GOARCH pin the
 # script to the same target the archive path resolves, so it installs into
 # third_party/ghostty-vt/$(VT_PLATFORM)/.
-$(NATIVE_VT_LIB): ghostty-vt-native.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
+$(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
 	GHOSTTY_VT_GOOS=$(VT_GOOS) GHOSTTY_VT_GOARCH=$(VT_GOARCH) ./scripts/build-libghostty-vt.sh
 
 # Rebuild the native archives for EVERY supported target from source and publish
-# them as prebuilt assets. Run after changing ghostty-vt-native.pin or
+# them as prebuilt assets. Run after changing the shared ghostty-vt.pin or
 # ghostty-vt-native.patch; needs zig 0.16.x (cross-compiles all targets from one
 # host) and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
 publish-native-vt:
@@ -113,7 +115,10 @@ GOTESTSUM=$(HOME)/go/bin/gotestsum
 $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
-test: $(NATIVE_VT_DEP) test-hooks
+verify-ghostty-vt-wasm:
+	bash ./app/scripts/ghostty-vt-wasm-lock.sh verify
+
+test: $(NATIVE_VT_DEP) test-hooks verify-ghostty-vt-wasm
 	./scripts/test-go.sh
 
 # Repository Claude Code hooks are shell, so they are invisible to the Go suite
@@ -122,11 +127,11 @@ test-hooks:
 	@bash ./scripts/claude/attn-profile-nudge_test.sh
 
 # Verbose test output (shows all test names as they run)
-test-v: $(NATIVE_VT_DEP)
+test-v: $(NATIVE_VT_DEP) verify-ghostty-vt-wasm
 	./scripts/test-go.sh -v
 
 # Quick test (compact package output)
-test-quick: $(NATIVE_VT_DEP)
+test-quick: $(NATIVE_VT_DEP) verify-ghostty-vt-wasm
 	./scripts/test-go.sh
 
 # Watch mode - re-runs tests on file changes

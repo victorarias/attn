@@ -35,9 +35,8 @@ package pty
 // predates that flip and which now guards the storage-off escape hatch.
 //
 // The client in both is a native terminal standing in for the frontend's wasm
-// model, fed through writeAsClient rather than written raw. The two ghostty
-// builds are different pins and disagree about OSC 133; writing the wire
-// straight into a native terminal would fail this property on correct code.
+// model, fed through writeAsClient. Both runtimes use ghostty-vt.pin; the real
+// WASM corpus test remains the authority on cross-target agreement.
 
 import (
 	"strings"
@@ -99,7 +98,7 @@ func FuzzKittyWireMirrorShipping(f *testing.F) {
 //     tripwire resync (kittyResyncScrollClamped, kittyResyncMarginMode,
 //     kittyResyncPendingWrap) instead of cleverer synthesis.
 //
-// Measured on the pin in ghostty-vt-native.pin: 15m / 38.1M execs green, then
+// Measured on the pin in ghostty-vt.pin: 15m / 38.1M execs green, then
 // the deferred-wrap class 97s into the next soak, then 15m / 42.5M execs green
 // again with its tripwire in.
 //
@@ -134,10 +133,9 @@ func fuzzKittyWireMirror(f *testing.F, storageLimit uint64) {
 		}
 
 		resynced := ""
-		var clientSeg feedSegmenter
 		feed := func(chunk []byte) {
 			wire, resync := feeder.feed(chunk)
-			writeAsClient(client, &clientSeg, wire)
+			writeAsClient(client, wire)
 			if resync != "" && resynced == "" {
 				resynced = resync
 			}

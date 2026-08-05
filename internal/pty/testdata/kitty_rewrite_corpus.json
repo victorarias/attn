@@ -1136,10 +1136,10 @@
         "",
         ""
       ],
-      "workerPlainText": "000�� done",
-      "workerViewportText": "000�� done\n\n\n\n\n\n\n\n",
-      "cursorCol": 10,
-      "cursorRow": 0
+      "workerPlainText": "000�\n� done",
+      "workerViewportText": "000�\n� done\n\n\n\n\n\n\n",
+      "cursorCol": 6,
+      "cursorRow": 1
     },
     {
       "name": "a prompt marker splitting a character at the wrap column",
@@ -1160,10 +1160,10 @@
         "",
         ""
       ],
-      "workerPlainText": "00000000000000000000\n�� done",
-      "workerViewportText": "00000000000000000000\n�� done\n\n\n\n\n\n\n",
-      "cursorCol": 7,
-      "cursorRow": 1
+      "workerPlainText": "00000000000000000000\n�\n� done",
+      "workerViewportText": "00000000000000000000\n�\n� done\n\n\n\n\n\n",
+      "cursorCol": 6,
+      "cursorRow": 2
     },
     {
       "name": "a c1-terminated apc still leaves the seven-bit st",
@@ -1211,10 +1211,10 @@
         "",
         ""
       ],
-      "workerPlainText": "out$ ls",
-      "workerViewportText": "out$ ls\n\n\n\n\n\n\n\n",
+      "workerPlainText": "out\n$ ls",
+      "workerViewportText": "out\n$ ls\n\n\n\n\n\n\n",
       "cursorCol": 0,
-      "cursorRow": 1
+      "cursorRow": 2
     },
     {
       "name": "markers split across feed chunks around an image",
