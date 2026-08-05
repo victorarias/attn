@@ -101,7 +101,10 @@ commands:
         --expect removes the document only if it is still at that revision.
 
   query <namespace> <collection> [query flags] [--json]
-        run a query once.
+        run a query once. Reports, beside the results, the log position the
+        answer was true at: put and delete print the position their write
+        landed at, so comparing the two tells you whether an answer already
+        includes a write you made.
 
   count <namespace> <collection> [query flags]
         how many documents match, without fetching them. --sort, --desc and
@@ -290,6 +293,21 @@ func runDocGet(args []string) {
 		return
 	}
 	fmt.Println(result.Document.Body)
+	printPosition(false, result.AsOfSeq)
+}
+
+// printPosition reports the log position a read was true at, which is what a
+// caller compares against the seq its own write returned to know whether the
+// answer already includes it.
+//
+// It goes to stderr so it does not land in a body someone is piping into jq,
+// and it is skipped under --json for the same reason: a machine reader gets the
+// position from the wire, or from `doc count --json`, which carries it in band.
+func printPosition(asJSON bool, seq int) {
+	if asJSON {
+		return
+	}
+	fmt.Fprintf(os.Stderr, "as of seq %d\n", seq)
 }
 
 func runDocDelete(args []string) {
@@ -317,6 +335,7 @@ func runDocQuery(args []string) {
 		docFail("query", err)
 	}
 	printDocuments(result.Documents, asJSON)
+	printPosition(asJSON, result.AsOfSeq)
 }
 
 func runDocCount(args []string) {

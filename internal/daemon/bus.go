@@ -237,12 +237,12 @@ const (
 	FactDocumentCollectionRemoved = "document.collection.removed"
 )
 
-// compactableFacts are the fact classes the retention pass may reduce to one
+// CompactableFacts are the fact classes the retention pass may reduce to one
 // row per subject. Both document facts qualify for the same reason: they are
 // invalidations about a subject whose state lives in the store, so only the
 // newest carries information. Session and ticket facts are deliberately absent
 // — they keep the age window's behavior unchanged.
-var compactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved}
+var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved}
 
 // projection maps facts to the wire traffic they produce.
 type projection struct {
@@ -491,7 +491,7 @@ func (d *Daemon) ensureEventBus() {
 	if d.store != nil {
 		backing = d.newSQLBusStore()
 	}
-	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: compactableFacts})
+	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
 }

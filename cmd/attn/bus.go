@@ -9,7 +9,9 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -34,6 +36,8 @@ func runBus() {
 	switch os.Args[2] {
 	case "status":
 		runBusStatus(os.Args[3:])
+	case "trim":
+		runBusTrim(os.Args[3:])
 	case "enable":
 		runBusSetEnabled(os.Args[3:], true)
 	case "disable":
@@ -53,6 +57,13 @@ commands:
         show the event log's live window, how many events it holds and what
         they weigh, and every registered consumer's cursor, filter, enabled
         bit, and lag (head - cursor).
+
+  trim
+        run one retention pass now instead of waiting for the daemon's hourly
+        tick: drop events past the age window, and reduce the compactable fact
+        classes to the newest event per subject. Both stop at the cursor floor,
+        so nothing an enabled consumer has yet to read is removed — a lagging
+        consumer pins the log, and bus status shows the lag.
 
   disable <consumer>
         stop delivering to a consumer. Its cursor is preserved, but a disabled
@@ -158,6 +169,47 @@ func runBusStatus(args []string) {
 		fmt.Fprintf(tw, "%s\t%d\t%d\t%t\t%s\n", c.Name, c.Cursor, c.Lag, c.Enabled, c.Filter)
 	}
 	_ = tw.Flush()
+}
+
+// runBusTrim runs one retention pass against the profile database.
+//
+// It builds a bus over the same store rather than reimplementing the pass, so
+// there is exactly one definition of what a pass does, which classes it may
+// compact, and where the cursor floor sits. The bus is never started: Trim is a
+// database operation, and the goroutines Start would raise are for delivery.
+func runBusTrim(args []string) {
+	for _, a := range args {
+		switch a {
+		case "-h", "--help":
+			writeBusHelp(os.Stdout)
+			return
+		default:
+			fmt.Fprintf(os.Stderr, "bus trim: unknown flag %q\n", a)
+			os.Exit(2)
+		}
+	}
+
+	s, closeStore := openBusStore()
+	defer closeStore()
+
+	before, _, err := s.BusLogSize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bus trim: measuring the log: %v\n", err)
+		os.Exit(1)
+	}
+	b := bus.New(bus.Options{
+		Store:       daemon.NewBusStore(s),
+		Compactable: daemon.CompactableFacts,
+		Log:         func(format string, args ...interface{}) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
+	})
+	removed := b.Trim()
+	after, bytes, err := s.BusLogSize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bus trim: measuring the log: %v\n", err)
+		os.Exit(1)
+	}
+	fmt.Printf("removed %d event(s); log now holds %d of %d, weighing %s\n",
+		removed, after, before, humanBytes(bytes))
 }
 
 // humanBytes renders the log's weight at the scale an operator reads it at.
