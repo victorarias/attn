@@ -2092,11 +2092,58 @@ export function useUiAutomationBridge({
         const visible = document.querySelector('.view-container.visible');
         const banner = visible?.querySelector('[data-testid="all-settled"]') ?? null;
         const follow = visible?.querySelector('[data-testid="follow-next-turn"] input');
+        const snoozedGroup = visible?.querySelector('[data-testid="session-group-snoozed"]') ?? null;
+        const snoozedHeader = snoozedGroup?.querySelector('[data-testid="session-group-snoozed-header"]');
+        const readPRSection = (testId: string) => {
+          const section = visible?.querySelector(`[data-testid="${testId}"]`) ?? null;
+          if (!section) return null;
+          return {
+            count: section.querySelector('.pr-section-count')?.textContent?.trim() || '',
+            // The repo as the row itself names it: inline on the flat side, on a
+            // group header on the review side. Which one carries it is the whole
+            // difference between the two halves.
+            rows: Array.from(section.querySelectorAll('[data-testid="pr-card"]')).map((row) => ({
+              number: row.querySelector('.pr-number')?.textContent?.trim() || '',
+              repo: row.querySelector('.pr-repo-inline')?.textContent?.trim() || '',
+              title: row.querySelector('.pr-title')?.textContent?.trim() || '',
+            })),
+            repoGroups: Array.from(section.querySelectorAll('.pr-repo-group .repo-name'))
+              .map((name) => name.textContent?.trim() || ''),
+          };
+        };
         return {
           onScreen: Boolean(visible?.querySelector('.dashboard')),
           allSettled: Boolean(banner),
           detail: banner?.querySelector('.all-settled-detail')?.textContent?.trim() || '',
           followNextTurn: follow instanceof HTMLInputElement ? follow.checked : null,
+          // The strip of keyboard hints home used to carry. Reported so its
+          // absence is something a caller can testify to rather than infer.
+          shortcutFooter: Boolean(visible?.querySelector('.dashboard-footer')),
+          // Agents the user deferred. Collapsed by default, so `rows` is empty
+          // until something expands it — which is a real answer, not a gap.
+          snoozed: {
+            present: Boolean(snoozedGroup),
+            header: snoozedHeader?.textContent?.trim() || '',
+            expanded: snoozedHeader?.getAttribute('aria-expanded') === 'true',
+            rows: Array.from(snoozedGroup?.querySelectorAll('.session-row') || []).map((row) => ({
+              id: (row.getAttribute('data-testid') || '').slice('session-'.length),
+              label: row.querySelector('.session-name')?.textContent?.trim() || '',
+              state: row.getAttribute('data-state') || '',
+              wake: row.querySelector('.session-wake-at')?.textContent?.trim() || '',
+              canWake: Boolean(row.querySelector('.session-wake-btn')),
+            })),
+          },
+          // Which agents home is still grouping by state. A deferred agent
+          // appearing here is the defect the snoozed section exists to remove.
+          stateGroupSessionIds: Array.from(
+            visible?.querySelectorAll('[data-testid^="session-group-"] .session-row') || [],
+          )
+            .filter((row) => !snoozedGroup?.contains(row))
+            .map((row) => (row.getAttribute('data-testid') || '').slice('session-'.length)),
+          prs: {
+            yours: readPRSection('pr-section-yours'),
+            review: readPRSection('pr-section-review'),
+          },
         };
       }
       case 'queue_get_state': {

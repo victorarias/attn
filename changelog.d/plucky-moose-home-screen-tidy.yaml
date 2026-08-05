@@ -1,0 +1,15 @@
+kind: changed
+area: home
+change: >
+  The home screen says three things more honestly. Agents you snoozed now
+  collect in their own collapsible Snoozed section at the foot of the Sessions
+  card, above muted workspaces, each showing when it comes back and offering a
+  wake-now action — until now a deferred agent was listed under Working or
+  Idle, which told you what it was doing but not that you had put it off. That
+  section shows whether or not the queue arrangement is on, so a deferral made
+  in queue mode can always be undone. Pull requests split into two: the ones you
+  opened lead the card as a flat list with the repo named on each row, and the
+  ones you were asked to review follow in the repo groups they were already in,
+  so finding your own no longer means reading past everyone else's. And the row
+  of keyboard hints under the cards is gone; Cmd+/ opens the full, always-correct
+  shortcut list.

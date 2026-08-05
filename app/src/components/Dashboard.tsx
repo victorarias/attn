@@ -9,7 +9,8 @@ import { useDaemonContext } from '../contexts/DaemonContext';
 import { getRepoName } from '../utils/repo';
 import { openUrl } from '@tauri-apps/plugin-opener';
 import type { UISessionState } from '../types/sessionState';
-import { compareTurnOrder, formatTurnAge } from '../utils/queueBands';
+import { compareTurnOrder, compareWakeOrder, formatTurnAge } from '../utils/queueBands';
+import { formatWakeTime, isSnoozed } from '../utils/snoozeDurations';
 import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 import appIcon from '../assets/icon.png';
 import './Dashboard.css';
@@ -27,6 +28,11 @@ type DashboardSession = {
   // already settled, which is exactly the case grouping by state gets wrong.
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  // When a deferred agent comes back. Its presence is what takes the agent out
+  // of every other group here: a snoozed agent's state is no longer an answer to
+  // anything the user asked, so listing it under Working or Idle says the one
+  // thing that is not true of it — that it is waiting on nothing.
+  turnSnoozedUntil?: string;
 };
 
 /**
@@ -66,6 +72,11 @@ interface DashboardProps {
   onRebootstrapEndpoint?: (endpointId: string) => Promise<void>;
   onSelectSession: (id: string) => void;
   onNewSession: () => void;
+  // Ending a snooze early. Home is the second place a deferral can be undone,
+  // and the only one that does not depend on the queue arrangement being on —
+  // the shortcut and the command menu are both queue-gated, so without this a
+  // snooze made in queue mode would have no way out once it was turned off.
+  onWakeTurn?: (id: string) => void;
   onRefreshPRs?: () => void;
   onOpenPR?: (pr: DaemonPR) => void;
   onOpenSettings: () => void;
@@ -95,6 +106,7 @@ export function Dashboard({
   onRebootstrapEndpoint,
   onSelectSession,
   onNewSession,
+  onWakeTurn,
   onRefreshPRs,
   onOpenPR,
   onOpenSettings,
@@ -104,6 +116,7 @@ export function Dashboard({
   onToggleFollowNextTurn,
 }: DashboardProps) {
   const now = useNow(TURN_AGE_TICK_MS);
+  const [snoozedExpanded, setSnoozedExpanded] = useState(false);
 
   const renderEndpointBadge = (session: DashboardProps['sessions'][number]) => {
     if (!session.endpointName) {
@@ -118,23 +131,46 @@ export function Dashboard({
 
   const chiefSession = sessions.find((session) => session.chiefOfStaff);
 
+  /**
+   * Agents the user deferred, soonest wake first, in queue order and out of
+   * everything below.
+   *
+   * Not gated on the queue arrangement, unlike the sidebar's section. A snooze
+   * can only be *made* with the queue on, but it outlives being turned off, and
+   * every other way to wake one early is queue-gated too — so with the setting
+   * off this list is the deferral's only remaining way out.
+   *
+   * The chief is here like any other agent, which is where home parts from the
+   * sidebar: the sidebar pulls the chief out of its bands entirely, but home's
+   * Sessions card lists it alongside the rest, so leaving it out would put a
+   * deferred chief back under a state group that cannot describe it.
+   */
+  const snoozedSessions = useMemo(() => (
+    sessions.filter((s) => isSnoozed(s.turnSnoozedUntil, now)).sort(compareWakeOrder)
+  ), [sessions, now]);
+
+  const awakeSessions = useMemo(() => {
+    const deferred = new Set(snoozedSessions.map((s) => s.id));
+    return sessions.filter((s) => !deferred.has(s.id));
+  }, [sessions, snoozedSessions]);
+
   // The chief is left out of the turns, exactly as the sidebar band leaves it
   // out: it has its own card here and its own slot there. That does mean home
   // can read "all settled" while the chief wants you — the same thing the
   // sidebar says, which is the lesser of the two surprises.
   const turnSessions = useMemo(() => (
     queueModeEnabled
-      ? sessions.filter((s) => s.turnOwed && !s.chiefOfStaff).sort(compareTurnOrder)
+      ? awakeSessions.filter((s) => s.turnOwed && !s.chiefOfStaff).sort(compareTurnOrder)
       : []
-  ), [queueModeEnabled, sessions]);
+  ), [queueModeEnabled, awakeSessions]);
 
   // With the queue off nothing has been settled, so every session is grouped by
   // state and there is no second band to keep them out of.
   const settledSessions = useMemo(() => (
     queueModeEnabled
-      ? sessions.filter((s) => !(s.turnOwed && !s.chiefOfStaff))
-      : sessions
-  ), [queueModeEnabled, sessions]);
+      ? awakeSessions.filter((s) => !(s.turnOwed && !s.chiefOfStaff))
+      : awakeSessions
+  ), [queueModeEnabled, awakeSessions]);
 
   const stateGroups = useMemo(() => (
     STATE_GROUPS
@@ -160,7 +196,13 @@ export function Dashboard({
     return counts.map((entry) => `${entry.n} ${entry.label}`).join(' · ');
   }, [settledSessions]);
 
-  const renderSessionRow = (s: DashboardSession, age?: string) => (
+  // `wake` replaces the age on a deferred row rather than joining it: the only
+  // question a snoozed row answers is when it comes back, and the turn it would
+  // have aged is already closed.
+  const renderSessionRow = (
+    s: DashboardSession,
+    { age, wake }: { age?: string; wake?: string } = {},
+  ) => (
     <div
       key={s.id}
       className="session-row clickable"
@@ -173,6 +215,22 @@ export function Dashboard({
       {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
       {renderEndpointBadge(s)}
       {age && <span className="session-turn-age">{age}</span>}
+      {wake && <span className="session-wake-at">{wake}</span>}
+      {wake && onWakeTurn && (
+        <button
+          type="button"
+          className="session-wake-btn"
+          data-testid={`session-wake-${s.id}`}
+          title="Wake now — bring it back to the queue"
+          aria-label={`Wake ${s.label}`}
+          onClick={(event) => {
+            event.stopPropagation();
+            onWakeTurn(s.id);
+          }}
+        >
+          ↩
+        </button>
+      )}
     </div>
   );
 
@@ -213,15 +271,86 @@ export function Dashboard({
     return map;
   }, [activePRs]);
 
-  // Group active PRs by repo
+  /**
+   * The PRs you opened, ahead of the ones you were asked to look at.
+   *
+   * Your own are the short list and the one you come here to find, so they lead
+   * and they stay flat — a repo header over two rows is a level of structure
+   * that only costs a click. The review side keeps the repo groups, because that
+   * is where the volume is and where muting a whole repo is the act that helps.
+   */
+  const yourPRs = useMemo(() => activePRs.filter((pr) => pr.role === 'author'), [activePRs]);
+  const reviewPRs = useMemo(() => activePRs.filter((pr) => pr.role !== 'author'), [activePRs]);
+
+  // Group the review side by repo
   const prsByRepo = useMemo(() => {
     const grouped = new Map<string, DaemonPR[]>();
-    for (const pr of activePRs) {
+    for (const pr of reviewPRs) {
       const existing = grouped.get(pr.repo) || [];
       grouped.set(pr.repo, [...existing, pr]);
     }
     return grouped;
-  }, [activePRs]);
+  }, [reviewPRs]);
+
+  // One row, two homes. `showRepo` names the repo inline, which the flat "Yours"
+  // list needs and a repo group already answers above its rows.
+  const renderPRRow = (pr: DaemonPR, { showRepo = false }: { showRepo?: boolean } = {}) => {
+    // Determine if this is an approved PR without changes (should be dimmed)
+    const isApprovedNoChanges = pr.approved_by_me && !pr.has_new_changes;
+    const showHost = (repoHosts.get(pr.repo)?.size || 0) > 1;
+    return (
+      <div
+        key={pr.id}
+        className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''} ${isApprovedNoChanges ? 'approved' : ''}`}
+        data-testid="pr-card"
+      >
+        <button
+          type="button"
+          className="pr-link"
+          onClick={(e) => {
+            e.stopPropagation();
+            sendPRVisited(pr.id);
+            openUrl(pr.url).catch((err) =>
+              console.error('[Dashboard] Failed to open PR URL:', err)
+            );
+          }}
+        >
+          <span className={`pr-role ${pr.role}`}>
+            {pr.role === 'reviewer'
+              ? (pr.author?.toLowerCase().includes('bot') ? '🤖' : '👀')
+              : '✏️'}
+          </span>
+          {showRepo && <span className="pr-repo-inline">{getRepoName(pr.repo)}</span>}
+          <span className="pr-number">#{pr.number}</span>
+          {showHost && pr.host && (
+            <span className="pr-host" title={pr.host}>{pr.host}</span>
+          )}
+          <span className="pr-title">{pr.title}</span>
+          {pr.role === 'author' && (
+            <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
+          )}
+        </button>
+        <div className="pr-badges">
+          {pr.has_new_changes && (
+            <span className="badge-changes" title="New commits/comments since your last visit">updated</span>
+          )}
+          {pr.approved_by_me && (
+            <span className="badge-approved" title="You approved this PR">✓</span>
+          )}
+          {pr.ci_status && pr.ci_status !== 'none' && (
+            <span className={`ci-status ${pr.ci_status}`} title={`CI ${pr.ci_status}`}></span>
+          )}
+        </div>
+        <PRActions
+          number={pr.number}
+          prId={pr.id}
+          author={pr.author}
+          onActionComplete={handleActionComplete}
+          onOpen={onOpenPR ? () => onOpenPR(pr) : undefined}
+        />
+      </div>
+    );
+  };
 
   const toggleRepo = (repo: string) => {
     setCollapsedRepos((prev) => {
@@ -388,7 +517,7 @@ export function Dashboard({
                       <span className="group-count">{turnSessions.length}</span>
                     </div>
                     {turnSessions.map((s) => (
-                      renderSessionRow(s, formatTurnAge(s.turnOpenedAt, now))
+                      renderSessionRow(s, { age: formatTurnAge(s.turnOpenedAt, now) })
                     ))}
                   </div>
                 )}
@@ -406,6 +535,30 @@ export function Dashboard({
                     {group.rows.map((s) => renderSessionRow(s))}
                   </div>
                 ))}
+                {/* Collapsed at the foot of the card, above the muted
+                    workspaces, exactly as the sidebar arranges the same two:
+                    both are the quiet end, and "not yet" sits nearer to your
+                    attention than "not ever". A snooze surfaces itself when it
+                    wakes, so the section is for checking on a promise or
+                    breaking it early — neither worth standing room. */}
+                {snoozedSessions.length > 0 && (
+                  <div className="session-group snoozed-group" data-testid="session-group-snoozed">
+                    <button
+                      type="button"
+                      className="group-label group-toggle"
+                      data-testid="session-group-snoozed-header"
+                      aria-expanded={snoozedExpanded}
+                      onClick={() => setSnoozedExpanded((open) => !open)}
+                    >
+                      <span className={`collapse-icon ${snoozedExpanded ? '' : 'collapsed'}`}>▾</span>
+                      Snoozed
+                      <span className="group-count">{snoozedSessions.length}</span>
+                    </button>
+                    {snoozedExpanded && snoozedSessions.map((s) => (
+                      renderSessionRow(s, { wake: formatWakeTime(s.turnSnoozedUntil, now) })
+                    ))}
+                  </div>
+                )}
                 {mutedWorkspaces.length > 0 && (
                   <div
                     className="session-group muted-summary clickable"
@@ -498,115 +651,68 @@ export function Dashboard({
                   <div className="pr-skeleton-title" />
                 </div>
               </div>
-            ) : prsByRepo.size === 0 ? (
+            ) : activePRs.length === 0 ? (
               <div className="card-empty">No PRs need attention</div>
             ) : (
-              Array.from(prsByRepo.entries()).map(([repo, repoPRs]) => {
-                const repoName = getRepoName(repo);
-                const isCollapsed = collapsedRepos.has(repo);
-                const reviewCount = repoPRs.filter((p) => p.role === 'reviewer').length;
-                const authorCount = repoPRs.filter((p) => p.role === 'author').length;
-                const showHost = (repoHosts.get(repo)?.size || 0) > 1;
-
-                return (
-                  <div key={repo} className="pr-repo-group">
-                    <div className="repo-header">
-                      <div
-                        className="repo-header-content clickable"
-                        onClick={() => toggleRepo(repo)}
-                      >
-                        <span className={`collapse-icon ${isCollapsed ? 'collapsed' : ''}`}>▾</span>
-                        <span className="repo-name">{repoName}</span>
-                        <span className="repo-counts">
-                          {reviewCount > 0 && <span className="count review">{reviewCount} review</span>}
-                          {authorCount > 0 && <span className="count author">{authorCount} yours</span>}
-                        </span>
-                      </div>
-                      <button
-                        className="repo-mute-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          sendMuteRepo(repo);
-                        }}
-                        title="Mute all PRs from this repo"
-                      >
-                        ⊘
-                      </button>
+              <>
+                {yourPRs.length > 0 && (
+                  <div className="pr-section" data-testid="pr-section-yours">
+                    <div className="pr-section-header">
+                      <span>Yours</span>
+                      <span className="pr-section-count">{yourPRs.length}</span>
                     </div>
-                    {!isCollapsed && (
-                      <div className="repo-prs">
-                        {repoPRs.map((pr) => {
-                          // Determine if this is an approved PR without changes (should be dimmed)
-                          const isApprovedNoChanges = pr.approved_by_me && !pr.has_new_changes;
-                          return (
-                          <div
-                            key={pr.id}
-                            className={`pr-row ${fadingPRs.has(pr.id) ? 'fading-out' : ''} ${isApprovedNoChanges ? 'approved' : ''}`}
-                            data-testid="pr-card"
-                          >
+                    {yourPRs.map((pr) => renderPRRow(pr, { showRepo: true }))}
+                  </div>
+                )}
+                {reviewPRs.length > 0 && (
+                  <div className="pr-section" data-testid="pr-section-review">
+                    <div className="pr-section-header">
+                      <span>Review requested</span>
+                      <span className="pr-section-count">{reviewPRs.length}</span>
+                    </div>
+                    {Array.from(prsByRepo.entries()).map(([repo, repoPRs]) => {
+                      const repoName = getRepoName(repo);
+                      const isCollapsed = collapsedRepos.has(repo);
+
+                      return (
+                        <div key={repo} className="pr-repo-group">
+                          <div className="repo-header">
+                            <div
+                              className="repo-header-content clickable"
+                              onClick={() => toggleRepo(repo)}
+                            >
+                              <span className={`collapse-icon ${isCollapsed ? 'collapsed' : ''}`}>▾</span>
+                              <span className="repo-name">{repoName}</span>
+                              <span className="repo-counts">
+                                <span className="count review">{repoPRs.length} review</span>
+                              </span>
+                            </div>
                             <button
-                              type="button"
-                              className="pr-link"
+                              className="repo-mute-btn"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                sendPRVisited(pr.id);
-                                openUrl(pr.url).catch((err) =>
-                                  console.error('[Dashboard] Failed to open PR URL:', err)
-                                );
+                                sendMuteRepo(repo);
                               }}
+                              title="Mute all PRs from this repo"
                             >
-                              <span className={`pr-role ${pr.role}`}>
-                                {pr.role === 'reviewer'
-                                  ? (pr.author?.toLowerCase().includes('bot') ? '🤖' : '👀')
-                                  : '✏️'}
-                              </span>
-                              <span className="pr-number">#{pr.number}</span>
-                              {showHost && pr.host && (
-                                <span className="pr-host" title={pr.host}>{pr.host}</span>
-                              )}
-                              <span className="pr-title">{pr.title}</span>
-                              {pr.role === 'author' && (
-                                <span className="pr-reason">{pr.reason.replace(/_/g, ' ')}</span>
-                              )}
+                              ⊘
                             </button>
-                            <div className="pr-badges">
-                              {pr.has_new_changes && (
-                                <span className="badge-changes" title="New commits/comments since your last visit">updated</span>
-                              )}
-                              {pr.approved_by_me && (
-                                <span className="badge-approved" title="You approved this PR">✓</span>
-                              )}
-                              {pr.ci_status && pr.ci_status !== 'none' && (
-                                <span className={`ci-status ${pr.ci_status}`} title={`CI ${pr.ci_status}`}></span>
-                              )}
-                            </div>
-                            <PRActions
-                              number={pr.number}
-                              prId={pr.id}
-                              author={pr.author}
-                              onActionComplete={handleActionComplete}
-                              onOpen={onOpenPR ? () => onOpenPR(pr) : undefined}
-                            />
                           </div>
-                        );})}
-                      </div>
-                    )}
+                          {!isCollapsed && (
+                            <div className="repo-prs">
+                              {repoPRs.map((pr) => renderPRRow(pr))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })
+                )}
+              </>
             )}
           </div>
         </div>
       </div>
-
-      <footer className="dashboard-footer">
-        <div className="footer-shortcuts">
-          <span className="shortcut"><kbd>⌘T</kbd> new workspace</span>
-          <span className="shortcut"><kbd>⌘1-9</kbd> switch workspace</span>
-          <span className="shortcut"><kbd>⌘,</kbd> settings</span>
-          <span className="shortcut"><kbd>⌘/</kbd> shortcuts</span>
-        </div>
-      </footer>
     </div>
   );
 }

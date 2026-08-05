@@ -206,8 +206,12 @@ export function buildQueueBands<TSession extends QueueBandSession>(
   return { chief, turns, settled, snoozed };
 }
 
-/** Soonest wake first, tie-broken by id so the order is total. */
-function compareWakeOrder(a: QueueBandSession, b: QueueBandSession): number {
+/**
+ * Soonest wake first, tie-broken by id so the order is total. Exported for the
+ * same reason as compareTurnOrder: home lists the same deferred agents the
+ * sidebar does, and two orders for one set of promises is two sets of promises.
+ */
+export function compareWakeOrder(a: QueueBandSession, b: QueueBandSession): number {
   const untilA = a.turnSnoozedUntil ?? '';
   const untilB = b.turnSnoozedUntil ?? '';
   if (untilA !== untilB) {
