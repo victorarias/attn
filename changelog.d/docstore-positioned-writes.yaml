@@ -1,0 +1,14 @@
+kind: changed
+area: daemon
+change: >
+  Document-store writes now commit the document and the fact describing it in
+  one transaction, so a change can no longer land without being announced, and
+  every write reports the log position it landed at. Reads answer with the
+  position they were true at, so a caller can tell whether its own write is
+  already in the answer. New `attn doc count` answers how many documents match
+  a query without fetching them, failures carry a machine-readable code beside
+  their text (`conflict` bringing the expected and actual revisions with it,
+  `undeclared_collection`, `invalid_query`), and `attn bus status` reports how
+  many events the log holds and what they weigh — which retention now keeps
+  bounded by collapsing repeated document facts about the same document to the
+  newest one.
