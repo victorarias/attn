@@ -529,8 +529,18 @@ export function Dashboard({
                     Settled
                   </div>
                 )}
+                {/* data-session-group marks the groups that describe what an
+                    agent is doing, so a reader can ask for them without
+                    matching the turn band or the snoozed section: those share
+                    the testid prefix and answer a different question. A new
+                    group opts in here or is correctly left out. */}
                 {stateGroups.map((group) => (
-                  <div key={group.state} className="session-group" data-testid={group.testId}>
+                  <div
+                    key={group.state}
+                    className="session-group"
+                    data-testid={group.testId}
+                    data-session-group="state"
+                  >
                     <div className="group-label">{group.label}</div>
                     {group.rows.map((s) => renderSessionRow(s))}
                   </div>

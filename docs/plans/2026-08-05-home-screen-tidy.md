@@ -133,6 +133,13 @@ appearing on hover.
       `Yours 11` as flat rows with the repo inline and no repo groups, then
       `Review requested 3` in two repo groups with the mute button intact.
       Profile cleaned afterwards.
+- [x] Narrow `stateGroupSessionIds` to groups that mark themselves
+      (`data-session-group="state"`). Review caught that the original
+      `[data-testid^="session-group-"]` prefix also matched the turn band, so
+      the field named one thing and reported another; an exclusion list would
+      have gained a hole the next time a group was added. Covered by a unit
+      test reading the same DOM the bridge reads, with an owed turn, a settled
+      agent, and a deferred one on screen.
 
 ## Follow-ups
 

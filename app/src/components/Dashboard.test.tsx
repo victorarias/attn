@@ -214,6 +214,30 @@ describe('Dashboard in queue mode', () => {
     expect(screen.queryByTestId('all-settled')).not.toBeInTheDocument();
   });
 
+  // `home_get_state` reports which agents are still grouped by what they are
+  // doing, and reads that marker to find them. Only the groups that answer that
+  // question carry it — the turn band and the snoozed section share the testid
+  // prefix and answer a different one.
+  it('marks the state groups so a reader can tell them from the turn band', () => {
+    const later = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    render(
+      <Dashboard
+        {...props}
+        sessions={[
+          { id: 's1', label: 'owed', state: 'waiting_input', cwd: '/a', turnOwed: true, turnOpenedAt: '2026-07-29T09:00:00Z' },
+          { id: 's2', label: 'busy', state: 'working', cwd: '/b', turnOwed: false },
+          { id: 's3', label: 'deferred', state: 'working', cwd: '/c', turnSnoozedUntil: later },
+        ]}
+      />
+    );
+
+    const marked = Array.from(document.querySelectorAll('[data-session-group="state"] .session-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(marked).toEqual(['session-s2']);
+    expect(screen.getByTestId('session-group-turns')).not.toHaveAttribute('data-session-group');
+    expect(screen.getByTestId('session-group-snoozed')).not.toHaveAttribute('data-session-group');
+  });
+
   it('announces all settled with what is still running once nothing is owed', () => {
     render(
       <Dashboard

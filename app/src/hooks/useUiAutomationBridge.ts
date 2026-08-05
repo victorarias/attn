@@ -2135,11 +2135,13 @@ export function useUiAutomationBridge({
           },
           // Which agents home is still grouping by state. A deferred agent
           // appearing here is the defect the snoozed section exists to remove.
+          // Read from the groups that mark themselves, not from the testid
+          // prefix: the turn band and the snoozed section share it and are not
+          // state groups, and an exclusion list would silently gain a hole the
+          // next time a group is added.
           stateGroupSessionIds: Array.from(
-            visible?.querySelectorAll('[data-testid^="session-group-"] .session-row') || [],
-          )
-            .filter((row) => !snoozedGroup?.contains(row))
-            .map((row) => (row.getAttribute('data-testid') || '').slice('session-'.length)),
+            visible?.querySelectorAll('[data-session-group="state"] .session-row') || [],
+          ).map((row) => (row.getAttribute('data-testid') || '').slice('session-'.length)),
           prs: {
             yours: readPRSection('pr-section-yours'),
             review: readPRSection('pr-section-review'),
