@@ -88,6 +88,12 @@ func (a *sqlBusStore) ListConsumers() ([]bus.Consumer, error) {
 
 func (a *sqlBusStore) Trim(cutoff time.Time) (int, error) { return a.store.TrimBusEvents(cutoff) }
 
+func (a *sqlBusStore) Compact(names []string, floor int64) (int, error) {
+	return a.store.CompactBusEvents(names, floor)
+}
+
+func (a *sqlBusStore) Size() (int64, int64, error) { return a.store.BusLogSize() }
+
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {
 	return bus.Consumer{
 		Name:      r.Name,

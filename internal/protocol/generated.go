@@ -1088,6 +1088,22 @@ type DocCollectionsResult struct {
 	Collections []DocumentCollectionSchema `json:"collections"`
 }
 
+type DocCountMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Query corresponds to the JSON schema field "query".
+	Query DocumentQuery `json:"query"`
+}
+
+type DocCountResult struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
+	// Count corresponds to the JSON schema field "count".
+	Count int `json:"count"`
+}
+
 type DocDefineMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -1133,6 +1149,9 @@ type DocDeleteResult struct {
 
 	// Namespace corresponds to the JSON schema field "namespace".
 	Namespace string `json:"namespace"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
 }
 
 type DocGetMessage struct {
@@ -1150,6 +1169,9 @@ type DocGetMessage struct {
 }
 
 type DocGetResult struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
 	// Document corresponds to the JSON schema field "document".
 	Document *StoredDocument `json:"document,omitempty,omitzero"`
 
@@ -1189,6 +1211,9 @@ type DocPutResult struct {
 
 	// Rev corresponds to the JSON schema field "rev".
 	Rev int `json:"rev"`
+
+	// Seq corresponds to the JSON schema field "seq".
+	Seq int `json:"seq"`
 }
 
 type DocQueryMessage struct {
@@ -1200,6 +1225,9 @@ type DocQueryMessage struct {
 }
 
 type DocQueryResult struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
 	// Documents corresponds to the JSON schema field "documents".
 	Documents []StoredDocument `json:"documents"`
 }
@@ -1248,6 +1276,26 @@ type DocumentCollectionSchema struct {
 
 	// Fields corresponds to the JSON schema field "fields".
 	Fields []DocumentFieldSpec `json:"fields"`
+
+	// Namespace corresponds to the JSON schema field "namespace".
+	Namespace string `json:"namespace"`
+}
+
+type DocumentConflict struct {
+	// Actual corresponds to the JSON schema field "actual".
+	Actual int `json:"actual"`
+
+	// Collection corresponds to the JSON schema field "collection".
+	Collection string `json:"collection"`
+
+	// Expected corresponds to the JSON schema field "expected".
+	Expected int `json:"expected"`
+
+	// Found corresponds to the JSON schema field "found".
+	Found bool `json:"found"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 
 	// Namespace corresponds to the JSON schema field "namespace".
 	Namespace string `json:"namespace"`
@@ -4182,6 +4230,9 @@ type Response struct {
 	// "doc_collections_result".
 	DocCollectionsResult *DocCollectionsResult `json:"doc_collections_result,omitempty,omitzero"`
 
+	// DocCountResult corresponds to the JSON schema field "doc_count_result".
+	DocCountResult *DocCountResult `json:"doc_count_result,omitempty,omitzero"`
+
 	// DocDefineResult corresponds to the JSON schema field "doc_define_result".
 	DocDefineResult *DocDefineResult `json:"doc_define_result,omitempty,omitzero"`
 
@@ -4205,6 +4256,12 @@ type Response struct {
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
+
+	// ErrorCode corresponds to the JSON schema field "error_code".
+	ErrorCode *string `json:"error_code,omitempty,omitzero"`
+
+	// ErrorConflict corresponds to the JSON schema field "error_conflict".
+	ErrorConflict *DocumentConflict `json:"error_conflict,omitempty,omitzero"`
 
 	// JournalAppendResult corresponds to the JSON schema field
 	// "journal_append_result".

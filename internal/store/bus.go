@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 )
 
@@ -57,7 +58,15 @@ func (s *Store) AppendBusEvent(e BusEvent, now time.Time) (int64, error) {
 	if s.db == nil {
 		return 0, nil
 	}
-	res, err := s.db.Exec(`
+	return appendBusEventWith(s.db, e, now)
+}
+
+// appendBusEventWith is the append itself, taking whatever runs the statement.
+// A composite write (see CommitDocumentWrite) passes its transaction so the fact
+// and the change it describes are one commit; AppendBusEvent passes the database
+// and gets SQLite's implicit single-statement transaction.
+func appendBusEventWith(x execer, e BusEvent, now time.Time) (int64, error) {
+	res, err := x.Exec(`
 		INSERT INTO bus_events (name, subject, payload, source, created_at)
 		VALUES (?, ?, ?, ?, ?)
 	`, e.Name, e.Subject, e.Payload, e.Source, formatTicketTime(now))
@@ -267,4 +276,82 @@ func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {
 	}
 	n, err := res.RowsAffected()
 	return int(n), err
+}
+
+// CompactBusEvents keeps only the newest fact per subject among the named ones,
+// and only below floor. It reports how many rows went.
+//
+// Which names may be compacted is a semantic question and is answered in
+// internal/bus; this is the SQL, the same split trimming uses. A compactable
+// name is one whose facts are pure invalidations — five of them about one
+// subject carry no more information than the newest, because the state itself
+// lives in the store and every consumer reads it from there.
+//
+// floor is the caller's cursor floor and is what makes this safe: a row at or
+// below it has been read by every enabled consumer, so removing it cannot cost
+// anyone a delivery, and reconcileGap's "below the earliest surviving seq means
+// trimmed" assumption stays true because no holes are punched above the floor.
+//
+// An empty name list is not "compact everything": it compacts nothing, because
+// a caller that named nothing asked for nothing.
+func (s *Store) CompactBusEvents(names []string, floor int64) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil || len(names) == 0 {
+		return 0, nil
+	}
+	placeholders := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
+	args := make([]any, 0, len(names)*2+1)
+	for _, n := range names {
+		args = append(args, n)
+	}
+	args = append(args, floor)
+	for _, n := range names {
+		args = append(args, n)
+	}
+	// The correlated MAX is an index walk over idx_bus_events_subject (subject,
+	// seq): for each candidate row, the newest fact about the same subject is the
+	// last entry of that subject's index range.
+	res, err := s.db.Exec(`
+		DELETE FROM bus_events
+		WHERE name IN (`+placeholders+`)
+		  AND seq <= ?
+		  AND seq < (
+		      SELECT MAX(newer.seq) FROM bus_events AS newer
+		      WHERE newer.subject = bus_events.subject
+		        AND newer.name IN (`+placeholders+`)
+		  )
+	`, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	return int(n), err
+}
+
+// BusLogSize reports how many facts the log holds and how many bytes of event
+// text they carry.
+//
+// Bytes is the weight of the rows themselves — name, subject, payload, source
+// and stamp — not the size of the database file: SQLite pages are shared with
+// every other table, so a file size would answer a different question than "is
+// the log outgrowing the data it describes". That is the question `attn bus
+// status` asks, and the one fact-class compaction exists to keep answerable.
+func (s *Store) BusLogSize() (rows int64, bytes int64, err error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return 0, 0, nil
+	}
+	err = s.db.QueryRow(`
+		SELECT COUNT(*),
+		       COALESCE(SUM(LENGTH(name) + LENGTH(subject) + LENGTH(payload) + LENGTH(source) + LENGTH(created_at)), 0)
+		FROM bus_events
+	`).Scan(&rows, &bytes)
+	if err != nil {
+		return 0, 0, err
+	}
+	return rows, bytes, nil
 }

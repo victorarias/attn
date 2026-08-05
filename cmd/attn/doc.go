@@ -46,6 +46,8 @@ func runDoc() {
 		runDocDelete(args)
 	case "query":
 		runDocQuery(args)
+	case "count":
+		runDocCount(args)
 	case "watch":
 		runDocWatch(args)
 	default:
@@ -100,6 +102,11 @@ commands:
 
   query <namespace> <collection> [query flags] [--json]
         run a query once.
+
+  count <namespace> <collection> [query flags]
+        how many documents match, without fetching them. --sort, --desc and
+        --limit are ignored: they decide which matches come back, never how
+        many there are.
 
   watch <namespace> <collection> [query flags] [--json]
         run a live query: print the current results, then print them again every
@@ -219,7 +226,10 @@ func runDocPut(args []string) {
 	if err != nil {
 		docFail("put", err)
 	}
-	fmt.Printf("wrote %s/%s/%s (rev %d)\n", namespace, collection, id, result.Rev)
+	// The seq is the write's position on the durable log, printed because it is
+	// what a caller compares against a later read to know the read includes this
+	// write.
+	fmt.Printf("wrote %s/%s/%s (rev %d, seq %d)\n", namespace, collection, id, result.Rev, result.Seq)
 }
 
 // takeExpectFlag pulls `--expect <rev|absent>` out of a command's arguments and
@@ -296,7 +306,7 @@ func runDocDelete(args []string) {
 		fmt.Printf("%s/%s/%s did not exist\n", namespace, collection, rest[0])
 		return
 	}
-	fmt.Printf("deleted %s/%s/%s\n", namespace, collection, rest[0])
+	fmt.Printf("deleted %s/%s/%s (seq %d)\n", namespace, collection, rest[0], result.Seq)
 }
 
 func runDocQuery(args []string) {
@@ -307,6 +317,23 @@ func runDocQuery(args []string) {
 		docFail("query", err)
 	}
 	printDocuments(result.Documents, asJSON)
+}
+
+func runDocCount(args []string) {
+	namespace, collection, rest := docTarget("count", args)
+	query, asJSON := parseDocQueryFlags("count", namespace, collection, rest)
+	result, err := docClient().DocCount(query)
+	if err != nil {
+		docFail("count", err)
+	}
+	if asJSON {
+		writeJSON(struct {
+			Count   int `json:"count"`
+			AsOfSeq int `json:"as_of_seq"`
+		}{result.Count, result.AsOfSeq})
+		return
+	}
+	fmt.Println(result.Count)
 }
 
 func runDocWatch(args []string) {

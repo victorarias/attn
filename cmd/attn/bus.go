@@ -50,8 +50,9 @@ func writeBusHelp(w io.Writer) {
 
 commands:
   status [--json]
-        show the event log's live window and every registered consumer's
-        cursor, filter, enabled bit, and lag (head - cursor).
+        show the event log's live window, how many events it holds and what
+        they weigh, and every registered consumer's cursor, filter, enabled
+        bit, and lag (head - cursor).
 
   disable <consumer>
         stop delivering to a consumer. Its cursor is preserved, but a disabled
@@ -64,8 +65,16 @@ commands:
 }
 
 type busStatusJSON struct {
-	Earliest  int64               `json:"earliest"`
-	Head      int64               `json:"head"`
+	Earliest int64 `json:"earliest"`
+	Head     int64 `json:"head"`
+	// Rows and Bytes are what the log actually holds, as opposed to the span of
+	// the seq space. They are the receipt for the invariant compaction upholds:
+	// the log stays proportional to the data it describes, never to how often
+	// that data is written. Bytes counts the event text — name, subject, payload,
+	// source, stamp — not the size of the database file, which is shared with
+	// every other table and would answer a different question.
+	Rows      int64               `json:"rows"`
+	Bytes     int64               `json:"bytes"`
 	Consumers []busConsumerReport `json:"consumers"`
 }
 
@@ -106,8 +115,13 @@ func runBusStatus(args []string) {
 		fmt.Fprintf(os.Stderr, "bus status: listing consumers: %v\n", err)
 		os.Exit(1)
 	}
+	logRows, logBytes, err := s.BusLogSize()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bus status: measuring the log: %v\n", err)
+		os.Exit(1)
+	}
 
-	report := busStatusJSON{Earliest: earliest, Head: head}
+	report := busStatusJSON{Earliest: earliest, Head: head, Rows: logRows, Bytes: logBytes}
 	for _, r := range rows {
 		lag := head - r.Cursor
 		if lag < 0 {
@@ -133,7 +147,7 @@ func runBusStatus(args []string) {
 		return
 	}
 
-	fmt.Printf("log: seq %d..%d (%d event(s) retained)\n", earliest, head, retainedCount(earliest, head))
+	fmt.Printf("log: seq %d..%d, %d event(s) holding %s\n", earliest, head, logRows, humanBytes(logBytes))
 	if len(report.Consumers) == 0 {
 		fmt.Println("no registered consumers")
 		return
@@ -146,15 +160,16 @@ func runBusStatus(args []string) {
 	_ = tw.Flush()
 }
 
-// retainedCount is a display-only approximation: seq is monotonic but trimming
-// removes rows from the middle of the space only at the low end, so head-earliest
-// overstates nothing except across a gap-free window. It is reported as a hint,
-// not a count of rows.
-func retainedCount(earliest, head int64) int64 {
-	if earliest == 0 || head < earliest {
-		return 0
+// humanBytes renders the log's weight at the scale an operator reads it at.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
 	}
-	return head - earliest + 1
 }
 
 func runBusSetEnabled(args []string, enabled bool) {

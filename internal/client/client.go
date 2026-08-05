@@ -177,14 +177,37 @@ func (c *Client) send(msg interface{}) (*protocol.Response, error) {
 	}
 
 	if !resp.Ok {
-		errMsg := ""
-		if resp.Error != nil {
-			errMsg = *resp.Error
+		return nil, &DaemonError{
+			Code:     protocol.Deref(resp.ErrorCode),
+			Message:  protocol.Deref(resp.Error),
+			Conflict: resp.ErrorConflict,
 		}
-		return nil, fmt.Errorf("daemon error: %s", errMsg)
 	}
 
 	return &resp, nil
+}
+
+// DaemonError is a refused command. It carries the daemon's message text
+// unchanged — that is what a human or an agent reads — plus the code beside it,
+// so a caller can branch on the answer without matching English. Code is empty
+// for the failures nobody has to branch on.
+type DaemonError struct {
+	Code     string
+	Message  string
+	Conflict *protocol.DocumentConflict
+}
+
+func (e *DaemonError) Error() string { return fmt.Sprintf("daemon error: %s", e.Message) }
+
+// ErrorCode reports the code a refusal carried, or "" for anything else. It is
+// what a retry loop asks: protocol.ErrorCodeConflict means read again and
+// retry, and everything else means stop.
+func ErrorCode(err error) string {
+	var daemonErr *DaemonError
+	if errors.As(err, &daemonErr) {
+		return daemonErr.Code
+	}
+	return ""
 }
 
 // Register registers a new session

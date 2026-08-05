@@ -107,6 +107,14 @@ type Store interface {
 	SetCursor(name string, cursor int64, now time.Time) error
 	ListConsumers() ([]Consumer, error)
 	Trim(cutoff time.Time) (int, error)
+	// Compact keeps only the newest fact per subject among the named ones, and
+	// only at or below floor. Which names those are is decided here (Options.
+	// Compactable); the SQL lives in the store, the same split Trim uses.
+	Compact(names []string, floor int64) (int, error)
+	// Size reports how many facts the log holds and how many bytes of event text
+	// they carry — the receipt that says whether the log is outgrowing the data
+	// it describes.
+	Size() (rows, bytes int64, err error)
 }
 
 // Handler receives one event. Returning an error stalls the consumer on that
@@ -126,6 +134,10 @@ type Options struct {
 	PollInterval time.Duration
 	RetryBase    time.Duration
 	RetryCap     time.Duration
+	// Compactable names the fact classes whose log rows are pure invalidations,
+	// so the retention pass may keep only the newest one per subject. See
+	// Bus.Trim for what that costs a consumer and why it is sound.
+	Compactable []string
 }
 
 // Bus is the event bus. The zero value is not usable; construct with New.
@@ -141,10 +153,17 @@ type Bus struct {
 	retryBase    time.Duration
 	retryCap     time.Duration
 
+	compactable []string
+
 	// publishMu serializes append + ephemeral fan-out so ephemeral subscribers
 	// observe events in seq order. Durable consumers get ordering from their
 	// cursor and do not need it.
 	publishMu sync.Mutex
+	// announced is the highest seq already fanned out to ephemeral subscribers,
+	// guarded by publishMu. Both entry points — Publish and Announce — read
+	// forward from it, which is what keeps events appended by somebody else's
+	// transaction in seq order with events this bus appended itself.
+	announced int64
 
 	mu        sync.Mutex
 	durables  []*durable
@@ -190,6 +209,7 @@ func New(opts Options) *Bus {
 		pollInterval: nonZeroDuration(opts.PollInterval, DefaultPollInterval),
 		retryBase:    nonZeroDuration(opts.RetryBase, DefaultRetryBase),
 		retryCap:     nonZeroDuration(opts.RetryCap, DefaultRetryCap),
+		compactable:  append([]string(nil), opts.Compactable...),
 		ephemeral:    map[int]*ephemeralSub{},
 	}
 	if b.now == nil {
@@ -199,6 +219,19 @@ func New(opts Options) *Bus {
 		b.log = func(string, ...interface{}) {}
 	}
 	b.ctx, b.cancel = context.WithCancel(context.Background())
+	// The announce mark starts at head, so a bus attached to an existing log
+	// announces what happens next rather than replaying its history. It is set
+	// here rather than in Start because a Bus that is never started still
+	// publishes and announces — that is the shape of every test daemon — and one
+	// that replayed a month of facts into the wire on its first write would be a
+	// worse failure than a missed one.
+	if b.store != nil {
+		if _, head, err := b.store.Bounds(); err != nil {
+			b.log("bus: reading log bounds at construction: %v", err)
+		} else {
+			b.announced = head
+		}
+	}
 	return b
 }
 
@@ -253,9 +286,62 @@ func (b *Bus) publish(ev Event, payload any) (int64, error) {
 	}
 	ev.Seq = seq
 
-	b.fanoutEphemeral(ev)
+	// Fan out by reading the log forward rather than by handing subscribers the
+	// event in hand. The two are the same message whenever this publish is the
+	// only writer, and they are not the same ORDER when they are not: a fact
+	// appended inside somebody else's transaction (see the document store's
+	// composite write) may sit below this seq and still be unannounced, and
+	// delivering this one first would show subscribers the log out of order.
+	// Reading forward makes the log the ordering authority, whoever wrote to it.
+	b.announceLocked(&ev)
 	b.wakeDurables()
 	return seq, nil
+}
+
+// Announce fans out facts appended to the log outside Publish — by a store
+// transaction that committed a change and its fact together — so ephemeral
+// subscribers see them in seq order beside everything else.
+//
+// It reads forward from the announce mark under the same lock Publish holds,
+// which makes it idempotent and order-correct no matter who calls it when: two
+// writers that commit and then race to announce cannot deliver out of order,
+// and an announce that never happens is repaired by the next one. Callers
+// therefore need no coordination beyond calling it after their commit.
+func (b *Bus) Announce() {
+	if b.store == nil {
+		return
+	}
+	b.publishMu.Lock()
+	defer b.publishMu.Unlock()
+	b.announceLocked(nil)
+	b.wakeDurables()
+}
+
+// announceLocked delivers everything above the announce mark. fallback is the
+// event the caller just appended, delivered directly if the log cannot be read
+// — losing durability must not also silence the wire.
+func (b *Bus) announceLocked(fallback *Event) {
+	for {
+		events, err := b.store.Since(b.announced, b.batchSize)
+		if err != nil {
+			b.log("bus: reading the log forward from seq %d to announce: %v", b.announced, err)
+			if fallback != nil && fallback.Seq > b.announced {
+				b.fanoutEphemeral(*fallback)
+				b.announced = fallback.Seq
+			}
+			return
+		}
+		if len(events) == 0 {
+			return
+		}
+		for _, ev := range events {
+			b.fanoutEphemeral(ev)
+			b.announced = ev.Seq
+		}
+		if len(events) < b.batchSize {
+			return
+		}
+	}
 }
 
 func (b *Bus) fanoutEphemeral(ev Event) {
@@ -609,21 +695,97 @@ func (b *Bus) retain() {
 	}
 }
 
-// Trim runs one retention pass and reports how many events were removed. It is
-// exported so the daemon and tests can force a pass without waiting for a tick.
+// Trim runs one retention pass and reports how many events it removed, by both
+// halves: the age window, and compaction of the fact classes that carry no
+// history. It is exported so the daemon and tests can force a pass without
+// waiting for a tick.
 func (b *Bus) Trim() int {
 	if b.store == nil {
 		return 0
 	}
+	var removed int
 	n, err := b.store.Trim(b.now().Add(-b.retention))
 	if err != nil {
 		b.log("bus: retention pass failed: %v", err)
+	} else {
+		removed += n
+		if n > 0 {
+			b.log("bus: trimmed %d event(s) older than %s", n, b.retention)
+		}
+	}
+	return removed + b.compact()
+}
+
+// compact keeps at most one fact per subject for every compactable name, which
+// is what bounds the log by the size of the data it describes rather than by
+// how often that data is written.
+//
+// A compactable fact is an invalidation: it says a subject changed, and the
+// state itself lives in the store, so five of them about one subject carry no
+// more than the newest. The consequence, stated rather than hidden: for these
+// names durable delivery is at-least-once PER CHANGED SUBJECT, not per write. A
+// consumer that was behind while a document changed five times learns once that
+// it changed, and reads current state — which is what a consumer of this bus is
+// told to do anyway. A workload that needs every intermediate change as a
+// business event is doing event sourcing, and those events are data: they
+// belong in a collection the workload writes, where their growth is its own
+// visible cost.
+//
+// The cursor floor is the same one trimming honors, for two load-bearing
+// reasons. An enabled consumer must never lose a fact it has not read, and
+// below the floor every enabled consumer has read everything, so their delivery
+// is bit-for-bit what it is today. And reconcileGap reads "cursor below the
+// earliest surviving seq" as "everything missing was trimmed"; compacting above
+// the floor would punch holes that assumption misreads and skip a revived
+// consumer past facts that still exist. A stalled enabled consumer therefore
+// pins compaction exactly as it pins trimming — a loud condition already, with
+// `attn bus status` showing the stall and the kill switch to unpin it.
+func (b *Bus) compact() int {
+	if len(b.compactable) == 0 {
+		return 0
+	}
+	floor, err := b.consumerFloor()
+	if err != nil {
+		b.log("bus: compaction pass failed: %v", err)
+		return 0
+	}
+	n, err := b.store.Compact(b.compactable, floor)
+	if err != nil {
+		b.log("bus: compaction pass failed: %v", err)
 		return 0
 	}
 	if n > 0 {
-		b.log("bus: trimmed %d event(s) older than %s", n, b.retention)
+		b.log("bus: compacted %d superseded event(s) at or below seq %d", n, floor)
 	}
 	return n
+}
+
+// consumerFloor is the lowest position every enabled consumer has passed. With
+// no enabled consumer registered it is the log head: nobody is owed anything, so
+// nothing is pinned. Disabled consumers are excluded for the same reason they
+// are excluded from trimming — a killed consumer must not pin the log.
+func (b *Bus) consumerFloor() (int64, error) {
+	rows, err := b.store.ListConsumers()
+	if err != nil {
+		return 0, fmt.Errorf("listing consumers: %w", err)
+	}
+	floor := int64(-1)
+	for _, c := range rows {
+		if !c.Enabled {
+			continue
+		}
+		if floor < 0 || c.Cursor < floor {
+			floor = c.Cursor
+		}
+	}
+	if floor >= 0 {
+		return floor, nil
+	}
+	_, head, err := b.store.Bounds()
+	if err != nil {
+		return 0, fmt.Errorf("reading log bounds: %w", err)
+	}
+	return head, nil
 }
 
 // ConsumerStatus is one row of Status.
@@ -641,9 +803,17 @@ type ConsumerStatus struct {
 }
 
 // Status reports the log head and every registration, for operator inspection.
+//
+// Rows and Bytes are the log's actual weight rather than head-minus-earliest,
+// which only ever described the seq space. They are the receipt for the
+// invariant compaction upholds — the log stays proportional to the data it
+// describes, never to how often that data is written — so a workload that
+// stresses it shows up as a measurement instead of a suspicion.
 type Status struct {
 	Head      int64
 	Earliest  int64
+	Rows      int64
+	Bytes     int64
 	Consumers []ConsumerStatus
 }
 
@@ -660,6 +830,10 @@ func (b *Bus) Status() (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
+	logRows, logBytes, err := b.store.Size()
+	if err != nil {
+		return Status{}, err
+	}
 
 	b.mu.Lock()
 	live := make(map[string]*durable, len(b.durables))
@@ -668,7 +842,7 @@ func (b *Bus) Status() (Status, error) {
 	}
 	b.mu.Unlock()
 
-	out := Status{Head: head, Earliest: earliest}
+	out := Status{Head: head, Earliest: earliest, Rows: logRows, Bytes: logBytes}
 	for _, r := range rows {
 		cs := ConsumerStatus{
 			Name:    r.Name,

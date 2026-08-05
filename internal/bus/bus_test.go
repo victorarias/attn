@@ -152,6 +152,54 @@ func (m *memStore) Trim(cutoff time.Time) (int, error) {
 	return removed, nil
 }
 
+// Compact mirrors the SQLite implementation: for the named fact classes, keep
+// only the newest row per subject, and only touch rows at or below the floor.
+func (m *memStore) Compact(names []string, floor int64) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	compactable := map[string]bool{}
+	for _, n := range names {
+		compactable[n] = true
+	}
+	newest := map[string]int64{}
+	for _, e := range m.events {
+		if compactable[e.Name] && e.Seq > newest[e.Subject] {
+			newest[e.Subject] = e.Seq
+		}
+	}
+	kept := m.events[:0]
+	removed := 0
+	for _, e := range m.events {
+		if compactable[e.Name] && e.Seq <= floor && e.Seq < newest[e.Subject] {
+			removed++
+			continue
+		}
+		kept = append(kept, e)
+	}
+	m.events = kept
+	return removed, nil
+}
+
+func (m *memStore) Size() (int64, int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var bytes int64
+	for _, e := range m.events {
+		bytes += int64(len(e.Name) + len(e.Subject) + len(e.Payload) + len(e.Source))
+	}
+	return int64(len(m.events)), bytes, nil
+}
+
+// appendOutOfBand puts an event on the log the way a store transaction does:
+// committed, with no fan-out — which is what Announce is for.
+func (m *memStore) appendOutOfBand(name, subject string, now time.Time) int64 {
+	seq, err := m.Append(Event{Name: name, Subject: subject}, now)
+	if err != nil {
+		panic(err)
+	}
+	return seq
+}
+
 // dropEventsBelow simulates retention having already trimmed the log, without
 // consulting cursors — the state a killed consumer wakes up into.
 func (m *memStore) dropEventsBelow(seq int64) {
