@@ -3700,6 +3700,7 @@ function AppContent({
           onToggleFollowNextTurn={() => setFollowNextTurn((armed) => !armed)}
           onSelectSession={handleSelectSession}
           onNewSession={() => handleNewSession('vertical')}
+          onWakeTurn={sendWakeTurn}
           onRefreshPRs={handleRefreshPRs}
           onOpenPR={handleOpenPR}
           onOpenSettings={() => setSettingsOpen(true)}

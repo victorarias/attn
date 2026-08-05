@@ -527,20 +527,9 @@
   color: rgba(252, 165, 165, 0.92);
 }
 
-.dashboard-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding-top: 20px;
-  border-top: 1px solid var(--color-border);
-  margin-top: 20px;
-}
-
-.footer-shortcuts {
-  display: flex;
-  gap: 24px;
-}
-
+/* Home no longer carries a shortcut strip, but .shortcut/.shortcut kbd are the
+   app's only definition of a keyboard hint and the LocationPicker and
+   AttentionDrawer footers still render them. They live here for that reason. */
 .shortcut {
   font-size: var(--font-size-sm);
   color: var(--color-text-dimmed);
@@ -964,4 +953,104 @@
   font-family: 'JetBrains Mono', monospace;
   font-size: var(--font-size-xs);
   color: var(--color-text-dimmed);
+}
+
+/* Deferred agents: the quiet end of the card, collapsed, above the muted
+   workspaces it shares a divider style with. */
+.session-group.snoozed-group {
+  border-top: 1px solid var(--color-border);
+  padding-top: 4px;
+  margin-top: 4px;
+}
+
+.group-label.group-toggle {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+  display: flex;
+  font: inherit;
+  font-size: var(--font-size-xs);
+  gap: 6px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  width: 100%;
+}
+
+.group-label.group-toggle:hover {
+  color: var(--color-text-tertiary);
+}
+
+/* When a deferred agent comes back. Takes the age column's place — the turn it
+   would have aged is already closed. */
+.session-wake-at {
+  margin-left: auto;
+  padding-left: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-xs);
+  color: var(--color-text-dimmed);
+}
+
+.session-wake-btn {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  color: var(--color-text-dimmed);
+  cursor: pointer;
+  flex-shrink: 0;
+  font-size: var(--font-size-sm);
+  line-height: 1;
+  opacity: 0;
+  padding: 3px 5px;
+}
+
+.session-row:hover .session-wake-btn,
+.session-wake-btn:focus-visible {
+  opacity: 1;
+}
+
+.session-wake-btn:hover {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-primary);
+}
+
+/* Heads each half of the PR card. Yours first, review requested below. */
+.pr-section + .pr-section {
+  margin-top: 14px;
+}
+
+.pr-section-header {
+  align-items: center;
+  border-bottom: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  display: flex;
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  gap: 6px;
+  letter-spacing: 0.08em;
+  margin-bottom: 6px;
+  padding: 0 8px 6px;
+  text-transform: uppercase;
+}
+
+.pr-section-count {
+  font-family: 'JetBrains Mono', monospace;
+  letter-spacing: 0;
+}
+
+/* Which repo a flat "Yours" row belongs to. The review side answers this with a
+   group header instead.
+
+   Capped and allowed to shrink: a long repo name (`figgy-pr-review-synthetic`)
+   otherwise takes the width the title needs, and the title is what tells two of
+   your PRs apart. */
+.pr-repo-inline {
+  color: var(--color-text-dimmed);
+  flex-shrink: 1;
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+  max-width: 30%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
