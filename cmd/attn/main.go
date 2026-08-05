@@ -403,6 +403,8 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.ThemeForeground, "theme-foreground", "", "terminal foreground color seeded for OSC 10/11/12 queries")
 	fs.StringVar(&cfg.ThemeBackground, "theme-background", "", "terminal background color seeded for OSC 10/11/12 queries")
 	fs.StringVar(&cfg.ThemeCursor, "theme-cursor", "", "terminal cursor color seeded for OSC 10/11/12 queries")
+	var themeANSIPaletteJSON string
+	fs.StringVar(&themeANSIPaletteJSON, "theme-ansi-palette-json", "", "JSON array of the 16 terminal ANSI palette colors")
 	fs.StringVar(&cfg.Executable, "executable", "", "selected agent executable override")
 	fs.StringVar(&cfg.ClaudeExecutable, "claude-executable", "", "claude executable override")
 	fs.StringVar(&cfg.CodexExecutable, "codex-executable", "", "codex executable override")
@@ -420,6 +422,12 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.OwnerNonce, "owner-nonce", "", "daemon owner nonce")
 
 	_ = fs.Parse(os.Args[2:])
+	if themeANSIPaletteJSON != "" {
+		if err := json.Unmarshal([]byte(themeANSIPaletteJSON), &cfg.ThemeANSIPalette); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --theme-ansi-palette-json: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	if externalCommandJSON != "" {
 		if err := json.Unmarshal([]byte(externalCommandJSON), &cfg.ExternalCommand); err != nil {
 			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --external-command-json: %v\n", err)

@@ -42,6 +42,8 @@ func New(cols, rows int, _ Options) (*Terminal, error) {
 
 func (t *Terminal) Write(_ []byte) {}
 
+func (t *Terminal) SetColorTheme(_ ColorTheme) error { return nil }
+
 func (t *Terminal) Resize(cols, rows int) {
 	if cols > 0 && rows > 0 {
 		t.cols, t.rows = cols, rows

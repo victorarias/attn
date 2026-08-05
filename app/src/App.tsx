@@ -121,7 +121,7 @@ import {
 } from './utils/queueBands';
 import { useWorkspaceSelectionController } from './hooks/useWorkspaceSelectionController';
 import { hideBootSplash } from './utils/bootSplash';
-import { getTerminalTheme } from './utils/terminalSizing';
+import { getTerminalAnsiPaletteColors, getTerminalTheme } from './utils/terminalSizing';
 import './App.css';
 
 const RELEASES_LATEST_API = 'https://api.github.com/repos/victorarias/attn/releases/latest';
@@ -999,7 +999,12 @@ function AppContent({
   useEffect(() => {
     if (!hasReceivedInitialState) return;
     const theme = getTerminalTheme(resolvedTheme);
-    sendSetTerminalTheme({ foreground: theme.foreground, background: theme.background, cursor: theme.cursor });
+    sendSetTerminalTheme({
+      foreground: theme.foreground,
+      background: theme.background,
+      cursor: theme.cursor,
+      ansi_palette: getTerminalAnsiPaletteColors(resolvedTheme),
+    });
   }, [hasReceivedInitialState, resolvedTheme, sendSetTerminalTheme]);
 
   // Settings modal (lifted from Dashboard for Cmd+, access)

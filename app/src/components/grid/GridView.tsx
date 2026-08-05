@@ -19,8 +19,8 @@
 // We grab stage focus on open/zoom so input follows the zoom instead of leaking
 // to whichever pane held focus when the grid opened.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Ghostty, InputHandler } from 'ghostty-web';
-import { ghosttyWasmUrl } from '../../ghostty/wasm';
+import { InputHandler } from 'ghostty-web';
+import { loadGhostty } from '../../ghostty/wasm';
 import { listenPtyEvents, ptyWrite } from '../../pty/bridge';
 import { installTerminalKeyHandler } from '../SessionTerminalWorkspace/terminalKeyHandler';
 import type { ScreenSnapshotResult } from '../../hooks/useDaemonSocket';
@@ -186,7 +186,7 @@ export function GridView({
       cursor: theme.cursor,
     });
 
-    void Ghostty.load(ghosttyWasmUrl).then((ghostty) => {
+    void loadGhostty().then((ghostty) => {
       if (disposed) return;
       const comp = new GridCompositor(renderer, ghostty, stage, metrics, {
         scrollbackLimit: TERMINAL_SCROLLBACK_BYTES,

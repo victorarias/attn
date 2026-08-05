@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -20,9 +21,10 @@ import (
 // TerminalTheme carries the frontend's resolved terminal colors as "#rrggbb"
 // hex strings. Zero-value fields fall back to built-in dark defaults.
 type TerminalTheme struct {
-	Foreground string
-	Background string
-	Cursor     string
+	Foreground  string
+	Background  string
+	Cursor      string
+	ANSIPalette [16]string
 }
 
 // Default OSC 10/11/12 colors, used for any TerminalTheme field that is empty
@@ -1050,10 +1052,50 @@ func detectTerminalQueries(data []byte) terminalQueries {
 
 // SetTheme replaces the colors used to answer OSC 10/11/12 queries. Safe to
 // call concurrently with the read loop.
-func (s *Session) SetTheme(theme TerminalTheme) {
+func (s *Session) SetTheme(theme TerminalTheme) error {
+	if s.ghostty != nil {
+		if err := s.ghostty.SetColorTheme(ghosttyColorTheme(theme)); err != nil {
+			return err
+		}
+	}
 	s.themeMu.Lock()
 	s.theme = theme
 	s.themeMu.Unlock()
+	return nil
+}
+
+func parseThemeColor(value, fallback string) uint32 {
+	if len(value) != 7 || value[0] != '#' {
+		value = fallback
+	}
+	parsed, err := strconv.ParseUint(value[1:], 16, 32)
+	if err != nil {
+		parsed, _ = strconv.ParseUint(fallback[1:], 16, 32)
+	}
+	return uint32(parsed)
+}
+
+func ghosttyColorTheme(theme TerminalTheme) ghosttyvt.ColorTheme {
+	result := ghosttyvt.ColorTheme{
+		Foreground:    parseThemeColor(theme.Foreground, defaultThemeForeground),
+		Background:    parseThemeColor(theme.Background, defaultThemeBackground),
+		Cursor:        parseThemeColor(theme.Cursor, defaultThemeCursor),
+		HasForeground: true,
+		HasBackground: true,
+		HasCursor:     true,
+	}
+	for i, value := range theme.ANSIPalette {
+		if len(value) != 7 || value[0] != '#' {
+			return result
+		}
+		parsed, err := strconv.ParseUint(value[1:], 16, 32)
+		if err != nil {
+			return result
+		}
+		result.ANSIPalette[i] = uint32(parsed)
+	}
+	result.HasANSIPalette = true
+	return result
 }
 
 func (s *Session) currentTheme() TerminalTheme {

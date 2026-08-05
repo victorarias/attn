@@ -1906,6 +1906,7 @@ model SetTerminalThemeMessage {
   foreground: string; // "#rrggbb"
   background: string; // "#rrggbb"
   cursor: string; // "#rrggbb"
+  ansi_palette: string[]; // Exactly 16 "#rrggbb" entries, ANSI 0-15.
 }
 
 model KillSessionMessage {

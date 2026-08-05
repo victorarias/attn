@@ -336,9 +336,10 @@ type SignalParams struct {
 }
 
 type SetThemeParams struct {
-	Foreground string `json:"foreground"`
-	Background string `json:"background"`
-	Cursor     string `json:"cursor"`
+	Foreground  string     `json:"foreground"`
+	Background  string     `json:"background"`
+	Cursor      string     `json:"cursor"`
+	ANSIPalette [16]string `json:"ansi_palette"`
 }
 
 type KittyImageParams struct {

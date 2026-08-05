@@ -2451,7 +2451,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
 
     // Sent before the daemon handshake completes: must queue, not drop.
     act(() => {
-      result.current.sendSetTerminalTheme({ foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4' });
+      result.current.sendSetTerminalTheme({
+        foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4',
+        ansi_palette: Array(16).fill('#000000'),
+      });
     });
     expect(ws.sent.map((entry) => JSON.parse(entry))).not.toContainEqual(
       expect.objectContaining({ cmd: 'set_terminal_theme' }),
@@ -2475,6 +2478,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         foreground: '#d4d4d4',
         background: '#1e1e1e',
         cursor: '#d4d4d4',
+        ansi_palette: Array(16).fill('#000000'),
       });
     });
 
@@ -2507,7 +2511,10 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
 
     act(() => {
-      result.current.sendSetTerminalTheme({ foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4' });
+      result.current.sendSetTerminalTheme({
+        foreground: '#d4d4d4', background: '#1e1e1e', cursor: '#d4d4d4',
+        ansi_palette: Array(16).fill('#000000'),
+      });
     });
     await waitFor(() => {
       expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
@@ -2515,6 +2522,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         foreground: '#d4d4d4',
         background: '#1e1e1e',
         cursor: '#d4d4d4',
+        ansi_palette: Array(16).fill('#000000'),
       });
     });
 
@@ -2549,6 +2557,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         foreground: '#d4d4d4',
         background: '#1e1e1e',
         cursor: '#d4d4d4',
+        ansi_palette: Array(16).fill('#000000'),
       });
     });
 

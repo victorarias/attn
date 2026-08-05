@@ -1336,13 +1336,19 @@ func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
 		ControlToken: "test-token",
 	}
 
+	palette := [16]string{
+		"#000000", "#cd3131", "#0dbc79", "#e5e510",
+		"#2472c8", "#bc3fbc", "#11a8cd", "#e5e5e5",
+		"#666666", "#f14c4c", "#23d18b", "#f5f543",
+		"#3b8eea", "#d670d6", "#29b8db", "#ffffff",
+	}
 	argv, err := backend.spawnArgs(SpawnOptions{
 		ID:    "sess-theme-set",
 		Agent: "shell",
 		CWD:   root,
 		Cols:  80,
 		Rows:  24,
-		Theme: pty.TerminalTheme{Foreground: "#aabbcc", Background: "#001122", Cursor: "#334455"},
+		Theme: pty.TerminalTheme{Foreground: "#aabbcc", Background: "#001122", Cursor: "#334455", ANSIPalette: palette},
 	}, session)
 	if err != nil {
 		t.Fatalf("spawnArgs(theme set) error: %v", err)
@@ -1357,6 +1363,9 @@ func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
 			t.Fatalf("argv flag %s = %q, want %q (argv=%v)", flag, got, want, argv)
 		}
 	}
+	if got, want := argAfterFlag(argv, "--theme-ansi-palette-json"), `["#000000","#cd3131","#0dbc79","#e5e510","#2472c8","#bc3fbc","#11a8cd","#e5e5e5","#666666","#f14c4c","#23d18b","#f5f543","#3b8eea","#d670d6","#29b8db","#ffffff"]`; got != want {
+		t.Fatalf("ANSI palette flag = %q, want %q", got, want)
+	}
 
 	argv, err = backend.spawnArgs(SpawnOptions{
 		ID:    "sess-theme-unset",
@@ -1368,7 +1377,7 @@ func TestWorkerBackend_Spawn_PassesThemeFlagsOnlyWhenSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("spawnArgs(theme unset) error: %v", err)
 	}
-	for _, flag := range []string{"--theme-foreground", "--theme-background", "--theme-cursor"} {
+	for _, flag := range []string{"--theme-foreground", "--theme-background", "--theme-cursor", "--theme-ansi-palette-json"} {
 		for _, arg := range argv {
 			if arg == flag {
 				t.Fatalf("argv unexpectedly contains %s when Theme is unset (argv=%v)", flag, argv)
