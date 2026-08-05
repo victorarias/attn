@@ -68,15 +68,39 @@ type SpawnOptions struct {
 // wedged, not busy, and the log says so.
 const terminationGrace = 3 * time.Second
 
+// envelopeDrainGrace bounds how long a dead host's exit waits for its envelope
+// stream to finish.
+//
+// The exit must not be announced before the last envelope is delivered: the
+// daemon turns it into `session_exited`, and a client that sees the session end
+// before the run that was closing it would draw a run stuck open on a dead
+// session. Draining costs only the time to consume what the pipe already holds
+// — a pipe buffer is 64 KB — so this is microseconds of work.
+//
+// It is bounded because EOF is not guaranteed. pi spawns tool subprocesses that
+// inherit the host's fds and lead their own process groups, so one that outlives
+// the host and escapes the group sweep would hold the write end open forever and
+// the exit would never be announced. 2 s is many orders of magnitude past the
+// real drain; reaching it means something still holds the fd, which the log
+// names before the read end is closed out from under it.
+const envelopeDrainGrace = 2 * time.Second
+
 type host struct {
 	sessionID   string
 	lifecycleID string
 	cmd         *exec.Cmd
 	pgid        int
 	stdin       *os.File
+	envelopes   *os.File
 	logFile     *os.File
-	exited      chan struct{}
-	killOnce    sync.Once
+	// reaped closes as soon as the process is gone; exited closes once the
+	// host is fully finished — drained, deregistered, and about to be
+	// announced. Kill escalates on the first and returns on the second, so a
+	// caller that gets a nil error can spawn the same session id again.
+	reaped   chan struct{}
+	exited   chan struct{}
+	drained  chan struct{}
+	killOnce sync.Once
 }
 
 type Manager struct {
@@ -166,8 +190,11 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		cmd:         cmd,
 		pgid:        cmd.Process.Pid,
 		stdin:       stdinW,
+		envelopes:   envelopeR,
 		logFile:     logFile,
+		reaped:      make(chan struct{}),
 		exited:      make(chan struct{}),
+		drained:     make(chan struct{}),
 	}
 	m.mu.Lock()
 	m.hosts[opts.SessionID] = h
@@ -208,6 +235,7 @@ func openLog(path string) (*os.File, error) {
 const maxEnvelopeBytes = 64 << 20
 
 func (m *Manager) readEnvelopes(h *host, r *os.File) {
+	defer close(h.drained)
 	defer r.Close()
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 64*1024), maxEnvelopeBytes)
@@ -265,9 +293,19 @@ func (m *Manager) monitor(h *host) {
 	if err := syscall.Kill(-h.pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
 		m.logf("host session %s: sweeping process group %d failed: %v", h.sessionID, h.pgid, err)
 	}
-	close(h.exited)
+	close(h.reaped)
 	h.stdin.Close()
 	h.logFile.Close()
+
+	// Everything the host said before it died reaches the daemon before the
+	// death does. See envelopeDrainGrace for why this is bounded.
+	select {
+	case <-h.drained:
+	case <-time.After(envelopeDrainGrace):
+		m.logf("host session %s: envelope stream still open %s after exit; something inherited fd 3", h.sessionID, envelopeDrainGrace)
+		h.envelopes.Close()
+		<-h.drained
+	}
 
 	exitCode, signal := exitStatus(h.cmd, waitErr)
 	m.mu.Lock()
@@ -275,6 +313,8 @@ func (m *Manager) monitor(h *host) {
 		delete(m.hosts, h.sessionID)
 	}
 	m.mu.Unlock()
+
+	close(h.exited)
 
 	m.logf("host session %s exited code=%d signal=%q pgid=%d", h.sessionID, exitCode, signal, h.pgid)
 	m.onExit(ExitInfo{SessionID: h.sessionID, ExitCode: exitCode, Signal: signal, LifecycleID: h.lifecycleID})
@@ -333,7 +373,9 @@ func (m *Manager) SessionIDs() []string {
 	return ids
 }
 
-// Kill tears a host down and returns once its process group is gone.
+// Kill tears a host down and returns once its process group is gone and the
+// host is deregistered — a caller that gets a nil error can spawn the same
+// session id again.
 //
 // The cooperative SIGTERM is the load-bearing half, not a courtesy: pi spawns
 // each tool subprocess into its OWN process group (measured 2026-08-05: a bash
@@ -356,8 +398,12 @@ func (m *Manager) Kill(sessionID string) error {
 		}
 	})
 
+	// The grace window is about the process, so it watches reaped; the return is
+	// about the teardown, so it waits out exited. Escalating on exited instead
+	// would count the envelope drain against the host's time to shut down.
 	select {
-	case <-h.exited:
+	case <-h.reaped:
+		<-h.exited
 		return nil
 	case <-time.After(terminationGrace):
 	}
