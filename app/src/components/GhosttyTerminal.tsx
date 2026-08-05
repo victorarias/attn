@@ -717,7 +717,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const [modelOpRing] = useState(createGhosttyModelOpRing);
     const modelOpRingRef = useRef(modelOpRing);
     const historicalReplayGenerationRef = useRef(0);
-    const cooperativeReplayBudgetRef = useRef(new CooperativeReplayBudget());
+    // Allocated once per pane through useState's lazy initializer, like the op
+    // ring above; the ref only carries it.
+    const [cooperativeReplayBudget] = useState(() => new CooperativeReplayBudget());
+    const cooperativeReplayBudgetRef = useRef(cooperativeReplayBudget);
     const pendingReplayGeometryRef = useRef<PendingReplayGeometry | null>(null);
     // Queued historical-replay operations (writes + resizes) not yet applied.
     // Used to detect that a generation bump actually discarded history.
