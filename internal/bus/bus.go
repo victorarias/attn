@@ -159,6 +159,10 @@ type Bus struct {
 	// observe events in seq order. Durable consumers get ordering from their
 	// cursor and do not need it.
 	publishMu sync.Mutex
+	// marked says the announce mark has been placed from a real log head. Until
+	// it is, the mark's zero value would mean "announce the whole log", so
+	// announcing is held back rather than replaying history at every client.
+	marked bool
 	// announced is the highest seq already fanned out to ephemeral subscribers,
 	// guarded by publishMu. Both entry points — Publish and Announce — read
 	// forward from it, which is what keeps events appended by somebody else's
@@ -226,11 +230,7 @@ func New(opts Options) *Bus {
 	// that replayed a month of facts into the wire on its first write would be a
 	// worse failure than a missed one.
 	if b.store != nil {
-		if _, head, err := b.store.Bounds(); err != nil {
-			b.log("bus: reading log bounds at construction: %v", err)
-		} else {
-			b.announced = head
-		}
+		b.markHead()
 	}
 	return b
 }
@@ -317,10 +317,36 @@ func (b *Bus) Announce() {
 	b.wakeDurables()
 }
 
+// markHead sets the announce mark to the log's head and reports whether it
+// learned where the log stands. A mark that was never set is 0, which means
+// "announce everything" — so until this succeeds the bus must not announce at
+// all, or the first write would replay the whole log into every live client.
+// Construction calls it once; announceLocked retries it, because a database
+// that could not be read at construction is usually readable a moment later.
+func (b *Bus) markHead() bool {
+	_, head, err := b.store.Bounds()
+	if err != nil {
+		b.log("bus: reading log bounds to place the announce mark: %v", err)
+		return false
+	}
+	b.announced = head
+	b.marked = true
+	return true
+}
+
 // announceLocked delivers everything above the announce mark. fallback is the
 // event the caller just appended, delivered directly if the log cannot be read
 // — losing durability must not also silence the wire.
 func (b *Bus) announceLocked(fallback *Event) {
+	// Without a mark there is no "everything after here" to deliver, only the
+	// whole log. Deliver the caller's own event, which is what it would have
+	// gotten before reading forward existed, and try again next time.
+	if !b.marked && !b.markHead() {
+		if fallback != nil {
+			b.fanoutEphemeral(*fallback)
+		}
+		return
+	}
 	for {
 		events, err := b.store.Since(b.announced, b.batchSize)
 		if err != nil {
@@ -690,7 +716,8 @@ func (b *Bus) retain() {
 		case <-b.ctx.Done():
 			return
 		case <-ticker.C:
-			b.Trim()
+			// A failed pass is already logged; the next tick retries it.
+			_, _ = b.Trim()
 		}
 	}
 }
@@ -699,13 +726,22 @@ func (b *Bus) retain() {
 // halves: the age window, and compaction of the fact classes that carry no
 // history. It is exported so the daemon and tests can force a pass without
 // waiting for a tick.
-func (b *Bus) Trim() int {
+// It reports what it removed and whether either half failed. The daemon's tick
+// logs the failure and carries on — a pass that could not run is retried an hour
+// later — but a caller that ASKED for a pass has to be able to tell a pass that
+// removed nothing from one that never happened, or a script reads "removed 0"
+// and concludes the log is already clean.
+func (b *Bus) Trim() (int, error) {
 	if b.store == nil {
-		return 0
+		return 0, nil
 	}
-	var removed int
+	var (
+		removed int
+		failed  error
+	)
 	n, err := b.store.Trim(b.now().Add(-b.retention))
 	if err != nil {
+		failed = fmt.Errorf("retention pass: %w", err)
 		b.log("bus: retention pass failed: %v", err)
 	} else {
 		removed += n
@@ -713,7 +749,11 @@ func (b *Bus) Trim() int {
 			b.log("bus: trimmed %d event(s) older than %s", n, b.retention)
 		}
 	}
-	return removed + b.compact()
+	compacted, err := b.compact()
+	if err != nil && failed == nil {
+		failed = err
+	}
+	return removed + compacted, failed
 }
 
 // compact keeps at most one fact per subject for every compactable name, which
@@ -740,24 +780,24 @@ func (b *Bus) Trim() int {
 // consumer past facts that still exist. A stalled enabled consumer therefore
 // pins compaction exactly as it pins trimming — a loud condition already, with
 // `attn bus status` showing the stall and the kill switch to unpin it.
-func (b *Bus) compact() int {
+func (b *Bus) compact() (int, error) {
 	if len(b.compactable) == 0 {
-		return 0
+		return 0, nil
 	}
 	floor, err := b.consumerFloor()
 	if err != nil {
 		b.log("bus: compaction pass failed: %v", err)
-		return 0
+		return 0, fmt.Errorf("compaction pass: %w", err)
 	}
 	n, err := b.store.Compact(b.compactable, floor)
 	if err != nil {
 		b.log("bus: compaction pass failed: %v", err)
-		return 0
+		return 0, fmt.Errorf("compaction pass: %w", err)
 	}
 	if n > 0 {
 		b.log("bus: compacted %d superseded event(s) at or below seq %d", n, floor)
 	}
-	return n
+	return n, nil
 }
 
 // consumerFloor is the lowest position every enabled consumer has passed. With

@@ -11,4 +11,5 @@ change: >
   `undeclared_collection`, `invalid_query`), and `attn bus status` reports how
   many events the log holds and what they weigh — which retention now keeps
   bounded by collapsing repeated document facts about the same document to the
-  newest one.
+  newest one. `attn bus trim` runs one retention pass on demand instead of
+  waiting for the hourly tick, and exits non-zero if the pass could not run.

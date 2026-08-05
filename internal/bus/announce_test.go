@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -199,7 +200,10 @@ func TestTrimCompactsTheNamesTheBusDeclared(t *testing.T) {
 		s.appendOutOfBand("session.state.changed", "sess-1", now)
 	}
 
-	removed := b.Trim()
+	removed, err := b.Trim()
+	if err != nil {
+		t.Fatalf("trim: %v", err)
+	}
 	if removed != 9 {
 		t.Fatalf("trim removed %d fact(s), want the 9 redundant ones", removed)
 	}
@@ -228,7 +232,7 @@ func TestTrimCompactsNothingWhenNoNameWasDeclared(t *testing.T) {
 		s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
 	}
 
-	if removed := b.Trim(); removed != 0 {
+	if removed, err := b.Trim(); err != nil || removed != 0 {
 		t.Fatalf("a bus with no compactable names removed %d fact(s)", removed)
 	}
 	status, err := b.Status()
@@ -237,5 +241,86 @@ func TestTrimCompactsNothingWhenNoNameWasDeclared(t *testing.T) {
 	}
 	if status.Rows != 10 {
 		t.Fatalf("log holds %d row(s), want all 10", status.Rows)
+	}
+}
+
+// A bus that could not learn where the log stands must not announce. The mark's
+// zero value means "everything after seq 0", so announcing on an unplaced mark
+// replays the entire log into every live client — the failure the mark exists to
+// prevent, arriving through the door meant to prevent it.
+func TestABusThatCouldNotFindTheHeadDoesNotReplayTheLog(t *testing.T) {
+	s := newMemStore()
+	now := time.Now()
+	for range 5 {
+		s.appendOutOfBand("document.changed", "ext/x/requests/old", now)
+	}
+	s.setBoundsErr(errors.New("the log would not say where it stands"))
+
+	b := testBus(t, s)
+	seen, stop := watchAll(b)
+	defer stop()
+
+	b.Announce()
+	if got := seen(); len(got) != 0 {
+		t.Fatalf("a bus with no mark announced %d historical fact(s)", len(got))
+	}
+
+	// A publish still reaches subscribers while the mark is unplaced: losing the
+	// mark must not silence the wire.
+	if _, err := b.Publish("session.state.changed", "s-1", nil); err != nil {
+		t.Fatalf("publish: %v", err)
+	}
+	if got := seen(); len(got) != 1 {
+		t.Fatalf("a publish under an unplaced mark delivered %d event(s), want 1", len(got))
+	}
+
+	// Once the log answers, the mark is placed from head and only what happens
+	// next is announced — the history stays unreplayed.
+	s.setBoundsErr(nil)
+	b.Announce()
+	if got := seen(); len(got) != 1 {
+		t.Fatalf("placing the mark replayed history: %d event(s) delivered", len(got))
+	}
+	fresh := s.appendOutOfBand("document.changed", "ext/x/requests/new", now)
+	b.Announce()
+	got := seen()
+	if len(got) != 2 || got[1].Seq != fresh {
+		t.Fatalf("after the mark was placed, delivered %v", seqsOf(got))
+	}
+}
+
+// A pass that could not run is not a pass that found nothing. `attn bus trim`
+// exits on this, and "removed 0" is what a clean log prints too.
+func TestTrimReportsAPassThatCouldNotRun(t *testing.T) {
+	s := newMemStore()
+	b := New(Options{
+		Store:       s,
+		Log:         func(string, ...interface{}) {},
+		Compactable: []string{"document.changed"},
+		Retention:   time.Hour,
+	})
+	now := time.Now()
+	for range 4 {
+		s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
+	}
+
+	// consumerFloor reads the bounds when no enabled consumer is registered, so
+	// a log that will not say where it stands cannot be compacted safely.
+	s.setBoundsErr(errors.New("the log would not say where it stands"))
+	removed, err := b.Trim()
+	if err == nil {
+		t.Fatal("a pass that could not run reported success")
+	}
+	if removed != 0 {
+		t.Fatalf("a failed pass reported removing %d event(s)", removed)
+	}
+
+	s.setBoundsErr(nil)
+	removed, err = b.Trim()
+	if err != nil {
+		t.Fatalf("trim: %v", err)
+	}
+	if removed != 3 {
+		t.Fatalf("the recovered pass removed %d event(s), want 3", removed)
 	}
 }

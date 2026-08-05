@@ -202,7 +202,7 @@ func runBusTrim(args []string) {
 		Compactable: daemon.CompactableFacts,
 		Log:         func(format string, args ...interface{}) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
 	})
-	removed := b.Trim()
+	removed, passErr := b.Trim()
 	after, bytes, err := s.BusLogSize()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bus trim: measuring the log: %v\n", err)
@@ -210,6 +210,12 @@ func runBusTrim(args []string) {
 	}
 	fmt.Printf("removed %d event(s); log now holds %d of %d, weighing %s\n",
 		removed, after, before, humanBytes(bytes))
+	// A pass that could not run exits non-zero. "removed 0" is also what a
+	// clean log prints, so without this a script cannot tell the two apart.
+	if passErr != nil {
+		fmt.Fprintf(os.Stderr, "bus trim: %v\n", passErr)
+		os.Exit(1)
+	}
 }
 
 // humanBytes renders the log's weight at the scale an operator reads it at.
