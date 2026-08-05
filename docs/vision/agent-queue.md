@@ -96,20 +96,27 @@ seconds, and only you know which.
   the top, always, outside the queue — it is the console you drive the rest from,
   not a peer competing for a slot, and when it blocks on you it says so where it
   stands rather than being promoted into competition with the work it dispatched.
-  Then what is your turn. Then the workspaces you pinned — a place to work rather
-  than a band of the queue, see below. Then the settled rest, quiet but reachable.
-  Muted last, and only if you go looking. The bands are the one thing you
-  hand-order, and you can drag them into the arrangement you want. Nothing inside
-  the queue is hand-orderable: its order is the answer to a question, not a
-  preference.
-- **Two arrangements, and neither one retires.** Pinning takes an agent out of the
-  queue for good: a pinned workspace is never handed to you, and you go to it
-  instead. That is not a lesser mode or a migration leftover — it is the other half
-  of the product. A sidebar you scan by color is exactly the right shape for work
-  you have deliberately chosen to hold in view, and it stays that shape forever. The
-  queue is where work is handed to you; the pinned band is where you go and get it.
-  An agent moves between them in either direction, and a workspace can be born
-  pinned, so the choice is yours at the start and at any point after.
+  Then what is your turn. Then the settled rest, quiet but reachable. Then the
+  agents you pinned one at a time, and below them the workspaces you pinned —
+  places to work rather than bands of the queue, see below. Muted last, and only
+  if you go looking. The bands are the one thing you hand-order, and you can drag
+  them into the arrangement you want. Nothing inside the queue is hand-orderable:
+  its order is the answer to a question, not a preference.
+- **Two arrangements, and neither one retires.** Pinning takes something out of the
+  queue for good: a pinned agent and a pinned workspace are both never handed to
+  you, and you go to them instead. That is not a lesser mode or a migration
+  leftover — it is the other half of the product. A sidebar you scan by color is
+  exactly the right shape for work you have deliberately chosen to hold in view,
+  and it stays that shape forever. The queue is where work is handed to you; the
+  pinned bands are where you go and get it. An agent moves between them in either
+  direction, and a workspace can be born pinned, so the choice is yours at the
+  start and at any point after.
+- **The pin follows the gesture's aim.** A pin aimed at one agent takes that agent
+  out and leaves its siblings in; a pin aimed at a workspace takes the workspace.
+  Both are the user saying "I'll come to this myself", at the scale they meant.
+  Pinning is not settling: the turn goes on accruing underneath a pinned agent, so
+  unpinning surfaces whatever is outstanding at its true age rather than restarting
+  its clock. Only the user's own settle ever closes a turn.
 - **Explicit intent outranks inference.** Pin, mute, and snooze are the user saying
   what matters, and detection never overrides them. This is what makes the queue
   safe to trust: when it is wrong, the user can be right, permanently, in one
@@ -151,10 +158,11 @@ seconds, and only you know which.
 
 **In scope.** Agent sessions only. The queue holds turns you owe an agent, and the
 existing session states are its entire vocabulary. The sidebar's standing order —
-chief on top, then your turn, then pinned workspaces, then the settled rest, then
-muted. Settle as the one intentional discharging act, available on any turn.
-Deferral (time-boxed snooze, broken only by errors and states we cannot explain),
-muting as its absolute sibling, pinning as the way out of the queue entirely, a
+chief on top, then your turn, then the settled rest, then pinned agents, then
+pinned workspaces, then muted. Settle as the one intentional discharging act,
+available on any turn. Deferral (time-boxed snooze, broken only by errors and
+states we cannot explain), muting as its absolute sibling, pinning — of a single
+agent or of a whole workspace — as the way out of the queue entirely, a
 shortcut for moving on to the next agent that wants you, unhurried exploration of
 settled agents, and a designed empty state.
 
@@ -181,7 +189,9 @@ because a queue has no unpinned workspaces to drop onto — re-homing an agent t
 arbitrary workspace is something the pinned arrangement keeps and the queue does
 not. A workspace can also be born outside the queue: the flow that creates a
 workspace and its first agent together carries a toggle for it, so work you already
-know you want to hold in view never enters the queue at all.
+know you want to hold in view never enters the queue at all. And an agent can be
+held on its own, without a workspace to put it in: pinning it from its row is the
+cheapest version of the same intent, for the one agent you are living in today.
 
 Shells are not in the queue. A workspace holding only shells can never owe you a
 turn, so it has no queue presence at all — it lives in the settled band like any
@@ -189,6 +199,16 @@ other workspace nothing is asking of, and it can be pinned up if it matters. A l
 build that just finished is genuinely something you were waiting on, and it is
 deliberately not a turn: admitting it would make "your turn" mean two things, and
 the session states are the vocabulary.
+
+A shell split out of an agent is that agent's **satellite**, and it has no row of
+its own: you reach it by going to the agent it sits beside, where it is a pane.
+Splitting a shell out of a shell inherits the same agent, so a chain of terminals
+still belongs to the one agent it came from. This is the queue's one exception to
+"reorders, never hides", and it is bounded by being judged fresh every time the
+sidebar draws rather than recorded as a permanent fate: a satellite whose agent
+has closed, or whose pane has moved to another workspace, has nothing left to be
+reached through and gets its settled row straight back. Nothing becomes
+unreachable, and no cascade has to run to keep that true.
 
 **What this costs, deliberately.** Today's sidebar is purely spatial — workspaces
 sort by a rank the user owns and nothing else ever moves them, which is what makes
@@ -249,8 +269,8 @@ should be possible to live in the queue without ever turning it on.
   between, and the guarantee that anything not in your face is still one click away.
   The chief's anchored slot ships earlier, with the queue: it never queues, so it
   needs somewhere to be blocked in view from the first day.
-  Carries the two ways an agent leaves the queue for good: dragged onto a pinned
-  workspace, or born there from the new-workspace flow.
+  Carries the ways an agent leaves the queue for good: pinned on its own from its
+  row, dragged onto a pinned workspace, or born there from the new-workspace flow.
 - [ ] **Move on.** A shortcut that takes you from the agent you just steered to the
   next one that wants you — a sibling in the workspace you are already in when
   there is one, the top of the queue when there is not. The core verb of the whole

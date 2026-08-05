@@ -58,6 +58,10 @@ export interface QueueBandSession extends WorkspaceViewSession {
   turnOwed?: boolean;
   turnOpenedAt?: string;
   turnSnoozedUntil?: string;
+  /** Set while this session is individually pinned out of the queue. */
+  pinnedAt?: string;
+  /** Set on a shell: the agent session it was split from. */
+  parentSessionId?: string;
 }
 
 export interface QueueRow<TSession extends QueueBandSession> {
@@ -129,6 +133,18 @@ export interface QueueBands<TSession extends QueueBandSession> {
   /** Everything else you could go and look at, in a stable order. */
   settled: QueueRow<TSession>[];
   /**
+   * Sessions the user pinned out of the queue one at a time, in the order they
+   * were pinned. They sit below the settled band and above the pinned
+   * workspaces: the queue and the draining of it stay at the top, and the things
+   * deliberately held in view sit just above the places you go to work.
+   *
+   * Pin time, not state and not hand-order: the band has to be somewhere the eye
+   * can return to, so a row must not move because the agent in it started
+   * working. New pins land at the bottom, out of the way of the ones already
+   * there.
+   */
+  pinned: QueueRow<TSession>[];
+  /**
    * Agents the user deferred, soonest wake first. They are in neither band: a
    * snooze is an answer to "whose turn is it" — not yours, not yet — and it has
    * a return time, which is what the section below the settled band exists to
@@ -168,7 +184,9 @@ export function buildQueueBands<TSession extends QueueBandSession>(
   let chief: QueueRow<TSession> | null = null;
   const turns: QueueRow<TSession>[] = [];
   const settled: QueueRow<TSession>[] = [];
+  const pinned: QueueRow<TSession>[] = [];
   const snoozed: QueueRow<TSession>[] = [];
+  const attachedParents = liveParentIds(workspaces);
 
   for (const workspace of workspaces) {
     for (const session of workspace.sessions) {
@@ -186,6 +204,22 @@ export function buildQueueBands<TSession extends QueueBandSession>(
       if (workspace.pinned || workspace.muted) {
         continue;
       }
+      // A pinned session is out of the queue whatever else is true of it, which
+      // is the point of pinning: the user said they would come to this one
+      // themselves. It outranks the snooze check because a pin has no deadline
+      // to come back from, and it outranks the turn check for the same reason
+      // the daemon already withholds turnOwed from it.
+      if (session.pinnedAt) {
+        pinned.push(row);
+        continue;
+      }
+      // A satellite — a shell still sitting beside the agent it was split from —
+      // gets no row of its own. You reach it by going to its agent, where it is
+      // a pane. Losing that parent is what gives it a row back, so nothing ever
+      // becomes unreachable.
+      if (isAttachedSatellite(session, workspace.id, attachedParents)) {
+        continue;
+      }
       // Before the turn check, though the two cannot both be true: the daemon
       // settles as it snoozes, so a snoozed session never carries turnOwed. The
       // order makes the row's home independent of that invariant holding in a
@@ -201,9 +235,57 @@ export function buildQueueBands<TSession extends QueueBandSession>(
   }
 
   turns.sort((a, b) => compareTurnOrder(a.session, b.session));
+  pinned.sort((a, b) => comparePinOrder(a.session, b.session));
   snoozed.sort((a, b) => compareWakeOrder(a.session, b.session));
 
-  return { chief, turns, settled, snoozed };
+  return { chief, turns, settled, pinned, snoozed };
+}
+
+/**
+ * Index every session by the workspace it is in, so a satellite's parent can be
+ * confirmed present *and* in the same workspace in one lookup.
+ *
+ * The workspace half is what keeps a satellite from vanishing after its pane is
+ * moved somewhere else: it is no longer beside its agent, so it is no longer
+ * reachable through it, so it gets its own row back.
+ */
+function liveParentIds(workspaces: WorkspaceWithSessions<QueueBandSession>[]): Map<string, string> {
+  const byId = new Map<string, string>();
+  for (const workspace of workspaces) {
+    for (const session of workspace.sessions) {
+      byId.set(session.id, workspace.id);
+    }
+  }
+  return byId;
+}
+
+/**
+ * Whether this session is a shell whose parent agent is present in the same
+ * workspace — the one case that earns no row of its own.
+ *
+ * An orphan is deliberately loud rather than quiet: a shell whose agent has
+ * closed, or one spawned before the link existed, keeps its settled row. The
+ * queue's standing rule is that it reorders and never hides, and a session with
+ * no parent to be reached through has only its own row left.
+ */
+function isAttachedSatellite(
+  session: QueueBandSession,
+  workspaceId: string,
+  parents: Map<string, string>,
+): boolean {
+  const parentId = session.parentSessionId;
+  if (!parentId) return false;
+  return parents.get(parentId) === workspaceId;
+}
+
+/** Pin order: earliest pin first, tie-broken by id so the order is total. */
+function comparePinOrder(a: QueueBandSession, b: QueueBandSession): number {
+  const pinnedA = a.pinnedAt ?? '';
+  const pinnedB = b.pinnedAt ?? '';
+  if (pinnedA !== pinnedB) {
+    return pinnedA < pinnedB ? -1 : 1;
+  }
+  return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
 /**
@@ -288,6 +370,12 @@ export type QueueAdvance<TSession extends QueueBandSession> =
  * bands entirely rather than landing in either — so requiring the arrival,
  * rather than just the departure, is what keeps a pin from carrying the user
  * away from the workspace they pinned to keep in view.
+ *
+ * Arrival in the *pinned* band is deliberately not a close, for the same reason
+ * and more sharply: pinning one agent is the user saying they will come to this
+ * one themselves, so moving them off it is the exact opposite of what they
+ * asked for. It is left out of `closedNow` on purpose — this is not an omission
+ * to be tidied up by adding the third band to the list.
  *
  * Snoozed counts because a snooze is a turn-closing act performed on the agent
  * the user is looking at, exactly like a settle: leaving them parked in an agent

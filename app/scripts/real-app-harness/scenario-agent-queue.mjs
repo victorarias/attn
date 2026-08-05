@@ -24,9 +24,13 @@
  *      the turn that has been owed longer,
  *   6. a settled agent whose run finishes without asking anything returns too —
  *      a result nobody has read is still the user's — while a shell pane, which
- *      reaches the same `idle` state, never queues at all,
- *   7. pinning a workspace from its queue row takes the agent out of both bands
- *      and back into the tree, so the queue is never a one-way door,
+ *      reaches the same `idle` state, never queues at all, and a shell split out
+ *      of an agent is that agent's satellite: no row anywhere, including for a
+ *      shell split out of that shell,
+ *   7. pinning an agent from its queue row takes that one agent out of the queue
+ *      into the Pinned band, leaving its workspace and siblings alone, and
+ *      unpinning there brings it back with the turn it never stopped owing — so
+ *      the queue is never a one-way door,
  *   8. the chief of staff occupies its own slot and never the band,
  *   9. turning the arrangement off and back on mid-session restores the whole
  *      workspace tree, then returns the same queue with the same agent selected,
@@ -111,6 +115,21 @@ function turnIds(queue) {
 
 function settledIds(queue) {
   return (queue.settled || []).map((row) => row.id);
+}
+
+// The pane a session occupies in `workspaceSessionId`'s workspace. Asked of the
+// pane's owning session rather than matched against the pane id's text: a pane id
+// is not required to contain the session id, and a lookup that quietly finds
+// nothing sends `undefined` to a command that then acts on the active pane.
+async function paneIdFor(client, workspaceSessionId, sessionId) {
+  const workspace = await client.request('get_workspace', { sessionId: workspaceSessionId });
+  const pane = (workspace.panes || []).find((entry) => entry.sessionId === sessionId);
+  if (!pane) {
+    throw new Error(
+      `no pane for session ${sessionId} in ${workspaceSessionId}: ${JSON.stringify((workspace.panes || []).map((entry) => entry.sessionId))}`,
+    );
+  }
+  return pane.paneId;
 }
 
 // Claude treats a fast multi-line write as a paste, so the submit has to be a
@@ -531,36 +550,106 @@ async function main() {
         JSON.stringify(turnIds(after)) === JSON.stringify(before),
         `opening a terminal changed nothing in the band: ${JSON.stringify(before)} -> ${JSON.stringify(turnIds(after))}`,
       );
-      const paneWithShell = await client.request('get_workspace', { sessionId: alpha.sessionId });
-      const shellPaneId = (paneWithShell.paneIds || []).find((paneId) => paneId.includes(shell.id));
-      await client.request('close_pane', { sessionId: alpha.sessionId, paneId: shellPaneId }).catch(() => {});
+
+      // And it is a satellite: split out of an agent, it is reached by going to
+      // that agent, where it is a pane. So it earns no row of its own anywhere —
+      // not in the settled band, and not in what is left of the tree.
+      runner.assert(
+        !settledIds(after).includes(shell.id),
+        `a shell beside its agent gets no settled row: ${JSON.stringify(settledIds(after))}`,
+      );
+      runner.assert(
+        !after.treeSessionIds.includes(shell.id),
+        `a satellite is not in the tree either: ${JSON.stringify(after.treeSessionIds)}`,
+      );
+
+      // Splitting out of the shell inherits the same agent rather than making the
+      // shell a parent, so a chain of terminals still belongs to the one agent it
+      // came from and nothing has a chain to walk.
+      await client.request('split_pane', {
+        sessionId: alpha.sessionId,
+        targetPaneId: await paneIdFor(client, alpha.sessionId, shell.id),
+        direction: 'horizontal',
+      });
+      const nested = await pollFor(async () => {
+        const state = await client.request('get_state');
+        const session = (state.sessions || [])
+          .find((entry) => entry.agent === 'shell' && entry.id !== shell.id && entry.state === 'idle');
+        return session || null;
+      }, 'the shell split out of the shell to register and settle into idle', 30_000);
+      await delay(3000);
+      const nestedQueue = await queueState(client);
+      runner.assert(
+        !turnIds(nestedQueue).includes(nested.id) && !settledIds(nestedQueue).includes(nested.id),
+        `a shell split out of a shell is a satellite of the same agent: ${JSON.stringify(settledIds(nestedQueue))}`,
+      );
+
+      // Leave the workspace as this step found it. A leftover shell pane is not a
+      // cosmetic mess: later steps click the middle of the window to put focus in
+      // the agent before a keyboard settle, and an extra pane is what that click
+      // lands on instead.
+      for (const id of [nested.id, shell.id]) {
+        await client.request('close_pane', {
+          sessionId: alpha.sessionId,
+          paneId: await paneIdFor(client, alpha.sessionId, id),
+        });
+      }
+      const cleaned = await pollFor(async () => {
+        const workspace = await client.request('get_workspace', { sessionId: alpha.sessionId });
+        return (workspace.panes || []).length === 1 ? workspace : null;
+      }, 'the shell panes to close, leaving the agent alone in its workspace', 15_000);
+      runner.assert(
+        cleaned.panes[0].sessionId === alpha.sessionId,
+        `the agent is the only pane left: ${JSON.stringify(cleaned.panes.map((pane) => pane.sessionId))}`,
+      );
     });
 
-    await runner.step('pinning_from_a_row_takes_the_agent_out_of_the_queue', async () => {
-      // The workspace group header owns pin in the tree, and the tree does not
-      // draw ordinary workspaces while the queue is on. Without this affordance
-      // turning the queue on would be a one-way door, so the row's own button is
-      // the claim under test — pressed through the DOM, as the user would.
+    await runner.step('pinning_from_a_row_takes_that_agent_out_of_the_queue', async () => {
+      // A gesture aimed at a row acts on that row: the button pins the agent, not
+      // its workspace, and the agent lands in the Pinned band below Settled. The
+      // row's own button is the claim under test — pressed through the DOM, as the
+      // user would — because the tree, which owns the workspace-scoped pin, is not
+      // drawn for ordinary workspaces while the queue is on. Without a way back it
+      // would be a one-way door, so unpinning from where the row lands is half the
+      // step.
       const before = await queueState(client);
       const alphaWorkspaceId = (before.turns.find((row) => row.id === alpha.sessionId) || {}).workspaceId;
-      runner.assert(Boolean(alphaWorkspaceId), 'the row carries the workspace its pin button acts on');
+      runner.assert(Boolean(alphaWorkspaceId), 'the row carries the workspace it belongs to');
+      const openedAt = observer.getSession(alpha.sessionId)?.turn_opened_at;
+      runner.assert(Boolean(openedAt), 'alpha has an open turn to pin over');
 
       await client.request('dom_click', { selector: `[data-testid="queue-pin-${alpha.sessionId}"]` });
-      const pinned = await waitForTurns(client, [beta.sessionId], 'alpha out of the band once its workspace is pinned', 20_000);
+      const pinned = await waitForTurns(client, [beta.sessionId], 'alpha out of the turns band once pinned', 20_000);
       runner.assert(
         !settledIds(pinned).includes(alpha.sessionId),
-        `a pinned agent is in neither band: ${JSON.stringify(settledIds(pinned))}`,
+        `a pinned agent is not in the settled band: ${JSON.stringify(settledIds(pinned))}`,
       );
       runner.assert(
-        pinned.treeSessionIds.includes(alpha.sessionId),
-        `a pinned workspace keeps its group in the tree: ${JSON.stringify(pinned.treeSessionIds)}`,
+        (pinned.pinned || []).map((row) => row.id).includes(alpha.sessionId),
+        `a pinned agent lands in the Pinned band: ${JSON.stringify(pinned.pinned)}`,
+      );
+      // Its workspace was not touched, so beta's sibling relationship — and every
+      // other agent in that workspace — is exactly where it was.
+      runner.assert(
+        !pinned.treeSessionIds.includes(alpha.sessionId),
+        `pinning one agent did not pin its workspace: ${JSON.stringify(pinned.treeSessionIds)}`,
       );
 
-      // Put it back through the group header's own pin button — the tree affordance
-      // that queue mode leaves in place for exactly this — so the steps below see
-      // the queue they expect.
-      await client.request('dom_click', { selector: `[data-testid="pin-workspace-${alphaWorkspaceId}"]` });
-      await waitForTurns(client, [beta.sessionId, alpha.sessionId], 'alpha back in the band once unpinned', 20_000);
+      // Unpin from the band the row landed in. Pinning is not settling: the turn
+      // went on accruing underneath, so alpha comes back owed rather than settled,
+      // and it comes back at the age it has really been owed.
+      await client.request('dom_click', { selector: `[data-testid="queue-unpin-${alpha.sessionId}"]` });
+      await waitForTurns(
+        client,
+        [beta.sessionId, alpha.sessionId],
+        'alpha back in the turns band once unpinned',
+        20_000,
+      );
+      const restoredOpenedAt = observer.getSession(alpha.sessionId)?.turn_opened_at;
+      runner.assert(
+        restoredOpenedAt === openedAt,
+        `the restored turn keeps the instant it opened rather than restarting its clock: ${JSON.stringify({ openedAt, restoredOpenedAt })}`,
+      );
     });
 
     await runner.step('the_chief_never_queues', async () => {
@@ -675,11 +764,24 @@ async function main() {
       // With nothing left to hand over, home is where the queue ends: staying
       // would leave the user on the one agent guaranteed to be finished with
       // them, and home is the surface that says so.
+      //
+      // Settled by shortcut, repeatedly, until the band runs out. One press is
+      // not enough to reach the end of the queue here: the daemon reclassifies
+      // every session when it comes back from the restart, and an agent the user
+      // settled at `waiting_input` can legitimately land on `idle` a moment later
+      // — a finished run is a turn like any other, so it opens one. Each press
+      // therefore settles the agent it was handed and is handed the next, which
+      // is the move-on loop itself; the claim under test is where that loop ends.
       await client.request('select_session', { sessionId: alpha.sessionId });
       await driver.activateApp();
       await driver.clickWindow(0.5, 0.5);
-      await driver.pressKey('e', { command: true, shift: true });
-      const emptied = await waitForTurns(client, [], 'the last turn settled by shortcut');
+      const emptied = await pollFor(async () => {
+        const queue = await queueState(client);
+        if (turnIds(queue).length === 0) return queue;
+        await driver.pressKey('e', { command: true, shift: true });
+        await delay(1500);
+        return null;
+      }, 'the band emptied one keyboard settle at a time', 45_000, 0);
       runner.assert(emptied.empty, 'the band says so itself once nothing is owed');
       const state = await pollFor(async () => {
         const current = await client.request('get_state');

@@ -219,7 +219,7 @@ func (d *Daemon) sendSpawnFailure(client *wsClient, sessionID string, err error)
 	})
 }
 
-func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, label string, existing *protocol.Session, isShell, pluginReportsNoState bool) *protocol.Session {
+func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, label string, existing *protocol.Session, isShell, pluginReportsNoState bool, parentSessionID string) *protocol.Session {
 	nowStr := string(protocol.TimestampNow())
 	state := protocol.SessionStateLaunching
 	if isShell {
@@ -241,6 +241,12 @@ func buildSpawnSessionRecord(msg *protocol.SpawnSessionMessage, agent, cwd, labe
 		state, stateSince, stateUpdatedAt = protocol.SessionStateWorking, nowStr, nowStr
 	}
 	session := &protocol.Session{ID: msg.ID, Label: label, Agent: protocol.SessionAgent(agent), Directory: cwd, State: state, StateSince: stateSince, StateUpdatedAt: stateUpdatedAt, LastSeen: nowStr, WorkspaceID: msg.WorkspaceID}
+	// The satellite link the caller resolved. It is already carried forward from
+	// the stored session on a respawn, so writing it unconditionally here cannot
+	// clear one.
+	if parentSessionID != "" {
+		session.ParentSessionID = protocol.Ptr(parentSessionID)
+	}
 	// Endpoint binding: prefer the spawn message's explicit endpoint; a respawn
 	// with no endpoint in the message keeps the stored binding.
 	if id := strings.TrimSpace(protocol.Deref(msg.EndpointID)); id != "" {

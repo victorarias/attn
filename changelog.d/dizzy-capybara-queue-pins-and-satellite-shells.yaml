@@ -1,0 +1,13 @@
+kind: added
+area: queue
+change: >
+  In the agent queue, the pin on a sidebar row now pins that one agent instead
+  of its whole workspace. A pinned agent leaves the queue and collects in a
+  Pinned band below Settled — in the order you pinned them — while its siblings
+  stay in the queue where they were. Pinning is "I'll come to this one myself",
+  not "I'm done": the turn goes on accruing underneath, so unpinning surfaces
+  whatever is outstanding at its true age rather than starting the clock over.
+  Unpin from the row in that band, or from the command menu on the agent you're
+  looking at. Pinning a whole workspace is unchanged and still reachable from
+  its group header and the command menu; the chief refuses the pin, since it
+  already has an anchored slot above the queue.

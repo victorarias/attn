@@ -1,0 +1,11 @@
+kind: changed
+area: queue
+change: >
+  A shell you split out of an agent is now that agent's satellite: it gets no
+  row of its own in the queue, because you reach it by going to the agent it
+  sits beside. Splitting a shell out of a shell inherits the same agent, so a
+  chain of terminals still belongs to the one agent it came from. The link is
+  judged fresh every time the sidebar draws: if the agent closes, or the shell's
+  pane is moved to another workspace, the shell gets its row back in Settled —
+  nothing ever becomes unreachable. Shells that already existed keep their own
+  rows; the link is recorded when a shell is opened, and is not backfilled.

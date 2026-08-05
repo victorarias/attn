@@ -2495,6 +2495,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 		d.sendOK(conn)
+	case protocol.CmdPinSession: // wire: pin_session
+		m := msg.(*protocol.PinSessionMessage)
+		if errMsg := d.setSessionPinned(m.SessionID, m.Pinned); errMsg != "" {
+			d.sendError(conn, errMsg)
+			return
+		}
+		d.sendOK(conn)
 	case protocol.CmdCollapseRepo: // wire: collapse_repo
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos: // wire: query_repos

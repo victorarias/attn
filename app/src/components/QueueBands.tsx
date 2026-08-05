@@ -34,12 +34,14 @@ interface QueueBandsProps {
    */
   onScreenSessionIds?: ReadonlySet<string>;
   /**
-   * Pinning a row's workspace is how an agent leaves the queue for good. The
-   * band rows are the only place it can be asked for while queue mode is on:
-   * the workspace group header, which owns it in the tree, is not drawn for the
-   * workspaces these rows come from.
+   * Pinning one agent out of the queue, and releasing it again.
+   *
+   * A gesture aimed at a row acts on that row: pinning here takes the single
+   * agent out and leaves its workspace and every sibling in. Pinning the whole
+   * workspace is still reachable — from its group header in the tree, and from
+   * ⌘K — but it is a different act and it is no longer what this button does.
    */
-  onPinWorkspace?: (workspaceId: string, pinned: boolean) => void;
+  onPinSession?: (sessionId: string, pinned: boolean) => void;
   /**
    * The per-session menu — chief of staff, close, reload — which the workspace
    * tree row owns when the queue is off. Queue mode does not draw that row for
@@ -66,6 +68,7 @@ function QueueRowView({
   onSnooze,
   onWake,
   onPin,
+  onUnpin,
   onOpenActions,
   showSettling,
   testIdPrefix,
@@ -80,6 +83,7 @@ function QueueRowView({
   onSnooze?: (event: ReactMouseEvent) => void;
   onWake?: () => void;
   onPin?: () => void;
+  onUnpin?: () => void;
   onOpenActions?: (event: ReactMouseEvent) => void;
   showSettling?: boolean;
   testIdPrefix: string;
@@ -122,7 +126,7 @@ function QueueRowView({
       {session.chiefOfStaff && <ChiefOfStaffBadge />}
       {age && <span className="queue-row-age">{age}</span>}
       {wake && <span className="queue-row-wake-at">{wake}</span>}
-      {(onOpenActions || onPin || onSettle || onSnooze || onWake) && (
+      {(onOpenActions || onPin || onUnpin || onSettle || onSnooze || onWake) && (
         <div className="queue-row-controls">
           {onWake && (
             <button
@@ -173,14 +177,29 @@ function QueueRowView({
               type="button"
               className="queue-row-pin"
               data-testid={`queue-pin-${session.id}`}
-              title={`Pin ${row.workspaceTitle} — take it out of the queue`}
-              aria-label={`Pin workspace ${row.workspaceTitle}`}
+              title="Pin this agent — keep it in view, out of the queue"
+              aria-label={`Pin ${session.label}`}
               onClick={(event) => {
                 event.stopPropagation();
                 onPin();
               }}
             >
               📍
+            </button>
+          )}
+          {onUnpin && (
+            <button
+              type="button"
+              className="queue-row-pin"
+              data-testid={`queue-unpin-${session.id}`}
+              title="Unpin — put this agent back in the queue"
+              aria-label={`Unpin ${session.label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onUnpin();
+              }}
+            >
+              📌
             </button>
           )}
           {onSettle && (
@@ -209,15 +228,19 @@ function QueueRowView({
 
 /**
  * The sidebar's standing order: the chief in its own anchored slot, the turns
- * the user owes oldest first, then the settled rest.
+ * the user owes oldest first, the settled rest, then the agents pinned out of
+ * the queue one at a time.
  *
  * An agent appears in exactly one of these, which is what lets its position
- * carry meaning. Rows carry their live state in both bands, because neither
- * band is about whether an agent is running — an agent you steered is still
- * yours until you settle it, and a settled one may well be working.
+ * carry meaning. Rows carry their live state in every band, because none of them
+ * is about whether an agent is running — an agent you steered is still yours
+ * until you settle it, a settled one may well be working, and a pinned one is
+ * usually the one you are working in.
  *
- * Only pinned and muted workspaces still render as groups, below; they are
- * places you go and get work rather than a list handed to you.
+ * Pinned sits last so the queue and the draining of it stay at the top of the
+ * eye's path; the pinned workspaces render as groups below it, and muted below
+ * those. Both kinds of pinned thing are places you go and get work rather than a
+ * list handed to you, which is why they neighbour each other.
  */
 export function QueueBands({
   bands,
@@ -225,7 +248,7 @@ export function QueueBands({
   onSelectSession,
   onSettleTurn,
   onScreenSessionIds,
-  onPinWorkspace,
+  onPinSession,
   onOpenActions,
   onOpenSnooze,
 }: QueueBandsProps) {
@@ -261,7 +284,7 @@ export function QueueBands({
             onSelect={() => onSelectSession(row.session.id)}
             onSettle={() => onSettleTurn(row.session.id)}
             onSnooze={snoozeHandler(row.session)}
-            onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+            onPin={onPinSession && (() => onPinSession(row.session.id, true))}
             onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
             showSettling={offScreen(row.session.id)}
             testIdPrefix="queue-turn"
@@ -286,9 +309,31 @@ export function QueueBands({
               // the reach the verb was designed for — and that agent is settled,
               // not owed.
               onSnooze={snoozeHandler(row.session)}
-              onPin={onPinWorkspace && (() => onPinWorkspace(row.workspaceId, true))}
+              onPin={onPinSession && (() => onPinSession(row.session.id, true))}
               onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
               testIdPrefix="queue-settled"
+            />
+          ))}
+        </>
+      )}
+      {bands.pinned.length > 0 && (
+        <>
+          <div className="queue-band-header">
+            <span>Pinned</span>
+            <span className="queue-band-count">{bands.pinned.length}</span>
+          </div>
+          {bands.pinned.map((row) => (
+            // No settle and no snooze: both are ways of answering "whose turn is
+            // it", and a pinned agent has stepped out of that question entirely.
+            // Unpinning is the only act here, and it is the way back in.
+            <QueueRowView
+              key={row.session.id}
+              row={row}
+              selected={selectedId === row.session.id}
+              onSelect={() => onSelectSession(row.session.id)}
+              onUnpin={onPinSession && (() => onPinSession(row.session.id, false))}
+              onOpenActions={onOpenActions && ((event) => onOpenActions(row.session, event))}
+              testIdPrefix="queue-pinned"
             />
           ))}
         </>

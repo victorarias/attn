@@ -2192,6 +2192,11 @@ export function useUiAutomationBridge({
             .map((row) => readRow(row, 'queue-turn-')),
           settled: Array.from(band?.querySelectorAll('[data-testid^="queue-settled-"]') || [])
             .map((row) => readRow(row, 'queue-settled-')),
+          // Agents pinned out of the queue one at a time. Below settled and above
+          // the pinned workspaces the tree still draws, so a caller can testify
+          // that the two kinds of pinning are distinct places.
+          pinned: Array.from(band?.querySelectorAll('[data-testid^="queue-pinned-"]') || [])
+            .map((row) => readRow(row, 'queue-pinned-')),
           snoozed: {
             present: Boolean(snoozedSection),
             header: snoozedHeader?.textContent?.trim() || '',

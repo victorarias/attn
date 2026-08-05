@@ -158,6 +158,8 @@ interface SidebarProps {
   onMutedExpandedChange?: (expanded: boolean) => void;
   onMuteWorkspace?: (workspaceId: string, endpointId?: string) => void;
   onPinWorkspace?: (workspaceId: string, pinned: boolean) => void;
+  /** Pin or release one agent, leaving its workspace and siblings in the queue. */
+  onPinSession?: (sessionId: string, pinned: boolean) => void;
   onRenameSession?: (sessionId: string, label: string) => Promise<void>;
   onRenameWorkspace?: (workspaceId: string, title: string) => Promise<void>;
   onChangeChiefOfStaff?: (sessionId: string, enabled: boolean) => void;
@@ -361,6 +363,7 @@ export function Sidebar({
   onMutedExpandedChange,
   onMuteWorkspace,
   onPinWorkspace,
+  onPinSession,
   onRenameSession,
   onRenameWorkspace,
   onChangeChiefOfStaff,
@@ -1011,7 +1014,7 @@ export function Sidebar({
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}
           onScreenSessionIds={onScreenSessionIds}
-          onPinWorkspace={onPinWorkspace}
+          onPinSession={onPinSession}
           onOpenActions={openSessionActions}
           onOpenSnooze={onOpenSnooze}
         />

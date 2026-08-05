@@ -141,6 +141,8 @@ model Session {
   turn_snoozed_until?: string;  // ISO timestamp a live snooze runs to. Present only while the deferral holds; its presence is what puts the row in the sidebar's snoozed section, and while it is set no state can open a turn for this session except one that breaks through.
   auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   auto_settle_held?: boolean;   // True while the auto-settle countdown is frozen because the user is typing into this session. Mutually exclusive with auto_settle_fires_at by construction: a frozen countdown has no deadline to animate against, so the tile draws a full paused bar and waits. It clears on its own five quiet seconds after the last keystroke, when a fresh deadline replaces it.
+  pinned_at?: string;           // ISO timestamp this session was individually pinned out of the queue. Presence is the pin, and the instant is the pinned band's sort key. Like a pinned workspace it filters at read: the turn stamps keep accruing underneath, so unpinning surfaces whatever was outstanding at its true age.
+  parent_session_id?: string;   // The agent session a shell was split from. Spawn-time provenance resolved by the daemon, always an agent id and never another shell's, so there is no chain to walk. Whether the link is live is judged at read (parent present in the same workspace), so the field itself is never cleared.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -1438,6 +1440,14 @@ model PinWorkspaceMessage {
   pinned: boolean;
 }
 
+// Pins one session out of the queue, leaving its workspace and its siblings
+// where they are. The chief is refused: it already has an anchored slot.
+model PinSessionMessage {
+  cmd: "pin_session";
+  session_id: string;
+  pinned: boolean;
+}
+
 model QueryPRsMessage {
   cmd: "query_prs";
   filter?: string;
@@ -1832,6 +1842,7 @@ model SpawnSessionMessage {
   resume_picker?: boolean;
   yolo_mode?: boolean;
   chief_of_staff?: boolean;    // Launch this session already holding the chief role (guidance injected at first spawn)
+  spawned_from?: string;       // The session this one was split from. Consulted only for agent "shell": the daemon resolves it to the owning agent session and stores that as the satellite's parent.
   initial_prompt?: string;
   executable?: string;         // Generic executable override for selected agent
   claude_executable?: string;  // Backward compatibility

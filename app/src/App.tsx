@@ -743,6 +743,7 @@ function AppContent({
     sendMuteAuthor,
     sendMuteWorkspace,
     sendPinWorkspace,
+    sendPinSession,
     sendPRVisited,
     sendRefreshPRs,
     sendRegisterWorkspace,
@@ -1186,6 +1187,8 @@ function AppContent({
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
+      pinnedAt: daemonSession?.pinned_at,
+      parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
@@ -1965,7 +1968,11 @@ function AppContent({
       await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId: newPaneId, targetPaneId: paneId, direction });
       paneAdded = true;
       if (spawnArgs) {
-        await ptySpawn({ args: spawnArgs });
+        // Name the session this one was split from. The daemon decides what to do
+        // with it — only a shell gets a parent, and splitting off another shell
+        // resolves to that shell's agent — so this stays a statement of fact
+        // rather than a second copy of the rule.
+        await ptySpawn({ args: { ...spawnArgs, spawned_from: activeSession.id } });
       } else {
         throw new Error('Session spawn arguments were not prepared.');
       }
@@ -2518,8 +2525,26 @@ function AppContent({
   const actionMenuItemsWithWorkspaceActions = useMemo<ActionMenuItem[]>(() => {
     const workspace = activeWorkspaceForCommands;
     if (!workspace) return actionMenuItems;
+    const activeSession = workspace.sessions.find((session) => session.id === activeSessionId);
+    // Pinning the agent is offered above pinning its workspace: it is the finer
+    // of the two and the one a user who reached for "pin" from inside a session
+    // usually means. The chief is left out — it is anchored above the queue
+    // already, and the daemon refuses the pin anyway.
+    const sessionPinItems: ActionMenuItem[] = activeSession && !activeSession.chiefOfStaff
+      ? [{
+        id: 'pin-active-session',
+        title: activeSession.pinnedAt ? `Unpin ${activeSession.label}` : `Pin ${activeSession.label}`,
+        description: activeSession.pinnedAt
+          ? 'Put this agent back in the queue'
+          : 'Take this agent out of the queue and keep it in view',
+        keywords: ['pin', 'unpin', 'agent', 'session', 'queue'],
+        icon: <AttentionActionIcon />,
+        run: () => sendPinSession(activeSession.id, !activeSession.pinnedAt),
+      }]
+      : [];
     return [
       ...actionMenuItems,
+      ...sessionPinItems,
       {
         id: 'pin-active-workspace',
         title: workspace.pinned ? `Unpin ${workspace.title}` : `Pin ${workspace.title}`,
@@ -2542,7 +2567,7 @@ function AppContent({
         run: () => sendMuteWorkspace(workspace.id, workspace.endpointId),
       },
     ];
-  }, [actionMenuItems, activeWorkspaceForCommands, sendPinWorkspace, sendMuteWorkspace]);
+  }, [actionMenuItems, activeWorkspaceForCommands, activeSessionId, sendPinWorkspace, sendPinSession, sendMuteWorkspace]);
 
 
   // Each arrangement has one notion of what wants the user, and the mode selects
@@ -3643,6 +3668,7 @@ function AppContent({
           onMutedExpandedChange={setSidebarMutedExpanded}
           onMuteWorkspace={sendMuteWorkspace}
           onPinWorkspace={sendPinWorkspace}
+          onPinSession={sendPinSession}
           onRenameSession={sendRenameSession}
           onRenameWorkspace={sendRenameWorkspace}
           onChangeChiefOfStaff={handleChangeChiefOfStaff}
