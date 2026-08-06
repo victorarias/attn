@@ -71,6 +71,22 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      # tauri bundles `bundled-plugins/` as the app's `Resources/plugins`, and a
+      # checkout has only a .gitkeep there — the compiled plugins are build
+      # output. A source install gets them from scripts/build-app-profile.sh;
+      # this is the release's equivalent step.
+      - name: Stage bundled plugins
+        run: ./scripts/build-bundled-plugins.sh
+
       - name: Import Apple signing credentials
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -123,9 +139,45 @@ jobs:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: attn ${{ env.RELEASE_TAG }}
           releaseBody: See CHANGELOG.md for details.
-          releaseDraft: false
+          # Draft until every gate below has run and every asset is attached.
+          # tauri-action's own upload is the un-notarized build, which the
+          # repackage step replaces; publishing here would put that build, and
+          # any bundle the verification is about to reject, in front of users.
+          # The `publish` job at the end flips it.
+          releaseDraft: true
           prerelease: false
           args: --target aarch64-apple-darwin
+
+      # A bundle that lost its plugins looks healthy and simply offers no agents
+      # from them, which nobody notices until someone tries to launch one. Fail
+      # here, before notarization spends twenty minutes on it. The expected set
+      # is whatever was staged, so a new plugin is covered without editing this.
+      - name: Verify the bundled plugins reached the app
+        run: |
+          app_path="$(find app/src-tauri/target -type d -name 'attn.app' | head -n1)"
+          if [ -z "$app_path" ]; then
+            echo "No attn.app bundle found in build output"
+            exit 1
+          fi
+
+          missing=0
+          for staged in app/src-tauri/bundled-plugins/*/; do
+            name="$(basename "$staged")"
+            for required in "attn-plugin.toml" "bin/${name}"; do
+              bundled="$app_path/Contents/Resources/plugins/$name/$required"
+              if [ ! -e "$bundled" ]; then
+                echo "missing from the app bundle: Contents/Resources/plugins/$name/$required"
+                missing=1
+              fi
+            done
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "staged plugins did not reach $app_path"
+            exit 1
+          fi
+
+          echo "bundled plugins present:"
+          ls "$app_path/Contents/Resources/plugins"
 
       - name: Repackage notarized app and replace release assets
         env:
@@ -291,3 +343,39 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${RELEASE_TAG}" /tmp/attn-linux-arm64 --clobber
+
+  # Nothing is public until every gate above has passed and every asset is
+  # attached. A failure anywhere leaves the draft for inspection: fix it, re-run
+  # the workflow on the same tag, and the draft is published only once the whole
+  # set is right.
+  publish:
+    name: Publish release
+    needs: [tauri, linux-amd64, linux-arm64]
+    permissions:
+      contents: write
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve release tag
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${{ github.ref_name }}"
+          fi
+
+          if ! [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG"
+            exit 1
+          fi
+
+          echo "RELEASE_TAG=$RELEASE_TAG" >> "$GITHUB_ENV"
+
+      - name: Publish the release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh release edit "${RELEASE_TAG}" --draft=false --latest
+          gh release view "${RELEASE_TAG}" --json isDraft,assets \
+            --jq '"published draft=\(.isDraft) assets:\n" + (.assets | map("  " + .name) | join("\n"))'
