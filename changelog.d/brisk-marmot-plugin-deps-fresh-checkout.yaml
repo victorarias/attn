@@ -1,0 +1,10 @@
+kind: fixed
+area: plugins
+change: >
+  Building the app from a fresh clone no longer fails while compiling the
+  bundled pi plugin. The plugin's headless host bundles pi's SDK in, and
+  nothing installed the plugin's dependencies, so the build stopped at
+  "Could not resolve @earendil-works/pi-coding-agent" on any machine that had
+  not run `bun install` by hand. The plugin build now installs from the
+  committed lockfile, and CI stages the bundled plugins from a clean checkout
+  so this cannot reach a contributor again.

@@ -14,6 +14,7 @@ jobs:
       daemon: ${{ steps.filter.outputs.daemon }}
       frontend: ${{ steps.filter.outputs.frontend }}
       tauri: ${{ steps.filter.outputs.tauri }}
+      plugins: ${{ steps.filter.outputs.plugins }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,6 +49,11 @@ jobs:
               - '.github/workflows/ci.yml'
             tauri:
               - 'app/src-tauri/**'
+              - '.github/workflows/ci.yml'
+            plugins:
+              - 'plugins/**'
+              - 'scripts/build-bundled-plugins.sh'
+              - '.tool-versions'
               - '.github/workflows/ci.yml'
   changelog:
     name: Changelog
@@ -261,3 +267,35 @@ jobs:
 
       - name: Cargo test
         run: cargo test
+
+  # The bundled plugins are compiled by the packaged-app build, which no CI job
+  # runs — so a plugin that only builds on a machine with warm node_modules got
+  # all the way to a contributor's fresh clone. This stages them the way the app
+  # build does, from a checkout that has nothing installed.
+  plugins:
+    name: Plugins
+    needs: changes
+    if: needs.changes.outputs.plugins == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Stage bundled plugins
+        run: ./scripts/build-bundled-plugins.sh "${RUNNER_TEMP}/bundled-plugins"
+
+      - name: Test plugins
+        run: |
+          for plugin in plugins/*/; do
+            [ -f "${plugin}package.json" ] || continue
+            echo ">>> ${plugin}"
+            (cd "$plugin" && bun test)
+          done
