@@ -132,13 +132,19 @@ to fix.
   override. Ready = no open `blocks` edges, not dormant, no live tender,
   not a template, and — once gates exist — not a gate. Truth at query time;
   nudging a tender when its blocker falls is named-later work.
-- **The crown's body is the plan.** Seed bodies are markdown from slice 1.
-  A chunk plan is a plot: alignment, receipts, and design decisions live in
-  the crown's body; the children are the ledger. The plan and its checkboxes
-  cannot drift because the checkbox *is* the seed. `docs/plans/` keeps
-  visions, gate records, and history; new chunk plans grow as plots once
-  slice 6 makes them readable and annotatable, and the markdown format
-  retires only when the replacement demonstrably covers the itch.
+- **The crown's body is the plan, and the crown is authoritative.** Seed
+  bodies are markdown from slice 1. A chunk plan is a plot: alignment,
+  receipts, and design decisions live in the crown's body; the children are
+  the ledger. The plan and its checkboxes cannot drift because the checkbox
+  *is* the seed. From the moment a plan is planted, the plot is the single
+  source of truth (decided 2026-08-06): `attn seed export <crown>` renders
+  the body plus the child ledger as a checklist to a markdown file stamped
+  *generated from crown `<id>` — edit the crown, not this file*, and the
+  existing annotation surface (keyed by workspace file path) works on that
+  export unchanged. The review loop runs from day one: export → open →
+  annotate → feedback reaches the tending agent → it adjusts the crown →
+  re-export. Slice 6 then deletes the export step instead of debuting a new
+  flow. `docs/plans/` keeps visions, gate records, and history.
 - **Template-ready schema, implemented last.** Carried from slice 1 so
   nothing migrates later; inert until their slices: `template` (flags a
   packet; excludes the subtree from ready and active views), declared
@@ -147,6 +153,15 @@ to fix.
   the `sown-from` provenance edge, and `gate` (a gate seed never enters
   agent ready — when unblocked it opens a **turn**, riding attn's existing
   attention system instead of a bolted-on approval table).
+- **The human tends the gardeners, not the seeds.** Seeds are tended by
+  agents; Victor steers the agents and only occasionally (~5% of the time)
+  adjusts a plan by hand. The garden owes the human capture (`plant`),
+  visibility (the panel, `ls`, `show`), and judgment calls (what withers) —
+  it must never demand tending ceremony from him.
+- **A todo becomes a seed when it would survive the session.** Anything
+  worth handing off, parking, or attributing gets planted; in-session
+  scratch stays in the session. This norm lives in agent guidance, not
+  schema — named here so it has a home, enforced nowhere.
 - **Tending is atomic claim.** `attn seed tend <id>` sets tender + `growing`
   in one move (the beads `--claim` lesson). The tender is
   `{session_id, seat?}` — seat is the free-string seat name from the
@@ -162,10 +177,46 @@ to fix.
 - **CLI-first, seconds to plant.** Agents live in the CLI; the app renders.
   Every command takes `--json`. Planting must cost one line and return the
   id.
+- **Agents are primed, not left to discover** (the gap beads fills with
+  hooks + AGENTS.md snippets; attn fills it at launch because it owns the
+  launcher — the chief-guidance injection path is the donor). Two layers:
+  a brief garden primer (vocabulary + the ready→tend→harvest loop) injected
+  into any attn-launched agent's guidance once the garden is live, and
+  context priming at launch — an interactive session learns its workspace's
+  ready count; a delegate dispatched at a crown starts knowing its plot,
+  its ready seeds, and the freshest handoffs. No agent should have to
+  discover the garden exists.
 - **Audit trail = revisions + notes + facts.** Docstore revisions record
   every mutation; notes carry the human/agent-authored trail; bus facts
   (`garden.planted`, `garden.tended`, …) drive projections. `attn seed show`
   assembles all three.
+
+## Vocabulary
+
+The working set, with the beads equivalent where one exists. These land in
+`docs/glossary.md` in slice 1; until then this table is the reference.
+
+| attn | meaning | beads |
+|---|---|---|
+| seed | the unit of work; one document, one id | bead / issue |
+| the garden | all seeds; the space they live in | the issue database |
+| plant | create a seed (one line, returns the id) | `bd create` |
+| tend / tender | atomically claim a seed / whoever holds it | `--claim` / assignee |
+| harvest | close as done, with a reason | `bd close` |
+| wither | close as abandoned, with a reason | — (close, undistinguished) |
+| replant | reopen a harvested or withered seed | reopen |
+| park / dormant | deliberately pause a seed / the paused state | — |
+| ready | no open blockers, no live tender — tendable now | `bd ready` |
+| plot | a seed with children plus execution intent — the whole subtree | molecule (epic with intent) |
+| crown | the root seed of a plot; plots have no id of their own, so the crown's id is how a plot is addressed | the molecule's parent bead |
+| step slug | a seed's stable name within its plot; survives sowing | step id |
+| packet | a plot flagged as template, with declared variables | proto (cooked formula) |
+| sow | instantiate a packet, filling its variables | `bd mol pour` |
+| cutting | extract a packet from a proven plot | `bd mol distill` |
+| gate | a seed that needs a human; opens a turn when unblocked, never enters agent `ready` | `[steps.gate]` |
+| note | trail entry on a seed; the seed's memory of itself, routed to nobody | comment |
+| handoff | a note kind addressed to whoever tends the seed next | — |
+| fruit / laurel | recognition attached to a seed | — |
 
 ## Slices
 
@@ -193,6 +244,9 @@ Ships:
 - [ ] Bus facts `garden.planted` with the seed as subject.
 - [ ] Glossary: seed, plant, the garden, plot, crown, packet (the vocabulary
       lands together even though plots arrive in slice 5).
+- [ ] `attn seed export <crown>` writes the crown's body (plus the child
+      ledger as a checklist, once children exist) to markdown stamped as
+      generated — the review bridge until slice 6 deletes it.
 - [ ] The first planting is this plan: its crown (this document as the body)
       and one seed per remaining slice, the day `plant` works. Hierarchy is
       wired as the verbs arrive — edges in slice 3, plot semantics in
@@ -243,6 +297,9 @@ Ships:
       both directions (blocks / blocked-by).
 - [ ] Harvesting a blocker makes the dependent ready at the next query (no
       nudge yet — named later).
+- [ ] Priming, interactive side: attn-launched sessions receive the brief
+      garden primer and their workspace's ready count in guidance (the
+      chief-guidance injection path).
 
 Acceptance:
 
@@ -285,6 +342,9 @@ Ships:
 - [ ] Dispatch-at-plot: a delegation carries its crown; inside it,
       flag-free `ready` scopes to the plot; children are parallel by
       default, only `blocks` edges sequence.
+- [ ] Priming, delegate side: a delegate dispatched at a crown launches
+      already knowing its plot (crown body summary, ready seeds, freshest
+      handoffs) — it never has to ask what it was sent to do.
 - [ ] App: the panel groups a plot's seeds under its crown and shows
       progress (done / growing / ready / blocked counts).
 - [ ] `attn seed show <crown>` includes plot progress; a stale-plot query
@@ -307,7 +367,9 @@ rendered, annotated, feedback flowing to the tending agent.
 
 Rides Victor's in-flight foundational work on the rendering/annotation
 surface; this slice is direction, not frozen design — re-align before
-building it.
+building it. By this point the export loop has been proving the review flow
+since slice 1, so this slice removes the export step from a working loop
+rather than debuting a new one.
 
 Ships:
 
@@ -329,17 +391,32 @@ Acceptance:
 
 ### Later (named, unplanned)
 
-- **Packets: sow and distill** — the template flag, declared variables,
-  interpolation, `sown-from` provenance, and `distill` extraction. The
+- **Packets: sow and cutting** — the template flag, declared variables,
+  interpolation, `sown-from` provenance, and `cutting` extraction (taking a
+  packet from a proven plot, as a gardener takes a cutting from their best
+  plant; beads calls this distill). The first packet candidate is already
+  visible — Victor's canonical chunk shape (2026-08-07): implement steps →
+  crew review → human gate, the gate riding gates-as-turns. The
   schema is carried from slice 1; the behavior ships when a real plot shape
   has repeated and earned its packet.
 - **Gates as turns** — `gate` seeds opening turns when unblocked; the
   schema field exists from slice 1.
-- **Tickets as views over the garden** — the migration the vision promises;
-  starts only after the garden carries real daily load.
+- **Tickets retire** (decided 2026-08-06; supersedes "tickets as views").
+  There will be no era of two capture systems: the garden takes over as
+  soon as it is usable — slice 5 (capture + dispatch) is the bar — and
+  tickets are then removed, not kept as a parallel board.
 - **Laurels attach to seeds** — the recognition arc; seed ids are the
   attachment points, nothing in this plan blocks it.
 - **Ready nudges** — waking a tender when its blocker falls (doorbell path).
+- **No seed comments — deliberately** (decided 2026-08-06). A comment is a
+  message with no addressee: too noisy to be a good trail note, too
+  undirected to be a good message. Notes are the seed's memory of itself and
+  route to nobody; conversation between agents is the vision's "agents
+  converse and observe" rock — directed, daemon-brokered messages that can
+  address a seed's participants as routing sugar, plus passive inspection
+  the daemon serves. Ticket comments cover the meantime. If slice 5's
+  multi-delegate reality demands seed-scoped chat before messaging lands,
+  that evidence reopens this — speculation does not.
 - **Seed priming at wake** — the `/wake` skill reading the occupant's tended
   seeds; belongs to the seat arc.
 - **Daemon seat primitive** — hardened from the skill simulation's lessons;
@@ -384,3 +461,17 @@ Acceptance:
   ideas; the glossary entry in slice 1 is the commitment point.
 - How slice 6's annotation keying generalizes from `<workspaceId>:<path>` to
   seed ids — designed with the foundational rendering work, not before.
+- Vocabulary fluency: `harvest` is the hardest word to sight-read (Victor,
+  2026-08-06) — expected to grow with use; revisit the name if it does not.
+  Agents get a brief vocabulary primer in guidance; no heavier mechanism.
+- Whether extensions (plugins/SDK) may read or write the garden, and through
+  what grant — `core/garden` is daemon-owned today, and the vision's
+  bespoke-seats rock will eventually want a door. Not needed for these
+  slices; named so the namespace choice doesn't silently decide it.
+- ~~Ticket retirement removes ticket comments — the one proven agent↔agent
+  conversation channel — before directed messaging exists.~~ Ruled
+  2026-08-06: messaging accelerates. A small **converse-and-observe
+  vertical** (peek: daemon-served read-only inspection; msg: directed
+  daemon-brokered delivery into the target session) lands **before** the
+  garden's build starts, so tickets retire only when both hold — garden
+  usable (slice 5) and messaging live. That vertical gets its own plan.
