@@ -14,11 +14,25 @@
 export const SEMANTIC_KINDS = ["session_ready", "run_started", "run_settled"] as const;
 
 /** Render kinds. Opaque to the daemon; host and app agree on the bodies. */
-export const RENDER_KINDS = ["message_start", "message_delta", "message_end"] as const;
+export const RENDER_KINDS = ["message_start", "message_delta", "message_end", "queue_update"] as const;
 
 export type SemanticKind = (typeof SEMANTIC_KINDS)[number];
 export type RenderKind = (typeof RENDER_KINDS)[number];
 export type EnvelopeKind = SemanticKind | RenderKind;
+
+/**
+ * The attn session states this host declares.
+ *
+ * These are attn's words, not pi's, and they are the whole reason the state of
+ * a conversation session needs no classifier and no screen: the host is attn
+ * code sitting inside the agent's own event loop, so it can say what the
+ * session is doing rather than infer it.
+ *
+ * `waiting_input` is here because a later slice's declaration will use it — an
+ * approval request is the agent asking, and only the host knows one is open.
+ * Slice 2 declares `working` and `idle` alone.
+ */
+export type HostSessionState = "working" | "idle" | "waiting_input";
 
 export interface Envelope {
   session_id: string;
@@ -27,7 +41,18 @@ export interface Envelope {
   body: unknown;
 }
 
-export interface SessionReadyBody {
+/**
+ * EVERY declaration carries the state it puts the session in. That invariant is
+ * what keeps the daemon's rule to one line — a declaration's `state` is applied
+ * at that declaration's seq — instead of a second envelope family that says the
+ * same thing a beat later, or a daemon-side guess about what a run boundary
+ * means.
+ */
+export interface DeclarationBody {
+  state: HostSessionState;
+}
+
+export interface SessionReadyBody extends DeclarationBody {
   /** pi's own session-file path, or null when pi has not written one yet. */
   session_file: string | null;
   model: string;
@@ -35,7 +60,9 @@ export interface SessionReadyBody {
   pi_version: string;
 }
 
-export interface RunSettledBody {
+export interface RunStartedBody extends DeclarationBody {}
+
+export interface RunSettledBody extends DeclarationBody {
   /** pi's last-run error text, when the run ended badly. Never keyed on. */
   error?: string;
 }
@@ -54,6 +81,19 @@ export interface MessageEndBody {
   id: string;
   role: string;
   text: string;
+}
+
+/**
+ * What is queued and not yet delivered, as pi sees it right now.
+ *
+ * pi emits this on both edges: when a message joins a queue, and again when it
+ * leaves one — the drain fires just before the user `message_start` that is the
+ * message being read. So the pair is the whole of "queued, then seen", and the
+ * app needs nothing else to draw it.
+ */
+export interface QueueUpdateBody {
+  steering: string[];
+  followUp: string[];
 }
 
 /** Anything the mapper is handed. pi's event union grows without warning. */
@@ -152,6 +192,11 @@ export function messageText(message: unknown): string {
   return text;
 }
 
+/** pi's queue arrays are readonly and could grow entries we do not model. */
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
+}
+
 function messageRole(message: unknown): string {
   if (message && typeof message === "object") {
     const role = (message as { role?: unknown }).role;
@@ -182,14 +227,35 @@ export class PiEventMapper {
   /** Emits whatever the pi event maps to. Unknown pi types are dropped. */
   handle(event: PiEvent): void {
     switch (event.type) {
-      case "agent_start":
+      case "agent_start": {
         this.deltas.flush();
-        this.stream.emit("run_started", {});
+        const body: RunStartedBody = { state: "working" };
+        this.stream.emit("run_started", body);
         return;
+      }
 
       case "agent_settled": {
         this.deltas.flush();
-        this.stream.emit("run_settled", {});
+        // `idle` and not `waiting_input`: a settled run in a chatbox is both at
+        // once — the agent finished, and nothing more happens until the user
+        // types — and attn's own vocabulary assigns that case to idle (see
+        // internal/attention). They open a turn identically, so choosing
+        // between the two words is not worth a classifier call per run.
+        const body: RunSettledBody = { state: "idle" };
+        this.stream.emit("run_settled", body);
+        return;
+      }
+
+      case "queue_update": {
+        // Ahead of the text it is about: a drain fires immediately before the
+        // user message it delivered, and the app draws the queue emptying and
+        // then the message arriving, in that order.
+        this.deltas.flush();
+        const body: QueueUpdateBody = {
+          steering: stringList(event.steering),
+          followUp: stringList(event.followUp),
+        };
+        this.stream.emit("queue_update", body);
         return;
       }
 
@@ -251,8 +317,28 @@ export class PiEventMapper {
   }
 }
 
-/** One verb the daemon can send the host over stdin. */
-export type HostVerb = { verb: "prompt"; text: string } | { verb: "shutdown" };
+/**
+ * One verb the daemon can send the host over stdin.
+ *
+ * Three of them carry text, and the difference between them is only WHEN the
+ * agent reads it:
+ *
+ *   prompt     the composer's first word. Refused mid-run — the composer that
+ *              sends it is shut for the whole of a run.
+ *   steer      read at the next turn boundary, mid-run. This is what a doorbell
+ *              uses: an interruption that lands as soon as the agent draws
+ *              breath rather than after everything it planned to do.
+ *   follow_up  read only when the whole run would otherwise settle. The way to
+ *              queue something for after the work, without cutting into it.
+ *
+ * steer and follow_up are also valid on an idle session, where there is no run
+ * to land in; the host opens one instead. Which is why the daemon never has to
+ * ask what a session is doing before nudging it.
+ */
+export type HostVerbWithText = { verb: "prompt" | "steer" | "follow_up"; text: string };
+export type HostVerb = HostVerbWithText | { verb: "shutdown" };
+
+const TEXT_VERBS = new Set(["prompt", "steer", "follow_up"]);
 
 export function parseVerb(line: string): HostVerb {
   const value: unknown = JSON.parse(line);
@@ -260,10 +346,10 @@ export function parseVerb(line: string): HostVerb {
     throw new Error("verb must be a JSON object");
   }
   const verb = (value as { verb?: unknown }).verb;
-  if (verb === "prompt") {
+  if (typeof verb === "string" && TEXT_VERBS.has(verb)) {
     const text = (value as { text?: unknown }).text;
-    if (typeof text !== "string" || text.trim() === "") throw new Error("prompt verb needs non-empty text");
-    return { verb: "prompt", text };
+    if (typeof text !== "string" || text.trim() === "") throw new Error(`${verb} verb needs non-empty text`);
+    return { verb: verb as HostVerbWithText["verb"], text };
   }
   if (verb === "shutdown") return { verb: "shutdown" };
   throw new Error(`unsupported verb ${JSON.stringify(verb)}`);

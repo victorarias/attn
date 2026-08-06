@@ -78,16 +78,31 @@ See `docs/glossary.md` for the vocabulary and
 `docs/plans/2026-08-05-pi-headless-host.md` for the slices.
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
-  out (NDJSON), **stdin** is verbs in (`prompt`, `shutdown`), **stdout/stderr**
-  are pi's and the host's own output, captured to
+  out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
+  `shutdown`), **stdout/stderr** are pi's and the host's own output, captured to
   `<data-dir>/hosts/log/<session>.log`. Envelopes never go on stdout: pi loads
   the user's own extensions and any one of them printing a line would corrupt a
   shared stream.
 - Two envelope families. **Declarations** (`session_ready`, `run_started`,
   `run_settled`) are attn's vocabulary and the daemon may read them.
-  **Renderings** (`message_start`, `message_delta`, `message_end`) are drawn by
-  the app and forwarded opaquely. Adding a rendering is a host + app change; a
-  new declaration is a protocol conversation.
+  **Renderings** (`message_start`, `message_delta`, `message_end`,
+  `queue_update`) are drawn by the app and forwarded opaquely. Adding a rendering
+  is a host + app change; a new declaration is a protocol conversation.
+- **Every declaration carries a `state`** — the attn state the session is in
+  once that declaration is true (`idle`, `working`, and later
+  `waiting_input`/`pending_approval`). The daemon applies it through the normal
+  `applyState` path with the envelope's `seq` as the ordering cursor, so a
+  declaration cannot be invented daemon-side from the kind alone. A declaration
+  without a state is logged and dropped, never guessed at.
+- Delivery is three verbs, and the host picks nothing: the daemon says which.
+  `steer` drains at pi's next turn boundary, `follow_up` drains only when the
+  run would otherwise settle, `prompt` opens a run and is refused mid-run. A
+  steer or follow-up at an idle session is resolved into a run rather than
+  dropped — a doorbell must never vanish for arriving at the wrong moment.
+- `queue_update` is pi's own queue state, forwarded verbatim. pi emits it on
+  enqueue and again immediately before the user message that delivers the entry,
+  which is exactly "queued, then seen" — so the app never invents an optimistic
+  entry of its own.
 - `seq` is one monotonic spine across both families, minted only by
   `EnvelopeStream`.
 - The mapper never claims exhaustiveness over pi's event union — pi added four

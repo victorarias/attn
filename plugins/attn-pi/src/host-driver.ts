@@ -8,9 +8,16 @@ import type { DriverRegisterResult, DriverSpawnParams, DriverSpawnResult } from 
  * This driver is a launcher and nothing else. It hands attn the argv for the
  * host binary and the model to run; everything after that — the envelope
  * stream, the prompt verbs, the process group — is between the host and attn's
- * daemon. That is why it registers no state_reporting or message_delivery: the
- * `pi` agent needs a relay to hear from a pi it does not own, and this one has
- * a pipe to a pi attn spawned itself.
+ * daemon. That is why it registers no message_delivery: the `pi` agent needs a
+ * relay to carry a message to a pi it does not own, and this one has a pipe to
+ * a pi attn spawned itself, so the daemon writes the verb straight down it.
+ *
+ * `state_reporting` it does declare, and it means the same thing here as for
+ * any other driver: this agent's state is declared, not observed. The
+ * declaration reaches the daemon on the host's envelope stream rather than over
+ * this connection, but the consequence is what the capability is for — the
+ * evidence resolver must not have an opinion about a session it can see no
+ * evidence for.
  */
 export const hostAgentName = "pi-host";
 
@@ -41,6 +48,7 @@ export class PiHostDriver {
       capabilities: {
         conversation: true,
         model_pin: true,
+        state_reporting: true,
       },
     });
     if (!result.ok) throw new Error("attn rejected pi-host driver registration");

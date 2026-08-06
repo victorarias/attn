@@ -1,0 +1,12 @@
+kind: added
+area: sessions
+change: >
+  A conversation session now sits in the dashboard like every other agent —
+  working while it runs, idle when it stops, owing you a turn until you settle
+  it. You can interrupt one mid-run instead of waiting for it to finish: the
+  composer stays open while the agent works, and what you send is read at its
+  next stopping point, or queued until the run would otherwise end if you press
+  Follow up. Anything sent and not yet read is shown above the composer until
+  the agent reads it. Nudges — a ticket that needs the agent, a notice from a
+  presentation — travel the same way, and one that arrives while the session is
+  idle starts it working rather than going nowhere.

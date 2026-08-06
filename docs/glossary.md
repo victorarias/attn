@@ -251,8 +251,8 @@ a ticket binding — so nothing that reasons about sessions has to know which ki
 it is looking at.
 
 What differs is the surface. A PTY session's surface is a byte stream and a
-terminal grid; a conversation session's is an **envelope** stream going out and a
-**prompt** verb coming in. There is no grid, no scrollback, and no attach.
+terminal grid; a conversation session's is an **envelope** stream going out and
+**verbs** coming in. There is no grid, no scrollback, and no attach.
 
 The process running the agent is its **host**. The daemon owns a host's lifetime
 exactly as it owns a PTY worker's: it signals the host to tear down, and kills
@@ -267,12 +267,33 @@ lets an agent's own vocabulary grow without the daemon changing:
   `run_started`, `run_settled`. These are the host telling attn something true
   about the session.
 - **Renderings** are what the app draws — `message_start`, `message_delta`,
-  `message_end`. The daemon forwards them opaquely and holds no opinion about
-  them.
+  `message_end`, `queue_update`. The daemon forwards them opaquely and holds no
+  opinion about them.
+
+Every declaration carries the attn state it puts the session in, so the daemon
+reads state off the host rather than inferring it from the kind. That is what
+makes a conversation session move through `working` and `idle` like any other
+agent, and it is the path a future `pending_approval` travels on too.
 
 A **run** is one prompt and everything the agent does in response to it, from
 `run_started` to `run_settled`. A run is what a turn is opened and settled
 around, the same way a PTY agent's stop is.
+
+Three verbs put a message in front of the agent, and which one you use is a
+statement about *when* it should be read:
+
+- a **prompt** opens a run, and is what the composer sends when nothing is
+  running;
+- a **steer** cuts in at the agent's next turn boundary — the interruption, and
+  what every attn doorbell (a ticket nudge, a chief nudge, a Present notice)
+  becomes for a conversation session, since there is no PTY to type into;
+- a **follow-up** waits for the run to finish and is read before it settles, so
+  the agent never stops with one unread.
+
+A steer or a follow-up sent to a session with no run open starts one. That is
+what makes a doorbell safe to ring at any moment: nothing is dropped for having
+arrived at the wrong time. What has been sent and not yet read is the session's
+**queue**, which the host reports as it fills and drains — queued, then seen.
 
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —

@@ -80,7 +80,7 @@ import { pendingRequestKey, type PendingRequests } from './daemonPendingRequests
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
-import { useConversationsStore } from '../store/conversations';
+import { useConversationsStore, type AgentPromptMode } from '../store/conversations';
 import { conversationAgents } from '../utils/agentAvailability';
 import { useAutomationsStore } from '../store/automations';
 
@@ -199,7 +199,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '214';
+export const PROTOCOL_VERSION = '215';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -3009,13 +3009,18 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'terminal_pointer_activity', id }));
   }, []);
 
-  // Sends a prompt to a conversation session's host. Fire-and-forget in the
+  // Sends a message to a conversation session's host. Fire-and-forget in the
   // same sense as pty_input: the answer is not a result message but the
   // envelope stream the host starts producing, which lands in the conversations
   // store. A failure the daemon can name (no live host) comes back as a
   // command error and is surfaced there, not awaited here.
-  const sendAgentPrompt = useCallback((id: string, text: string) => {
-    sendOrQueueCommand({ cmd: 'agent_prompt', id, text }, { waitForInitialState: true });
+  //
+  // `mode` is when the agent reads it: a plain prompt opens a run, a steer cuts
+  // into the one already open at its next turn boundary, and a follow-up waits
+  // for it to finish. The host resolves a steer or follow-up on an idle session
+  // into a run of its own, so the caller does not have to check first.
+  const sendAgentPrompt = useCallback((id: string, text: string, mode?: AgentPromptMode) => {
+    sendOrQueueCommand({ cmd: 'agent_prompt', id, text, ...(mode ? { mode } : {}) }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
   // Pushes the app's resolved terminal theme colors to the daemon, which uses

@@ -89,6 +89,41 @@ describe('conversations store', () => {
     ]);
   });
 
+  it('carries pi\'s two queues verbatim, and empties them when a run ends', () => {
+    apply('session_ready', {}, 1);
+    apply('run_started', {}, 2);
+    apply('queue_update', { steering: ['one'], followUp: ['two', 'three'] }, 3);
+
+    expect(conversation().queue).toEqual({ steering: ['one'], followUp: ['two', 'three'] });
+
+    // Nothing survives a settle: pi drains a follow-up inside the run rather
+    // than after it, so a queue still standing here belongs to a host that has
+    // stopped speaking.
+    apply('run_settled', {}, 4);
+    expect(conversation().queue).toEqual({ steering: [], followUp: [] });
+  });
+
+  it('shuts the composer only until the host acknowledges the run', () => {
+    apply('session_ready', {}, 1);
+    useConversationsStore.getState().promptSent(SESSION);
+
+    expect(conversation().running).toBe(true);
+    expect(conversation().awaitingRun).toBe(true);
+
+    apply('run_started', {}, 2);
+    expect(conversation().running).toBe(true);
+    expect(conversation().awaitingRun).toBe(false);
+  });
+
+  it('reopens the composer when a prompt that reached no host is settled', () => {
+    apply('session_ready', {}, 1);
+    useConversationsStore.getState().promptSent(SESSION);
+    apply('run_settled', { error: 'this conversation\'s agent is no longer running' }, 0);
+
+    expect(conversation().running).toBe(false);
+    expect(conversation().awaitingRun).toBe(false);
+  });
+
   it('ignores a kind this build does not draw', () => {
     apply('message_start', { id: 'm1', role: 'assistant' }, 1);
     apply('tool_card', { id: 't1' }, 2);

@@ -104,14 +104,21 @@ first-class.
 
 Ships:
 
-- [ ] Host declares working/idle/waiting on run boundaries (states ride the
-      existing `applyState` path).
-- [ ] Turn integration (turn opens on settle-wanting-user, existing
+- [x] Host declares working/idle/waiting on run boundaries (states ride the
+      existing `applyState` path). Every declaration carries the state it puts
+      the session in; the daemon applies it as a `pluginReport` keyed on the
+      envelope `seq`, so ordering and superseded runs need no new machinery.
+      The host emits `working` and `idle`; `waiting_input` is on the wire and
+      waits for slice 4 to have something to say with it — pi cannot ask a
+      question outside a tool approval today, and `idle`/`waiting_input` are
+      behaviorally identical to attn (both open a turn, both accept nudges), so
+      classifying between them would buy nothing.
+- [x] Turn integration (turn opens on settle-wanting-user, existing
       `turn_owed` derivation).
-- [ ] `steer` and `follow_up` verbs on the wire, host picks steer vs new
+- [x] `steer` and `follow_up` verbs on the wire, host picks steer vs new
       prompt by run state.
-- [ ] `queue_update` surfaced so the UI shows queued -> seen.
-- [ ] Doorbell/ticket nudges routed through these verbs (no PTY typing, no
+- [x] `queue_update` surfaced so the UI shows queued -> seen.
+- [x] Doorbell/ticket nudges routed through these verbs (no PTY typing, no
       monitors).
 
 Acceptance:

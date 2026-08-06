@@ -427,6 +427,22 @@ func (d *Daemon) queueReportDuringPluginLaunch(plugin *pluginConnection, session
 	return true
 }
 
+// queueHostReportDuringLaunch is the same holding pen for a conversation
+// session's declared state, which arrives on the host's envelope stream rather
+// than over a plugin connection. The run id is what it matches on: it is minted
+// per launch and handed to exactly one host, so it identifies the reporter as
+// precisely as the plugin connection does for the JSON-RPC drivers.
+func (d *Daemon) queueHostReportDuringLaunch(sessionID string, params pluginReportStateParams) bool {
+	d.pluginDriverMu.Lock()
+	defer d.pluginDriverMu.Unlock()
+	launch, ok := d.pluginLaunching[sessionID]
+	if !ok || launch.RunID == "" || launch.RunID != strings.TrimSpace(params.RunID) {
+		return false
+	}
+	d.pluginReports[sessionID] = append(d.pluginReports[sessionID], pendingPluginReport{State: &params})
+	return true
+}
+
 func (d *Daemon) queueExitDuringPluginLaunch(info ptybackend.ExitInfo) bool {
 	d.pluginDriverMu.Lock()
 	defer d.pluginDriverMu.Unlock()
