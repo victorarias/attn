@@ -71,6 +71,22 @@ jobs:
           mkdir -p app/src-tauri/binaries
           cp /tmp/attn "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      # tauri bundles `bundled-plugins/` as the app's `Resources/plugins`, and a
+      # checkout has only a .gitkeep there — the compiled plugins are build
+      # output. A source install gets them from scripts/build-app-profile.sh;
+      # this is the release's equivalent step.
+      - name: Stage bundled plugins
+        run: ./scripts/build-bundled-plugins.sh
+
       - name: Import Apple signing credentials
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
@@ -126,6 +142,37 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: --target aarch64-apple-darwin
+
+      # A bundle that lost its plugins looks healthy and simply offers no agents
+      # from them, which nobody notices until someone tries to launch one. Fail
+      # here, before notarization spends twenty minutes on it. The expected set
+      # is whatever was staged, so a new plugin is covered without editing this.
+      - name: Verify the bundled plugins reached the app
+        run: |
+          app_path="$(find app/src-tauri/target -type d -name 'attn.app' | head -n1)"
+          if [ -z "$app_path" ]; then
+            echo "No attn.app bundle found in build output"
+            exit 1
+          fi
+
+          missing=0
+          for staged in app/src-tauri/bundled-plugins/*/; do
+            name="$(basename "$staged")"
+            for required in "attn-plugin.toml" "bin/${name}"; do
+              bundled="$app_path/Contents/Resources/plugins/$name/$required"
+              if [ ! -e "$bundled" ]; then
+                echo "missing from the app bundle: Contents/Resources/plugins/$name/$required"
+                missing=1
+              fi
+            done
+          done
+          if [ "$missing" -ne 0 ]; then
+            echo "staged plugins did not reach $app_path"
+            exit 1
+          fi
+
+          echo "bundled plugins present:"
+          ls "$app_path/Contents/Resources/plugins"
 
       - name: Repackage notarized app and replace release assets
         env:
