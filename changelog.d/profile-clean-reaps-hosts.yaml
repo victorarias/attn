@@ -1,0 +1,8 @@
+kind: fixed
+area: cli
+change: >
+  `attn profile clean` now shuts down a profile's conversation-session host
+  processes the same way it already reaps its pty-workers. Each host leaves a
+  durable record at spawn, so a host orphaned by a daemon that died uncleanly
+  is found and stopped — cooperatively first, so its tool subprocesses are
+  torn down too — instead of quietly burning memory after the profile is gone.

@@ -11,6 +11,7 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/hostsession"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
 
@@ -317,6 +318,12 @@ func runProfileClean(args []string) {
 	// ever adopt it. Reap before the registry goes.
 	reportWorkerReap(ptyworker.ReapDataDir(r.DataDir))
 
+	// Conversation hosts die with their daemon on purpose — but a daemon that
+	// died without running its shutdown left them running, reparented to init,
+	// findable only through the host registry this data dir holds. Same rule as
+	// workers: reap before the registry goes.
+	reportHostReap(hostsession.ReapDataDir(r.DataDir))
+
 	// App bundle: forget it in LaunchServices (so the deep-link scheme and
 	// bundle id stop resolving to a path we're about to delete), then remove it.
 	if fileExists(r.AppPath) {
@@ -362,6 +369,44 @@ func reportWorkerReap(results []ptyworker.ReapResult) {
 		}
 		fmt.Printf("           ! session %s: pid %d could not be confirmed as its worker (%v); left running — check it with `ps -p %d` and kill it yourself if it is stale\n",
 			res.SessionID, res.WorkerPID, res.Err, res.WorkerPID)
+	}
+}
+
+// reportHostReap prints one line per registered conversation host. Anything
+// short of a confirmed death names the pid: an unidentified host was left
+// alone on purpose, and a survivor outlived SIGKILL — both need a human.
+func reportHostReap(results []hostsession.ReapResult) {
+	if len(results) == 0 {
+		fmt.Printf("  hosts    none registered\n")
+		return
+	}
+	byOutcome := map[hostsession.ReapOutcome]int{}
+	for _, res := range results {
+		byOutcome[res.Outcome]++
+	}
+	order := []hostsession.ReapOutcome{
+		hostsession.ReapTerminated,
+		hostsession.ReapKilled,
+		hostsession.ReapAlreadyGone,
+		hostsession.ReapUnidentified,
+		hostsession.ReapSurvived,
+	}
+	parts := make([]string, 0, len(order))
+	for _, outcome := range order {
+		if n := byOutcome[outcome]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, outcome))
+		}
+	}
+	fmt.Printf("  hosts    %d registered (%s)\n", len(results), strings.Join(parts, ", "))
+	for _, res := range results {
+		switch res.Outcome {
+		case hostsession.ReapUnidentified:
+			fmt.Printf("           ! session %s: pid %d could not be confirmed as its host (%v); left running — check it with `ps -p %d` and kill it yourself if it is stale\n",
+				res.SessionID, res.PID, res.Err, res.PID)
+		case hostsession.ReapSurvived:
+			fmt.Printf("           ! session %s: host pid %d survived SIGKILL (%v)\n",
+				res.SessionID, res.PID, res.Err)
+		}
 	}
 }
 

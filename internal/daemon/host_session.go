@@ -119,12 +119,13 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 		cwd = opts.CWD
 	}
 	return d.ensureHostSessions().Spawn(hostsession.SpawnOptions{
-		SessionID:   opts.ID,
-		LifecycleID: opts.LifecycleID,
-		Command:     opts.ExternalCommand,
-		Env:         env,
-		CWD:         cwd,
-		LogPath:     hostSessionLogPath(opts.ID),
+		SessionID:    opts.ID,
+		LifecycleID:  opts.LifecycleID,
+		Command:      opts.ExternalCommand,
+		Env:          env,
+		CWD:          cwd,
+		LogPath:      hostSessionLogPath(opts.ID),
+		RegistryPath: hostsession.RegistryPath(config.DataDir(), opts.ID),
 	})
 }
 
