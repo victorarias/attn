@@ -59,10 +59,11 @@ func TestLaunchIntentSpawnSuccessPersistsResolvedValues(t *testing.T) {
 		t.Fatal("LaunchIntent() = ok false, want true after successful spawn")
 	}
 	want := store.LaunchIntent{
-		YoloMode:   true,
-		Executable: "/opt/claude",
-		Model:      "claude-opus",
-		Effort:     "high",
+		YoloMode:      true,
+		ApprovalRoute: launchcontract.ApprovalRouteBypass,
+		Executable:    "/opt/claude",
+		Model:         "claude-opus",
+		Effort:        "high",
 	}
 	if got != want {
 		t.Fatalf("LaunchIntent() = %+v, want %+v", got, want)

@@ -97,6 +97,28 @@ func TestAttachReviveRespawnsRecoverableSessionFromStoredIntent(t *testing.T) {
 	}
 }
 
+func TestAttachRevivePreservesStoredReviewerRoute(t *testing.T) {
+	intent := store.LaunchIntent{ApprovalRoute: launchcontract.ApprovalRouteReviewer}
+	d, backend, client, _ := newAttachReviveTestDaemon(t, protocol.SessionStateRecoverable, &intent)
+	d.store.SetSetting(SettingAutoApproveEnabled, "false")
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{
+		Cmd:          protocol.CmdAttachSession,
+		ID:           "recoverable",
+		AttachPolicy: protocol.Ptr(protocol.AttachPolicyRevive),
+		Cols:         protocol.Ptr(80),
+		Rows:         protocol.Ptr(24),
+	})
+
+	result := readAttachReviveResult(t, client)
+	if !result.Success || !protocol.Deref(result.Revived) {
+		t.Fatalf("attach result = %+v, want success with revived=true", result)
+	}
+	opts, spawned := backend.LastSpawn()
+	if !spawned || !opts.AutoApprove || opts.YoloMode || opts.ApprovalRoute != launchcontract.ApprovalRouteReviewer {
+		t.Fatalf("spawn options = %+v, want stored reviewer route", opts)
+	}
+}
+
 func TestAttachDoesNotReviveWithoutPolicy(t *testing.T) {
 	d, backend, client, _ := newAttachReviveTestDaemon(t, protocol.SessionStateRecoverable, &store.LaunchIntent{})
 	d.handleAttachSession(client, &protocol.AttachSessionMessage{Cmd: protocol.CmdAttachSession, ID: "recoverable"})

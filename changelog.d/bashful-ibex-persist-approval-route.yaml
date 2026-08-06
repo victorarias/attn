@@ -1,0 +1,6 @@
+kind: fixed
+area: queue
+change: >
+  Automatically reviewed permission requests stay behind the guardian dwell
+  after the daemon restarts, so brief approvals no longer flash as turns that
+  need the user and then disappear through auto-settle.

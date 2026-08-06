@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/sessionstate"
@@ -74,12 +75,13 @@ func TestSpawnFilesWhoAnswersApprovals(t *testing.T) {
 		autoApprove bool
 		yolo        bool
 		want        bool
+		wantRoute   launchcontract.ApprovalRoute
 	}{
-		{name: "guardian", autoApprove: true, want: true},
-		{name: "user answers", autoApprove: false, want: false},
+		{name: "guardian", autoApprove: true, want: true, wantRoute: launchcontract.ApprovalRouteReviewer},
+		{name: "user answers", autoApprove: false, want: false, wantRoute: launchcontract.ApprovalRouteUser},
 		// Yolo removes the approval gate rather than delegating it, so there is
 		// nothing for a reviewer to answer and nothing to dwell on.
-		{name: "yolo outranks auto-approve", autoApprove: true, yolo: true, want: false},
+		{name: "yolo outranks auto-approve", autoApprove: true, yolo: true, want: false, wantRoute: launchcontract.ApprovalRouteBypass},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -105,6 +107,10 @@ func TestSpawnFilesWhoAnswersApprovals(t *testing.T) {
 
 			if got := evidenceOf(t, d, msg.ID).ReviewerInLoop; got != tc.want {
 				t.Fatalf("ReviewerInLoop = %v, want %v", got, tc.want)
+			}
+			intent, ok := d.store.LaunchIntent(msg.ID)
+			if !ok || intent.ApprovalRoute != tc.wantRoute {
+				t.Fatalf("ApprovalRoute = %q, ok=%v, want %q", intent.ApprovalRoute, ok, tc.wantRoute)
 			}
 		})
 	}

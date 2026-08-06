@@ -423,6 +423,36 @@ func TestBuildReloadSpawnOptionsPreservesUnattendedContractAsUnit(t *testing.T) 
 	}
 }
 
+func TestBuildReloadSpawnOptionsUsesRecordedApprovalRoute(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		setting       string
+		route         launchcontract.ApprovalRoute
+		wantAuto      bool
+		wantYolo      bool
+		wantPersisted launchcontract.ApprovalRoute
+	}{
+		{name: "reviewer survives disabled global setting", setting: "false", route: launchcontract.ApprovalRouteReviewer, wantAuto: true, wantPersisted: launchcontract.ApprovalRouteReviewer},
+		{name: "user survives enabled global setting", setting: "true", route: launchcontract.ApprovalRouteUser, wantPersisted: launchcontract.ApprovalRouteUser},
+		{name: "legacy missing route is conservative", setting: "true", route: "", wantPersisted: launchcontract.ApprovalRouteUser},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			backend := &fakeReloadBackend{params: ptybackend.SessionLaunchParams{Recorded: true, ApprovalRoute: tc.route}}
+			d := newReloadTestDaemon(t, backend)
+			addReloadSession(d, "route", protocol.SessionAgentCodex, protocol.SessionStateWorking)
+			d.store.SetSetting(SettingAutoApproveEnabled, tc.setting)
+
+			opts, err := d.buildReloadSpawnOptions(d.store.Get("route"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if opts.AutoApprove != tc.wantAuto || opts.YoloMode != tc.wantYolo || opts.ApprovalRoute != tc.wantPersisted {
+				t.Fatalf("approval launch = auto:%v yolo:%v route:%q", opts.AutoApprove, opts.YoloMode, opts.ApprovalRoute)
+			}
+		})
+	}
+}
+
 func TestReloadSessionAgentSkipsWhenNoLiveWorker(t *testing.T) {
 	backend := &fakeReloadBackend{liveIDs: nil, params: ptybackend.SessionLaunchParams{Recorded: true}}
 	d := newReloadTestDaemon(t, backend)

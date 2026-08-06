@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
@@ -35,6 +36,39 @@ func TestWithoutEnvironmentKeysRemovesInheritedLaunchPins(t *testing.T) {
 	want := []string{"PATH=/bin"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("withoutEnvironmentKeys() = %#v, want %#v", got, want)
+	}
+}
+
+func TestWorkerSpawnArgsCarryApprovalRoute(t *testing.T) {
+	root := newWorkerBackendTestRoot(t)
+	backend, err := NewWorker(WorkerBackendConfig{
+		DataRoot:         root,
+		DaemonInstanceID: "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		BinaryPath:       "/bin/true",
+	})
+	if err != nil {
+		t.Fatalf("NewWorker() error: %v", err)
+	}
+	session := &workerSession{
+		SessionID:    "approval-route",
+		RegistryPath: filepath.Join(root, "registry.json"),
+		SocketPath:   filepath.Join(root, "worker.sock"),
+		ControlToken: "test-token",
+	}
+	argv, err := backend.spawnArgs(SpawnOptions{
+		ID:            session.SessionID,
+		Agent:         "codex",
+		CWD:           root,
+		Cols:          80,
+		Rows:          24,
+		AutoApprove:   true,
+		ApprovalRoute: launchcontract.ApprovalRouteReviewer,
+	}, session)
+	if err != nil {
+		t.Fatalf("spawnArgs() error: %v", err)
+	}
+	if got := argAfterFlag(argv, "--approval-route"); got != string(launchcontract.ApprovalRouteReviewer) {
+		t.Fatalf("--approval-route = %q, want %q", got, launchcontract.ApprovalRouteReviewer)
 	}
 }
 

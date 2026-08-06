@@ -8,7 +8,6 @@ import (
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
-	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/sessionstate"
 	"github.com/victorarias/attn/internal/statetrace"
 )
@@ -374,17 +373,6 @@ func (d *Daemon) recordReviewerEvidence(sessionID string, inLoop bool) {
 	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
 		e.ReviewerInLoop = inLoop
 	})
-}
-
-// reviewerInLoop reads the launch options for the one arrangement that puts
-// something other than the user in front of an approval request.
-//
-// Both agents gate their reviewer on the same option — claude with
-// `--permission-mode auto`, codex with `approvals_reviewer=auto_review` — and
-// yolo outranks it by removing the approval gate altogether, so a yolo session
-// has no reviewer because it has nothing to review.
-func reviewerInLoop(opts ptybackend.SpawnOptions) bool {
-	return opts.AutoApprove && !opts.YoloMode
 }
 
 // recordReviewerEvidenceFromPermissionMode files claude's reported mode.

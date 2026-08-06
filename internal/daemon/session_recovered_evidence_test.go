@@ -7,16 +7,76 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/attention"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/sessionstate"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // heartbeat builds the level a worker reports back for a session it has been
 // running since before this daemon existed.
 func heartbeat(claim string, at time.Time) pty.Observation {
 	return pty.Observation{Source: pty.SourceHeartbeat, Claim: claim, Detail: "a turn summary", At: at}
+}
+
+// The daemon-restart regression: the guardian route must be reconstructed
+// before the first approval observation is resolved. Otherwise this brief
+// request publishes yellow immediately and opens a turn that auto-settle later
+// closes by accident.
+func TestRecoveredReviewerKeepsBriefApprovalInsideGuardianDwell(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	concludedAt := time.Now().Add(-time.Minute)
+	addRecoveredSession(t, d, "guarded", protocol.SessionStateWorking, concludedAt)
+	d.store.SetLaunchIntent("guarded", store.LaunchIntent{ApprovalRoute: launchcontract.ApprovalRouteReviewer})
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: []string{"guarded"},
+		info:    map[string]ptybackend.SessionInfo{"guarded": runningInfo(nil)},
+		params: map[string]ptybackend.SessionLaunchParams{
+			"guarded": {Recorded: true, ApprovalRoute: launchcontract.ApprovalRouteReviewer},
+		},
+	}
+	d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+
+	if !evidenceOf(t, d, "guarded").ReviewerInLoop {
+		t.Fatal("recovery did not reconstruct the reviewer before resolver activity")
+	}
+	now := time.Now()
+	d.recordBracketEvidence("guarded", protocol.StateWorking)
+	d.recordPTYEvidence("guarded", pty.Observation{Source: pty.SourceHeartbeat, Claim: "approval", At: now, Detail: "Action Required"})
+	d.resolveAllSessions(now.Add(time.Second))
+	if got := d.store.Get("guarded").State; got == protocol.SessionStatePendingApproval {
+		t.Fatal("brief guardian-reviewed approval published after daemon recovery")
+	}
+
+	d.recordPTYEvidence("guarded", pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: now.Add(2 * time.Second)})
+	d.resolveAllSessions(now.Add(3 * time.Second))
+	if got := d.store.Get("guarded").State; got != protocol.SessionStateWorking {
+		t.Fatalf("state = %q, want working after guardian answered", got)
+	}
+}
+
+func TestRecoveryUsesWorkerApprovalRouteAndRepairsStoredIntent(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addRecoveredSession(t, d, "route-mismatch", protocol.SessionStateWorking, time.Now().Add(-time.Minute))
+	d.store.SetLaunchIntent("route-mismatch", store.LaunchIntent{ApprovalRoute: launchcontract.ApprovalRouteUser})
+	d.ptyBackend = &fakeWorkerReconcileBackend{
+		liveIDs: []string{"route-mismatch"},
+		info:    map[string]ptybackend.SessionInfo{"route-mismatch": runningInfo(nil)},
+		params: map[string]ptybackend.SessionLaunchParams{
+			"route-mismatch": {Recorded: true, ApprovalRoute: launchcontract.ApprovalRouteReviewer},
+		},
+	}
+	d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
+
+	if !evidenceOf(t, d, "route-mismatch").ReviewerInLoop {
+		t.Fatal("stored route won over the surviving worker")
+	}
+	intent, ok := d.store.LaunchIntent("route-mismatch")
+	if !ok || intent.ApprovalRoute != launchcontract.ApprovalRouteReviewer {
+		t.Fatalf("repaired launch intent = %+v, ok=%v", intent, ok)
+	}
 }
 
 func addRecoveredSession(t *testing.T, d *Daemon, id string, state protocol.SessionState, stateSince time.Time) {

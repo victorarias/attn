@@ -60,11 +60,12 @@ type ActiveAgentDriverRun struct {
 // relaunch a session without a client. Geometry is deliberately absent:
 // the attaching client owns it.
 type LaunchIntent struct {
-	YoloMode     bool   `json:"yolo_mode,omitempty"`
-	Executable   string `json:"executable,omitempty"`
-	Model        string `json:"model,omitempty"`
-	Effort       string `json:"effort,omitempty"`
-	ChiefOfStaff bool   `json:"chief_of_staff,omitempty"`
+	YoloMode      bool                         `json:"yolo_mode,omitempty"`
+	ApprovalRoute launchcontract.ApprovalRoute `json:"approval_route,omitempty"`
+	Executable    string                       `json:"executable,omitempty"`
+	Model         string                       `json:"model,omitempty"`
+	Effort        string                       `json:"effort,omitempty"`
+	ChiefOfStaff  bool                         `json:"chief_of_staff,omitempty"`
 	// UnattendedLaunch is the complete launch contract for sessions launched
 	// unattended (delegation/automations). Persisting the whole contract makes
 	// the store a sufficient authority to relaunch such a session when the

@@ -93,6 +93,7 @@ type Config struct {
 	ResumeSessionID   string
 	ResumePicker      bool
 	YoloMode          bool
+	ApprovalRoute     launchcontract.ApprovalRoute
 	InitialPromptFile string
 
 	ThemeForeground  string
@@ -361,6 +362,7 @@ func (r *Runtime) run(ctx context.Context) error {
 	// of defaulting them.
 	entry.LaunchParamsRecorded = true
 	entry.YoloMode = r.cfg.YoloMode
+	entry.ApprovalRoute = r.cfg.ApprovalRoute
 	entry.Executable = r.cfg.Executable
 	entry.ClaudeExecutable = r.cfg.ClaudeExecutable
 	entry.CodexExecutable = r.cfg.CodexExecutable
