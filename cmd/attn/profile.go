@@ -591,7 +591,7 @@ Usage:
   attn profile resolve --field wsPort      print one resolved value
   attn profile resolve --profile agent7    resolve a different profile
   attn profile tauri-config    Tauri --config overlay for the profile's build
-  attn profile clean <name>    reap workers, stop daemon, quit app, remove its app + data dir
+  attn profile clean <name>    reap workers + hosts, stop daemon, quit app, remove its app + data dir
   attn profile list            every profile with data and/or an installed app
   attn profile list --json     same, machine-readable, with origin and what is running
   attn profile set-origin <name> [--worktree <dir>]
