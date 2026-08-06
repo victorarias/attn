@@ -17,8 +17,7 @@ import (
 // never produce a single piece of evidence again. The resolver would then have
 // nothing to say about it for the rest of its life.
 //
-// Two things are recoverable without persisting anything, because both sources
-// outlived the daemon:
+// Three things are recoverable because their sources outlived the daemon:
 //
 //   - The level. The worker holds the last observation its signal observers
 //     emitted, timestamped. A level is a standing claim, so reading it back is
@@ -26,6 +25,8 @@ import (
 //   - The outstanding harness edge. An approval or a question is not in the
 //     worker, but the session's own persisted state *is* the record that one was
 //     outstanding, and nothing has happened since to answer it.
+//   - The approval route. The surviving worker registry records the effective
+//     launch-time route, with the session's durable launch intent as fallback.
 //
 // What is deliberately not reconstructed is the bracket pair (turn open, tool
 // open). Those are hook-driven and genuinely gone, and inventing them would hold
@@ -37,6 +38,9 @@ import (
 func (d *Daemon) seedRecoveredEvidence(sessionID string, existing *protocol.Session, info ptybackend.SessionInfo) {
 	if d == nil || existing == nil {
 		return
+	}
+	if route, ok := d.recoveredApprovalRoute(sessionID); ok {
+		d.recordReviewerEvidence(sessionID, route.ReviewerInLoop())
 	}
 	if info.HasLastSignal {
 		// Routed through the ordinary PTY evidence path rather than written

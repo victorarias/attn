@@ -389,6 +389,9 @@ func (b *WorkerBackend) spawnArgs(opts SpawnOptions, session *workerSession) ([]
 	if opts.YoloMode {
 		args = append(args, "--yolo-mode")
 	}
+	if opts.ApprovalRoute != "" {
+		args = append(args, "--approval-route", string(opts.ApprovalRoute))
+	}
 	if opts.InitialPromptFile != "" {
 		args = append(args, "--initial-prompt-file", opts.InitialPromptFile)
 	}
@@ -1076,6 +1079,7 @@ func (b *WorkerBackend) SessionLaunchParams(ctx context.Context, sessionID strin
 	return SessionLaunchParams{
 		Recorded:          entry.LaunchParamsRecorded,
 		YoloMode:          entry.YoloMode,
+		ApprovalRoute:     entry.ApprovalRoute,
 		Executable:        entry.Executable,
 		ClaudeExecutable:  entry.ClaudeExecutable,
 		CodexExecutable:   entry.CodexExecutable,

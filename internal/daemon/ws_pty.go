@@ -322,7 +322,11 @@ func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent
 		spawnMsg.Effort = protocol.Ptr(launch.Effort)
 		spawnMsg.Executable = protocol.Ptr(launch.Executable)
 	}
-	return spawnMsg, internalSpawnPolicy{unattendedLaunch: launch}
+	return spawnMsg, internalSpawnPolicy{
+		unattendedLaunch:      launch,
+		approvalRoute:         intent.ApprovalRoute,
+		preserveApprovalRoute: true,
+	}
 }
 
 // reviveSessionForAttach respawns a recoverable session from its durable record

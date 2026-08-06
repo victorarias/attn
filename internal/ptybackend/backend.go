@@ -64,6 +64,11 @@ type SpawnOptions struct {
 	// worker exports ATTN_AUTO_APPROVE so the launched agent starts in its native
 	// auto-approve mode (Claude --permission-mode auto). Yolo overrides it.
 	AutoApprove bool
+	// ApprovalRoute is the effective, launch-time destination for approval
+	// requests. The worker persists it so a replacement daemon can reconstruct
+	// guardian evidence without consulting a later global setting. Empty is
+	// accepted only for legacy/internal callers that predate route recording.
+	ApprovalRoute launchcontract.ApprovalRoute
 	// TrustWorkingDirectory is set only for unattended daemon-owned launches.
 	TrustWorkingDirectory bool
 
@@ -94,8 +99,16 @@ type SpawnOptions struct {
 }
 
 func validateUnattendedSpawnOptions(opts SpawnOptions) error {
+	if opts.ApprovalRoute != "" && !opts.ApprovalRoute.Valid() {
+		return fmt.Errorf("invalid approval route %q", opts.ApprovalRoute)
+	}
 	launch := opts.UnattendedLaunch
 	if launch.IsZero() {
+		if opts.ApprovalRoute != "" {
+			if want := launchcontract.ResolveApprovalRoute(opts.YoloMode, opts.AutoApprove, launch); opts.ApprovalRoute != want {
+				return fmt.Errorf("approval route %q does not match effective launch route %q", opts.ApprovalRoute, want)
+			}
+		}
 		return nil
 	}
 	if err := launch.Validate(); err != nil {
@@ -107,6 +120,11 @@ func validateUnattendedSpawnOptions(opts SpawnOptions) error {
 	if opts.AutoApprove || opts.TrustWorkingDirectory || strings.TrimSpace(opts.Model) != "" ||
 		strings.TrimSpace(opts.Effort) != "" || strings.TrimSpace(opts.Executable) != "" {
 		return errors.New("unattended launch policy must not be duplicated in spawn options")
+	}
+	if opts.ApprovalRoute != "" {
+		if want := launchcontract.ResolveApprovalRoute(opts.YoloMode, opts.AutoApprove, launch); opts.ApprovalRoute != want {
+			return fmt.Errorf("approval route %q does not match effective launch route %q", opts.ApprovalRoute, want)
+		}
 	}
 	return nil
 }
@@ -216,17 +234,16 @@ type SessionInfoProvider interface {
 	SessionInfo(ctx context.Context, sessionID string) (SessionInfo, error)
 }
 
-// SessionLaunchParams carries the per-spawn launch flags the daemon does not
-// otherwise persist — they arrive per-spawn from the client and otherwise live
-// only in the live worker. Backends that run a per-session worker record them in
-// the worker registry so the daemon can read them back when it re-spawns the
-// agent in place (chief-of-staff assign/demote reload).
+// SessionLaunchParams carries the launch flags recorded by a live worker. The
+// worker registry is authoritative for the process that actually survived a
+// daemon restart; the durable launch intent is the fallback when no worker does.
 type SessionLaunchParams struct {
 	// Recorded is false for sessions whose worker predates launch-param recording.
 	// The daemon must NOT trust the other fields when false and must abort the
 	// reload rather than respawn with defaulted launch flags.
 	Recorded          bool
 	YoloMode          bool
+	ApprovalRoute     launchcontract.ApprovalRoute
 	Executable        string
 	ClaudeExecutable  string
 	CodexExecutable   string

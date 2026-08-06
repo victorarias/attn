@@ -589,7 +589,8 @@ func TestStore_LaunchIntentRoundTrip(t *testing.T) {
 	}
 	s.Add(&protocol.Session{ID: "launch-intent", Label: "launch-intent"})
 	want := LaunchIntent{
-		ChiefOfStaff: true,
+		ChiefOfStaff:  true,
+		ApprovalRoute: launchcontract.ApprovalRouteReviewer,
 		UnattendedLaunch: launchcontract.UnattendedLaunchSpec{
 			Agent: "claude", Model: "sonnet", Effort: "high", Executable: "/opt/claude",
 			ApprovalProductMode: launchcontract.ApprovalAuto, ApprovalDriverMode: launchcontract.ApprovalAuto,

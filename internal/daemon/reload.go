@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -265,6 +266,8 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 	// Success. Do NOT clear the flag here — the killed worker's exit consumes it.
 	// AfterFunc is a backstop only (never-arriving exit), so the flag cannot wedge.
 	time.AfterFunc(reloadStuckFlagGrace, func() { d.clearReloading(sessionID) })
+	d.store.SetLaunchIntent(sessionID, launchIntentFromSpawnOptions(opts, d.isChiefOfStaffSession(sessionID)))
+	d.recordReviewerEvidence(sessionID, opts.ApprovalRoute.ReviewerInLoop())
 	d.publishFact(FactSessionRespawned, sessionID, nil)
 	d.logf("reload: respawned %s (agent=%s resume=%t yolo=%t)", sessionID, opts.Agent, opts.ResumeSessionID != "", opts.YoloMode)
 	return nil
@@ -291,6 +294,16 @@ func (d *Daemon) buildReloadSpawnOptions(session *protocol.Session) (ptybackend.
 	if !params.Recorded {
 		return d.buildReloadSpawnOptionsFromStoredIntent(session, fmt.Errorf("launch params not recorded (pre-reload worker)"))
 	}
+	if _, known, routeErr := recordedApprovalRoute(params.ApprovalRoute, params.YoloMode, params.UnattendedLaunch); routeErr != nil {
+		return ptybackend.SpawnOptions{}, fmt.Errorf("read launch params: %w", routeErr)
+	} else if !known {
+		// A route-aware launch intent can fill the one field an older surviving
+		// worker did not record. Do not copy mutable settings or otherwise replace
+		// the live worker's launch params.
+		if intent, exists := d.store.LaunchIntent(sessionID); exists && intent.ApprovalRoute.Valid() {
+			params.ApprovalRoute = intent.ApprovalRoute
+		}
+	}
 	return d.buildReloadSpawnOptionsFromLaunchParams(session, params)
 }
 
@@ -303,6 +316,7 @@ func (d *Daemon) buildReloadSpawnOptionsFromStoredIntent(session *protocol.Sessi
 	return d.buildReloadSpawnOptionsFromLaunchParams(session, ptybackend.SessionLaunchParams{
 		Recorded:         true,
 		YoloMode:         intent.YoloMode,
+		ApprovalRoute:    intent.ApprovalRoute,
 		Executable:       intent.Executable,
 		Model:            intent.Model,
 		Effort:           intent.Effort,
@@ -351,6 +365,7 @@ func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Sessi
 		ResumeSessionID:         resumeSessionID,
 		Theme:                   d.currentTerminalTheme(),
 		YoloMode:                params.YoloMode,
+		ApprovalRoute:           params.ApprovalRoute,
 		Executable:              params.Executable,
 		ClaudeExecutable:        params.ClaudeExecutable,
 		CodexExecutable:         params.CodexExecutable,
@@ -359,7 +374,7 @@ func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Sessi
 		Effort:                  params.Effort,
 		LoginShellEnv:           d.cachedLoginShellEnv(),
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
-		AutoApprove:             parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)),
+		AutoApprove:             false,
 		// Carry the chief context-window cap across an in-place reload so a
 		// reloaded chief comes back capped, not just a fresh launch. The wrapper
 		// re-derives the chief's NotebookRoot (and thus emits the cap) via the
@@ -379,8 +394,17 @@ func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Sessi
 		opts.Executable = ""
 		opts.Model = ""
 		opts.Effort = ""
-		opts.AutoApprove = false
 		opts.UnattendedLaunch = params.UnattendedLaunch
+	}
+	route, known, err := recordedApprovalRoute(params.ApprovalRoute, params.YoloMode, params.UnattendedLaunch)
+	if err != nil {
+		return ptybackend.SpawnOptions{}, err
+	}
+	if !known {
+		route = launchcontract.ApprovalRouteUser
+	}
+	if err := applyApprovalRoute(&opts, route); err != nil {
+		return ptybackend.SpawnOptions{}, err
 	}
 	return opts, nil
 }

@@ -613,6 +613,7 @@ func TestDaemon_Start_SelectsEmbeddedBackendWhenRequested(t *testing.T) {
 type fakeWorkerReconcileBackend struct {
 	liveIDs []string
 	info    map[string]ptybackend.SessionInfo
+	params  map[string]ptybackend.SessionLaunchParams
 }
 
 func (b *fakeWorkerReconcileBackend) Spawn(context.Context, ptybackend.SpawnOptions) error {
@@ -643,6 +644,13 @@ func (b *fakeWorkerReconcileBackend) SessionInfo(_ context.Context, sessionID st
 		return ptybackend.SessionInfo{}, fmt.Errorf("missing info for %s", sessionID)
 	}
 	return info, nil
+}
+func (b *fakeWorkerReconcileBackend) SessionLaunchParams(_ context.Context, sessionID string) (ptybackend.SessionLaunchParams, error) {
+	params, ok := b.params[sessionID]
+	if !ok {
+		return ptybackend.SessionLaunchParams{}, pty.ErrSessionNotFound
+	}
+	return params, nil
 }
 
 type fakeDeferredRecoveryBackend struct {

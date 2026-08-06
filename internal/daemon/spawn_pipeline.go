@@ -19,7 +19,9 @@ import (
 )
 
 type internalSpawnPolicy struct {
-	unattendedLaunch launchcontract.UnattendedLaunchSpec
+	unattendedLaunch      launchcontract.UnattendedLaunchSpec
+	approvalRoute         launchcontract.ApprovalRoute
+	preserveApprovalRoute bool
 }
 
 type spawnRequest struct {
@@ -249,6 +251,22 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 		}
 		plan.spawnOpts.AutoApprove, plan.spawnOpts.TrustWorkingDirectory, plan.spawnOpts.Model, plan.spawnOpts.Effort, plan.spawnOpts.Executable, plan.spawnOpts.UnattendedLaunch = false, false, "", "", "", launch
 	}
+	if req.policy.preserveApprovalRoute {
+		route, known, err := recordedApprovalRoute(req.policy.approvalRoute, plan.spawnOpts.YoloMode, plan.spawnOpts.UnattendedLaunch)
+		if err != nil {
+			plan.rollback(d, msg.ID)
+			return nil, &spawnRejection{err: err}
+		}
+		if !known {
+			route = launchcontract.ApprovalRouteUser
+		}
+		if err := applyApprovalRoute(&plan.spawnOpts, route); err != nil {
+			plan.rollback(d, msg.ID)
+			return nil, &spawnRejection{err: err}
+		}
+	} else {
+		plan.spawnOpts.ApprovalRoute = launchcontract.ResolveApprovalRoute(plan.spawnOpts.YoloMode, plan.spawnOpts.AutoApprove, plan.spawnOpts.UnattendedLaunch)
+	}
 	// A chief launch caps its context window (chief_context_window_cap); non-chief
 	// launches stay uncapped so delegated interactive agents are never affected.
 	plan.spawnOpts.ChiefContextWindowCap = d.chiefContextWindowCap(plan.isChief)
@@ -330,14 +348,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 	// death after Spawn but before commit would otherwise leave a recoverable
 	// session with no stored launch intent to revive from.
 	plan.priorIntent, plan.hadPriorIntent = d.store.LaunchIntent(session.ID)
-	d.store.SetLaunchIntent(session.ID, store.LaunchIntent{
-		YoloMode:         plan.spawnOpts.YoloMode,
-		Executable:       plan.spawnOpts.Executable,
-		Model:            plan.spawnOpts.Model,
-		Effort:           plan.spawnOpts.Effort,
-		ChiefOfStaff:     plan.isChief,
-		UnattendedLaunch: plan.spawnOpts.UnattendedLaunch,
-	})
+	d.store.SetLaunchIntent(session.ID, launchIntentFromSpawnOptions(plan.spawnOpts, plan.isChief))
 	if err := d.spawnSessionRuntime(req, plan.spawnOpts); err != nil {
 		if req.existingSession == nil {
 			d.store.Remove(msg.ID)
@@ -360,7 +371,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 	// else, so it is filed here. Codex reports no permission mode to the daemon at
 	// any point in its life, and without this its guardian would be invisible —
 	// which is the arrangement the dwell exists for.
-	d.recordReviewerEvidence(msg.ID, reviewerInLoop(plan.spawnOpts))
+	d.recordReviewerEvidence(msg.ID, plan.spawnOpts.ApprovalRoute.ReviewerInLoop())
 	if plan.spawnOpts.InitialPromptFile != "" {
 		// The spawned wrapper removes the file after reading it. Keep a fallback
 		// for failures between PTY spawn and wrapper startup.

@@ -27,6 +27,7 @@ import (
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
+	"github.com/victorarias/attn/internal/launchcontract"
 	"github.com/victorarias/attn/internal/pathutil"
 	"github.com/victorarias/attn/internal/present"
 	"github.com/victorarias/attn/internal/probetui"
@@ -389,6 +390,7 @@ func runPTYWorker() {
 	var cfg ptyworker.Config
 	var cols int
 	var rows int
+	var approvalRoute string
 	fs.StringVar(&cfg.DaemonInstanceID, "daemon-instance-id", "", "daemon instance id")
 	fs.StringVar(&cfg.SessionID, "session-id", "", "session id")
 	fs.StringVar(&cfg.Agent, "agent", "", "session agent")
@@ -399,6 +401,7 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.ResumeSessionID, "resume-session-id", "", "resume session id")
 	fs.BoolVar(&cfg.ResumePicker, "resume-picker", false, "resume picker")
 	fs.BoolVar(&cfg.YoloMode, "yolo-mode", false, "launch agent in yolo mode")
+	fs.StringVar(&approvalRoute, "approval-route", "", "effective approval route recorded for daemon recovery")
 	fs.StringVar(&cfg.InitialPromptFile, "initial-prompt-file", "", "file containing the initial agent prompt")
 	fs.StringVar(&cfg.ThemeForeground, "theme-foreground", "", "terminal foreground color seeded for OSC 10/11/12 queries")
 	fs.StringVar(&cfg.ThemeBackground, "theme-background", "", "terminal background color seeded for OSC 10/11/12 queries")
@@ -422,6 +425,13 @@ func runPTYWorker() {
 	fs.StringVar(&cfg.OwnerNonce, "owner-nonce", "", "daemon owner nonce")
 
 	_ = fs.Parse(os.Args[2:])
+	if approvalRoute != "" {
+		cfg.ApprovalRoute = launchcontract.ApprovalRoute(approvalRoute)
+		if !cfg.ApprovalRoute.Valid() {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --approval-route %q\n", approvalRoute)
+			os.Exit(1)
+		}
+	}
 	if themeANSIPaletteJSON != "" {
 		if err := json.Unmarshal([]byte(themeANSIPaletteJSON), &cfg.ThemeANSIPalette); err != nil {
 			fmt.Fprintf(os.Stderr, "pty-worker error: invalid --theme-ansi-palette-json: %v\n", err)
