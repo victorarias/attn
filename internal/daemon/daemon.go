@@ -2421,6 +2421,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleDocDelete(conn, msg.(*protocol.DocDeleteMessage))
 	case protocol.CmdDocQuery: // wire: doc_query
 		d.handleDocQuery(conn, msg.(*protocol.DocQueryMessage))
+	case protocol.CmdDocCount: // wire: doc_count
+		d.handleDocCount(conn, msg.(*protocol.DocCountMessage))
 	// doc_subscribe keeps the connection: it streams result sets until the
 	// caller disconnects, rather than answering once.
 	case protocol.CmdDocSubscribe: // wire: doc_subscribe

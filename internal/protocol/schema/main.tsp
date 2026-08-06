@@ -3575,11 +3575,18 @@ model DocPutMessage {
 
 // `rev` is the revision the document now has, so a create-then-update sequence
 // needs no read in between.
+//
+// `seq` is the write's POSITION: the document write and the fact describing it
+// are one commit, and this is where that fact landed on the durable log. Compare
+// it against a later read's `as_of_seq` to know whether that read includes this
+// write. It is an opaque monotone position — never a row id, never dense, never
+// contiguous — and clients only store and compare it.
 model DocPutResult {
   "namespace": string;
   "collection": string;
   "id": string;
   "rev": safeint;
+  "seq": safeint;
 }
 
 model DocGetMessage {
@@ -3591,9 +3598,14 @@ model DocGetMessage {
 
 // `found` separates an absent document from a failed read; `document` is present
 // only when found.
+//
+// `as_of_seq` is the log position this answer was true at, read in the same
+// transaction as the document. 0 means "before everything" — a valid position on
+// a log that has never been written to, not a missing answer.
 model DocGetResult {
   "found": boolean;
   "document"?: StoredDocument;
+  "as_of_seq": safeint;
 }
 
 // `expected_rev` removes the document only if it is still at that revision —
@@ -3610,11 +3622,16 @@ model DocDeleteMessage {
 
 // `existed` is false when the delete removed nothing, so a caller does not
 // report a change that did not happen.
+//
+// `seq` is the removal's position on the durable log, as DocPutResult describes.
+// It is 0 when `existed` is false: nothing changed, so nothing was announced and
+// there is no position to report.
 model DocDeleteResult {
   "namespace": string;
   "collection": string;
   "id": string;
   "existed": boolean;
+  "seq": safeint;
 }
 
 model DocQueryMessage {
@@ -3622,8 +3639,38 @@ model DocQueryMessage {
   "query": DocumentQuery;
 }
 
+// `as_of_seq` is the log position these documents were true at, read in the same
+// transaction as the rows themselves.
 model DocQueryResult {
   "documents": StoredDocument[];
+  "as_of_seq": safeint;
+}
+
+// Count the documents a query matches, without fetching their bodies. The
+// filters (and the after cursor, if any) mean exactly what they mean for
+// doc_query; sort and limit are ignored, because they decide which matches come
+// back and never how many there are.
+model DocCountMessage {
+  "cmd": "doc_count";
+  "query": DocumentQuery;
+}
+
+model DocCountResult {
+  "count": int32;
+  "as_of_seq": safeint;
+}
+
+// The revisions a refused write disagreed about. `expected` is what the caller
+// asserted (0 meaning "must not exist"); `found` reports whether a document was
+// there at all when the store looked, and `actual` is its revision, meaningless
+// when `found` is false. Together they say which write this one lost to.
+model DocumentConflict {
+  "namespace": string;
+  "collection": string;
+  "id": string;
+  "expected": safeint;
+  "found": boolean;
+  "actual": safeint;
 }
 
 // Subscribe to a live query. Unlike every other command here, this one keeps the
@@ -3658,6 +3705,15 @@ model DocSubscribeResult {
 model Response {
   ok: boolean;
   error?: string;
+  // A machine-readable name for what went wrong, beside the human-readable
+  // `error` text. Present only where a caller has to branch on the answer:
+  // `conflict` (retry after re-reading — `error_conflict` carries which
+  // revisions disagreed), `undeclared_collection` (the collection is not
+  // there), `invalid_query` (the query itself is wrong). Everything else
+  // carries no code, and a client must treat an unknown code as "broken, stop"
+  // rather than matching the message text.
+  error_code?: string;
+  error_conflict?: DocumentConflict;
   data?: string;
   delegate_result?: DelegateResult;
   delegation_operation?: DelegationOperation;
@@ -3696,6 +3752,7 @@ model Response {
   doc_get_result?: DocGetResult;
   doc_delete_result?: DocDeleteResult;
   doc_query_result?: DocQueryResult;
+  doc_count_result?: DocCountResult;
   doc_subscribe_result?: DocSubscribeResult;
 }
 

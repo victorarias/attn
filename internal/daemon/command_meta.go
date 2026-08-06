@@ -154,6 +154,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDocGet:         commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocDelete:      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocQuery:       commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocCount:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocSubscribe:   commandMetadata(ScopeHubLocal, false, true),
 }
 

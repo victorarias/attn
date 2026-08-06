@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, AddEndpointMessage, AgentEventMessage, AgentPromptMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocumentCollectionSchema, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentSort, DocUndefineMessage, DocUndefineResult, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SettleTurnMessage, SetWorkspaceRankMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, AddEndpointMessage, AgentEventMessage, AgentPromptMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDefinitionSummary, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationRunSummary, AutomationsChangedMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionsMessage, ClearWarningsMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentSort, DocUndefineMessage, DocUndefineResult, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PR, PRActionResultMessage, PresentAnnotation, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, PRRole, PRsUpdatedMessage, PRVisitedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizedMessage, PtyResizeMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionsUpdatedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SetChiefOfStaffMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SettingsUpdatedMessage, SettleTurnMessage, SetWorkspaceRankMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketsUpdatedMessage, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const addEndpointMessage = Convert.toAddEndpointMessage(json);
 //   const agentEventMessage = Convert.toAgentEventMessage(json);
@@ -70,6 +70,8 @@
 //   const dispatchWorkState = Convert.toDispatchWorkState(json);
 //   const docCollectionsMessage = Convert.toDocCollectionsMessage(json);
 //   const docCollectionsResult = Convert.toDocCollectionsResult(json);
+//   const docCountMessage = Convert.toDocCountMessage(json);
+//   const docCountResult = Convert.toDocCountResult(json);
 //   const docDefineMessage = Convert.toDocDefineMessage(json);
 //   const docDefineResult = Convert.toDocDefineResult(json);
 //   const docDeleteMessage = Convert.toDocDeleteMessage(json);
@@ -83,6 +85,7 @@
 //   const docSubscribeMessage = Convert.toDocSubscribeMessage(json);
 //   const docSubscribeResult = Convert.toDocSubscribeResult(json);
 //   const documentCollectionSchema = Convert.toDocumentCollectionSchema(json);
+//   const documentConflict = Convert.toDocumentConflict(json);
 //   const documentFieldSpec = Convert.toDocumentFieldSpec(json);
 //   const documentFilter = Convert.toDocumentFilter(json);
 //   const documentQuery = Convert.toDocumentQuery(json);
@@ -1426,6 +1429,45 @@ export interface FieldElement {
     [property: string]: any;
 }
 
+export interface DocCountMessage {
+    cmd:   DocCountMessageCmd;
+    query: Query;
+    [property: string]: any;
+}
+
+export enum DocCountMessageCmd {
+    DocCount = "doc_count",
+}
+
+export interface Query {
+    after?:     string;
+    collection: string;
+    filters?:   FilterElement[];
+    limit?:     number;
+    namespace:  string;
+    sort?:      Sort;
+    [property: string]: any;
+}
+
+export interface FilterElement {
+    field:      string;
+    op:         string;
+    value_json: string;
+    [property: string]: any;
+}
+
+export interface Sort {
+    desc?: boolean;
+    field: string;
+    [property: string]: any;
+}
+
+export interface DocCountResult {
+    as_of_seq: number;
+    count:     number;
+    [property: string]: any;
+}
+
 export interface DocDefineMessage {
     cmd:    DocDefineMessageCmd;
     schema: Schema;
@@ -1460,6 +1502,7 @@ export interface DocDeleteResult {
     existed:    boolean;
     id:         string;
     namespace:  string;
+    seq:        number;
     [property: string]: any;
 }
 
@@ -1476,6 +1519,7 @@ export enum DocGetMessageCmd {
 }
 
 export interface DocGetResult {
+    as_of_seq: number;
     document?: Document;
     found:     boolean;
     [property: string]: any;
@@ -1509,6 +1553,7 @@ export interface DocPutResult {
     id:         string;
     namespace:  string;
     rev:        number;
+    seq:        number;
     [property: string]: any;
 }
 
@@ -1522,30 +1567,8 @@ export enum DocQueryMessageCmd {
     DocQuery = "doc_query",
 }
 
-export interface Query {
-    after?:     string;
-    collection: string;
-    filters?:   FilterElement[];
-    limit?:     number;
-    namespace:  string;
-    sort?:      Sort;
-    [property: string]: any;
-}
-
-export interface FilterElement {
-    field:      string;
-    op:         string;
-    value_json: string;
-    [property: string]: any;
-}
-
-export interface Sort {
-    desc?: boolean;
-    field: string;
-    [property: string]: any;
-}
-
 export interface DocQueryResult {
+    as_of_seq: number;
     documents: Document[];
     [property: string]: any;
 }
@@ -1569,6 +1592,16 @@ export interface DocSubscribeResult {
 export interface DocumentCollectionSchema {
     collection: string;
     fields:     FieldElement[];
+    namespace:  string;
+    [property: string]: any;
+}
+
+export interface DocumentConflict {
+    actual:     number;
+    collection: string;
+    expected:   number;
+    found:      boolean;
+    id:         string;
     namespace:  string;
     [property: string]: any;
 }
@@ -4249,6 +4282,7 @@ export interface Response {
     delegate_result?:                      DelegateResultObject;
     delegation_operation?:                 DelegationOperationObject;
     doc_collections_result?:               DocCollectionsResultObject;
+    doc_count_result?:                     DocCountResultObject;
     doc_define_result?:                    DocDefineResultObject;
     doc_delete_result?:                    DocDeleteResultObject;
     doc_get_result?:                       DocGetResultObject;
@@ -4257,6 +4291,8 @@ export interface Response {
     doc_subscribe_result?:                 DocSubscribeResultObject;
     doc_undefine_result?:                  DocUndefineResultObject;
     error?:                                string;
+    error_code?:                           string;
+    error_conflict?:                       Conflict;
     journal_append_result?:                JournalAppendResultObject;
     notebook_entries?:                     NotebookEntryElement[];
     notebook_guide?:                       NotebookGuide;
@@ -4293,6 +4329,12 @@ export interface DocCollectionsResultObject {
     [property: string]: any;
 }
 
+export interface DocCountResultObject {
+    as_of_seq: number;
+    count:     number;
+    [property: string]: any;
+}
+
 export interface DocDefineResultObject {
     collection: string;
     namespace:  string;
@@ -4304,10 +4346,12 @@ export interface DocDeleteResultObject {
     existed:    boolean;
     id:         string;
     namespace:  string;
+    seq:        number;
     [property: string]: any;
 }
 
 export interface DocGetResultObject {
+    as_of_seq: number;
     document?: Document;
     found:     boolean;
     [property: string]: any;
@@ -4318,10 +4362,12 @@ export interface DocPutResultObject {
     id:         string;
     namespace:  string;
     rev:        number;
+    seq:        number;
     [property: string]: any;
 }
 
 export interface DocQueryResultObject {
+    as_of_seq: number;
     documents: Document[];
     [property: string]: any;
 }
@@ -4336,6 +4382,16 @@ export interface DocUndefineResultObject {
     collection:        string;
     documents_removed: number;
     namespace:         string;
+    [property: string]: any;
+}
+
+export interface Conflict {
+    actual:     number;
+    collection: string;
+    expected:   number;
+    found:      boolean;
+    id:         string;
+    namespace:  string;
     [property: string]: any;
 }
 
@@ -6964,6 +7020,22 @@ export class Convert {
         return JSON.stringify(uncast(value, r("DocCollectionsResult")), null, 2);
     }
 
+    public static toDocCountMessage(json: string): DocCountMessage {
+        return cast(JSON.parse(json), r("DocCountMessage"));
+    }
+
+    public static docCountMessageToJson(value: DocCountMessage): string {
+        return JSON.stringify(uncast(value, r("DocCountMessage")), null, 2);
+    }
+
+    public static toDocCountResult(json: string): DocCountResult {
+        return cast(JSON.parse(json), r("DocCountResult"));
+    }
+
+    public static docCountResultToJson(value: DocCountResult): string {
+        return JSON.stringify(uncast(value, r("DocCountResult")), null, 2);
+    }
+
     public static toDocDefineMessage(json: string): DocDefineMessage {
         return cast(JSON.parse(json), r("DocDefineMessage"));
     }
@@ -7066,6 +7138,14 @@ export class Convert {
 
     public static documentCollectionSchemaToJson(value: DocumentCollectionSchema): string {
         return JSON.stringify(uncast(value, r("DocumentCollectionSchema")), null, 2);
+    }
+
+    public static toDocumentConflict(json: string): DocumentConflict {
+        return cast(JSON.parse(json), r("DocumentConflict"));
+    }
+
+    public static documentConflictToJson(value: DocumentConflict): string {
+        return JSON.stringify(uncast(value, r("DocumentConflict")), null, 2);
     }
 
     public static toDocumentFieldSpec(json: string): DocumentFieldSpec {
@@ -10630,6 +10710,31 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
         { json: "type", js: "type", typ: "" },
     ], "any"),
+    "DocCountMessage": o([
+        { json: "cmd", js: "cmd", typ: r("DocCountMessageCmd") },
+        { json: "query", js: "query", typ: r("Query") },
+    ], "any"),
+    "Query": o([
+        { json: "after", js: "after", typ: u(undefined, "") },
+        { json: "collection", js: "collection", typ: "" },
+        { json: "filters", js: "filters", typ: u(undefined, a(r("FilterElement"))) },
+        { json: "limit", js: "limit", typ: u(undefined, 0) },
+        { json: "namespace", js: "namespace", typ: "" },
+        { json: "sort", js: "sort", typ: u(undefined, r("Sort")) },
+    ], "any"),
+    "FilterElement": o([
+        { json: "field", js: "field", typ: "" },
+        { json: "op", js: "op", typ: "" },
+        { json: "value_json", js: "value_json", typ: "" },
+    ], "any"),
+    "Sort": o([
+        { json: "desc", js: "desc", typ: u(undefined, true) },
+        { json: "field", js: "field", typ: "" },
+    ], "any"),
+    "DocCountResult": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
+        { json: "count", js: "count", typ: 0 },
+    ], "any"),
     "DocDefineMessage": o([
         { json: "cmd", js: "cmd", typ: r("DocDefineMessageCmd") },
         { json: "schema", js: "schema", typ: r("Schema") },
@@ -10650,6 +10755,7 @@ const typeMap: any = {
         { json: "existed", js: "existed", typ: true },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
     ], "any"),
     "DocGetMessage": o([
         { json: "cmd", js: "cmd", typ: r("DocGetMessageCmd") },
@@ -10658,6 +10764,7 @@ const typeMap: any = {
         { json: "namespace", js: "namespace", typ: "" },
     ], "any"),
     "DocGetResult": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
         { json: "document", js: "document", typ: u(undefined, r("Document")) },
         { json: "found", js: "found", typ: true },
     ], "any"),
@@ -10681,29 +10788,14 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
         { json: "rev", js: "rev", typ: 0 },
+        { json: "seq", js: "seq", typ: 0 },
     ], "any"),
     "DocQueryMessage": o([
         { json: "cmd", js: "cmd", typ: r("DocQueryMessageCmd") },
         { json: "query", js: "query", typ: r("Query") },
     ], "any"),
-    "Query": o([
-        { json: "after", js: "after", typ: u(undefined, "") },
-        { json: "collection", js: "collection", typ: "" },
-        { json: "filters", js: "filters", typ: u(undefined, a(r("FilterElement"))) },
-        { json: "limit", js: "limit", typ: u(undefined, 0) },
-        { json: "namespace", js: "namespace", typ: "" },
-        { json: "sort", js: "sort", typ: u(undefined, r("Sort")) },
-    ], "any"),
-    "FilterElement": o([
-        { json: "field", js: "field", typ: "" },
-        { json: "op", js: "op", typ: "" },
-        { json: "value_json", js: "value_json", typ: "" },
-    ], "any"),
-    "Sort": o([
-        { json: "desc", js: "desc", typ: u(undefined, true) },
-        { json: "field", js: "field", typ: "" },
-    ], "any"),
     "DocQueryResult": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
         { json: "documents", js: "documents", typ: a(r("Document")) },
     ], "any"),
     "DocSubscribeMessage": o([
@@ -10717,6 +10809,14 @@ const typeMap: any = {
     "DocumentCollectionSchema": o([
         { json: "collection", js: "collection", typ: "" },
         { json: "fields", js: "fields", typ: a(r("FieldElement")) },
+        { json: "namespace", js: "namespace", typ: "" },
+    ], "any"),
+    "DocumentConflict": o([
+        { json: "actual", js: "actual", typ: 0 },
+        { json: "collection", js: "collection", typ: "" },
+        { json: "expected", js: "expected", typ: 0 },
+        { json: "found", js: "found", typ: true },
+        { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
     ], "any"),
     "DocumentFieldSpec": o([
@@ -12296,6 +12396,7 @@ const typeMap: any = {
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
         { json: "delegation_operation", js: "delegation_operation", typ: u(undefined, r("DelegationOperationObject")) },
         { json: "doc_collections_result", js: "doc_collections_result", typ: u(undefined, r("DocCollectionsResultObject")) },
+        { json: "doc_count_result", js: "doc_count_result", typ: u(undefined, r("DocCountResultObject")) },
         { json: "doc_define_result", js: "doc_define_result", typ: u(undefined, r("DocDefineResultObject")) },
         { json: "doc_delete_result", js: "doc_delete_result", typ: u(undefined, r("DocDeleteResultObject")) },
         { json: "doc_get_result", js: "doc_get_result", typ: u(undefined, r("DocGetResultObject")) },
@@ -12304,6 +12405,8 @@ const typeMap: any = {
         { json: "doc_subscribe_result", js: "doc_subscribe_result", typ: u(undefined, r("DocSubscribeResultObject")) },
         { json: "doc_undefine_result", js: "doc_undefine_result", typ: u(undefined, r("DocUndefineResultObject")) },
         { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "error_code", js: "error_code", typ: u(undefined, "") },
+        { json: "error_conflict", js: "error_conflict", typ: u(undefined, r("Conflict")) },
         { json: "journal_append_result", js: "journal_append_result", typ: u(undefined, r("JournalAppendResultObject")) },
         { json: "notebook_entries", js: "notebook_entries", typ: u(undefined, a(r("NotebookEntryElement"))) },
         { json: "notebook_guide", js: "notebook_guide", typ: u(undefined, r("NotebookGuide")) },
@@ -12336,6 +12439,10 @@ const typeMap: any = {
     "DocCollectionsResultObject": o([
         { json: "collections", js: "collections", typ: a(r("Schema")) },
     ], "any"),
+    "DocCountResultObject": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
+        { json: "count", js: "count", typ: 0 },
+    ], "any"),
     "DocDefineResultObject": o([
         { json: "collection", js: "collection", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
@@ -12345,8 +12452,10 @@ const typeMap: any = {
         { json: "existed", js: "existed", typ: true },
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
+        { json: "seq", js: "seq", typ: 0 },
     ], "any"),
     "DocGetResultObject": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
         { json: "document", js: "document", typ: u(undefined, r("Document")) },
         { json: "found", js: "found", typ: true },
     ], "any"),
@@ -12355,8 +12464,10 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
         { json: "rev", js: "rev", typ: 0 },
+        { json: "seq", js: "seq", typ: 0 },
     ], "any"),
     "DocQueryResultObject": o([
+        { json: "as_of_seq", js: "as_of_seq", typ: 0 },
         { json: "documents", js: "documents", typ: a(r("Document")) },
     ], "any"),
     "DocSubscribeResultObject": o([
@@ -12366,6 +12477,14 @@ const typeMap: any = {
     "DocUndefineResultObject": o([
         { json: "collection", js: "collection", typ: "" },
         { json: "documents_removed", js: "documents_removed", typ: 0 },
+        { json: "namespace", js: "namespace", typ: "" },
+    ], "any"),
+    "Conflict": o([
+        { json: "actual", js: "actual", typ: 0 },
+        { json: "collection", js: "collection", typ: "" },
+        { json: "expected", js: "expected", typ: 0 },
+        { json: "found", js: "found", typ: true },
+        { json: "id", js: "id", typ: "" },
         { json: "namespace", js: "namespace", typ: "" },
     ], "any"),
     "JournalAppendResultObject": o([
@@ -13795,6 +13914,9 @@ const typeMap: any = {
     ],
     "DocCollectionsMessageCmd": [
         "doc_collections",
+    ],
+    "DocCountMessageCmd": [
+        "doc_count",
     ],
     "DocDefineMessageCmd": [
         "doc_define",

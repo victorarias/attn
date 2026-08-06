@@ -220,12 +220,29 @@ const (
 	// Subject is the document's address (namespace/collection/id); the payload
 	// carries the address in parts plus whether it was a removal.
 	//
+	// It is appended by the store, inside the transaction that made the change,
+	// and announced afterwards — see CommitDocumentWrite. That is what makes the
+	// seq it lands at usable as the write's position.
+	//
 	// This fact has no entry in wireProjections, and that is not an omission: it
 	// produces no WebSocket traffic. Its consumer is the live-query fan-out in
 	// documents.go, an ephemeral subscriber beside the hub that delivers result
 	// sets to IPC callers over their own connections.
 	FactDocumentChanged = "document.changed"
+	// FactDocumentCollectionRemoved: a document collection was undefined, taking
+	// every document under it. Subject is the collection (namespace/collection),
+	// because that is the entity that went — a removal has no document to name,
+	// and saying so with an empty document id would leave every future consumer
+	// special-casing an address that points at nothing.
+	FactDocumentCollectionRemoved = "document.collection.removed"
 )
+
+// CompactableFacts are the fact classes the retention pass may reduce to one
+// row per subject. Both document facts qualify for the same reason: they are
+// invalidations about a subject whose state lives in the store, so only the
+// newest carries information. Session and ticket facts are deliberately absent
+// — they keep the age window's behavior unchanged.
+var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved}
 
 // projection maps facts to the wire traffic they produce.
 type projection struct {
@@ -474,7 +491,7 @@ func (d *Daemon) ensureEventBus() {
 	if d.store != nil {
 		backing = d.newSQLBusStore()
 	}
-	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf})
+	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
 }

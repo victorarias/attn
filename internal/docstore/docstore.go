@@ -234,6 +234,57 @@ func IsConflict(err error) bool {
 	return errors.As(err, &conflict)
 }
 
+// UndeclaredCollectionError is every read or write against a collection nobody
+// declared. It is a type for the same reason ConflictError is: the surfaces
+// above have to tell "declare it first" from "something is broken", and a UI
+// host has to tell "kill this tile" from "retry".
+type UndeclaredCollectionError struct {
+	Namespace  string
+	Collection string
+}
+
+func (e *UndeclaredCollectionError) Error() string {
+	return fmt.Sprintf("docstore: %s/%s is not declared; declare it with `attn doc define` before reading or writing it",
+		e.Namespace, e.Collection)
+}
+
+// IsUndeclaredCollection reports whether an error is a missing declaration.
+func IsUndeclaredCollection(err error) bool {
+	var undeclared *UndeclaredCollectionError
+	return errors.As(err, &undeclared)
+}
+
+// InvalidQueryError is a query this collection cannot answer: an unknown field,
+// an operator that does not exist, a bound of the wrong type, a cursor pointing
+// at a document that is gone. It wraps the specific refusal rather than
+// replacing it — the message is the part an agent fixes the query from, and the
+// type is the part a program branches on.
+type InvalidQueryError struct{ Err error }
+
+func (e *InvalidQueryError) Error() string { return e.Err.Error() }
+func (e *InvalidQueryError) Unwrap() error { return e.Err }
+
+// IsInvalidQuery reports whether an error is a query this store refused to
+// compile.
+func IsInvalidQuery(err error) bool {
+	var invalid *InvalidQueryError
+	return errors.As(err, &invalid)
+}
+
+// InvalidQuery marks an error as a refusal to run a caller's query. It is
+// exported because a query can also be refused before it reaches Compile —
+// decoding one off the wire, for instance — and those refusals are the same
+// class to whoever asked.
+func InvalidQuery(err error) error {
+	if err == nil {
+		return nil
+	}
+	if IsInvalidQuery(err) {
+		return err
+	}
+	return &InvalidQueryError{Err: err}
+}
+
 // Compiled is a validated query as SQL. Table is the collection's table, Where
 // and Order are fragments the store splices into its own SELECT, and Args binds
 // Where's placeholders in order. Where is empty when nothing constrains the
@@ -439,7 +490,18 @@ func (s CollectionSchema) declaredNames() string {
 // empty, and its absence when q.After is set is an error rather than an empty
 // page: a cursor pointing at a document that no longer exists is a caller
 // mistake worth hearing about, not a silent end of results.
+// Every rejection is an *InvalidQueryError, typed once here rather than at each
+// return below: the callers above turn the type into an error code, and one
+// choke point is what keeps that mapping from becoming string matching.
 func (q Query) Compile(schema CollectionSchema, anchor *Document) (Compiled, error) {
+	compiled, err := q.compile(schema, anchor)
+	if err != nil {
+		return Compiled{}, InvalidQuery(err)
+	}
+	return compiled, nil
+}
+
+func (q Query) compile(schema CollectionSchema, anchor *Document) (Compiled, error) {
 	if err := ValidateNamespace(q.Namespace); err != nil {
 		return Compiled{}, err
 	}

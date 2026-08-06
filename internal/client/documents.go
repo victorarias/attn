@@ -83,6 +83,17 @@ func (c *Client) DocQuery(query protocol.DocumentQuery) (*protocol.DocQueryResul
 	return resp.DocQueryResult, nil
 }
 
+// DocCount reports how many documents a query matches, without fetching their
+// bodies. Sort and limit are ignored: they decide which matches come back,
+// never how many there are.
+func (c *Client) DocCount(query protocol.DocumentQuery) (*protocol.DocCountResult, error) {
+	resp, err := c.send(protocol.DocCountMessage{Cmd: protocol.CmdDocCount, Query: query})
+	if err != nil {
+		return nil, err
+	}
+	return resp.DocCountResult, nil
+}
+
 // DocSubscribe opens a live query and calls onResult for every delivery,
 // beginning with the current result set. Unlike every other call here it holds
 // its connection open, so it returns only when onResult asks it to stop, the

@@ -10,7 +10,29 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "212"
+const ProtocolVersion = "213"
+
+// Error codes. A failed response may carry one beside its message text, naming
+// what a caller can do about it rather than leaving it to match English. Only
+// the document store issues them today; the field is on Response because the
+// question — "is this worth retrying, or is it broken?" — is not specific to it.
+//
+// A client that does not recognise a code must treat the failure as broken
+// rather than guessing, which is what keeps adding one from being a breaking
+// change.
+const (
+	// ErrorCodeConflict: a conditional write was refused because the document is
+	// not at the revision the caller asserted. Response.ErrorConflict names both
+	// revisions. Re-read and apply the change to the version that won.
+	ErrorCodeConflict = "conflict"
+	// ErrorCodeUndeclaredCollection: the collection was never declared, or is no
+	// longer declared. Nothing to retry — declare it, or stop.
+	ErrorCodeUndeclaredCollection = "undeclared_collection"
+	// ErrorCodeInvalidQuery: the query itself is wrong — an unknown field, an
+	// operator that does not exist, a bound of the wrong type, a cursor pointing
+	// at a document that is gone. The message says which.
+	ErrorCodeInvalidQuery = "invalid_query"
+)
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -78,6 +100,7 @@ const (
 	CmdDocGet                                = "doc_get"
 	CmdDocDelete                             = "doc_delete"
 	CmdDocQuery                              = "doc_query"
+	CmdDocCount                              = "doc_count"
 	CmdDocSubscribe                          = "doc_subscribe"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
@@ -648,6 +671,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDocQuery:
 		var msg DocQueryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocCount:
+		var msg DocCountMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

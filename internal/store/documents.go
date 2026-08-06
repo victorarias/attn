@@ -208,16 +208,23 @@ func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, err
 // revision writes only if the document is still at it. A failed assertion is a
 // *docstore.ConflictError and nothing is written.
 //
-// EACH FORM IS ONE STATEMENT, which is what makes the check atomic without a
-// transaction: SQLite runs a bare statement in its own. Reading the revision and
-// then writing would be two, and the whole point of this is the window between
-// them. The re-read below happens only on the failure path, to say what the
-// write lost to.
+// THE WRITE ITSELF IS ONE STATEMENT, which is what makes the check atomic: each
+// form below refuses in the same statement that would have written. Reading the
+// revision and then writing would be two, and the whole point of this is the
+// window between them. Whether that statement runs in SQLite's implicit
+// transaction (here) or inside one that also appends a fact
+// (CommitDocumentWrite) changes nothing about the check — the same statement
+// runs either way. The re-read below happens only on the failure path, to say
+// what the write lost to.
 func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []byte, now time.Time, expected *int64) (int64, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
 		return 0, err
 	}
+	return putDocumentWith(s.db, schema, table, id, body, now, expected)
+}
+
+func putDocumentWith(q rowQuerier, schema docstore.CollectionSchema, table, id string, body []byte, now time.Time, expected *int64) (int64, error) {
 	ts := now.UTC().Format(docstore.TimeFormat)
 
 	var (
@@ -254,13 +261,13 @@ func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []
 	}
 
 	var rev int64
-	err = s.db.QueryRow(stmt, args...).Scan(&rev)
+	err := q.QueryRow(stmt, args...).Scan(&rev)
 	// No row came back is how every refusal arrives — but only an expectation can
 	// refuse one. The unconditional upsert always writes a row, so no row from it
 	// is a broken statement rather than a conflict, and reporting it as one would
 	// tell a caller to retry something that will never succeed.
 	if err == sql.ErrNoRows && expected != nil {
-		return 0, s.documentConflict(schema, table, id, *expected)
+		return 0, documentConflictWith(q, schema, table, id, *expected)
 	}
 	if err != nil {
 		return 0, fmt.Errorf("store: writing %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
@@ -302,6 +309,10 @@ func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expe
 	if err != nil {
 		return false, err
 	}
+	return deleteDocumentWith(s.db, schema, table, id, expected)
+}
+
+func deleteDocumentWith(x execQuerier, schema docstore.CollectionSchema, table, id string, expected *int64) (bool, error) {
 	if expected != nil && *expected == docstore.ExpectAbsent {
 		// "Delete this if it is not there" is not an assertion a delete can act
 		// on, and silently treating it as unconditional would delete a document
@@ -316,7 +327,7 @@ func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expe
 		stmt += ` AND rev = ?`
 		args = append(args, *expected)
 	}
-	res, err := s.db.Exec(stmt, args...)
+	res, err := x.Exec(stmt, args...)
 	if err != nil {
 		return false, fmt.Errorf("store: deleting %s/%s/%s: %w", schema.Namespace, schema.Collection, id, err)
 	}
@@ -325,22 +336,25 @@ func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expe
 		return false, err
 	}
 	if n == 0 && expected != nil {
-		return false, s.documentConflict(schema, table, id, *expected)
+		return false, documentConflictWith(x, schema, table, id, *expected)
 	}
 	return n > 0, nil
 }
 
-// documentConflict describes a refused write. It reads the document again to
+// documentConflictWith describes a refused write. It reads the document again to
 // name the revision that won, because "your write was refused" without that is
 // an error a caller cannot act on. A read failure here is not worth losing the
 // conflict over — the refusal is the fact, the revision is the detail — so it
 // degrades to reporting the document as absent.
-func (s *Store) documentConflict(schema docstore.CollectionSchema, table, id string, expected int64) error {
+//
+// The re-read runs on whatever refused the write, which inside a composite is
+// its transaction: reading around it would read a state the refusal never saw.
+func documentConflictWith(q rowQuerier, schema docstore.CollectionSchema, table, id string, expected int64) error {
 	conflict := &docstore.ConflictError{
 		Namespace: schema.Namespace, Collection: schema.Collection, ID: id, Expected: expected,
 	}
 	var rev int64
-	switch err := s.db.QueryRow(`SELECT rev FROM `+table+` WHERE id = ?`, id).Scan(&rev); {
+	switch err := q.QueryRow(`SELECT rev FROM `+table+` WHERE id = ?`, id).Scan(&rev); {
 	case err == nil:
 		conflict.Found = true
 		conflict.Actual = rev
@@ -349,6 +363,100 @@ func (s *Store) documentConflict(schema docstore.CollectionSchema, table, id str
 			schema.Namespace, schema.Collection, id, err)
 	}
 	return conflict
+}
+
+// DocumentWrite is one document mutation: a put of Body, or a removal when
+// Delete is set. Expected is the caller's assertion about the version being
+// replaced or removed, exactly as PutDocument and DeleteDocument take it.
+type DocumentWrite struct {
+	Schema   docstore.CollectionSchema
+	ID       string
+	Body     []byte
+	Delete   bool
+	Expected *int64
+}
+
+// DocumentWriteResult is what a committed write is worth telling a caller.
+//
+// Changed reports whether the store actually moved, and is what separates a
+// delete that removed a document from one that found nothing there. Seq is the
+// fact's position on the durable log and is 0 exactly when Changed is false —
+// nothing changed, so nothing was announced. Rev is the document's new revision
+// and is 0 for a delete, which has no version to report.
+type DocumentWriteResult struct {
+	Rev     int64
+	Seq     int64
+	Changed bool
+}
+
+// CommitDocumentWrite writes a document and appends the fact describing it in
+// ONE transaction, and is how every fact-bearing writer reaches the store.
+//
+// The composite exists because the two halves used to be separate commits: a
+// document write landed, and its fact was published afterwards and could fail
+// on its own (the bus logged and carried on). A crash between them left the
+// data changed and the log silent — permanently, since nothing re-derives facts
+// — which is the divergence B-track workflows would trigger on. After this,
+// a fact that cannot be made durable fails the whole write: the caller gets an
+// error and a retry instead of a store nobody was told about.
+//
+// The store stays fact-agnostic. It does not know what `document.changed` means
+// or how a subject is spelled; the caller builds the fact and this appends it.
+//
+// A write that changed nothing appends NO fact and returns no seq: a delete
+// that found nothing, or a refusal, is not a change, and waking every live
+// query on the collection to re-render an identical result set is the cost the
+// conditional write exists to avoid.
+func (s *Store) CommitDocumentWrite(w DocumentWrite, fact BusEvent, now time.Time) (DocumentWriteResult, error) {
+	table, err := s.documentTable(w.Schema)
+	if err != nil {
+		return DocumentWriteResult{}, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	tx, err := s.db.Begin()
+	if err != nil {
+		return DocumentWriteResult{}, fmt.Errorf("store: writing %s/%s/%s: %w",
+			w.Schema.Namespace, w.Schema.Collection, w.ID, err)
+	}
+	// Rolled back on every path that does not commit, including the ones that
+	// return no error: a delete that removed nothing has nothing to commit.
+	defer func() { _ = tx.Rollback() }()
+
+	var out DocumentWriteResult
+	if w.Delete {
+		existed, err := deleteDocumentWith(tx, w.Schema, table, w.ID, w.Expected)
+		if err != nil {
+			return DocumentWriteResult{}, err
+		}
+		out.Changed = existed
+	} else {
+		rev, err := putDocumentWith(tx, w.Schema, table, w.ID, w.Body, now, w.Expected)
+		if err != nil {
+			return DocumentWriteResult{}, err
+		}
+		out.Rev = rev
+		out.Changed = true
+	}
+
+	if !out.Changed {
+		return out, nil
+	}
+
+	seq, err := appendBusEventWith(tx, fact, now)
+	if err != nil {
+		return DocumentWriteResult{}, fmt.Errorf("store: announcing the write to %s/%s/%s: %w",
+			w.Schema.Namespace, w.Schema.Collection, w.ID, err)
+	}
+	out.Seq = seq
+
+	if err := tx.Commit(); err != nil {
+		return DocumentWriteResult{}, fmt.Errorf("store: committing the write to %s/%s/%s: %w",
+			w.Schema.Namespace, w.Schema.Collection, w.ID, err)
+	}
+	return out, nil
 }
 
 // queryDocuments runs an already-compiled query. The compiled fragments are
@@ -394,13 +502,131 @@ func queryDocumentsWith(q rowsQuerier, c docstore.Compiled) ([]docstore.Document
 	return out, rows.Err()
 }
 
-// QueryRead is one answer to one query: the documents, and the declaration they
-// were computed against. The declaration is returned rather than assumed because
-// the caller's copy may already be out of date by the time it reads this — the
-// one in here is the one the answer actually means.
+// QueryRead is one answer to one query: the documents, the declaration they
+// were computed against, and the log position they were true at. The
+// declaration is returned rather than assumed because the caller's copy may
+// already be out of date by the time it reads this — the one in here is the one
+// the answer actually means.
 type QueryRead struct {
 	Schema    docstore.CollectionSchema
 	Documents []docstore.Document
+	AsOfSeq   int64
+}
+
+// readAsOfSeq is the log position an answer was true at: the highest seq in
+// bus_events, read inside the same transaction as the rows.
+//
+// Every document write commits its fact into that log, so this is exactly "the
+// last change this answer includes". Same transaction, not a second read: read
+// outside it and the number names a state the rows were never in.
+//
+// An empty log yields 0, which is a valid position meaning "before everything"
+// rather than a missing answer. Compaction removes rows but never the newest,
+// so it cannot lower MAX(seq) and the watermark is immune to it.
+func readAsOfSeq(q rowQuerier) (int64, error) {
+	var seq int64
+	if err := q.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM bus_events`).Scan(&seq); err != nil {
+		return 0, fmt.Errorf("store: reading the log position of this answer: %w", err)
+	}
+	return seq, nil
+}
+
+// DocumentRead is one answer to one document read: the document if it is there,
+// and the log position the answer was true at.
+type DocumentRead struct {
+	Document *docstore.Document
+	Found    bool
+	AsOfSeq  int64
+}
+
+// ReadDocument answers a get in a single read transaction — the declaration,
+// the row, and the log position, all against one state of the database, for the
+// same reason ReadQuery does. The bool is false with a nil error when the
+// collection was never declared.
+func (s *Store) ReadDocument(namespace, collection, id string) (DocumentRead, bool, error) {
+	if s.db == nil {
+		return DocumentRead{}, false, fmt.Errorf("store: no database")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return DocumentRead{}, false, fmt.Errorf("store: reading %s/%s/%s: %w", namespace, collection, id, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	schema, table, found, err := readCollectionTx(tx, namespace, collection)
+	if err != nil || !found {
+		return DocumentRead{}, false, err
+	}
+	doc, ok, err := getDocumentWith(tx, schema.Namespace, schema.Collection, table, id)
+	if err != nil {
+		return DocumentRead{}, false, err
+	}
+	asOf, err := readAsOfSeq(tx)
+	if err != nil {
+		return DocumentRead{}, false, err
+	}
+	return DocumentRead{Document: doc, Found: ok, AsOfSeq: asOf}, true, nil
+}
+
+// CountRead is one answer to a count: how many documents match, and the log
+// position that was true at.
+type CountRead struct {
+	Schema  docstore.CollectionSchema
+	Count   int
+	AsOfSeq int64
+}
+
+// CountQuery answers "how many match" with the same compile the query itself
+// uses, so a count and the page it describes cannot disagree about what
+// matches. Only the filter half of the compiled query is used: ordering and the
+// limit decide which matches come back, never how many there are.
+//
+// A query carrying an after cursor counts what follows the anchor, which is the
+// same thing paging through the rest of the answer would find.
+func (s *Store) CountQuery(q docstore.Query) (CountRead, bool, error) {
+	if s.db == nil {
+		return CountRead{}, false, fmt.Errorf("store: no database")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return CountRead{}, false, fmt.Errorf("store: counting %s/%s: %w", q.Namespace, q.Collection, err)
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	schema, table, found, err := readCollectionTx(tx, q.Namespace, q.Collection)
+	if err != nil || !found {
+		return CountRead{}, false, err
+	}
+	var anchor *docstore.Document
+	if q.After != "" {
+		doc, ok, err := getDocumentWith(tx, schema.Namespace, schema.Collection, table, q.After)
+		if err != nil {
+			return CountRead{}, false, err
+		}
+		if ok {
+			anchor = doc
+		}
+	}
+	compiled, err := q.Compile(schema, anchor)
+	if err != nil {
+		return CountRead{}, false, err
+	}
+	if err := docstore.ValidateTableName(compiled.Table); err != nil {
+		return CountRead{}, false, err
+	}
+	stmt := `SELECT COUNT(*) FROM ` + compiled.Table
+	if compiled.Where != "" {
+		stmt += ` WHERE ` + compiled.Where
+	}
+	var n int
+	if err := tx.QueryRow(stmt, compiled.Args...).Scan(&n); err != nil {
+		return CountRead{}, false, fmt.Errorf("store: counting %s/%s: %w", q.Namespace, q.Collection, err)
+	}
+	asOf, err := readAsOfSeq(tx)
+	if err != nil {
+		return CountRead{}, false, err
+	}
+	return CountRead{Schema: schema, Count: n, AsOfSeq: asOf}, true, nil
 }
 
 // ReadQuery answers a query in a single read transaction, and is the only way
@@ -466,7 +692,11 @@ func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
 	if err != nil {
 		return QueryRead{}, false, err
 	}
-	return QueryRead{Schema: schema, Documents: docs}, true, nil
+	asOf, err := readAsOfSeq(tx)
+	if err != nil {
+		return QueryRead{}, false, err
+	}
+	return QueryRead{Schema: schema, Documents: docs, AsOfSeq: asOf}, true, nil
 }
 
 // CountDocuments reports how many documents a collection holds. It is what the
@@ -667,6 +897,13 @@ type rowQuerier interface {
 
 type rowsQuerier interface {
 	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+// execQuerier is a write that may have to read to explain itself: a refused
+// delete re-reads the revision that won.
+type execQuerier interface {
+	execer
+	rowQuerier
 }
 
 // readCollection reads a declaration and the table minted for it.

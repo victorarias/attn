@@ -23,6 +23,13 @@ type sqlBusStore struct{ store *store.Store }
 
 func (d *Daemon) newSQLBusStore() *sqlBusStore { return &sqlBusStore{store: d.store} }
 
+// NewBusStore adapts a store the caller opened itself. `attn bus trim` uses it
+// to run the same retention pass the daemon's tick runs, against the same
+// policy, without a daemon: the pass is a database operation, and an operator
+// must be able to run one whether or not the daemon is listening — the reason
+// the whole `attn bus` surface is database-direct.
+func NewBusStore(s *store.Store) bus.Store { return &sqlBusStore{store: s} }
+
 func (a *sqlBusStore) Append(e bus.Event, now time.Time) (int64, error) {
 	return a.store.AppendBusEvent(store.BusEvent{
 		Name:    e.Name,
@@ -87,6 +94,12 @@ func (a *sqlBusStore) ListConsumers() ([]bus.Consumer, error) {
 }
 
 func (a *sqlBusStore) Trim(cutoff time.Time) (int, error) { return a.store.TrimBusEvents(cutoff) }
+
+func (a *sqlBusStore) Compact(names []string, floor int64) (int, error) {
+	return a.store.CompactBusEvents(names, floor)
+}
+
+func (a *sqlBusStore) Size() (int64, int64, error) { return a.store.BusLogSize() }
 
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {
 	return bus.Consumer{
