@@ -10,10 +10,9 @@
  *
  *   1. create a `pi-host` session and wait for its composer to open
  *      (`session_ready` reached the app),
- *   2. type a prompt into the real composer and click Send — the composer
- *      closes while the run is open,
- *   3. assert the reply streams into the pane and the composer reopens on
- *      settle,
+ *   2. type a prompt into the real composer and click Send,
+ *   3. assert the reply streams into the pane and the run settles (the send
+ *      button goes back from Steer to Send),
  *   4. send a SECOND prompt after settle and assert its own reply,
  *   5. start a long-running tool subprocess, close the session while it is
  *      live, and assert the host's group AND that subprocess are gone. pi
@@ -93,26 +92,20 @@ async function sendPrompt(client, sessionId, text) {
 }
 
 async function waitForReply(client, sessionId, expected, description) {
-  // The run has to open and close: a reply asserted without seeing the run
-  // settle would pass on a host that streamed and then wedged.
-  await pollFor(
-    async () => {
-      const state = await conversationState(client, sessionId);
-      return state?.inputDisabled === true ? state : null;
-    },
-    `${description}: the composer to close while the run is open`,
-    60_000,
-  );
+  // The run has to close, not just produce text: a reply asserted on its own
+  // would pass on a host that streamed and then wedged. The composer stays open
+  // for the whole run — Enter is a steer while the agent works — so the signal
+  // that the run ended is the send button going back to a plain send.
   return pollFor(
     async () => {
       const state = await conversationState(client, sessionId);
-      if (!state || state.inputDisabled) return null;
+      if (!state || state.sendLabel !== 'Send') return null;
       const reply = state.messages.find(
         (message) => message.role === 'assistant' && message.text.toLowerCase().includes(expected),
       );
       return reply && !reply.streaming ? state : null;
     },
-    `${description}: an assistant reply containing "${expected}" with the composer reopened`,
+    `${description}: an assistant reply containing "${expected}" with the run settled`,
     120_000,
   );
 }
