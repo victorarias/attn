@@ -33,6 +33,10 @@ type Event struct {
 	Seq       int
 	Kind      string
 	Body      map[string]interface{}
+	// LifecycleID matches the run this host was spawned for, for the same
+	// reason ExitInfo carries one: a superseded host that is still draining
+	// must not be able to describe the session that replaced it.
+	LifecycleID string
 }
 
 // ExitInfo reports a host that is gone, after its group has been swept.
@@ -266,7 +270,13 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 		if envelope.SessionID != "" && envelope.SessionID != h.sessionID {
 			m.logf("host session %s: envelope claims session %s; using the spawned one", h.sessionID, envelope.SessionID)
 		}
-		m.onEvent(Event{SessionID: h.sessionID, Seq: envelope.Seq, Kind: envelope.Kind, Body: envelope.Body})
+		m.onEvent(Event{
+			SessionID:   h.sessionID,
+			Seq:         envelope.Seq,
+			Kind:        envelope.Kind,
+			Body:        envelope.Body,
+			LifecycleID: h.lifecycleID,
+		})
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
@@ -334,9 +344,32 @@ func exitStatus(cmd *exec.Cmd, waitErr error) (int, string) {
 	return state.ExitCode(), ""
 }
 
-// Prompt sends one prompt verb to a live host.
-func (m *Manager) Prompt(sessionID, text string) error {
-	return m.send(sessionID, map[string]interface{}{"verb": "prompt", "text": text})
+// Delivery is when a host should let its agent read a message.
+type Delivery string
+
+const (
+	// DeliveryPrompt is the first word of a run. A host refuses it mid-run.
+	DeliveryPrompt Delivery = "prompt"
+	// DeliverySteer lands at the agent's next turn boundary, interrupting the
+	// run in progress. This is what a doorbell uses.
+	DeliverySteer Delivery = "steer"
+	// DeliveryFollowUp lands only when the run would otherwise settle, so it
+	// queues behind the work instead of cutting into it.
+	DeliveryFollowUp Delivery = "follow_up"
+)
+
+// Deliver sends one message to a live host, to be read at `how`.
+//
+// The host, not this manager, decides what a steer means on a session with no
+// run open: it starts one. So a caller never has to know what the agent is
+// doing to reach it.
+func (m *Manager) Deliver(sessionID string, how Delivery, text string) error {
+	switch how {
+	case DeliveryPrompt, DeliverySteer, DeliveryFollowUp:
+	default:
+		return fmt.Errorf("unsupported host delivery %q", how)
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": string(how), "text": text})
 }
 
 func (m *Manager) send(sessionID string, verb map[string]interface{}) error {

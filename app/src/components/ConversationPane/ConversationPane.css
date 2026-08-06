@@ -53,6 +53,43 @@
   color: var(--color-error);
 }
 
+/* Sent and not yet read. It sits between the transcript and the composer
+   because that is where it is in time: after everything the agent has said,
+   before whatever the user is about to type. */
+.conversation-pane-queue {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.conversation-queued {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--color-bg-elevated, transparent);
+  border-radius: 0 4px 4px 0;
+}
+
+.conversation-queued-label {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conversation-queued-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .conversation-pane-composer {
   flex: 0 0 auto;
   display: flex;
@@ -89,7 +126,21 @@
   cursor: pointer;
 }
 
-.conversation-pane-send:disabled {
+.conversation-pane-send:disabled,
+.conversation-pane-followup:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The quieter of the two sends: cutting in is the common intent mid-run, so
+   the follow-up reads as the deliberate alternative rather than the default. */
+.conversation-pane-followup {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
 }

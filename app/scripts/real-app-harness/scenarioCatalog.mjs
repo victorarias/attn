@@ -265,6 +265,14 @@ export const scenarioCatalog = [
     timeoutMs: 300_000,
   },
   {
+    id: 'pi-host-nudge',
+    label: 'Conversation session: steer mid-run, nudge an idle session, state and turn',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-nudge'],
+    // Same prereqs as pi-host-conversation. Holds a `sleep 25` open so the
+    // steer is provably queued, then runs two more prompts through the agent.
+    timeoutMs: 420_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

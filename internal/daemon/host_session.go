@@ -160,12 +160,29 @@ func (d *Daemon) removeSessionRuntime(sessionID string) error {
 	return d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
-// handleHostEvent forwards one envelope to every connected client.
+// hostDeclarationKinds are the envelope kinds the daemon reads. Everything else
+// a host emits is a rendering the app draws and the daemon only forwards, and
+// keeping that list here rather than in a switch is what makes "the daemon
+// never keys behavior on a render kind" checkable.
+var hostDeclarationKinds = map[string]bool{
+	"session_ready": true,
+	"run_started":   true,
+	"run_settled":   true,
+}
+
+// handleHostEvent forwards one envelope to every connected client, and applies
+// the state a declaration carries.
 //
-// This is a stream, not a state change: it takes the same direct path
-// pty_output does rather than riding the event bus. The daemon's picture of a
-// session must be complete without reading one of these, which is why nothing
-// here writes to the store.
+// The forwarding is a stream, not a state change: it takes the same direct path
+// pty_output does rather than riding the event bus.
+//
+// The state is the other half. Every declaration carries the attn state it puts
+// the session in — the host is attn code inside the agent's own loop, so it says
+// what the session is doing instead of leaving the daemon to infer it from a run
+// boundary or a resolver to guess it from evidence a conversation session does
+// not produce. The declaration's own seq is the ordering cursor, which is why a
+// verdict-shaped race cannot happen here: a stale envelope carries a stale seq
+// and the store's strictly-increasing CAS drops it.
 func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	d.wsHub.BroadcastValue(&protocol.AgentEventMessage{
 		Event: protocol.EventAgentEvent,
@@ -174,6 +191,51 @@ func (d *Daemon) handleHostEvent(event hostsession.Event) {
 		Kind:  event.Kind,
 		Body:  event.Body,
 	})
+	// seq 0 is the daemon's own envelope, minted off the host's spine (see
+	// handleAgentPrompt). It exists to unstick a client, not to describe a
+	// session, so it declares nothing.
+	if hostDeclarationKinds[event.Kind] && event.Seq > 0 {
+		d.applyHostDeclaredState(event)
+	}
+}
+
+// applyHostDeclaredState routes one declaration's state through the daemon's
+// only persisted-state door.
+//
+// It travels as a plugin report because that is exactly what it is: an agent
+// whose driver declares its own state, reporting it under the run cursor the
+// spawn opened. What differs from the JSON-RPC drivers is only the pipe it
+// arrived on. Reusing the cause buys the ordered CAS, the resolver veto, and
+// the recovery rules that already exist for declared state, instead of a second
+// set that would have to be kept in agreement with them.
+func (d *Daemon) applyHostDeclaredState(event hostsession.Event) {
+	state, ok := event.Body["state"].(string)
+	if !ok {
+		// Not every declaration has to move the session — but in this protocol
+		// version every one of them does, so a missing state is a host/daemon
+		// disagreement worth naming rather than a silent no-op.
+		d.logf("host session %s: %s declaration carries no state", event.SessionID, event.Kind)
+		return
+	}
+	state = strings.TrimSpace(state)
+	params := pluginReportStateParams{
+		SessionID: event.SessionID,
+		RunID:     event.LifecycleID,
+		Seq:       uint64(event.Seq),
+		State:     state,
+	}
+	if err := validatePluginReportedState(params); err != nil {
+		d.logf("host session %s: rejected %s declaration: %v", event.SessionID, event.Kind, err)
+		return
+	}
+	// The host is quick: `session_ready` regularly beats the spawn's own commit,
+	// which is where the run cursor is opened. Queue it there exactly as a
+	// plugin's report is queued, or the session's first state is lost and it
+	// sits in `launching` until its first run.
+	if d.queueHostReportDuringLaunch(event.SessionID, params) {
+		return
+	}
+	d.applyPluginReportedState(params)
 }
 
 // handleHostExit routes a dead host into the same exit path a dead PTY worker
@@ -185,6 +247,32 @@ func (d *Daemon) handleHostExit(info hostsession.ExitInfo) {
 		Signal:      info.Signal,
 		LifecycleID: info.LifecycleID,
 	})
+}
+
+// deliverToHostSession lands a message in a conversation session's agent.
+//
+// It is the conversation half of message delivery, and the reason a doorbell
+// for one of these sessions types nothing: there is no composer to paste into
+// and no Enter to send, only a verb down a pipe the daemon already owns. A
+// steer is the right default for every nudge — it is read at the agent's next
+// turn boundary rather than after everything it had planned to do — and it is
+// safe on an idle session, where the host opens a run for it instead.
+func (d *Daemon) deliverToHostSession(sessionID string, how hostsession.Delivery, text string) error {
+	return d.ensureHostSessions().Deliver(sessionID, how, text)
+}
+
+// hostDeliveryFor maps the app's delivery request onto a host verb. An absent
+// or unknown mode is a plain prompt: that is what every client before this
+// protocol version meant, and what the composer means when no run is open.
+func hostDeliveryFor(mode string) hostsession.Delivery {
+	switch hostsession.Delivery(strings.TrimSpace(mode)) {
+	case hostsession.DeliverySteer:
+		return hostsession.DeliverySteer
+	case hostsession.DeliveryFollowUp:
+		return hostsession.DeliveryFollowUp
+	default:
+		return hostsession.DeliveryPrompt
+	}
 }
 
 // handleAgentPrompt answers the agent_prompt command.
@@ -199,13 +287,22 @@ func (d *Daemon) handleAgentPrompt(client *wsClient, msg *protocol.AgentPromptMe
 		d.sendCommandError(client, protocol.CmdAgentPrompt, "agent_prompt is missing text")
 		return
 	}
-	if err := d.ensureHostSessions().Prompt(sessionID, text); err != nil {
-		d.logf("agent_prompt for session %s failed: %v", sessionID, err)
+	how := hostDeliveryFor(protocol.Deref(msg.Mode))
+	if err := d.deliverToHostSession(sessionID, how, text); err != nil {
+		d.logf("agent_prompt (%s) for session %s failed: %v", how, sessionID, err)
 		d.sendCommandError(client, protocol.CmdAgentPrompt, "no live conversation host for session "+sessionID)
-		// The app closes its composer the moment it sends, so a prompt that
+		if how != hostsession.DeliveryPrompt {
+			// A steer or follow-up left the composer open and the run — as far
+			// as this client knows — already running. There is no run to settle
+			// and nothing to reopen; the command error is the whole answer.
+			return
+		}
+		// The app closes its composer the moment it sends a prompt, so one that
 		// never reached a host has to come back as the run it will never open.
 		// seq 0 says this is the daemon's own envelope rather than a point on
-		// the host's spine, which is why it cannot collide with one.
+		// the host's spine, which is why it cannot collide with one — and why
+		// it declares no state: a session with no host is the exit path's to
+		// describe, not this one's.
 		d.handleHostEvent(hostsession.Event{
 			SessionID: sessionID,
 			Kind:      "run_settled",

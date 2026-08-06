@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/hostsession"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -141,9 +142,14 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 
 // typeDoorbell delivers a bounded prompt to sessionID — the shared primitive
 // behind the chief-of-staff doorbells (notebook activation, inbox nudge) and
-// the markdown-annotation submit payload. When the session's active plugin
-// driver run declares the message_delivery capability, the prompt is relayed
-// in-band via the plugin (no PTY fallback on failure — see
+// the markdown-annotation submit payload.
+//
+// Three delivery paths, in descending order of how much the daemon owns. A
+// conversation session's agent runs in a host the daemon spawned, so the prompt
+// is a steer down that pipe: nothing is typed, nothing is spliced, and it is
+// read at the agent's next turn boundary. Failing that, when the session's
+// active plugin driver run declares the message_delivery capability, the prompt
+// is relayed in-band via the plugin (no PTY fallback on failure — see
 // deliverDoorbellViaPluginDriver). Otherwise it types the prompt as an
 // explicit bracketed-paste event — the terminator gives the agent a semantic
 // boundary, so the prompt lands in the composer as one pasted block — and
@@ -161,6 +167,9 @@ func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
 	session := d.store.Get(sessionID)
 	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return errDoorbellBlockedByApproval
+	}
+	if d.isHostSession(sessionID) {
+		return d.deliverToHostSession(sessionID, hostsession.DeliverySteer, prompt)
 	}
 	if delivered, err := d.deliverDoorbellViaPluginDriver(session, prompt); delivered {
 		return err

@@ -40,6 +40,7 @@ import {
   parseVerb,
   type Envelope,
   type HostVerb,
+  type HostVerbWithText,
   type RunSettledBody,
   type SessionReadyBody,
 } from "./envelope";
@@ -138,6 +139,10 @@ async function main(): Promise<void> {
     model: pinnedModel,
     cwd,
     pi_version: piVersion,
+    // A session nobody has spoken to yet is idle, and idle owes the user a
+    // turn: nothing will ever happen in it until they type. This is what takes
+    // the session out of `launching`.
+    state: "idle",
   };
   stream.emit("session_ready", ready);
 
@@ -145,13 +150,6 @@ async function main(): Promise<void> {
   let shuttingDown = false;
 
   const runPrompt = async (text: string) => {
-    if (running) {
-      // Landing a message mid-run is `steer`/`follow_up`, which is slice 2.
-      // Until then the app disables its input while a run is open, so this is
-      // a contract violation worth naming rather than a case to queue for.
-      console.error("[attn-pi-host] refused prompt: a run is already open");
-      return;
-    }
     running = true;
     try {
       await session.prompt(text);
@@ -164,10 +162,50 @@ async function main(): Promise<void> {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[attn-pi-host] prompt failed: ${error instanceof Error ? error.stack : String(error)}`);
       deltas.flush();
-      const settled: RunSettledBody = { error: message };
+      const settled: RunSettledBody = { state: "idle", error: message };
       stream.emit("run_settled", settled);
     } finally {
       running = false;
+    }
+  };
+
+  /**
+   * Lands text in the agent, whatever it happens to be doing.
+   *
+   * This is the whole of "the host picks steer vs a new prompt by run state",
+   * and it is why nothing upstream — not the daemon, not a nudge countdown —
+   * has to know whether a run is open before delivering a message. pi's own
+   * queues only exist while the agent is running: a steer queued on an idle
+   * session would sit there forever with nothing to drain it, so an idle
+   * session gets a run opened for the text instead.
+   *
+   * The receipts behind the two queues (2026-08-04 spike, re-validated at
+   * 0.83.0): a steer drains at the next turn boundary, a follow-up drains only
+   * when the whole run would otherwise settle.
+   */
+  const deliver = async (verb: HostVerbWithText) => {
+    if (!running) {
+      if (verb.verb === "prompt") return runPrompt(verb.text);
+      // Not a violation and not a queue: the message opens the run it would
+      // have interrupted.
+      console.error(`[attn-pi-host] ${verb.verb} on an idle session: starting a run`);
+      return runPrompt(verb.text);
+    }
+    if (verb.verb === "prompt") {
+      // The app's composer sends steer while a run is open, so a plain prompt
+      // arriving mid-run is a contract violation worth naming rather than a
+      // case to guess an intent for.
+      console.error("[attn-pi-host] refused prompt: a run is already open");
+      return;
+    }
+    try {
+      if (verb.verb === "steer") await session.steer(verb.text);
+      else await session.followUp(verb.text);
+    } catch (error) {
+      // Queueing can refuse the text outright (pi rejects extension commands
+      // here). Say so in the log; the run itself is unharmed and the queue the
+      // app is drawing simply never gained an entry.
+      console.error(`[attn-pi-host] ${verb.verb} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -193,7 +231,9 @@ async function main(): Promise<void> {
   const handleVerb = (verb: HostVerb) => {
     switch (verb.verb) {
       case "prompt":
-        void runPrompt(verb.text);
+      case "steer":
+      case "follow_up":
+        void deliver(verb);
         return;
       case "shutdown":
         shutdown();

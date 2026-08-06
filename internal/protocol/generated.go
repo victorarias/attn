@@ -40,6 +40,9 @@ type AgentPromptMessage struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// Mode corresponds to the JSON schema field "mode".
+	Mode *string `json:"mode,omitempty,omitzero"`
+
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
 }

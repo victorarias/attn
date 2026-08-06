@@ -45,7 +45,7 @@ describe('ConversationPane', () => {
     fireEvent.change(input, { target: { value: 'first prompt' } });
     fireEvent.click(screen.getByTestId('conversation-send'));
 
-    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'first prompt');
+    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'first prompt', 'prompt');
     expect(input).toHaveValue('');
   });
 
@@ -59,31 +59,70 @@ describe('ConversationPane', () => {
     expect(sendAgentPrompt).not.toHaveBeenCalled();
 
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'line one');
+    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'line one', 'prompt');
   });
 
-  it('closes the composer while a run is open and reopens it after settle', () => {
+  // While the agent works, Enter is a steer: the message lands at the agent's
+  // next turn boundary instead of waiting for everything it had planned to do.
+  it('sends a steer while a run is open and a prompt again after settle', () => {
     const sendAgentPrompt = renderPane();
     apply('session_ready', {}, 1);
     apply('run_started', {}, 2);
 
     const input = screen.getByTestId('conversation-input');
-    expect(input).toBeDisabled();
+    expect(input).not.toBeDisabled();
+    expect(screen.getByTestId('conversation-send')).toHaveTextContent('Steer');
+
+    fireEvent.change(input, { target: { value: 'actually, look at x first' } });
     fireEvent.keyDown(input, { key: 'Enter' });
-    expect(sendAgentPrompt).not.toHaveBeenCalled();
+    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'actually, look at x first', 'steer');
 
     apply('run_settled', {}, 3);
-    expect(screen.getByTestId('conversation-input')).not.toBeDisabled();
+    expect(screen.getByTestId('conversation-send')).toHaveTextContent('Send');
 
     fireEvent.change(screen.getByTestId('conversation-input'), { target: { value: 'second prompt' } });
     fireEvent.keyDown(screen.getByTestId('conversation-input'), { key: 'Enter' });
-    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'second prompt');
+    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'second prompt', 'prompt');
   });
 
-  // The host's run_started is a round trip away, and the host answers a second
-  // prompt mid-run with a log line the user never sees — so the second Enter
-  // has to die here, with the second draft still in the box.
-  it('takes one prompt per run even before the host answers', () => {
+  // The other queue, one button away: a follow-up waits for the run to finish
+  // rather than cutting into it.
+  it('offers a follow-up only while a run is open', () => {
+    const sendAgentPrompt = renderPane();
+    apply('session_ready', {}, 1);
+    expect(screen.queryByTestId('conversation-follow-up')).toBeNull();
+
+    apply('run_started', {}, 2);
+    fireEvent.change(screen.getByTestId('conversation-input'), { target: { value: 'when you are done, push' } });
+    fireEvent.click(screen.getByTestId('conversation-follow-up'));
+
+    expect(sendAgentPrompt).toHaveBeenCalledWith(SESSION, 'when you are done, push', 'follow_up');
+    expect(screen.getByTestId('conversation-input')).toHaveValue('');
+  });
+
+  // Queued, then seen. The queue is the host's word for what pi has not read
+  // yet, so the strip clears when the agent reads it and not a moment before.
+  it('shows what the agent has not read yet until it reads it', () => {
+    renderPane();
+    apply('session_ready', {}, 1);
+    apply('run_started', {}, 2);
+    apply('queue_update', { steering: ['look at x first'], followUp: [] }, 3);
+
+    expect(screen.getByTestId('conversation-queue')).toHaveTextContent('look at x first');
+    expect(screen.getByTestId('conversation-queue')).toHaveTextContent('Steering');
+
+    apply('queue_update', { steering: [], followUp: [] }, 4);
+    apply('message_start', { id: 'm1', role: 'user' }, 5);
+    apply('message_end', { id: 'm1', role: 'user', text: 'look at x first' }, 6);
+
+    expect(screen.queryByTestId('conversation-queue')).toBeNull();
+    expect(screen.getByTestId('conversation-message-m1')).toHaveTextContent('look at x first');
+  });
+
+  // The host's run_started is a round trip away, and a steer sent into that gap
+  // would reach a host with no run to steer — so the second Enter has to die
+  // here, with the second draft still in the box.
+  it('shuts the composer only for the round trip that opens the run', () => {
     const sendAgentPrompt = renderPane();
     apply('session_ready', {}, 1);
 
@@ -97,11 +136,9 @@ describe('ConversationPane', () => {
     fireEvent.click(screen.getByTestId('conversation-send'));
     expect(sendAgentPrompt).toHaveBeenCalledTimes(1);
 
-    // The host's own run_started lands on an already-open run and moves
-    // nothing; the settle is what reopens the composer.
+    // The host's own run_started is the acknowledgement, and it reopens the
+    // composer as a steer box rather than leaving it shut for the whole run.
     apply('run_started', {}, 2);
-    expect(screen.getByTestId('conversation-input')).toBeDisabled();
-    apply('run_settled', {}, 3);
     expect(screen.getByTestId('conversation-input')).not.toBeDisabled();
   });
 

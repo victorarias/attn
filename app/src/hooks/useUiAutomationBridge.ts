@@ -3045,12 +3045,25 @@ export function useUiAutomationBridge({
             text: element.querySelector('.conversation-message-text')?.textContent || '',
           };
         });
+        // What the agent has been sent and has not read yet, in the order the
+        // pane shows it. A nudge scenario asserts the whole arc on this: the
+        // entry appears here, then leaves as the message it delivered appears
+        // in `messages`.
+        const queued = Array.from(root.querySelectorAll('[data-testid="conversation-queued"]')).map((node) => ({
+          kind: node.querySelector('.conversation-queued-label')?.textContent || '',
+          text: node.querySelector('.conversation-queued-text')?.textContent || '',
+        }));
+        const send = root.querySelector('[data-testid="conversation-send"]');
         return {
           sessionId,
           messages,
+          queued,
           inputDisabled: Boolean(textarea?.disabled),
           placeholder: textarea?.placeholder || '',
           draft: textarea?.value || '',
+          // "Send" or "Steer": which of the two a plain Enter would do.
+          sendLabel: send?.textContent || '',
+          followUpAvailable: Boolean(root.querySelector('[data-testid="conversation-follow-up"]')),
         };
       }
       // --- Ticket detail panel (work-tracker) ------------------------------

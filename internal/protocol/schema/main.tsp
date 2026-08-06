@@ -1904,17 +1904,27 @@ model TerminalPointerActivityMessage {
   id: string;
 }
 
-// Sends a prompt to a conversation session — one whose agent runs in a headless
+// Sends a message to a conversation session — one whose agent runs in a headless
 // host process rather than a PTY, so there is no keystroke to type. `id` is the
 // attn session id, exactly as pty_input uses it.
 //
-// The host takes one prompt at a time in this protocol version: mid-run
-// steering is its own verb and does not exist yet, so a prompt sent while a run
-// is open is refused and logged rather than queued.
+// `mode` is WHEN the agent reads it, and it exists because a running agent has
+// two queues:
+//
+//   prompt     (default, and what an absent mode means) the first word of a
+//              run. Refused while a run is open.
+//   steer      read at the agent's next turn boundary, interrupting the run in
+//              progress.
+//   follow_up  read only when the run would otherwise settle, so it queues
+//              behind the work rather than cutting into it.
+//
+// steer and follow_up are valid on an idle session too: the host opens a run
+// for the text rather than queueing it against a run that will never come.
 model AgentPromptMessage {
   cmd: "agent_prompt";
   id: string;
   text: string;
+  mode?: string;
 }
 
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
@@ -3336,11 +3346,17 @@ model PtyOutputMessage {
 // `kind` is either SEMANTIC — attn's own vocabulary, which the daemon reads and
 // features integrate on (`session_ready`, `run_started`, `run_settled`) — or
 // RENDER, which exists only so the app can paint (`message_start`,
-// `message_delta`, `message_end`). The daemon forwards render bodies without
-// reading them: their shape is agreed between the host and the app and is
-// versioned by the plugin, not by ProtocolVersion. Do not add daemon behavior
-// keyed on a render kind; if the daemon needs to know something, it needs a
-// semantic kind.
+// `message_delta`, `message_end`, `queue_update`). The daemon forwards render
+// bodies without reading them: their shape is agreed between the host and the
+// app and is versioned by the plugin, not by ProtocolVersion. Do not add daemon
+// behavior keyed on a render kind; if the daemon needs to know something, it
+// needs a semantic kind.
+//
+// Every semantic body carries a `state` in attn's session vocabulary — the
+// state that declaration puts the session in. The host is attn code inside the
+// agent's own loop, so a conversation session's state is declared rather than
+// classified or scraped, and the envelope's `seq` is the ordering cursor the
+// daemon applies it under.
 //
 // `body` is therefore untyped here on purpose. A client that meets an unknown
 // kind ignores it — the host's kind set grows with the plugin.

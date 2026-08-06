@@ -144,6 +144,42 @@ describe("PiEventMapper", () => {
     expect(emitted.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5]);
   });
 
+  test("every declaration carries the attn state it puts the session in", () => {
+    const { emitted, mapper } = harness();
+
+    mapper.handle({ type: "agent_start" });
+    mapper.handle({ type: "agent_settled" });
+
+    expect(emitted.map((e) => [e.kind, (e.body as { state?: string }).state])).toEqual([
+      ["run_started", "working"],
+      ["run_settled", "idle"],
+    ]);
+  });
+
+  test("surfaces both of pi's queues, and the drain that empties them", () => {
+    const { emitted, mapper } = harness();
+
+    mapper.handle({ type: "queue_update", steering: ["stop and look at x"], followUp: [] });
+    // pi removes the entry and re-announces the queue immediately before the
+    // user message that is the agent reading it — queued, then seen.
+    mapper.handle({ type: "queue_update", steering: [], followUp: [] });
+    mapper.handle({ type: "message_start", message: { role: "user", content: "stop and look at x" } });
+
+    expect(emitted.map((e) => e.kind)).toEqual(["queue_update", "queue_update", "message_start"]);
+    expect(emitted[0].body).toEqual({ steering: ["stop and look at x"], followUp: [] });
+    expect(emitted[1].body).toEqual({ steering: [], followUp: [] });
+  });
+
+  test("flushes pending text before a queue update so the queue never overtakes the reply", () => {
+    const { emitted, mapper } = harness();
+
+    mapper.handle({ type: "message_start", message: assistant("") });
+    mapper.handle({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "working on it" } });
+    mapper.handle({ type: "queue_update", steering: ["one more thing"], followUp: [] });
+
+    expect(emitted.map((e) => e.kind)).toEqual(["message_start", "message_delta", "queue_update"]);
+  });
+
   test("flushes pending text before message_end so the pane never sees the end first", () => {
     const { emitted, mapper } = harness();
 
@@ -228,12 +264,16 @@ describe("messageText", () => {
 describe("parseVerb", () => {
   test("accepts the verbs the daemon sends", () => {
     expect(parseVerb('{"verb":"prompt","text":"hello"}')).toEqual({ verb: "prompt", text: "hello" });
+    expect(parseVerb('{"verb":"steer","text":"actually, stop"}')).toEqual({ verb: "steer", text: "actually, stop" });
+    expect(parseVerb('{"verb":"follow_up","text":"then this"}')).toEqual({ verb: "follow_up", text: "then this" });
     expect(parseVerb('{"verb":"shutdown"}')).toEqual({ verb: "shutdown" });
   });
 
   test("names what is wrong instead of failing quietly", () => {
     expect(() => parseVerb('{"verb":"prompt","text":"  "}')).toThrow("prompt verb needs non-empty text");
-    expect(() => parseVerb('{"verb":"steer","text":"x"}')).toThrow('unsupported verb "steer"');
+    expect(() => parseVerb('{"verb":"steer"}')).toThrow("steer verb needs non-empty text");
+    expect(() => parseVerb('{"verb":"follow_up","text":""}')).toThrow("follow_up verb needs non-empty text");
+    expect(() => parseVerb('{"verb":"nudge","text":"x"}')).toThrow('unsupported verb "nudge"');
     expect(() => parseVerb("[]")).toThrow("verb must be a JSON object");
   });
 });
