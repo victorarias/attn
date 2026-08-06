@@ -41,7 +41,10 @@ builders.
   available to any attn-living agent — beads-shaped UX on attn-native storage.
   Seeds are planted in seconds, grown, tended, handed onward, and harvested;
   the garden of seeds is the attribution fabric that makes the loop closable.
-  Recognition attaches to seeds — laurels are the fruit.
+  Recognition addresses seats and may attach to seeds — laurels are the
+  fruit, but most will name something beyond the seed at hand (Victor,
+  2026-08-07): the seat is the required address, the seed an optional
+  anchor.
 - **Primitives in the core, bespoke-ness in the extensibility layer.** attn is
   not a hand-crafted crew; it ships the seat, work-graph, and recognition
   primitives, and the extensibility mechanism lets each user grow their own.
@@ -58,7 +61,8 @@ builders.
 
 **In scope:** the seat primitive (chief migrates to become the first seat);
 consented handoff and successor priming; the fine-grained work graph with
-tickets evolving into views over it; intentful recognition (laurels/feedback)
+tickets retiring in its favor (no two-system era — the garden takes over as
+soon as it is usable); intentful recognition (laurels/feedback)
 routed through a deliberately minimal central server; retirement of keeper
 narration and workspace context once handoffs prove out; extensibility surface
 for user-defined seats.
@@ -87,12 +91,43 @@ for user-defined seats.
 - [~] **Handoff & priming** — consented closure flow; agent-authored handoff
   notes accrue to the seat; next wake primes from them. Simulated by the same
   skills; priming size is logged from the start so the condensation budget
-  gets a receipt.
+  gets a receipt. Grown 2026-08-07 into **consented closure mechanics**: the
+  harness warns at context pressure (a tripwire early enough — ~75–80% —
+  that a real handoff can still be written), then runs
+  **handoff → new → wake** (the default: sessions are days, and this is a
+  day ending) or **handoff → compact → wake** (the mid-day nap, for when
+  stopping would orphan in-flight state). This converts compaction from a
+  silent seam into a chosen goodbye. attn already observes both compaction
+  edges (`_hook-compact` on PreCompact/PostCompact); PTY driving, launch
+  intent, and daemon-owned revive supply the orchestration. With external
+  harnesses (Claude Code, codex) this is honest **patchwork** — hooks,
+  proxies, PTY driving; the deep version arrives with attn's own pi-based
+  agent, where pressure detection, the handoff prompt, and wake priming are
+  first-class parts of a loop we control. Context limits become attn
+  configuration, per role — workers and crew carry different limits, not
+  one global. Open: whether hooks can see context usage in the current
+  harness (ground-check), and the codex equivalent.
 - [~] **The garden (seeds)** — attn-native fine-grained seeds with audit trail
-  and seat attribution, for any attn-living agent; tickets become views over
-  the garden; a planning seat tends it; `/orchestrate-with-fable` and ad-hoc
+  and seat attribution, for any attn-living agent; tickets retire outright
+  once the garden is usable — no two-system era; a planning seat tends it;
+  `/orchestrate-with-fable` and ad-hoc
   plan-file choreography retire into it. Vertical-slice plan:
   [docs/plans/2026-08-06-the-garden-vertical-slices.md](../plans/2026-08-06-the-garden-vertical-slices.md).
+- [ ] **Agents converse and observe** — a seated agent messages another agent
+  and gets a reply, and inspects what another is doing without interrupting
+  it. Conversation grows from ticket comments — proven, but indirect and
+  noisy as a long-term shape — straight to directed, daemon-brokered
+  messages, which can address a seed's participants as routing sugar (seed
+  comments as a separate mechanism were considered and skipped: a comment is
+  a message with no addressee). Observation is the daemon's to serve, passively:
+  state, todos, the latest assistant message, the screen. Asking an agent
+  what it is doing costs it a turn; watching it must cost nothing.
+  `attn delegate` already proves inspect-and-converse for the human; the
+  agent-facing surface is the same daemon capability with a different
+  client, and the server-as-client future rides the same two surfaces.
+  Sequenced ahead of the garden's build (2026-08-06): its smallest vertical
+  — peek, then directed msg — lands first, so ticket retirement never
+  orphans agent conversation.
 - [ ] **Intentful recognition** — laurels and feedback between human and seats
   and between seats, attached to work items, delivered at wake; a very simple
   central server routes across daemons and machines.
@@ -119,7 +154,7 @@ Known questions:
   the natural home). And a prior question, raised 2026-08-06, open but not
   decided: whether a dedicated store is needed at all. Handoffs and laurels
   attach to seeds, and work history *is* the seeds a seat tended — so wake
-  priming may be a garden query, and condensation may be `distill` wearing a
+  priming may be a garden query, and condensation may be `cutting` wearing a
   different hat. Before building a memory store, check whether the garden
   already covers the itch; what remains may be no more than the charter and
   non-work learnings.
@@ -154,7 +189,25 @@ Known questions:
   forever: whether the garden becomes the app's primary navigation — sessions
   reached through the seeds they tend, the session list demoted to a
   secondary view — is decided together with the in-flight foundational
-  rendering work, not by drift.
+  rendering work, not by drift. Interim answer (2026-08-07): **the crew** —
+  the seats are what Victor wants to see first; he expects this to evolve.
+- **What wakes a seat.** The spectrum, per Victor's visualization
+  (2026-08-07): he wakes them by default; automations may wake the
+  recurring ones; seeds will trigger some (a blocker falls, a message
+  lands); and **some may never go away** — persistent sessions. Raw
+  compaction strains "the agent's own words, at the agent's own closure" —
+  harness-driven, mid-flight, unconsented, a seam of forgetting hidden
+  inside apparent continuity (testimony: a compacted agent's own account,
+  2026-08-07). Resolved by the consented-closure mechanics in the handoff
+  rock: with handoff-before-compact, a persistent seat becomes a chain of
+  chosen goodbyes, and never-sleeping stops being an exception to the
+  principle.
+- **The overnight contract.** The house is work-driven, not clock-driven:
+  if work exists — including work the crew itself created — workers run at
+  any hour, and Victor sleeping is not a reason to stop. What is *not*
+  default: the crew deciding to start new goals around the clock. 24/7
+  self-perpetuation is a door deliberately left ajar ("not by default"),
+  never drifted through.
 
 Blindspots — flag for a `ground` pass before their first chunk:
 
