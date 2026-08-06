@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/sessionstate"
 )
 
 // newAutoSettleDaemon builds a daemon with one codex session that already owes the
@@ -323,6 +324,65 @@ func TestAutoSettle_FireTimeRecheckRefusesANonWorkingSession(t *testing.T) {
 	}
 	if !turnIsOwed(d, id) {
 		t.Fatal("turn was settled despite the session no longer working")
+	}
+}
+
+// A stop-time classification deliberately holds the last published state while
+// it decides whether the finished turn is idle or needs input. That held green
+// is presentation stability, not proof the agent is still working, so it must
+// suspend an auto-settle that was armed by the preceding turn.
+func TestAutoSettle_ClassificationSuspendsAndThenReevaluates(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id) // into the visible countdown
+
+	d.recordClassifierStarted(id, time.Now())
+
+	if _, ok := autoSettlePending(d, id); ok {
+		t.Fatal("countdown survived classification start")
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("classification start settled the turn")
+	}
+
+	// If classification completes while the persisted state is still working,
+	// re-evaluation starts the ordinary arm delay again. A subsequent idle or
+	// waiting-input resolution will cancel it through applyState.
+	d.recordClassifierFinished(id)
+	entry, ok := autoSettlePending(d, id)
+	if !ok || entry.phase != autoSettleArming {
+		t.Fatalf("after classification: pending=%v entry=%+v, want a fresh arm", ok, entry)
+	}
+}
+
+// recordClassifierStarted normally removes the timer before it can fire. This
+// pins the other ordering: the callback has already claimed the timer when the
+// evidence lands, so its own fire-time gate must still preserve the turn.
+func TestAutoSettle_FireTimeRecheckRefusesHeldWorkingDuringClassification(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id) // into the visible countdown
+
+	d.recordEvidence(id, time.Now(), func(e *sessionstate.Evidence) {
+		e.ClassifyingSince = time.Now()
+	})
+
+	entry, ok := autoSettlePending(d, id)
+	if !ok {
+		t.Fatal("no countdown to exercise the fire-time classification gate")
+	}
+	entry.timer.Stop()
+	d.autoSettleFire(id, entry.timer)
+
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn settled while the working state was held for classification")
+	}
+	if _, ok := autoSettlePending(d, id); ok {
+		t.Fatal("timer survived a classifying fire-time refusal")
 	}
 }
 

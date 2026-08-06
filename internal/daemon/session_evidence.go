@@ -515,6 +515,11 @@ func (d *Daemon) recordClassifierStarted(sessionID string, at time.Time) {
 	d.recordEvidence(sessionID, at, func(e *sessionstate.Evidence) {
 		e.ClassifyingSince = at
 	})
+	// A stop means the last published `working` may now be only the resolver's
+	// awaiting-verdict hold. Suspend auto-settle until the verdict tells us
+	// whether work actually continues. The fire path repeats this check to close
+	// the race with a timer callback that already removed itself from the map.
+	d.cancelAutoSettle(sessionID, "classification started")
 }
 
 // recordClassifierFinished clears that mark. It must run on every exit from a
@@ -524,6 +529,13 @@ func (d *Daemon) recordClassifierFinished(sessionID string) {
 	d.recordEvidence(sessionID, time.Now(), func(e *sessionstate.Evidence) {
 		e.ClassifyingSince = time.Time{}
 	})
+	// No state transition is guaranteed here: a background-working verdict can
+	// leave the persisted state as `working`. Re-evaluate explicitly so that real
+	// continuing work gets the normal full arm and countdown again. Idle and
+	// user-wanted verdicts will move state and cancel it before the arm elapses.
+	if session := d.store.Get(sessionID); session != nil {
+		d.syncAutoSettle(sessionID, string(session.State))
+	}
 }
 
 // runEvidenceResolveLoop re-resolves every session on a tick and publishes the

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/sessionstate"
 )
 
 // Auto-settle closes a turn the user has already dealt with.
@@ -381,6 +382,19 @@ func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) 
 	session := d.store.Get(sessionID)
 	if session == nil {
 		return "gone"
+	}
+	// The resolver deliberately holds the last published state while a stop-time
+	// verdict is being computed. That projected `working` prevents a color flicker,
+	// but it is not evidence that the agent is still working and must not close the
+	// turn. recordClassifierStarted normally cancels the timer immediately; this
+	// fire-time check closes the race where the callback already took the timer.
+	if evidence, ok := d.evidenceTable().snapshot(sessionID); ok &&
+		sessionstate.ClassifierVerdictPending(
+			evidence,
+			sessionstate.PolicyFor(string(session.Agent)),
+			time.Now(),
+		) {
+		return "classifying"
 	}
 	// The state gate is re-checked here as well as in syncAutoSettle. The
 	// transition path is the primary guard; this catches a session whose state

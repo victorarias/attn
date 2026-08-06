@@ -1,0 +1,7 @@
+kind: fixed
+area: queue
+change: >
+  Auto-settle now waits for a stop-time classification to finish before closing
+  a turn. A session can stay green briefly while attn decides whether the agent
+  finished or needs input; that held green state no longer makes the turn
+  disappear before the verdict arrives.
