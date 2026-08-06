@@ -539,12 +539,19 @@ func typeIntoAs(d *Daemon, sessionID, source string) {
 	d.handlePtyInput(nil, msg)
 }
 
-// goQuiet backdates the session's last keystroke so the quiet window has
-// elapsed, standing in for the user taking their hands off the keyboard.
+// goQuiet backdates the session's last auto-settle activity so the quiet window
+// has elapsed, standing in for the user taking their hands off the session.
 func goQuiet(d *Daemon, sessionID string) {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
-	d.lastUserInputAt[sessionID] = time.Now().Add(-2 * autoSettleHoldQuietWindow)
+	d.lastAutoSettleActivityAt[sessionID] = time.Now().Add(-2 * autoSettleHoldQuietWindow)
+}
+
+func movePointerIn(d *Daemon, sessionID string) {
+	d.handleTerminalPointerActivity(&protocol.TerminalPointerActivityMessage{
+		Cmd: protocol.CmdTerminalPointerActivity,
+		ID:  sessionID,
+	})
 }
 
 // The feature in one pass: typing freezes a running countdown, the freeze is
@@ -629,10 +636,10 @@ func TestAutoSettle_KeystrokeRacingTheFireHoldsInsteadOfSettling(t *testing.T) {
 	// Record the keystroke without holding: exactly the window in which the timer
 	// has already been pulled out of the map and is on its way to the settle.
 	d.lastInputMu.Lock()
-	if d.lastUserInputAt == nil {
-		d.lastUserInputAt = make(map[string]time.Time)
+	if d.lastAutoSettleActivityAt == nil {
+		d.lastAutoSettleActivityAt = make(map[string]time.Time)
 	}
-	d.lastUserInputAt[id] = time.Now()
+	d.lastAutoSettleActivityAt[id] = time.Now()
 	d.lastInputMu.Unlock()
 
 	var outcome string
@@ -644,6 +651,66 @@ func TestAutoSettle_KeystrokeRacingTheFireHoldsInsteadOfSettling(t *testing.T) {
 	}
 	if !turnIsOwed(d, id) {
 		t.Fatal("turn settled by a countdown that fired into a keystroke")
+	}
+}
+
+func TestAutoSettle_PointerMovementFreezesTheCountdownWithoutClaimingTyping(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+
+	movePointerIn(d, id)
+
+	held, ok := autoSettlePending(d, id)
+	if !ok || held.phase != autoSettleHeld || held.resume != autoSettleCounting {
+		t.Fatalf("after pointer movement: pending=%v entry=%+v, want held(resume=counting)", ok, held)
+	}
+	if d.recentUserInput(id, time.Hour) {
+		t.Fatal("pointer movement was recorded as keyboard input; it would delay ticket nudges")
+	}
+	if !protocol.Deref(d.sessionForBroadcast(d.store.Get(id)).AutoSettleHeld) {
+		t.Fatal("auto_settle_held absent after pointer movement")
+	}
+
+	movePointerIn(d, id)
+	fireAutoSettleNow(t, d, id)
+	if pending, ok := autoSettlePending(d, id); !ok || pending.phase != autoSettleHeld {
+		t.Fatalf("fresh pointer movement did not extend the hold: pending=%v entry=%+v", ok, pending)
+	}
+
+	goQuiet(d, id)
+	fireAutoSettleNow(t, d, id)
+	if resumed, ok := autoSettlePending(d, id); !ok || resumed.phase != autoSettleCounting {
+		t.Fatalf("after pointer quiet: pending=%v entry=%+v, want counting", ok, resumed)
+	}
+}
+
+func TestAutoSettle_PointerMovementInsideTheSettleStillHoldsIt(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+
+	moved := false
+	d.autoSettlePreSettleHook = func() {
+		if moved {
+			return
+		}
+		moved = true
+		movePointerIn(d, id)
+	}
+	var outcome string
+	d.autoSettleFireHook = func(_, action string) { outcome = action }
+	fireAutoSettleNow(t, d, id)
+
+	if !moved || outcome != "held" {
+		t.Fatalf("pointer race: moved=%v outcome=%q, want true/held", moved, outcome)
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("turn settled around pointer activity that landed before the settle committed")
 	}
 }
 

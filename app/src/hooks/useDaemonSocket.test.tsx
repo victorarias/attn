@@ -1627,6 +1627,53 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     unmount();
   });
 
+  it('drops terminal pointer activity until the daemon is ready', async () => {
+    const { result, unmount } = renderHook(() =>
+      useDaemonSocket({
+        onSessionsUpdate: vi.fn(),
+        onWorkspacesUpdate: vi.fn(),
+        onPRsUpdate: vi.fn(),
+        onReposUpdate: vi.fn(),
+        onAuthorsUpdate: vi.fn(),
+        wsUrl: 'ws://localhost:9999/ws',
+      }),
+    );
+    const ws = await waitForOpenSocket();
+
+    result.current.sendTerminalPointerActivity('session-pointer');
+    expect(ws.sent.map((entry) => JSON.parse(entry))).not.toContainEqual({
+      cmd: 'terminal_pointer_activity',
+      id: 'session-pointer',
+    });
+
+    act(() => {
+      ws.emit({
+        event: 'initial_state',
+        protocol_version: PROTOCOL_VERSION,
+        sessions: [],
+        workspaces: [],
+        prs: [],
+        repos: [],
+        authors: [],
+        settings: {},
+      });
+    });
+    expect(ws.sent.map((entry) => JSON.parse(entry))).not.toContainEqual({
+      cmd: 'terminal_pointer_activity',
+      id: 'session-pointer',
+    });
+
+    act(() => {
+      result.current.sendTerminalPointerActivity('session-pointer');
+    });
+    expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
+      cmd: 'terminal_pointer_activity',
+      id: 'session-pointer',
+    });
+
+    unmount();
+  });
+
   it('correlates overlapping resize results for the same split by request id', async () => {
     const { result, unmount } = renderHook(() =>
       useDaemonSocket({

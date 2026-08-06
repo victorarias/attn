@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 /**
- * Real-app scenario: typing to an agent freezes its settling countdown.
+ * Real-app scenario: keyboard and pointer activity freeze settling.
  *
  * attn closes a turn for the user once they have steered an agent and it has
  * gone back to work. The countdown that does it used to run regardless of what
@@ -48,6 +48,7 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
 import { preTrustClaudeFolder, ensureClaudePromptReadyViaPty } from './scenarioAgents.mjs';
 import { waitForFirstWorkspacePane } from './scenarioAssertions.mjs';
 
@@ -58,6 +59,16 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 // produces it — a change to one should make this run fail, not follow it.
 const QUIET_WINDOW_MS = 5_000;
 const COUNTDOWN_SECONDS = 60;
+
+function windowRelativePoint(pageX, pageY, windowBounds, innerWidth, innerHeight) {
+  const { width, height } = windowBounds.logicalBounds;
+  const chromeX = Math.max(0, width - innerWidth);
+  const chromeY = Math.max(0, height - innerHeight);
+  return {
+    relativeX: (chromeX / 2 + pageX) / width,
+    relativeY: (chromeY + pageY) / height,
+  };
+}
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -104,6 +115,10 @@ async function main() {
     throw new Error('the settle-typing-hold scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
 
+  if (process.env.ATTN_HARNESS_PARK_VISIBLE_PX === undefined) {
+    process.env.ATTN_HARNESS_PARK_VISIBLE_PX = '800';
+  }
+
   const runner = createScenarioRunner(options, {
     scenarioId: 'SETTLE-TYPING-HOLD',
     tier: 'tier3-local-agent',
@@ -116,6 +131,7 @@ async function main() {
 
   const client = new UiAutomationClient({ appPath: options.appPath });
   const observer = new DaemonObserver({ wsUrl: options.wsUrl });
+  const driver = new MacOSDriver({ appPath: options.appPath });
   const note = (message, extra) => runner.log(message, extra);
 
   let agentId = null;
@@ -297,6 +313,60 @@ async function main() {
       note('countdown resumed whole', { remainingMs, chip: resumedChip });
     });
 
+    await runner.step('pointer_movement_freezes_and_extends_the_countdown', async () => {
+      const windowBounds = await client.request('get_window_bounds', {});
+      runner.assert(Boolean(windowBounds?.logicalBounds), `window bounds available: ${JSON.stringify(windowBounds)}`);
+      const cellA = await client.request('get_pane_cell_rect', {
+        sessionId: agentId,
+        paneId: agentPaneId,
+        cell: { row: 2, col: 4 },
+      });
+      const cellB = await client.request('get_pane_cell_rect', {
+        sessionId: agentId,
+        paneId: agentPaneId,
+        cell: { row: 15, col: 40 },
+      });
+      const points = [cellA, cellB].map((cell) => windowRelativePoint(
+        cell.centerX,
+        cell.centerY,
+        windowBounds,
+        cell.innerWidth,
+        cell.innerHeight,
+      ));
+      note('pointer movement targets', { points });
+
+      const until = Date.now() + QUIET_WINDOW_MS * 2.5;
+      let moves = 0;
+      while (Date.now() < until) {
+        // Visit both targets so the step never depends on where the cursor was
+        // left by a previous scenario run. Each pair contains real movement.
+        for (const point of points) {
+          await driver.movePointerInWindow(point.relativeX, point.relativeY);
+          moves += 1;
+        }
+        await delay(2_000);
+        const session = observer.getSession(agentId);
+        runner.assert(
+          session?.auto_settle_held === true && !session?.auto_settle_fires_at,
+          `the countdown stays frozen while the pointer keeps moving (held=${JSON.stringify(session?.auto_settle_held)}, firesAt=${JSON.stringify(session?.auto_settle_fires_at)})`,
+          session,
+        );
+      }
+      note('freeze survived continued pointer movement', { moves, forMs: QUIET_WINDOW_MS * 2.5 });
+
+      const resumed = await pollFor(
+        () => observer.getSession(agentId)?.auto_settle_fires_at ? observer.getSession(agentId) : null,
+        'the countdown to return after pointer movement stopped',
+        QUIET_WINDOW_MS * 4,
+      );
+      const remainingMs = Date.parse(resumed.auto_settle_fires_at) - Date.now();
+      runner.assert(
+        remainingMs > (COUNTDOWN_SECONDS - 10) * 1_000,
+        `pointer quiet returns a whole countdown (${remainingMs}ms of ${COUNTDOWN_SECONDS}s)`,
+        resumed,
+      );
+    });
+
     await runner.step('automation_writes_do_not_freeze_it', async () => {
       // attn typing on the user's behalf — a nudge, a delegation brief, a
       // harness driving a pane — must not hold a countdown open. Same pane, same
@@ -319,7 +389,7 @@ async function main() {
     });
 
     const summary = runner.finishSuccess({ agentId });
-    console.log('[settle-typing-hold] PASS — typing froze the countdown, kept it frozen, and going quiet handed back a whole one.');
+    console.log('[settle-typing-hold] PASS — typing and pointer movement froze the countdown, and going quiet handed back a whole one.');
     console.log(JSON.stringify(summary, null, 2));
   } catch (error) {
     const summary = runner.finishFailure(error, { agentId });

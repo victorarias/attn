@@ -56,7 +56,7 @@ func parseOptions() throws -> Options {
     while index < args.count {
         let arg = args[index]
         switch arg {
-        case "activate", "activate_background", "frontmost", "display_state", "windowid", "windowlist", "text", "key", "keycode", "click", "right_click", "drag", "menu", "window_park", "scroll":
+        case "activate", "activate_background", "frontmost", "display_state", "windowid", "windowlist", "text", "key", "keycode", "move", "click", "right_click", "drag", "menu", "window_park", "scroll":
             options.command = arg
         case "--window-title":
             index += 1
@@ -168,6 +168,7 @@ func parseOptions() throws -> Options {
               InputDriver.swift text --text "hello" [--bundle-id ...] [--prompt-accessibility]
               InputDriver.swift key --key d [--modifiers command,option]
               InputDriver.swift keycode --key-code 36 [--modifiers command]
+              InputDriver.swift move --relative-x 0.75 --relative-y 0.5 [--window-title <substring>]
               InputDriver.swift click --relative-x 0.75 --relative-y 0.5 [--modifiers command] [--window-title <substring>]
               InputDriver.swift menu --path "File>New Session" [--bundle-id ...]
               InputDriver.swift window_park --visible-px 200 [--bundle-id ...] [--window-title <substring>]
@@ -194,7 +195,7 @@ func parseOptions() throws -> Options {
     }
 
     guard options.command != nil else {
-        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, display_state, windowid, windowlist, text, key, keycode, click, or menu.")
+        throw DriverError.usage("Missing command. Use activate, activate_background, frontmost, display_state, windowid, windowlist, text, key, keycode, move, click, or menu.")
     }
 
     return options
@@ -768,6 +769,30 @@ func clickWindow(bundleId: String, relativeX: Double, relativeY: Double, right: 
     up.post(tap: .cghidEventTap)
 }
 
+func movePointerInWindow(bundleId: String, relativeX: Double, relativeY: Double, titleSubstring: String? = nil) throws {
+    let bounds = try mainWindowBounds(bundleId: bundleId, titleSubstring: titleSubstring)
+    let target = CGPoint(
+        x: bounds.origin.x + bounds.width * min(max(relativeX, 0), 1),
+        y: bounds.origin.y + bounds.height * min(max(relativeY, 0), 1)
+    )
+    let start = CGEvent(source: nil)?.location ?? target
+    // WebKit may coalesce a single teleported mouseMoved event. A short stream
+    // follows the same physical path a real mouse or trackpad would and makes
+    // this command suitable for testing movement itself, not just hover state.
+    for i in 1...6 {
+        let progress = Double(i) / 6.0
+        let point = CGPoint(
+            x: start.x + (target.x - start.x) * progress,
+            y: start.y + (target.y - start.y) * progress
+        )
+        guard let move = CGEvent(mouseEventSource: nil, mouseType: .mouseMoved, mouseCursorPosition: point, mouseButton: .left) else {
+            throw DriverError.eventCreationFailed("Failed to create mouse move event.")
+        }
+        move.post(tap: .cghidEventTap)
+        Thread.sleep(forTimeInterval: 0.016)
+    }
+}
+
 // Presses the left button at (relativeX, relativeY), drags to
 // (toRelativeX, toRelativeY) in `steps` interpolated leftMouseDragged events
 // ~16ms apart (WebKit ignores teleporting drags for text selection), and
@@ -887,7 +912,7 @@ do {
     // and observation-only commands work fine against a sleeping display and
     // are deliberately left alone.
     switch options.command {
-    case "activate", "text", "key", "keycode", "click", "right_click", "scroll", "drag":
+    case "activate", "text", "key", "keycode", "move", "click", "right_click", "scroll", "drag":
         try requireLiveDisplay()
     default:
         break
@@ -896,7 +921,7 @@ do {
     // HID-based commands must run against a frontmost app; AX-based and
     // observation-only commands must NOT activate (that is the whole point).
     switch options.command {
-    case "activate", "text", "key", "keycode", "click", "right_click", "scroll":
+    case "activate", "text", "key", "keycode", "move", "click", "right_click", "scroll":
         try activateApp(bundleId: options.bundleId)
     default:
         break
@@ -942,6 +967,12 @@ do {
             throw DriverError.invalidArgument("Missing --key-code value")
         }
         try postKeyCode(CGKeyCode(keyCode), modifiers: options.modifiers, targetPid: try runningPID(bundleId: options.bundleId))
+    case "move":
+        try ensureAccessibility(prompt: options.promptAccessibility)
+        guard let relativeX = options.relativeX, let relativeY = options.relativeY else {
+            throw DriverError.invalidArgument("Missing --relative-x/--relative-y for move")
+        }
+        try movePointerInWindow(bundleId: options.bundleId, relativeX: relativeX, relativeY: relativeY, titleSubstring: options.windowTitle)
     case "click":
         try ensureAccessibility(prompt: options.promptAccessibility)
         guard let relativeX = options.relativeX, let relativeY = options.relativeY else {

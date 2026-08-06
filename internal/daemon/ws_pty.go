@@ -654,6 +654,12 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 	}
 }
 
+func (d *Daemon) handleTerminalPointerActivity(msg *protocol.TerminalPointerActivityMessage) {
+	if d.noteAutoSettleActivity(msg.ID) {
+		d.holdAutoSettle(msg.ID)
+	}
+}
+
 // ptyGeometry is the payload of FactSessionPTYResized. The new size is not
 // derivable from the store, so the fact carries it. XPixel/YPixel are the
 // pane's total size in device pixels, 0 when the resizing client reported none.

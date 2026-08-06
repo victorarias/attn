@@ -194,6 +194,18 @@ export class MacOSDriver {
     await this.pressKeyCode(36);
   }
 
+  async movePointerInWindow(relativeX, relativeY, opts = {}) {
+    await this.runInputDriver(withWindowTitleArgs([
+      'move',
+      '--relative-x',
+      String(relativeX),
+      '--relative-y',
+      String(relativeY),
+      '--prompt-accessibility',
+    ], opts));
+    await delay(this.actionDelayMs);
+  }
+
   async clickWindow(relativeX, relativeY, opts = {}) {
     const args = [
       'click',

@@ -152,6 +152,10 @@ export interface GhosttyTerminalProps {
     paneCount: number;
   };
   onInput: (data: string) => void;
+  // User pointer movement inside this terminal. Kept separate from onInput:
+  // application-mouse bytes belong to the TUI, while this signal only keeps an
+  // auto-settle countdown from closing under an engaged user.
+  onPointerActivity?: () => void;
   // Cmd+click on a markdown file path routes here (docking an in-app markdown
   // tile) instead of opening the OS default app. sessionId is the pane's
   // session, or '' when the pane has none (the daemon falls back to the
@@ -645,7 +649,7 @@ function cellText(
 }
 
 export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminalProps>(
-  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered, annotations, annotationsVersion = 0, onAnnotationAnchor, onAnnotationMiss, onAnnotationActivate }, ref) {
+  function GhosttyTerminal({ fontSize, resolvedTheme = 'dark', debugName, cwd, runtimeLogMeta, onInput, onPointerActivity, onOpenMarkdown, onReady, onResize, onReplayInterrupted, onTerminalModelRecovered, annotations, annotationsVersion = 0, onAnnotationAnchor, onAnnotationMiss, onAnnotationActivate }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
@@ -765,6 +769,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const readyRef = useRef(false);
     const startupRef = useRef(emptyStartup());
     const onInputRef = useRef(onInput);
+    const onPointerActivityRef = useRef(onPointerActivity);
+    const lastPointerActivityAtRef = useRef(Number.NEGATIVE_INFINITY);
     const onOpenMarkdownRef = useRef(onOpenMarkdown);
     const onReadyRef = useRef(onReady);
     const onResizeRef = useRef(onResize);
@@ -827,6 +833,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const fontSizeRef = useRef(fontSize);
 
     onInputRef.current = onInput;
+    onPointerActivityRef.current = onPointerActivity;
     onOpenMarkdownRef.current = onOpenMarkdown;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
@@ -3781,6 +3788,15 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           startSelectionDrag();
         }}
         onMouseMove={(event) => {
+          // Pointer activity is intentionally sampled rather than sent for
+          // every pixel. The daemon's five-second quiet window only needs a
+          // recent proof of engagement; four samples a second keeps its edge
+          // accurate without turning ordinary mouse movement into wire spam.
+          const pointerActivityAt = performance.now();
+          if (pointerActivityAt - lastPointerActivityAtRef.current >= 250) {
+            lastPointerActivityAtRef.current = pointerActivityAt;
+            onPointerActivityRef.current?.();
+          }
           if (isWorkspaceResizeActive(containerRef.current)) {
             event.preventDefault();
             event.stopPropagation();

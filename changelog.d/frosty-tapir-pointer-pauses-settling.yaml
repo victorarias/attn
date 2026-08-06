@@ -1,0 +1,8 @@
+kind: changed
+area: queue
+change: >
+  Moving the pointer over an agent now pauses its settling countdown just like
+  typing does. Keep interacting and the paused indicator stays put; five quiet
+  seconds after the last movement, the whole countdown returns. The new settling
+  signal adds no terminal input for the agent and does not delay ticket nudges
+  meant to avoid half-typed prompts.

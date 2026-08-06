@@ -15,11 +15,11 @@ import { CountdownCancelHint } from './CountdownCancelHint';
  * is something you notice from across the screen, which is the only way an
  * indicator on a tile you are not focused on does its job.
  *
- * `auto_settle_held` is the same countdown with the user's hands on the keyboard:
- * the daemon has frozen it and sent no deadline, so the bar draws full and still.
- * A full bar rather than a partial one because there is nothing to be partial
- * about — the deadline is gone, and when typing stops the daemon sends a whole new
- * one, which is exactly what a full frozen bar promises.
+ * `auto_settle_held` is the same countdown while the user is interacting with the
+ * terminal: the daemon has frozen it and sent no deadline, so the bar draws full
+ * and still. A full bar rather than a partial one because there is nothing to be
+ * partial about — the deadline is gone, and after the user goes quiet the daemon
+ * sends a whole new one, which is exactly what a full frozen bar promises.
  *
  * Two homes, so a countdown is never invisible. The pane header is the primary
  * one — the tile is where you are looking when you steered the agent. The sidebar

@@ -10,6 +10,9 @@ func TestCommandMetaExamples(t *testing.T) {
 	if meta := CommandMeta[protocol.CmdPtyInput]; meta.Scope != ScopeSession {
 		t.Fatalf("pty_input scope = %v, want %v", meta.Scope, ScopeSession)
 	}
+	if meta := CommandMeta[protocol.CmdTerminalPointerActivity]; meta.Scope != ScopeSession {
+		t.Fatalf("terminal_pointer_activity scope = %v, want %v", meta.Scope, ScopeSession)
+	}
 	if meta := CommandMeta[protocol.CmdSpawnSession]; meta.Scope != ScopeEndpoint {
 		t.Fatalf("spawn_session scope = %v, want %v", meta.Scope, ScopeEndpoint)
 	}
@@ -24,6 +27,9 @@ func TestCommandMetaExamples(t *testing.T) {
 	}
 	if shouldLogWSCommand(protocol.CmdPtyInput) {
 		t.Fatal("pty_input should be excluded from normal websocket command logging")
+	}
+	if shouldLogWSCommand(protocol.CmdTerminalPointerActivity) {
+		t.Fatal("terminal_pointer_activity should be excluded from normal websocket command logging")
 	}
 }
 

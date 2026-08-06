@@ -123,7 +123,7 @@
   box-shadow: 0 0 9px 1px rgba(var(--settling-accent), 0.7);
 }
 
-/* ---- Held: the user is typing, so the countdown is frozen ----
+/* ---- Held: the user is interacting, so the countdown is frozen ----
 
    The bar keeps its full width and stops moving; the chip dims and its dot stops
    pulsing. Frozen has to read as "still here, not running" rather than as a

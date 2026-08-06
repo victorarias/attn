@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "213"
+const ProtocolVersion = "214"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -231,6 +231,7 @@ const (
 	CmdGetScreenSnapshot                     = "get_screen_snapshot"
 	CmdGetKittyImage                         = "get_kitty_image"
 	CmdPtyInput                              = "pty_input"
+	CmdTerminalPointerActivity               = "terminal_pointer_activity"
 	CmdAgentPrompt                           = "agent_prompt"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
@@ -1541,6 +1542,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg PtyInputMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal pty_input: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdTerminalPointerActivity:
+		var msg TerminalPointerActivityMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal terminal_pointer_activity: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
