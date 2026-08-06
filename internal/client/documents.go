@@ -134,6 +134,13 @@ func revisions(held []protocol.StoredDocument) []protocol.DocumentRevision {
 type DocSubscriptionEnded struct {
 	Code    string
 	Message string
+
+	// lost distinguishes the one ending that is safe to retry — the connection
+	// went — from every other one. It is not the same fact as an empty Code: a
+	// delivery this client cannot apply also carries no daemon code, and
+	// resubscribing after one repeats it with the same declared revisions,
+	// forever. Set here rather than exported so no caller can claim it.
+	lost bool
 }
 
 func (e *DocSubscriptionEnded) Error() string {
@@ -151,6 +158,15 @@ func DocSubscriptionCode(err error) (string, bool) {
 		return ended.Code, true
 	}
 	return "", false
+}
+
+// DocConnectionLost reports whether a subscription ended because the connection
+// went. That is the only ending worth resubscribing to: a daemon that refused
+// the query and a delivery this client could not apply both recur on the next
+// attempt, so retrying either is a loop that reports nothing.
+func DocConnectionLost(err error) bool {
+	var ended *DocSubscriptionEnded
+	return errors.As(err, &ended) && ended.lost
 }
 
 // DocSubscribe opens a live query and calls onWindow for every delivery,
@@ -189,7 +205,7 @@ func (c *Client) DocSubscribe(query protocol.DocumentQuery, held []protocol.Stor
 	for {
 		var resp protocol.Response
 		if err := decoder.Decode(&resp); err != nil {
-			return &DocSubscriptionEnded{Message: "the daemon closed the connection"}
+			return &DocSubscriptionEnded{Message: "the daemon closed the connection", lost: true}
 		}
 		if !resp.Ok {
 			return &DocSubscriptionEnded{

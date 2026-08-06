@@ -393,11 +393,13 @@ func runDocWatch(args []string) {
 			printDocWindow(window, opts.asJSON)
 			return true
 		})
-		code, ended := client.DocSubscriptionCode(err)
+		_, ended := client.DocSubscriptionCode(err)
 		switch {
-		case opts.resume && ended && code == "":
+		case opts.resume && client.DocConnectionLost(err):
 			// The connection went, not the collection. Everything held stays
-			// held, and the resubscribe declares it.
+			// held, and the resubscribe declares it. Only this ending retries:
+			// every other one recurs on the next attempt, and a watch that
+			// resubscribed through one would spin reporting nothing.
 		case opts.resume && watching && !ended:
 			// The daemon is not answering the door yet. Restarting one takes
 			// long enough that a watch which gave up here would not survive the

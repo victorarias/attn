@@ -89,6 +89,44 @@ func TestASubscriptionEndingWithoutAnErrorIsStillAnError(t *testing.T) {
 	if code != "" {
 		t.Fatalf("a lost connection carried code %q, and there is nothing for a caller to branch on", code)
 	}
+	if !DocConnectionLost(err) {
+		t.Fatal("a lost connection is the one ending worth resubscribing to, and it did not say so")
+	}
+}
+
+// The three endings that are NOT worth retrying, kept together because what
+// separates them from a lost connection is one bit that is easy to conflate
+// with an empty code. A resuming watcher that retried any of them would spin:
+// the daemon refuses the same query again, and an unapplicable delivery repeats
+// with the same declared revisions.
+func TestOnlyALostConnectionIsWorthResubscribing(t *testing.T) {
+	unapplicable := docServer(t, func(conn net.Conn, _ protocol.DocSubscribeMessage) {
+		// Orders a document whose body it never sent and the client never held.
+		sendDelivery(t, conn, protocol.DocSubscribeResult{Delivery: 1, Order: []string{"ghost"}})
+	})
+	err := New(unapplicable).DocSubscribe(protocol.DocumentQuery{}, nil, func(DocWindow) bool { return true })
+	if _, ended := DocSubscriptionCode(err); !ended {
+		t.Fatalf("an unapplicable delivery reported %v", err)
+	}
+	if DocConnectionLost(err) {
+		t.Fatal("an unapplicable delivery claimed the connection went; resubscribing repeats it forever")
+	}
+
+	coded := docServer(t, func(conn net.Conn, _ protocol.DocSubscribeMessage) {
+		json.NewEncoder(conn).Encode(protocol.Response{
+			Ok:        false,
+			Error:     protocol.Ptr("collection undefined while subscribed"),
+			ErrorCode: protocol.Ptr(protocol.ErrorCodeCollectionUndefined),
+		})
+	})
+	err = New(coded).DocSubscribe(protocol.DocumentQuery{}, nil, func(DocWindow) bool { return true })
+	if DocConnectionLost(err) {
+		t.Fatal("a collection that was removed claimed the connection went")
+	}
+
+	if DocConnectionLost(errString("connection refused")) {
+		t.Fatal("an ordinary error claimed to be a lost subscription")
+	}
 }
 
 // The daemon's coded ending has to survive the read loop as a code, because a UI
