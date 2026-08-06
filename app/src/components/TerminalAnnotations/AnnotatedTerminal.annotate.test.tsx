@@ -264,7 +264,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     expect(stored()).toHaveLength(1);
 
     rerender({ state: 'waiting_input' });
@@ -281,7 +281,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     const before = stored()[0];
 
     daemon.messages = [
@@ -303,7 +303,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     daemon.messages = [{ key: 'turn-2', markdown: TURN_2 }];
     rerender({ state: 'waiting_input' });
@@ -366,7 +366,7 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     fireEvent.click(screen.getByLabelText('Verify this'));
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(screen.getByText('Send all'));
 
@@ -391,10 +391,10 @@ describe('AnnotatedTerminal', () => {
     activate(stored()[0].id);
     expect(screen.getByTestId('annotation-popup')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     expect(stored()).toHaveLength(1);
-    expect(stored()[0].emoji).toBe('🧪');
+    expect(stored()[0].emoji).toBe('🧾');
   });
 
   it('reopens a comment straight into its editor, prefilled', async () => {
@@ -618,7 +618,7 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     fireEvent.click(screen.getByLabelText('Verify this'));
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(card(0).open);
     terminalFocusCalls = 0;
@@ -693,6 +693,50 @@ describe('AnnotatedTerminal', () => {
     await act(async () => {});
     expect(terminal.annotations).toBeUndefined();
     expect(terminal.onAnnotationAnchor).toBeUndefined();
+  });
+});
+
+// Fifteen emoji-only chips is a row nobody can read. The line under it is what
+// makes the row learnable without hovering each one and waiting for a tooltip.
+describe('AnnotatedTerminal label hint', () => {
+  function hint(): string {
+    return screen.getByTestId('annotation-popup-hint').textContent ?? '';
+  }
+
+  it('names a chip while the pointer is on it', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+
+    fireEvent.mouseEnter(screen.getByLabelText('Show the receipt'));
+
+    expect(hint()).toBe('Show the receipt');
+  });
+
+  it('goes back to naming the mark that is already on this annotation', async () => {
+    // Reopening a mark should say what it says. Leaving the last hovered chip
+    // in the line would name a label the annotation does not carry.
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    // Marking closes the popup, so this is the reopen a user does from the grid.
+    activate(stored()[0].id);
+
+    expect(hint()).toBe('Show the receipt');
+    fireEvent.mouseEnter(screen.getByLabelText('This is wrong'));
+    expect(hint()).toBe('This is wrong');
+    fireEvent.mouseLeave(screen.getByLabelText('This is wrong'));
+
+    expect(hint()).toBe('Show the receipt');
+  });
+
+  it('says what to do when nothing is marked or hovered', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+
+    expect(hint()).toBe('Pick a label, or write a comment');
   });
 });
 
@@ -877,7 +921,7 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
     // Mid-flight, the user marks something else.
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     const keptId = stored().find((entry) => entry.id !== sentId)!.id;
 
     await act(async () => {
@@ -915,7 +959,7 @@ describe('AnnotatedTerminal sending', () => {
 
     // Mid-flight, the user changes their mind about the label.
     activate(id);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     await act(async () => {
       daemon.releaseSubmit?.();
@@ -924,8 +968,8 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
     expect(stored()).toHaveLength(1);
     expect(stored()[0].id).toBe(id);
-    expect(stored()[0].emoji).toBe('🧪');
-    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧪']));
+    expect(stored()[0].emoji).toBe('🧾');
+    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧾']));
     expect(daemon.calls.clearAnnotations).toBe(0);
   });
 
@@ -940,20 +984,20 @@ describe('AnnotatedTerminal sending', () => {
     fireEvent.click(screen.getByLabelText('Verify this'));
     const editedId = stored()[0].id;
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(screen.getByText('Send all'));
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
 
     activate(editedId);
-    fireEvent.click(screen.getByLabelText('Out of scope'));
+    fireEvent.click(screen.getByLabelText('This is wrong'));
 
     await act(async () => {
       daemon.releaseSubmit?.();
     });
 
     await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual([editedId]));
-    expect(stored()[0].emoji).toBe('🚫');
+    expect(stored()[0].emoji).toBe('❌');
   });
 
   it('tombstones the daemon draft only once the send is delivered', async () => {
@@ -1050,7 +1094,7 @@ describe('AnnotatedTerminal persistence', () => {
       start: 31,
       end: 55,
       quote: TURN_1.slice(31, 55),
-      emoji: '🧪',
+      emoji: '🧾',
       comment: '',
     }];
 

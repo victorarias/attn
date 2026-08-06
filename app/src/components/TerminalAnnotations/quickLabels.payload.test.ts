@@ -7,8 +7,11 @@ describe('QUICK_LABEL_GROUPS', () => {
     // objections. Ninth in a run of corrections, the one positive mark reads as
     // one more complaint — the group is what a divider draws between.
     expect(QUICK_LABEL_GROUPS[0].map((label) => label.id)).toEqual(['exactly-this']);
-    expect(QUICK_LABEL_GROUPS).toHaveLength(2);
+    expect(QUICK_LABEL_GROUPS.length).toBeGreaterThan(1);
     expect(QUICK_LABELS[0].emoji).toBe('💯');
+    // Its opposite leads the next group rather than sharing the first: the two
+    // verdicts are a pair, and a divider is what says they are not the same act.
+    expect(QUICK_LABEL_GROUPS[1][0].id).toBe('this-is-wrong');
   });
 
   it('flattens to the whole row, so a grouped label is still resolvable', () => {
@@ -22,11 +25,11 @@ describe('buildAnnotationPayload', () => {
     // The agent cannot see the highlight. The quote is the only thing that
     // tells it which part of its own answer the feedback lands on.
     const payload = buildAnnotationPayload([
-      { start: 40, emoji: '🧪', comment: '', quote: 'ship it without tests' },
+      { start: 40, emoji: '🧾', comment: '', quote: 'ship it without tests' },
     ]);
 
     expect(payload).toContain('> ship it without tests');
-    expect(payload).toContain('🧪 Needs tests');
+    expect(payload).toContain('🧾 Show the receipt');
   });
 
   it('sends the label instruction, not the label name', () => {
@@ -88,7 +91,7 @@ describe('buildAnnotationPayload', () => {
 
   describe('with a note', () => {
     const MARKS = [
-      { start: 40, emoji: '🧪', comment: '', quote: 'the retry wrapper' },
+      { start: 40, emoji: '🧾', comment: '', quote: 'the retry wrapper' },
       { start: 4, emoji: '❓', comment: 'which parser?', quote: 'the parser' },
     ];
 
@@ -113,5 +116,16 @@ describe('buildAnnotationPayload', () => {
 
       expect(payload.indexOf('the parser')).toBeLessThan(payload.indexOf('the retry wrapper'));
     });
+  });
+});
+
+// Retiring a label leaves its emoji behind on marks already saved. Reusing one
+// would relabel them into something the user never said, so a retired emoji is
+// retired for good — this is the list, and it only ever grows.
+describe('retired emoji', () => {
+  it('never come back on a different label', () => {
+    const retired = ['🧬', '📉', '🚫', '🧪'];
+    const live = new Set(QUICK_LABELS.map((label) => label.emoji));
+    expect(retired.filter((emoji) => live.has(emoji))).toEqual([]);
   });
 });

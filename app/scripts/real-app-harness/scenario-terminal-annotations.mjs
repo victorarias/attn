@@ -48,7 +48,7 @@ const SETTLED_STATES = new Set(['idle', 'waiting_input', 'pending_approval']);
 
 // The label clicked in the popup. Its aria-label is the button's accessible
 // name in QUICK_LABELS; its emoji is what the filed annotation carries.
-const LABEL = { name: 'Needs tests', emoji: '🧪' };
+const LABEL = { name: 'Show the receipt', emoji: '🧾' };
 // The note drafted beside the marks, and what proves it left the composer.
 const NOTE = 'Prefer the smallest change that covers this.';
 

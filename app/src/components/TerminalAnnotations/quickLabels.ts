@@ -11,7 +11,7 @@ export interface QuickLabel {
   emoji: string;
   text: string;
   // The instruction sent to the agent. Absent when the label's own name says
-  // everything ("Clarify this", "Needs tests").
+  // everything ("Clarify this").
   tip?: string;
 }
 
@@ -19,10 +19,16 @@ export interface QuickLabel {
 // separates, so the grouping lives here as data rather than as an index the
 // popup counts to — reordering a label cannot silently move the divider.
 //
-// Agreement is its own group because it is the only mark that says "keep
-// going". Ninth in a run of seven corrections it reads as one more complaint,
-// and a reviewer with no quick way to say "this part is right" only ever files
-// the objections.
+// Every label here reacts to a *claim in a sentence*, because that is what a
+// highlight selects. Labels about the work rather than the words — "needs
+// tests", "out of scope", "match existing patterns" — belong on a plan, which
+// is why they live in the markdown reader's set and not this one. On a message
+// they had nothing to attach to and were never used.
+//
+// An emoji is an identity, not decoration: it is what a stored annotation
+// carries and what `labelByEmoji` resolves the payload from. A retired emoji
+// stays retired — reusing one would silently relabel marks already on disk into
+// something the user never said.
 export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
   [
     // Its tip is the longest here on purpose: "good" alone tells an agent
@@ -36,12 +42,41 @@ export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
     },
   ],
   [
+    // The other end of the same axis. It has to travel the way agreement does:
+    // a wrong claim is rarely wrong only where it was written.
+    {
+      id: 'this-is-wrong',
+      emoji: '❌',
+      text: 'This is wrong',
+      tip: 'This is wrong. Correct it before going further, and check what else you built on it — anything downstream of this claim is suspect too.',
+    },
+    // Doubt with nothing articulate behind it yet. Without this the only way to
+    // say it is to argue a case the user has not made, so it arrives as silence
+    // or as a rewrite. "Do not defend it" is the load-bearing half of the tip:
+    // the reflex it exists to stop is a rebuttal.
+    {
+      id: 'dont-love-this',
+      emoji: '😕',
+      text: "I don't love this",
+      tip: 'Something here is off. Do not defend it — rework this part. If you cannot see what is wrong with it, say what you think I am reacting to and ask.',
+    },
+  ],
+  [
     { id: 'clarify-this', emoji: '❓', text: 'Clarify this' },
     {
       id: 'verify-this',
       emoji: '🔍',
       text: 'Verify this',
       tip: 'This seems like an assumption. Verify by reading the actual code before proceeding.',
+    },
+    // Verify is "go and check". This is "you already claimed it — show your
+    // work". It catches the failure the others cannot: confident prose written
+    // over a guess, which reads exactly like prose written over a measurement.
+    {
+      id: 'show-the-receipt',
+      emoji: '🧾',
+      text: 'Show the receipt',
+      tip: 'You asserted this as fact. Name what backs it — the file and line, the measurement, the command output — or say plainly that it is an assumption.',
     },
     {
       id: 'give-me-an-example',
@@ -50,30 +85,44 @@ export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
       tip: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario.',
     },
     {
-      id: 'match-existing-patterns',
-      emoji: '🧬',
-      text: 'Match existing patterns',
-      tip: 'Search the codebase for existing patterns that already solve this. Reuse what exists.',
-    },
-    {
       id: 'consider-alternatives',
       emoji: '🔄',
       text: 'Consider alternatives',
       tip: 'Propose 2-3 alternative approaches with trade-offs based on the actual codebase.',
     },
+  ],
+  [
+    // Aimed at the writing. "Be concise" as a standing instruction teaches
+    // nothing; a mark on the paragraph that was padding teaches the register.
     {
-      id: 'ensure-no-regression',
-      emoji: '📉',
-      text: 'Ensure no regression',
-      tip: 'Verify this will not break existing behavior. Identify what could regress.',
+      id: 'cut-this',
+      emoji: '✂️',
+      text: 'Cut this',
+      tip: 'This is padding. Say what it says in a fraction of the words, or drop it — do not restate it more carefully.',
+    },
+    // Aimed at the proposal.
+    {
+      id: 'simplify-this',
+      emoji: '🪓',
+      text: 'Simplify this',
+      tip: 'This is more machinery than the problem needs. Find the version with fewer moving parts, even if that means throwing this away.',
+    },
+  ],
+  [
+    // The two halves of getting the asking wrong, marked on the question or the
+    // decision itself rather than delivered as a note about behaviour.
+    {
+      id: 'your-call',
+      emoji: '🪙',
+      text: 'Your call',
+      tip: 'You did not need me for this. Decide it yourself and keep going — ask only when the choice is genuinely mine to make.',
     },
     {
-      id: 'out-of-scope',
-      emoji: '🚫',
-      text: 'Out of scope',
-      tip: 'This is not part of the current task. Remove it and stay focused on what was requested.',
+      id: 'ask-me-first',
+      emoji: '🙋',
+      text: 'Ask me first',
+      tip: 'You should have asked before deciding this. Stop and ask rather than picking for me.',
     },
-    { id: 'needs-tests', emoji: '🧪', text: 'Needs tests' },
   ],
 ];
 

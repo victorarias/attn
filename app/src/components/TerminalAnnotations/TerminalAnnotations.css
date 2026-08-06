@@ -24,6 +24,11 @@
   border: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  /* The chip row on one line is ~490px, which is wider than a pane in a
+     three-way split — and a popup that cannot fit its pane falls back to the
+     window, where it lands on the sidebar. Two shorter rows keep it inside the
+     pane it belongs to, which is worth more than a single row of glyphs. */
+  max-width: 320px;
 }
 
 .anno-popup--placed {
@@ -33,7 +38,21 @@
 .anno-popup-labels {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
+}
+
+/* Always drawn, so naming a chip cannot change the popup's height and move it
+   out from under the pointer that is reading it. */
+.anno-popup-hint {
+  min-height: 15px;
+  margin: 4px 2px 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--text-secondary, #8a8a8a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .anno-popup-label {

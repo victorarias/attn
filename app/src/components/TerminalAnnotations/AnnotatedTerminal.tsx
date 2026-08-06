@@ -24,7 +24,7 @@ import {
   type MessageAnchor,
   type TerminalAnnotation,
 } from '../../utils/terminalAnnotations';
-import { QUICK_LABEL_GROUPS, buildAnnotationPayload } from './quickLabels';
+import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelByEmoji } from './quickLabels';
 import { clampToViewport, placePopup, type PlaceOptions, type Placement } from './placement';
 import { useShortcut } from '../../shortcuts/useShortcut';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
@@ -163,6 +163,20 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // background fetch would be a repaint for no one.
     const windowErrorRef = useRef<string | null>(null);
     const [draft, setDraft] = useState('');
+
+    // What the chip row is about to do, named in words under it. Fifteen
+    // emoji-only buttons is a row you have to hover one at a time to read, and
+    // the native tooltip arrives a second late — long enough that the fast way
+    // to find a label is to click one and undo it. The line is always drawn so
+    // that naming a chip cannot change the popup's height and move it out from
+    // under the pointer.
+    const [hint, setHint] = useState<string | null>(null);
+    const hintProps = useCallback((text: string) => ({
+      onMouseEnter: () => setHint(text),
+      onMouseLeave: () => setHint((current) => (current === text ? null : current)),
+      onFocus: () => setHint(text),
+      onBlur: () => setHint((current) => (current === text ? null : current)),
+    }), []);
     // The note the whole set is sent with. Hydrated with the annotations,
     // written through on a pause in typing, and spent by the send that
     // delivered it.
@@ -833,6 +847,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                       title={label.text}
                       aria-label={label.text}
                       onClick={() => applyLabel(label.emoji)}
+                      {...hintProps(label.text)}
                     >
                       {label.emoji}
                     </button>
@@ -846,6 +861,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 title="Write a comment"
                 aria-label="Write a comment"
                 onClick={() => setComposer((current) => (current ? { ...current, writing: true } : current))}
+                {...hintProps('Write a comment')}
               >
                 💬
               </button>
@@ -858,9 +874,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 title="Remove this annotation"
                 aria-label="Remove this annotation"
                 onClick={() => removeAnnotation(composed.id)}
+                {...hintProps('Remove this annotation')}
               >
                 🗑
               </button>
+            </div>
+            {/* Hovering names what a chip does; at rest the line names the mark
+                this annotation already carries, so reopening one says what it
+                says without a click. */}
+            <div className="anno-popup-hint" data-testid="annotation-popup-hint">
+              {hint ?? labelByEmoji(composed.emoji)?.text ?? 'Pick a label, or write a comment'}
             </div>
             {composer.writing ? (
               <div className="anno-popup-compose">
