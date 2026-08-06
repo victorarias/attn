@@ -79,14 +79,20 @@ for user-defined seats.
 
 - [x] **Chief as proto-seat** — single-holder profile role, durable ticket role
   identity, protected session. The embryo exists.
-- [ ] **Seat primitive** — durable identity + charter + memory home; sessions
+- [~] **Seat primitive** — durable identity + charter + memory home; sessions
   occupy seats; chief migrates to be the first seat, not a special case.
-- [ ] **Handoff & priming** — consented closure flow; agent-authored handoff
-  notes accrue to the seat; next wake primes from them.
-- [ ] **The garden (seeds)** — attn-native fine-grained seeds with audit trail
+  Running today as a hand-run skill-layer simulation (`~/.attn/seats/`,
+  `/wake`, `/handoff`; first real handoff filed 2026-08-06) that teaches the
+  primitive's shape before it hardens into the daemon.
+- [~] **Handoff & priming** — consented closure flow; agent-authored handoff
+  notes accrue to the seat; next wake primes from them. Simulated by the same
+  skills; priming size is logged from the start so the condensation budget
+  gets a receipt.
+- [~] **The garden (seeds)** — attn-native fine-grained seeds with audit trail
   and seat attribution, for any attn-living agent; tickets become views over
   the garden; a planning seat tends it; `/orchestrate-with-fable` and ad-hoc
-  plan-file choreography retire into it.
+  plan-file choreography retire into it. Vertical-slice plan:
+  [docs/plans/2026-08-06-the-garden-vertical-slices.md](../plans/2026-08-06-the-garden-vertical-slices.md).
 - [ ] **Intentful recognition** — laurels and feedback between human and seats
   and between seats, attached to work items, delivered at wake; a very simple
   central server routes across daemons and machines.
@@ -110,7 +116,13 @@ Known questions:
   seat drill from any summary back to the original detail on demand. Forgetting
   is replaced by condensation plus retrieval. Open: the atom of seat memory,
   the priming budget, and the condensation cadence (the durable jobs queue is
-  the natural home).
+  the natural home). And a prior question, raised 2026-08-06, open but not
+  decided: whether a dedicated store is needed at all. Handoffs and laurels
+  attach to seeds, and work history *is* the seeds a seat tended — so wake
+  priming may be a garden query, and condensation may be `distill` wearing a
+  different hat. Before building a memory store, check whether the garden
+  already covers the itch; what remains may be no more than the charter and
+  non-work learnings.
 - **Seatless sessions stay first-class, for errands.** Continuity has two
   axes: a handoff always attaches to the seed, and additionally to a seat
   when one is occupied. Errand sessions pay no ceremony tax, and whoever next
@@ -129,16 +141,61 @@ Known questions:
   norm — is what keeps laurels worth receiving. Specificity is the sycophancy
   filter: counterfeit admiration cannot name its trigger. Expect iteration on
   the wording.
+- **The negative channel.** Recognition needs an opposite as deliberate as the
+  laurel — the flag that work went wrong, attached to the work it names,
+  project-scoped like the fruit it mirrors. Working names float in the garden
+  register (rot, weeds, blight) and none is chosen. The same intentfulness
+  rules bind it: never derived, never gamified, and specificity is still the
+  filter — a complaint that cannot name its trigger is noise. Design owed with
+  the recognition arc; it lives wherever the fruits live.
+- **The garden as the front door.** Today attn's home screen is sessions and
+  workspaces. The vision says an agent "finds its work waiting" — and so
+  should the user. Named here so it cannot silently default to a side panel
+  forever: whether the garden becomes the app's primary navigation — sessions
+  reached through the seeds they tend, the session list demoted to a
+  secondary view — is decided together with the in-flight foundational
+  rendering work, not by drift.
 
 Blindspots — flag for a `ground` pass before their first chunk:
 
 - **The central server.** Identity and addressing of seats across daemons and
   machines, relationship to the existing hub/relay, auth, and the smallest
-  honest first version. Unfamiliar territory; ground before designing.
-- **Seed grain and schema.** How fine is fine — seed shape, dependency
-  model, audit-trail contract, lifecycle vocabulary (planted, growing,
-  dormant, harvested, withered). Study the beads *UX* specifically (not its
-  implementation) before committing a schema.
+  honest first version. Unfamiliar territory; ground before designing. Its
+  scope grew on 2026-08-06: recognition routing was the founding reason, but
+  the garden itself needs a home the moment remote daemons are in play — a
+  garden per daemon is a split brain, so seeds, plans, fruits, and the
+  negative channel all converge on one hub. The garden plan takes the interim
+  stance (one garden, at the hub daemon, remote sessions reaching it over the
+  relay); syncing that hub with a central server across machines is a known
+  unknown Victor already wants solved — how is entirely open. Stance set
+  2026-08-06, ahead of the ground pass: the server is **closed source**,
+  **operated by Victor**, and **optional, never required** — attn is complete
+  standalone; the service adds cross-computer garden syncing and recognition
+  routing and gates no feature. The moat is operational gravity (the hosted
+  network is the convenient path), not a lock — the Tailscale shape: open
+  clients, closed coordination plane. Closed keeps monetization optionality
+  and freedom to move fast at zero cost today, and is the reversible door
+  (closed can open later; open cannot close). The server will not be fully
+  opaque: the foreseen future includes viewing and editing seeds from the
+  web, and controlling agents remotely — or a server-side agent directing
+  the daemon's agents — so the server understands the garden model. The
+  shape that reconciles that with "optional": the hub stays the **sole
+  applier** of garden mutations; the server is a privileged remote client —
+  it renders, forwards intents, and routes recognition, but never writes as
+  a peer. That keeps "optional" true and multi-master sync permanently off
+  the table. Auth stays as simple as possible for as long as possible — a
+  minted API key in the config; Victor is the sole user for a long time.
+  Sync scope includes roles/seats alongside seeds. Hubs that never meet each
+  other (work, home) still each meet the server: cross-hub garden visibility
+  is a union routed by daemon prefix, never a merge — fully qualified seed
+  ids (`<daemon-id>/<local-id>`, prefix minted only at the boundary) make
+  identity collisions impossible by construction, and every seed has one
+  home hub that applies its writes. The ground pass owns the sync and
+  transport mechanics and the smallest honest first version.
+- **Seed grain and schema.** ~~Study the beads *UX* specifically (not its
+  implementation) before committing a schema.~~ Ground pass done 2026-08-06;
+  findings and the resulting schema decisions (ids are identity, edges are
+  structure; atomic tend; ready-as-query) live in the garden plan.
 
 ## References
 

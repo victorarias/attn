@@ -1,0 +1,15 @@
+kind: internal
+area: docs
+change: >
+  Vertical-slice plan for the garden (docs/plans/2026-08-06-the-garden-vertical-slices.md):
+  seeds as docstore-backed fine-grained work items — plant/tend/harvest CLI,
+  live app panel, typed edges with context-inferred ready, seed-attached
+  handoff notes, plots (a crown with children) as dispatch targets, and plans
+  living in the garden as the crown's rendered, annotatable body. One garden
+  lives at the hub daemon (remote sessions reach it over the relay); the plan
+  dogfoods itself as the first plot from slice 1. Packets (templates),
+  gates-as-turns, and sow/distill are designed into the schema now and
+  implemented later. The friendly-home vision gains the grown central-server
+  scope and stance (closed source, operated, optional — sync and recognition,
+  no feature gating), the negative recognition channel, the
+  garden-as-front-door question, and the seat-memory-as-garden-query check.
