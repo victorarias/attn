@@ -825,6 +825,7 @@ function AppContent({
     tileContents,
     requestTileContent,
     sendRuntimeInput,
+    sendTerminalPointerActivity,
     sendSetTerminalTheme,
     isRuntimeAttached,
     getRepoInfo,
@@ -3806,6 +3807,7 @@ function AppContent({
                     annotationApi={annotationApi}
                     onTriggerNudge={sendTriggerNudge}
                     onCancelCountdown={sendCancelCountdown}
+                    onTerminalPointerActivity={sendTerminalPointerActivity}
                     onOpenPresentation={handleOpenPresentationWindow}
                     onOpenMarkdown={(path, sessionId) => {
                       void sendOpenMarkdown(path, sessionId).catch((error) => {

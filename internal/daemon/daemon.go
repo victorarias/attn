@@ -254,6 +254,7 @@ type Daemon struct {
 	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex
 	lastUserInputAt            map[string]time.Time // per-session keystroke recency — the fire-time splice guard
+	lastAutoSettleActivityAt   map[string]time.Time // per-session keyboard/pointer recency — the auto-settle hold
 	// autoSettleFireMu serializes the auto-settle timer's fire-time decision
 	// against the state write in applyState. Without it the timer can read a
 	// `working`, owed turn, have a transition into waiting_input commit

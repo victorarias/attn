@@ -5269,6 +5269,14 @@ type TasksChangedMessage struct {
 	Event string `json:"event"`
 }
 
+type TerminalPointerActivityMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type Ticket struct {
 	// Activity corresponds to the JSON schema field "activity".
 	Activity []TicketActivity `json:"activity"`

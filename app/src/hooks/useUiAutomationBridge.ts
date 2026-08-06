@@ -600,7 +600,7 @@ function collectSessionUiState(
   // carries either a deadline or the frozen flag, never both, and only the DOM
   // can testify that the tile drew the one it was sent — a running countdown
   // animating against a deadline, or a still full bar that says attn is waiting
-  // for the user to stop typing.
+  // for the user to stop interacting.
   const settlingChip = firstAgentPane?.querySelector('[data-testid="settling-indicator"]') ?? null;
   const settlingFill = firstAgentPane?.querySelector('.settling-header-track-fill') ?? null;
   const workspaceId = session.workspaceId;

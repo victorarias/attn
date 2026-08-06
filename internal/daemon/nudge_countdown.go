@@ -299,6 +299,7 @@ func (d *Daemon) clearNudgeState(sessionID string) {
 	d.nudgeMu.Unlock()
 	d.lastInputMu.Lock()
 	delete(d.lastUserInputAt, sessionID)
+	delete(d.lastAutoSettleActivityAt, sessionID)
 	d.lastInputMu.Unlock()
 	d.deliveryMu.Lock()
 	delete(d.watchLeaseUntil, sessionID)
@@ -497,9 +498,9 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 // caller can hang further reactions off the same verdict instead of re-deriving
 // who typed.
 //
-// Two mechanisms read the stamp, for opposite reasons: the nudge splice guard,
-// so a doorbell never lands on a half-typed line, and auto-settle's typing hold,
-// so a turn is not closed under the user's hands.
+// It also records the same instant as auto-settle activity. Pointer movement
+// records only that second stamp: it means the user is engaged with the agent,
+// but cannot splice a doorbell onto a half-typed line.
 func (d *Daemon) noteUserInput(sessionID, source string) bool {
 	if sessionID == "" || !isUserKeystrokeSource(source) {
 		return false
@@ -509,7 +510,28 @@ func (d *Daemon) noteUserInput(sessionID, source string) bool {
 	if d.lastUserInputAt == nil {
 		d.lastUserInputAt = make(map[string]time.Time)
 	}
+	if d.lastAutoSettleActivityAt == nil {
+		d.lastAutoSettleActivityAt = make(map[string]time.Time)
+	}
 	d.lastUserInputAt[sessionID] = now
+	d.lastAutoSettleActivityAt[sessionID] = now
+	d.lastInputMu.Unlock()
+	return true
+}
+
+// noteAutoSettleActivity records user engagement that should freeze a pending
+// settle without claiming that the user typed into the PTY. It shares
+// lastInputMu with settleIfAutoSettleQuiet so activity arriving before the turn
+// closes always wins the race.
+func (d *Daemon) noteAutoSettleActivity(sessionID string) bool {
+	if sessionID == "" {
+		return false
+	}
+	d.lastInputMu.Lock()
+	if d.lastAutoSettleActivityAt == nil {
+		d.lastAutoSettleActivityAt = make(map[string]time.Time)
+	}
+	d.lastAutoSettleActivityAt[sessionID] = time.Now()
 	d.lastInputMu.Unlock()
 	return true
 }
@@ -531,8 +553,7 @@ func (d *Daemon) userInputQuietRemaining(sessionID string, within time.Duration)
 }
 
 // userInputQuietRemainingLocked is the same reading, for a caller that already
-// holds lastInputMu because it needs the answer and its own next step to be
-// indivisible from recording a keystroke. See settleIfQuiet.
+// holds lastInputMu.
 func (d *Daemon) userInputQuietRemainingLocked(sessionID string, within time.Duration) time.Duration {
 	last, ok := d.lastUserInputAt[sessionID]
 	if !ok {
@@ -545,30 +566,48 @@ func (d *Daemon) userInputQuietRemainingLocked(sessionID string, within time.Dur
 	return remaining
 }
 
-// settleIfQuiet is auto-settle's commit: the only place a timer closes a turn,
-// and the reason the typing hold is airtight rather than merely likely.
+func (d *Daemon) autoSettleActivityQuietRemaining(sessionID string, within time.Duration) time.Duration {
+	d.lastInputMu.Lock()
+	defer d.lastInputMu.Unlock()
+	return d.autoSettleActivityQuietRemainingLocked(sessionID, within)
+}
+
+func (d *Daemon) autoSettleActivityQuietRemainingLocked(sessionID string, within time.Duration) time.Duration {
+	last, ok := d.lastAutoSettleActivityAt[sessionID]
+	if !ok {
+		return 0
+	}
+	remaining := within - time.Since(last)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
+}
+
+// settleIfAutoSettleQuiet is auto-settle's commit: the only place a timer closes
+// a turn, and the reason the activity hold is airtight rather than merely likely.
 //
 // The quiet check and the store write happen in one critical section, under the
-// same lock noteUserInput records a keystroke with. That is what makes the two
+// same lock keyboard and pointer activity use. That is what makes the two
 // indivisible. Checking first and settling afterwards — however few instructions
-// apart — leaves a gap a real keystroke can land in: it would be stamped after
+// apart — leaves a gap a real interaction can land in: it would be stamped after
 // the guard had already looked, and the hold that follows it finds the timer
 // gone from the map and does nothing, so the turn closes with the user's hands
-// on the keyboard. Serialized, a key pressed before the settle commits is always
-// seen by the check that guards it, and a key that loses was pressed after the
-// turn had already closed — which is honest, and unavoidable in any design.
+// on the session. Serialized, activity before the settle commits is always seen
+// by the check that guards it, and activity that loses happened after the turn
+// had already closed — which is honest, and unavoidable in any design.
 //
 // The lock spans a store write, so the scope is worth stating plainly: the only
-// way to contend for it is to type in the instant a settle commits, and a settle
-// only commits after `within` of silence. The single keystroke that could ever
-// wait on one primary-key update is the one this exists to protect.
+// way to contend for it is to interact in the instant a settle commits, and a
+// settle only commits after `within` of silence. The single activity report that
+// could ever wait on one primary-key update is the one this exists to protect.
 //
 // Reports the remaining quiet time when it refuses, so the caller can reschedule
 // exactly to the end of the window, and whether the turn was actually settled.
-func (d *Daemon) settleIfQuiet(sessionID string, within time.Duration) (quiet time.Duration, settled bool) {
+func (d *Daemon) settleIfAutoSettleQuiet(sessionID string, within time.Duration) (quiet time.Duration, settled bool) {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
-	if remaining := d.userInputQuietRemainingLocked(sessionID, within); remaining > 0 {
+	if remaining := d.autoSettleActivityQuietRemainingLocked(sessionID, within); remaining > 0 {
 		return remaining, false
 	}
 	return 0, d.store.SettleTurn(sessionID, time.Now())

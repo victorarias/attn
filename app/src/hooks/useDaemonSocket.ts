@@ -199,7 +199,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '213';
+export const PROTOCOL_VERSION = '214';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2998,6 +2998,17 @@ export function useDaemonSocket({
     );
   }, [sendOrQueueCommand]);
 
+  const sendTerminalPointerActivity = useCallback((id: string) => {
+    // This is an ephemeral recency signal, not input that must be replayed.
+    // Dropping it while disconnected avoids an idle reconnect accumulating and
+    // later flushing a burst of stale mouse movements.
+    const ws = wsRef.current;
+    if (!hasReceivedInitialStateRef.current || !ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(JSON.stringify({ cmd: 'terminal_pointer_activity', id }));
+  }, []);
+
   // Sends a prompt to a conversation session's host. Fire-and-forget in the
   // same sense as pty_input: the answer is not a result message but the
   // envelope stream the host starts producing, which lands in the conversations
@@ -5159,6 +5170,7 @@ export function useDaemonSocket({
     requestTileContent,
     sendOpenMarkdown,
     sendRuntimeInput: sendPtyInput,
+    sendTerminalPointerActivity,
     sendSetTerminalTheme,
     isRuntimeAttached,
     sendGetFileDiff,

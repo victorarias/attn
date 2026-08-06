@@ -39,14 +39,14 @@ const (
 	// before the turn is settled.
 	defaultAutoSettleCountdownSeconds = 15
 
-	// autoSettleHoldQuietWindow is how long a session must go without a keystroke
-	// before a held countdown resumes. It is the whole of the typing hold's
-	// tuning, and it is not a setting: it measures the user's hands, not the
+	// autoSettleHoldQuietWindow is how long a session must go without user activity
+	// before a held countdown resumes. It is the whole of the interaction hold's
+	// tuning, and it is not a setting: it measures the user's attention, not the
 	// agent's behavior, so it is orthogonal to the two windows above.
 	//
 	// Five seconds rather than the nudge guard's three, and rather than something
-	// generous. It only has to span the gaps *between* keystrokes while composing
-	// — pausing to read the screen mid-prompt — because the countdown it resumes
+	// generous. It only has to span gaps in active keyboard or pointer interaction
+	// because the countdown it resumes
 	// into is itself the grace period, visible and cancellable. Stacking a long
 	// quiet window on top of that pays twice for the same protection, and being
 	// wrong here does not settle a turn silently: it unfreezes a bar the user
@@ -73,9 +73,9 @@ const (
 	autoSettleArming autoSettlePhase = iota
 	// autoSettleCounting: the countdown is running and its deadline is broadcast.
 	autoSettleCounting
-	// autoSettleHeld: the user is typing into this session, so nothing is
+	// autoSettleHeld: the user is interacting with this session, so nothing is
 	// counting. The pending timer is a quiet check, not a deadline — it asks
-	// "have the keystrokes stopped?" and either re-holds or resumes. No deadline
+	// "has the interaction stopped?" and either re-holds or resumes. No deadline
 	// rides the wire; `auto_settle_held` does, and the tile freezes on it.
 	autoSettleHeld
 )
@@ -86,8 +86,8 @@ const (
 // against.
 //
 // resume is meaningful only while held: it is the phase the hold came from and
-// will return to, so that typing during the invisible arm delay restarts the arm
-// delay rather than promoting the session to a countdown it never earned.
+// will return to, so that activity during the invisible arm delay restarts the
+// arm delay rather than promoting the session to a countdown it never earned.
 type autoSettleTimer struct {
 	timer   *time.Timer
 	phase   autoSettlePhase
@@ -201,8 +201,9 @@ func (d *Daemon) armAutoSettle(sessionID string) {
 	// No broadcast: the arming phase is deliberately invisible.
 }
 
-// holdAutoSettle freezes a pending settle because the user just typed into this
-// session. Called for every genuine keystroke, so its cost on a no-op is one map
+// holdAutoSettle freezes a pending settle because the user just interacted with
+// this session. Called for genuine keyboard and throttled pointer activity, so
+// its cost on a no-op is one map
 // lookup.
 //
 // Typing is the one thing attn can see through a TUI it has no visibility into.
@@ -409,15 +410,15 @@ func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) 
 		return "not-owed"
 	}
 
-	// A phase that only moves the timer along can take the typing hold as a plain
-	// check: nothing is committed on the far side of it, so a keystroke that
+	// A phase that only moves the timer along can take the interaction hold as a
+	// plain check: nothing is committed on the far side of it, so activity that
 	// arrives a moment later still meets a pending timer and freezes it there.
 	if phase == autoSettleHeld || phase == autoSettleArming {
 		hold := phase
 		if phase == autoSettleHeld {
 			hold = resume
 		}
-		if quiet := d.userInputQuietRemaining(sessionID, autoSettleHoldQuietWindow); quiet > 0 {
+		if quiet := d.autoSettleActivityQuietRemaining(sessionID, autoSettleHoldQuietWindow); quiet > 0 {
 			d.holdFromFire(sessionID, hold, quiet)
 			return "held"
 		}
@@ -451,12 +452,12 @@ func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) 
 		d.autoSettlePreSettleHook()
 	}
 
-	// The countdown ran out, so this is where the turn closes. The typing hold is
+	// The countdown ran out, so this is where the turn closes. The activity hold is
 	// re-asked here rather than above because it has to be indivisible from the
-	// write it guards — settleIfQuiet holds the keystroke lock across both — and
-	// because the countdown timer can have fired in the microseconds around a
-	// keystroke, before holdAutoSettle could stop it.
-	quiet, settled := d.settleIfQuiet(sessionID, autoSettleHoldQuietWindow)
+	// write it guards — settleIfAutoSettleQuiet holds the activity lock across both — and
+	// because the countdown timer can have fired in the microseconds around an
+	// activity report, before holdAutoSettle could stop it.
+	quiet, settled := d.settleIfAutoSettleQuiet(sessionID, autoSettleHoldQuietWindow)
 	if quiet > 0 {
 		d.holdFromFire(sessionID, autoSettleCounting, quiet)
 		return "held"
@@ -468,8 +469,8 @@ func (d *Daemon) runAutoSettle(sessionID string, phase, resume autoSettlePhase) 
 	return "settled"
 }
 
-// holdFromFire parks a session the fire path found the user typing into, with a
-// quiet check exactly at the end of the window their last keystroke opened.
+// holdFromFire parks a session the fire path found the user interacting with,
+// with a quiet check exactly at the end of the window their last activity opened.
 func (d *Daemon) holdFromFire(sessionID string, resume autoSettlePhase, quiet time.Duration) {
 	d.autoSettleMu.Lock()
 	d.startAutoSettleHeldLocked(sessionID, resume, quiet)
@@ -506,7 +507,7 @@ func (d *Daemon) cancelAutoSettleByUser(sessionID string) bool {
 }
 
 // decorateSessionWithAutoSettle stamps the broadcast clone with the countdown
-// deadline while one is running, or the held flag while the user is typing. The
+// deadline while one is running, or the held flag while the user is interacting.
 // two are mutually exclusive by construction — a frozen countdown has no
 // deadline to animate against, and that is the point — so a client never has to
 // decide which one wins. Read under autoSettleMu; callers must not already hold

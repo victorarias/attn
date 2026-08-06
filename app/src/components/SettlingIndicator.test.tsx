@@ -52,7 +52,7 @@ describe('HeaderSettlingIndicator', () => {
     expect(onPointerDown).not.toHaveBeenCalled();
   });
 
-  describe('held — the user is typing and the daemon has frozen the countdown', () => {
+  describe('held — the user is interacting and the daemon has frozen the countdown', () => {
     it('says it is paused, and animates nothing', () => {
       const { container } = render(<HeaderSettlingIndicator held />);
       expect(screen.getByTestId('settling-indicator')).toHaveTextContent('Settling paused');

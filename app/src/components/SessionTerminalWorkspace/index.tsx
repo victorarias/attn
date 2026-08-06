@@ -125,8 +125,8 @@ interface SessionTerminalWorkspaceProps {
     // The deadline an auto-settle countdown will close this session's turn at.
     // Present only while one is running; the daemon owns the timer.
     autoSettleFiresAt?: string;
-    // True while that countdown is frozen because the user is typing into this
-    // session. Mutually exclusive with the deadline above.
+    // True while that countdown is frozen because the user is typing or moving
+    // the pointer in this session. Mutually exclusive with the deadline above.
     autoSettleHeld?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
@@ -179,6 +179,7 @@ interface SessionTerminalWorkspaceProps {
   // Keep the turn an auto-settle countdown is about to close. Clicking the chip
   // is the pointer equivalent of the ⌘. shortcut.
   onCancelCountdown?: (sessionId: string) => void;
+  onTerminalPointerActivity?: (sessionId: string) => void;
   onOpenPresentation?: (presentationId: string) => void;
   // Cmd+click on a markdown path inside a pane's terminal: dock it as a
   // markdown tile bound to that pane's session (empty sessionId = let the
@@ -236,6 +237,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onRenameSession,
     onTriggerNudge,
     onCancelCountdown,
+    onTerminalPointerActivity,
     onOpenPresentation,
     onOpenMarkdown,
     onTerminalModelRecovered,
@@ -1052,6 +1054,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   debugName={`agent:${paneTitle}:${paneSession?.agent ?? 'shell'}:${agentPane.sessionId}`}
                   runtimeLogMeta={{ sessionId: agentPane.sessionId, paneId: agentPane.id, runtimeId: agentPane.runtimeId, paneKind: 'agent', isActivePane: activePaneId === agentPane.id, isActiveSession, paneCount: paneIds.length }}
                   onInput={runtime.handleTerminalInput(agentPane.id)}
+                  onPointerActivity={() => onTerminalPointerActivity?.(agentPane.sessionId)}
                   onOpenMarkdown={onOpenMarkdown}
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}

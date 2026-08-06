@@ -109,6 +109,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDetachSession:                         commandMetadata(ScopeSession, true, true),
 	protocol.CmdGetKittyImage:                         commandMetadata(ScopeSession, false, true),
 	protocol.CmdPtyInput:                              commandMetadata(ScopeSession, true, false),
+	protocol.CmdTerminalPointerActivity:               commandMetadata(ScopeSession, false, false),
 	protocol.CmdAgentPrompt:                           commandMetadata(ScopeSession, true, false),
 	protocol.CmdPtyResize:                             commandMetadata(ScopeSession, true, true),
 	protocol.CmdKillSession:                           commandMetadata(ScopeSession, true, true),

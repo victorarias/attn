@@ -1135,6 +1135,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleGetKittyImage(client, msg.(*protocol.GetKittyImageMessage))
 	case protocol.CmdPtyInput: // wire: pty_input
 		d.handlePtyInput(client, msg.(*protocol.PtyInputMessage))
+	case protocol.CmdTerminalPointerActivity: // wire: terminal_pointer_activity
+		d.handleTerminalPointerActivity(msg.(*protocol.TerminalPointerActivityMessage))
 	case protocol.CmdAgentPrompt: // wire: agent_prompt
 		d.handleAgentPrompt(client, msg.(*protocol.AgentPromptMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
@@ -1548,6 +1550,10 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdPtyInput: // wire: pty_input
 		if typed, ok := msg.(*protocol.PtyInputMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdTerminalPointerActivity: // wire: terminal_pointer_activity
+		if typed, ok := msg.(*protocol.TerminalPointerActivityMessage); ok {
 			return typed.ID
 		}
 	case protocol.CmdAgentPrompt: // wire: agent_prompt
