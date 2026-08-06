@@ -833,7 +833,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const fontSizeRef = useRef(fontSize);
 
     onInputRef.current = onInput;
-    onPointerActivityRef.current = onPointerActivity;
     onOpenMarkdownRef.current = onOpenMarkdown;
     onReadyRef.current = onReady;
     onResizeRef.current = onResize;
@@ -852,6 +851,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // debugName can change (its agent/title segment is reassigned on relabel).
     // A ref keeps the key out of callback dependency arrays.
     diagKeyRef.current = runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName;
+
+    useEffect(() => {
+      onPointerActivityRef.current = onPointerActivity;
+    }, [onPointerActivity]);
 
     const recoverFromModelFault = useCallback((operation: string, reason: unknown) => {
       // An invalid model can make several queued render/write operations fail
