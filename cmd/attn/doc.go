@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
@@ -111,9 +112,21 @@ commands:
         --limit are ignored: they decide which matches come back, never how
         many there are.
 
-  watch <namespace> <collection> [query flags] [--json]
-        run a live query: print the current results, then print them again every
-        time a write changes them. Runs until interrupted.
+  watch <namespace> <collection> [query flags] [--json] [--resume]
+        run a live query: print the current window, then print it again every
+        time a write changes it. Runs until interrupted, and exits non-zero if
+        the subscription ends — a watch that has stopped watching must not look
+        like a watch that finished.
+
+        What is printed is the whole window; what travels is the order plus only
+        the bodies this watcher does not already hold, which --json reports as
+        "changed". A live query takes no --after: it is a window, not a walk.
+
+        --resume resubscribes when the connection goes — a daemon restart, for
+        instance — waiting for the daemon to come back and declaring what it
+        holds, so only what changed while it was away comes back. A collection
+        that is removed or redeclared without a field the query uses ends the
+        watch either way, and so does a daemon that was never there.
 
 query flags:
   --where <expr>    repeatable. field=value, or field<value, field<=value,
@@ -329,23 +342,23 @@ func runDocDelete(args []string) {
 
 func runDocQuery(args []string) {
 	namespace, collection, rest := docTarget("query", args)
-	query, asJSON := parseDocQueryFlags("query", namespace, collection, rest)
+	query, opts := parseDocQueryFlags("query", namespace, collection, rest)
 	result, err := docClient().DocQuery(query)
 	if err != nil {
 		docFail("query", err)
 	}
-	printDocuments(result.Documents, asJSON)
-	printPosition(asJSON, result.AsOfSeq)
+	printDocuments(result.Documents, opts.asJSON)
+	printPosition(opts.asJSON, result.AsOfSeq)
 }
 
 func runDocCount(args []string) {
 	namespace, collection, rest := docTarget("count", args)
-	query, asJSON := parseDocQueryFlags("count", namespace, collection, rest)
+	query, opts := parseDocQueryFlags("count", namespace, collection, rest)
 	result, err := docClient().DocCount(query)
 	if err != nil {
 		docFail("count", err)
 	}
-	if asJSON {
+	if opts.asJSON {
 		writeJSON(struct {
 			Count   int `json:"count"`
 			AsOfSeq int `json:"as_of_seq"`
@@ -355,30 +368,79 @@ func runDocCount(args []string) {
 	fmt.Println(result.Count)
 }
 
+// runDocWatch prints applied windows: what the query holds right now, printed
+// again whenever a write changes it. What travels is smaller than what is
+// printed — a delivery carries ids plus only the bodies this watcher does not
+// already hold — and `changed` is that receipt.
+//
+// It never exits 0 while it has stopped watching. A live query that ends has
+// stopped reporting changes, and a watcher that returns success there leaves
+// whoever ran it looking at a list frozen at the moment the subscription broke.
+// --resume is the way to survive a daemon restart: it resubscribes carrying the
+// revisions it holds, so the daemon sends back only what changed while it was
+// away. A collection that was removed or redeclared out from under the query
+// ends the watch anyway, because resubscribing would fail the same way.
 func runDocWatch(args []string) {
 	namespace, collection, rest := docTarget("watch", args)
-	query, asJSON := parseDocQueryFlags("watch", namespace, collection, rest)
-	err := docClient().DocSubscribe(query, func(result *protocol.DocSubscribeResult) bool {
-		if asJSON {
-			writeJSON(struct {
-				Delivery  int            `json:"delivery"`
-				Documents []jsonDocument `json:"documents"`
-			}{result.Delivery, docsForJSON(result.Documents)})
-		} else {
-			fmt.Printf("--- delivery %d (%d document(s)) ---\n", result.Delivery, len(result.Documents))
-			printDocuments(result.Documents, false)
+	query, opts := parseDocQueryFlags("watch", namespace, collection, rest)
+
+	var held []protocol.StoredDocument
+	watching := false
+	for {
+		err := docClient().DocSubscribe(query, held, func(window client.DocWindow) bool {
+			watching = true
+			held = window.Documents
+			printDocWindow(window, opts.asJSON)
+			return true
+		})
+		code, ended := client.DocSubscriptionCode(err)
+		switch {
+		case opts.resume && ended && code == "":
+			// The connection went, not the collection. Everything held stays
+			// held, and the resubscribe declares it.
+		case opts.resume && watching && !ended:
+			// The daemon is not answering the door yet. Restarting one takes
+			// long enough that a watch which gave up here would not survive the
+			// thing --resume exists for; a watch that has never connected still
+			// fails immediately, because that is a wrong socket, not an outage.
+			time.Sleep(daemonReconnectInterval)
+		default:
+			docFail("watch", err)
 		}
-		return true
-	})
-	if err != nil {
-		docFail("watch", err)
 	}
 }
 
-// parseDocQueryFlags reads the query flags shared by query and watch.
-func parseDocQueryFlags(verb, namespace, collection string, args []string) (protocol.DocumentQuery, bool) {
+// daemonReconnectInterval is how often a resuming watch retries a daemon that
+// is not accepting connections. Measured: a stop plus ensure returns the socket
+// in 0.49s, so this polls twice inside the outage it exists for, and costs one
+// connect attempt per tick when the daemon is simply gone.
+const daemonReconnectInterval = 200 * time.Millisecond
+
+func printDocWindow(window client.DocWindow, asJSON bool) {
+	if asJSON {
+		writeJSON(struct {
+			Delivery  int            `json:"delivery"`
+			AsOfSeq   int64          `json:"as_of_seq"`
+			Documents []jsonDocument `json:"documents"`
+			Changed   []string       `json:"changed"`
+		}{window.Delivery, window.AsOfSeq, docsForJSON(window.Documents), window.Changed})
+		return
+	}
+	fmt.Printf("--- delivery %d (%d document(s), %d body(s) sent, as of seq %d) ---\n",
+		window.Delivery, len(window.Documents), len(window.Changed), window.AsOfSeq)
+	printDocuments(window.Documents, false)
+}
+
+// docQueryOptions are the flags that shape the output rather than the query.
+type docQueryOptions struct {
+	asJSON bool
+	resume bool
+}
+
+// parseDocQueryFlags reads the query flags shared by query, count and watch.
+func parseDocQueryFlags(verb, namespace, collection string, args []string) (protocol.DocumentQuery, docQueryOptions) {
 	query := protocol.DocumentQuery{Namespace: namespace, Collection: collection}
-	asJSON := false
+	var opts docQueryOptions
 	for i := 0; i < len(args); i++ {
 		next := func() string {
 			if i+1 >= len(args) {
@@ -389,7 +451,12 @@ func parseDocQueryFlags(verb, namespace, collection string, args []string) (prot
 		}
 		switch args[i] {
 		case "--json":
-			asJSON = true
+			opts.asJSON = true
+		case "--resume":
+			if verb != "watch" {
+				docFail(verb, fmt.Errorf("--resume is only for watch; a one-shot read has nothing to resume"))
+			}
+			opts.resume = true
 		case "--desc":
 			desc := true
 			if query.Sort == nil {
@@ -425,7 +492,7 @@ func parseDocQueryFlags(verb, namespace, collection string, args []string) (prot
 	if query.Sort != nil && query.Sort.Field == "" {
 		docFail(verb, fmt.Errorf("--desc needs --sort <field>"))
 	}
-	return query, asJSON
+	return query, opts
 }
 
 // docWhereOps are matched longest-first so ">=" is not read as ">".

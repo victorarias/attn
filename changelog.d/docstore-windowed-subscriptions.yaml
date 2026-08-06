@@ -1,0 +1,13 @@
+kind: added
+area: daemon
+change: >
+  A live document query now sends only what changed. Every delivery carries the
+  window's order, the log position it was true at, and bodies for the documents
+  the subscriber does not already hold — so a busy collection stops re-sending
+  the same unchanged rows on every write. A subscriber can also resume by
+  content: it declares the revisions it kept, and the first delivery diffs
+  against them, which makes reconnecting after a daemon restart cost the
+  documents that actually moved rather than the whole window. `attn doc watch`
+  prints each applied window, takes `--resume` to reconnect that way, and exits
+  non-zero when the daemon ends the subscription, naming whether the collection
+  was removed or redeclared underneath it.
