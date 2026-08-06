@@ -15,8 +15,9 @@ import (
 // daemon owns the mapping to the protocol shape — keeping this package a leaf.
 //
 // read_at is persisted as '' while unread and as a timestamp once read. Timestamps
-// reuse the jobs table's RFC3339Nano encoding and parseStoreTime decoder (same
-// package), so a blank/garbage value decodes to the zero time.
+// reuse the jobs table's sortableTimeFormat encoding and parseStoreTime decoder
+// (same package), so a blank/garbage value decodes to the zero time. The encoding
+// is the fixed-width one because created_at orders this feed as text.
 
 // NotificationRecord is one durable notification row. ReadAt is the zero time
 // while unread; a non-zero ReadAt marks it read.
@@ -47,7 +48,7 @@ func (s *Store) AddNotification(rec NotificationRecord, now time.Time) (Notifica
 		`INSERT INTO notifications (id, kind, title, body, detail, source_kind, source_id, created_at, read_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')`,
 		rec.ID, rec.Kind, rec.Title, rec.Body, rec.Detail, rec.SourceKind, rec.SourceID,
-		rec.CreatedAt.Format(notificationTimeFormat),
+		rec.CreatedAt.Format(sortableTimeFormat),
 	)
 	if err != nil {
 		return NotificationRecord{}, fmt.Errorf("store: add notification: %w", err)
@@ -101,7 +102,7 @@ func (s *Store) MarkNotificationRead(id string, now time.Time) error {
 	}
 	if _, err := s.db.Exec(
 		`UPDATE notifications SET read_at = ? WHERE id = ? AND read_at = ''`,
-		now.UTC().Format(notificationTimeFormat), id); err != nil {
+		now.UTC().Format(sortableTimeFormat), id); err != nil {
 		return fmt.Errorf("store: mark notification read %s: %w", id, err)
 	}
 	return nil
@@ -115,7 +116,7 @@ func (s *Store) MarkAllNotificationsRead(now time.Time) (int, error) {
 	}
 	res, err := s.db.Exec(
 		`UPDATE notifications SET read_at = ? WHERE read_at = ''`,
-		now.UTC().Format(notificationTimeFormat))
+		now.UTC().Format(sortableTimeFormat))
 	if err != nil {
 		return 0, fmt.Errorf("store: mark all notifications read: %w", err)
 	}
@@ -125,10 +126,6 @@ func (s *Store) MarkAllNotificationsRead(now time.Time) (int, error) {
 	}
 	return int(n), nil
 }
-
-// notificationTimeFormat matches the jobs table so both surfaces round-trip
-// timestamps identically.
-const notificationTimeFormat = time.RFC3339Nano
 
 func scanNotificationRow(sc rowScanner) (*NotificationRecord, error) {
 	var (
