@@ -8,6 +8,12 @@ shard_count="${ATTN_GO_TEST_SHARDS:-5}"
 package_parallelism="${ATTN_GO_TEST_PACKAGE_PARALLELISM:-4}"
 test_gomaxprocs="${ATTN_GO_TEST_GOMAXPROCS:-${GOMAXPROCS:-3}}"
 test_timeout="${ATTN_GO_TEST_TIMEOUT:-90s}"
+# The race job runs the same packages a second time under -race, which costs
+# roughly an order of magnitude. Measured: `go test -race ./internal/store
+# ./internal/docstore` takes 22s on an M-series laptop, and CI runs SQLite work
+# 3-4x slower, so ~90s is the real ceiling. 300s is a tripwire — only a hang
+# reaches it.
+race_timeout="${ATTN_GO_TEST_RACE_TIMEOUT:-300s}"
 
 if ! [[ "$shard_count" =~ ^[1-9][0-9]*$ ]]; then
   echo "ATTN_GO_TEST_SHARDS must be a positive integer, got: $shard_count" >&2
@@ -136,6 +142,15 @@ while IFS= read -r package; do
   packages+=("$package")
 done <"$packages_file"
 run_job packages "$go_bin" test -timeout "$test_timeout" -p "$package_parallelism" "$@" "${packages[@]}"
+
+# A live document query re-reads on a wake set by the very write it is
+# reporting, so the store's own concurrency is load-bearing in a way a wrong
+# answer hides better than a crash does: a lost wake or a torn read looks like a
+# stale window, not a panic. Race detection is too slow to spend on every
+# package on every push, so it is scoped to the two that compile and execute
+# those queries. These packages therefore run twice — once for the answers,
+# once for the memory model.
+run_job race "$go_bin" test -timeout "$race_timeout" -race "$@" ./internal/store ./internal/docstore
 
 shard=0
 while [ "$shard" -lt "$shard_count" ]; do

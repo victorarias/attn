@@ -18,16 +18,25 @@ import (
 // The document store's daemon half: the fact a write publishes, the live queries
 // that fact wakes, and the IPC surface `attn doc` speaks.
 //
-// WHY A SUBSCRIPTION RE-RUNS RATHER THAN PATCHES. Every delivery is the query's
-// current full result set. A patch stream would be smaller and it is where live
-// query systems grow their bugs: a document falling out of a `limit 20` window
-// forces a re-query to find the 21st anyway, so a patch path needs the re-run
-// path underneath it and only some of the time. Re-running always is one path.
+// WHY A SUBSCRIPTION RE-RUNS RATHER THAN PATCHES. Every delivery re-runs the
+// whole query. A patch stream would avoid the re-run and it is where live query
+// systems grow their bugs: a document falling out of a `limit 20` window forces
+// a re-query to find the 21st anyway, so a patch path needs the re-run path
+// underneath it and only some of the time. Re-running always is one path.
 //
-// That also makes a delivery safe to drop. Because each one supersedes the last,
-// a subscriber that has not drained loses nothing when a newer result set
-// replaces a queued one — which is how the one-slot wake channel below collapses
-// a burst of writes into a single delivery with no coalescing window to manage.
+// What a delivery carries is a different question from how it is computed. The
+// re-run answers "which documents, in what order"; the bodies are then diffed
+// against what this subscriber is known to hold, so a window of a hundred
+// documents whose first one changed is one body and a hundred ids. That diff is
+// pure bookkeeping over one map — no second notion of what changed, and nothing
+// a patch stream's ordering hazards can reach.
+//
+// A delivery is still safe to drop, which is what the one-slot wake channel
+// below relies on: each delivery is computed from current state at the moment it
+// is sent, so a subscriber that has not drained loses nothing when a burst of
+// writes collapses into one delivery. What it must NOT lose is the record of
+// what it holds — that lives beside the connection, advances only when a
+// delivery is actually encoded, and is what makes dropping the rest correct.
 //
 // WHY THE BUS FAN-OUT DOES NOT WRITE THE SOCKET. The bus holds its publish lock
 // across the inline fan-out, so anything slow inside a handler stalls every
@@ -208,24 +217,6 @@ func (d *Daemon) documentSubscriptionCount() int {
 	return len(d.docSubs)
 }
 
-// compileDocQuery resolves the query's after cursor and compiles it. The cursor
-// is a document id, so the anchor has to be read here: docstore holds no
-// database handle, and it needs the anchor's sort value to compare against the
-// whole ordering tuple.
-func (d *Daemon) compileDocQuery(q docstore.Query, schema docstore.CollectionSchema) (docstore.Compiled, error) {
-	var anchor *docstore.Document
-	if q.After != "" {
-		doc, found, err := d.store.GetDocument(schema, q.After)
-		if err != nil {
-			return docstore.Compiled{}, err
-		}
-		if found {
-			anchor = doc
-		}
-	}
-	return q.Compile(schema, anchor)
-}
-
 // runDocQuery answers a query, returning the store's read — documents, the
 // declaration they were computed against, and the log position they were true
 // at — plus how long it took. The caller decides what a slow one means: once
@@ -351,11 +342,46 @@ func undeclaredCollectionError(namespace, collection string) error {
 //
 // The message text is unchanged and stays the part a human or an agent reads.
 func (d *Daemon) sendDocError(conn net.Conn, err error) {
-	resp := protocol.Response{Ok: false, Error: protocol.Ptr(err.Error())}
-	var conflict *docstore.ConflictError
+	d.sendDocErrorAs(conn, err, docErrorCode(err))
+}
+
+// docErrorCode is the code a docstore error answers a request with.
+func docErrorCode(err error) string {
 	switch {
-	case errors.As(err, &conflict):
-		resp.ErrorCode = protocol.Ptr(protocol.ErrorCodeConflict)
+	case docstore.IsConflict(err):
+		return protocol.ErrorCodeConflict
+	case docstore.IsUndeclaredCollection(err):
+		return protocol.ErrorCodeUndeclaredCollection
+	case docstore.IsInvalidQuery(err):
+		return protocol.ErrorCodeInvalidQuery
+	}
+	return ""
+}
+
+// subscriptionEndCode is the code the SAME errors carry once a subscription has
+// been accepted, where they mean something different. Answering a request,
+// "this collection is not declared" and "this query is wrong" are both things
+// the caller got wrong. Ending an accepted subscription they are things that
+// happened TO it — the collection was removed, or redeclared without a field
+// the query uses — and a UI host has to tell those apart to know whether to
+// kill the tile or rewrite its query.
+func subscriptionEndCode(err error) string {
+	switch {
+	case docstore.IsUndeclaredCollection(err):
+		return protocol.ErrorCodeCollectionUndefined
+	case docstore.IsInvalidQuery(err):
+		return protocol.ErrorCodeCollectionRedeclared
+	}
+	return docErrorCode(err)
+}
+
+func (d *Daemon) sendDocErrorAs(conn net.Conn, err error, code string) {
+	resp := protocol.Response{Ok: false, Error: protocol.Ptr(err.Error())}
+	if code != "" {
+		resp.ErrorCode = protocol.Ptr(code)
+	}
+	var conflict *docstore.ConflictError
+	if errors.As(err, &conflict) {
 		resp.ErrorConflict = &protocol.DocumentConflict{
 			Namespace:  conflict.Namespace,
 			Collection: conflict.Collection,
@@ -364,10 +390,6 @@ func (d *Daemon) sendDocError(conn net.Conn, err error) {
 			Found:      conflict.Found,
 			Actual:     int(conflict.Actual),
 		}
-	case docstore.IsUndeclaredCollection(err):
-		resp.ErrorCode = protocol.Ptr(protocol.ErrorCodeUndeclaredCollection)
-	case docstore.IsInvalidQuery(err):
-		resp.ErrorCode = protocol.Ptr(protocol.ErrorCodeInvalidQuery)
 	}
 	if err := json.NewEncoder(conn).Encode(resp); err != nil {
 		d.logf("docstore: writing error response: %v", err)
@@ -610,32 +632,32 @@ func (d *Daemon) handleDocCount(conn net.Conn, msg *protocol.DocCountMessage) {
 }
 
 // handleDocSubscribe is the only handler that keeps its connection. It writes
-// the current result set immediately — a subscriber must be able to render from
-// one round trip, which is what makes an extension UI's remount cheap — and then
-// a fresh one every time a write to the collection could have changed it. It
-// ends when the caller disconnects, or when the collection stops being able to
-// answer the query at all.
+// the query's current window immediately — a subscriber must be able to render
+// from one round trip, which is what makes an extension UI's remount cheap — and
+// then a fresh one every time a write to the collection could have changed it.
+// It ends when the caller disconnects, or when the collection stops being able
+// to answer the query at all.
+//
+// A delivery is a window, not a result set: the ids in order, plus only the
+// bodies the subscriber does not already hold. What it holds comes from `have`
+// on the way in and from what has been delivered since, tracked below as one
+// {id: rev} map. See DocSubscribeResult on the wire for the client's one rule.
 func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMessage) {
 	q, err := documentQueryFromProtocol(msg.Query)
 	if err != nil {
 		d.sendDocError(conn, err)
 		return
 	}
-	schema, err := d.collectionFor(q.Namespace, q.Collection)
-	if err != nil {
-		d.sendDocError(conn, err)
-		return
-	}
-	// Compile once up front. A query that cannot compile must fail the subscribe
-	// rather than fail on every delivery of a subscription that looked accepted.
-	if _, err := d.compileDocQuery(q, *schema); err != nil {
-		d.sendDocError(conn, err)
+	if q.After != "" {
+		d.sendDocError(conn, docstore.InvalidQuery(fmt.Errorf(
+			"docstore: %s/%s cannot subscribe with the after cursor %q: a live query is a window and a cursor is a walk, so the document the cursor names moves out from under the subscription. Set a limit instead and render each delivery's window; a delivery already carries only what changed.",
+			q.Namespace, q.Collection, q.After)))
 		return
 	}
 
 	// Registered before the first query runs. The other order drops a write that
-	// lands in between; this order can only cause one redundant delivery, and a
-	// delivery is the whole result set, so a redundant one costs nothing.
+	// lands in between; this order can only cause one redundant delivery, which
+	// costs the subscriber an ids-only message.
 	sub := d.addDocSubscription(q)
 	defer d.removeDocSubscription(sub.id)
 
@@ -646,6 +668,12 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 		defer close(gone)
 		_, _ = io.Copy(io.Discard, conn)
 	}()
+
+	// What the subscriber holds. Seeded from `have`, then replaced by each
+	// delivered window: the client's forget rule means anything absent from a
+	// window's order is gone from its cache too, so this map is the window and
+	// never grows past the query's limit.
+	held := heldRevisions(msg.Have)
 
 	encoder := json.NewEncoder(conn)
 	for delivery := 1; ; delivery++ {
@@ -660,28 +688,70 @@ func (d *Daemon) handleDocSubscribe(conn net.Conn, msg *protocol.DocSubscribeMes
 		// serve again. The re-read happens inside the query's own transaction, so
 		// a redeclare cannot land between reading the declaration and running the
 		// statement compiled from it.
+		//
+		// The first of these reads is also the acceptance check: a query that
+		// cannot be answered fails the subscribe, in the same call that would
+		// have served it. There is no separate compile up front, because a second
+		// compile path is a second place for the rules to be applied differently.
 		read, took, err := d.runDocQuery(q)
 		if err != nil {
-			d.sendDocError(conn, err)
+			code := docErrorCode(err)
+			if delivery > 1 {
+				code = subscriptionEndCode(err)
+			}
+			d.sendDocErrorAs(conn, err, code)
 			return
 		}
 		d.logSlowDocFanOut(sub, read.Schema, took)
-		resp := protocol.Response{
-			Ok: true,
-			DocSubscribeResult: &protocol.DocSubscribeResult{
-				Delivery:  delivery,
-				Documents: storedDocumentsToProtocol(read.Documents),
-			},
-		}
-		if err := encoder.Encode(resp); err != nil {
+		window, next := windowDelivery(delivery, read, held)
+		if err := encoder.Encode(protocol.Response{Ok: true, DocSubscribeResult: window}); err != nil {
 			return
 		}
+		held = next
 		select {
 		case <-sub.wake:
 		case <-gone:
 			return
 		}
 	}
+}
+
+// heldRevisions turns the subscriber's declared `have` into the map the
+// delivery loop diffs against. A resume is exact rather than approximate: an id
+// claiming a revision the store never issued simply differs from the one it
+// finds, so that body is sent and the subscriber converges on the next delivery
+// however stale its claim was.
+func heldRevisions(have []protocol.DocumentRevision) map[string]int64 {
+	if len(have) == 0 {
+		return nil
+	}
+	held := make(map[string]int64, len(have))
+	for _, entry := range have {
+		held[entry.ID] = int64(entry.Rev)
+	}
+	return held
+}
+
+// windowDelivery turns a read into one delivery and the revisions the subscriber
+// holds once it applies it. A body travels only when the subscriber's revision
+// for that id differs from the stored one; everything else is carried by order,
+// which the client renders from its cache.
+func windowDelivery(delivery int, read store.QueryRead, held map[string]int64) (*protocol.DocSubscribeResult, map[string]int64) {
+	out := &protocol.DocSubscribeResult{
+		Delivery: delivery,
+		AsOfSeq:  int(read.AsOfSeq),
+		Order:    make([]string, 0, len(read.Documents)),
+		Upsert:   make([]protocol.StoredDocument, 0),
+	}
+	next := make(map[string]int64, len(read.Documents))
+	for _, doc := range read.Documents {
+		out.Order = append(out.Order, doc.ID)
+		next[doc.ID] = doc.Rev
+		if rev, ok := held[doc.ID]; !ok || rev != doc.Rev {
+			out.Upsert = append(out.Upsert, storedDocumentToProtocol(doc))
+		}
+	}
+	return out, next
 }
 
 func (d *Daemon) sendDocResponse(conn net.Conn, resp protocol.Response) {

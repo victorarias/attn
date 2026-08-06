@@ -73,24 +73,58 @@ func deleteDoc(t *testing.T, d *Daemon, id string) bool {
 	return resp.DocDeleteResult.Existed
 }
 
+// window is one delivery as the subscriber sees it once the client rule has been
+// applied: the wire's own order and upsert, plus the documents those resolve to.
+type window struct {
+	delivery  int
+	asOfSeq   int64
+	order     []string
+	upsert    []protocol.StoredDocument
+	documents []protocol.StoredDocument
+}
+
 // liveQuery subscribes and returns a reader for its deliveries plus a stop that
 // disconnects the caller and waits for the handler to finish — the real signal
 // that the subscription has been torn down.
+//
+// It applies the client rule itself rather than calling internal/client's
+// applier: this is a second implementation of the same three sentences, and two
+// implementations disagreeing is the thing the invariant exists to catch. The
+// resolution below is also where the invariant is checked — every id in order
+// must resolve from the bodies this connection has been sent — so every test in
+// this file that reads a delivery is asserting it.
 type liveQuery struct {
 	dec  *json.Decoder
 	stop func()
+	held map[string]protocol.StoredDocument
 }
 
 func subscribe(t *testing.T, d *Daemon, q protocol.DocumentQuery) *liveQuery {
 	t.Helper()
+	return subscribeResuming(t, d, q, nil)
+}
+
+// subscribeResuming subscribes declaring what the caller already holds. held
+// seeds the applier's cache so a resumed subscription's deliveries resolve the
+// same way a reconnecting client's would.
+func subscribeResuming(t *testing.T, d *Daemon, q protocol.DocumentQuery, held []protocol.StoredDocument) *liveQuery {
+	t.Helper()
+	have := make([]protocol.DocumentRevision, 0, len(held))
+	cache := make(map[string]protocol.StoredDocument, len(held))
+	for _, doc := range held {
+		have = append(have, protocol.DocumentRevision{ID: doc.ID, Rev: doc.Rev})
+		cache[doc.ID] = doc
+	}
 	client, server := net.Pipe()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.handleDocSubscribe(server, &protocol.DocSubscribeMessage{Cmd: protocol.CmdDocSubscribe, Query: q})
+		d.handleDocSubscribe(server, &protocol.DocSubscribeMessage{
+			Cmd: protocol.CmdDocSubscribe, Query: q, Have: have,
+		})
 		_ = server.Close()
 	}()
-	lq := &liveQuery{dec: json.NewDecoder(client)}
+	lq := &liveQuery{dec: json.NewDecoder(client), held: cache}
 	lq.stop = func() {
 		_ = client.Close()
 		<-done
@@ -99,9 +133,10 @@ func subscribe(t *testing.T, d *Daemon, q protocol.DocumentQuery) *liveQuery {
 	return lq
 }
 
-// next reads one delivery. It blocks until the daemon sends, which is what makes
-// these tests wait on a real signal rather than on a duration.
-func (lq *liveQuery) next(t *testing.T) *protocol.DocSubscribeResult {
+// next reads one delivery and applies it. It blocks until the daemon sends,
+// which is what makes these tests wait on a real signal rather than on a
+// duration.
+func (lq *liveQuery) next(t *testing.T) window {
 	t.Helper()
 	resp := lq.nextRaw(t)
 	if !resp.Ok {
@@ -110,7 +145,38 @@ func (lq *liveQuery) next(t *testing.T) *protocol.DocSubscribeResult {
 	if resp.DocSubscribeResult == nil {
 		t.Fatal("delivery carried no result")
 	}
-	return resp.DocSubscribeResult
+	return lq.apply(t, resp.DocSubscribeResult)
+}
+
+// apply is the client rule: render order, take each body from upsert if it is
+// there and from the cache otherwise, forget everything not in order.
+func (lq *liveQuery) apply(t *testing.T, result *protocol.DocSubscribeResult) window {
+	t.Helper()
+	arrived := make(map[string]protocol.StoredDocument, len(result.Upsert))
+	for _, doc := range result.Upsert {
+		arrived[doc.ID] = doc
+	}
+	out := window{
+		delivery: result.Delivery,
+		asOfSeq:  int64(result.AsOfSeq),
+		order:    result.Order,
+		upsert:   result.Upsert,
+	}
+	next := make(map[string]protocol.StoredDocument, len(result.Order))
+	for _, id := range result.Order {
+		doc, ok := arrived[id]
+		if !ok {
+			doc, ok = lq.held[id]
+		}
+		if !ok {
+			t.Fatalf("delivery %d ordered %q but neither sent its body nor had this subscriber been given one: %v",
+				result.Delivery, id, result.Order)
+		}
+		next[id] = doc
+		out.documents = append(out.documents, doc)
+	}
+	lq.held = next
+	return out
 }
 
 // nextRaw reads one delivery without requiring it to have succeeded, for the
@@ -124,39 +190,44 @@ func (lq *liveQuery) nextRaw(t *testing.T) protocol.Response {
 	return resp
 }
 
-func ids(result *protocol.DocSubscribeResult) []string {
-	out := make([]string, 0, len(result.Documents))
-	for _, doc := range result.Documents {
+// changed names the ids whose bodies travelled in this delivery.
+func (w window) changed() []string {
+	out := make([]string, 0, len(w.upsert))
+	for _, doc := range w.upsert {
 		out = append(out, doc.ID)
 	}
 	return out
 }
 
+func ids(w window) []string { return w.order }
+
 func testQuery() protocol.DocumentQuery {
 	return protocol.DocumentQuery{Namespace: testDocNS, Collection: testDocColl}
 }
 
-// Subscribing delivers the current result set straight away, in the same round
-// trip. An extension UI remounts by re-subscribing, so a subscription that only
-// promised future updates would render empty until something happened to change.
-func TestSubscribingDeliversTheCurrentResultSetImmediately(t *testing.T) {
+// Subscribing delivers the query's current window straight away, in the same
+// round trip. An extension UI remounts by re-subscribing, so a subscription that
+// only promised future updates would render empty until something happened to
+// change.
+func TestSubscribingDeliversTheCurrentWindowImmediately(t *testing.T) {
 	d := newDaemonForTest(t)
 	defineTestCollection(t, d)
 	putDoc(t, d, "already-here", `{"status":"pending"}`)
 
 	lq := subscribe(t, d, testQuery())
 	first := lq.next(t)
-	if first.Delivery != 1 {
-		t.Fatalf("first delivery = %d, want 1", first.Delivery)
+	if first.delivery != 1 {
+		t.Fatalf("first delivery = %d, want 1", first.delivery)
 	}
 	if got := ids(first); len(got) != 1 || got[0] != "already-here" {
 		t.Fatalf("first delivery = %v", got)
 	}
 }
 
-// A write wakes the subscription, and what arrives is the whole current result
-// set rather than a description of what changed.
-func TestAWriteWakesTheSubscriptionWithTheWholeResultSet(t *testing.T) {
+// A write wakes the subscription, and what arrives is the query's whole current
+// order — never a patch the subscriber has to merge — plus the one body it does
+// not hold.
+func TestAWriteWakesTheSubscriptionWithTheCurrentWindow(t *testing.T) {
 	d := newDaemonForTest(t)
 	defineTestCollection(t, d)
 	lq := subscribe(t, d, testQuery())
@@ -166,14 +237,17 @@ func TestAWriteWakesTheSubscriptionWithTheWholeResultSet(t *testing.T) {
 
 	putDoc(t, d, "a", `{"status":"pending"}`)
 	second := lq.next(t)
-	if second.Delivery != 2 {
-		t.Fatalf("delivery = %d, want 2", second.Delivery)
+	if second.delivery != 2 {
+		t.Fatalf("delivery = %d, want 2", second.delivery)
 	}
 	if got := ids(second); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("after write = %v", got)
 	}
-	if body := second.Documents[0].Body; body != `{"status":"pending"}` {
+	if body := second.documents[0].Body; body != `{"status":"pending"}` {
 		t.Fatalf("body = %s", body)
+	}
+	if got := second.changed(); len(got) != 1 || got[0] != "a" {
+		t.Fatalf("bodies sent = %v, want just the document that changed", got)
 	}
 }
 
@@ -193,8 +267,8 @@ func TestANoOpDeleteDoesNotWakeSubscribers(t *testing.T) {
 	putDoc(t, d, "a", `{"status":"pending"}`)
 
 	next := lq.next(t)
-	if next.Delivery != 2 {
-		t.Fatalf("delivery = %d, want 2 — the no-op delete delivered", next.Delivery)
+	if next.delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — the no-op delete delivered", next.delivery)
 	}
 	if got := ids(next); len(got) != 1 || got[0] != "a" {
 		t.Fatalf("delivery = %v", got)
@@ -253,8 +327,8 @@ func TestASubscriptionOnlyWakesForItsOwnCollection(t *testing.T) {
 	putDoc(t, d, "ours", `{"status":"pending"}`)
 
 	next := lq.next(t)
-	if next.Delivery != 2 {
-		t.Fatalf("delivery = %d, want 2 — the neighbouring namespace woke this subscription", next.Delivery)
+	if next.delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — the neighbouring namespace woke this subscription", next.delivery)
 	}
 	if got := ids(next); len(got) != 1 || got[0] != "ours" {
 		t.Fatalf("delivery = %v — it crossed the namespace boundary", got)
@@ -312,19 +386,32 @@ func TestReadingAnUndeclaredCollectionSaysHowToDeclareIt(t *testing.T) {
 	}
 }
 
-// A subscription whose query cannot compile is refused at subscribe time. The
-// alternative is a subscription that looks accepted and fails on every delivery.
+// A subscription whose query cannot be answered is refused at subscribe time,
+// by the same read that would have served it. The alternative is a subscription
+// that looks accepted and fails on every delivery.
+//
+// The refusal carries invalid_query rather than either subscription-ending code:
+// nothing happened to this subscription, the caller asked for something the
+// collection does not offer, and resubscribing with a corrected query works.
 func TestASubscriptionWithAnUnqueryableFieldIsRefusedUpFront(t *testing.T) {
 	d := newDaemonForTest(t)
 	defineTestCollection(t, d)
 	q := testQuery()
 	q.Sort = &protocol.DocumentSort{Field: "undeclared"}
-	resp := docCall(t, func(c net.Conn) {
-		d.handleDocSubscribe(c, &protocol.DocSubscribeMessage{Cmd: protocol.CmdDocSubscribe, Query: q})
-	})
+
+	lq := subscribe(t, d, q)
+	resp := lq.nextRaw(t)
 	if resp.Ok {
 		t.Fatal("subscribing with an undeclared sort field succeeded")
 	}
+	if code := protocol.Deref(resp.ErrorCode); code != protocol.ErrorCodeInvalidQuery {
+		t.Fatalf("error code = %q, want %q", code, protocol.ErrorCodeInvalidQuery)
+	}
+	// stop waits for the handler to return, which is when a registered
+	// subscription would have been removed. Registering before the first read is
+	// deliberate — it is what keeps a write landing mid-subscribe from being
+	// missed — so what has to hold is that a refusal still leaves nothing behind.
+	lq.stop()
 	if n := d.documentSubscriptionCount(); n != 0 {
 		t.Fatalf("a refused subscribe left %d subscriptions behind", n)
 	}
@@ -390,6 +477,11 @@ func TestRemovingACollectionReachesItsLiveQueries(t *testing.T) {
 	}
 	if msg := protocol.Deref(final.Error); !strings.Contains(msg, "is not declared") {
 		t.Fatalf("error does not say the collection is gone: %q", msg)
+	}
+	// The code is what a UI host branches on: collection_undefined means the
+	// tile is dead, not that its query was wrong.
+	if code := protocol.Deref(final.ErrorCode); code != protocol.ErrorCodeCollectionUndefined {
+		t.Fatalf("error code = %q, want %q", code, protocol.ErrorCodeCollectionUndefined)
 	}
 }
 
@@ -488,6 +580,11 @@ func TestRedeclaringWithoutAFieldEndsTheLiveQueriesUsingIt(t *testing.T) {
 	}
 	if msg := protocol.Deref(final.Error); !strings.Contains(msg, "status") {
 		t.Fatalf("error does not name the field that went: %q", msg)
+	}
+	// collection_redeclared rather than collection_undefined: the collection is
+	// still there, and it is the query that can never be answered again.
+	if code := protocol.Deref(final.ErrorCode); code != protocol.ErrorCodeCollectionRedeclared {
+		t.Fatalf("error code = %q, want %q", code, protocol.ErrorCodeCollectionRedeclared)
 	}
 }
 
@@ -592,8 +689,8 @@ func TestARefusedWriteDoesNotWakeSubscribers(t *testing.T) {
 	if got := ids(next); len(got) != 2 {
 		t.Fatalf("first delivery after the refused write = %v, want both documents", got)
 	}
-	if next.Delivery != 2 {
-		t.Fatalf("delivery = %d, want 2 — something delivered in between", next.Delivery)
+	if next.delivery != 2 {
+		t.Fatalf("delivery = %d, want 2 — something delivered in between", next.delivery)
 	}
 }
 

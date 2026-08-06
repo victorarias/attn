@@ -3681,29 +3681,70 @@ model DocumentConflict {
   "actual": safeint;
 }
 
+// One document a resuming subscriber already holds, and at which revision.
+//
+// A pair list rather than a map because the generated Go types erase a record's
+// value type to `any`, and a revision that decodes as an untyped number is
+// exactly the value this resume must not get wrong.
+model DocumentRevision {
+  "id": string;
+  "rev": safeint;
+}
+
 // Subscribe to a live query. Unlike every other command here, this one keeps the
 // connection open: the daemon writes a DocSubscribeResult immediately carrying
-// the current result set, then writes a fresh one every time a write to the
-// collection changes what the query returns. The subscription ends when the
-// caller closes the connection.
+// the query's current window, then writes a fresh one every time a write to the
+// collection could have changed it. The subscription ends when the caller closes
+// the connection, or when the collection stops being able to answer the query.
+//
+// `have` is what the subscriber already holds, and is how a reconnecting client
+// resumes without replaying history: the first delivery then carries only the
+// window members whose revision differs from what is declared here. Everything
+// else about that delivery is unchanged, so a fresh subscribe is simply the case
+// where `have` is empty.
+//
+// A query carrying `after` is REFUSED. A live query is a window and a cursor is
+// a walk: the anchor moves under a subscription, so the page it names is not the
+// page it named a write ago. Use `limit` and let each delivery carry the current
+// window. One-shot doc_query keeps `after` exactly as it is, because a single
+// read has one instant and nothing to move under it.
 model DocSubscribeMessage {
   "cmd": "doc_subscribe";
   "query": DocumentQuery;
+  "have"?: DocumentRevision[];
 }
 
-// One delivery of a live query's results. `documents` is always the CURRENT full
-// result set, never a patch — a subscriber renders what it is given and never
-// reconstructs state from a sequence of deliveries. `delivery` counts deliveries
-// on this subscription, starting at 1 for the initial one; it is named for what
-// it counts because a document carries its own `rev` and one word for both would
-// read as though they were related.
+// One delivery of a live query's window, and the whole client contract is one
+// rule:
 //
-// int32 rather than the safeint a document's revision uses: this counter is
-// bounded by how long one connection stays open, not by a document's whole
-// history.
+//   Render `order`. Take each body from `upsert` if it is there, else from your
+//   cache. Forget every cached document not named in `order`.
+//
+// `order` is the query's current result, in the server's own order — the client
+// never re-derives sort position, because document order comes from SQLite's
+// comparison under column affinity and a client re-sorting locally would have to
+// reimplement that exactly. `upsert` carries only the bodies the subscriber does
+// not already hold: the ones it declared at a different revision in `have`, and
+// the ones that have changed since a previous delivery on this connection.
+// There is no `remove` field because removal is derivable from `order`, and a
+// derivable field is a field two implementations can disagree about.
+//
+// The daemon upholds — and a test pins — that every id in `order` is either in
+// `upsert`, or was declared in `have` at its current revision, or arrived in an
+// earlier delivery on this connection. A client that finds a body it does not
+// hold must treat the subscription as broken and resubscribe with no `have`.
+//
+// `as_of_seq` is the log position this window was true at, read in the same
+// transaction as the rows. `delivery` counts deliveries on this subscription,
+// starting at 1; it is named for what it counts because a document carries its
+// own `rev` and one word for both would read as though they were related. int32
+// rather than safeint because the counter is bounded by how long one connection
+// stays open, not by a document's whole history.
 model DocSubscribeResult {
   "delivery": int32;
-  "documents": StoredDocument[];
+  "as_of_seq": safeint;
+  "order": string[];
+  "upsert": StoredDocument[];
 }
 
 // ============================================================================
@@ -3717,9 +3758,12 @@ model Response {
   // `error` text. Present only where a caller has to branch on the answer:
   // `conflict` (retry after re-reading — `error_conflict` carries which
   // revisions disagreed), `undeclared_collection` (the collection is not
-  // there), `invalid_query` (the query itself is wrong). Everything else
-  // carries no code, and a client must treat an unknown code as "broken, stop"
-  // rather than matching the message text.
+  // there), `invalid_query` (the query itself is wrong), and the two that end a
+  // live subscription — `collection_undefined` (the collection was removed;
+  // kill the tile) and `collection_redeclared` (it no longer declares a field
+  // the query used; the tile's query needs rewriting). Everything else carries
+  // no code, and a client must treat an unknown code as "broken, stop" rather
+  // than matching the message text.
   error_code?: string;
   error_conflict?: DocumentConflict;
   data?: string;
