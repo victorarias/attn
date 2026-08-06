@@ -2463,6 +2463,10 @@ func applyMigration93(tx *sql.Tx) error {
 //   - delegation_operations.created_at, workspaces.created_at and
 //     workspace_layout_panes.created_at each order a listing, so rows written
 //     together came back in an arbitrary order.
+//   - workflow_runs.created_at orders the run listing and is written by the CLI
+//     rather than by this package, so the store normalizes whatever spelling a
+//     caller hands it (normalizeWorkflowStamp) instead of the writers being asked
+//     to agree. Its callers reach it through protocol.TimestampNow() too.
 //   - endpoints.created_at / updated_at were the worst of them: written through
 //     protocol.TimestampNow(), which renders the local zone, so the stored values
 //     carry an offset like "+02:00" and the listing misordered across a zone or
@@ -2490,6 +2494,7 @@ func applyMigration94(tx *sql.Tx) error {
 		{"endpoints", "id", []string{"created_at", "updated_at"}},
 		{"workspaces", "id", []string{"created_at"}},
 		{"workspace_layout_panes", "rowid", []string{"created_at", "updated_at"}},
+		{"workflow_runs", "run_id", []string{"created_at"}},
 	}
 	unreadable := 0
 	for _, r := range restamps {

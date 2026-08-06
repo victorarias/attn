@@ -201,6 +201,36 @@ func TestPendingDelegationOperationsAreInClaimOrderWithinASecond(t *testing.T) {
 	}
 }
 
+// ListWorkflowRuns promises newest-first, in `ORDER BY created_at DESC`. Its
+// stamps come from the CLI through protocol.TimestampNow(), so the store
+// normalizes them on write — this is the assert that the normalizing happens at
+// all, rather than the column inheriting whatever spelling a caller chose.
+func TestWorkflowRunsAreNewestFirstWithinASecond(t *testing.T) {
+	s := newTurnStore(t)
+
+	for _, r := range raggedOffsets {
+		at := turnBase().Add(r.offset).Format(time.RFC3339Nano)
+		if err := s.UpsertWorkflowRun(&WorkflowRunRow{
+			RunID: r.id, ScriptPath: "s.js", ScriptHash: "h", Status: "running",
+			CreatedAt: at, UpdatedAt: at,
+		}); err != nil {
+			t.Fatalf("upsert run %s: %v", r.id, err)
+		}
+	}
+
+	runs, err := s.ListWorkflowRuns("")
+	if err != nil {
+		t.Fatalf("list workflow runs: %v", err)
+	}
+	ids := make([]string, 0, len(runs))
+	for _, r := range runs {
+		ids = append(ids, r.RunID)
+	}
+	if want := reversed(chronologicalRaggedIDs()); !sameOrder(ids, want) {
+		t.Fatalf("workflow runs came back as %v, want %v", ids, want)
+	}
+}
+
 // Migration 94 rewrites what earlier versions stored. Its input is the encoding
 // they wrote, so the test writes that encoding rather than describing it: the
 // stamps go in the way an older store would have written them, the migration
