@@ -18,7 +18,7 @@ func (s *Store) AddWorkspace(ws *protocol.Workspace) {
 	if s.db == nil {
 		return
 	}
-	createdAt := time.Now().UTC().Format(time.RFC3339Nano)
+	createdAt := time.Now().UTC().Format(sortableTimeFormat)
 	// rank is set on INSERT only. On re-register (ON CONFLICT) the stored rank is
 	// the durable authority for ordering and must survive — like title, it is not
 	// re-derived from the incoming struct so a user reorder sticks.

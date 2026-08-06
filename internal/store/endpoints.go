@@ -4,11 +4,22 @@ import (
 	"database/sql"
 	"log"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/victorarias/attn/internal/config"
-	"github.com/victorarias/attn/internal/protocol"
 )
+
+// endpointStamp is the instant an endpoint row was written, in the encoding the
+// listing orders by. It is deliberately not protocol.TimestampNow(): that renders
+// time.Now() in the local zone with a trailing-zero-stripped fraction, and
+// created_at is ORDER BY'd as text, so two rows written either side of a DST
+// change or in different fraction widths came back in an order that was not
+// theirs. sortableTimeFormat is UTC and fixed-width, so text order is time order.
+//
+// The value stays an RFC3339 string on the same protocol.Timestamp wire field —
+// this narrows which RFC3339 spelling is written, it does not change the type.
+func endpointStamp() string { return time.Now().UTC().Format(sortableTimeFormat) }
 
 type EndpointRecord struct {
 	ID        string
@@ -41,7 +52,7 @@ func (s *Store) AddEndpoint(name, sshTarget, profile string) (*EndpointRecord, e
 		return nil, sql.ErrConnDone
 	}
 
-	now := string(protocol.TimestampNow())
+	now := endpointStamp()
 	record := &EndpointRecord{
 		ID:        uuid.NewString(),
 		Name:      strings.TrimSpace(name),
@@ -186,7 +197,7 @@ func (s *Store) UpdateEndpoint(id string, update EndpointUpdate) (*EndpointRecor
 	if update.Profile != nil {
 		record.Profile = *update.Profile
 	}
-	record.UpdatedAt = string(protocol.TimestampNow())
+	record.UpdatedAt = endpointStamp()
 
 	if _, err := s.db.Exec(`
 		UPDATE endpoints

@@ -940,6 +940,13 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// held a job scheduled on a whole second back until the next second and
 	// scrambled rows written inside one second. Applied by applyMigration93.
 	{93, "store job and notification timestamps in an encoding that sorts", ``},
+	// The last of the rewrite migrations 91 and 93 began, for every remaining TEXT
+	// stamp this package compares or orders as text: the turn stamps that decide
+	// whether a session owes the user a turn, the automation provider cursor that
+	// gates a review-request observation, and the created_at that orders
+	// delegations, endpoints, workspaces and workspace panes. Applied by
+	// applyMigration94.
+	{94, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1230,6 +1237,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 93 {
 			if err := applyMigration93(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 94 {
+			if err := applyMigration94(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2425,6 +2437,81 @@ func applyMigration93(tx *sql.Tx) error {
 	unreadable += n
 	if unreadable > 0 {
 		log.Printf("[store] migration 93: left %d job/notification timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+	}
+	return nil
+}
+
+// applyMigration94 finishes what migrations 91 and 93 started: after it, no TEXT
+// stamp this package compares or orders as text is written in an encoding whose
+// text order is not time order.
+//
+// What each column cost while it was wrong:
+//
+//   - sessions.turn_opened_at / turn_settled_at are compared against each other
+//     ("a turn is open iff opened > settled"), so a turn settled inside the
+//     second it was opened in read as still open and the next turn silently never
+//     opened. Whole-second opens are routine, not a coincidence: a day-named
+//     snooze wakes on an exact second and the woken turn is stamped with that
+//     deadline. turn_snoozed_until is only ever compared for equality, but it
+//     rides along because WakeTurnAt matches the stored deadline against a
+//     freshly formatted one — restamping it in the same breath as changing the
+//     writer is what keeps a snooze written before this migration wakeable after
+//     it.
+//   - automation_provider_cursors.observed_at gates the cursor advance
+//     (`excluded.observed_at >= ...observed_at`), so an observation could fail to
+//     advance the cursor past one taken microseconds earlier.
+//   - delegation_operations.created_at, workspaces.created_at and
+//     workspace_layout_panes.created_at each order a listing, so rows written
+//     together came back in an arbitrary order.
+//   - endpoints.created_at / updated_at were the worst of them: written through
+//     protocol.TimestampNow(), which renders the local zone, so the stored values
+//     carry an offset like "+02:00" and the listing misordered across a zone or
+//     DST change as well as across a fraction width. Restamping normalizes them
+//     to UTC, which is why the decode has to be the tolerant one.
+//
+// Idempotent by construction — re-encoding an already-converted stamp yields
+// itself — and an undecodable stamp is left alone and reported, both inherited
+// from restampTable, which also skips the ” that means "no stamp here" on the
+// turn columns and on an unclaimed cursor.
+//
+// The composite-key tables are keyed by rowid: every table here is an ordinary
+// rowid table, and restampTable needs one column that names a row, not the
+// primary key it happens to have.
+func applyMigration94(tx *sql.Tx) error {
+	restamps := []struct {
+		table   string
+		key     string
+		columns []string
+	}{
+		{"sessions", "id", []string{"turn_opened_at", "turn_settled_at", "turn_snoozed_until"}},
+		{"automation_provider_cursors", "rowid", []string{"observed_at"}},
+		{"automation_review_request_edges", "rowid", []string{"last_observed_at"}},
+		{"delegation_operations", "request_id", []string{"created_at", "updated_at"}},
+		{"endpoints", "id", []string{"created_at", "updated_at"}},
+		{"workspaces", "id", []string{"created_at"}},
+		{"workspace_layout_panes", "rowid", []string{"created_at", "updated_at"}},
+	}
+	unreadable := 0
+	for _, r := range restamps {
+		// A table the base schema creates rather than a migration is absent from a
+		// database built up from an older hand-written schema. There is nothing to
+		// rewrite in a table that does not exist yet, and whatever creates it later
+		// writes the new encoding from the start.
+		present, err := tableExists(tx, r.table)
+		if err != nil {
+			return fmt.Errorf("checking for %s: %w", r.table, err)
+		}
+		if !present {
+			continue
+		}
+		n, err := restampTable(tx, r.table, r.key, r.columns)
+		if err != nil {
+			return fmt.Errorf("restamping %s: %w", r.table, err)
+		}
+		unreadable += n
+	}
+	if unreadable > 0 {
+		log.Printf("[store] migration 94: left %d turn/cursor/listing timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
 	}
 	return nil
 }

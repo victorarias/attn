@@ -1,0 +1,15 @@
+kind: fixed
+area: daemon
+change: >
+  An agent that finishes a turn in the same second the turn began no longer goes
+  quiet: it comes back to the queue the next time it wants you. Delegations,
+  workspaces and workspace panes created moments apart are also listed in the
+  order they were created.
+symptom: >
+  attn recorded these timestamps in a form whose text order was not time order
+  within a single second, and it compares them as text. The turn a session owes
+  you is decided by comparing when it opened against when you settled it, so a
+  turn settled inside the second it opened in still read as open — and no new
+  turn opened, with nothing said about it. Waking from a "until tomorrow" or
+  "until Monday" snooze was the way in, because those wake on an exact second.
+  Existing records are rewritten on first launch.
