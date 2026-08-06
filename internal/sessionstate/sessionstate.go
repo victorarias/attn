@@ -405,7 +405,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		if parkedVerdict(e) {
 			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundParked}
 		}
-		if verdictPending(e, policy, now) {
+		if ClassifierVerdictPending(e, policy, now) {
 			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBackgroundWork}
 		}
 		if promptIdleConfirmed(e) {
@@ -524,15 +524,17 @@ func settled(e Evidence, fallback Reason, policy Policy, now time.Time) Resoluti
 	if r, ok := classifierVerdict(e); ok {
 		return r
 	}
-	if verdictPending(e, policy, now) {
+	if ClassifierVerdictPending(e, policy, now) {
 		return Resolution{Hold: true, Reason: ReasonAwaitingVerdict}
 	}
 	return Resolution{State: protocol.SessionStateIdle, Reason: fallback}
 }
 
-// verdictPending reports whether a classification is running and still worth
-// waiting for.
-func verdictPending(e Evidence, policy Policy, now time.Time) bool {
+// ClassifierVerdictPending reports whether a classification is running and
+// still worth waiting for. Consumers outside the resolver use the same bounded
+// definition when they must distinguish confirmed work from a working state the
+// resolver is temporarily holding while the verdict arrives.
+func ClassifierVerdictPending(e Evidence, policy Policy, now time.Time) bool {
 	if e.ClassifyingSince.IsZero() {
 		return false
 	}

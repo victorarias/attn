@@ -430,6 +430,58 @@ async function main() {
       );
     });
 
+    await runner.step('classification_suspends_auto_settle', async () => {
+      // The countdown must not treat the resolver's awaiting-verdict hold as
+      // proof that work continues. Give the short run enough time to reach the
+      // visible countdown, but a wide enough countdown that it reliably stops
+      // and starts classification before the settle deadline.
+      await client.request('set_setting', { key: 'auto_settle_arm_seconds', value: '5' });
+      await client.request('set_setting', { key: 'auto_settle_countdown_seconds', value: '60' });
+      await client.request('set_setting', { key: 'auto_settle_enabled', value: 'true' });
+      try {
+        await client.request('select_session', { sessionId: alpha.sessionId });
+        const pane = await waitForFirstWorkspacePane(client, alpha.sessionId, `current pane for ${alpha.sessionId}`, 20_000);
+        await submitPrompt(
+          client,
+          alpha.sessionId,
+          pane.paneId,
+          'Count from 1 to 500, one number per line, nothing else. Do not use any tools.',
+        );
+        await pollFor(
+          () => (observer.getSession(alpha.sessionId)?.state === 'working' ? true : null),
+          'the short run to start',
+          60_000,
+        );
+        await pollFor(
+          () => observer.getSession(alpha.sessionId)?.auto_settle_fires_at || null,
+          'the short run to reach the auto-settle countdown',
+          60_000,
+        );
+        await pollFor(
+          () => (observer.getSession(alpha.sessionId)?.state === 'idle' ? true : null),
+          'classification to resolve the short run to idle',
+          60_000,
+        );
+
+        const session = observer.getSession(alpha.sessionId);
+        runner.assert(
+          !session?.auto_settle_fires_at,
+          `classification removed the countdown (got ${JSON.stringify(session?.auto_settle_fires_at)})`,
+        );
+        const queue = await queueState(client);
+        runner.assert(
+          turnIds(queue).includes(alpha.sessionId),
+          `the classified result still owes its turn: ${JSON.stringify(turnIds(queue))}`,
+        );
+        runner.assert(
+          !settledIds(queue).includes(alpha.sessionId),
+          `classification did not auto-settle the result: ${JSON.stringify(settledIds(queue))}`,
+        );
+      } finally {
+        await client.request('set_setting', { key: 'auto_settle_enabled', value: 'false' }).catch(() => {});
+      }
+    });
+
     await runner.step('auto_settle_hands_over_the_next_agent', async () => {
       // A turn closing hands over the next agent that owes one whoever closed
       // it — a countdown completing is not a lesser settle than the keystroke.
@@ -468,13 +520,14 @@ async function main() {
         const pane = await waitForFirstWorkspacePane(client, watched.sessionId, `current pane for ${watched.sessionId}`, 20_000);
 
         // Steering is what arms it. The prompt asks for enough output to outlast
-        // both windows — anything shorter finishes first, and leaving `working`
-        // cancels the settle, so a one-word reply would test nothing.
+        // both windows — anything shorter finishes first, and the stop-time
+        // classifier correctly suspends the settle, so a short reply would test
+        // the classifier guard instead of continuing work.
         await submitPrompt(
           client,
           watched.sessionId,
           pane.paneId,
-          'Count from 1 to 100, one number per line, nothing else. Do not use any tools.',
+          'Count from 1 to 500, one number per line, nothing else. Do not use any tools.',
         );
         // Both preconditions are polled separately from the handover so a run
         // where the steering never landed, or where the agent finished before
