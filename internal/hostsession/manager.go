@@ -24,6 +24,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victorarias/attn/internal/procreap"
 )
 
 // Event is one envelope a host emitted, already split into the parts the
@@ -212,7 +214,8 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	// profile clean` reaps by. A failed write is logged, not fatal — the host
 	// is healthy, only the crash-recovery net has a hole the log names.
 	if opts.RegistryPath != "" {
-		if err := writeRegistry(opts.RegistryPath, newRegistryEntry(opts.SessionID, cmd.Process.Pid, opts.Command)); err != nil {
+		entry := procreap.NewEntry(opts.SessionID, cmd.Process.Pid, cmd.Process.Pid, opts.Command)
+		if err := procreap.WriteEntry(opts.RegistryPath, entry); err != nil {
 			m.logf("host session %s: recording host registry entry failed: %v", opts.SessionID, err)
 		}
 	}
@@ -343,7 +346,7 @@ func (m *Manager) monitor(h *host) {
 	// The process and its group are gone; retire the durable record so the
 	// registry only ever names hosts that may still be running.
 	if h.registryPath != "" {
-		if err := os.Remove(h.registryPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+		if err := procreap.RemoveEntry(h.registryPath); err != nil {
 			m.logf("host session %s: removing host registry entry failed: %v", h.sessionID, err)
 		}
 	}
