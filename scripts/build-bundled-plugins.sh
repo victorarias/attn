@@ -81,6 +81,14 @@ stage_plugin() {
     exit 1
   fi
 
+  # A plugin that bundles a dependency in needs it on disk first: node_modules
+  # is gitignored, so on a fresh checkout `bun build` stops at the first import
+  # with "Could not resolve". Frozen, because the pin a bundled plugin ships is
+  # the one its lockfile records — a build is never the place to move it.
+  if [[ -f "${source_dir}/bun.lock" ]]; then
+    (cd "${source_dir}" && bun install --frozen-lockfile)
+  fi
+
   rm -rf "${stage_dir}"
   mkdir -p "${stage_dir}/bin"
   bun build "${source_dir}/src/index.ts" --compile --minify --outfile "${stage_dir}/bin/${name}"
