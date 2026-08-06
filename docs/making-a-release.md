@@ -82,6 +82,14 @@ With the compilation PR merged and `main` clean of pending fragments:
 It bumps versions, opens a `release/<tag>` PR, waits for CI, merges, tags the
 merge commit, and the tag triggers `.github/workflows/release.yml`.
 
+That workflow builds the app, stages the bundled plugins into it, checks they
+survived into the bundle, notarizes and staples, and builds the Linux daemons —
+all against a **draft** release. It is published only after every one of those
+has passed. So a failed release run leaves a draft, not a half-built public
+release: fix the cause and re-run the workflow on the same tag
+(`gh workflow run release.yml -f tag=<tag>`), which replaces the assets and
+publishes when the whole set is right.
+
 ## What's New modal
 
 The in-app What's New modal (`app/src/components/WhatsNewModal.tsx`,
