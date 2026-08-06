@@ -46,6 +46,11 @@ vi.mock('../GhosttyTerminal', () => ({
         terminalFocusCalls += 1;
         return true;
       },
+      // jsdom lays nothing out, so there is no pane rect to report. Null is the
+      // honest answer and the one placement already handles: it falls back to
+      // the window. Placement inside a pane is covered in placement.test.ts,
+      // where the geometry can be stated instead of measured.
+      getBounds: () => null,
     }), []);
     return <div data-testid="terminal" />;
   }),
@@ -62,6 +67,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   messages: AnnotatableMessage[] = [{ key: 'turn-1', markdown: TURN_1 }];
   truncated = false;
   annotations: TerminalAnnotation[] = [];
+  note = '';
   generation = 0;
   tombstone = 0;
   calls = { fetchMessages: 0, fetchAnnotations: 0, saveAnnotations: 0, clearAnnotations: 0 };
@@ -102,6 +108,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     this.calls.fetchAnnotations += 1;
     return {
       annotations: this.annotations.map((annotation) => ({ ...annotation })),
+      note: this.note,
       generation: this.generation,
     };
   };
@@ -109,6 +116,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   saveAnnotations = async (
     _sessionId: string,
     annotations: readonly TerminalAnnotation[],
+    note: string,
     generation: number,
   ) => {
     this.calls.saveAnnotations += 1;
@@ -122,6 +130,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     }
     if (generation <= this.generation || generation <= this.tombstone) return { stale: true };
     this.annotations = annotations.map((annotation) => ({ ...annotation }));
+    this.note = note;
     this.generation = generation;
     return { stale: false };
   };
@@ -131,6 +140,9 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     if (generation > this.tombstone) this.tombstone = generation;
     if (generation > this.generation) {
       this.annotations = [];
+      // The note is composed with the marks and goes with them. See
+      // annotationDraftTable.clear.
+      this.note = '';
       this.generation = generation;
     }
     return { generation: this.generation };
@@ -684,6 +696,105 @@ describe('AnnotatedTerminal', () => {
   });
 });
 
+// The note is the other half of a pass over an answer: one instruction, plus
+// the places it lands. Before it existed the instruction was typed into the
+// terminal on its own and had to explain its relationship to the marks.
+describe('AnnotatedTerminal note', () => {
+  /** The box the note is typed into, and typing into it. */
+  function noteBox(): HTMLTextAreaElement {
+    return screen.getByTestId('annotation-note') as HTMLTextAreaElement;
+  }
+
+  function writeNote(text: string) {
+    fireEvent.change(noteBox(), { target: { value: text } });
+  }
+
+  it('has nowhere to be written until something is marked', async () => {
+    // The panel is what hosts it, and the panel is what a mark opens. A note
+    // with no marks is an ordinary message and belongs in the terminal.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    expect(screen.queryByTestId('annotation-note')).toBeNull();
+  });
+
+  it('is written through to the daemon on a pause in typing', async () => {
+    const { daemon } = renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+
+    writeNote('Split this into two PRs.');
+
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+  });
+
+  it('survives the pane it was typed in', async () => {
+    // The whole point of the daemon holding the draft. A note kept in this
+    // component's memory would be gone the next time the session is opened —
+    // and it is the part of the draft with the most thought in it.
+    const daemon = new FakeAnnotationDaemon();
+    const first = renderTerminal({ api: daemon });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+    first.unmount();
+
+    renderTerminal({ api: daemon });
+
+    await waitFor(() => expect(noteBox().value).toBe('Split this into two PRs.'));
+  });
+
+  it('goes out ahead of the marks in one keystroke', async () => {
+    const { daemon } = renderTerminal({ paneActive: true });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+
+    // From inside the box: the last sentence is typed there, and reaching for
+    // the button afterwards is the reach the note exists to remove.
+    fireEvent.keyDown(noteBox(), { key: 'Enter', metaKey: true });
+
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    const payload = daemon.submitted[0];
+    expect(payload.indexOf('Split this into two PRs.')).toBeLessThan(payload.indexOf('## 1.'));
+  });
+
+  it('is spent by the send that delivered it', async () => {
+    const { daemon } = renderTerminal({ paneActive: true });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    await waitFor(() => expect(daemon.note).toBe(''));
+  });
+
+  it('is kept by a send the session refused', async () => {
+    // The same asymmetry the marks have: clearing work that was never
+    // delivered is the one failure the user cannot undo.
+    const { daemon } = renderTerminal({ paneActive: true });
+    daemon.nextSubmitStatus = 'skipped_pending_approval';
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
+    expect(noteBox().value).toBe('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+  });
+});
+
 // Sending is the moment the user's marks stop being theirs and become a turn.
 // Everything here is about the one asymmetry that makes it dangerous: a
 // delivered send SHOULD clear them, and every other outcome MUST NOT.
@@ -976,7 +1087,7 @@ describe('AnnotatedTerminal persistence', () => {
       quote: TURN_1.slice(0, 26),
       emoji: '🔍',
       comment: '',
-    }], daemon.tombstone);
+    }], '', daemon.tombstone);
     expect(late.stale).toBe(true);
     expect(daemon.annotations).toHaveLength(0);
   });

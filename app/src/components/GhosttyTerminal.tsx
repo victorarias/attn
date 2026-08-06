@@ -242,6 +242,11 @@ export interface GhosttyTerminalHandle {
   scrollToTop: () => boolean;
   getText: () => string;
   getSize: () => { cols: number; rows: number } | null;
+  // The grid's rect in viewport coordinates. What a pane-anchored overlay
+  // positions itself against: fitting the window is not enough for one, because
+  // a window also holds the sidebar and the neighbouring panes, and an overlay
+  // that lands there is present in the DOM and unreachable on screen.
+  getBounds: () => DOMRect | null;
   // True once the model's size has come from a real container measurement
   // (a fit() that did not bail). Until then getSize() reports the provisional
   // construction default, which must never claim PTY geometry authority.
@@ -2390,6 +2395,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       },
       typeTextViaInput: (text: string) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
       isInputFocused: () => document.activeElement === containerRef.current,
+      getBounds: () => containerRef.current?.getBoundingClientRect() ?? null,
       write,
       resizeLocal,
       seedBlocks,
@@ -2600,6 +2606,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           },
           typeTextViaInput: (text) => { onInputRef.current(text.replace(/\n/g, '\r')); return true; },
           isInputFocused: () => document.activeElement === container,
+          getBounds: () => container.getBoundingClientRect(),
           write,
           resizeLocal,
           seedBlocks,

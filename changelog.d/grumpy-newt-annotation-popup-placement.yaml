@@ -1,0 +1,9 @@
+kind: fixed
+area: terminal
+change: >
+  The annotation editor no longer opens where you cannot use it. Annotating
+  text near a pane's edge used to draw the popup past that edge, half of it
+  under the sidebar or a neighbouring pane, and opening one beside the
+  annotations panel drew it underneath. It now places itself inside the pane it
+  annotates, steps off the panel when it would land under it, and follows the
+  pane when the window is resized.

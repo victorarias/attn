@@ -1036,6 +1036,14 @@ function annotationSurfaceState() {
     popupRect: box(popup),
     panelRect: box(panel),
     viewport: { width: window.innerWidth, height: window.innerHeight },
+    // Every terminal grid on screen. The popup is portalled to the body and
+    // positioned against the window, so the DOM no longer says which pane it
+    // belongs to — but landing outside all of them is the failure, and that a
+    // driver can see. A popup over the sidebar or a neighbouring pane is
+    // present, correctly sized, and unusable.
+    paneRects: Array.from(document.querySelectorAll('.terminal-container.ghostty-terminal'))
+      .map((pane) => box(pane))
+      .filter((rect): rect is NonNullable<typeof rect> => rect !== null),
     popupQuote: text(popup, '.anno-popup-quote'),
     // The comment box's current contents, so a driver can tell "reopened an
     // annotation to edit it" from "opened an empty box beside it".
@@ -1062,6 +1070,9 @@ function annotationSurfaceState() {
       rect: box(card),
       removeRect: box(card.querySelector('.anno-card-remove')),
     })),
+    // What goes out ahead of the marks. Null when the panel is closed, which is
+    // also the only time there is nowhere to type it.
+    note: (panel?.querySelector('.anno-panel-note') as HTMLTextAreaElement | null)?.value ?? null,
     footer: text(panel, '.anno-panel-foot'),
     // What an annotate gesture that resolved to nothing said for itself. The
     // whole failure mode this covers is silence, so a driver asserting only on

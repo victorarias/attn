@@ -11,8 +11,11 @@ import (
 type SessionAnnotationDraft struct {
 	SessionID   string
 	Annotations string // raw JSON array of protocol.SessionAnnotation
-	Generation  int    // current generation floor: max(generation, tombstone)
-	UpdatedAt   string
+	// What the user wants to say about the turn as a whole, beside the marks
+	// on its parts. Sent in front of them and cleared with them.
+	Note       string
+	Generation int // current generation floor: max(generation, tombstone)
+	UpdatedAt  string
 }
 
 // GetSessionAnnotationDraft returns the draft for a session. A session that was
@@ -27,16 +30,17 @@ func (s *Store) GetSessionAnnotationDraft(sessionID string) (*SessionAnnotationD
 	return &SessionAnnotationDraft{
 		SessionID:   sessionID,
 		Annotations: draft.Annotations,
+		Note:        draft.Note,
 		Generation:  draft.Generation,
 		UpdatedAt:   draft.UpdatedAt,
 	}, nil
 }
 
-// SaveSessionAnnotationDraft upserts the full annotation list for a session,
-// rejecting a generation that does not clear the stored one and the tombstone
-// with ErrStaleAnnotationSave.
-func (s *Store) SaveSessionAnnotationDraft(sessionID, annotationsJSON string, generation int, now time.Time) error {
-	return sessionDraftTable.save(s, sessionID, annotationsJSON, generation, now)
+// SaveSessionAnnotationDraft upserts the full annotation list and note for a
+// session, rejecting a generation that does not clear the stored one and the
+// tombstone with ErrStaleAnnotationSave.
+func (s *Store) SaveSessionAnnotationDraft(sessionID, annotationsJSON, note string, generation int, now time.Time) error {
+	return sessionDraftTable.save(s, sessionID, annotationsJSON, note, generation, now)
 }
 
 // ClearSessionAnnotationDraft tombstones a session's annotations — what

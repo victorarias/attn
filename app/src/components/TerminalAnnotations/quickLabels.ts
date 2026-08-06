@@ -101,10 +101,20 @@ export interface PayloadAnnotation {
 // the exact words it is about. Items are ordered by position in the message
 // rather than by when they were made, because the agent reads the payload as a
 // pass over its own answer.
-export function buildAnnotationPayload(annotations: readonly PayloadAnnotation[]): string {
+//
+// The note goes first, before the marks. It is what the user wants done —
+// "let's do x and y" — and the marks are the detail that qualifies it. Sending
+// it after them would make it read as an afterthought, which is exactly the
+// ordering that has people writing "…but also consider what I put below".
+export function buildAnnotationPayload(
+  annotations: readonly PayloadAnnotation[],
+  note = '',
+): string {
   if (annotations.length === 0) return '';
   const ordered = [...annotations].sort((a, b) => a.start - b.start);
   const lines: string[] = ['Feedback on your last message.', ''];
+  const trimmedNote = note.trim();
+  if (trimmedNote) lines.push(trimmedNote, '');
   ordered.forEach((annotation, index) => {
     const label = annotation.emoji ? labelByEmoji(annotation.emoji) : undefined;
     const heading = label

@@ -32,12 +32,16 @@ if (typeof window !== 'undefined') {
   });
 }
 
-// Mock ResizeObserver
-(globalThis as typeof globalThis & { ResizeObserver: typeof ResizeObserver }).ResizeObserver = vi.fn().mockImplementation(() => ({
-  observe: vi.fn(),
-  unobserve: vi.fn(),
-  disconnect: vi.fn(),
-})) as unknown as typeof ResizeObserver;
+// Mock ResizeObserver. A class rather than a vi.fn() returning an object: the
+// arrow-function implementation could not be `new`-ed, so every component that
+// constructs one — rather than only reading the global — threw here.
+class ResizeObserverStub {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+(globalThis as typeof globalThis & { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
+  ResizeObserverStub as unknown as typeof ResizeObserver;
 
 // Node 22+ ships a built-in `localStorage` that shadows happy-dom's Storage
 // when vitest installs `window` onto globalThis. Node's stub is missing the

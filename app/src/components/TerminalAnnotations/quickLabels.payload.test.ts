@@ -85,4 +85,33 @@ describe('buildAnnotationPayload', () => {
   it('is empty with nothing to say', () => {
     expect(buildAnnotationPayload([])).toBe('');
   });
+
+  describe('with a note', () => {
+    const MARKS = [
+      { start: 40, emoji: '🧪', comment: '', quote: 'the retry wrapper' },
+      { start: 4, emoji: '❓', comment: 'which parser?', quote: 'the parser' },
+    ];
+
+    it('puts the note ahead of the marks it qualifies', () => {
+      // The note is the instruction and the marks are where it lands. Sent
+      // after them it reads as an afterthought, which is the ordering that has
+      // people typing "…and also consider the feedback below".
+      const payload = buildAnnotationPayload(MARKS, 'Split this into two PRs.');
+      const lines = payload.split('\n').filter((line) => line !== '');
+
+      expect(lines[0]).toBe('Feedback on your last message.');
+      expect(lines[1]).toBe('Split this into two PRs.');
+      expect(lines[2]).toMatch(/^## 1\./);
+    });
+
+    it('leaves a whitespace-only note out entirely', () => {
+      expect(buildAnnotationPayload(MARKS, '   \n  ')).toBe(buildAnnotationPayload(MARKS));
+    });
+
+    it('keeps the marks in reading order under the note', () => {
+      const payload = buildAnnotationPayload(MARKS, 'Split this into two PRs.');
+
+      expect(payload.indexOf('the parser')).toBeLessThan(payload.indexOf('the retry wrapper'));
+    });
+  });
 });

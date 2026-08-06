@@ -58,6 +58,9 @@ func (d *Daemon) handleSessionAnnotationsGet(client *wsClient, msg *protocol.Ses
 	}
 	result.Success = true
 	result.Annotations = annotations
+	if draft.Note != "" {
+		result.Note = protocol.Ptr(draft.Note)
+	}
 	result.Generation = draft.Generation
 	d.sendToClient(client, result)
 }
@@ -86,7 +89,13 @@ func (d *Daemon) handleSessionAnnotationsSave(client *wsClient, msg *protocol.Se
 		d.sendToClient(client, result)
 		return
 	}
-	err = d.store.SaveSessionAnnotationDraft(sessionID, string(annotationsJSON), msg.Generation, time.Now())
+	err = d.store.SaveSessionAnnotationDraft(
+		sessionID,
+		string(annotationsJSON),
+		protocol.Deref(msg.Note),
+		msg.Generation,
+		time.Now(),
+	)
 	if errors.Is(err, store.ErrStaleAnnotationSave) {
 		d.logf("session_annotations_save: %s: stale save at generation %d rejected", sessionID, msg.Generation)
 		result.Stale = protocol.Ptr(true)
