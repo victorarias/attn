@@ -264,16 +264,25 @@ number, a `kind`, and a body. Kinds fall in two families, and the split is what
 lets an agent's own vocabulary grow without the daemon changing:
 
 - **Declarations** are what the daemon understands and acts on — `session_ready`,
-  `run_started`, `run_settled`. These are the host telling attn something true
-  about the session.
+  `run_started`, `run_settled`, `tool_started`, `tool_finished`. These are the
+  host telling attn something true about the session.
 - **Renderings** are what the app draws — `message_start`, `message_delta`,
-  `message_end`, `queue_update`. The daemon forwards them opaquely and holds no
-  opinion about them.
+  `message_end`, `queue_update`, `tool_detail`. The daemon forwards them opaquely
+  and holds no opinion about them.
 
-Every declaration carries the attn state it puts the session in, so the daemon
-reads state off the host rather than inferring it from the kind. That is what
-makes a conversation session move through `working` and `idle` like any other
-agent, and it is the path a future `pending_approval` travels on too.
+A **state declaration** is the subset of declarations that carries the attn state
+it puts the session in — the run boundaries — so the daemon reads state off the
+host rather than inferring it from the kind. That is what makes a conversation
+session move through `working` and `idle` like any other agent, and it is the
+path a future `pending_approval` travels on too. Tool boundaries are declarations
+without a state: they say what the agent did, not where the session now is.
+
+A **tool call** appears in the transcript as a card: the tool's name, one line
+naming what it was pointed at, and how it ended. What the call actually read,
+wrote or printed is **detail**, and it stays in the host until someone opens the
+card and the app asks for it. That is deliberate — a transcript that inlines
+every tool's output is one nobody can scroll, and most of them are never
+looked at.
 
 A **run** is one prompt and everything the agent does in response to it, from
 `run_started` to `run_settled`. A run is what a turn is opened and settled
@@ -293,7 +302,9 @@ statement about *when* it should be read:
 A steer or a follow-up sent to a session with no run open starts one. That is
 what makes a doorbell safe to ring at any moment: nothing is dropped for having
 arrived at the wrong time. What has been sent and not yet read is the session's
-**queue**, which the host reports as it fills and drains — queued, then seen.
+**queue**, which the host reports as it fills and drains — queued, then seen. The
+queue can be cleared, which drops everything in it at once; what the strip shows
+is always the host's last word about it, never a local guess.
 
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —

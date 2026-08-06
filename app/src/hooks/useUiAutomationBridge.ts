@@ -3053,11 +3053,36 @@ export function useUiAutomationBridge({
           kind: node.querySelector('.conversation-queued-label')?.textContent || '',
           text: node.querySelector('.conversation-queued-text')?.textContent || '',
         }));
+        // Every tool card in the transcript, and what an opened one is showing.
+        // A card's collapsed state is part of the contract — a scenario asserts
+        // that output is absent until the card is opened — so `expanded` and
+        // `output` are reported separately rather than folded together.
+        const tools = Array.from(root.querySelectorAll('.conversation-tool')).map((node) => {
+          const element = node as HTMLElement;
+          const body = element.querySelector('[data-testid="conversation-tool-body"]');
+          return {
+            callId: (element.dataset.testid || '').replace('conversation-tool-', ''),
+            name: element.dataset.toolName || '',
+            status: element.dataset.toolStatus || '',
+            summary: element.querySelector('.conversation-tool-summary')?.textContent || '',
+            error: element.querySelector('[data-testid="conversation-tool-error"]')?.textContent || '',
+            expanded: element.dataset.expanded === 'true',
+            waiting: Boolean(body?.querySelector('[data-testid="conversation-tool-waiting"]')),
+            output: body?.querySelector('[data-testid="conversation-tool-output"]')?.textContent || '',
+            hasPatch: Boolean(body?.querySelector('[data-testid="conversation-tool-patch"]')),
+            // The card is offering the whole of an output pi clipped.
+            fullOutputAvailable: Boolean(body?.querySelector('[data-testid="conversation-tool-full"]')),
+            detailError: body?.querySelector('[data-testid="conversation-tool-detail-error"]')?.textContent || '',
+          };
+        });
         const send = root.querySelector('[data-testid="conversation-send"]');
         return {
           sessionId,
           messages,
+          tools,
           queued,
+          // Present only while something is queued: the way out of the queue.
+          queueClearAvailable: Boolean(root.querySelector('[data-testid="conversation-queue-clear"]')),
           inputDisabled: Boolean(textarea?.disabled),
           placeholder: textarea?.placeholder || '',
           draft: textarea?.value || '',

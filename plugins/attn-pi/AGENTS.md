@@ -79,21 +79,48 @@ See `docs/glossary.md` for the vocabulary and
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
   out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
-  `shutdown`), **stdout/stderr** are pi's and the host's own output, captured to
-  `<data-dir>/hosts/log/<session>.log`. Envelopes never go on stdout: pi loads
-  the user's own extensions and any one of them printing a line would corrupt a
-  shared stream.
-- Two envelope families. **Declarations** (`session_ready`, `run_started`,
-  `run_settled`) are attn's vocabulary and the daemon may read them.
-  **Renderings** (`message_start`, `message_delta`, `message_end`,
-  `queue_update`) are drawn by the app and forwarded opaquely. Adding a rendering
-  is a host + app change; a new declaration is a protocol conversation.
-- **Every declaration carries a `state`** — the attn state the session is in
-  once that declaration is true (`idle`, `working`, and later
-  `waiting_input`/`pending_approval`). The daemon applies it through the normal
-  `applyState` path with the envelope's `seq` as the ordering cursor, so a
-  declaration cannot be invented daemon-side from the kind alone. A declaration
-  without a state is logged and dropped, never guessed at.
+  `tool_detail`, `clear_queue`, `shutdown`), **stdout/stderr** are pi's and the
+  host's own output, captured to `<data-dir>/hosts/log/<session>.log`. Envelopes
+  never go on stdout: pi loads the user's own extensions and any one of them
+  printing a line would corrupt a shared stream.
+- Two envelope families. **Semantic** kinds (`session_ready`, `run_started`,
+  `run_settled`, `tool_started`, `tool_finished`) are attn's vocabulary and the
+  daemon may read them. **Renderings** (`message_start`, `message_delta`,
+  `message_end`, `queue_update`, `tool_detail`) are drawn by the app and
+  forwarded opaquely. Adding a rendering is a host + app change; a new semantic
+  kind is a protocol conversation.
+- **A state declaration is the subset of semantic kinds that carries a `state`**
+  (`STATE_DECLARATION_KINDS`: `session_ready`, `run_started`, `run_settled`) —
+  the attn state the session is in once that declaration is true (`idle`,
+  `working`, and later `waiting_input`/`pending_approval`). The daemon applies it
+  through the normal `applyState` path with the envelope's `seq` as the ordering
+  cursor, so it cannot be invented daemon-side from the kind alone. One of those
+  kinds arriving without a state is logged and dropped, never guessed at. Tool
+  boundaries are deliberately NOT state declarations: `applyState` restamps
+  `state_since` on every apply, so a session that ran twenty tools would show as
+  having been working for however long the last one took.
+- **Tool visibility is a declaration plus a fetch.** `tool_started` /
+  `tool_finished` carry only what the transcript keeps forever — the tool's name,
+  a one-line summary, the files it names, how it ended. What it read, wrote or
+  printed stays in the host until a card is opened and the `tool_detail` verb
+  asks for it. The receipt is the attach-snapshot corpus (claude JSONL, p50
+  0.15 MB / p99 11.6 MB, ~0.4% message text): eagerly inlining tool output is how
+  a transcript balloons. The held detail is bounded by `ToolDetailStore`, which
+  names its own budget when it has evicted what you asked for.
+- **A message appears when it has something to say.** Nothing is emitted on pi's
+  `message_start`: the first text delta mints the message, and one that streamed
+  nothing is decided at its end. pi opens a message per assistant turn whether or
+  not that turn says anything (a tool-only turn ends empty), and it hands each
+  tool's whole output back to the model as a `toolResult` message —
+  `UNRENDERED_ROLES`, dropped, because the card is that call's record and drawing
+  the message too inlines every byte the card exists to fetch on demand.
+- `tool_detail` is addressed by `call_id`, not by a request id, and is broadcast
+  to every client. Two windows showing the same card cost one read, a `full`
+  answer upgrades both, and nothing can time out.
+- `tool_execution_update` is dropped on purpose — a live-updating card would
+  repaint continuously beside GPU terminals, and the delta stream is what the
+  coalescer exists to bound. It is handled explicitly so it does not log as an
+  unmapped pi event.
 - Delivery is three verbs, and the host picks nothing: the daemon says which.
   `steer` drains at pi's next turn boundary, `follow_up` drains only when the
   run would otherwise settle, `prompt` opens a run and is refused mid-run. A
@@ -102,7 +129,10 @@ See `docs/glossary.md` for the vocabulary and
 - `queue_update` is pi's own queue state, forwarded verbatim. pi emits it on
   enqueue and again immediately before the user message that delivers the entry,
   which is exactly "queued, then seen" — so the app never invents an optimistic
-  entry of its own.
+  entry of its own. `clear_queue` is the way out, and it is all-or-nothing
+  because `session.clearQueue()` is: pi offers no per-entry removal, and clearing
+  then re-queueing the survivors would race the drain. The strip empties on pi's
+  answering `queue_update`, never on the click.
 - `seq` is one monotonic spine across both families, minted only by
   `EnvelopeStream`.
 - The mapper never claims exhaustiveness over pi's event union — pi added four

@@ -16,6 +16,14 @@ type AddEndpointMessage struct {
 	SshTarget string `json:"ssh_target"`
 }
 
+type AgentClearQueueMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type AgentEventMessage struct {
 	// Body corresponds to the JSON schema field "body".
 	Body RecordUnknown `json:"body"`
@@ -45,6 +53,20 @@ type AgentPromptMessage struct {
 
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
+}
+
+type AgentToolDetailMessage struct {
+	// CallID corresponds to the JSON schema field "call_id".
+	CallID string `json:"call_id"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Full corresponds to the JSON schema field "full".
+	Full *bool `json:"full,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type ApprovePRMessage struct {

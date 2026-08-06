@@ -15,6 +15,7 @@
 
 import { createWriteStream } from "node:fs";
 import { existsSync, mkdirSync } from "node:fs";
+import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import {
@@ -37,16 +38,48 @@ import {
   DeltaCoalescer,
   EnvelopeStream,
   PiEventMapper,
+  ToolDetailStore,
   parseVerb,
   type Envelope,
   type HostVerb,
   type HostVerbWithText,
   type RunSettledBody,
   type SessionReadyBody,
+  type ToolDetailBody,
 } from "./envelope";
 
 /** The flush window for streamed text. Receipt in DeltaCoalescer's comment. */
 const DELTA_WINDOW_MS = 30;
+
+/**
+ * How much tool output this host holds so an expanded card can be answered
+ * without going back to disk.
+ *
+ * Receipt (2026-08-06, this machine, compiled host, pi 0.83.0): a host idles at
+ * 130 MB RSS, and an 8-call exploration run — ls, two greps, five reads over a
+ * real Go package — retained 52,463 bytes across those calls, 6.4 KB each. A
+ * second run whose `seq 1 5000` pi truncated retained 10,342 bytes across 4
+ * calls. 16 MB is ~320x the heavier of the two and holds ~330 calls even if
+ * every one hit pi's own 50 KB per-result cap; against a 130 MB floor it is a
+ * tenth of what the host already costs. Past it the oldest calls are dropped
+ * and a card that asks for one says so, naming this budget. Each run logs what
+ * it actually held, which is where the next remeasurement comes from.
+ */
+const TOOL_DETAIL_BUDGET_BYTES = 16 << 20;
+
+/**
+ * How much of pi's full-output file one `tool_detail --full` answer carries.
+ *
+ * pi writes the untruncated output of a clipped bash call to a temp file, and
+ * that file has no bound at all — a `find /` is gigabytes. Two limits sit above
+ * this one: the daemon tears a host down at a 64 MB envelope line, and the app
+ * paints the answer into one DOM node. 4 MB is 80x pi's own 50 KB in-result cap
+ * — roughly 50,000 terminal lines, past anything read in a chat card — and an
+ * order of magnitude under the envelope ceiling. A longer file is answered with
+ * its last 4 MB, which is the end pi itself keeps, and the card is told the
+ * limit, the real size, and where the whole file is.
+ */
+const FULL_OUTPUT_LIMIT_BYTES = 4 << 20;
 
 /** The fd the daemon reads envelopes from. */
 const ENVELOPE_FD = 3;
@@ -95,6 +128,29 @@ function resolveModel(pinned: string) {
   }
 }
 
+/**
+ * Reads at most `limit` bytes off the END of a file.
+ *
+ * The end, because this reads pi's full-output file for a command whose output
+ * pi itself already clipped to its tail: the last lines are the ones that
+ * carry the failure, the summary, the prompt that came back. A file inside the
+ * limit is read whole.
+ */
+async function readOutputTail(path: string, limit: number): Promise<{ text: string; clipped: boolean; size: number }> {
+  const handle = await open(path, "r");
+  try {
+    const { size } = await handle.stat();
+    if (size <= limit) {
+      return { text: await handle.readFile("utf8"), clipped: false, size };
+    }
+    const buffer = Buffer.alloc(limit);
+    await handle.read(buffer, 0, limit, size - limit);
+    return { text: buffer.toString("utf8"), clipped: true, size };
+  } finally {
+    await handle.close();
+  }
+}
+
 async function main(): Promise<void> {
   const piVersion = requirePinnedPi();
   const sessionID = requireEnv("ATTN_PI_HOST_SESSION_ID");
@@ -128,11 +184,24 @@ async function main(): Promise<void> {
 
   const stream = new EnvelopeStream(sessionID, write);
   const deltas = new DeltaCoalescer(DELTA_WINDOW_MS, (id, text) => stream.emit("message_delta", { id, text }));
+  const toolDetails = new ToolDetailStore(TOOL_DETAIL_BUDGET_BYTES);
   const mapper = new PiEventMapper(stream, deltas, (type) => {
     console.error(`[attn-pi-host] unmapped pi event type ${type} (pi ${piVersion})`);
-  });
+  }, toolDetails);
 
-  session.subscribe((event) => mapper.handle(event as { type: string }));
+  session.subscribe((event) => {
+    mapper.handle(event as { type: string });
+    // What the budget above is actually holding, once per run. The store drops
+    // the oldest calls silently by design — the card that asks for one is where
+    // the loud answer belongs — so this is the line that says how close a real
+    // session gets, and it is the receipt anyone remeasuring the budget reads.
+    if ((event as { type?: string }).type === "agent_settled") {
+      console.error(
+        `[attn-pi-host] holding ${toolDetails.retainedBytes} bytes of tool detail ` +
+        `across ${toolDetails.size} call(s), budget ${TOOL_DETAIL_BUDGET_BYTES} bytes`,
+      );
+    }
+  });
 
   const ready: SessionReadyBody = {
     session_file: session.sessionFile ?? null,
@@ -209,6 +278,52 @@ async function main(): Promise<void> {
     }
   };
 
+  /**
+   * Answers one expanded card.
+   *
+   * Everything the answer needs was kept when the call finished, except the
+   * full output — that lives in pi's own temp file and is read here, on demand,
+   * bounded. The answer is addressed by call id and goes to every client, so a
+   * second client with the same card open gets it for free.
+   */
+  const sendToolDetail = async (callID: string, full: boolean) => {
+    const held = toolDetails.get(callID);
+    if (!held) {
+      const reason = toolDetails.missingReason(callID);
+      console.error(`[attn-pi-host] ${reason}`);
+      const body: ToolDetailBody = { call_id: callID, text: "", full: false, truncated: false, error: reason };
+      stream.emit("tool_detail", body);
+      return;
+    }
+    const body: ToolDetailBody = {
+      call_id: callID,
+      text: held.text,
+      full: false,
+      truncated: held.truncated,
+      ...(held.patch === undefined ? {} : { patch: held.patch }),
+      ...(held.fullOutputPath === undefined ? {} : { full_output_path: held.fullOutputPath }),
+    };
+    if (full && held.fullOutputPath) {
+      try {
+        const read = await readOutputTail(held.fullOutputPath, FULL_OUTPUT_LIMIT_BYTES);
+        body.text = read.text;
+        body.full = true;
+        body.truncated = read.clipped;
+        if (read.clipped) {
+          body.error =
+            `showing the last ${FULL_OUTPUT_LIMIT_BYTES >> 20} MB of ${read.size} bytes; ` +
+            `the whole output is at ${held.fullOutputPath}`;
+        }
+      } catch (error) {
+        // The file is pi's, in the system temp dir, and nothing promises it
+        // outlives the run. Say which file and why rather than drawing a card
+        // that silently shows the clipped text it already had.
+        body.error = `could not read ${held.fullOutputPath}: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+    stream.emit("tool_detail", body);
+  };
+
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -235,6 +350,20 @@ async function main(): Promise<void> {
       case "follow_up":
         void deliver(verb);
         return;
+      case "tool_detail":
+        void sendToolDetail(verb.callID, verb.full);
+        return;
+      case "clear_queue": {
+        // pi clears both queues together and emits its own queue_update, which
+        // is what empties the strip. The app never removes an entry itself, so
+        // a clear that pi refuses leaves the strip showing what is really still
+        // queued instead of a lie.
+        const dropped = session.clearQueue();
+        console.error(
+          `[attn-pi-host] cleared the queue: ${dropped.steering.length} steering, ${dropped.followUp.length} follow-up`,
+        );
+        return;
+      }
       case "shutdown":
         shutdown();
         return;
