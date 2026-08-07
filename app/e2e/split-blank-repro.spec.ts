@@ -79,13 +79,14 @@ test('agent pane stays painted after opening a shell split', async ({ page, daem
   const terminal = await setupAgent(page, daemon, agentId);
 
   // 1) Paint a full frame and confirm it actually rendered (high quad count).
+  //    Read the last REAL draw, not the last trace entry: once the model is
+  //    clean every further paint is a skip (`quads: null`), and `null ?? 0`
+  //    reads a fully painted surface as blank. Nothing re-dirties the model
+  //    here, so a skip landing after the draw is terminal — the poll re-reads
+  //    the same entry until the deadline. That is this step's CI flake.
   await emitUntilVisible(page, agentId, fullFrame('OLD'), 'OLD line 0');
   await expect
-    .poll(async () => {
-      const trace = await readTrace(page, agentId);
-      const last = trace[trace.length - 1];
-      return last?.quads ?? 0;
-    }, { timeout: 5000 })
+    .poll(async () => lastRealDraw(await readTrace(page, agentId))?.quads ?? 0, { timeout: 5000 })
     .toBeGreaterThan(50);
 
   const sizeBefore = await page.evaluate((sid) => window.__TEST_GET_SESSION_PANE_SIZE?.(sid) ?? null, agentId);
