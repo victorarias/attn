@@ -1,0 +1,9 @@
+kind: fixed
+area: app
+change: >
+  The quick-label picker in the Markdown reader now measures itself before
+  deciding where to open. It used to flip above its button only when there was
+  under 220px below it, which the list already exceeded — so opening it low in
+  the window drew the last labels past the bottom edge, where they could not be
+  clicked. It now goes above when it does not fit below, and clamps into the
+  window when it fits neither way.

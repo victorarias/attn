@@ -4,6 +4,10 @@
  * (clamped to the viewport) so the first row sits under the pointer; falls
  * back to the anchor element when no cursor hint exists.
  *
+ * It measures itself before settling vertically: the list is as tall as the
+ * label set makes it, so where it fits is not something the code can be told
+ * once.
+ *
  * Interaction contract (spec E14–E16):
  * - bare digits 1..9,0 AND Alt+digit apply label N (0 = 10th);
  * - Escape dismisses;
@@ -11,7 +15,7 @@
  *   (setTimeout 0) so the click that OPENED the picker never dismisses it.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscapeStack } from '../../../hooks/useEscapeStack';
 import { LABEL_COLOR_MAP, QUICK_LABELS, type QuickLabel } from './quickLabels';
@@ -28,16 +32,28 @@ const PICKER_WIDTH = 192;
 const GAP = 6;
 const VIEWPORT_PADDING = 12;
 
+// `height` is the picker's measured height, 0 before it has ever been laid
+// out. It is measured rather than assumed because the picker is a list and its
+// height is whatever the label set makes it — a constant guessed against one
+// label count is how a picker ends up hanging off the bottom of the window
+// after somebody adds a label.
 function computePosition(
   anchorEl: HTMLElement,
-  cursorHint?: { x: number; y: number } | null,
-): { top: number; left: number; flipAbove: boolean } {
+  cursorHint: { x: number; y: number } | null | undefined,
+  height: number,
+): { top: number; left: number } {
   const rect = anchorEl.getBoundingClientRect();
 
-  // Vertical: anchor rect decides above/below and placement.
-  const spaceBelow = window.innerHeight - rect.bottom;
-  const flipAbove = spaceBelow < 220;
-  const top = flipAbove ? rect.top - GAP : rect.bottom + GAP;
+  // Vertical: below the anchor, above it when it does not fit below, and
+  // clamped into the viewport when it fits neither way — a picker drawn
+  // half off-screen is a picker whose last labels cannot be clicked.
+  const below = rect.bottom + GAP;
+  const above = rect.top - GAP - height;
+  const lowestTop = window.innerHeight - VIEWPORT_PADDING - height;
+  let top = below;
+  if (height > 0 && below > lowestTop) {
+    top = above >= VIEWPORT_PADDING ? above : Math.max(VIEWPORT_PADDING, lowestTop);
+  }
 
   // Horizontal: prefer cursor x (first row's text directly under the
   // pointer), fallback to the anchor's right edge.
@@ -47,18 +63,19 @@ function computePosition(
     Math.min(left, window.innerWidth - PICKER_WIDTH - VIEWPORT_PADDING),
   );
 
-  return { top, left, flipAbove };
+  return { top, left };
 }
 
 export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: QuickLabelPickerProps) {
-  const [position, setPosition] = useState<{ top: number; left: number; flipAbove: boolean } | null>(
-    null,
-  );
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  const [height, setHeight] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Position tracking.
+  // Position tracking. The first pass places the picker with height 0 (below
+  // the anchor); the layout effect below measures it and the placement is
+  // corrected before the browser paints, so it is never seen off-screen.
   useEffect(() => {
-    const update = () => setPosition(computePosition(anchorEl, cursorHint));
+    const update = () => setPosition(computePosition(anchorEl, cursorHint, height));
     update();
     window.addEventListener('scroll', update, true);
     window.addEventListener('resize', update);
@@ -66,7 +83,14 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
       window.removeEventListener('scroll', update, true);
       window.removeEventListener('resize', update);
     };
-  }, [anchorEl, cursorHint]);
+  }, [anchorEl, cursorHint, height]);
+
+  useLayoutEffect(() => {
+    const measured = ref.current?.offsetHeight ?? 0;
+    if (measured > 0) {
+      setHeight((current) => (current === measured ? current : measured));
+    }
+  });
 
   // Escape dismiss via the centralized stack: the picker mounts after (so
   // registers above) the toolbar — Escape closes picker first, then toolbar.
@@ -114,7 +138,7 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
   return createPortal(
     <div
       ref={ref}
-      className={`md-quick-label-picker ${position.flipAbove ? 'md-quick-label-picker--above' : ''}`.trim()}
+      className="md-quick-label-picker"
       style={{ top: position.top, left: position.left, width: PICKER_WIDTH }}
       onMouseDown={(e) => e.stopPropagation()}
     >
