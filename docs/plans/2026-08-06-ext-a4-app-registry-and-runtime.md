@@ -271,8 +271,9 @@ here names the limit, the value, and the ask — agents read errors, not code.
 
 ## Delivery — epic branch
 
-All A4 PRs target **`epic/ext-a4`** (created 2026-08-06 from main at
-`01ab976a`), so slices merge promptly without betting main; main takes one
+All A4 PRs target **`epic/ext-a4`** (created 2026-08-06 from main, since
+fast-forwarded to `09ca4e28` — the A3.4 Stage 2 + timestamp-fix integration
+merge), so slices merge promptly without betting main; main takes one
 fully-CI'd, fully-reviewed merge at the end. Discipline that keeps the epic
 honest:
 
