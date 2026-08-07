@@ -7,12 +7,16 @@ daemon_package="github.com/victorarias/attn/internal/daemon"
 shard_count="${ATTN_GO_TEST_SHARDS:-5}"
 package_parallelism="${ATTN_GO_TEST_PACKAGE_PARALLELISM:-4}"
 test_gomaxprocs="${ATTN_GO_TEST_GOMAXPROCS:-${GOMAXPROCS:-3}}"
-test_timeout="${ATTN_GO_TEST_TIMEOUT:-90s}"
+# Measured 2026-08-07: `go test ./internal/store` alone takes ~23s on an
+# M-series laptop after the doc-store windowed-subscription battery and the
+# two timestamp-migration suites landed, and CI runs SQLite work 3-4x slower
+# — the package hit the old 90s ceiling on a healthy run (run 31133211867).
+# 300s is a tripwire: only a hang reaches it.
+test_timeout="${ATTN_GO_TEST_TIMEOUT:-300s}"
 # The race job runs the same packages a second time under -race, which costs
 # roughly an order of magnitude. Measured: `go test -race ./internal/store
 # ./internal/docstore` takes 22s on an M-series laptop, and CI runs SQLite work
-# 3-4x slower, so ~90s is the real ceiling. 300s is a tripwire — only a hang
-# reaches it.
+# 3-4x slower. 300s is the same tripwire — only a hang reaches it.
 race_timeout="${ATTN_GO_TEST_RACE_TIMEOUT:-300s}"
 
 if ! [[ "$shard_count" =~ ^[1-9][0-9]*$ ]]; then
