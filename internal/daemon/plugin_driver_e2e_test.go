@@ -13,6 +13,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
@@ -76,6 +77,17 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 
 	d := NewForTesting(socketPath)
 	d.pluginDir = pluginDir
+	// Tests normally run the daemon mute. This one spans three processes and its
+	// only observed failure is a close notification that never arrives, so keep
+	// the daemon's own account of every exit and every dropped notification —
+	// it is what the failure prints instead of a bare deadline.
+	daemonLog := filepath.Join(tmpDir, "daemon.log")
+	if logger, err := logging.New(daemonLog); err == nil {
+		d.logger = logger
+		t.Cleanup(func() { _ = logger.Close() })
+	} else {
+		t.Logf("daemon log unavailable: %v", err)
+	}
 	d.loginShellEnv = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH")}
 	go func() {
 		if err := d.Start(); err != nil {
@@ -109,6 +121,13 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 
 	sessionID := "plugin-driver-e2e"
 	workspaceID := "workspace-" + sessionID
+	fixture := pluginFixtureSession{
+		daemon:    d,
+		sessionID: sessionID,
+		closeLog:  fixtureCloseLog,
+		stderr:    fixtureStderr,
+		daemonLog: daemonLog,
+	}
 	if err := writeWS(ws, map[string]interface{}{
 		"cmd":       protocol.CmdRegisterWorkspace,
 		"id":        workspaceID,
@@ -132,7 +151,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 
 	terminatePluginFixturePTY(t, d, sessionID)
-	firstClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 1)[0]
+	firstClose := waitForPluginFixtureCloseRecords(t, fixture, 1)[0]
 	if firstClose.Params.RunID != records[0].Params.RunID || firstClose.Params.Reason != "exited" {
 		t.Fatalf("first close=%+v, want exited notification for spawned run %q", firstClose.Params, records[0].Params.RunID)
 	}
@@ -154,7 +173,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 
 	terminatePluginFixturePTY(t, d, sessionID)
-	secondClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 2)[1]
+	secondClose := waitForPluginFixtureCloseRecords(t, fixture, 2)[1]
 	if secondClose.Params.RunID != resume.Params.RunID || secondClose.Params.Reason != "exited" {
 		t.Fatalf("second close=%+v, want exited notification for resumed run %q", secondClose.Params, resume.Params.RunID)
 	}
@@ -354,28 +373,99 @@ func waitForPluginFixtureRecords(t *testing.T, path string, count int) []pluginD
 	return records
 }
 
-func waitForPluginFixtureCloseRecords(t *testing.T, path string, count int) []pluginDriverCloseRecord {
+// pluginFixtureSession is everything the close wait needs to explain itself when
+// the notification never lands.
+type pluginFixtureSession struct {
+	daemon    *Daemon
+	sessionID string
+	closeLog  string
+	stderr    string
+	daemonLog string
+}
+
+// waitForPluginFixtureCloseRecords waits for the fixture plugin to record
+// `count` driver.session_closed notifications.
+//
+// The notification crosses three processes: the worker sees the PTY child exit,
+// the daemon ends the driver run, the plugin gets driver.session_closed, and the
+// fixture appends to the log. Measured on Linux with six copies of this test
+// running in parallel under CPU load, that whole chain finishes in under 50ms
+// (240 samples, worst 48.2ms). The deadline below is therefore a tripwire two
+// orders of magnitude past any healthy run: reaching it means a link went quiet,
+// not that the machine was slow. A CI flake reaching it told us only that, which
+// is unfixable, so failing here prints who saw what — the daemon's account of
+// the exit, the fixture's stderr (a fixture that died takes its connection with
+// it, and the daemon then drops the notification as "owner disconnected"), and
+// the session state the store ended up in.
+func waitForPluginFixtureCloseRecords(t *testing.T, fixture pluginFixtureSession, count int) []pluginDriverCloseRecord {
 	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		records, ok := readPluginFixtureCloseRecords(fixture.closeLog, count)
+		if ok {
+			return records
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d fixture plugin close record(s)\n%s", count, fixture.diagnose())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func readPluginFixtureCloseRecords(path string, count int) ([]pluginDriverCloseRecord, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
 	var records []pluginDriverCloseRecord
-	waitForCondition(t, 5*time.Second, func() bool {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return false
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
 		}
-		records = nil
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			if line == "" {
-				continue
-			}
-			var record pluginDriverCloseRecord
-			if err := json.Unmarshal([]byte(line), &record); err != nil {
-				return false
-			}
-			records = append(records, record)
+		var record pluginDriverCloseRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return nil, false
 		}
-		return len(records) >= count
-	}, "fixture plugin close log")
-	return records
+		records = append(records, record)
+	}
+	return records, len(records) >= count
+}
+
+func (f pluginFixtureSession) diagnose() string {
+	var out strings.Builder
+	state := "session missing from store"
+	if session := f.daemon.store.Get(f.sessionID); session != nil {
+		state = string(session.State)
+	}
+	run := f.daemon.store.GetAgentDriverRun(f.sessionID)
+	fmt.Fprintf(&out, "session state=%s active_run=%q plugin=%q driver_registered=%t\n",
+		state, run.RunID, run.PluginName, f.driverRegistered())
+	records, _ := readPluginFixtureCloseRecords(f.closeLog, 0)
+	fmt.Fprintf(&out, "close records recorded: %d\n", len(records))
+	out.WriteString(pluginFixtureFileTail("fixture stderr", f.stderr, 40))
+	out.WriteString(pluginFixtureFileTail("daemon log", f.daemonLog, 60))
+	return out.String()
+}
+
+func (f pluginFixtureSession) driverRegistered() bool {
+	_, ok := f.daemon.plugins.driver("fixture")
+	return ok
+}
+
+func pluginFixtureFileTail(label, path string, lines int) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("--- %s: unreadable (%v)\n", label, err)
+	}
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		return fmt.Sprintf("--- %s: empty\n", label)
+	}
+	all := strings.Split(trimmed, "\n")
+	if len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	return fmt.Sprintf("--- %s (last %d lines):\n%s\n", label, len(all), strings.Join(all, "\n"))
 }
 
 func TestPluginDriverFixtureProcess(t *testing.T) {
