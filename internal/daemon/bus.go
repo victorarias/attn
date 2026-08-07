@@ -235,6 +235,14 @@ const (
 	// and saying so with an empty document id would leave every future consumer
 	// special-casing an address that points at nothing.
 	FactDocumentCollectionRemoved = "document.collection.removed"
+	// FactDocumentCollectionRedeclared: a collection's declaration was rewritten
+	// in place. Subject is the collection, like a removal, and for the same
+	// reason: the entity that moved is the declaration, not any document. Its
+	// consumer is the live-query fan-out — a redeclare that drops a queried
+	// field must end the subscriptions using it at redeclare time, not at the
+	// next arbitrary write. Like the other document facts it has no entry in
+	// wireProjections.
+	FactDocumentCollectionRedeclared = "document.collection.redeclared"
 )
 
 // CompactableFacts are the fact classes the retention pass may reduce to one
@@ -242,7 +250,7 @@ const (
 // invalidations about a subject whose state lives in the store, so only the
 // newest carries information. Session and ticket facts are deliberately absent
 // — they keep the age window's behavior unchanged.
-var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved}
+var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared}
 
 // projection maps facts to the wire traffic they produce.
 type projection struct {

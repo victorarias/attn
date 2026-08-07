@@ -570,10 +570,9 @@ func TestRedeclaringWithoutAFieldEndsTheLiveQueriesUsingIt(t *testing.T) {
 	if !resp.Ok {
 		t.Fatalf("redeclare: %v", protocol.Deref(resp.Error))
 	}
-	// A write is what wakes the subscription; the redeclare alone is not a
-	// document change.
-	putDoc(t, d, "b", `{"status":"pending"}`)
-
+	// No write follows: the redeclare itself must wake the subscription and end
+	// it. A quiet collection whose declaration moved is exactly the case where
+	// waiting for the next document change would mean waiting forever.
 	final := lq.nextRaw(t)
 	if final.Ok {
 		t.Fatalf("delivery after the field went = %+v, want an error", final)

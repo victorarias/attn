@@ -59,15 +59,21 @@ func TestDocumentsOverARealSocket(t *testing.T) {
 	// made from inside the callback so it lands while the read loop is running,
 	// which is the only way to observe a delivery that is not the first.
 	var windows []client.DocWindow
-	var putSeq int
+	// The daemon delivers the second window the moment the write commits, which
+	// can be before the writer's own RPC response arrives — so the seq travels
+	// over a channel rather than a variable the subscribe loop would race.
+	putSeq := make(chan int, 1)
 	err = c.DocSubscribe(q, nil, func(w client.DocWindow) bool {
 		windows = append(windows, w)
 		if len(windows) == 1 {
 			go func() {
 				result, err := c.DocPut(testDocNS, testDocColl, "c", `{"status":"pending"}`, nil)
-				if err == nil {
-					putSeq = result.Seq
+				if err != nil {
+					t.Errorf("live put: %v", err)
+					putSeq <- 0
+					return
 				}
+				putSeq <- result.Seq
 			}()
 		}
 		return len(windows) < 2
@@ -85,8 +91,8 @@ func TestDocumentsOverARealSocket(t *testing.T) {
 	if len(live.Changed) != 1 || live.Changed[0] != "c" {
 		t.Fatalf("the live window sent %v, want only the document that was written", live.Changed)
 	}
-	if live.AsOfSeq < int64(putSeq) {
-		t.Fatalf("the live window is as of seq %d, below the write it reflects at %d", live.AsOfSeq, putSeq)
+	if seq := <-putSeq; live.AsOfSeq < int64(seq) {
+		t.Fatalf("the live window is as of seq %d, below the write it reflects at %d", live.AsOfSeq, seq)
 	}
 
 	// Resume. Between the two subscriptions a document is removed and another is

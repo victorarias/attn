@@ -83,6 +83,11 @@ type documentCollectionRemoved struct {
 	Documents  int    `json:"documents"`
 }
 
+type documentCollectionRedeclared struct {
+	Namespace  string `json:"namespace"`
+	Collection string `json:"collection"`
+}
+
 // subscribeDocumentFacts registers the live-query fan-out as its own ephemeral
 // bus consumer, beside the WebSocket hub's. It is deliberately not a projection:
 // wireProjections maps facts to WebSocket traffic, and these deliveries go to
@@ -92,7 +97,8 @@ func (d *Daemon) subscribeDocumentFacts() {
 		return
 	}
 	d.docUnsubHooks = d.eventBus.Subscribe(
-		bus.Filter{FactDocumentChanged, FactDocumentCollectionRemoved}, d.wakeDocumentSubscriptions)
+		bus.Filter{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared},
+		d.wakeDocumentSubscriptions)
 }
 
 func (d *Daemon) unsubscribeDocumentFacts() {
@@ -147,13 +153,29 @@ func (d *Daemon) publishCollectionRemoved(namespace, collection string, document
 		documentCollectionRemoved{Namespace: namespace, Collection: collection, Documents: documents})
 }
 
-// wakeDocumentSubscriptions is the fact handler for both document facts. It does
+// publishCollectionRedeclared announces that a collection's declaration was
+// rewritten. The delivery loop re-reads the declaration on every wake, so this
+// is all a redeclare needs to publish: a subscription whose queried fields
+// survived pays one redundant delivery, and one whose field went gets its
+// collection_redeclared ending now instead of at the next arbitrary write.
+func (d *Daemon) publishCollectionRedeclared(namespace, collection string) {
+	d.publishFact(FactDocumentCollectionRedeclared, docstore.Target(namespace, collection),
+		documentCollectionRedeclared{Namespace: namespace, Collection: collection})
+}
+
+// wakeDocumentSubscriptions is the fact handler for every document fact. It does
 // no I/O.
 func (d *Daemon) wakeDocumentSubscriptions(ev bus.Event) {
 	var namespace, collection string
 	switch ev.Name {
 	case FactDocumentCollectionRemoved:
 		fact, ok := decodeFact[documentCollectionRemoved](d, ev)
+		if !ok {
+			return
+		}
+		namespace, collection = fact.Namespace, fact.Collection
+	case FactDocumentCollectionRedeclared:
+		fact, ok := decodeFact[documentCollectionRedeclared](d, ev)
 		if !ok {
 			return
 		}
@@ -410,9 +432,17 @@ func (d *Daemon) handleDocDefine(conn net.Conn, msg *protocol.DocDefineMessage) 
 		d.sendError(conn, "no database")
 		return
 	}
-	if err := d.store.DefineDocumentCollection(schema, time.Now()); err != nil {
+	redeclared, err := d.store.DefineDocumentCollection(schema, time.Now())
+	if err != nil {
 		d.sendDocError(conn, err)
 		return
+	}
+	// A first declaration has no watchers — nothing could subscribe to a
+	// collection that did not exist. A redeclare can, and they must hear about
+	// it now: a live query parked on its wake channel would otherwise hold a
+	// stale window until an unrelated write happened to land, or forever.
+	if redeclared {
+		d.publishCollectionRedeclared(schema.Namespace, schema.Collection)
 	}
 	d.sendDocResponse(conn, protocol.Response{
 		Ok:              true,

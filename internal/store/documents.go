@@ -51,28 +51,34 @@ const documentColumns = `id, body, rev, created_at, updated_at`
 // Registry row and DDL commit together. A declaration whose table did not get
 // built, or a table no declaration names, would each be a collection that
 // cannot be queried or cannot be found.
-func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now time.Time) error {
+//
+// The returned bool reports whether this was a redeclaration of an existing
+// collection. Only the define's own transaction can tell — a caller checking
+// existence first would race a concurrent define — and the caller needs the
+// distinction because a redeclare has watchers to wake and a first declaration
+// cannot.
+func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now time.Time) (bool, error) {
 	if s.db == nil {
-		return fmt.Errorf("store: no database")
+		return false, fmt.Errorf("store: no database")
 	}
 	if err := schema.Validate(); err != nil {
-		return err
+		return false, err
 	}
 	fields, err := json.Marshal(schema.Fields)
 	if err != nil {
-		return fmt.Errorf("store: encoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: encoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	ts := now.UTC().Format(docstore.TimeFormat)
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	existing, table, found, err := readCollectionTx(tx, schema.Namespace, schema.Collection)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if !found {
@@ -80,31 +86,31 @@ func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now t
 			`INSERT INTO document_collections (namespace, collection, fields_json, updated_at) VALUES (?, ?, ?, ?)`,
 			schema.Namespace, schema.Collection, string(fields), ts)
 		if err != nil {
-			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		id, err := res.LastInsertId()
 		if err != nil {
-			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		table = docstore.TableName(id)
 		if err := createCollectionTable(tx, table, schema.Fields); err != nil {
-			return fmt.Errorf("store: creating storage for %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: creating storage for %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 	} else {
 		if err := alterCollectionTable(tx, table, existing.Fields, schema.Fields); err != nil {
-			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		if _, err := tx.Exec(
 			`UPDATE document_collections SET fields_json = ?, updated_at = ? WHERE namespace = ? AND collection = ?`,
 			string(fields), ts, schema.Namespace, schema.Collection); err != nil {
-			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: committing declaration of %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: committing declaration of %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
-	return nil
+	return found, nil
 }
 
 // DocumentCollection returns a collection's declaration with its table filled
