@@ -11,6 +11,9 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/daemonctl"
+	"github.com/victorarias/attn/internal/hostsession"
+	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/procreap"
 	"github.com/victorarias/attn/internal/ptyworker"
 )
 
@@ -317,6 +320,13 @@ func runProfileClean(args []string) {
 	// ever adopt it. Reap before the registry goes.
 	reportWorkerReap(ptyworker.ReapDataDir(r.DataDir))
 
+	// Conversation hosts and plugin runtime processes die with their daemon on
+	// purpose — but a daemon that died without running its shutdown left them
+	// running, reparented to init, findable only through the registries this
+	// data dir holds. Same rule as workers: reap before the registries go.
+	reportProcReap("hosts", "session", hostsession.ReapDataDir(r.DataDir))
+	reportProcReap("plugins", "plugin", plugins.ReapRuntimeProcesses(r.DataDir))
+
 	// App bundle: forget it in LaunchServices (so the deep-link scheme and
 	// bundle id stop resolving to a path we're about to delete), then remove it.
 	if fileExists(r.AppPath) {
@@ -362,6 +372,49 @@ func reportWorkerReap(results []ptyworker.ReapResult) {
 		}
 		fmt.Printf("           ! session %s: pid %d could not be confirmed as its worker (%v); left running — check it with `ps -p %d` and kill it yourself if it is stale\n",
 			res.SessionID, res.WorkerPID, res.Err, res.WorkerPID)
+	}
+}
+
+// reportProcReap prints one line per process registered in a procreap registry
+// (conversation hosts, plugin runtime processes). Anything short of a confirmed
+// death names the pid: an unidentified process was left alone on purpose, and a
+// survivor outlived SIGKILL — both need a human.
+func reportProcReap(label, noun string, results []procreap.ReapResult) {
+	if len(results) == 0 {
+		fmt.Printf("  %-8s none registered\n", label)
+		return
+	}
+	byOutcome := map[procreap.ReapOutcome]int{}
+	for _, res := range results {
+		byOutcome[res.Outcome]++
+	}
+	order := []procreap.ReapOutcome{
+		procreap.ReapTerminated,
+		procreap.ReapKilled,
+		procreap.ReapAlreadyGone,
+		procreap.ReapUnidentified,
+		procreap.ReapSurvived,
+		procreap.ReapUnreadable,
+	}
+	parts := make([]string, 0, len(order))
+	for _, outcome := range order {
+		if n := byOutcome[outcome]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, outcome))
+		}
+	}
+	fmt.Printf("  %-8s %d registered (%s)\n", label, len(results), strings.Join(parts, ", "))
+	for _, res := range results {
+		switch res.Outcome {
+		case procreap.ReapUnidentified:
+			fmt.Printf("           ! %s %s: pid %d could not be confirmed as its process (%v); left running — check it with `ps -p %d` and kill it yourself if it is stale\n",
+				noun, res.ID, res.PID, res.Err, res.PID)
+		case procreap.ReapSurvived:
+			fmt.Printf("           ! %s %s: pid %d survived SIGKILL (%v)\n",
+				noun, res.ID, res.PID, res.Err)
+		case procreap.ReapUnreadable:
+			fmt.Printf("           ! record %s could not be read (%v); whatever it described was not reaped — check `ps` for stray %s processes\n",
+				res.ID, res.Err, noun)
+		}
 	}
 }
 
@@ -546,7 +599,7 @@ Usage:
   attn profile resolve --field wsPort      print one resolved value
   attn profile resolve --profile agent7    resolve a different profile
   attn profile tauri-config    Tauri --config overlay for the profile's build
-  attn profile clean <name>    reap workers, stop daemon, quit app, remove its app + data dir
+  attn profile clean <name>    reap workers + hosts + plugin drivers, stop daemon, quit app, remove its app + data dir
   attn profile list            every profile with data and/or an installed app
   attn profile list --json     same, machine-readable, with origin and what is running
   attn profile set-origin <name> [--worktree <dir>]

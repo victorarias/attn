@@ -118,8 +118,9 @@ permissions.
   `attn profile resolve --json`; remove with `attn profile clean <name>`.
 - **Clean up the profile you created.** Nothing reaps it for you: its daemon
   (~40MB) and every pty-worker (~15MB) keep running until someone notices them
-  days later. `attn profile clean <name>` reaps the workers, stops the daemon,
-  quits the app, and removes the bundle and data dir. `make install
+  days later. `attn profile clean <name>` reaps the workers, conversation
+  hosts, and plugin runtime processes, stops the daemon, quits the app, and
+  removes the bundle and data dir. `make install
   PROFILE=<name>` records the worktree it ran from, so `attn profile list` tells
   you which profiles are yours, and a PostToolUse hook reminds you after you
   create or merge a PR.

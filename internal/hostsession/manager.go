@@ -24,6 +24,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victorarias/attn/internal/procreap"
 )
 
 // Event is one envelope a host emitted, already split into the parts the
@@ -59,6 +61,11 @@ type SpawnOptions struct {
 	// extensions, and any of them may print; keeping that away from the
 	// envelope fd is why the envelopes have their own.
 	LogPath string
+	// RegistryPath is where the host's durable record lives (see registry.go).
+	// Written right after spawn, removed once the host is fully gone, and read
+	// by `attn profile clean` to reap hosts a dead daemon left behind. Empty
+	// means no record is kept.
+	RegistryPath string
 }
 
 // terminationGrace is how long a host gets to tear down cooperatively after
@@ -90,13 +97,14 @@ const terminationGrace = 3 * time.Second
 const envelopeDrainGrace = 2 * time.Second
 
 type host struct {
-	sessionID   string
-	lifecycleID string
-	cmd         *exec.Cmd
-	pgid        int
-	stdin       *os.File
-	envelopes   *os.File
-	logFile     *os.File
+	sessionID    string
+	lifecycleID  string
+	cmd          *exec.Cmd
+	pgid         int
+	registryPath string
+	stdin        *os.File
+	envelopes    *os.File
+	logFile      *os.File
 	// reaped closes as soon as the process is gone; exited closes once the
 	// host is fully finished — drained, deregistered, and about to be
 	// announced. Kill escalates on the first and returns on the second, so a
@@ -189,16 +197,27 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	stdinR.Close()
 
 	h := &host{
-		sessionID:   opts.SessionID,
-		lifecycleID: opts.LifecycleID,
-		cmd:         cmd,
-		pgid:        cmd.Process.Pid,
-		stdin:       stdinW,
-		envelopes:   envelopeR,
-		logFile:     logFile,
-		reaped:      make(chan struct{}),
-		exited:      make(chan struct{}),
-		drained:     make(chan struct{}),
+		sessionID:    opts.SessionID,
+		lifecycleID:  opts.LifecycleID,
+		cmd:          cmd,
+		pgid:         cmd.Process.Pid,
+		registryPath: opts.RegistryPath,
+		stdin:        stdinW,
+		envelopes:    envelopeR,
+		logFile:      logFile,
+		reaped:       make(chan struct{}),
+		exited:       make(chan struct{}),
+		drained:      make(chan struct{}),
+	}
+	// The durable record must exist before anything can observe the host: a
+	// daemon that dies right after this line has already left the trace `attn
+	// profile clean` reaps by. A failed write is logged, not fatal — the host
+	// is healthy, only the crash-recovery net has a hole the log names.
+	if opts.RegistryPath != "" {
+		entry := procreap.NewEntry(opts.SessionID, cmd.Process.Pid, cmd.Process.Pid, opts.Command)
+		if err := procreap.WriteEntry(opts.RegistryPath, entry); err != nil {
+			m.logf("host session %s: recording host registry entry failed: %v", opts.SessionID, err)
+		}
 	}
 	m.mu.Lock()
 	m.hosts[opts.SessionID] = h
@@ -323,6 +342,14 @@ func (m *Manager) monitor(h *host) {
 		delete(m.hosts, h.sessionID)
 	}
 	m.mu.Unlock()
+
+	// The process and its group are gone; retire the durable record so the
+	// registry only ever names hosts that may still be running.
+	if h.registryPath != "" {
+		if err := procreap.RemoveEntry(h.registryPath); err != nil {
+			m.logf("host session %s: removing host registry entry failed: %v", h.sessionID, err)
+		}
+	}
 
 	close(h.exited)
 

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/procreap"
 )
 
 type pluginDesiredState string
@@ -112,9 +113,14 @@ func (realPluginSupervisorClock) AfterFunc(delay time.Duration, fn func()) plugi
 	return time.AfterFunc(delay, fn)
 }
 
-type execPluginProcessLauncher struct{}
+type execPluginProcessLauncher struct {
+	// registryDir, when set, receives a procreap record per spawned process so
+	// `attn profile clean` can reap drivers a crashed daemon left behind (see
+	// plugins.RuntimeRegistryDir).
+	registryDir string
+}
 
-func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (pluginProcessHandle, error) {
+func (l execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (pluginProcessHandle, error) {
 	var cmd *exec.Cmd
 	switch manifest.Plugin.Kind {
 	case plugins.EntrypointExecutable:
@@ -126,18 +132,37 @@ func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (p
 	}
 	cmd.Dir = manifest.Dir
 	cmd.Env = env
+	// Group leadership is what lets the reaper sweep whatever the driver
+	// spawned once the driver itself is gone, without touching the daemon's
+	// other children.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s plugin process: %w", manifest.Plugin.Kind, err)
 	}
-	return &execPluginProcess{cmd: cmd}, nil
+	process := &execPluginProcess{cmd: cmd}
+	if l.registryDir != "" {
+		pid := cmd.Process.Pid
+		// The path carries the pid so a restart's fresh record and the old
+		// process's removal (in Wait, which can straddle the respawn) never
+		// touch the same file.
+		path := filepath.Join(l.registryDir, fmt.Sprintf("%s-%d.json", manifest.Name, pid))
+		if err := procreap.WriteEntry(path, procreap.NewEntry(manifest.Name, pid, pid, cmd.Args)); err == nil {
+			process.registryPath = path
+		}
+	}
+	return process, nil
 }
 
 type execPluginProcess struct {
-	cmd *exec.Cmd
+	cmd          *exec.Cmd
+	registryPath string
 }
 
 func (p *execPluginProcess) Wait() pluginExit {
 	err := p.cmd.Wait()
+	if p.registryPath != "" {
+		_ = procreap.RemoveEntry(p.registryPath)
+	}
 	exit := pluginExit{}
 	if err != nil {
 		exit.Error = err.Error()
