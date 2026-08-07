@@ -12,6 +12,7 @@
 // docs/decisions/2026-08-02-terminal-annotations-anchor-to-the-transcript.md.
 
 import React, { forwardRef, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   GhosttyTerminal,
   type GhosttyTerminalHandle,
@@ -23,8 +24,8 @@ import {
   type MessageAnchor,
   type TerminalAnnotation,
 } from '../../utils/terminalAnnotations';
-import { QUICK_LABEL_GROUPS, buildAnnotationPayload } from './quickLabels';
-import { clampToViewport, placePopup, type Placement } from './placement';
+import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelByEmoji } from './quickLabels';
+import { clampToViewport, placePopup, type PlaceOptions, type Placement } from './placement';
 import { useShortcut } from '../../shortcuts/useShortcut';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
 import type { UISessionState } from '../../types/sessionState';
@@ -43,6 +44,9 @@ export interface SessionMessagesResult {
 
 export interface SessionAnnotationsResult {
   annotations: TerminalAnnotation[];
+  // What the user wants to say about the turn as a whole, beside the marks on
+  // its parts. Empty when there is none.
+  note: string;
   generation: number;
 }
 
@@ -62,6 +66,7 @@ export interface SessionAnnotationApi {
   saveAnnotations: (
     sessionId: string,
     annotations: readonly TerminalAnnotation[],
+    note: string,
     generation: number,
   ) => Promise<{ stale: boolean }>;
   clearAnnotations: (sessionId: string, generation: number) => Promise<{ generation: number }>;
@@ -158,6 +163,37 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // background fetch would be a repaint for no one.
     const windowErrorRef = useRef<string | null>(null);
     const [draft, setDraft] = useState('');
+
+    // What the chip row is about to do, named in words under it. Fourteen
+    // emoji-only buttons is a row you have to hover one at a time to read, and
+    // the native tooltip arrives a second late — long enough that the fast way
+    // to find a label is to click one and undo it. The line is always drawn so
+    // that naming a chip cannot change the popup's height and move it out from
+    // under the pointer.
+    const [hint, setHint] = useState<string | null>(null);
+    const hintProps = useCallback((text: string) => ({
+      onMouseEnter: () => setHint(text),
+      onMouseLeave: () => setHint((current) => (current === text ? null : current)),
+      onFocus: () => setHint(text),
+      onBlur: () => setHint((current) => (current === text ? null : current)),
+    }), []);
+    // The note the whole set is sent with. Hydrated with the annotations,
+    // written through on a pause in typing, and spent by the send that
+    // delivered it.
+    //
+    // Mirrored into a ref because the writes that carry it read it in the same
+    // tick as the state update that has not landed yet — a send that clears the
+    // note then persists the survivors would otherwise re-save what it just
+    // spent.
+    const [note, setNote] = useState('');
+    const noteRef = useRef('');
+    const writeNote = useCallback((next: string) => {
+      noteRef.current = next;
+      setNote(next);
+    }, []);
+    // Whether a keystroke is waiting to be written through, and the pending
+    // timer, so the pane going away mid-sentence flushes rather than drops it.
+    const noteSaveTimerRef = useRef<number | null>(null);
     const commentRef = useRef<HTMLTextAreaElement>(null);
     const popupRef = useRef<HTMLDivElement>(null);
     // Where the popup ended up after being fitted to the window. Null until it
@@ -195,13 +231,14 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       generationRef.current += 1;
       const generation = generationRef.current;
       const annotations = store.list().map((entry) => ({ ...entry }));
-      void annotationApi.saveAnnotations(sessionId, annotations, generation)
+      void annotationApi.saveAnnotations(sessionId, annotations, noteRef.current, generation)
         .then((result) => {
           if (!result.stale) return;
           // Someone else's write won. Theirs is the truth; take it rather than
           // keep insisting on a list the store already rejected.
           return annotationApi.fetchAnnotations(sessionId).then((stored) => {
             store.hydrate(stored.annotations);
+            writeNote(stored.note);
             generationRef.current = stored.generation;
             bump();
           });
@@ -210,7 +247,41 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           // The daemon is unreachable. What is on screen is still the user's
           // work; the next mutation retries the whole list.
         });
-    }, [annotationApi, bump, sessionId, store]);
+    }, [annotationApi, bump, sessionId, store, writeNote]);
+
+    // The latest persist, for the flush on the way out. The cleanup that runs
+    // it is registered once, so it cannot close over the render's copy. Written
+    // after the commit, not during render: a render React discards must not
+    // leave its callback behind as the one the unmount flush will call.
+    const persistRef = useRef(persist);
+    useLayoutEffect(() => {
+      persistRef.current = persist;
+    }, [persist]);
+
+    // Write the note through on a pause in typing rather than per keystroke:
+    // one save per pause is all a burst of typing deserves, and everything else
+    // on this surface persists on the mutation itself because a click has no
+    // burst to smooth out. 400ms clears an ordinary inter-keystroke gap
+    // (~100-250ms) while keeping what a crash could cost to a fragment.
+    const NOTE_SAVE_PAUSE_MS = 400;
+    const scheduleNoteSave = useCallback(() => {
+      if (noteSaveTimerRef.current !== null) window.clearTimeout(noteSaveTimerRef.current);
+      noteSaveTimerRef.current = window.setTimeout(() => {
+        noteSaveTimerRef.current = null;
+        persistRef.current();
+      }, NOTE_SAVE_PAUSE_MS);
+    }, []);
+
+    // A pane closed or a session switched mid-sentence must not cost the
+    // sentence: the pending write is flushed on the way out, which is the same
+    // guarantee every other mutation here already has.
+    const flushNoteSave = useCallback(() => {
+      if (noteSaveTimerRef.current === null) return;
+      window.clearTimeout(noteSaveTimerRef.current);
+      noteSaveTimerRef.current = null;
+      persistRef.current();
+    }, []);
+    useEffect(() => flushNoteSave, [flushNoteSave]);
 
     // Hydrate before anything can be drawn: annotations made in an earlier app
     // run are the ones most likely to be forgotten about, so they have to be
@@ -222,6 +293,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
         .then((stored) => {
           if (cancelled) return;
           store.hydrate(stored.annotations);
+          writeNote(stored.note);
           generationRef.current = stored.generation;
           bump();
         })
@@ -381,19 +453,76 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       return () => window.removeEventListener('mousedown', onDown, true);
     }, [composer, dismissComposer]);
 
-    // Fit the popup to the window once it has a size. In a layout effect so the
-    // corrected position is in place before the browser paints; measuring in a
-    // plain effect would show one frame at the unclamped spot.
-    useLayoutEffect(() => {
-      const node = popupRef.current;
-      if (!composer || !node) return;
+    // What placement has to respect beyond the window: the pane the popup
+    // belongs to, and the panel it must not cover. Both are read at placement
+    // time rather than remembered — the pane moves on a split or a window
+    // resize, and the panel moves on a drag and grows with the list.
+    const placementOptions = useCallback((): PlaceOptions => ({
+      bounds: terminalRef.current?.getBounds() ?? null,
+      avoid: panelRef.current?.getBoundingClientRect() ?? null,
+    }), []);
+
+    // Fit a pointer-anchored floater to the pane once it has a size. Idempotent
+    // and cheap, so every trigger that can change the answer can just call it.
+    const fitToPane = useCallback((
+      node: HTMLElement | null,
+      anchor: { clientX: number; clientY: number } | null,
+      apply: (next: Placement) => void,
+    ) => {
+      if (!node || !anchor) return;
       const rect = node.getBoundingClientRect();
-      setPopupAt(placePopup(
-        { x: composer.clientX, y: composer.clientY },
+      apply(placePopup(
+        { x: anchor.clientX, y: anchor.clientY },
         { width: rect.width, height: rect.height },
         { width: window.innerWidth, height: window.innerHeight },
+        placementOptions(),
       ));
-    }, [composer]);
+    }, [placementOptions]);
+
+    // The composer as the placement triggers see it. A ref because a resize
+    // observer and a window listener fire outside React's render, and the
+    // anchor they need is whatever is open right now.
+    const composerRef = useRef<Composer | null>(null);
+
+    // Only writes when the answer moved: placement runs on every mutation and
+    // on every observed resize, and re-rendering a popup to put it back where
+    // it already is repaints the pane underneath it for nothing.
+    const applyPopupAt = useCallback((next: Placement) => {
+      setPopupAt((current) => (
+        current && current.left === next.left && current.top === next.top ? current : next
+      ));
+    }, []);
+
+    const repositionPopup = useCallback(() => {
+      fitToPane(popupRef.current, composerRef.current, applyPopupAt);
+    }, [applyPopupAt, fitToPane]);
+
+    // In a layout effect so the corrected position is in place before the
+    // browser paints; measuring in a plain effect would show one frame at the
+    // unfitted spot. `version` and the panel's own geometry are dependencies
+    // because both move the panel the popup is stepping around.
+    useLayoutEffect(() => {
+      composerRef.current = composer;
+      repositionPopup();
+    }, [composer, panelAt, repositionPopup, version]);
+
+    // The popup changes size under its own feet — the comment box opens, the
+    // textarea is dragged taller, an emoji font finishes loading. Each of those
+    // can push a fitted popup back out of the pane, and none of them is a
+    // render this component would otherwise see.
+    useEffect(() => {
+      const node = popupRef.current;
+      if (!composer || !node || typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(() => repositionPopup());
+      observer.observe(node);
+      return () => observer.disconnect();
+    }, [composer, repositionPopup]);
+
+    useEffect(() => {
+      if (!composer) return;
+      window.addEventListener('resize', repositionPopup);
+      return () => window.removeEventListener('resize', repositionPopup);
+    }, [composer, repositionPopup]);
 
     // The box is the only reason the editor opened, so it takes the keyboard as
     // it appears. The caret goes to the end: reopening a comment is for adding
@@ -472,6 +601,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // user cannot undo.
     const send = () => {
       if (annotations.length === 0 || !annotationApi || sendingRef.current) return;
+      // Land any note still waiting on its typing pause before composing from
+      // it. A send that is then refused leaves nothing unwritten behind it.
+      flushNoteSave();
       // A comment being typed when the send fires is part of what the user
       // means to say, so commit it rather than dropping it on the floor.
       if (composed && composer?.writing) {
@@ -495,12 +627,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
         persist();
         return;
       }
+      // Snapshotted alongside the marks and for the same reason: the box stays
+      // typable across the round trip, and a sentence added while it was in
+      // flight was not part of what went.
+      const sendingNote = note.trim();
       const payload = buildAnnotationPayload(sending.map((entry) => ({
         quote: entry.quote,
         emoji: entry.emoji,
         comment: entry.comment,
         start: entry.start,
-      })));
+      })), sendingNote);
       sendingRef.current = true;
       setOutcome({ kind: 'sending' });
       void annotationApi.submitAnnotations(sessionId, payload)
@@ -525,6 +661,10 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
             if (now.emoji !== entry.emoji || now.comment !== entry.comment) return;
             store.remove(entry.id);
           });
+          // The note is spent under the same rule as a mark: only if it still
+          // reads as it did when the payload was composed. Typed over while the
+          // send was in flight, it belongs to the next one.
+          if (sendingNote && noteRef.current.trim() === sendingNote) writeNote('');
           const kept = store.list().length;
           setOutcome({ kind: 'sent', count: sending.length, kept });
           bump();
@@ -532,8 +672,10 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           // that was already in flight and keeps sent marks from reappearing.
           // A tombstone when nothing survived; an ordinary write-through of the
           // survivors when something did, because a tombstone would take them
-          // with it.
-          if (kept > 0) {
+          // with it. A note typed over during the flight is a survivor too —
+          // the clear zeroes the note column, so tombstoning here would drop a
+          // sentence that is still on screen and belongs to the next send.
+          if (kept > 0 || noteRef.current.trim()) {
             persist();
             return;
           }
@@ -583,18 +725,11 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       return () => window.clearTimeout(timer);
     }, [outcome]);
 
-    // Same measure-then-clamp as the popup, for the same reason: the pointer is
+    // Same measure-then-fit as the popup, for the same reason: the pointer is
     // routinely near an edge, and a sentence is wider than the popup is.
     useLayoutEffect(() => {
-      const node = noticeRef.current;
-      if (!notice || !node) return;
-      const rect = node.getBoundingClientRect();
-      setNoticeAt(placePopup(
-        { x: notice.clientX, y: notice.clientY },
-        { width: rect.width, height: rect.height },
-        { width: window.innerWidth, height: window.innerHeight },
-      ));
-    }, [notice]);
+      fitToPane(noticeRef.current, notice, setNoticeAt);
+    }, [fitToPane, notice]);
 
     // Long enough to read a sentence, then gone. It explains a gesture that has
     // already finished, so it must not become something to dismiss.
@@ -656,7 +791,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // The sentence above the footer. A refusal explains why the marks are still
     // there; a send that left some behind explains why the panel did not empty.
     // Both are the answer to "I pressed Send and the list is still here".
-    const noteText = outcome?.kind === 'skipped'
+    const outcomeText = outcome?.kind === 'skipped'
       ? 'Not sent — the session is waiting on an approval, where the sending Enter would answer it. Send again once you have answered.'
       : outcome?.kind === 'error'
         ? outcome.message
@@ -675,6 +810,14 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           onAnnotationMiss={enabled ? handleMiss : undefined}
           onAnnotationActivate={enabled ? openAnnotation : undefined}
         />
+        {/* Portalled out of the pane. Both of these are positioned against the
+            window and routinely reach past the pane's edge — a popup on the
+            first column of a line overlaps the sidebar — and inside the pane's
+            stacking context that is drawn under the app's chrome rather than
+            over it. There is nothing to inherit from the pane here: they carry
+            their own position and their own z-index. */}
+        {createPortal(
+          <>
         {notice ? (
           <div
             ref={noticeRef}
@@ -710,6 +853,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                       title={label.text}
                       aria-label={label.text}
                       onClick={() => applyLabel(label.emoji)}
+                      {...hintProps(label.text)}
                     >
                       {label.emoji}
                     </button>
@@ -723,6 +867,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 title="Write a comment"
                 aria-label="Write a comment"
                 onClick={() => setComposer((current) => (current ? { ...current, writing: true } : current))}
+                {...hintProps('Write a comment')}
               >
                 💬
               </button>
@@ -735,9 +880,16 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 title="Remove this annotation"
                 aria-label="Remove this annotation"
                 onClick={() => removeAnnotation(composed.id)}
+                {...hintProps('Remove this annotation')}
               >
                 🗑
               </button>
+            </div>
+            {/* Hovering names what a chip does; at rest the line names the mark
+                this annotation already carries, so reopening one says what it
+                says without a click. */}
+            <div className="anno-popup-hint" data-testid="annotation-popup-hint">
+              {hint ?? labelByEmoji(composed.emoji)?.text ?? 'Pick a label, or write a comment'}
             </div>
             {composer.writing ? (
               <div className="anno-popup-compose">
@@ -781,6 +933,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
             ) : null}
           </div>
         ) : null}
+          </>,
+          document.body,
+        )}
         {panelOpen ? (
           <div
             ref={panelRef}
@@ -827,12 +982,41 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 </div>
               ))}
             </div>
+            {/* What the marks cannot say. A pass over an answer is usually one
+                instruction plus the places it lands, and without somewhere to
+                put the instruction it gets typed into the terminal separately —
+                which then has to explain itself ("…and also see the feedback
+                below"). Here it goes out ahead of the marks, in the same
+                keystroke. */}
+            <textarea
+              className="anno-panel-note"
+              data-testid="annotation-note"
+              value={note}
+              aria-label="Note sent with these annotations"
+              placeholder="Anything else to say with these?"
+              onChange={(event) => {
+                writeNote(event.target.value);
+                scheduleNoteSave();
+              }}
+              onBlur={flushNoteSave}
+              // ⌘Enter sends the whole set from in here too. The box is where
+              // the last sentence is typed, and reaching for the button after
+              // it would be the reach this exists to remove. The shortcut
+              // dispatcher stays out of native editable targets, so this is
+              // what makes the key work where it is most wanted.
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  event.preventDefault();
+                  send();
+                }
+              }}
+            />
             {/* A refusal sits above the footer rather than replacing it: it is
                 asking to be retried, and the button that retries has to stay
                 where the eye already is. */}
-            {noteText ? (
-              <div className="anno-panel-note" data-testid="annotation-send-note" role="status">
-                {noteText}
+            {outcomeText ? (
+              <div className="anno-panel-outcome" data-testid="annotation-send-note" role="status">
+                {outcomeText}
               </div>
             ) : null}
             <div className="anno-panel-foot">

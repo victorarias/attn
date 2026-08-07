@@ -48,7 +48,7 @@ func (s *Store) GetMarkdownAnnotationDraft(path string) (*MarkdownAnnotationDraf
 // tombstone generation (a debounced save that fires after a clear must not
 // resurrect ghost drafts).
 func (s *Store) SaveMarkdownAnnotationDraft(path, annotationsJSON string, generation int, now time.Time) error {
-	return markdownDraftTable.save(s, path, annotationsJSON, generation, now)
+	return markdownDraftTable.save(s, path, annotationsJSON, "", generation, now)
 }
 
 // ClearMarkdownAnnotationDraft tombstones the draft for path: the list is

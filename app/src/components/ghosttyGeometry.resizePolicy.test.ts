@@ -5,9 +5,9 @@ import {
   geometryOverflowsContainer,
   isWorkspaceResizeDragActive,
   liveResizeConflictsWithQueuedReplay,
-} from './GhosttyTerminal';
+} from './ghosttyGeometry';
 
-describe('GhosttyTerminal resize policy', () => {
+describe('ghosttyGeometry resize policy', () => {
   afterEach(() => {
     delete document.documentElement.dataset.attnWorkspaceResizing;
   });

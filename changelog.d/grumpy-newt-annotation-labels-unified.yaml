@@ -1,0 +1,13 @@
+kind: changed
+area: app
+change: >
+  Annotating a document in the Markdown reader now offers the same labels as
+  annotating an agent's message. There were two sets, and the difference was an
+  accident of where each came from rather than a claim that a plan deserves
+  different vocabulary — so a label learned in one place now means the same
+  thing in the other, and a new label lands in both at once. The reader gains
+  "This is wrong", "I don't love this", "Show the receipt", "Cut this",
+  "Simplify this", "Your call" and "Ask me first"; its 👍 button is now the
+  same one-click agreement the picker offers, instruction and all, rather than a
+  second way to say the same thing. Marks made with a withdrawn label still
+  render as what they said.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { recoveryDelayMs } from './GhosttyTerminal';
+import { recoveryDelayMs } from './ghosttyGeometry';
 
 describe('recoveryDelayMs (WebGL context-loss recovery backoff)', () => {
   it('escalates delays across the first three attempts', () => {

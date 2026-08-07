@@ -933,6 +933,10 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// the queue without dragging its workspace along, and the satellite link
 	// from a shell to the agent it was split from. Applied by applyMigration92.
 	{92, "add the session pin and the satellite parent to sessions", ``},
+	// The annotation draft's note: what the user says about the turn as a
+	// whole, saved and cleared with the marks on its parts. Applied by
+	// applyMigration93.
+	{93, "add the note to session annotation drafts", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1218,6 +1222,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 92 {
 			if err := applyMigration92(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 93 {
+			if err := applyMigration93(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2317,6 +2326,18 @@ func applyMigration92(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+// applyMigration93 adds the note a user writes alongside a session's
+// annotation marks. Guarded on the column, so a rewound schema_migrations
+// table re-runs it without failing on work already done.
+func applyMigration93(tx *sql.Tx) error {
+	has, err := columnExists(tx, "session_annotation_drafts", "note")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE session_annotation_drafts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
 	return err
 }
 

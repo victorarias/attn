@@ -46,6 +46,11 @@ vi.mock('../GhosttyTerminal', () => ({
         terminalFocusCalls += 1;
         return true;
       },
+      // jsdom lays nothing out, so there is no pane rect to report. Null is the
+      // honest answer and the one placement already handles: it falls back to
+      // the window. Placement inside a pane is covered in placement.test.ts,
+      // where the geometry can be stated instead of measured.
+      getBounds: () => null,
     }), []);
     return <div data-testid="terminal" />;
   }),
@@ -62,6 +67,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   messages: AnnotatableMessage[] = [{ key: 'turn-1', markdown: TURN_1 }];
   truncated = false;
   annotations: TerminalAnnotation[] = [];
+  note = '';
   generation = 0;
   tombstone = 0;
   calls = { fetchMessages: 0, fetchAnnotations: 0, saveAnnotations: 0, clearAnnotations: 0 };
@@ -102,6 +108,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     this.calls.fetchAnnotations += 1;
     return {
       annotations: this.annotations.map((annotation) => ({ ...annotation })),
+      note: this.note,
       generation: this.generation,
     };
   };
@@ -109,6 +116,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   saveAnnotations = async (
     _sessionId: string,
     annotations: readonly TerminalAnnotation[],
+    note: string,
     generation: number,
   ) => {
     this.calls.saveAnnotations += 1;
@@ -122,6 +130,7 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     }
     if (generation <= this.generation || generation <= this.tombstone) return { stale: true };
     this.annotations = annotations.map((annotation) => ({ ...annotation }));
+    this.note = note;
     this.generation = generation;
     return { stale: false };
   };
@@ -131,6 +140,9 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     if (generation > this.tombstone) this.tombstone = generation;
     if (generation > this.generation) {
       this.annotations = [];
+      // The note is composed with the marks and goes with them. See
+      // annotationDraftTable.clear.
+      this.note = '';
       this.generation = generation;
     }
     return { generation: this.generation };
@@ -252,7 +264,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     expect(stored()).toHaveLength(1);
 
     rerender({ state: 'waiting_input' });
@@ -269,7 +281,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     const before = stored()[0];
 
     daemon.messages = [
@@ -291,7 +303,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     daemon.messages = [{ key: 'turn-2', markdown: TURN_2 }];
     rerender({ state: 'waiting_input' });
@@ -354,7 +366,7 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     fireEvent.click(screen.getByLabelText('Verify this'));
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(screen.getByText('Send all'));
 
@@ -379,10 +391,10 @@ describe('AnnotatedTerminal', () => {
     activate(stored()[0].id);
     expect(screen.getByTestId('annotation-popup')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     expect(stored()).toHaveLength(1);
-    expect(stored()[0].emoji).toBe('🧪');
+    expect(stored()[0].emoji).toBe('🧾');
   });
 
   it('reopens a comment straight into its editor, prefilled', async () => {
@@ -606,7 +618,7 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     fireEvent.click(screen.getByLabelText('Verify this'));
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(card(0).open);
     terminalFocusCalls = 0;
@@ -681,6 +693,179 @@ describe('AnnotatedTerminal', () => {
     await act(async () => {});
     expect(terminal.annotations).toBeUndefined();
     expect(terminal.onAnnotationAnchor).toBeUndefined();
+  });
+});
+
+// Fourteen emoji-only chips is a row nobody can read. The line under it is what
+// makes the row learnable without hovering each one and waiting for a tooltip.
+describe('AnnotatedTerminal label hint', () => {
+  function hint(): string {
+    return screen.getByTestId('annotation-popup-hint').textContent ?? '';
+  }
+
+  it('names a chip while the pointer is on it', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+
+    fireEvent.mouseEnter(screen.getByLabelText('Show the receipt'));
+
+    expect(hint()).toBe('Show the receipt');
+  });
+
+  it('goes back to naming the mark that is already on this annotation', async () => {
+    // Reopening a mark should say what it says. Leaving the last hovered chip
+    // in the line would name a label the annotation does not carry.
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    // Marking closes the popup, so this is the reopen a user does from the grid.
+    activate(stored()[0].id);
+
+    expect(hint()).toBe('Show the receipt');
+    fireEvent.mouseEnter(screen.getByLabelText('This is wrong'));
+    expect(hint()).toBe('This is wrong');
+    fireEvent.mouseLeave(screen.getByLabelText('This is wrong'));
+
+    expect(hint()).toBe('Show the receipt');
+  });
+
+  it('says what to do when nothing is marked or hovered', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+
+    expect(hint()).toBe('Pick a label, or write a comment');
+  });
+});
+
+// The note is the other half of a pass over an answer: one instruction, plus
+// the places it lands. Before it existed the instruction was typed into the
+// terminal on its own and had to explain its relationship to the marks.
+describe('AnnotatedTerminal note', () => {
+  /** The box the note is typed into, and typing into it. */
+  function noteBox(): HTMLTextAreaElement {
+    return screen.getByTestId('annotation-note') as HTMLTextAreaElement;
+  }
+
+  function writeNote(text: string) {
+    fireEvent.change(noteBox(), { target: { value: text } });
+  }
+
+  it('has nowhere to be written until something is marked', async () => {
+    // The panel is what hosts it, and the panel is what a mark opens. A note
+    // with no marks is an ordinary message and belongs in the terminal.
+    renderTerminal();
+    await windowReady('turn-1');
+
+    expect(screen.queryByTestId('annotation-note')).toBeNull();
+  });
+
+  it('is written through to the daemon on a pause in typing', async () => {
+    const { daemon } = renderTerminal();
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+
+    writeNote('Split this into two PRs.');
+
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+  });
+
+  it('survives the pane it was typed in', async () => {
+    // The whole point of the daemon holding the draft. A note kept in this
+    // component's memory would be gone the next time the session is opened —
+    // and it is the part of the draft with the most thought in it.
+    const daemon = new FakeAnnotationDaemon();
+    const first = renderTerminal({ api: daemon });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+    first.unmount();
+
+    renderTerminal({ api: daemon });
+
+    await waitFor(() => expect(noteBox().value).toBe('Split this into two PRs.'));
+  });
+
+  it('goes out ahead of the marks in one keystroke', async () => {
+    const { daemon } = renderTerminal({ paneActive: true });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+
+    // From inside the box: the last sentence is typed there, and reaching for
+    // the button afterwards is the reach the note exists to remove.
+    fireEvent.keyDown(noteBox(), { key: 'Enter', metaKey: true });
+
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    const payload = daemon.submitted[0];
+    expect(payload.indexOf('Split this into two PRs.')).toBeLessThan(payload.indexOf('## 1.'));
+  });
+
+  it('is spent by the send that delivered it', async () => {
+    const { daemon } = renderTerminal({ paneActive: true });
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+    await waitFor(() => expect(daemon.note).toBe(''));
+  });
+
+  it('is kept on the daemon when it was typed over while the send was in flight', async () => {
+    // The last mark is spent, so the client raises a tombstone — and the
+    // tombstone zeroes the note column too. A note the user typed DURING the
+    // flight is not what was sent, so it stays on screen; it has to stay in
+    // the store with it, or closing the pane loses a sentence that is visibly
+    // still there.
+    const { daemon } = renderTerminal({ paneActive: true });
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+
+    // Mid-flight, the user keeps typing.
+    writeNote('Split this into two PRs, smallest first.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs, smallest first.'));
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+
+    await waitFor(() => expect(daemon.annotations).toHaveLength(0));
+    expect(noteBox().value).toBe('Split this into two PRs, smallest first.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs, smallest first.'));
+  });
+
+  it('is kept by a send the session refused', async () => {
+    // The same asymmetry the marks have: clearing work that was never
+    // delivered is the one failure the user cannot undo.
+    const { daemon } = renderTerminal({ paneActive: true });
+    daemon.nextSubmitStatus = 'skipped_pending_approval';
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+
+    fireEvent.click(screen.getByText('Send all'));
+
+    await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
+    expect(noteBox().value).toBe('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
   });
 });
 
@@ -766,7 +951,7 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
     // Mid-flight, the user marks something else.
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
     const keptId = stored().find((entry) => entry.id !== sentId)!.id;
 
     await act(async () => {
@@ -804,7 +989,7 @@ describe('AnnotatedTerminal sending', () => {
 
     // Mid-flight, the user changes their mind about the label.
     activate(id);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     await act(async () => {
       daemon.releaseSubmit?.();
@@ -813,8 +998,8 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
     expect(stored()).toHaveLength(1);
     expect(stored()[0].id).toBe(id);
-    expect(stored()[0].emoji).toBe('🧪');
-    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧪']));
+    expect(stored()[0].emoji).toBe('🧾');
+    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧾']));
     expect(daemon.calls.clearAnnotations).toBe(0);
   });
 
@@ -829,20 +1014,20 @@ describe('AnnotatedTerminal sending', () => {
     fireEvent.click(screen.getByLabelText('Verify this'));
     const editedId = stored()[0].id;
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Needs tests'));
+    fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     fireEvent.click(screen.getByText('Send all'));
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
 
     activate(editedId);
-    fireEvent.click(screen.getByLabelText('Out of scope'));
+    fireEvent.click(screen.getByLabelText('This is wrong'));
 
     await act(async () => {
       daemon.releaseSubmit?.();
     });
 
     await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual([editedId]));
-    expect(stored()[0].emoji).toBe('🚫');
+    expect(stored()[0].emoji).toBe('❌');
   });
 
   it('tombstones the daemon draft only once the send is delivered', async () => {
@@ -939,7 +1124,7 @@ describe('AnnotatedTerminal persistence', () => {
       start: 31,
       end: 55,
       quote: TURN_1.slice(31, 55),
-      emoji: '🧪',
+      emoji: '🧾',
       comment: '',
     }];
 
@@ -976,7 +1161,7 @@ describe('AnnotatedTerminal persistence', () => {
       quote: TURN_1.slice(0, 26),
       emoji: '🔍',
       comment: '',
-    }], daemon.tombstone);
+    }], '', daemon.tombstone);
     expect(late.stale).toBe(true);
     expect(daemon.annotations).toHaveLength(0);
   });

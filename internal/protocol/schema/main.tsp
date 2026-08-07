@@ -2224,16 +2224,23 @@ model SessionAnnotationsGetResultMessage {
   success: boolean;
   error?: string;
   annotations: SessionAnnotation[];
+  // The draft's note: what the user wants to say about the turn as a whole,
+  // alongside the marks on its parts. Empty when there is none.
+  note?: string;
   generation: int32;
 }
 
-// Persist the full annotation list for a session. Whole-list rather than
-// per-annotation edits: the list is small, one writer owns it, and a full save
-// cannot leave the store holding half of an edit.
+// Persist the full annotation list for a session, and the note that goes with
+// it. Whole-draft rather than per-annotation edits: the list is small, one
+// writer owns it, and a full save cannot leave the store holding half of an
+// edit.
 model SessionAnnotationsSaveMessage {
   cmd: "session_annotations_save";
   session_id: string;
   annotations: SessionAnnotation[];
+  // Saved with the marks and cleared with them, because it is one thing the
+  // user is composing and sends in one keystroke.
+  note?: string;
   generation: int32;
   request_id: string;
 }
