@@ -4748,6 +4748,7 @@ export interface SessionAnnotationsGetResultMessage {
     error?:      string;
     event:       SessionAnnotationsGetResultMessageEvent;
     generation:  number;
+    note?:       string;
     request_id:  string;
     session_id:  string;
     success:     boolean;
@@ -4773,6 +4774,7 @@ export interface SessionAnnotationsSaveMessage {
     annotations: SessionAnnotationsGetResultMessageAnnotation[];
     cmd:         SessionAnnotationsSaveMessageCmd;
     generation:  number;
+    note?:       string;
     request_id:  string;
     session_id:  string;
     [property: string]: any;
@@ -12785,6 +12787,7 @@ const typeMap: any = {
         { json: "error", js: "error", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("SessionAnnotationsGetResultMessageEvent") },
         { json: "generation", js: "generation", typ: 0 },
+        { json: "note", js: "note", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "success", js: "success", typ: true },
@@ -12802,6 +12805,7 @@ const typeMap: any = {
         { json: "annotations", js: "annotations", typ: a(r("SessionAnnotationsGetResultMessageAnnotation")) },
         { json: "cmd", js: "cmd", typ: r("SessionAnnotationsSaveMessageCmd") },
         { json: "generation", js: "generation", typ: 0 },
+        { json: "note", js: "note", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
     ], "any"),

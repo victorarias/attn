@@ -25,6 +25,7 @@ function createTerminal(): GhosttyTerminalHandle {
     focus: vi.fn(() => true),
     typeTextViaInput: vi.fn(() => true),
     isInputFocused: vi.fn(() => true),
+    getBounds: vi.fn(() => null),
     write: vi.fn(() => Promise.resolve()),
     resizeLocal: vi.fn(() => Promise.resolve()),
     reset: vi.fn(),

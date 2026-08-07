@@ -30,22 +30,37 @@ function renderPicker(overrides: Partial<QuickLabelPickerProps> = {}) {
   return { view, props };
 }
 
+// jsdom lays nothing out, so the picker measures 0 and stays below the anchor.
+// A placement test has to say how tall it is.
+function withPickerHeight(height: number) {
+  Object.defineProperty(HTMLDivElement.prototype, 'offsetHeight', {
+    configurable: true,
+    get(this: HTMLDivElement) {
+      return this.classList.contains('md-quick-label-picker') ? height : 0;
+    },
+  });
+}
+
 beforeEach(() => {
   vi.useFakeTimers();
 });
 
 afterEach(() => {
   vi.useRealTimers();
+  Reflect.deleteProperty(HTMLDivElement.prototype, 'offsetHeight');
 });
 
 describe('QuickLabelPicker', () => {
-  it('renders all ten labels, numbered 1..0', () => {
+  it('renders the whole label set, numbering the ten that have a shortcut', () => {
+    // Past the tenth there is no digit to press, and a badge there would name
+    // a key that applies a different label.
     renderPicker();
     const rows = document.querySelectorAll('.md-quick-label-row');
     expect(rows).toHaveLength(QUICK_LABELS.length);
     expect(rows[0].textContent).toContain(QUICK_LABELS[0].text);
     expect(rows[0].querySelector('.md-quick-label-num')!.textContent).toBe('1');
     expect(rows[9].querySelector('.md-quick-label-num')!.textContent).toBe('0');
+    expect(rows[10]?.querySelector('.md-quick-label-num')).toBeNull();
   });
 
   it('positions at the cursor hint (x − 28) below the anchor (E14)', () => {
@@ -61,11 +76,24 @@ describe('QuickLabelPicker', () => {
     expect(picker.style.left).toBe('12px');
   });
 
-  it('flips above when vertical space below is under 220px', () => {
+  it('goes above the anchor when its measured height does not fit below', () => {
+    // The picker is as tall as the label set makes it. It used to flip on a
+    // guessed 220px, which a ten-row list already exceeded — so adding labels
+    // pushed the last ones off the bottom of the window, unclickable.
+    withPickerHeight(300);
     const anchorEl = makeAnchor({ top: window.innerHeight - 40, bottom: window.innerHeight - 20 });
     renderPicker({ anchorEl });
     const picker = document.querySelector<HTMLElement>('.md-quick-label-picker')!;
-    expect(picker.classList.contains('md-quick-label-picker--above')).toBe(true);
+    // anchor top (innerHeight - 40) - 6 gap - 300 height
+    expect(picker.style.top).toBe(`${window.innerHeight - 346}px`);
+  });
+
+  it('clamps into the viewport when it fits neither above nor below', () => {
+    withPickerHeight(window.innerHeight);
+    const anchorEl = makeAnchor({ top: window.innerHeight - 40, bottom: window.innerHeight - 20 });
+    renderPicker({ anchorEl });
+    const picker = document.querySelector<HTMLElement>('.md-quick-label-picker')!;
+    expect(picker.style.top).toBe('12px');
   });
 
   it('the opening click does not dismiss it; the next outside pointerdown does (E15)', () => {

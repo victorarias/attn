@@ -102,9 +102,8 @@ vi.mock('../utils/terminalPerf', () => ({ registerTerminalPerfGetter: () => () =
 
 import { GhosttyTerminal, type GhosttyTerminalHandle } from './GhosttyTerminal';
 
-// The suite-wide ResizeObserver stub is a vi.fn(), which `new` does not build
-// into an observer the component can hold — the pane never reaches onReady
-// behind it. A real class is what the other GhosttyTerminal render tests use.
+// This suite drives resizes through the observer itself, so it installs one it
+// can hold a handle on rather than using the inert class from setup.ts.
 beforeEach(() => {
   globalThis.ResizeObserver = class {
     observe() {}

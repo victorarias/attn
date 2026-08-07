@@ -111,6 +111,8 @@ export interface SessionMessageWindow {
 /** A session's persisted annotations, with the generation floor to write past. */
 export interface SessionAnnotationSet {
   annotations: DaemonSessionAnnotation[];
+  /** What the user wants to say about the turn as a whole. Empty when unset. */
+  note: string;
   generation: number;
 }
 export interface DirectoryEntry {
@@ -199,7 +201,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '215';
+export const PROTOCOL_VERSION = '216';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -4214,11 +4216,12 @@ export function useDaemonSocket({
   const sendSessionAnnotationsSave = useCallback((
     sessionId: string,
     annotations: readonly DaemonSessionAnnotation[],
+    note: string,
     generation: number,
   ): Promise<{ stale: boolean }> => {
     return sendRequest(
       'session_annotations_save',
-      { session_id: sessionId, annotations: annotations.map(annotationToWire), generation },
+      { session_id: sessionId, annotations: annotations.map(annotationToWire), note, generation },
       'Session annotation save timed out',
     );
   }, [sendRequest]);

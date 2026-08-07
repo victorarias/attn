@@ -933,20 +933,24 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// the queue without dragging its workspace along, and the satellite link
 	// from a shell to the agent it was split from. Applied by applyMigration92.
 	{92, "add the session pin and the satellite parent to sessions", ``},
+	// The annotation draft's note: what the user says about the turn as a
+	// whole, saved and cleared with the marks on its parts. Applied by
+	// applyMigration93.
+	{93, "add the note to session annotation drafts", ``},
 	// The same rewrite migration 91 did for documents, for the two other TEXT
 	// stamp columns this package compares as text: the job queue's and the
 	// notifications feed's. A job's scheduled_at is compared against now on every
 	// dispatch sweep, and both feeds list by a stamp, so a variable-width fraction
 	// held a job scheduled on a whole second back until the next second and
-	// scrambled rows written inside one second. Applied by applyMigration93.
-	{93, "store job and notification timestamps in an encoding that sorts", ``},
-	// The last of the rewrite migrations 91 and 93 began, for every remaining TEXT
+	// scrambled rows written inside one second. Applied by applyMigration94.
+	{94, "store job and notification timestamps in an encoding that sorts", ``},
+	// The last of the rewrite migrations 91 and 94 began, for every remaining TEXT
 	// stamp this package compares or orders as text: the turn stamps that decide
 	// whether a session owes the user a turn, the automation provider cursor that
 	// gates a review-request observation, and the created_at that orders
 	// delegations, endpoints, workspaces and workspace panes. Applied by
-	// applyMigration94.
-	{94, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
+	// applyMigration95.
+	{95, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1242,6 +1246,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 94 {
 			if err := applyMigration94(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 95 {
+			if err := applyMigration95(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2344,6 +2353,18 @@ func applyMigration92(tx *sql.Tx) error {
 	return err
 }
 
+// applyMigration93 adds the note a user writes alongside a session's
+// annotation marks. Guarded on the column, so a rewound schema_migrations
+// table re-runs it without failing on work already done.
+func applyMigration93(tx *sql.Tx) error {
+	has, err := columnExists(tx, "session_annotation_drafts", "note")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE session_annotation_drafts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
 // applyMigration91 rewrites every stored document stamp into
 // docstore.TimeFormat's fixed-width encoding, so that comparing the stamps as
 // text — which is the only way a TEXT column is compared, and what every sort
@@ -2407,7 +2428,7 @@ func collectionTableIDs(tx *sql.Tx) ([]int64, error) {
 	return ids, rows.Err()
 }
 
-// applyMigration93 rewrites the job queue's and the notifications feed's stored
+// applyMigration94 rewrites the job queue's and the notifications feed's stored
 // stamps into sortableTimeFormat, for the same reason migration 91 rewrote the
 // document store's: they are TEXT columns compared as text, and the encoding
 // they were written in stripped trailing zeros from the fraction, so text order
@@ -2424,7 +2445,7 @@ func collectionTableIDs(tx *sql.Tx) ([]int64, error) {
 // itself — and an undecodable stamp is left alone and reported, both properties
 // inherited from restampTable. An unread notification's read_at is ” by design;
 // restampTable skips a blank without counting it.
-func applyMigration93(tx *sql.Tx) error {
+func applyMigration94(tx *sql.Tx) error {
 	unreadable, err := restampTable(tx, "jobs", "id",
 		[]string{"scheduled_at", "created_at", "updated_at"})
 	if err != nil {
@@ -2436,12 +2457,12 @@ func applyMigration93(tx *sql.Tx) error {
 	}
 	unreadable += n
 	if unreadable > 0 {
-		log.Printf("[store] migration 93: left %d job/notification timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+		log.Printf("[store] migration 94: left %d job/notification timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
 	}
 	return nil
 }
 
-// applyMigration94 finishes what migrations 91 and 93 started: after it, no TEXT
+// applyMigration95 finishes what migrations 91 and 94 started: after it, no TEXT
 // stamp this package compares or orders as text is written in an encoding whose
 // text order is not time order.
 //
@@ -2481,7 +2502,7 @@ func applyMigration93(tx *sql.Tx) error {
 // The composite-key tables are keyed by rowid: every table here is an ordinary
 // rowid table, and restampTable needs one column that names a row, not the
 // primary key it happens to have.
-func applyMigration94(tx *sql.Tx) error {
+func applyMigration95(tx *sql.Tx) error {
 	restamps := []struct {
 		table   string
 		key     string
@@ -2516,7 +2537,7 @@ func applyMigration94(tx *sql.Tx) error {
 		unreadable += n
 	}
 	if unreadable > 0 {
-		log.Printf("[store] migration 94: left %d turn/cursor/listing timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+		log.Printf("[store] migration 95: left %d turn/cursor/listing timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
 	}
 	return nil
 }

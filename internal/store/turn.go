@@ -33,7 +33,7 @@ type TurnStamps struct {
 // every digit), so a turn settled inside the second it was opened in read as
 // still open and the next turn silently never opened. Whole-second opens are the
 // ordinary case, not a coincidence: a day-named snooze wakes on an exact second
-// and the woken turn is stamped with that deadline. Migration 94 rewrote the
+// and the woken turn is stamped with that deadline. Migration 95 rewrote the
 // stored stamps.
 //
 // It returns true when a turn was opened.
@@ -276,7 +276,7 @@ func (s *Store) setTurnStampsLocked(id string, stamps TurnStamps) {
 
 // parseTurnStamp decodes a stored turn stamp in any RFC3339 spelling — the
 // fixed-width one written today and the trailing-zero-stripped one written
-// before migration 94 — and yields the zero time for the ” that means "no turn
+// before migration 95 — and yields the zero time for the ” that means "no turn
 // here" as well as for anything it cannot read. It is parseStoreTime, which the
 // job queue and the notifications feed already decode with: the columns hold one
 // encoding, so they get one decoder.

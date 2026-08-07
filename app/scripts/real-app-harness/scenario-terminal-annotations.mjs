@@ -48,7 +48,9 @@ const SETTLED_STATES = new Set(['idle', 'waiting_input', 'pending_approval']);
 
 // The label clicked in the popup. Its aria-label is the button's accessible
 // name in QUICK_LABELS; its emoji is what the filed annotation carries.
-const LABEL = { name: 'Needs tests', emoji: '🧪' };
+const LABEL = { name: 'Show the receipt', emoji: '🧾' };
+// The note drafted beside the marks, and what proves it left the composer.
+const NOTE = 'Prefer the smallest change that covers this.';
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -104,6 +106,20 @@ async function waitForTurn(observer, sessionId, description) {
     `${description} to settle`,
     SETTLE_TIMEOUT_MS,
   );
+}
+
+// Whether `inner` lies entirely within `outer`, with a pixel of slack for the
+// subpixel rounding a real window produces.
+function contains(outer, inner) {
+  return inner.left >= outer.left - 1
+    && inner.top >= outer.top - 1
+    && inner.left + inner.width <= outer.left + outer.width + 1
+    && inner.top + inner.height <= outer.top + outer.height + 1;
+}
+
+function overlaps(a, b) {
+  return a.left < b.left + b.width && b.left < a.left + a.width
+    && a.top < b.top + b.height && b.top < a.top + a.height;
 }
 
 // Alt-drag over the agent's prose until it resolves to an anchor. Returns the
@@ -179,7 +195,7 @@ function daemonAnnotations(wsUrl, sessionId, timeoutMs = 8_000) {
         reject(new Error(data.error || `session_annotations_get failed for ${sessionId}`));
         return;
       }
-      resolve({ annotations: data.annotations || [], generation: data.generation ?? 0 });
+      resolve({ annotations: data.annotations || [], note: data.note ?? '', generation: data.generation ?? 0 });
     });
     ws.once('error', (error) => {
       clearTimeout(timer);
@@ -540,6 +556,40 @@ async function main() {
       );
     });
 
+    // The editor is positioned against the window, but it is only usable
+    // inside the pane it annotates: the sidebar and the neighbouring panes
+    // paint over anything that reaches them. A drag on the first words of a
+    // line anchors it at the pane's left edge, which is where it used to be
+    // drawn half under the sidebar.
+    await runner.step('the_editor_lands_inside_its_pane', async () => {
+      await pollForDrag(client, runner, sessionId, paneId, 'the second turn');
+      const state = await pollFor(
+        async () => {
+          const current = await client.request('get_annotation_state', {});
+          return current.popupOpen && current.popupRect ? current : null;
+        },
+        'the editor to report its geometry',
+        5_000,
+      );
+      const { popupRect, panelRect, paneRects, viewport } = state;
+      runner.assert(
+        Array.isArray(paneRects) && paneRects.length > 0,
+        'No terminal grid reported its geometry, so this step can prove nothing',
+      );
+      runner.assert(
+        paneRects.some((pane) => contains(pane, popupRect)),
+        `The annotation editor was drawn outside every terminal pane, where the app's chrome covers it: `
+        + `popup ${JSON.stringify(popupRect)}, panes ${JSON.stringify(paneRects)}, viewport ${JSON.stringify(viewport)}`,
+      );
+      // The other half: the panel is drawn over the editor, so an editor that
+      // lands under it is on screen and unreachable.
+      runner.assert(
+        !panelRect || !overlaps(panelRect, popupRect),
+        `The annotation editor was drawn under the annotations panel: `
+        + `popup ${JSON.stringify(popupRect)}, panel ${JSON.stringify(panelRect)}`,
+      );
+    });
+
     // The panel is the list of what you wrote, so a row in it is clicked to
     // change what it says — and once it says something, the control that
     // removes it has to still be on the row rather than pushed below it.
@@ -599,6 +649,26 @@ async function main() {
       await sleep(300);
     });
 
+    // The note is the sentence the marks qualify — "let's do x and y", with the
+    // marks saying where. It is drafted in the panel and goes out with them, so
+    // it is held by the daemon like they are and spent by the same send.
+    await runner.step('a_note_is_drafted_beside_the_marks', async () => {
+      await client.request('dom_type', { selector: '.anno-panel-note', text: NOTE });
+
+      const held = await pollFor(
+        async () => {
+          const result = await daemonAnnotations(options.wsUrl, sessionId);
+          return result.note === NOTE ? result : null;
+        },
+        'the daemon to hold the note',
+        10_000,
+      );
+      runner.assert(
+        held.annotations.length === 1,
+        `Writing the note disturbed the marks it belongs to: ${JSON.stringify(held.annotations)}`,
+      );
+    });
+
     await runner.step('send_shortcut_submits_it_and_tombstones_it', async () => {
       // A real ⌘Return, not the button: the button is a click handler any unit
       // test can drive, while the keystroke has to survive AppKit, reach the
@@ -629,6 +699,16 @@ async function main() {
       // The tombstone, not a save of the empty list: a save already in flight
       // must not be able to put the sent marks back.
       runner.assert(after.generation >= 2, `Generation after send = ${after.generation}, want the raised tombstone`);
+      // The note was delivered with them, so it is spent with them — one left
+      // behind is an instruction that goes out a second time.
+      runner.assert(
+        !after.note,
+        `The daemon still holds the sent note: ${JSON.stringify(after.note)}`,
+      );
+      runner.assert(
+        !sent.note,
+        `The note box still holds what was just sent: ${JSON.stringify(sent.note)}`,
+      );
 
       // The claim this whole path exists for: Send all SUBMITS. Text sitting in
       // the composer would satisfy any assertion about the pane's contents, so
@@ -638,12 +718,30 @@ async function main() {
       await waitForTurn(observer, sessionId, 'the turn the annotation feedback opened');
 
       const lines = await readLines(client, sessionId, paneId);
-      // Submitted means the composer is empty again: whatever the agent said
-      // back, the prompt must not still be holding the payload.
-      const stillComposing = lines.some((line) => /^❯\s+\S/.test(line));
+      // Submitted means the composer no longer holds the payload. Read the
+      // composer itself — the rows between the last two rules the agent draws
+      // around it — and look for the payload's own words. A "❯ " prefix is not
+      // enough: the agent draws a suggested prompt in there when it is empty,
+      // and by prefix alone that is indistinguishable from text left unsent.
+      const rules = lines
+        .map((line, index) => (/^─{10,}/.test(line.trim()) ? index : -1))
+        .filter((index) => index >= 0);
+      const composer = rules.length >= 2
+        ? lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1])
+        : [];
       runner.assert(
-        !stillComposing,
-        `The feedback is still sitting in the prompt, so it was typed but never submitted. Pane text:\n${lines.join('\n')}`,
+        rules.length >= 2,
+        `Could not find the composer in the pane, so this cannot prove the payload left it. Pane text:\n${lines.join('\n')}`,
+      );
+      const held = composer.filter((line) => (
+        line.includes('Feedback on your last message')
+        || line.includes(NOTE.slice(0, 24))
+        || quote.trim().split(/\s+/).some((word) => word.length > 4 && line.includes(word))
+      ));
+      runner.assert(
+        held.length === 0,
+        `The feedback is still sitting in the prompt, so it was typed but never submitted. `
+        + `Composer holds ${JSON.stringify(held)}. Pane text:\n${lines.join('\n')}`,
       );
     });
 

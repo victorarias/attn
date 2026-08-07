@@ -4,7 +4,7 @@
  * math/images/keyboard-copy.
  *
  * Buttons: Copy, Delete (redline — creates instantly, no popover), Comment,
- * ⚡ quick-label picker toggle, fixed 👍 (thumbs-up label), Cancel.
+ * ⚡ quick-label picker toggle, a fixed one-click agreement button, Cancel.
  *
  * Positioning: `center-above` for prose (centered over the selection rect),
  * `top-right` for code blocks (right-aligned above the block); recomputed on
@@ -253,10 +253,10 @@ export function SelectionToolbar({
       <button
         type="button"
         className="md-toolbar-btn"
-        title="Looks good"
+        title={THUMBS_UP_LABEL.text}
         onClick={() => onQuickLabel(THUMBS_UP_LABEL)}
       >
-        <span className="md-toolbar-emoji">👍</span>
+        <span className="md-toolbar-emoji">{THUMBS_UP_LABEL.emoji}</span>
       </button>
       {showQuickLabels && zapButtonRef.current && (
         <QuickLabelPicker

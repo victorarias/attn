@@ -1,11 +1,17 @@
 /* The annotation surface floats over the pane rather than inside it: the
    terminal's layout is driven by a fit() measured against its own container,
    and anything added to that container's flow changes the grid. Fixed
-   positioning keeps the popup exactly where the pointer released. */
+   positioning keeps the popup exactly where the pointer released.
+
+   The popup and the notice are portalled to document.body, so their z-index is
+   read in the root stacking context and has to clear every tile and workspace
+   overlay in the app (the highest is ~10001). Inside the pane they were drawn
+   under the chrome beside it, which is what put a popup anchored to a line's
+   first column behind the sidebar. */
 
 .anno-popup {
   position: fixed;
-  z-index: 60;
+  z-index: 10010;
   /* The pre-measurement position: centred above the pointer. Replaced the
      moment placePopup() has a real size to fit into the window, which is
      before the first paint. */
@@ -18,6 +24,11 @@
   border: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
+  /* The chip row on one line is ~490px, which is wider than a pane in a
+     three-way split — and a popup that cannot fit its pane falls back to the
+     window, where it lands on the sidebar. Two shorter rows keep it inside the
+     pane it belongs to, which is worth more than a single row of glyphs. */
+  max-width: 320px;
 }
 
 .anno-popup--placed {
@@ -27,7 +38,21 @@
 .anno-popup-labels {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 2px;
+}
+
+/* Always drawn, so naming a chip cannot change the popup's height and move it
+   out from under the pointer that is reading it. */
+.anno-popup-hint {
+  min-height: 15px;
+  margin: 4px 2px 0;
+  font-size: 11px;
+  line-height: 15px;
+  color: var(--color-text-secondary, #8a8a8a);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .anno-popup-label {
@@ -166,7 +191,7 @@
    and an explanation that appears somewhere else is one they never see. */
 .anno-notice {
   position: fixed;
-  z-index: 60;
+  z-index: 10010;
   transform: translate(-50%, -100%) translateY(-8px);
   max-width: 340px;
   padding: 7px 10px;
@@ -337,9 +362,25 @@
   color: var(--color-error);
 }
 
+/* The note the whole set carries. Sits between the marks and the footer: it is
+   read as the instruction the list qualifies, and it is the last thing typed
+   before the send, so it belongs beside the button that sends. */
+.anno-panel-note {
+  min-height: 52px;
+  margin: 0 6px 6px;
+  padding: 6px 8px;
+  resize: vertical;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  font: inherit;
+  font-size: var(--font-size-xs);
+}
+
 /* Why a send did not happen. Sits between the list and the footer so the Send
    button it is asking you to press again stays visible under it. */
-.anno-panel-note {
+.anno-panel-outcome {
   padding: 8px 10px;
   border-top: 1px solid var(--color-border);
   color: var(--color-text-secondary);

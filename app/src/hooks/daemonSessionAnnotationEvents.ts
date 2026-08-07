@@ -26,6 +26,7 @@ type SessionAnnotationEvent = {
   messages?: unknown;
   truncated?: unknown;
   annotations?: unknown;
+  note?: unknown;
   generation?: unknown;
 };
 
@@ -111,6 +112,7 @@ export function handleSessionAnnotationDaemonEvent(
         event,
         (e) => ({
           annotations: toAnnotations(e.annotations),
+          note: typeof e.note === 'string' ? e.note : '',
           generation: typeof e.generation === 'number' ? e.generation : 0,
         }),
         'Session annotation fetch failed',

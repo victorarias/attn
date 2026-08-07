@@ -4581,6 +4581,9 @@ type SessionAnnotationsGetResultMessage struct {
 	// Generation corresponds to the JSON schema field "generation".
 	Generation int `json:"generation"`
 
+	// Note corresponds to the JSON schema field "note".
+	Note *string `json:"note,omitempty,omitzero"`
+
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
@@ -4600,6 +4603,9 @@ type SessionAnnotationsSaveMessage struct {
 
 	// Generation corresponds to the JSON schema field "generation".
 	Generation int `json:"generation"`
+
+	// Note corresponds to the JSON schema field "note".
+	Note *string `json:"note,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`

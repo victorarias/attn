@@ -26,7 +26,7 @@ func TestSessionAnnotationDraftSaveGetRoundtrip(t *testing.T) {
 	s := newSessionAnnotationTestStore(t)
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 1, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 1, now); err != nil {
 		t.Fatalf("save gen 1: %v", err)
 	}
 
@@ -63,10 +63,10 @@ func TestSessionAnnotationDraftRejectsAnOlderGeneration(t *testing.T) {
 	s := newSessionAnnotationTestStore(t)
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 4, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 4, now); err != nil {
 		t.Fatalf("save gen 4: %v", err)
 	}
-	err := s.SaveSessionAnnotationDraft("session-1", `[]`, 3, now)
+	err := s.SaveSessionAnnotationDraft("session-1", `[]`, "", 3, now)
 	if !errors.Is(err, ErrStaleAnnotationSave) {
 		t.Fatalf("save gen 3 after gen 4 = %v, want ErrStaleAnnotationSave", err)
 	}
@@ -86,14 +86,14 @@ func TestSessionAnnotationDraftTombstoneRefusesAnInFlightSave(t *testing.T) {
 	s := newSessionAnnotationTestStore(t)
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 1, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 1, now); err != nil {
 		t.Fatalf("save gen 1: %v", err)
 	}
 	if err := s.ClearSessionAnnotationDraft("session-1", 2, now); err != nil {
 		t.Fatalf("clear gen 2: %v", err)
 	}
 
-	err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 2, now)
+	err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 2, now)
 	if !errors.Is(err, ErrStaleAnnotationSave) {
 		t.Fatalf("save at the tombstone's generation = %v, want ErrStaleAnnotationSave", err)
 	}
@@ -121,7 +121,7 @@ func TestSessionAnnotationDraftClearWorksOnASessionNeverAnnotated(t *testing.T) 
 	if err := s.ClearSessionAnnotationDraft("session-1", 3, now); err != nil {
 		t.Fatalf("clear on a missing row: %v", err)
 	}
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 3, now); !errors.Is(err, ErrStaleAnnotationSave) {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 3, now); !errors.Is(err, ErrStaleAnnotationSave) {
 		t.Fatalf("save at the tombstone = %v, want ErrStaleAnnotationSave", err)
 	}
 }
@@ -130,7 +130,7 @@ func TestSessionAnnotationDraftIsKeyedPerSession(t *testing.T) {
 	s := newSessionAnnotationTestStore(t)
 	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
 
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 1, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 1, now); err != nil {
 		t.Fatalf("save session-1: %v", err)
 	}
 
@@ -166,7 +166,7 @@ func TestRemoveSessionDeletesItsAnnotationDraft(t *testing.T) {
 		StateSince: protocol.TimestampNow().String(),
 		LastSeen:   protocol.TimestampNow().String(),
 	})
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 5, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 5, now); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -193,7 +193,7 @@ func TestClearSessionsDeletesAnnotationDrafts(t *testing.T) {
 		StateSince: protocol.TimestampNow().String(),
 		LastSeen:   protocol.TimestampNow().String(),
 	})
-	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, 5, now); err != nil {
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "", 5, now); err != nil {
 		t.Fatalf("save: %v", err)
 	}
 
@@ -205,5 +205,120 @@ func TestClearSessionsDeletesAnnotationDrafts(t *testing.T) {
 	}
 	if draft.Annotations != "[]" || draft.Generation != 0 {
 		t.Errorf("draft after ClearSessions = %+v, want nothing left behind", draft)
+	}
+}
+
+func TestSessionAnnotationDraftCarriesItsNote(t *testing.T) {
+	// The note is the instruction the marks qualify. It is drafted over the
+	// same minutes they are, so it has to survive a reopened pane the same way.
+	s := newSessionAnnotationTestStore(t)
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "Split this into two PRs.", 1, now); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+
+	draft, err := s.GetSessionAnnotationDraft("session-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if draft.Note != "Split this into two PRs." {
+		t.Errorf("note = %q, want the saved note", draft.Note)
+	}
+}
+
+func TestSessionAnnotationDraftNoteIsEmptyBeforeAnythingIsSaved(t *testing.T) {
+	s := newSessionAnnotationTestStore(t)
+
+	draft, err := s.GetSessionAnnotationDraft("never-annotated")
+	if err != nil {
+		t.Fatalf("get missing: %v", err)
+	}
+	if draft.Note != "" {
+		t.Errorf("note = %q, want empty", draft.Note)
+	}
+}
+
+func TestClearSessionAnnotationDraftClearsTheNoteToo(t *testing.T) {
+	// Clearing is what a send does. Leaving the note behind would put the
+	// instruction that was just delivered back on the next turn.
+	s := newSessionAnnotationTestStore(t)
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "Split this into two PRs.", 1, now); err != nil {
+		t.Fatalf("save: %v", err)
+	}
+	if err := s.ClearSessionAnnotationDraft("session-1", 2, now); err != nil {
+		t.Fatalf("clear: %v", err)
+	}
+
+	draft, err := s.GetSessionAnnotationDraft("session-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if draft.Note != "" || draft.Annotations != "[]" {
+		t.Errorf("draft after clear = %+v, want the note gone with the marks", draft)
+	}
+}
+
+func TestSessionAnnotationDraftKeepsTheNoteOfTheGenerationThatWon(t *testing.T) {
+	// A refused save must not leave its note behind: the note and the marks
+	// are one draft, and a half-applied one is a draft the user never wrote.
+	s := newSessionAnnotationTestStore(t)
+	now := time.Date(2026, 8, 2, 12, 0, 0, 0, time.UTC)
+
+	if err := s.SaveSessionAnnotationDraft("session-1", testAnnotations, "the newer note", 4, now); err != nil {
+		t.Fatalf("save gen 4: %v", err)
+	}
+	if err := s.SaveSessionAnnotationDraft("session-1", `[]`, "the older note", 3, now); !errors.Is(err, ErrStaleAnnotationSave) {
+		t.Fatalf("save gen 3 after gen 4 = %v, want ErrStaleAnnotationSave", err)
+	}
+
+	draft, err := s.GetSessionAnnotationDraft("session-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if draft.Note != "the newer note" {
+		t.Errorf("note = %q, want the newer note untouched", draft.Note)
+	}
+}
+
+func TestMigration93KeepsDraftsWrittenBeforeTheNoteExisted(t *testing.T) {
+	// `attn` has shipped session annotation drafts since schema 86, so real
+	// installs hold rows written by a build that had no note column. They are
+	// carried, not recreated: the marks on them are work the user did.
+	dbPath := filepath.Join(t.TempDir(), "pre-93.db")
+	db, err := OpenDB(dbPath)
+	if err != nil {
+		t.Fatalf("OpenDB setup: %v", err)
+	}
+	if _, err := db.Exec(`
+		ALTER TABLE session_annotation_drafts DROP COLUMN note;
+		INSERT INTO session_annotation_drafts
+			(session_id, annotations_json, generation, tombstone_generation, updated_at)
+			VALUES ('session-1', '` + testAnnotations + `', 6, 0, '2026-08-02T12:00:00Z');
+		DELETE FROM schema_migrations WHERE version >= 93;
+	`); err != nil {
+		t.Fatalf("seed a pre-93 database: %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("close pre-93 database: %v", err)
+	}
+
+	migrated, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	defer migrated.Close()
+
+	draft, err := migrated.GetSessionAnnotationDraft("session-1")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if draft.Annotations != testAnnotations || draft.Generation != 6 {
+		t.Errorf("draft after migration = %+v, want the marks and generation carried", draft)
+	}
+	if draft.Note != "" {
+		t.Errorf("note = %q, want empty for a draft written before it existed", draft.Note)
 	}
 }

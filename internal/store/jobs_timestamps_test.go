@@ -171,11 +171,11 @@ func TestNotificationsListNewestFirstWithinASecond(t *testing.T) {
 	}
 }
 
-// Migration 93 rewrites what earlier versions stored. Its input is the encoding
+// Migration 94 rewrites what earlier versions stored. Its input is the encoding
 // they wrote, so the test writes that encoding rather than describing it: the
 // stamps go in the way an older store would have written them, the migration
 // runs, and the claim and the order that were wrong come back right.
-func TestMigration93RewritesJobAndNotificationStampsThatDoNotSort(t *testing.T) {
+func TestMigration94RewritesJobAndNotificationStampsThatDoNotSort(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := NewWithDB(dbPath)
 	if err != nil {
@@ -193,7 +193,7 @@ func TestMigration93RewritesJobAndNotificationStampsThatDoNotSort(t *testing.T) 
 		}
 	}
 
-	// Roll the stamps back to the encoding migration 93 exists to replace, and
+	// Roll the stamps back to the encoding migration 94 exists to replace, and
 	// plant one value it cannot read, which it must leave alone rather than turn
 	// into year 1. read_at stays '' on every notification: an unread row's
 	// sentinel is not a stamp that failed to parse, and the migration must leave
@@ -214,8 +214,8 @@ func TestMigration93RewritesJobAndNotificationStampsThatDoNotSort(t *testing.T) 
 		`UPDATE jobs SET created_at = 'not a timestamp' WHERE id = ?`, "j5"); err != nil {
 		t.Fatalf("plant unreadable stamp: %v", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 93`); err != nil {
-		t.Fatalf("unrecord migration 93: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 94`); err != nil {
+		t.Fatalf("unrecord migration 94: %v", err)
 	}
 
 	// Sanity: the planted state is the broken one, so a pass here would mean the
@@ -229,30 +229,30 @@ func TestMigration93RewritesJobAndNotificationStampsThatDoNotSort(t *testing.T) 
 	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("migrateDB: %v", err)
 	}
-	assertMigration93Applied(t, s)
+	assertMigration94Applied(t, s)
 
 	// Re-running finds nothing left to do and changes nothing: the rewrite is a
 	// decode and re-encode, so an already-converted stamp yields itself.
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 93`); err != nil {
-		t.Fatalf("unrecord migration 93 again: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 94`); err != nil {
+		t.Fatalf("unrecord migration 94 again: %v", err)
 	}
 	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("re-run migrateDB: %v", err)
 	}
-	assertMigration93Applied(t, s)
+	assertMigration94Applied(t, s)
 }
 
-// assertMigration93Applied is the post-migration state: the whole-second job is
+// assertMigration94Applied is the post-migration state: the whole-second job is
 // claimable at its own second, both feeds order by time, the stamp that does not
 // decode is untouched, and an unread notification is still unread.
-func assertMigration93Applied(t *testing.T, s *Store) {
+func assertMigration94Applied(t *testing.T, s *Store) {
 	t.Helper()
 	got, err := s.EligibleJobs(jobBase(), 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"j0"}; !sameOrder(jobIDs(got), want) {
-		t.Fatalf("after migration 93 the jobs claimable at the whole second are %v, want %v", jobIDs(got), want)
+		t.Fatalf("after migration 94 the jobs claimable at the whole second are %v, want %v", jobIDs(got), want)
 	}
 
 	notes, err := s.ListNotifications()
@@ -264,7 +264,7 @@ func assertMigration93Applied(t *testing.T, s *Store) {
 		titles = append(titles, n.Title)
 	}
 	if want := reversed(chronologicalJobIDs()); !sameOrder(titles, want) {
-		t.Fatalf("after migration 93 the notifications list as %v, want %v", titles, want)
+		t.Fatalf("after migration 94 the notifications list as %v, want %v", titles, want)
 	}
 	for _, n := range notes {
 		if !n.ReadAt.IsZero() {

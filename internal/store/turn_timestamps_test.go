@@ -113,8 +113,8 @@ func TestASnoozeWrittenInTheOldEncodingIsStillWakeable(t *testing.T) {
 		until.Format(time.RFC3339Nano)); err != nil {
 		t.Fatalf("plant old snooze stamp: %v", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 94`); err != nil {
-		t.Fatalf("unrecord migration 94: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 95`); err != nil {
+		t.Fatalf("unrecord migration 95: %v", err)
 	}
 
 	// Sanity: without the rewrite the timer cannot cash the deadline it holds.
@@ -129,7 +129,7 @@ func TestASnoozeWrittenInTheOldEncodingIsStillWakeable(t *testing.T) {
 		t.Fatalf("stored deadline reads back as %s, want %s", got, until)
 	}
 	if !s.WakeTurnAt("s1", until) {
-		t.Fatalf("after migration 94 the fired timer still could not cash its deadline")
+		t.Fatalf("after migration 95 the fired timer still could not cash its deadline")
 	}
 }
 
@@ -231,11 +231,11 @@ func TestWorkflowRunsAreNewestFirstWithinASecond(t *testing.T) {
 	}
 }
 
-// Migration 94 rewrites what earlier versions stored. Its input is the encoding
+// Migration 95 rewrites what earlier versions stored. Its input is the encoding
 // they wrote, so the test writes that encoding rather than describing it: the
 // stamps go in the way an older store would have written them, the migration
 // runs, and the guard and the order that were wrong come back right.
-func TestMigration94RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T) {
+func TestMigration95RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	s, err := NewWithDB(dbPath)
 	if err != nil {
@@ -251,7 +251,7 @@ func TestMigration94RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T
 		}
 	}
 
-	// Roll the stamps back to the encoding migration 94 exists to replace: a turn
+	// Roll the stamps back to the encoding migration 95 exists to replace: a turn
 	// opened on a whole second and settled half a second later, and delegation
 	// rows whose fractions extend one another. One value the migration cannot read
 	// is planted too, which it must leave alone rather than turn into year 1, and
@@ -274,8 +274,8 @@ func TestMigration94RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T
 		`UPDATE delegation_operations SET updated_at = 'not a timestamp' WHERE request_id = ?`, "r5"); err != nil {
 		t.Fatalf("plant unreadable stamp: %v", err)
 	}
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 94`); err != nil {
-		t.Fatalf("unrecord migration 94: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 95`); err != nil {
+		t.Fatalf("unrecord migration 95: %v", err)
 	}
 
 	// Sanity: the planted state is the broken one, so a pass here would mean the
@@ -287,13 +287,13 @@ func TestMigration94RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T
 	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("migrateDB: %v", err)
 	}
-	assertMigration94Applied(t, s)
+	assertMigration95Applied(t, s)
 
 	// Re-running finds nothing left to do and changes nothing: the rewrite is a
 	// decode and re-encode, so an already-converted stamp yields itself.
 	before := stampDigest(t, s)
-	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 94`); err != nil {
-		t.Fatalf("unrecord migration 94 again: %v", err)
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 95`); err != nil {
+		t.Fatalf("unrecord migration 95 again: %v", err)
 	}
 	if err := migrateDB(s.db, dbPath); err != nil {
 		t.Fatalf("re-run migrateDB: %v", err)
@@ -303,14 +303,14 @@ func TestMigration94RewritesTurnCursorAndListingStampsThatDoNotSort(t *testing.T
 	}
 }
 
-// assertMigration94Applied is the post-migration state: the settled turn reopens,
+// assertMigration95Applied is the post-migration state: the settled turn reopens,
 // the delegation listing is in claim order, the stamp that does not decode is
 // untouched, and the unsnoozed sentinel is still the sentinel.
-func assertMigration94Applied(t *testing.T, s *Store) {
+func assertMigration95Applied(t *testing.T, s *Store) {
 	t.Helper()
 
 	if !s.OpenTurnIfClosed("s1", turnBase().Add(time.Second)) {
-		t.Fatalf("after migration 94 a settled turn still did not reopen")
+		t.Fatalf("after migration 95 a settled turn still did not reopen")
 	}
 
 	got, err := s.PendingDelegationOperations()
@@ -322,7 +322,7 @@ func assertMigration94Applied(t *testing.T, s *Store) {
 		ids = append(ids, rec.Operation.RequestID)
 	}
 	if want := chronologicalRaggedIDs(); !sameOrder(ids, want) {
-		t.Fatalf("after migration 94 the delegations came back as %v, want %v", ids, want)
+		t.Fatalf("after migration 95 the delegations came back as %v, want %v", ids, want)
 	}
 
 	var unreadable string
@@ -343,7 +343,7 @@ func assertMigration94Applied(t *testing.T, s *Store) {
 	}
 }
 
-// stampDigest is every stamp migration 94 touches, in a stable order, so a
+// stampDigest is every stamp migration 95 touches, in a stable order, so a
 // second run can be compared byte for byte against the first.
 func stampDigest(t *testing.T, s *Store) string {
 	t.Helper()

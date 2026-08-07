@@ -26,7 +26,7 @@ import (
 // every digit). Within one second the two orders disagreed, which made a job
 // scheduled on a whole second wait out the rest of that second before
 // `scheduled_at <= now` claimed it, and scrambled both feeds' listings among
-// rows written in the same second. Migration 93 rewrote the stored stamps.
+// rows written in the same second. Migration 94 rewrote the stored stamps.
 //
 // It is docstore.TimeFormat: the document store hit the same defect and this is
 // the same fix, so there is one spelling of it rather than two that must be kept
@@ -267,7 +267,7 @@ func scanJobRow(sc rowScanner) (*JobRecord, error) {
 
 // parseStoreTime decodes a stored timestamp in any RFC3339 form — the
 // fixed-width one written today, the trailing-zero-stripped one written before
-// migration 93, or a whole second with no fraction at all. A blank/garbage value
+// migration 94, or a whole second with no fraction at all. A blank/garbage value
 // yields the zero time rather than an error: a job with an unreadable timestamp
 // is still a real record, and the queue treats a zero scheduled_at as
 // "eligible now".
