@@ -11,10 +11,34 @@
 // what lets a later attach dedup a live stream against a snapshot watermark.
 
 /** Semantic kinds. attn's vocabulary; the daemon may read these. */
-export const SEMANTIC_KINDS = ["session_ready", "run_started", "run_settled"] as const;
+export const SEMANTIC_KINDS = [
+  "session_ready",
+  "run_started",
+  "run_settled",
+  "tool_started",
+  "tool_finished",
+] as const;
 
 /** Render kinds. Opaque to the daemon; host and app agree on the bodies. */
-export const RENDER_KINDS = ["message_start", "message_delta", "message_end", "queue_update"] as const;
+export const RENDER_KINDS = [
+  "message_start",
+  "message_delta",
+  "message_end",
+  "queue_update",
+  "tool_detail",
+] as const;
+
+/**
+ * The semantic kinds that MOVE the session, and therefore carry a `state`.
+ *
+ * The rest of the semantic family are facts about a run that is already open:
+ * a tool starting says what the agent is doing, not that the session became
+ * something else. Re-declaring `working` on every tool boundary would restamp
+ * `state_since` on each one and reset the dashboard's "working for 4m" to zero
+ * several times a minute, so a fact carries no state and the daemon never
+ * applies one.
+ */
+export const STATE_DECLARATION_KINDS = ["session_ready", "run_started", "run_settled"] as const;
 
 export type SemanticKind = (typeof SEMANTIC_KINDS)[number];
 export type RenderKind = (typeof RENDER_KINDS)[number];
@@ -96,8 +120,236 @@ export interface QueueUpdateBody {
   followUp: string[];
 }
 
+/**
+ * A tool call the agent started. One per `call_id`, matched by a
+ * `tool_finished` with the same id.
+ *
+ * The body is deliberately small — a name, a one-line summary, the files it
+ * names — because it is the transcript's permanent record of the call. What
+ * the tool actually read, wrote, or printed is fetched on demand (see
+ * ToolDetailBody): the corpus receipt behind this slice is a p99 11.6 MB
+ * transcript with ~0.4% message text, and inlining tool output is how it got
+ * that way.
+ */
+export interface ToolStartedBody {
+  call_id: string;
+  /** pi's own tool name: bash, read, edit, write, grep, find, ls, or any custom one. */
+  name: string;
+  /** One line naming the call: the command, the path, the pattern. May be clipped. */
+  summary: string;
+  /** Files this call touches. Search roots are in the summary, not here. */
+  files: string[];
+}
+
+export interface ToolFinishedBody {
+  call_id: string;
+  name: string;
+  status: "ok" | "error";
+  summary: string;
+  files: string[];
+  /** Detail can be fetched for this call — the `tool_detail` verb answers. */
+  detail: boolean;
+  /** The detail carries a unified patch (the edit tool), so it draws as a diff. */
+  patch: boolean;
+  /** pi clipped the tool's own output; the whole of it may still exist on disk. */
+  truncated: boolean;
+  /** pi wrote the untruncated output to a file, so `full` detail can be asked for. */
+  full_output: boolean;
+  /** The failure, when the tool errored. Clipped to SUMMARY_LIMIT like a summary. */
+  error?: string;
+}
+
+/**
+ * What an expanded tool card shows, answered for one `tool_detail` verb.
+ *
+ * It is addressed by `call_id` and not by a request id: every client watching
+ * the session gets it, and a card that was waiting for it draws. Two clients
+ * expanding the same call cost one fetch, and a client that asked for the full
+ * output upgrades everyone's card — same output, more of it.
+ */
+export interface ToolDetailBody {
+  call_id: string;
+  /** The tool's output text. */
+  text: string;
+  /** The unified patch, for tools that produce one. */
+  patch?: string;
+  /** `text` came from the full-output file rather than pi's clipped result. */
+  full: boolean;
+  /** More output exists than `text` shows. */
+  truncated: boolean;
+  /** Where pi kept the whole output, when it kept it. */
+  full_output_path?: string;
+  /** The fetch failed, and this says why. The card shows it in place of text. */
+  error?: string;
+}
+
 /** Anything the mapper is handed. pi's event union grows without warning. */
 type PiEvent = { type: string; [key: string]: unknown };
+
+/**
+ * How long a one-line summary — a command, a path, a failure — may be before
+ * the declaration clips it.
+ *
+ * A declaration is the transcript's permanent per-call record, so it must not
+ * be where output lives. pi's own tool-output cap is 2,000 lines / 50 KB;
+ * 2,000 characters is 4% of that, past any command line or error headline a
+ * person writes, and the whole text is one expand away. A clip says so, with
+ * the limit and the real length, rather than trailing off.
+ */
+export const SUMMARY_LIMIT = 2000;
+
+export function clipSummary(text: string, limit = SUMMARY_LIMIT): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= limit) return collapsed;
+  return `${collapsed.slice(0, limit)}… [clipped at ${limit} of ${collapsed.length} characters]`;
+}
+
+function argString(args: unknown, key: string): string {
+  if (!args || typeof args !== "object") return "";
+  const value = (args as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * The one line a collapsed card shows for a call.
+ *
+ * Only pi's built-in tools are named here. A custom tool — an MCP server, a
+ * user extension — falls through to its first string argument, which is nearly
+ * always the thing it is acting on, and to nothing at all when it has none.
+ * Guessing harder would only produce a confident wrong label.
+ */
+export function toolSummary(name: string, args: unknown): string {
+  switch (name) {
+    case "bash":
+      return clipSummary(argString(args, "command"));
+    case "read":
+    case "write":
+    case "edit":
+      return clipSummary(argString(args, "path"));
+    case "ls":
+      return clipSummary(argString(args, "path") || ".");
+    case "grep":
+    case "find": {
+      const pattern = argString(args, "pattern");
+      const path = argString(args, "path");
+      return clipSummary(path ? `${pattern} in ${path}` : pattern);
+    }
+    default: {
+      if (!args || typeof args !== "object") return "";
+      for (const value of Object.values(args as Record<string, unknown>)) {
+        if (typeof value === "string" && value.trim() !== "") return clipSummary(value);
+      }
+      return "";
+    }
+  }
+}
+
+/**
+ * The files a call touches — what a card can offer to open.
+ *
+ * A search root is not a file the agent touched, so grep/find/ls paths stay in
+ * the summary. Only the tools that name one file are listed here.
+ */
+export function toolFiles(name: string, args: unknown): string[] {
+  switch (name) {
+    case "read":
+    case "write":
+    case "edit": {
+      const path = argString(args, "path");
+      return path ? [path] : [];
+    }
+    default:
+      return [];
+  }
+}
+
+/** What an expanded card needs, held until it is asked for or evicted. */
+export interface ToolDetail {
+  text: string;
+  patch?: string;
+  truncated: boolean;
+  fullOutputPath?: string;
+}
+
+/**
+ * Holds each tool call's detail until the app expands the card, under a byte
+ * budget.
+ *
+ * A conversation session runs all day, so this cannot be an unbounded map of
+ * every tool result the agent ever produced. It is insertion-ordered and drops
+ * the oldest entries first, and a call whose detail is gone answers with a
+ * message that names the budget and the count rather than an empty card.
+ */
+export class ToolDetailStore {
+  private entries = new Map<string, ToolDetail>();
+  private bytes = 0;
+  private evicted = 0;
+
+  constructor(private readonly budgetBytes: number) {}
+
+  put(callId: string, detail: ToolDetail): void {
+    this.remove(callId);
+    const size = detailBytes(detail);
+    // One detail larger than the whole budget would evict everything and then
+    // itself; keep it rather than the history, since it is the one the user is
+    // most likely about to expand.
+    this.entries.set(callId, detail);
+    this.bytes += size;
+    for (const [key, held] of this.entries) {
+      if (this.bytes <= this.budgetBytes || key === callId) break;
+      this.entries.delete(key);
+      this.bytes -= detailBytes(held);
+      this.evicted += 1;
+    }
+  }
+
+  get(callId: string): ToolDetail | undefined {
+    return this.entries.get(callId);
+  }
+
+  /** Why a card has no detail, in words that name the limit and the ask. */
+  missingReason(callId: string): string {
+    return (
+      `no detail held for tool call ${callId}: this host keeps the most recent ` +
+      `${(this.budgetBytes / (1 << 20)).toFixed(0)} MB of tool output and has dropped ${this.evicted} older call(s)`
+    );
+  }
+
+  private remove(callId: string): void {
+    const existing = this.entries.get(callId);
+    if (!existing) return;
+    this.entries.delete(callId);
+    this.bytes -= detailBytes(existing);
+  }
+
+  get retainedBytes(): number {
+    return this.bytes;
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+}
+
+function detailBytes(detail: ToolDetail): number {
+  return detail.text.length + (detail.patch?.length ?? 0);
+}
+
+/** Pulls the text blocks out of a pi tool result's content array. */
+export function toolResultText(result: unknown): string {
+  if (!result || typeof result !== "object") return "";
+  const content = (result as { content?: unknown }).content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  const parts: string[] = [];
+  for (const block of content) {
+    if (block && typeof block === "object" && (block as { type?: unknown }).type === "text") {
+      const text = (block as { text?: unknown }).text;
+      if (typeof text === "string") parts.push(text);
+    }
+  }
+  return parts.join("\n");
+}
 
 export interface EnvelopeSink {
   (envelope: Envelope): void;
@@ -197,6 +449,25 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+/** One string field off a pi details object, or "" when it is not there. */
+function readString(source: unknown, key: string): string {
+  if (!source || typeof source !== "object") return "";
+  const value = (source as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : "";
+}
+
+/**
+ * pi message roles the transcript does not draw.
+ *
+ * `toolResult` is a message whose whole body is one tool's output — pi's own
+ * way of putting the result back in front of the model. The transcript's record
+ * of that call is its card, which holds a name and a line and fetches the
+ * output only when someone opens it; drawing the message too would inline every
+ * byte the card exists to keep out (receipt: `seq 1 5000` measured at 23,893
+ * bytes in one message, 2026-08-06).
+ */
+const UNRENDERED_ROLES = new Set(["toolResult"]);
+
 function messageRole(message: unknown): string {
   if (message && typeof message === "object") {
     const role = (message as { role?: unknown }).role;
@@ -217,11 +488,24 @@ export class PiEventMapper {
   private messageCounter = 0;
   private currentMessageID: string | null = null;
   private readonly seenUnknown = new Set<string>();
+  /**
+   * The calls that have started and not finished, by call id.
+   *
+   * `tool_execution_end` carries the result but not the arguments, so what the
+   * call WAS has to be remembered from its start to be repeated on the finish
+   * — the app draws one card and needs the same label on both halves. Bounded
+   * by concurrency, not by session length: an entry lives only until its end
+   * event lands.
+   */
+  private readonly openCalls = new Map<string, { name: string; summary: string; files: string[] }>();
+  /** The role of the message pi currently has open, for the id it will mint. */
+  private currentRole = "assistant";
 
   constructor(
     private readonly stream: EnvelopeStream,
     private readonly deltas: DeltaCoalescer,
     private readonly onUnknown: (type: string) => void = () => {},
+    private readonly details: ToolDetailStore | null = null,
   ) {}
 
   /** Emits whatever the pi event maps to. Unknown pi types are dropped. */
@@ -259,35 +543,115 @@ export class PiEventMapper {
         return;
       }
 
-      case "message_start": {
+      case "tool_execution_start": {
+        // Ahead of any text still pending: the card belongs after the sentence
+        // that announced it, not before.
         this.deltas.flush();
-        this.messageCounter += 1;
-        this.currentMessageID = `m${this.messageCounter}`;
-        const body: MessageStartBody = { id: this.currentMessageID, role: messageRole(event.message) };
-        this.stream.emit("message_start", body);
+        const callID = typeof event.toolCallId === "string" ? event.toolCallId : "";
+        const name = typeof event.toolName === "string" ? event.toolName : "";
+        if (callID === "") return;
+        const call = { name, summary: toolSummary(name, event.args), files: toolFiles(name, event.args) };
+        this.openCalls.set(callID, call);
+        const body: ToolStartedBody = { call_id: callID, ...call };
+        this.stream.emit("tool_started", body);
+        return;
+      }
+
+      case "tool_execution_update":
+        // The bash tool's throttled partial output. Deliberately dropped: a
+        // card that streams its output for the whole of a `go test` run is the
+        // per-tool version of the balloon collapsed cards exist to avoid, and
+        // the finished card carries the same text one expand away. Named here
+        // rather than left to the default arm so it does not read as a pi event
+        // this host failed to keep up with.
+        return;
+
+      case "tool_execution_end": {
+        this.deltas.flush();
+        const callID = typeof event.toolCallId === "string" ? event.toolCallId : "";
+        if (callID === "") return;
+        const name = typeof event.toolName === "string" ? event.toolName : "";
+        const started = this.openCalls.get(callID);
+        this.openCalls.delete(callID);
+        const isError = event.isError === true;
+        const result = event.result;
+        const text = toolResultText(result);
+        const toolDetails = (result as { details?: unknown } | undefined)?.details;
+        const patch = readString(toolDetails, "patch");
+        const fullOutputPath = readString(toolDetails, "fullOutputPath");
+        const truncation = toolDetails && typeof toolDetails === "object"
+          ? (toolDetails as { truncation?: unknown }).truncation
+          : undefined;
+        const truncated = truncation !== null && typeof truncation === "object"
+          && (truncation as { truncated?: unknown }).truncated === true;
+
+        if (this.details && (text !== "" || patch !== "")) {
+          this.details.put(callID, {
+            text,
+            patch: patch === "" ? undefined : patch,
+            truncated,
+            fullOutputPath: fullOutputPath === "" ? undefined : fullOutputPath,
+          });
+        }
+
+        const body: ToolFinishedBody = {
+          call_id: callID,
+          name: started?.name || name,
+          status: isError ? "error" : "ok",
+          summary: started?.summary ?? "",
+          files: started?.files ?? [],
+          detail: text !== "" || patch !== "",
+          patch: patch !== "",
+          truncated,
+          full_output: fullOutputPath !== "",
+        };
+        // The failure headline rides along: a card the user has to expand to
+        // learn WHAT went wrong is a card they have to expand every time.
+        if (isError && text !== "") body.error = clipSummary(text);
+        this.stream.emit("tool_finished", body);
+        return;
+      }
+
+      case "message_start": {
+        // Nothing is emitted here. pi opens a message before anyone knows
+        // whether it will have anything to say: an assistant turn that only
+        // calls tools ends with empty text, and its tool RESULT arrives as a
+        // message of its own carrying the tool's entire output. Emitting on
+        // open would put both in the transcript — an empty bubble, and the very
+        // inlined output the tool card exists to keep out of it.
+        //
+        // So a message appears when it has content: the first delta mints it
+        // (requireMessageID), and one that streamed nothing is decided at its
+        // end.
+        this.deltas.flush();
+        this.currentMessageID = null;
+        this.currentRole = messageRole(event.message);
         return;
       }
 
       case "message_update": {
         const inner = event.assistantMessageEvent as { type?: string; delta?: unknown } | undefined;
-        // Only assistant TEXT streams to the pane in slice 1. Thinking and
-        // tool-call argument deltas are their own render surfaces (slices 3+)
-        // and would otherwise land in the message body as noise.
+        // Only assistant TEXT streams to the pane. Thinking and tool-call
+        // argument deltas are their own render surfaces and would otherwise land
+        // in the message body as noise.
         if (!inner || inner.type !== "text_delta" || typeof inner.delta !== "string") return;
+        if (UNRENDERED_ROLES.has(this.currentRole)) return;
         this.deltas.push(this.requireMessageID(), inner.delta);
         return;
       }
 
       case "message_end": {
         this.deltas.flush();
-        const id = this.requireMessageID();
-        const body: MessageEndBody = {
-          id,
-          role: messageRole(event.message),
-          text: messageText(event.message),
-        };
-        this.stream.emit("message_end", body);
+        const role = messageRole(event.message);
+        const text = messageText(event.message);
+        const open = this.currentMessageID;
         this.currentMessageID = null;
+        this.currentRole = "assistant";
+        // A tool's output belongs to its card, which fetches it on demand. A
+        // message that never said anything is not a message.
+        if (UNRENDERED_ROLES.has(role) || (open === null && text === "")) return;
+        const id = open ?? this.mintMessage(role);
+        this.stream.emit("message_end", { id, role, text } satisfies MessageEndBody);
         return;
       }
 
@@ -303,17 +667,22 @@ export class PiEventMapper {
   }
 
   /**
-   * A delta or end without a preceding start means pi opened a message shape
-   * this mapper does not model. Minting one keeps the pane coherent rather
-   * than dropping the text on the floor.
+   * The id of the message the text belongs to, opening one if it is the first
+   * thing that message has said. Also covers a delta whose `message_start`
+   * never arrived — pi opening a message shape this mapper does not model must
+   * not drop the agent's words on the floor.
    */
   private requireMessageID(): string {
-    if (this.currentMessageID === null) {
-      this.messageCounter += 1;
-      this.currentMessageID = `m${this.messageCounter}`;
-      this.stream.emit("message_start", { id: this.currentMessageID, role: "assistant" });
-    }
+    if (this.currentMessageID === null) this.currentMessageID = this.mintMessage(this.currentRole);
     return this.currentMessageID;
+  }
+
+  /** Opens a message on the wire and returns its id. */
+  private mintMessage(role: string): string {
+    this.messageCounter += 1;
+    const id = `m${this.messageCounter}`;
+    this.stream.emit("message_start", { id, role } satisfies MessageStartBody);
+    return id;
   }
 }
 
@@ -334,9 +703,22 @@ export class PiEventMapper {
  * steer and follow_up are also valid on an idle session, where there is no run
  * to land in; the host opens one instead. Which is why the daemon never has to
  * ask what a session is doing before nudging it.
+ *
+ * Two more verbs are about what is already in flight rather than new text:
+ *
+ *   tool_detail  what an expanded card shows, answered as a `tool_detail`
+ *                envelope. `full` reads pi's full-output file instead of the
+ *                clipped result it returned to the model.
+ *   clear_queue  drops everything queued and unread. pi clears both queues at
+ *                once — there is no per-entry removal — and answers with its
+ *                own `queue_update`, so the strip empties on pi's word.
  */
 export type HostVerbWithText = { verb: "prompt" | "steer" | "follow_up"; text: string };
-export type HostVerb = HostVerbWithText | { verb: "shutdown" };
+export type HostVerb =
+  | HostVerbWithText
+  | { verb: "shutdown" }
+  | { verb: "clear_queue" }
+  | { verb: "tool_detail"; callID: string; full: boolean };
 
 const TEXT_VERBS = new Set(["prompt", "steer", "follow_up"]);
 
@@ -352,5 +734,11 @@ export function parseVerb(line: string): HostVerb {
     return { verb: verb as HostVerbWithText["verb"], text };
   }
   if (verb === "shutdown") return { verb: "shutdown" };
+  if (verb === "clear_queue") return { verb: "clear_queue" };
+  if (verb === "tool_detail") {
+    const callID = (value as { call_id?: unknown }).call_id;
+    if (typeof callID !== "string" || callID.trim() === "") throw new Error("tool_detail verb needs a call_id");
+    return { verb: "tool_detail", callID, full: (value as { full?: unknown }).full === true };
+  }
   throw new Error(`unsupported verb ${JSON.stringify(verb)}`);
 }

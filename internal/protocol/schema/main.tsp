@@ -1927,6 +1927,36 @@ model AgentPromptMessage {
   mode?: string;
 }
 
+// Asks a conversation session's host for what an expanded tool card shows.
+//
+// A tool declaration carries a name, a one-line summary and the files it named
+// — never the output, which is how a transcript balloons. The output is fetched
+// when a card is opened, and the answer arrives as an `agent_event` of kind
+// `tool_detail` addressed by the same `call_id`, so every client with that card
+// open draws it.
+//
+// `full` asks for pi's untruncated output file instead of the clipped result it
+// gave the model. It only means anything for a call whose declaration said
+// `full_output`.
+model AgentToolDetailMessage {
+  cmd: "agent_tool_detail";
+  id: string;
+  call_id: string;
+  full?: boolean;
+}
+
+// Drops everything a conversation session's agent has been sent and not yet
+// read. The way out for the queue strip: a steer that has not landed yet, or a
+// follow-up queued behind work the user no longer wants done.
+//
+// It clears both queues at once because that is the only shape pi offers — no
+// per-entry removal exists — and the host answers with pi's own queue state, so
+// the strip empties on the agent's word rather than optimistically.
+model AgentClearQueueMessage {
+  cmd: "agent_clear_queue";
+  id: string;
+}
+
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
 // TIOCGWINSZ's ws_xpixel/ws_ypixel and XTWINOPS speak, so image emitters can
 // size an image to the space they were given. Absent or 0 means the client has

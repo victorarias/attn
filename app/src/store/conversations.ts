@@ -6,11 +6,19 @@ import { create } from 'zustand';
 // anything: the stream is the conversation.
 //
 // Two kinds of envelope land here. Semantic ones (session_ready, run_started,
-// run_settled) say where the session is; render ones (message_start,
-// message_delta, message_end, queue_update) say what it said and what it has
-// not read yet. An unknown kind is ignored on purpose — the host is pinned to a
-// pi version the app is not, and a kind this build does not draw must not break
-// the ones it does.
+// run_settled, tool_started, tool_finished) say where the session is and what
+// the agent did; render ones (message_start, message_delta, message_end,
+// queue_update, tool_detail) say what it said, what it has not read yet, and
+// what one opened tool card shows. An unknown kind is ignored on purpose — the
+// host is pinned to a pi version the app is not, and a kind this build does not
+// draw must not break the ones it does.
+//
+// What a tool call actually read, wrote or printed is NOT in this store until
+// the user opens the card. A tool declaration is a name, a line and a status;
+// the output is fetched with `agent_tool_detail` and arrives as its own
+// envelope. That is the whole reason a long conversation stays small: the
+// corpus behind this design is a p99 11.6 MB transcript with ~0.4% message
+// text, and eagerly inlining tool output is how it got that way.
 
 export interface ConversationMessage {
   id: string;
@@ -19,6 +27,59 @@ export interface ConversationMessage {
   // True between message_start and message_end: the text is still arriving.
   streaming: boolean;
 }
+
+/** What an opened tool card shows, fetched on demand. */
+export interface ConversationToolDetail {
+  text: string;
+  /** A unified patch, for tools that produce one. Drawn as a diff. */
+  patch?: string;
+  /** `text` is the whole output, read back from the file pi wrote it to. */
+  full: boolean;
+  /** More output exists than `text` shows. */
+  truncated: boolean;
+  fullOutputPath?: string;
+  /** The fetch failed, or answered with less than was asked for, and why. */
+  error?: string;
+}
+
+/**
+ * One tool call, drawn as a card in the transcript where it happened.
+ *
+ * It exists from the moment the call starts — a card that appears only once the
+ * tool finishes would leave a session that is grinding through a long command
+ * looking like it stopped talking.
+ */
+export interface ConversationToolCall {
+  callId: string;
+  name: string;
+  /** One line naming the call: the command, the path, the pattern. */
+  summary: string;
+  /** Files the call touched. Search roots live in the summary, not here. */
+  files: string[];
+  status: 'running' | 'ok' | 'error';
+  /** The failure headline, when it failed. Shown without opening the card. */
+  error?: string;
+  /** Detail can be fetched for this call. */
+  hasDetail: boolean;
+  /** The detail carries a patch, so the card draws a diff. */
+  hasPatch: boolean;
+  /** pi clipped the output it gave the model. */
+  truncated: boolean;
+  /** pi kept the whole output on disk, so `full` detail can be asked for. */
+  fullOutput: boolean;
+  detail?: ConversationToolDetail;
+}
+
+/**
+ * The transcript, in the order it happened: what was said and what was done.
+ *
+ * One list rather than two, because a tool card's whole meaning is where it
+ * sits — after the sentence that announced it, before the one that reports what
+ * it found.
+ */
+export type ConversationItem =
+  | ({ kind: 'message' } & ConversationMessage)
+  | ({ kind: 'tool' } & ConversationToolCall);
 
 /**
  * When the agent reads a message the user sends.
@@ -38,6 +99,8 @@ export type AgentPromptMode = 'prompt' | 'steer' | 'follow_up';
  * when the host says pi queued it, and disappears when the host says pi read
  * it, which is the whole of "queued, then seen". Inventing a local optimistic
  * entry would mean two sources for one truth and a queue that can get stuck.
+ * The same rule holds for cancelling: `agent_clear_queue` empties pi's queues
+ * and pi's own queue_update is what empties this one.
  */
 export interface ConversationQueue {
   steering: string[];
@@ -45,7 +108,7 @@ export interface ConversationQueue {
 }
 
 export interface ConversationState {
-  messages: ConversationMessage[];
+  items: ConversationItem[];
   // A run is open: the agent is working, and a message the user sends now is a
   // steer or a follow-up rather than a prompt.
   running: boolean;
@@ -67,7 +130,7 @@ export interface ConversationState {
 const emptyQueue: ConversationQueue = { steering: [], followUp: [] };
 
 const emptyConversation: ConversationState = {
-  messages: [],
+  items: [],
   running: false,
   awaitingRun: false,
   ready: false,
@@ -92,10 +155,30 @@ function text(body: Record<string, unknown>, key: string): string {
   return typeof value === 'string' ? value : '';
 }
 
+function flag(body: Record<string, unknown>, key: string): boolean {
+  return body[key] === true;
+}
+
 function stringList(body: Record<string, unknown>, key: string): string[] {
   const value = body[key];
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === 'string') : [];
 }
+
+/** Replaces one item in place, matched by a predicate. Returns null if absent. */
+function replaceItem(
+  items: ConversationItem[],
+  match: (item: ConversationItem) => boolean,
+  update: (item: ConversationItem) => ConversationItem,
+): ConversationItem[] | null {
+  const index = items.findIndex(match);
+  if (index < 0) return null;
+  const next = items.slice();
+  next[index] = update(next[index]);
+  return next;
+}
+
+const isTool = (callId: string) => (item: ConversationItem) => item.kind === 'tool' && item.callId === callId;
+const isMessage = (id: string) => (item: ConversationItem) => item.kind === 'message' && item.id === id;
 
 function applyToConversation(
   current: ConversationState,
@@ -111,59 +194,156 @@ function applyToConversation(
     case 'run_settled': {
       // Whatever was still streaming when the run closed is finished: the host
       // emits message_end before run_settled, so a message left open here means
-      // the run ended under it and it will never grow again.
-      const messages = current.messages.map((message) => (
-        message.streaming ? { ...message, streaming: false } : message
-      ));
+      // the run ended under it and it will never grow again. The same is true
+      // of a tool card still showing as running — pi reports every tool it
+      // starts, so one that never reported is one whose run ended under it.
+      const items = current.items.map((item) => {
+        if (item.kind === 'message') return item.streaming ? { ...item, streaming: false } : item;
+        if (item.status !== 'running') return item;
+        return { ...item, status: 'error' as const, error: 'the run ended before this tool reported' };
+      });
       // A run that ended badly says so in the transcript. Otherwise a prompt
       // that failed outright — an unauthenticated provider, a model that
       // refused — reads as an agent that answered with silence.
       const failure = text(body, 'error');
       if (failure !== '') {
-        messages.push({ id: `error-${seq}`, role: 'error', text: failure, streaming: false });
+        items.push({ kind: 'message', id: `error-${seq}`, role: 'error', text: failure, streaming: false });
       }
       // The queue empties with the run. pi drains a follow-up by starting the
       // next run rather than by ending this one, so anything still shown here
       // when a run closes is a queue this host will never speak about again —
       // most often because the host died under it.
-      return { ...current, running: false, awaitingRun: false, messages, queue: emptyQueue };
+      return { ...current, running: false, awaitingRun: false, items, queue: emptyQueue };
     }
     case 'queue_update':
       return { ...current, queue: { steering: stringList(body, 'steering'), followUp: stringList(body, 'followUp') } };
-    case 'message_start': {
-      const id = text(body, 'id');
-      if (!id || current.messages.some((message) => message.id === id)) return current;
+    case 'tool_started': {
+      const callId = text(body, 'call_id');
+      if (!callId || current.items.some(isTool(callId))) return current;
       return {
         ...current,
-        messages: [...current.messages, { id, role: text(body, 'role') || 'assistant', text: '', streaming: true }],
+        items: [...current.items, {
+          kind: 'tool',
+          callId,
+          name: text(body, 'name'),
+          summary: text(body, 'summary'),
+          files: stringList(body, 'files'),
+          status: 'running',
+          hasDetail: false,
+          hasPatch: false,
+          truncated: false,
+          fullOutput: false,
+        }],
+      };
+    }
+    case 'tool_finished': {
+      const callId = text(body, 'call_id');
+      if (!callId) return current;
+      const failure = text(body, 'error');
+      const finished = (item: ConversationToolCall): ConversationItem => ({
+        ...item,
+        kind: 'tool',
+        name: text(body, 'name') || item.name,
+        summary: text(body, 'summary') || item.summary,
+        files: stringList(body, 'files').length > 0 ? stringList(body, 'files') : item.files,
+        status: text(body, 'status') === 'error' ? 'error' : 'ok',
+        error: failure === '' ? undefined : failure,
+        hasDetail: flag(body, 'detail'),
+        hasPatch: flag(body, 'patch'),
+        truncated: flag(body, 'truncated'),
+        fullOutput: flag(body, 'full_output'),
+      });
+      const replaced = replaceItem(current.items, isTool(callId), (item) => finished(item as ConversationToolCall));
+      if (replaced) return { ...current, items: replaced };
+      // A finish for a call we never saw start. Draw it rather than drop it:
+      // losing the record of what the agent did is worse than a card that
+      // never showed as running.
+      return {
+        ...current,
+        items: [...current.items, finished({
+          callId,
+          name: '',
+          summary: '',
+          files: [],
+          status: 'ok',
+          hasDetail: false,
+          hasPatch: false,
+          truncated: false,
+          fullOutput: false,
+        })],
+      };
+    }
+    case 'tool_detail': {
+      const callId = text(body, 'call_id');
+      if (!callId) return current;
+      const patch = text(body, 'patch');
+      const failure = text(body, 'error');
+      const fullOutputPath = text(body, 'full_output_path');
+      const detail: ConversationToolDetail = {
+        text: text(body, 'text'),
+        full: flag(body, 'full'),
+        truncated: flag(body, 'truncated'),
+        ...(patch === '' ? {} : { patch }),
+        ...(fullOutputPath === '' ? {} : { fullOutputPath }),
+        ...(failure === '' ? {} : { error: failure }),
+      };
+      // The answer is addressed by call id and reaches every client, so a card
+      // opened in another window fills in here too. A `full` answer supersedes
+      // the clipped one; a clipped one never overwrites a full one that already
+      // landed.
+      const replaced = replaceItem(current.items, isTool(callId), (item) => {
+        const tool = item as ConversationToolCall;
+        if (tool.detail?.full && !detail.full) return item;
+        return { ...tool, kind: 'tool', detail };
+      });
+      return replaced ? { ...current, items: replaced } : current;
+    }
+    case 'message_start': {
+      const id = text(body, 'id');
+      if (!id || current.items.some(isMessage(id))) return current;
+      return {
+        ...current,
+        items: [...current.items, {
+          kind: 'message',
+          id,
+          role: text(body, 'role') || 'assistant',
+          text: '',
+          streaming: true,
+        }],
       };
     }
     case 'message_delta': {
       const id = text(body, 'id');
       const delta = text(body, 'text');
       if (!id || delta === '') return current;
-      const index = current.messages.findIndex((message) => message.id === id);
-      if (index < 0) {
-        // A delta for a message we never saw start. Draw it rather than drop
-        // it: losing the agent's words is worse than an unlabelled role.
-        return { ...current, messages: [...current.messages, { id, role: 'assistant', text: delta, streaming: true }] };
-      }
-      const messages = current.messages.slice();
-      messages[index] = { ...messages[index], text: messages[index].text + delta };
-      return { ...current, messages };
+      const replaced = replaceItem(current.items, isMessage(id), (item) => ({
+        ...(item as ConversationMessage),
+        kind: 'message',
+        text: (item as ConversationMessage).text + delta,
+      }));
+      if (replaced) return { ...current, items: replaced };
+      // A delta for a message we never saw start. Draw it rather than drop
+      // it: losing the agent's words is worse than an unlabelled role.
+      return {
+        ...current,
+        items: [...current.items, { kind: 'message', id, role: 'assistant', text: delta, streaming: true }],
+      };
     }
     case 'message_end': {
       const id = text(body, 'id');
       if (!id) return current;
-      const index = current.messages.findIndex((message) => message.id === id);
       // message_end carries the whole message, so it replaces the accumulated
       // deltas rather than appending to them. A coalescing window the host
       // never got to flush cannot leave the app one delta short of the truth.
-      const settled = { id, role: text(body, 'role') || 'assistant', text: text(body, 'text'), streaming: false };
-      if (index < 0) return { ...current, messages: [...current.messages, settled] };
-      const messages = current.messages.slice();
-      messages[index] = { ...messages[index], ...settled };
-      return { ...current, messages };
+      const settled = {
+        kind: 'message' as const,
+        id,
+        role: text(body, 'role') || 'assistant',
+        text: text(body, 'text'),
+        streaming: false,
+      };
+      const replaced = replaceItem(current.items, isMessage(id), () => settled);
+      return { ...current, items: replaced ?? [...current.items, settled] };
     }
     default:
       return current;

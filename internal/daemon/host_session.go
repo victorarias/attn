@@ -160,11 +160,18 @@ func (d *Daemon) removeSessionRuntime(sessionID string) error {
 	return d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
-// hostDeclarationKinds are the envelope kinds the daemon reads. Everything else
-// a host emits is a rendering the app draws and the daemon only forwards, and
-// keeping that list here rather than in a switch is what makes "the daemon
-// never keys behavior on a render kind" checkable.
-var hostDeclarationKinds = map[string]bool{
+// hostStateDeclarationKinds are the envelope kinds that MOVE the session, and
+// therefore carry the state to apply. Everything else a host emits the daemon
+// only forwards — the renderings the app draws, and the semantic facts about a
+// run that is already open (a tool starting and finishing). Keeping the list
+// here rather than in a switch is what makes "the daemon never keys behavior on
+// anything else" checkable.
+//
+// A tool boundary is deliberately not here. The session is already `working`
+// when one arrives, and re-applying that state would restamp `state_since` on
+// every tool call — resetting the dashboard's "working for 4m" several times a
+// minute for a session whose state never changed.
+var hostStateDeclarationKinds = map[string]bool{
 	"session_ready": true,
 	"run_started":   true,
 	"run_settled":   true,
@@ -194,7 +201,7 @@ func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	// seq 0 is the daemon's own envelope, minted off the host's spine (see
 	// handleAgentPrompt). It exists to unstick a client, not to describe a
 	// session, so it declares nothing.
-	if hostDeclarationKinds[event.Kind] && event.Seq > 0 {
+	if hostStateDeclarationKinds[event.Kind] && event.Seq > 0 {
 		d.applyHostDeclaredState(event)
 	}
 }
@@ -308,5 +315,43 @@ func (d *Daemon) handleAgentPrompt(client *wsClient, msg *protocol.AgentPromptMe
 			Kind:      "run_settled",
 			Body:      map[string]interface{}{"error": "this conversation's agent is no longer running"},
 		})
+	}
+}
+
+// handleAgentToolDetail answers the agent_tool_detail command.
+//
+// Nothing is returned here. The host writes its answer onto the same envelope
+// stream every other rendering travels on, addressed by the call id, so the
+// card that asked draws when it lands — and so does an identical card open in
+// another window. A session with no live host is the only failure this can
+// name, and it names it rather than leaving a card spinning forever.
+func (d *Daemon) handleAgentToolDetail(client *wsClient, msg *protocol.AgentToolDetailMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	callID := strings.TrimSpace(msg.CallID)
+	if sessionID == "" || callID == "" {
+		d.sendCommandError(client, protocol.CmdAgentToolDetail, "agent_tool_detail needs a session id and a call id")
+		return
+	}
+	if err := d.ensureHostSessions().ToolDetail(sessionID, callID, protocol.Deref(msg.Full)); err != nil {
+		d.logf("agent_tool_detail for session %s call %s failed: %v", sessionID, callID, err)
+		d.sendCommandError(client, protocol.CmdAgentToolDetail, "no live conversation host for session "+sessionID)
+	}
+}
+
+// handleAgentClearQueue answers the agent_clear_queue command.
+//
+// Like the detail fetch, the visible result comes back on the envelope stream:
+// the host clears pi's queues and pi says what is left, which is what empties
+// the strip. Reporting success here would only promise something this daemon
+// has not seen happen.
+func (d *Daemon) handleAgentClearQueue(client *wsClient, msg *protocol.AgentClearQueueMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	if sessionID == "" {
+		d.sendCommandError(client, protocol.CmdAgentClearQueue, "agent_clear_queue is missing a session id")
+		return
+	}
+	if err := d.ensureHostSessions().ClearQueue(sessionID); err != nil {
+		d.logf("agent_clear_queue for session %s failed: %v", sessionID, err)
+		d.sendCommandError(client, protocol.CmdAgentClearQueue, "no live conversation host for session "+sessionID)
 	}
 }

@@ -168,6 +168,119 @@ func TestHostRenderingsDoNotMoveTheSession(t *testing.T) {
 	}
 }
 
+// A tool boundary is a fact about a run that is already open, not a state
+// claim. Applying one would restamp `state_since` on every tool call and reset
+// the dashboard's "working for 4m" several times a minute on a session whose
+// state never changed.
+func TestHostToolEventsDoNotRestampTheState(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addHostSession(t, d, "conv-7")
+	declare(d, "conv-7", 1, "session_ready", protocol.StateIdle)
+	declare(d, "conv-7", 2, "run_started", protocol.StateWorking)
+
+	before := d.store.Get("conv-7").StateSince
+	// A tool declaration carries no state at all; even one that did must not be
+	// able to move the session.
+	d.handleHostEvent(hostsession.Event{
+		SessionID:   "conv-7",
+		Seq:         3,
+		Kind:        "tool_started",
+		Body:        map[string]interface{}{"call_id": "c1", "name": "bash", "state": protocol.StateIdle},
+		LifecycleID: "run-conv-7",
+	})
+	d.handleHostEvent(hostsession.Event{
+		SessionID:   "conv-7",
+		Seq:         4,
+		Kind:        "tool_finished",
+		Body:        map[string]interface{}{"call_id": "c1", "name": "bash", "status": "ok"},
+		LifecycleID: "run-conv-7",
+	})
+
+	session := d.store.Get("conv-7")
+	if got := string(session.State); got != protocol.StateWorking {
+		t.Fatalf("state = %q, want working: a tool boundary says nothing about the session's state", got)
+	}
+	if session.StateSince != before {
+		t.Fatalf("state_since moved from %q to %q: a tool boundary must not restart the working clock", before, session.StateSince)
+	}
+}
+
+// Both of the new verbs travel the same one-way pipe the delivery verbs do:
+// what comes back is an envelope on the host's own stream, not a return value
+// here. So the assertion is that the verb crossed the pipe intact.
+func TestToolDetailAndClearQueueReachTheHost(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addHostSession(t, d, "conv-8")
+
+	echo := filepath.Join(t.TempDir(), "echo-host.sh")
+	script := "#!/bin/sh\nwhile IFS= read -r line; do\n" +
+		"  escaped=$(printf '%s' \"$line\" | sed 's/\"/\\\\\"/g')\n" +
+		"  printf '{\"session_id\":\"conv-8\",\"seq\":1,\"kind\":\"message_end\",\"body\":{\"verb\":\"%s\"}}\\n' \"$escaped\" >&3\n" +
+		"done\n"
+	if err := os.WriteFile(echo, []byte(script), 0o755); err != nil {
+		t.Fatalf("write echo host: %v", err)
+	}
+
+	received := make(chan string, 4)
+	manager := hostsession.New(d.logf, func(event hostsession.Event) {
+		if verb, ok := event.Body["verb"].(string); ok {
+			received <- verb
+		}
+	}, func(hostsession.ExitInfo) {})
+	d.hostSessions = manager
+	if err := manager.Spawn(hostsession.SpawnOptions{SessionID: "conv-8", Command: []string{echo}}); err != nil {
+		t.Fatalf("spawn echo host: %v", err)
+	}
+	t.Cleanup(func() { _ = manager.Kill("conv-8") })
+
+	client := &wsClient{send: make(chan outboundMessage, 10)}
+	d.handleAgentToolDetail(client, &protocol.AgentToolDetailMessage{
+		Cmd:    protocol.CmdAgentToolDetail,
+		ID:     "conv-8",
+		CallID: "call-42",
+		Full:   protocol.Ptr(true),
+	})
+	d.handleAgentClearQueue(client, &protocol.AgentClearQueueMessage{Cmd: protocol.CmdAgentClearQueue, ID: "conv-8"})
+
+	want := []string{`"verb":"tool_detail"`, `"verb":"clear_queue"`}
+	got := make([]string, 0, 2)
+	for range want {
+		select {
+		case verb := <-received:
+			got = append(got, verb)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("only %d of %d verbs reached the host: %v", len(got), len(want), got)
+		}
+	}
+	joined := strings.Join(got, "\n")
+	for _, fragment := range append(want, `"call_id":"call-42"`, `"full":true`) {
+		if !strings.Contains(joined, fragment) {
+			t.Fatalf("host received %q, want it to contain %s", joined, fragment)
+		}
+	}
+}
+
+// A card that asks a session with no host must be told, or it spins forever.
+func TestToolDetailWithoutAHostIsAnError(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client := &wsClient{send: make(chan outboundMessage, 10)}
+
+	d.handleAgentToolDetail(client, &protocol.AgentToolDetailMessage{
+		Cmd:    protocol.CmdAgentToolDetail,
+		ID:     "gone",
+		CallID: "call-1",
+	})
+
+	select {
+	case msg := <-client.send:
+		if !strings.Contains(string(msg.payload), "no live conversation host") {
+			t.Fatalf("client got %q, want an error naming the missing host", string(msg.payload))
+		}
+	default:
+		t.Fatal("no command error for a detail fetch against a session with no host")
+	}
+}
+
 // A conversation session has no PTY to type into. The doorbell has to become a
 // steer down the host's own pipe — which also means it lands at the agent's
 // next turn boundary instead of after everything it had planned to do.

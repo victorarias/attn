@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConversationsStore, selectConversation, type AgentPromptMode } from '../../store/conversations';
 import { useDaemonApi } from '../../contexts/DaemonApiContext';
+import type { ResolvedTheme } from '../../hooks/useTheme';
+import { ToolCard } from './ToolCard';
 import './ConversationPane.css';
 
 interface ConversationPaneProps {
@@ -8,24 +10,26 @@ interface ConversationPaneProps {
   // Focused leaf of the visible session: only that pane's composer takes focus
   // on its own, so a split never steals the caret from the pane you are in.
   paneActive: boolean;
+  // Passed through to the diff an edit tool's card draws.
+  resolvedTheme?: ResolvedTheme;
 }
 
 /**
  * The surface a conversation session is drawn on, in place of a terminal.
  *
- * The whole pane is the host's envelope stream rendered: a message list and a
- * composer. It sends prompts and reads the store; it holds no picture of the
- * session that the stream did not give it.
+ * The whole pane is the host's envelope stream rendered: a transcript of what
+ * the agent said and did, and a composer. It sends prompts and reads the store;
+ * it holds no picture of the session that the stream did not give it.
  */
-export function ConversationPane({ sessionId, paneActive }: ConversationPaneProps) {
+export function ConversationPane({ sessionId, paneActive, resolvedTheme }: ConversationPaneProps) {
   const conversation = useConversationsStore(selectConversation(sessionId));
   const promptSent = useConversationsStore((state) => state.promptSent);
-  const { sendAgentPrompt } = useDaemonApi();
+  const { sendAgentPrompt, sendAgentClearQueue } = useDaemonApi();
   const [draft, setDraft] = useState('');
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
 
-  const { running, awaitingRun, ready, messages, queue } = conversation;
+  const { running, awaitingRun, ready, items, queue } = conversation;
   // Open for all of a run, shut only for the round trip that opens one. While
   // the run is live the two sends are steer and follow-up instead of prompt —
   // that is the whole difference, and it is why the user is never left with
@@ -35,7 +39,10 @@ export function ConversationPane({ sessionId, paneActive }: ConversationPaneProp
 
   // Follow the stream. Only when the reader is already at the bottom: scrolling
   // back to re-read something must not be yanked away by the next delta.
-  const lastLength = messages.reduce((total, message) => total + message.text.length, 0);
+  const lastLength = items.reduce(
+    (total, item) => total + (item.kind === 'message' ? item.text.length : item.summary.length),
+    0,
+  );
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -43,7 +50,7 @@ export function ConversationPane({ sessionId, paneActive }: ConversationPaneProp
     if (distanceFromBottom < 80) {
       list.scrollTop = list.scrollHeight;
     }
-  }, [lastLength, messages.length]);
+  }, [lastLength, items.length]);
 
   // The composer opens the moment the run closes, with the caret already in it.
   useEffect(() => {
@@ -82,27 +89,49 @@ export function ConversationPane({ sessionId, paneActive }: ConversationPaneProp
   return (
     <div className="conversation-pane" data-testid={`conversation-pane-${sessionId}`}>
       <div className="conversation-pane-messages" ref={listRef} data-testid="conversation-messages">
-        {messages.length === 0 ? (
+        {items.length === 0 ? (
           <div className="conversation-pane-empty">
             {ready ? 'Ask this agent something.' : 'Starting the agent...'}
           </div>
         ) : (
-          messages.map((message) => (
+          items.map((item) => (item.kind === 'tool' ? (
+            <ToolCard
+              key={`tool:${item.callId}`}
+              sessionId={sessionId}
+              tool={item}
+              resolvedTheme={resolvedTheme}
+            />
+          ) : (
             <div
-              key={message.id}
-              className={`conversation-message conversation-message--${message.role}`}
-              data-testid={`conversation-message-${message.id}`}
-              data-role={message.role}
-              data-streaming={message.streaming ? 'true' : 'false'}
+              key={`message:${item.id}`}
+              className={`conversation-message conversation-message--${item.role}`}
+              data-testid={`conversation-message-${item.id}`}
+              data-role={item.role}
+              data-streaming={item.streaming ? 'true' : 'false'}
             >
-              <div className="conversation-message-role">{message.role}</div>
-              <div className="conversation-message-text">{message.text}</div>
+              <div className="conversation-message-role">{item.role}</div>
+              <div className="conversation-message-text">{item.text}</div>
             </div>
-          ))
+          )))
         )}
       </div>
       {pending.length > 0 && (
         <div className="conversation-pane-queue" data-testid="conversation-queue">
+          <div className="conversation-pane-queue-header">
+            <span className="conversation-queued-label">Not read yet</span>
+            {/* pi clears both queues or neither — it offers no way to drop one
+                entry — so this says what it does. The strip empties on pi's own
+                queue_update, not on this click. */}
+            <button
+              type="button"
+              className="conversation-queue-clear"
+              data-testid="conversation-queue-clear"
+              title="Drop everything the agent has not read yet"
+              onClick={() => sendAgentClearQueue(sessionId)}
+            >
+              Cancel all
+            </button>
+          </div>
           {pending.map((entry, index) => (
             <div className="conversation-queued" key={`${index}-${entry}`} data-testid="conversation-queued">
               <span className="conversation-queued-label">

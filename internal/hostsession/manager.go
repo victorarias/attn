@@ -372,6 +372,31 @@ func (m *Manager) Deliver(sessionID string, how Delivery, text string) error {
 	return m.send(sessionID, map[string]interface{}{"verb": string(how), "text": text})
 }
 
+// ToolDetail asks a host for what an expanded tool card shows.
+//
+// The answer does not come back here: it arrives as another envelope on the
+// host's own stream, addressed by the same call id, and reaches every client
+// through the ordinary forwarding path. Two clients with the same card open
+// therefore cost one fetch, and neither has a request to time out.
+//
+// `full` asks for pi's untruncated output file rather than the clipped result
+// it handed the model; it means nothing for a call that produced no such file,
+// and the host answers with what it has.
+func (m *Manager) ToolDetail(sessionID, callID string, full bool) error {
+	if callID == "" {
+		return errors.New("tool detail needs a call id")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "tool_detail", "call_id": callID, "full": full})
+}
+
+// ClearQueue drops everything the agent has been sent and not yet read.
+//
+// The host answers with the agent's own queue state, so the strip a client is
+// drawing empties on the agent's word rather than on this call returning.
+func (m *Manager) ClearQueue(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "clear_queue"})
+}
+
 func (m *Manager) send(sessionID string, verb map[string]interface{}) error {
 	m.mu.Lock()
 	h, ok := m.hosts[sessionID]

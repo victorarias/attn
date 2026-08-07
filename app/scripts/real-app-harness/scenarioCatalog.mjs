@@ -273,6 +273,15 @@ export const scenarioCatalog = [
     timeoutMs: 420_000,
   },
   {
+    id: 'pi-host-tools',
+    label: 'Conversation session: tool cards, on-demand detail, full output, patch as a diff, queue cancel',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-tools'],
+    // Same prereqs as pi-host-conversation. Four prompts through a real agent,
+    // the last of which holds a `sleep 30` open so a steer is provably queued
+    // before it is cancelled.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

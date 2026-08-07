@@ -141,16 +141,41 @@ Goal: see what the agent did.
 
 Ships:
 
-- [ ] Semantic `tool_started`/`tool_finished` (name, status, files).
-- [ ] Render tool detail as collapsed cards, expand fetches detail on demand
-      (`fullOutputPath` for oversized bash output).
-- [ ] Edit-tool patches rendered with the existing diff viewer.
+- [x] Semantic `tool_started`/`tool_finished` (name, status, files). They are
+      semantic but **not** state declarations: `applyState` restamps
+      `state_since` on every apply, so a session that ran twenty tools would
+      report having been working only since the last one.
+- [x] Render tool detail as collapsed cards, expand fetches detail on demand
+      (`fullOutputPath` for oversized bash output). The `tool_detail` verb is
+      addressed by `call_id` and its answer is broadcast, so two clients showing
+      the same card cost one read and nothing can time out.
+- [x] Edit-tool patches rendered with the existing diff viewer — `PatchDiff`
+      from `@pierre/diffs`, fed pi's unified patch directly rather than
+      reconstructing before/after text the patch does not carry.
+- [x] pi's `toolResult` messages are dropped from the transcript. Found in live
+      verification: pi hands each tool's whole output back to the model as a
+      message of its own, and the pane was drawing it — 23,893 bytes for one
+      `seq 1 5000` — which is exactly the ballooning the collapsed card exists
+      to prevent. A message now appears only when it has text of its own, which
+      also retires the empty bubble a tool-only assistant turn used to leave.
+- [x] Cancelling a queued steer or follow-up (`clear_queue` → pi's
+      `clearQueue()`), carried over from slice 2. All-or-nothing, because pi
+      offers no per-entry removal; the strip empties on pi's answering
+      `queue_update`, never on the click.
 
 Acceptance:
 
-- [ ] A session that reads/edits/runs shows accurate cards.
-- [ ] Expanding a truncated bash output shows the full text.
-- [ ] A patch renders as a diff.
+- [x] A session that reads/edits/runs shows accurate cards.
+- [x] Expanding a truncated bash output shows the full text.
+- [x] A patch renders as a diff.
+- [x] A queued steer can be cancelled and the queue strip reflects it.
+
+All four are the packaged-app scenario `pi-host-tools`
+(`app/scripts/real-app-harness/scenario-pi-host-tools.mjs`), run against a real
+agent on a throwaway profile. It also asserts the negative that makes the cards
+worth having: after 5,000 lines of tool output, no message in the transcript
+carries it. The measured transcript for a session that read, printed 5,000
+lines, edited and slept is 406 characters.
 
 ### Slice 4 — dying and coming back
 

@@ -199,7 +199,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '215';
+export const PROTOCOL_VERSION = '216';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -3023,6 +3023,30 @@ export function useDaemonSocket({
     sendOrQueueCommand({ cmd: 'agent_prompt', id, text, ...(mode ? { mode } : {}) }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
+  // Asks the host for what one tool call actually read, wrote or printed. Sent
+  // when a tool card is opened, and again with `full` when the user asks for the
+  // whole of an output pi clipped.
+  //
+  // Fire-and-forget for the same reason as the prompt, and deliberately not a
+  // request/result pair: the host broadcasts the answer to every client, so the
+  // same card opened in two windows costs one read, and a card whose answer is
+  // already on its way asks for nothing. It also means a slow disk cannot time
+  // out a promise — the card simply fills in when the text arrives.
+  const sendAgentToolDetail = useCallback((id: string, callId: string, full?: boolean) => {
+    sendOrQueueCommand(
+      { cmd: 'agent_tool_detail', id, call_id: callId, ...(full ? { full } : {}) },
+      { waitForInitialState: true },
+    );
+  }, [sendOrQueueCommand]);
+
+  // Drops everything the user has sent that the agent has not read yet — both
+  // queues at once, which is all pi offers. The queue strip empties on the
+  // host's own queue_update rather than here, so what the app shows is still
+  // pi's answer about pi's queues and never a local guess.
+  const sendAgentClearQueue = useCallback((id: string) => {
+    sendOrQueueCommand({ cmd: 'agent_clear_queue', id }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
   // Pushes the app's resolved terminal theme colors to the daemon, which uses
   // them to seed the worker's authoritative color model and answer OSC
   // 10/11/12 (foreground/background/cursor) queries on behalf of every session
@@ -5152,6 +5176,8 @@ export function useDaemonSocket({
     sendUnsubscribeGitStatus,
     sendSessionSelected,
     sendAgentPrompt,
+    sendAgentToolDetail,
+    sendAgentClearQueue,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

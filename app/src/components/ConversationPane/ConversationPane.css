@@ -53,6 +53,138 @@
   color: var(--color-error);
 }
 
+/* One tool call. Collapsed it is a single line — name, what it was done to,
+   how it went — and it stays that way until someone opens it. Nothing here
+   animates: attn renders GPU terminals beside agents that run all day, and a
+   card that repaints while a tool runs would do it on every one of them. */
+.conversation-tool {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.conversation-tool-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-tool-caret {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.conversation-tool-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.conversation-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-tool-status {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* A failure is the one thing worth colouring: a card that reads the same
+   whether the tool worked or not makes the reader open every one of them. */
+.conversation-tool--error {
+  border-color: var(--color-error);
+}
+
+.conversation-tool--error .conversation-tool-status {
+  color: var(--color-error);
+}
+
+/* The headline of a failure, shown without opening the card. */
+.conversation-tool-error {
+  padding: 0 8px 6px 24px;
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conversation-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.conversation-tool-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-tool-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-tool-note--error {
+  color: var(--color-error);
+}
+
+.conversation-tool-action {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.conversation-tool-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Tool output is bounded here as well as at the host: a card is a glance at
+   what happened, and an 8,000-line file dropped into the transcript would push
+   everything the agent said off the screen. Scroll it in place instead. */
+.conversation-tool-output {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conversation-tool-patch {
+  max-height: 420px;
+  overflow: auto;
+}
+
 /* Sent and not yet read. It sits between the transcript and the composer
    because that is where it is in time: after everything the agent has said,
    before whatever the user is about to type. */
@@ -62,6 +194,23 @@
   flex-direction: column;
   gap: 4px;
   padding: 8px 12px 0;
+}
+
+.conversation-pane-queue-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conversation-queue-clear {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
 }
 
 .conversation-queued {
