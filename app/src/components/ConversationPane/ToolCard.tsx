@@ -44,12 +44,14 @@ export function ToolCard({ sessionId, tool, resolvedTheme = 'dark' }: ToolCardPr
     setRequested(full ? 'full' : 'clipped');
   }, [sendAgentToolDetail, sessionId, tool.callId]);
 
+  // The read is decided here rather than inside the updater: React may replay a
+  // state updater, and a replayed one would ask the host for the same detail
+  // twice.
   const toggle = useCallback(() => {
-    setExpanded((open) => {
-      if (!open && tool.hasDetail && !detail && requested === 'none') fetchDetail(false);
-      return !open;
-    });
-  }, [detail, fetchDetail, requested, tool.hasDetail]);
+    const opening = !expanded;
+    if (opening && tool.hasDetail && !detail && requested === 'none') fetchDetail(false);
+    setExpanded(opening);
+  }, [detail, expanded, fetchDetail, requested, tool.hasDetail]);
 
   // The patch pi hands us is already a unified diff against the file as it was,
   // so it is rendered as one rather than reconstructed into before/after text —

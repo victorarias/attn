@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { ConversationPane } from './index';
@@ -14,15 +15,16 @@ vi.mock('@pierre/diffs/react', () => ({
 
 const SESSION = 'sess-1';
 
-function renderPane(api: Partial<DaemonApi> = {}) {
+function renderPane(api: Partial<DaemonApi> = {}, { strict = false } = {}) {
   const sendAgentToolDetail = vi.fn();
   const sendAgentClearQueue = vi.fn();
   const full = { sendAgentPrompt: vi.fn(), sendAgentToolDetail, sendAgentClearQueue, ...api } as unknown as DaemonApi;
-  render(
+  const pane = (
     <DaemonApiProvider api={full}>
       <ConversationPane sessionId={SESSION} paneActive />
-    </DaemonApiProvider>,
+    </DaemonApiProvider>
   );
+  render(strict ? <StrictMode>{pane}</StrictMode> : pane);
   return { sendAgentToolDetail, sendAgentClearQueue };
 }
 
@@ -77,6 +79,19 @@ describe('ConversationPane tool cards', () => {
     // Closing and reopening must not re-ask: the answer is already on its way
     // or already here.
     fireEvent.click(screen.getByTestId('conversation-tool-toggle'));
+    fireEvent.click(screen.getByTestId('conversation-tool-toggle'));
+    expect(sendAgentToolDetail).toHaveBeenCalledTimes(1);
+  });
+
+  // React may invoke a state updater more than once, so the read has to be
+  // decided in the click handler and not inside the setter. StrictMode is how
+  // that replay is reproducible: with the decision inside the updater, one
+  // click asks the host twice.
+  it('asks once even when React replays the state update', () => {
+    const { sendAgentToolDetail } = renderPane({}, { strict: true });
+    apply('session_ready', {}, 1);
+    finishBash({}, 2);
+
     fireEvent.click(screen.getByTestId('conversation-tool-toggle'));
     expect(sendAgentToolDetail).toHaveBeenCalledTimes(1);
   });
