@@ -675,7 +675,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // synchronously inside the mount effect's own cleanup/scheduling without
     // triggering a render.
     const recoveryAttemptRef = useRef(0);
-    const recoveryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     // Dedupe failures from the same model while React applies the epoch bump.
     // Do not use this to represent a pending recovery: a replacement can fault
     // during its own initial fit and must trigger another rebuild.
@@ -2300,17 +2299,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       let observer: ResizeObserver | null = null;
       const container = containerRef.current;
       const canvas = canvasRef.current;
-      // Nothing has been allocated yet, so there is nothing to tear down —
-      // said as an explicit no-op cleanup so every path out of this effect
-      // returns one.
-      if (!container || !canvas) return () => {};
+      if (!container || !canvas) return;
       const perfId = `ghostty-${debugNameRef.current}`;
+      // The pending recovery timer. Owned by this effect run rather than by a
+      // ref, so the cleanup below is visibly the thing that cancels it and a
+      // torn-down pane can leave nothing behind. The attempt COUNT is a ref:
+      // it has to survive the epoch bump that rebuilds the renderer.
+      let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+
       // Schedules the next WebGL-recovery attempt (a lost context or a failed
       // renderer construction land here) with escalating backoff. A pending
       // timer is never doubled: a context-lost event and a construction
       // failure could otherwise both fire for the same dead renderer.
       const scheduleRecovery = () => {
-        if (recoveryTimerRef.current !== null) return;
+        if (recoveryTimer !== null) return;
         recoveryAttemptRef.current += 1;
         const attempt = recoveryAttemptRef.current;
         const delay = recoveryDelayMs(attempt);
@@ -2322,8 +2324,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
         noteRecovery(diagKeyRef.current, { session, paneKind, attempt, outcome: 'scheduled', delayMs: delay });
-        recoveryTimerRef.current = setTimeout(() => {
-          recoveryTimerRef.current = null;
+        recoveryTimer = setTimeout(() => {
+          recoveryTimer = null;
           // A stale timer must not resurrect a pane that has since unmounted
           // (or been torn down for an unrelated reason, e.g. this same effect
           // already cleaned up) — cleanup below also cancels this outright,
@@ -2573,9 +2575,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       return () => {
         active = false;
-        if (recoveryTimerRef.current !== null) {
-          clearTimeout(recoveryTimerRef.current);
-          recoveryTimerRef.current = null;
+        if (recoveryTimer !== null) {
+          clearTimeout(recoveryTimer);
+          recoveryTimer = null;
         }
         recordDiag({
           kind: 'pane_unmount',
