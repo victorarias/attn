@@ -250,9 +250,13 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     }, [annotationApi, bump, sessionId, store, writeNote]);
 
     // The latest persist, for the flush on the way out. The cleanup that runs
-    // it is registered once, so it cannot close over the render's copy.
+    // it is registered once, so it cannot close over the render's copy. Written
+    // after the commit, not during render: a render React discards must not
+    // leave its callback behind as the one the unmount flush will call.
     const persistRef = useRef(persist);
-    persistRef.current = persist;
+    useLayoutEffect(() => {
+      persistRef.current = persist;
+    }, [persist]);
 
     // Write the note through on a pause in typing rather than per keystroke:
     // one save per pause is all a burst of typing deserves, and everything else
