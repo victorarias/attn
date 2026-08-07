@@ -114,15 +114,47 @@ func spawnSleeper(t *testing.T, marker string) *exec.Cmd {
 	// `:` matters: with a lone simple command, sh exec's it directly and the
 	// process argv becomes bare `sleep 60`, losing the marker — which made this
 	// helper a race rather than a fixture.
-	cmd := exec.Command("sh", "-c", "sleep 60; :", marker)
+	//
+	// The leading `echo` is the readiness signal, and the helper does not return
+	// until it arrives. `Start()` returning does not mean argv is readable:
+	// Linux closes the exec pipe that unblocks the parent in begin_new_exec,
+	// before create_elf_tables publishes the new argv, so /proc/<pid>/cmdline
+	// can still read back empty when the parent looks straight away. Measured on
+	// Linux under 20 spinning shells, 10 of 400 spawns had no argv on the first
+	// read (worst wait 3.5ms) and 0 of 400 missed once gated on this byte; the
+	// gate took TestProcessHasArgIdentifiesOwnProcess from 14 failures in 2000
+	// runs to 0 in 2000 under the same load. argv is in place before the child
+	// executes its first instruction, so a byte from the child proves it is
+	// published, and proves it without consulting processHasArg, which this file
+	// also has to test honestly.
+	stdout, ready, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("sleeper readiness pipe: %v", err)
+	}
+	cmd := exec.Command("sh", "-c", "echo ready; sleep 60; :", marker)
+	cmd.Stdout = ready
 	if err := cmd.Start(); err != nil {
+		_ = stdout.Close()
+		_ = ready.Close()
 		t.Fatalf("start sleeper: %v", err)
 	}
+	_ = ready.Close()
 	t.Cleanup(func() {
+		_ = stdout.Close()
 		_ = cmd.Process.Kill()
 		_, _ = cmd.Process.Wait()
 	})
 	go func() { _, _ = cmd.Process.Wait() }()
+
+	// A tripwire, not a wait a healthy spawn ever feels: the readiness byte
+	// lands in microseconds, and only a sleeper that never execs at all reaches
+	// this deadline.
+	if err := stdout.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		t.Fatalf("sleeper readiness deadline: %v", err)
+	}
+	if _, err := stdout.Read(make([]byte, len("ready\n"))); err != nil {
+		t.Fatalf("sleeper never signalled readiness (marker %q): %v", marker, err)
+	}
 	return cmd
 }
 

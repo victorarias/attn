@@ -1,0 +1,10 @@
+kind: internal
+area: tests
+change: >
+  Removed the top CI flake and gave the next one a witness. The ptyworker reap
+  fixture now waits for its sleeper to signal before reading its argv, since a
+  process's argv is not readable the instant `Start()` returns (14 failures in
+  2000 loaded Linux runs, 0 after). The plugin-driver end-to-end test keeps a
+  daemon log and prints who saw what when a driver.session_closed notification
+  goes missing, and the daemon logs the three paths that used to drop or defer
+  that notification silently.
