@@ -696,7 +696,7 @@ describe('AnnotatedTerminal', () => {
   });
 });
 
-// Fifteen emoji-only chips is a row nobody can read. The line under it is what
+// Fourteen emoji-only chips is a row nobody can read. The line under it is what
 // makes the row learnable without hovering each one and waiting for a tooltip.
 describe('AnnotatedTerminal label hint', () => {
   function hint(): string {
@@ -819,6 +819,36 @@ describe('AnnotatedTerminal note', () => {
 
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
     await waitFor(() => expect(daemon.note).toBe(''));
+  });
+
+  it('is kept on the daemon when it was typed over while the send was in flight', async () => {
+    // The last mark is spent, so the client raises a tombstone — and the
+    // tombstone zeroes the note column too. A note the user typed DURING the
+    // flight is not what was sent, so it stays on screen; it has to stay in
+    // the store with it, or closing the pane loses a sentence that is visibly
+    // still there.
+    const { daemon } = renderTerminal({ paneActive: true });
+    daemon.releaseSubmit = () => {};
+    await windowReady('turn-1');
+    anchor('turn-1', 0, 26);
+    fireEvent.click(screen.getByLabelText('Verify this'));
+    writeNote('Split this into two PRs.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
+
+    fireEvent.click(screen.getByText('Send all'));
+    await waitFor(() => expect(daemon.submitted).toHaveLength(1));
+
+    // Mid-flight, the user keeps typing.
+    writeNote('Split this into two PRs, smallest first.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs, smallest first.'));
+
+    await act(async () => {
+      daemon.releaseSubmit?.();
+    });
+
+    await waitFor(() => expect(daemon.annotations).toHaveLength(0));
+    expect(noteBox().value).toBe('Split this into two PRs, smallest first.');
+    await waitFor(() => expect(daemon.note).toBe('Split this into two PRs, smallest first.'));
   });
 
   it('is kept by a send the session refused', async () => {

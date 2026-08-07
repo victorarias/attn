@@ -164,7 +164,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     const windowErrorRef = useRef<string | null>(null);
     const [draft, setDraft] = useState('');
 
-    // What the chip row is about to do, named in words under it. Fifteen
+    // What the chip row is about to do, named in words under it. Fourteen
     // emoji-only buttons is a row you have to hover one at a time to read, and
     // the native tooltip arrives a second late — long enough that the fast way
     // to find a label is to click one and undo it. The line is always drawn so
@@ -672,8 +672,10 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           // that was already in flight and keeps sent marks from reappearing.
           // A tombstone when nothing survived; an ordinary write-through of the
           // survivors when something did, because a tombstone would take them
-          // with it.
-          if (kept > 0) {
+          // with it. A note typed over during the flight is a survivor too —
+          // the clear zeroes the note column, so tombstoning here would drop a
+          // sentence that is still on screen and belongs to the next send.
+          if (kept > 0 || noteRef.current.trim()) {
             persist();
             return;
           }

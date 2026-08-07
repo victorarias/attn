@@ -77,10 +77,21 @@ describe('retired labels', () => {
     expect(labelById('never-existed')).toBeUndefined();
   });
 
-  it('stay out of the emoji lookup, which only ever names a live label', () => {
-    // Two retired labels share 👍, so there is no answer to give here — and a
-    // terminal payload that named a label nobody can pick would be a lie.
-    expect(labelByEmoji('👍')).toBeUndefined();
+  it('still resolve by emoji, which is all a terminal mark stores', () => {
+    // A terminal mark persists nothing but the emoji, and drafts outlive the
+    // upgrade that retired a label. Without this, a mark saved as 🧪 comes back
+    // headed "🧪 Comment" with its instruction dropped — the user's own label
+    // turned into an unlabelled one.
+    expect(labelByEmoji('🧪')?.text).toBe('Needs tests');
+    expect(labelByEmoji('🚫')?.text).toBe('Out of scope');
     expect(labelByEmoji('💯')?.id).toBe('exactly-this');
+    expect(labelByEmoji('🦄')).toBeUndefined();
+  });
+
+  it('answer the one ambiguous emoji with the label the picker offered', () => {
+    // 'nice-approach' and 'thumbs-up' both wore 👍. It was never a terminal
+    // emoji, so nothing on disk depends on the answer — but the lookup must
+    // still give one rather than depend on array order by accident.
+    expect(labelByEmoji('👍')?.id).toBe('nice-approach');
   });
 });

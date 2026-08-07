@@ -184,9 +184,18 @@ export const RETIRED_LABELS: QuickLabel[] = [
   { id: 'thumbs-up', emoji: '👍', text: 'Looks good', color: 'green' },
 ];
 
-/** Resolves a live label by the emoji a terminal mark carries. */
+/**
+ * Resolves a label by the emoji a terminal mark carries, retired ones included.
+ * A terminal mark stores nothing but the emoji, and drafts outlive an upgrade:
+ * a mark made with a label that has since been withdrawn still has to render
+ * as what the user said and still has to carry its instruction when sent.
+ *
+ * 👍 is the one ambiguity — two retired labels wore it — and it resolves to the
+ * first, which is the one the picker offered. It was never a terminal emoji.
+ */
 export function labelByEmoji(emoji: string): QuickLabel | undefined {
-  return QUICK_LABELS.find((label) => label.emoji === emoji);
+  return QUICK_LABELS.find((label) => label.emoji === emoji)
+    ?? RETIRED_LABELS.find((label) => label.emoji === emoji);
 }
 
 /**

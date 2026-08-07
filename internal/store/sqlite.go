@@ -2187,17 +2187,6 @@ func applyMigration85(tx *sql.Tx) error {
 //
 // Guarded on the new registry's minting column, so a rewound schema_migrations
 // table re-runs it without erroring on work already done.
-// Guarded on the column, so a rewound schema_migrations table re-runs it
-// without failing on work already done.
-func applyMigration93(tx *sql.Tx) error {
-	has, err := columnExists(tx, "session_annotation_drafts", "note")
-	if err != nil || has {
-		return err
-	}
-	_, err = tx.Exec("ALTER TABLE session_annotation_drafts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
-	return err
-}
-
 func applyMigration89(tx *sql.Tx) error {
 	migrated, err := columnExists(tx, "document_collections", "id")
 	if err != nil || migrated {
@@ -2337,6 +2326,18 @@ func applyMigration92(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+// applyMigration93 adds the note a user writes alongside a session's
+// annotation marks. Guarded on the column, so a rewound schema_migrations
+// table re-runs it without failing on work already done.
+func applyMigration93(tx *sql.Tx) error {
+	has, err := columnExists(tx, "session_annotation_drafts", "note")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE session_annotation_drafts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
 	return err
 }
 
