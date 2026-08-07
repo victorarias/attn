@@ -7,22 +7,24 @@ import (
 	"golang.org/x/sys/unix"
 )
 
+// stampResolution is how finely a stamp from this platform separates two
+// births. It has to stay well under the interval in which a pid can be handed
+// out again: reuse needs the pid space to wrap, and on this machine (M-series,
+// kern.maxproc 8000, ceiling ~99998) the first reuse took 2m37s of nothing but
+// forking — 92043 spawns at 588/s.
+const stampResolution = time.Microsecond
+
 // processStartTime reads the process's birth time from
-// sysctl kern.proc.pid.<pid> — kinfo_proc's p_starttime, a timeval, so
-// microsecond resolution.
+// sysctl kern.proc.pid.<pid> — kinfo_proc's p_starttime, a timeval.
 //
 // `ps -o lstart=` is the obvious alternative and is the wrong tool: Darwin's
 // ps(1) formats lstart with strftime %c, whole seconds and nothing below.
-// Receipt for preferring the sysctl: pid reuse needs the pid space to wrap, and
-// on this machine (M-series, kern.maxproc 8000, ceiling ~99998) the first reuse
-// took 2m37s of nothing but forking — 92043 spawns at 588/s. So a 1-second
-// stamp was not in fact a coin flip; it had two orders of magnitude of margin
-// at that fork rate. But that margin is a timing coincidence measured on one
-// idle laptop: it shrinks with a faster forker and with a lowered pid ceiling,
-// and nothing in the system would tell us when it got thin. The gate that stops
-// this package from signalling a stranger should not rest on that, and 1µs —
-// eight orders of magnitude under the measured floor — costs nothing.
-const stampResolution = time.Microsecond
+// Against the reuse floor above, a 1-second stamp was not in fact a coin flip;
+// it had two orders of magnitude of margin at that fork rate. But that margin
+// is a timing coincidence measured on one idle laptop: it shrinks with a faster
+// forker and with a lowered pid ceiling, and nothing in the system would tell
+// us when it got thin. The gate that stops this package from signalling a
+// stranger should not rest on that, and 1µs costs nothing.
 func processStartTime(pid int) (string, error) {
 	proc, err := unix.SysctlKinfoProc("kern.proc.pid", pid)
 	if err != nil {
