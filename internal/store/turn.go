@@ -25,12 +25,23 @@ type TurnStamps struct {
 // age it was opened at, so a row never moves in the queue while the user works
 // with the agent, and a re-reported state cannot disturb it.
 //
+// The guard is a text comparison — turn_opened_at and turn_settled_at are TEXT
+// columns — so the stored encoding is the whole definition of "still open", and
+// it has to be one whose text order is time order within a second. That is
+// sortableTimeFormat. Under the RFC3339Nano this used to write, a stamp whose
+// fraction another stamp extends sorted above it ('Z' is 0x5A, above '.' and
+// every digit), so a turn settled inside the second it was opened in read as
+// still open and the next turn silently never opened. Whole-second opens are the
+// ordinary case, not a coincidence: a day-named snooze wakes on an exact second
+// and the woken turn is stamped with that deadline. Migration 95 rewrote the
+// stored stamps.
+//
 // It returns true when a turn was opened.
 func (s *Store) OpenTurnIfClosed(id string, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(sortableTimeFormat)
 
 	if s.db == nil {
 		if _, ok := s.sessions[id]; !ok {
@@ -76,7 +87,7 @@ func (s *Store) SettleTurn(id string, now time.Time) bool {
 	}
 
 	result, err := s.db.Exec(`UPDATE sessions SET turn_settled_at = ? WHERE id = ?`,
-		now.UTC().Format(time.RFC3339Nano), id)
+		now.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SettleTurn: failed for session %s: %v", id, err)
 		return false
@@ -113,7 +124,7 @@ func (s *Store) SnoozeTurn(id string, until, now time.Time) bool {
 
 	result, err := s.db.Exec(
 		`UPDATE sessions SET turn_settled_at = ?, turn_snoozed_until = ? WHERE id = ?`,
-		now.UTC().Format(time.RFC3339Nano), until.UTC().Format(time.RFC3339Nano), id)
+		now.UTC().Format(sortableTimeFormat), until.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SnoozeTurn: failed for session %s: %v", id, err)
 		return false
@@ -167,14 +178,14 @@ func (s *Store) WakeTurnAt(id string, deadline time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stamp := deadline.UTC().Format(time.RFC3339Nano)
+	stamp := deadline.UTC().Format(sortableTimeFormat)
 
 	if s.db == nil {
 		current, ok := s.turnStamps[id]
 		if !ok || current.SnoozedUntil.IsZero() {
 			return false
 		}
-		if current.SnoozedUntil.UTC().Format(time.RFC3339Nano) != stamp {
+		if current.SnoozedUntil.UTC().Format(sortableTimeFormat) != stamp {
 			return false
 		}
 		current.SnoozedUntil = time.Time{}
@@ -263,13 +274,10 @@ func (s *Store) setTurnStampsLocked(id string, stamps TurnStamps) {
 	s.turnStamps[id] = stamps
 }
 
-func parseTurnStamp(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed
-}
+// parseTurnStamp decodes a stored turn stamp in any RFC3339 spelling — the
+// fixed-width one written today and the trailing-zero-stripped one written
+// before migration 95 — and yields the zero time for the ” that means "no turn
+// here" as well as for anything it cannot read. It is parseStoreTime, which the
+// job queue and the notifications feed already decode with: the columns hold one
+// encoding, so they get one decoder.
+func parseTurnStamp(value string) time.Time { return parseStoreTime(value) }

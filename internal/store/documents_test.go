@@ -31,7 +31,7 @@ func storeWithRequests(t *testing.T, bodies map[string]string) (*Store, time.Tim
 	t.Helper()
 	s := New()
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	i := 0
@@ -107,7 +107,7 @@ func queryIDs(t *testing.T, s *Store, q docstore.Query) []string {
 func TestADeclarationRoundTripsThroughTheDatabase(t *testing.T) {
 	s := New()
 	now := time.Now().UTC()
-	if err := s.DefineDocumentCollection(requestsDeclaration(), now); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), now); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	got, ok, err := s.DocumentCollection("ext/approval-gate", "requests")
@@ -132,7 +132,7 @@ func TestRedeclaringAddsAQueryableFieldWithoutTouchingDocuments(t *testing.T) {
 	})
 	schema := requestsDeclaration()
 	schema.Fields = append(schema.Fields, docstore.FieldSpec{Name: "note", Type: docstore.FieldString})
-	if err := s.DefineDocumentCollection(schema, base); err != nil {
+	if _, err := s.DefineDocumentCollection(schema, base); err != nil {
 		t.Fatalf("redefine: %v", err)
 	}
 	ids := queryIDs(t, s, docstore.Query{
@@ -371,7 +371,7 @@ func TestPagingAnUnsortedQuery(t *testing.T) {
 func TestPagingByCreatedAtWithIdenticalTimestamps(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	for _, id := range []string{"a", "b", "c"} {
@@ -418,7 +418,7 @@ func TestTwoNamespacesWithTheSameCollectionNameStaySeparate(t *testing.T) {
 	s, base := storeWithRequests(t, map[string]string{"shared-id": `{"status":"pending"}`})
 	other := requestsDeclaration()
 	other.Namespace = "ext/other"
-	if err := s.DefineDocumentCollection(other, base); err != nil {
+	if _, err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatalf("define other: %v", err)
 	}
 	if _, err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "shared-id", []byte(`{"status":"approved"}`), base, nil); err != nil {
@@ -666,7 +666,7 @@ func TestConcurrentReadModifyWritesLoseNoUpdate(t *testing.T) {
 		t.Fatalf("open: %v", err)
 	}
 	defer s.Close()
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	schema := requestsDecl(t, s)
@@ -780,7 +780,7 @@ func TestCountIsScopedToTheCollection(t *testing.T) {
 	s, base := storeWithRequests(t, map[string]string{"a": `{"status":"pending"}`, "b": `{"status":"pending"}`})
 	other := requestsDeclaration()
 	other.Namespace = "ext/other"
-	if err := s.DefineDocumentCollection(other, base); err != nil {
+	if _, err := s.DefineDocumentCollection(other, base); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := s.PutDocument(declOf(t, s, "ext/other", "requests"), "z", []byte(`{"status":"x"}`), base, nil); err != nil {
@@ -839,7 +839,7 @@ func TestDocumentsSurviveReopeningTheDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	if err := first.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := first.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	if _, err := first.PutDocument(declOf(t, first, "ext/approval-gate", "requests"), "a", []byte(`{"status":"pending"}`), base, nil); err != nil {
@@ -1082,7 +1082,7 @@ func TestCollectionsWithTheSameFieldNameDoNotShareStorage(t *testing.T) {
 			Namespace: "ext/approval-gate", Collection: coll,
 			Fields: []docstore.FieldSpec{{Name: "status", Type: docstore.FieldString}},
 		}
-		if err := s.DefineDocumentCollection(schema, now); err != nil {
+		if _, err := s.DefineDocumentCollection(schema, now); err != nil {
 			t.Fatalf("define %s: %v", coll, err)
 		}
 		if _, err := s.PutDocument(declOf(t, s, "ext/approval-gate", coll), coll+"-1",
@@ -1107,7 +1107,7 @@ func TestRedeclaringRemovesAFieldAndCanBringItBack(t *testing.T) {
 	})
 	withoutUrgent := requestsDeclaration()
 	withoutUrgent.Fields = withoutUrgent.Fields[:2]
-	if err := s.DefineDocumentCollection(withoutUrgent, base); err != nil {
+	if _, err := s.DefineDocumentCollection(withoutUrgent, base); err != nil {
 		t.Fatalf("redeclare without urgent: %v", err)
 	}
 
@@ -1120,7 +1120,7 @@ func TestRedeclaringRemovesAFieldAndCanBringItBack(t *testing.T) {
 		t.Fatal("filtering on an undeclared field compiled; it must be rejected")
 	}
 
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("redeclare with urgent: %v", err)
 	}
 	got := queryIDs(t, s, docstore.Query{
@@ -1142,7 +1142,7 @@ func TestRedeclaringAFieldsTypeChangesHowItCompares(t *testing.T) {
 	})
 	asText := requestsDeclaration()
 	asText.Fields[1] = docstore.FieldSpec{Name: "attempts", Type: docstore.FieldString}
-	if err := s.DefineDocumentCollection(asText, base); err != nil {
+	if _, err := s.DefineDocumentCollection(asText, base); err != nil {
 		t.Fatalf("redeclare attempts as string: %v", err)
 	}
 	got := queryIDs(t, s, docstore.Query{
@@ -1175,7 +1175,7 @@ func TestUndefiningDropsTheStorageAndRedeclaringStartsEmpty(t *testing.T) {
 		t.Fatalf("declaration after undefine: ok=%v err=%v", ok, err)
 	}
 
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("redefine: %v", err)
 	}
 	after := declOf(t, s, "ext/approval-gate", "requests")
@@ -1356,7 +1356,7 @@ func seedPreRevisionDocuments(t *testing.T, dbPath string) {
 		t.Fatalf("open for seeding: %v", err)
 	}
 	base := time.Date(2026, 8, 3, 9, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("seed declaration: %v", err)
 	}
 	schema := declOf(t, s, "ext/approval-gate", "requests")

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "215"
+const ProtocolVersion = "216"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -32,6 +32,18 @@ const (
 	// operator that does not exist, a bound of the wrong type, a cursor pointing
 	// at a document that is gone. The message says which.
 	ErrorCodeInvalidQuery = "invalid_query"
+	// ErrorCodeCollectionUndefined ends a live subscription because the
+	// collection it watches was removed. Distinct from
+	// ErrorCodeUndeclaredCollection, which answers a request against a
+	// collection that was never there: this one says an accepted subscription's
+	// target went away underneath it, which is a UI host's "kill the tile"
+	// rather than "the caller asked for the wrong thing".
+	ErrorCodeCollectionUndefined = "collection_undefined"
+	// ErrorCodeCollectionRedeclared ends a live subscription because the
+	// collection was redeclared without a field the query uses. The query can
+	// never be answered again as written, so the tile's query is what has to
+	// change; resubscribing unchanged would fail the same way.
+	ErrorCodeCollectionRedeclared = "collection_redeclared"
 )
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the

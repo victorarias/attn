@@ -36,7 +36,7 @@ func storeWithRaggedStamps(t *testing.T) (*Store, docstore.CollectionSchema, tim
 	t.Helper()
 	s := New()
 	base := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	schema := declOf(t, s, "ext/approval-gate", "requests")
@@ -221,7 +221,7 @@ func TestMigration91RewritesStampsThatDoNotSort(t *testing.T) {
 	defer s.Close()
 
 	base := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	schema := declOf(t, s, "ext/approval-gate", "requests")

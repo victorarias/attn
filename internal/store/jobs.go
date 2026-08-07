@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/victorarias/attn/internal/docstore"
 )
 
 // This is the SQLite persistence for the durable job queue (internal/jobs).
@@ -13,10 +15,24 @@ import (
 // keeps this package a leaf (internal/store imports neither internal/jobs nor
 // internal/daemon).
 
-// jobTimeFormat is the stored timestamp encoding. RFC3339Nano preserves the
-// sub-second precision the queue's backoff and debounce timing relies on, and it
-// sorts lexicographically, which is what lets scheduled_at be an index term.
-const jobTimeFormat = time.RFC3339Nano
+// sortableTimeFormat is the stored timestamp encoding for the two surfaces in
+// this package that keep their stamps in TEXT columns and compare them there:
+// the job queue (scheduled_at, created_at, updated_at) and the notifications
+// feed (created_at). Text order has to be time order, which takes a fraction of
+// a fixed width, always present and always nine digits.
+//
+// time.RFC3339Nano, which this used to be, does not: it strips trailing zeros,
+// so widths vary and "…:00Z" sorts above "…:00.5Z" ('Z' is 0x5A, above '.' and
+// every digit). Within one second the two orders disagreed, which made a job
+// scheduled on a whole second wait out the rest of that second before
+// `scheduled_at <= now` claimed it, and scrambled both feeds' listings among
+// rows written in the same second. Migration 94 rewrote the stored stamps.
+//
+// It is docstore.TimeFormat: the document store hit the same defect and this is
+// the same fix, so there is one spelling of it rather than two that must be kept
+// in step. Always formatted from a UTC time, so the zone is always "Z" and every
+// stored stamp is the same 30 characters wide.
+const sortableTimeFormat = docstore.TimeFormat
 
 // rowScanner is satisfied by both *sql.Row and *sql.Rows, so one scan helper
 // serves a single-row lookup and a listing. It lives here because the job queue
@@ -84,9 +100,9 @@ func upsertJob(ex execer, rec JobRecord) error {
 		   created_at=excluded.created_at,
 		   updated_at=excluded.updated_at`,
 		rec.ID, rec.Kind, rec.UniqueKey, rec.Priority, rec.Payload, rec.Result, rec.State,
-		rec.Attempts, rec.MaxAttempts, rec.ScheduledAt.UTC().Format(jobTimeFormat),
+		rec.Attempts, rec.MaxAttempts, rec.ScheduledAt.UTC().Format(sortableTimeFormat),
 		rec.LastError, boolToInt(rec.Requeued),
-		rec.CreatedAt.UTC().Format(jobTimeFormat), rec.UpdatedAt.UTC().Format(jobTimeFormat),
+		rec.CreatedAt.UTC().Format(sortableTimeFormat), rec.UpdatedAt.UTC().Format(sortableTimeFormat),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert job %s: %w", rec.ID, err)
@@ -170,7 +186,7 @@ func (s *Store) EligibleJobs(now time.Time, limit int) ([]JobRecord, error) {
 		 WHERE state IN ('queued', 'failed') AND scheduled_at <= ?
 		 ORDER BY priority DESC, scheduled_at ASC, created_at ASC
 		 LIMIT ?`,
-		now.UTC().Format(jobTimeFormat), limit)
+		now.UTC().Format(sortableTimeFormat), limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: eligible jobs: %w", err)
 	}
@@ -185,7 +201,7 @@ func (s *Store) RecoverRunningJobs(now time.Time) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("store: no database")
 	}
-	ts := now.UTC().Format(jobTimeFormat)
+	ts := now.UTC().Format(sortableTimeFormat)
 	res, err := s.db.Exec(
 		`UPDATE jobs SET state='queued', scheduled_at=?, updated_at=? WHERE state='running'`, ts, ts)
 	if err != nil {
@@ -207,7 +223,7 @@ func (s *Store) TrimDoneJobs(cutoff time.Time) (int, error) {
 		return 0, fmt.Errorf("store: no database")
 	}
 	res, err := s.db.Exec(
-		`DELETE FROM jobs WHERE state='done' AND updated_at < ?`, cutoff.UTC().Format(jobTimeFormat))
+		`DELETE FROM jobs WHERE state='done' AND updated_at < ?`, cutoff.UTC().Format(sortableTimeFormat))
 	if err != nil {
 		return 0, fmt.Errorf("store: trim done jobs: %w", err)
 	}
@@ -249,19 +265,16 @@ func scanJobRow(sc rowScanner) (*JobRecord, error) {
 	return &rec, nil
 }
 
-// parseStoreTime decodes a stored timestamp, tolerating the plain RFC3339 form as
-// well as RFC3339Nano. A blank/garbage value yields the zero time rather than an
-// error — a job with an unreadable timestamp is still a real record, and the
-// queue treats a zero scheduled_at as "eligible now".
+// parseStoreTime decodes a stored timestamp in any RFC3339 form — the
+// fixed-width one written today, the trailing-zero-stripped one written before
+// migration 94, or a whole second with no fraction at all. A blank/garbage value
+// yields the zero time rather than an error: a job with an unreadable timestamp
+// is still a real record, and the queue treats a zero scheduled_at as
+// "eligible now".
 func parseStoreTime(s string) time.Time {
-	if s == "" {
+	t, err := docstore.ParseTime(s)
+	if err != nil {
 		return time.Time{}
 	}
-	if t, err := time.Parse(jobTimeFormat, s); err == nil {
-		return t.UTC()
-	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.UTC()
-	}
-	return time.Time{}
+	return t
 }

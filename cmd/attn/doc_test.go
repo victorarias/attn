@@ -61,14 +61,14 @@ func TestWhereRejectsAnExpressionWithNoOperator(t *testing.T) {
 // the advance still carries to the next iteration — otherwise a flag's value
 // would be parsed again as if it were a flag.
 func TestQueryFlagsConsumeTheirValues(t *testing.T) {
-	query, asJSON := parseDocQueryFlags("query", "ext/approval-gate", "requests", []string{
+	query, opts := parseDocQueryFlags("query", "ext/approval-gate", "requests", []string{
 		"--where", "status=pending",
 		"--sort", "created_at",
 		"--desc",
 		"--limit", "7",
 		"--json",
 	})
-	if !asJSON {
+	if !opts.asJSON {
 		t.Fatal("--json not seen")
 	}
 	if query.Namespace != "ext/approval-gate" || query.Collection != "requests" {
@@ -82,6 +82,15 @@ func TestQueryFlagsConsumeTheirValues(t *testing.T) {
 	}
 	if query.Limit == nil || *query.Limit != 7 {
 		t.Fatalf("limit = %v", query.Limit)
+	}
+}
+
+// --resume is a watch flag. A one-shot read that accepted it would silently
+// ignore it, and the caller would believe it had asked for something.
+func TestResumeBelongsToWatch(t *testing.T) {
+	_, opts := parseDocQueryFlags("watch", "ext/a", "c", []string{"--resume"})
+	if !opts.resume {
+		t.Fatal("--resume not seen on watch")
 	}
 }
 

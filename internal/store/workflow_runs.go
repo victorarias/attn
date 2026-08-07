@@ -2,7 +2,30 @@ package store
 
 import (
 	"database/sql"
+
+	"github.com/victorarias/attn/internal/docstore"
 )
+
+// normalizeWorkflowStamp re-encodes a caller-supplied stamp into the encoding the
+// run listing orders by, and leaves anything it cannot read alone.
+//
+// The normalizing happens here rather than at the writers because created_at is
+// ORDER BY'd as text, so this column's order is the store's promise, not the
+// caller's. The callers reach it through protocol.TimestampNow(), which renders
+// time.Now() in the local zone with a trailing-zero-stripped fraction — two runs
+// started inside one second, or either side of a DST change, came back in an
+// order that was not theirs. That helper is the wire's spelling and is left as
+// it is; this is the one column whose order depends on it.
+func normalizeWorkflowStamp(s string) string {
+	if s == "" {
+		return s
+	}
+	t, err := docstore.ParseTime(s)
+	if err != nil {
+		return s
+	}
+	return t.Format(sortableTimeFormat)
+}
 
 // workflowScanner abstracts *sql.Row and *sql.Rows so a single scanner func can
 // serve both QueryRow and Query loops.
@@ -96,7 +119,7 @@ func (s *Store) UpsertWorkflowRun(run *WorkflowRunRow) error {
 		nullPtrString(run.ResultJSON),
 		nullPtrString(run.LastError),
 		boolToInt(run.Resumable),
-		run.CreatedAt,
+		normalizeWorkflowStamp(run.CreatedAt),
 		run.UpdatedAt,
 		nullPtrString(run.CompletedAt),
 	)

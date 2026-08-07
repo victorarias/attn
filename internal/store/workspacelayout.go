@@ -25,7 +25,7 @@ func (s *Store) SaveWorkspaceLayout(snapshot workspacelayout.WorkspaceLayout) er
 		return err
 	}
 
-	now := time.Now().Format(time.RFC3339Nano)
+	now := time.Now().UTC().Format(sortableTimeFormat)
 	tx, err := s.db.Begin()
 	if err != nil {
 		return err

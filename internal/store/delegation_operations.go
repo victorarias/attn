@@ -36,7 +36,7 @@ func (s *Store) ClaimDelegationOperation(requestID, operationID, sessionID, chie
 	if s.db == nil {
 		return nil, false, errors.New("delegation idempotency requires a database")
 	}
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(sortableTimeFormat)
 	result, err := s.db.Exec(`INSERT INTO delegation_operations
 		(request_id, operation_id, request_json, state, progress, session_id, chief_session_id, ticket_id, created_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -113,7 +113,7 @@ func getDelegationOperation(db *sql.DB, id string) (*DelegationOperationRecord, 
 func (s *Store) MarkDelegationWorktreeOwned(id, path, token string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(sortableTimeFormat)
 	_, err := s.db.Exec(`UPDATE delegation_operations SET worktree_path = ?, worktree_owned = 1, worktree_token = ?, updated_at = ?
 		WHERE request_id = ? OR operation_id = ?`, path, token, stamp, id, id)
 	return err
@@ -137,7 +137,7 @@ func (s *Store) UpdateDelegationOperation(id string, state protocol.DelegationOp
 	if operationErr != nil {
 		errorText = operationErr.Error()
 	}
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(sortableTimeFormat)
 	_, err := s.db.Exec(`UPDATE delegation_operations SET state = ?, progress = ?,
 		workspace_id = CASE WHEN ? = '' THEN workspace_id ELSE ? END,
 		ticket_id = CASE WHEN ? = '' THEN ticket_id ELSE ? END,

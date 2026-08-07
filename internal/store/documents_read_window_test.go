@@ -129,7 +129,7 @@ func TestAFilterIsBoundUnderTheDeclarationItRunsAgainst(t *testing.T) {
 			next.Fields[i].Type = docstore.FieldString
 		}
 	}
-	if err := s.DefineDocumentCollection(next, base.Add(time.Hour)); err != nil {
+	if _, err := s.DefineDocumentCollection(next, base.Add(time.Hour)); err != nil {
 		t.Fatalf("redeclare: %v", err)
 	}
 

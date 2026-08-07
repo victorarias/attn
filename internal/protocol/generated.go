@@ -1236,16 +1236,25 @@ type DocSubscribeMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Have corresponds to the JSON schema field "have".
+	Have []DocumentRevision `json:"have,omitempty,omitzero"`
+
 	// Query corresponds to the JSON schema field "query".
 	Query DocumentQuery `json:"query"`
 }
 
 type DocSubscribeResult struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
 	// Delivery corresponds to the JSON schema field "delivery".
 	Delivery int `json:"delivery"`
 
-	// Documents corresponds to the JSON schema field "documents".
-	Documents []StoredDocument `json:"documents"`
+	// Order corresponds to the JSON schema field "order".
+	Order []string `json:"order"`
+
+	// Upsert corresponds to the JSON schema field "upsert".
+	Upsert []StoredDocument `json:"upsert"`
 }
 
 type DocUndefineMessage struct {
@@ -1338,6 +1347,14 @@ type DocumentQuery struct {
 
 	// Sort corresponds to the JSON schema field "sort".
 	Sort *DocumentSort `json:"sort,omitempty,omitzero"`
+}
+
+type DocumentRevision struct {
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Rev corresponds to the JSON schema field "rev".
+	Rev int `json:"rev"`
 }
 
 type DocumentSort struct {
