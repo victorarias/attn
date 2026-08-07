@@ -394,6 +394,7 @@ func reportProcReap(label, noun string, results []procreap.ReapResult) {
 		procreap.ReapAlreadyGone,
 		procreap.ReapUnidentified,
 		procreap.ReapSurvived,
+		procreap.ReapUnreadable,
 	}
 	parts := make([]string, 0, len(order))
 	for _, outcome := range order {
@@ -410,6 +411,9 @@ func reportProcReap(label, noun string, results []procreap.ReapResult) {
 		case procreap.ReapSurvived:
 			fmt.Printf("           ! %s %s: pid %d survived SIGKILL (%v)\n",
 				noun, res.ID, res.PID, res.Err)
+		case procreap.ReapUnreadable:
+			fmt.Printf("           ! record %s could not be read (%v); whatever it described was not reaped — check `ps` for stray %s processes\n",
+				res.ID, res.Err, noun)
 		}
 	}
 }

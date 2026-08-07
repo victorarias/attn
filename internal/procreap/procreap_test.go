@@ -84,6 +84,75 @@ while true; do sleep 0.05; done
 	}
 }
 
+// The identity gate is only as good as the stamp's resolution. A stamp coarser
+// than the interval in which the kernel can hand the same pid to a different
+// process lets an imposter through the gate, and the reaper then SIGTERMs,
+// SIGKILLs and group-sweeps a stranger — the kill-by-pattern this package
+// exists to avoid.
+//
+// The floor a stamp has to beat is the pid-reuse interval, which requires a
+// full wrap of the pid space: measured at 2m37s on macOS (92043 spawns at
+// 588/s, ceiling ~99998) and at more than 4 minutes on Linux (1949409 spawns at
+// 8123/s without a single reuse, pid_max 4194304). Each platform's
+// stampResolution — 1µs from the Darwin sysctl, 10ms from Linux's /proc — sits
+// orders of magnitude under that, and this pins it: processes spawned that far
+// apart must carry different stamps. A second-granularity source (Darwin's
+// `ps -o lstart=`, whose strftime %c drops everything below a second) fails
+// here.
+func TestStartTimeStampResolvesFasterThanPidsAreReused(t *testing.T) {
+	// Generous multiple of the platform floor, still five orders of magnitude
+	// under the measured reuse interval.
+	separation := 20 * stampResolution
+	if separation < time.Millisecond {
+		separation = time.Millisecond
+	}
+	script := writeScript(t, "while true; do sleep 0.05; done\n")
+
+	spawn := func() (int, string) {
+		t.Helper()
+		cmd := exec.Command(script)
+		if err := cmd.Start(); err != nil {
+			t.Fatalf("start: %v", err)
+		}
+		pid := cmd.Process.Pid
+		go func() { _ = cmd.Wait() }()
+		t.Cleanup(func() { _ = syscall.Kill(pid, syscall.SIGKILL) })
+		stamp, err := processStartTime(pid)
+		if err != nil {
+			t.Fatalf("read start time of pid %d: %v", pid, err)
+		}
+		return pid, stamp
+	}
+
+	firstPID, firstStamp := spawn()
+	time.Sleep(separation)
+	secondPID, secondStamp := spawn()
+
+	if firstStamp == secondStamp {
+		t.Fatalf("pids %d and %d started %s apart share the stamp %q; the stamp is too coarse to tell a recycled pid from the recorded process",
+			firstPID, secondPID, separation, firstStamp)
+	}
+}
+
+// The stamp must also be stable: re-reading a live process has to reproduce
+// what was recorded at spawn, or every reap would degrade to "unidentified"
+// and clean would quietly stop reaping anything.
+func TestStartTimeStampIsStableAcrossReads(t *testing.T) {
+	dir := t.TempDir()
+	entry := orphan(t, dir, "e1", `
+touch "$READY_FILE"
+while true; do sleep 0.05; done
+`)
+	time.Sleep(50 * time.Millisecond)
+	again, err := processStartTime(entry.PID)
+	if err != nil {
+		t.Fatalf("re-read start time: %v", err)
+	}
+	if again != entry.ProcessStartTime {
+		t.Fatalf("stamp for pid %d changed between reads: recorded %q, now %q", entry.PID, entry.ProcessStartTime, again)
+	}
+}
+
 // A cooperative child — one whose SIGTERM handler runs its teardown — is
 // terminated by the first signal; the reap never escalates.
 func TestReapTerminatesACooperativeOrphan(t *testing.T) {
@@ -199,6 +268,32 @@ func TestReapReportsADeadEntryAsAlreadyGone(t *testing.T) {
 func TestReapOfAnEmptyDirIsQuiet(t *testing.T) {
 	if results := ReapDir(t.TempDir(), testGrace); len(results) != 0 {
 		t.Fatalf("expected no results, got %+v", results)
+	}
+}
+
+// A record this build cannot decode — corrupt, or written by a future version —
+// describes a process that will now never be reaped. Reporting it is the whole
+// point: staying silent would read as "nothing was registered".
+func TestReapReportsAnUnreadableRecord(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "e1.json"), []byte("{not json"), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := WriteEntry(filepath.Join(dir, "e2.json"), Entry{Version: entryVersion + 1, ID: "e2", PID: 1}); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+
+	results := ReapDir(dir, testGrace)
+	if len(results) != 2 {
+		t.Fatalf("expected both records reported, got %+v", results)
+	}
+	for _, res := range results {
+		if res.Outcome != ReapUnreadable {
+			t.Fatalf("expected %s, got %+v", ReapUnreadable, res)
+		}
+		if res.Err == nil || res.ID == "" {
+			t.Fatalf("an unreadable record must name itself and say why: %+v", res)
+		}
 	}
 }
 

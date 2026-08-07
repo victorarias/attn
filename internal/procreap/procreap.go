@@ -20,11 +20,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
 	"syscall"
 	"time"
 )
@@ -140,6 +137,11 @@ const (
 	// still would not die. Reported loudly; a process that survives SIGKILL is
 	// the kernel's problem, not something to hide.
 	ReapSurvived ReapOutcome = "survived"
+	// ReapUnreadable: a record exists but could not be decoded (corrupt, or
+	// written by a version this build does not understand), so whatever it
+	// described cannot be reaped. Named rather than skipped: silence here reads
+	// as "nothing was registered", which is the opposite of the truth.
+	ReapUnreadable ReapOutcome = "unreadable"
 )
 
 // ReapResult reports what happened to one registered process.
@@ -172,6 +174,11 @@ func ReapDir(dir string, grace time.Duration) []ReapResult {
 	for _, path := range paths {
 		entry, err := ReadEntry(path)
 		if err != nil {
+			results = append(results, ReapResult{
+				ID:      filepath.Base(path),
+				Outcome: ReapUnreadable,
+				Err:     err,
+			})
 			continue
 		}
 		results = append(results, reapEntry(entry, grace))
@@ -265,34 +272,17 @@ func waitForGone(pid int, timeout time.Duration) bool {
 	return !processAlive(pid)
 }
 
-// processStartTime returns an opaque, platform-native stamp of when the pid's
-// process started, stable across reads for the same process. Comparing the
-// stamp recorded at spawn against a fresh read is the identity check that makes
-// signalling a recorded pid safe: a recycled pid carries a different start
-// time. On Linux it is /proc/<pid>/stat's starttime field (clock ticks since
-// boot); elsewhere it is `ps -o lstart=`, whose second granularity is far finer
-// than any realistic pid-reuse window.
-func processStartTime(pid int) (string, error) {
-	if raw, err := os.ReadFile(filepath.Join("/proc", strconv.Itoa(pid), "stat")); err == nil {
-		// comm (field 2) is an arbitrary string in parentheses; everything
-		// after the closing paren is space-separated. starttime is field 22
-		// overall, so the 20th after the state field that follows the paren.
-		rest := string(raw)
-		if i := strings.LastIndexByte(rest, ')'); i >= 0 {
-			fields := strings.Fields(rest[i+1:])
-			if len(fields) >= 20 {
-				return fields[19], nil
-			}
-		}
-		return "", fmt.Errorf("unparseable /proc/%d/stat", pid)
-	}
-	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "lstart=").Output()
-	if err != nil {
-		return "", fmt.Errorf("read start time of pid %d: %w", pid, err)
-	}
-	stamp := strings.TrimSpace(string(out))
-	if stamp == "" {
-		return "", fmt.Errorf("pid %d has no start time (gone?)", pid)
-	}
-	return stamp, nil
-}
+// processStartTime returns an opaque stamp of when the pid's process started,
+// stable across reads for the same process and distinct between any two
+// processes that could share a pid. Comparing the stamp recorded at spawn
+// against a fresh read is the identity check that makes signalling a recorded
+// pid safe.
+//
+// Resolution is the whole safety property. A stamp coarser than the interval in
+// which the kernel can hand the same pid to a different process makes the gate
+// pass for a stranger, and the reaper then SIGTERMs, SIGKILLs and group-sweeps
+// an innocent one — the kill-by-pattern this package exists to avoid. Each
+// implementation states its resolution and the measured pid-reuse floor it has
+// to beat (procstart_darwin.go, procstart_linux.go); there is deliberately no
+// generic fallback, so an unsupported platform fails to compile rather than
+// reaping on a stamp nobody has checked.
