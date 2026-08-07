@@ -143,7 +143,9 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
               {label.emoji}
             </span>
             <span className="md-quick-label-text">{label.text}</span>
-            <span className="md-quick-label-num">{(index + 1) % 10}</span>
+            {/* Only the first ten have a digit; past that the badge would
+                promise a shortcut that applies a different label. */}
+            {index < 10 && <span className="md-quick-label-num">{(index + 1) % 10}</span>}
           </button>
         );
       })}

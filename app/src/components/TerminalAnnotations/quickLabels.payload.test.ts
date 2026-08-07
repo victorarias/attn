@@ -119,13 +119,5 @@ describe('buildAnnotationPayload', () => {
   });
 });
 
-// Retiring a label leaves its emoji behind on marks already saved. Reusing one
-// would relabel them into something the user never said, so a retired emoji is
-// retired for good — this is the list, and it only ever grows.
-describe('retired emoji', () => {
-  it('never come back on a different label', () => {
-    const retired = ['🧬', '📉', '🚫', '🧪'];
-    const live = new Set(QUICK_LABELS.map((label) => label.emoji));
-    expect(retired.filter((emoji) => live.has(emoji))).toEqual([]);
-  });
-});
+// Retired emoji are guarded where the set itself lives:
+// `src/annotations/quickLabels.test.ts`.

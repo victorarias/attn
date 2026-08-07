@@ -3,8 +3,8 @@ area: terminal
 change: >
   The annotation labels are now about what an agent said rather than about the
   work. "Match existing patterns", "Ensure no regression", "Out of scope" and
-  "Needs tests" are gone — they belong on a plan, which is where they stay, and
-  on a sentence there was nothing for them to attach to. In their place:
+  "Needs tests" are gone — a highlight selects a claim in a sentence, and those
+  are about the work, so there was nothing for them to attach to. In their place:
   "This is wrong", the missing opposite of "Exactly this", which tells the agent
   to check what else it built on the claim; "I don't love this", for doubt you
   cannot yet articulate, which tells it to rework rather than argue back; "Show
