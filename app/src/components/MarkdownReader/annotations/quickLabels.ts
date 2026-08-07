@@ -21,9 +21,21 @@ export { LABEL_COLOR_MAP, QUICK_LABELS, type QuickLabel } from '../../../annotat
  * picker offers — a one-click agreement that sent a different, instruction-less
  * label than the list's was the same act saying two different things.
  */
-export const THUMBS_UP_LABEL: QuickLabel = QUICK_LABELS.find(
-  (label) => label.id === 'exactly-this',
-)!;
+const AGREEMENT_LABEL_ID = 'exactly-this';
+
+export const THUMBS_UP_LABEL: QuickLabel = (() => {
+  const label = QUICK_LABELS.find((candidate) => candidate.id === AGREEMENT_LABEL_ID);
+  if (!label) {
+    // Retiring this id without repointing the button would otherwise leave an
+    // undefined here and break the toolbar on render, a long way from the edit
+    // that caused it.
+    throw new Error(
+      `The one-click agreement button points at quick label "${AGREEMENT_LABEL_ID}", which the shared set no longer offers. `
+      + `Point it at one of: ${QUICK_LABELS.map((candidate) => candidate.id).join(', ')}.`,
+    );
+  }
+  return label;
+})();
 
 export function quickLabelById(id: string): QuickLabel | undefined {
   return labelById(id);
