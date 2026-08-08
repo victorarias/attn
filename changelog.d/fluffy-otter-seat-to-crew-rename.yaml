@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  Renamed the "seat" primitive to "crew member" across the
+  friendly-home-for-agents vision and the garden vertical-slice plan; the
+  hand-run simulation directory and skills moved to the crew register with
+  it. Both docs keep a dated note recording the rename.
