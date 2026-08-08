@@ -286,10 +286,11 @@ type SpawnOpts struct {
 	// AutoCompactWindow, when > 0, caps this launch's effective context window so
 	// auto-compaction triggers at that token threshold instead of the model's full
 	// window (Claude: CLAUDE_CODE_AUTO_COMPACT_WINDOW env var; Codex:
-	// model_auto_compact_token_limit config override). Sourced from the
-	// chief_context_window_cap setting for chief launches and relayed into the
-	// worker via ATTN_CHIEF_AUTO_COMPACT_WINDOW; 0 means no cap. Only applied on a
-	// chief launch, so delegated interactive agents are never capped.
+	// model_auto_compact_token_limit config override). The daemon resolves the
+	// policy (chief_context_window_cap on chief launches,
+	// default_context_window_cap_<agent> on every other launch — see
+	// launchContextWindowCap) and it rides ATTN_AUTO_COMPACT_WINDOW into the
+	// worker; 0 means no cap, and the drivers apply it on every launch shape.
 	AutoCompactWindow int
 
 	// Executable is the resolved executable path (from ResolveExecutable).
