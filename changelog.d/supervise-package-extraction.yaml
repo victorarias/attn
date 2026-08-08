@@ -14,8 +14,8 @@ change: >
   running stably is now parked instead of retried forever — after ten restarts,
   roughly two to three minutes of crash-looping — and parking is loud: a daemon
   log line, a durable notification naming the plugin and its last exit, and a
-  parked runtime phase in the plugins list. Reinstalling or restarting the
-  plugin revives it with a clean restart budget. And a plugin's stdout and
+  parked runtime phase in the plugins list. Reinstalling the plugin, or
+  restarting attn, revives it with a clean restart budget. And a plugin's stdout and
   stderr, which went to /dev/null, are now captured to an append-only
   per-plugin log file under the profile's plugin-log directory, with a start
   marker per generation so a crash loop leaves a readable trail.

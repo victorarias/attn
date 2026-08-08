@@ -116,7 +116,9 @@ const notificationKindPluginParked = "plugin_parked"
 // notifyPluginParked is the supervisor's OnGiveUp sink: a plugin that crash-
 // looped past the give-up tripwire stops being retried, so the only way the
 // user learns about it is a loud line in the daemon log plus a durable
-// notification. Reinstalling or restarting the plugin re-enters supervision.
+// notification. Reinstalling the plugin, or restarting attn, re-enters
+// supervision — there is no per-plugin restart verb yet, so the copy must not
+// promise one.
 func (d *Daemon) notifyPluginParked(name string, snapshot pluginRuntimeSnapshot) {
 	detail := ""
 	if snapshot.LastExit != nil {
@@ -129,7 +131,7 @@ func (d *Daemon) notifyPluginParked(name string, snapshot pluginRuntimeSnapshot)
 	record, err := d.store.AddNotification(store.NotificationRecord{
 		Kind:       notificationKindPluginParked,
 		Title:      fmt.Sprintf("Plugin stopped: %s", name),
-		Body:       fmt.Sprintf("attn restarted it %d times without it ever staying up, and has stopped trying. Reinstall or restart the plugin to try again.", snapshot.RestartAttempt),
+		Body:       fmt.Sprintf("attn restarted it %d times without it ever staying up, and has stopped trying. Reinstall the plugin, or restart attn, to try again.", snapshot.RestartAttempt),
 		Detail:     detail,
 		SourceKind: "plugin",
 		SourceID:   name,
