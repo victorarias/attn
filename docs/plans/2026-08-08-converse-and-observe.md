@@ -51,9 +51,9 @@ Target:
         -> INSERT agent_messages row (sender, target, content)
         -> deliverable now?  -> composeAttributedPrompt -> typeDoorbell
            blocked (pending_approval / working guard)?
-                             -> row stays queued; delivery retried on
-                                state change (same trigger the ticket-nudge
-                                countdown already watches)
+                             -> row stays queued; a NEW state-change
+                                retry trigger delivers it later (no such
+                                rail exists today — see Slice 2)
     <- result says delivered | queued (never a silent drop)
 ```
 
@@ -138,12 +138,21 @@ shows no reaction of any kind.
 - [ ] Protocol: `AgentMsgMessage` / `AgentMsgResult` (`delivered | queued`),
       version bump.
 - [ ] Daemon: `handleAgentMsg` — persist row, compose attributed prompt,
-      deliver via `typeDoorbell`; on guard refusal leave queued and hook
-      redelivery into the state-change path the ticket-nudge countdown
-      already rides; stamp `delivered_at` on success.
-- [ ] CLI: `attn agent msg <session> "text"`; sender from `ATTN_SESSION_ID`
-      (refuse with a clear error when unset — a message needs a sender);
-      print `delivered` or `queued (target pending approval)`.
+      deliver via `typeDoorbell`; on guard refusal leave queued; stamp
+      `delivered_at` on success.
+- [ ] Redelivery trigger — **new machinery, the load-bearing piece of
+      "never a silent drop"**. Nothing re-arms on session state change
+      today: the ticket-nudge countdown consumes its timer entry at fire,
+      and a blocked fire returns without re-arming (its retry rides unread
+      marker + click + fresh activity). Build a queued-message drain that
+      runs on the target's state transitions (observing `applyState`) and
+      attempts delivery whenever `isNudgeDeliveryAllowed` turns true.
+- [ ] CLI: `attn agent msg <session> "text"`; sender from
+      `--source-session`, defaulting to `ATTN_SESSION_ID` (the
+      `ticket comment` convention, `main.go:750`) — the escape hatch for a
+      human running the CLI outside a session; refuse with a clear error
+      when neither names a sender. Print `delivered` or
+      `queued (target pending approval)`.
 - [ ] Content cap with a named limit: measure a sane doorbell paste size
       first (bracketed paste of multi-KB text through the fence), set the
       tripwire past it, and make the error name the limit, its value, and
