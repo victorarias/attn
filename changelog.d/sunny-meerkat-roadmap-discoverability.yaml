@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  The extension-platform roadmap's C2 gate now includes app capability
+  discoverability: how an agent in an unrelated session learns an installed
+  app's surface exists (leading idea: a manifest-declared agent entry
+  materialized into the harness's skill mechanism at session launch), the
+  CLI shape for invoking app actions, and the context-scoping question for
+  the app index. The teachability ladder covered authoring only; the
+  consumer side is now a named gate question.
