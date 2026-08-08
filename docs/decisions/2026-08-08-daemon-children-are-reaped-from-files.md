@@ -46,9 +46,11 @@ creates the base schema and runs the full migration chain, taking a
 pre-migration backup on the way. Reading three pids out of the database would
 mean migrating it — and then deleting the directory it lives in, since the
 caller is `attn profile clean`. Opening `mode=ro` avoids the migration but not
-the deeper problem: a WAL left behind by a process that died mid-write needs
-write access to recover, so read-only is the open most likely to fail on exactly
-the crashed daemon being cleaned up after.
+the deeper problem: the store runs SQLite's default rollback journal (nothing
+sets `journal_mode`), so a process that died mid-write leaves a hot `-journal`
+that the next open has to roll back — which needs write access. Read-only is
+therefore the open most likely to fail on exactly the crashed daemon being
+cleaned up after.
 
 **There is no query.** Reaping is "iterate everything and signal it": no
 filters, no joins, no ordering, a handful of records read once. Indexes and
