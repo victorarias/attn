@@ -13,6 +13,9 @@
 // plugin runtime processes (the daemon's plugin supervisor). pty-workers have
 // their own richer registry (internal/ptyworker) with a control socket; this
 // package is for children that have no RPC surface of their own.
+//
+// Why a directory of files rather than the store, and what would flip that:
+// docs/decisions/2026-08-08-daemon-children-are-reaped-from-files.md.
 package procreap
 
 import (
