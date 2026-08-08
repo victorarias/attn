@@ -235,7 +235,7 @@ func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
 		switch {
 		case !item.Installed:
 			info.RuntimeState = pluginRuntimeStateStopped
-		case healthStatus == "unhealthy" || runtimePhase == pluginPhaseBackoff:
+		case healthStatus == "unhealthy" || runtimePhase == pluginPhaseBackoff || runtimePhase == pluginPhaseParked:
 			info.RuntimeState = pluginRuntimeStateDegraded
 		case connection != nil:
 			info.RuntimeState = pluginRuntimeStateConnected

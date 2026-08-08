@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/victorarias/attn/internal/supervise"
 )
 
 func TestPluginDirForSocketUsesSocketRuntimeRoot(t *testing.T) {
@@ -179,7 +181,7 @@ func TestDaemon_StartInstalledPlugins_RestartsCleanExitWithNewGeneration(t *test
 	// prewarm so every generation resolves the same fake bun fixture.
 	d.pluginSupervisor = newPluginSupervisor(
 		execPluginProcessLauncher{},
-		realPluginSupervisorClock{},
+		nil,
 		func(manifest pluginManifest, generation uint64) []string {
 			return mergePluginEnvironment(os.Environ(), []string{
 				"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH"),
@@ -188,7 +190,9 @@ func TestDaemon_StartInstalledPlugins_RestartsCleanExitWithNewGeneration(t *test
 				"ATTN_PLUGIN_GENERATION=" + strconv.FormatUint(generation, 10),
 			})
 		},
-		func(pluginName string) { d.publishFact(FactPluginHealthChanged, pluginName, nil) },
+		supervise.Options{
+			OnChange: func(pluginName string) { d.publishFact(FactPluginHealthChanged, pluginName, nil) },
+		},
 	)
 	go d.Start()
 	defer d.Stop()

@@ -281,6 +281,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   field name — never from caller text
 - `internal/jobs`: durable job queue (retry/backoff, coalescing, commit fence,
   cron entries) — every background duty and every periodic tick runs on it
+- `internal/supervise`: process supervision for long-lived daemon children
+  (restart backoff, generation fencing, stability window, disconnect grace,
+  give-up parking, per-child log capture). Consumers name a child and hand over
+  a start function; the package knows nothing about what it supervises. The
+  plugin runtime is one consumer, the app runtime's sidecar is the other
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
