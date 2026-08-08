@@ -21,6 +21,10 @@ type memStore struct {
 	sinceErr  error
 	appendErr error
 	boundsErr error
+	deleteErr error
+	// onDelete observes the moment a registration is removed, which is where the
+	// unregister ordering (loop exits, then the row goes) is checkable.
+	onDelete func(name string)
 }
 
 func newMemStore() *memStore {
@@ -91,6 +95,23 @@ func (m *memStore) SaveConsumer(c Consumer, now time.Time) error {
 	return nil
 }
 
+func (m *memStore) DeleteConsumer(name string) error {
+	m.mu.Lock()
+	hook, err := m.onDelete, m.deleteErr
+	if err == nil {
+		delete(m.consumers, name)
+	}
+	m.mu.Unlock()
+
+	if hook != nil {
+		hook(name)
+	}
+	return err
+}
+
+// SetCursor refuses a name it does not know, exactly as an UPDATE that matches no
+// row would leave a cursor unmoved. A cursor write for a deleted consumer must
+// therefore never reach the store — the fake is what proves it does not.
 func (m *memStore) SetCursor(name string, cursor int64, now time.Time) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -109,6 +130,12 @@ func (m *memStore) SetCursor(name string, cursor int64, now time.Time) error {
 func (m *memStore) setBoundsErr(err error) {
 	m.mu.Lock()
 	m.boundsErr = err
+	m.mu.Unlock()
+}
+
+func (m *memStore) setDeleteErr(err error) {
+	m.mu.Lock()
+	m.deleteErr = err
 	m.mu.Unlock()
 }
 
@@ -644,20 +671,6 @@ func TestStatusReportsLagAndLiveness(t *testing.T) {
 	}
 	if !c.Live {
 		t.Fatal("a consumer with a running loop should report Live")
-	}
-}
-
-// A registration is a startup-time decision: every persisted consumer has a
-// delivery loop, so there is no such thing as a registration nobody serves.
-func TestRegisterAfterStartIsRejected(t *testing.T) {
-	b := testBus(t, newMemStore())
-	if err := b.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(b.Stop)
-
-	if err := b.Register("late", All, func(context.Context, Event) error { return nil }); !errors.Is(err, ErrAlreadyStarted) {
-		t.Fatalf("Register after Start = %v, want ErrAlreadyStarted", err)
 	}
 }
 

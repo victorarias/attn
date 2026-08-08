@@ -129,6 +129,46 @@ func TestSaveBusConsumerPreservesCursorAndEnabled(t *testing.T) {
 	}
 }
 
+// Deleting a registration is what ends its hold on the retention floor: while the
+// row exists and is enabled, events it has not read cannot be trimmed, however
+// long ago whoever served it went away.
+func TestDeleteBusConsumerReleasesTheRetentionFloor(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	appendBus(t, s, "a.happened", "", busBase)
+	appendBus(t, s, "b.happened", "", busBase.Add(time.Minute))
+
+	if err := s.SaveBusConsumer(BusConsumer{Name: "app:ghost", Cursor: 0, Filter: "*", Enabled: true}, busBase); err != nil {
+		t.Fatalf("SaveBusConsumer: %v", err)
+	}
+	if n, err := s.TrimBusEvents(busBase.Add(time.Hour)); err != nil || n != 0 {
+		t.Fatalf("trimmed %d event(s) (err=%v); an enabled row must pin the log", n, err)
+	}
+
+	if err := s.DeleteBusConsumer("app:ghost"); err != nil {
+		t.Fatalf("DeleteBusConsumer: %v", err)
+	}
+	if _, ok, err := s.GetBusConsumer("app:ghost"); err != nil || ok {
+		t.Fatalf("the row survived deletion (found=%v, err=%v)", ok, err)
+	}
+	if n, err := s.TrimBusEvents(busBase.Add(time.Hour)); err != nil || n != 2 {
+		t.Fatalf("trimmed %d event(s) (err=%v) after the row went, want 2", n, err)
+	}
+}
+
+// Deleting a row that is not there is success: the caller is an uninstall path,
+// and an uninstall that fails the second time it runs is a worse surface than one
+// that says nothing.
+func TestDeleteBusConsumerMissingIsSuccess(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.DeleteBusConsumer("nobody"); err != nil {
+		t.Fatalf("DeleteBusConsumer of an unknown name: %v", err)
+	}
+}
+
 func TestGetBusConsumerMissing(t *testing.T) {
 	s := New()
 	t.Cleanup(func() { _ = s.Close() })
