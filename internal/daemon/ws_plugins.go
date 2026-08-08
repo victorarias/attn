@@ -20,6 +20,7 @@ const (
 	pluginRuntimeStateStarting     = "starting"
 	pluginRuntimeStateConnected    = "connected"
 	pluginRuntimeStateDegraded     = "degraded"
+	pluginRuntimeStateParked       = "parked"
 )
 
 func (d *Daemon) handleListPluginsWS(client *wsClient) {
@@ -235,6 +236,10 @@ func (d *Daemon) pluginsUpdatedMessage() *protocol.PluginsUpdatedMessage {
 		switch {
 		case !item.Installed:
 			info.RuntimeState = pluginRuntimeStateStopped
+		case runtimePhase == pluginPhaseParked:
+			// Parked is not degraded: nothing is being retried, so it must not
+			// read as a plugin that is still coming back on its own.
+			info.RuntimeState = pluginRuntimeStateParked
 		case healthStatus == "unhealthy" || runtimePhase == pluginPhaseBackoff:
 			info.RuntimeState = pluginRuntimeStateDegraded
 		case connection != nil:

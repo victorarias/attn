@@ -226,7 +226,7 @@ func TestDaemon_PluginConnectionGenerationDrivesDisconnectRecovery(t *testing.T)
 	<-staleDone
 
 	current, currentDone := startPluginPipeGeneration(t, d, "supervised", nil, restarted.Generation)
-	d.pluginSupervisor.Stop("supervised", pluginStopRemove)
+	d.pluginSupervisor.Stop("supervised")
 	_ = current.Close()
 	<-currentDone
 }

@@ -445,7 +445,7 @@ model PluginInfo {
   running: boolean;
   availability: string; // "bundled" | "user"
   installation_state: string; // "available" | "installed"
-  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded"
+  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded" | "parked"
   can_install: boolean;
   can_uninstall: boolean;
   // "starting" | "connected" | "backoff" | "stopped". Plain string keeps

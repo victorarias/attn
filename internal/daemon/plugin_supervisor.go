@@ -1,120 +1,54 @@
 package daemon
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"os/exec"
 	"path/filepath"
-	"strings"
-	"sync"
-	"syscall"
-	"time"
 
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/supervise"
 )
 
-type pluginDesiredState string
+// The plugin runtime is one consumer of internal/supervise: every installed
+// plugin is a supervised child named by its manifest, launched with the plugin
+// environment the daemon computes for that generation. Restart backoff,
+// generation fencing, the stability window, the disconnect grace and the
+// give-up tripwire all live in the shared package; what stays here is how a
+// plugin manifest becomes a process.
 
 const (
-	pluginDesiredRunning pluginDesiredState = "running"
-	pluginDesiredStopped pluginDesiredState = "stopped"
+	pluginDesiredRunning = supervise.DesiredRunning
+	pluginDesiredStopped = supervise.DesiredStopped
 )
-
-type pluginRuntimePhase string
 
 const (
-	pluginPhaseStarting  pluginRuntimePhase = "starting"
-	pluginPhaseConnected pluginRuntimePhase = "connected"
-	pluginPhaseBackoff   pluginRuntimePhase = "backoff"
-	pluginPhaseStopped   pluginRuntimePhase = "stopped"
+	pluginPhaseStarting  = supervise.PhaseStarting
+	pluginPhaseConnected = supervise.PhaseConnected
+	pluginPhaseBackoff   = supervise.PhaseBackoff
+	pluginPhaseStopped   = supervise.PhaseStopped
+	pluginPhaseParked    = supervise.PhaseParked
 )
 
-type pluginStopReason string
+var pluginRestartBackoff = supervise.RestartBackoff
 
-const (
-	pluginStopRemove   pluginStopReason = "remove"
-	pluginStopShutdown pluginStopReason = "shutdown"
-)
+const pluginDisconnectGrace = supervise.DisconnectGrace
 
-var pluginRestartBackoff = []time.Duration{
-	250 * time.Millisecond,
-	500 * time.Millisecond,
-	time.Second,
-	2 * time.Second,
-	4 * time.Second,
-	8 * time.Second,
-	16 * time.Second,
-	30 * time.Second,
-}
+type pluginExit = supervise.Exit
+type pluginRuntimeSnapshot = supervise.Snapshot
+type pluginProcessHandle = supervise.Process
+type pluginSupervisorTimer = supervise.Timer
+type pluginSupervisorClock = supervise.Clock
 
-const pluginDisconnectGrace = 5 * time.Second
-const pluginStableConnection = 60 * time.Second
-
-type pluginExit struct {
-	At       time.Time
-	ExitCode *int
-	Signal   string
-	Error    string
-}
-
-func (e pluginExit) String() string {
-	detail := strings.TrimSpace(e.Error)
-	if detail == "" && e.Signal != "" {
-		detail = "signal " + e.Signal
-	}
-	if detail == "" && e.ExitCode != nil {
-		detail = fmt.Sprintf("exit code %d", *e.ExitCode)
-	}
-	if detail == "" {
-		detail = "process exited"
-	}
-	if e.At.IsZero() {
-		return detail
-	}
-	return fmt.Sprintf("%s: %s", e.At.Format(time.RFC3339), detail)
-}
-
-type pluginRuntimeSnapshot struct {
-	Desired        pluginDesiredState
-	Phase          pluginRuntimePhase
-	Generation     uint64
-	Running        bool
-	Connected      bool
-	RestartAttempt int
-	StartedAt      time.Time
-	ConnectedAt    time.Time
-	NextRestartAt  time.Time
-	LastExit       *pluginExit
-}
-
-type pluginProcessHandle interface {
-	Wait() pluginExit
-	Kill() error
-}
-
+// pluginProcessLauncher turns one manifest into a running process. Log is the
+// supervisor's per-plugin append-only log file, or nil when capture is off.
 type pluginProcessLauncher interface {
-	Start(manifest pluginManifest, env []string) (pluginProcessHandle, error)
-}
-
-type pluginSupervisorTimer interface {
-	Stop() bool
-}
-
-type pluginSupervisorClock interface {
-	Now() time.Time
-	AfterFunc(time.Duration, func()) pluginSupervisorTimer
-}
-
-type realPluginSupervisorClock struct{}
-
-func (realPluginSupervisorClock) Now() time.Time { return time.Now() }
-func (realPluginSupervisorClock) AfterFunc(delay time.Duration, fn func()) pluginSupervisorTimer {
-	return time.AfterFunc(delay, fn)
+	Start(manifest pluginManifest, env []string, log io.Writer) (pluginProcessHandle, error)
 }
 
 type execPluginProcessLauncher struct{}
 
-func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (pluginProcessHandle, error) {
+func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string, log io.Writer) (pluginProcessHandle, error) {
 	var cmd *exec.Cmd
 	switch manifest.Plugin.Kind {
 	case plugins.EntrypointExecutable:
@@ -126,355 +60,43 @@ func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string) (p
 	}
 	cmd.Dir = manifest.Dir
 	cmd.Env = env
-	if err := cmd.Start(); err != nil {
+	process, err := supervise.StartCommand(cmd, log)
+	if err != nil {
 		return nil, fmt.Errorf("start %s plugin process: %w", manifest.Plugin.Kind, err)
 	}
-	return &execPluginProcess{cmd: cmd}, nil
+	return process, nil
 }
 
-type execPluginProcess struct {
-	cmd *exec.Cmd
-}
-
-func (p *execPluginProcess) Wait() pluginExit {
-	err := p.cmd.Wait()
-	exit := pluginExit{}
-	if err != nil {
-		exit.Error = err.Error()
-	}
-	if state := p.cmd.ProcessState; state != nil {
-		if code := state.ExitCode(); code >= 0 {
-			exit.ExitCode = intPtr(code)
-		}
-		if status, ok := state.Sys().(syscall.WaitStatus); ok && status.Signaled() {
-			exit.Signal = status.Signal().String()
-		}
-	}
-	return exit
-}
-
-func (p *execPluginProcess) Kill() error {
-	if p.cmd == nil || p.cmd.Process == nil {
-		return nil
-	}
-	return p.cmd.Process.Kill()
-}
-
-type managedPlugin struct {
-	manifest pluginManifest
-	desired  pluginDesiredState
-	phase    pluginRuntimePhase
-
-	generation     uint64
-	process        pluginProcessHandle
-	restartAttempt int
-	startedAt      time.Time
-	connectedAt    time.Time
-	nextRestartAt  time.Time
-	lastExit       *pluginExit
-
-	restartTimer    pluginSupervisorTimer
-	disconnectTimer pluginSupervisorTimer
-	stabilityTimer  pluginSupervisorTimer
-}
-
+// pluginSupervisor adapts the shared supervisor to plugin manifests.
 type pluginSupervisor struct {
-	mu       sync.Mutex
-	plugins  map[string]*managedPlugin
+	*supervise.Supervisor
 	launcher pluginProcessLauncher
-	clock    pluginSupervisorClock
 	env      func(pluginManifest, uint64) []string
-	onChange func(pluginName string)
-	shutdown bool
 }
 
 func newPluginSupervisor(
 	launcher pluginProcessLauncher,
 	clock pluginSupervisorClock,
 	env func(pluginManifest, uint64) []string,
-	onChange func(pluginName string),
+	options supervise.Options,
 ) *pluginSupervisor {
 	if launcher == nil {
 		launcher = execPluginProcessLauncher{}
 	}
-	if clock == nil {
-		clock = realPluginSupervisorClock{}
-	}
 	if env == nil {
 		env = func(pluginManifest, uint64) []string { return nil }
 	}
+	options.Clock = clock
 	return &pluginSupervisor{
-		plugins:  make(map[string]*managedPlugin),
-		launcher: launcher,
-		clock:    clock,
-		env:      env,
-		onChange: onChange,
+		Supervisor: supervise.New(options),
+		launcher:   launcher,
+		env:        env,
 	}
 }
 
+// Ensure starts the plugin, or adopts the manifest for its next start.
 func (s *pluginSupervisor) Ensure(manifest pluginManifest) error {
-	if strings.TrimSpace(manifest.Name) == "" {
-		return errors.New("plugin process name is required")
-	}
-	s.mu.Lock()
-	if s.shutdown {
-		s.mu.Unlock()
-		return errors.New("plugin supervisor is shut down")
-	}
-	plugin := s.plugins[manifest.Name]
-	if plugin == nil {
-		plugin = &managedPlugin{manifest: manifest, desired: pluginDesiredRunning, phase: pluginPhaseStarting}
-		s.plugins[manifest.Name] = plugin
-	} else {
-		plugin.manifest = manifest
-		plugin.desired = pluginDesiredRunning
-		if plugin.process != nil || plugin.restartTimer != nil {
-			s.mu.Unlock()
-			return nil
-		}
-	}
-	err := s.spawnLocked(plugin)
-	s.mu.Unlock()
-	s.notify(manifest.Name)
-	return err
-}
-
-func (s *pluginSupervisor) Stop(name string, _ pluginStopReason) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil {
-		s.mu.Unlock()
-		return
-	}
-	plugin.desired = pluginDesiredStopped
-	plugin.phase = pluginPhaseStopped
-	plugin.generation++
-	plugin.connectedAt = time.Time{}
-	plugin.nextRestartAt = time.Time{}
-	stopPluginTimer(&plugin.restartTimer)
-	stopPluginTimer(&plugin.disconnectTimer)
-	stopPluginTimer(&plugin.stabilityTimer)
-	process := plugin.process
-	plugin.process = nil
-	s.mu.Unlock()
-	if process != nil {
-		_ = process.Kill()
-	}
-	s.notify(name)
-}
-
-func (s *pluginSupervisor) Shutdown() {
-	s.mu.Lock()
-	if s.shutdown {
-		s.mu.Unlock()
-		return
-	}
-	s.shutdown = true
-	names := make([]string, 0, len(s.plugins))
-	for name := range s.plugins {
-		names = append(names, name)
-	}
-	s.mu.Unlock()
-	for _, name := range names {
-		s.Stop(name, pluginStopShutdown)
-	}
-}
-
-// NoteConnected accepts untracked test/manual connections, but a supervised
-// plugin must present the exact generation injected into its process.
-func (s *pluginSupervisor) NoteConnected(name string, generation uint64) bool {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil {
-		s.mu.Unlock()
-		return true
-	}
-	if generation == 0 || generation != plugin.generation || plugin.desired != pluginDesiredRunning || plugin.process == nil {
-		s.mu.Unlock()
-		return false
-	}
-	plugin.phase = pluginPhaseConnected
-	plugin.connectedAt = s.clock.Now()
-	plugin.nextRestartAt = time.Time{}
-	stopPluginTimer(&plugin.disconnectTimer)
-	stopPluginTimer(&plugin.stabilityTimer)
-	capturedGeneration := plugin.generation
-	plugin.stabilityTimer = s.clock.AfterFunc(pluginStableConnection, func() {
-		s.markStable(name, capturedGeneration)
-	})
-	s.mu.Unlock()
-	s.notify(name)
-	return true
-}
-
-func (s *pluginSupervisor) NoteDisconnected(name string, generation uint64) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil || generation != plugin.generation || plugin.desired != pluginDesiredRunning || plugin.process == nil {
-		s.mu.Unlock()
-		return
-	}
-	plugin.phase = pluginPhaseStarting
-	plugin.connectedAt = time.Time{}
-	stopPluginTimer(&plugin.stabilityTimer)
-	stopPluginTimer(&plugin.disconnectTimer)
-	capturedProcess := plugin.process
-	capturedGeneration := plugin.generation
-	plugin.disconnectTimer = s.clock.AfterFunc(pluginDisconnectGrace, func() {
-		s.disconnectExpired(name, capturedGeneration, capturedProcess)
-	})
-	s.mu.Unlock()
-	s.notify(name)
-}
-
-func (s *pluginSupervisor) Snapshot(name string) (pluginRuntimeSnapshot, bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	plugin := s.plugins[name]
-	if plugin == nil {
-		return pluginRuntimeSnapshot{}, false
-	}
-	snapshot := pluginRuntimeSnapshot{
-		Desired:        plugin.desired,
-		Phase:          plugin.phase,
-		Generation:     plugin.generation,
-		Running:        plugin.process != nil,
-		Connected:      plugin.phase == pluginPhaseConnected,
-		RestartAttempt: plugin.restartAttempt,
-		StartedAt:      plugin.startedAt,
-		ConnectedAt:    plugin.connectedAt,
-		NextRestartAt:  plugin.nextRestartAt,
-	}
-	if plugin.lastExit != nil {
-		exit := *plugin.lastExit
-		if plugin.lastExit.ExitCode != nil {
-			exit.ExitCode = intPtr(*plugin.lastExit.ExitCode)
-		}
-		snapshot.LastExit = &exit
-	}
-	return snapshot, true
-}
-
-func (s *pluginSupervisor) spawnLocked(plugin *managedPlugin) error {
-	plugin.generation++
-	plugin.phase = pluginPhaseStarting
-	plugin.nextRestartAt = time.Time{}
-	stopPluginTimer(&plugin.restartTimer)
-	generation := plugin.generation
-	process, err := s.launcher.Start(plugin.manifest, s.env(plugin.manifest, generation))
-	if err != nil {
-		exit := pluginExit{At: s.clock.Now(), Error: err.Error()}
-		plugin.lastExit = &exit
-		s.scheduleRestartLocked(plugin)
-		return err
-	}
-	plugin.process = process
-	plugin.startedAt = s.clock.Now()
-	stopPluginTimer(&plugin.disconnectTimer)
-	name := plugin.manifest.Name
-	capturedProcess := process
-	plugin.disconnectTimer = s.clock.AfterFunc(pluginDisconnectGrace, func() {
-		s.disconnectExpired(name, generation, capturedProcess)
-	})
-	go func(name string, generation uint64, process pluginProcessHandle) {
-		exit := process.Wait()
-		s.processExited(name, generation, process, exit)
-	}(name, generation, process)
-	return nil
-}
-
-func (s *pluginSupervisor) processExited(name string, generation uint64, process pluginProcessHandle, exit pluginExit) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil || generation != plugin.generation || plugin.process != process {
-		s.mu.Unlock()
-		return
-	}
-	plugin.process = nil
-	plugin.connectedAt = time.Time{}
-	stopPluginTimer(&plugin.disconnectTimer)
-	stopPluginTimer(&plugin.stabilityTimer)
-	exit.At = s.clock.Now()
-	plugin.lastExit = &exit
-	if plugin.desired == pluginDesiredRunning && !s.shutdown {
-		s.scheduleRestartLocked(plugin)
-	} else {
-		plugin.phase = pluginPhaseStopped
-		plugin.nextRestartAt = time.Time{}
-	}
-	s.mu.Unlock()
-	s.notify(name)
-}
-
-func (s *pluginSupervisor) scheduleRestartLocked(plugin *managedPlugin) {
-	stopPluginTimer(&plugin.restartTimer)
-	plugin.restartAttempt++
-	index := plugin.restartAttempt - 1
-	if index >= len(pluginRestartBackoff) {
-		index = len(pluginRestartBackoff) - 1
-	}
-	delay := pluginRestartBackoff[index]
-	plugin.phase = pluginPhaseBackoff
-	plugin.nextRestartAt = s.clock.Now().Add(delay)
-	capturedGeneration := plugin.generation
-	plugin.restartTimer = s.clock.AfterFunc(delay, func() {
-		s.restart(nameOf(plugin), capturedGeneration)
+	return s.Supervisor.Ensure(manifest.Name, func(req supervise.StartRequest) (supervise.Process, error) {
+		return s.launcher.Start(manifest, s.env(manifest, req.Generation), req.Log)
 	})
 }
-
-func (s *pluginSupervisor) restart(name string, generation uint64) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil || generation != plugin.generation || plugin.desired != pluginDesiredRunning || s.shutdown {
-		s.mu.Unlock()
-		return
-	}
-	plugin.restartTimer = nil
-	_ = s.spawnLocked(plugin)
-	s.mu.Unlock()
-	s.notify(name)
-}
-
-func (s *pluginSupervisor) markStable(name string, generation uint64) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil || generation != plugin.generation || plugin.phase != pluginPhaseConnected {
-		s.mu.Unlock()
-		return
-	}
-	plugin.restartAttempt = 0
-	plugin.stabilityTimer = nil
-	s.mu.Unlock()
-	s.notify(name)
-}
-
-func (s *pluginSupervisor) disconnectExpired(name string, generation uint64, process pluginProcessHandle) {
-	s.mu.Lock()
-	plugin := s.plugins[name]
-	if plugin == nil || generation != plugin.generation || plugin.process != process || plugin.phase == pluginPhaseConnected || plugin.desired != pluginDesiredRunning {
-		s.mu.Unlock()
-		return
-	}
-	plugin.disconnectTimer = nil
-	s.mu.Unlock()
-	_ = process.Kill()
-}
-
-// notify reports one plugin's supervision state moving. The name is required:
-// the daemon turns it into a fact, and a fact needs the entity it is about.
-func (s *pluginSupervisor) notify(pluginName string) {
-	if s.onChange != nil {
-		s.onChange(pluginName)
-	}
-}
-
-func stopPluginTimer(timer *pluginSupervisorTimer) {
-	if *timer != nil {
-		(*timer).Stop()
-		*timer = nil
-	}
-}
-
-func nameOf(plugin *managedPlugin) string { return plugin.manifest.Name }
-
-func intPtr(value int) *int { return &value }

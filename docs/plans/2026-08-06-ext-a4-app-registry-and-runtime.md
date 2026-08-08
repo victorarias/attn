@@ -189,10 +189,12 @@ The supervisor extracts from `internal/daemon/plugin_supervisor.go` into
 - **Give-up state** (new — today it retries forever): a child that keeps
   dying without reaching stability gets parked, loudly — fact + durable
   notification + `attn app status`. Initial tripwire: parked after 10
-  consecutive restarts with no stability window (~3.5 minutes of
-  crash-looping at the existing backoff numbers). Tripwire, not a receipt —
-  recalibrate during this stage's verification and record the measurement
-  here.
+  consecutive restarts with no stability window. Tripwire, not a receipt —
+  recalibrate if a legitimate child ever reaches it. **Slice 2 correction to
+  the estimate:** ten restarts at the pinned backoff cost 121.75s of waiting
+  (0.25+0.5+1+2+4+8+16+30+30+30), plus up to the 5s disconnect grace per
+  attempt for a child that starts and never calls back — so a crash-looping
+  child is parked after roughly two to three minutes, not ~3.5.
 - **Log capture** (new — plugin stdout/stderr goes to /dev/null today, a
   hole `attn app logs` cannot live with): per-child append-only log file
   (`<data-dir>/apps/log/runtime.log`, the ptyworker per-session pattern),
@@ -281,7 +283,15 @@ fully-CI'd, fully-reviewed merge at the end.
 1. **Bus consumer lifecycle** — post-`Start` register, `Unregister`, row
    deletion, tests for the pin-the-log orphan case.
 2. **Supervisor extraction** — `internal/supervise`, pluginSupervisor moves
-   onto it, give-up state + log capture.
+   onto it, give-up state + log capture. *Shipped:* a consumer names a child
+   and hands over a `StartFunc`, so the package carries no manifest, no
+   environment and no protocol; `Ensure` doubles as the un-park (it revives a
+   parked child with a clean restart budget), which is why no separate restart
+   entry point exists yet. `parked` is a new `runtime_phase` value — the field
+   is a free-form string on the wire, so no protocol bump. Plugin logs land in
+   `<data-dir>/plugin-log/<name>.log`, deliberately outside
+   `<data-dir>/plugins` because everything under there is scanned for
+   manifests.
 3. **Registry + store + CLI skeleton** — `app_*` tables,
    list/status/enable/disable/remove against them, glossary entries (app,
    plugin), `ext/` → `app/` namespace rename.
