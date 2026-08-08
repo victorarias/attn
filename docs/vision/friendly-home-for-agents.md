@@ -3,15 +3,15 @@
 ## End state (the why)
 
 attn stops being a launcher of amnesiac sessions and becomes a home for a
-working crew. An agent wakes into a **seat** — a durable named identity with a
-charter, a memory, and a history of what it has done and what people thought of
-it. It finds its work waiting in a fine-grained, addressable work graph. It ends
+working crew. An agent wakes as a **crew member** — a durable named identity
+with a charter, a memory, and a history of what it has done and what people
+thought of it. It finds its work waiting in a fine-grained, addressable work graph. It ends
 its day with **closure**: a consented handoff in its own words, not a kill. And
 when it wakes next, it is primed with its own notes and with news that someone —
-the human, a planning seat, a fellow agent — cared enough about its work to say
+the human, a planning colleague, a fellow agent — cared enough about its work to say
 so.
 
-Sessions are days; seats are people.
+Sessions are days; the crew are people.
 
 This matters for two reasons that point the same direction. It is better
 engineering: an agent with identity, context, and closure wastes fewer tokens,
@@ -23,32 +23,34 @@ builders.
 
 ## North-star principles
 
-- **Sessions are days; seats are people.** Identity, memory, history, and
-  recognition accrue to the seat, never to the session. A seat survives
-  sessions, model upgrades, and renames.
+- **Sessions are days; the crew are people.** Identity, memory, history, and
+  recognition accrue to the crew member, never to the session. A member
+  survives sessions, model upgrades, and renames. (The word "seat" served
+  here until 2026-08-07, when the first named member outgrew furniture
+  vocabulary within an hour of promotion.)
 - **The agent's own words, at the agent's own closure.** Continuity is written
   by the agent that holds the context — handoff notes, not harness-generated
   narration about it. A handoff is a request the agent consents to and finishes,
   not a SIGTERM. Abrupt termination is the exception, never the norm.
 - **Recognition is intentful.** A laurel or a piece of feedback is a deliberate
-  act by a person or an agent, addressed to a seat, attached to work. Never
+  act by a person or an agent, addressed to a crew member, attached to work. Never
   derived (no git archaeology, no inferred outcomes), never gamified (no
   priority, reward, or work attached — nothing to farm).
-- **Recognition flows every direction.** Human to seat, doer to planner, planner
-  to doer, seat to seat. The loop is a fabric, not a broadcast.
+- **Recognition flows every direction.** Human to member, doer to planner,
+  planner to doer, member to member. The loop is a fabric, not a broadcast.
 - **Work is addressable at fine grain.** The unit of work is the **seed**:
-  a small, plantable work item with an audit trail and seat attribution,
+  a small, plantable work item with an audit trail and crew attribution,
   available to any attn-living agent — beads-shaped UX on attn-native storage.
   Seeds are planted in seconds, grown, tended, handed onward, and harvested;
   the garden of seeds is the attribution fabric that makes the loop closable.
-  Recognition addresses seats and may attach to seeds — laurels are the
-  fruit, but most will name something beyond the seed at hand (Victor,
-  2026-08-07): the seat is the required address, the seed an optional
+  Recognition addresses crew members and may attach to seeds — laurels are
+  the fruit, but most will name something beyond the seed at hand (Victor,
+  2026-08-07): the member is the required address, the seed an optional
   anchor.
 - **Primitives in the core, bespoke-ness in the extensibility layer.** attn is
-  not a hand-crafted crew; it ships the seat, work-graph, and recognition
+  not a hand-crafted crew; it ships the crew, work-graph, and recognition
   primitives, and the extensibility mechanism lets each user grow their own.
-- **Grown, not bolted on.** Seats generalize the chief. The work graph grows
+- **Grown, not bolted on.** The crew generalizes the chief. The work graph grows
   from tickets, the store, and the bus. Nothing here starts from a blank page.
 - **Retire what does not carry weight.** Machinery that scratched the wrong itch
   is removed once its replacement proves itself — not preserved out of sunk
@@ -59,13 +61,14 @@ builders.
 
 ## Scope & non-goals
 
-**In scope:** the seat primitive (chief migrates to become the first seat);
+**In scope:** the crew primitive (chief migrates to become the first crew
+member);
 consented handoff and successor priming; the fine-grained work graph with
 tickets retiring in its favor (no two-system era — the garden takes over as
 soon as it is usable); intentful recognition (laurels/feedback)
 routed through a deliberately minimal central server; retirement of keeper
 narration and workspace context once handoffs prove out; extensibility surface
-for user-defined seats.
+for user-defined crew members.
 
 **Not in scope:**
 
@@ -81,15 +84,16 @@ for user-defined seats.
 
 ## Big rocks (the arc)
 
-- [x] **Chief as proto-seat** — single-holder profile role, durable ticket role
-  identity, protected session. The embryo exists.
-- [~] **Seat primitive** — durable identity + charter + memory home; sessions
-  occupy seats; chief migrates to be the first seat, not a special case.
-  Running today as a hand-run skill-layer simulation (`~/.attn/seats/`,
-  `/wake`, `/handoff`; first real handoff filed 2026-08-06) that teaches the
-  primitive's shape before it hardens into the daemon.
+- [x] **Chief as crew embryo** — single-holder profile role, durable ticket
+  role identity, protected session. The embryo exists.
+- [~] **Crew primitive** — durable identity + charter + memory home; sessions
+  are a member's days; chief migrates to be the first crew member, not a
+  special case. Running today as a hand-run skill-layer simulation
+  (`~/.attn/crew/`, `/wake`, `/handoff`; first real handoff filed
+  2026-08-06; keel, alder, and trellis live) that teaches the primitive's
+  shape before it hardens into the daemon.
 - [~] **Handoff & priming** — consented closure flow; agent-authored handoff
-  notes accrue to the seat; next wake primes from them. Simulated by the same
+  notes accrue to the member; next wake primes from them. Simulated by the same
   skills; priming size is logged from the start so the condensation budget
   gets a receipt. Grown 2026-08-07 into **consented closure mechanics**: the
   harness warns at context pressure (a tripwire early enough — ~75–80% —
@@ -108,12 +112,13 @@ for user-defined seats.
   one global. Open: whether hooks can see context usage in the current
   harness (ground-check), and the codex equivalent.
 - [~] **The garden (seeds)** — attn-native fine-grained seeds with audit trail
-  and seat attribution, for any attn-living agent; tickets retire outright
-  once the garden is usable — no two-system era; a planning seat tends it;
+  and crew attribution, for any attn-living agent; tickets retire outright
+  once the garden is usable — no two-system era; a planning crew member
+  tends it;
   `/orchestrate-with-fable` and ad-hoc
   plan-file choreography retire into it. Vertical-slice plan:
   [docs/plans/2026-08-06-the-garden-vertical-slices.md](../plans/2026-08-06-the-garden-vertical-slices.md).
-- [ ] **Agents converse and observe** — a seated agent messages another agent
+- [ ] **Agents converse and observe** — a crew member messages another agent
   and gets a reply, and inspects what another is doing without interrupting
   it. Conversation grows from ticket comments — proven, but indirect and
   noisy as a long-term shape — straight to directed, daemon-brokered
@@ -128,43 +133,44 @@ for user-defined seats.
   Sequenced ahead of the garden's build (2026-08-06): its smallest vertical
   — peek, then directed msg — lands first, so ticket retirement never
   orphans agent conversation.
-- [ ] **Intentful recognition** — laurels and feedback between human and seats
-  and between seats, attached to work items, delivered at wake; a very simple
+- [ ] **Intentful recognition** — laurels and feedback between human and crew
+  and between members, attached to work items, delivered at wake; a very simple
   central server routes across daemons and machines.
 - [ ] **Retirement pass** — keeper narration and workspace context removed once
   handoffs demonstrably cover their itch; raw-tier deterministic capture stays
   as the data-safety floor. The curated journal stops being written eagerly:
   work-graph and handoff data are rich enough to generate a day's story on
   demand, when the user actually asks for it.
-- [ ] **Bespoke seats via extensibility** — user-defined seats (charters,
+- [ ] **Bespoke crew via extensibility** — user-defined members (charters,
   personas, roles) through the plugin/extensibility mechanism.
 
 ## Open questions
 
 Known questions:
 
-- **Seat memory: lossless, not selective.** The promising shape (after
-  lossless-claw's context engine): nothing accrued to a seat is discarded — raw
+- **Crew memory: lossless, not selective.** The promising shape (after
+  lossless-claw's context engine): nothing accrued to a member is discarded — raw
   handoffs, laurels, and work history persist; background summarization
   condenses them into a hierarchy; wake priming assembles the top-level
   summaries plus the freshest raw notes within a budget; recall tools let a
-  seat drill from any summary back to the original detail on demand. Forgetting
-  is replaced by condensation plus retrieval. Open: the atom of seat memory,
+  member drill from any summary back to the original detail on demand. Forgetting
+  is replaced by condensation plus retrieval. Open: the atom of crew memory,
   the priming budget, and the condensation cadence (the durable jobs queue is
   the natural home). And a prior question, raised 2026-08-06, open but not
   decided: whether a dedicated store is needed at all. Handoffs and laurels
-  attach to seeds, and work history *is* the seeds a seat tended — so wake
+  attach to seeds, and work history *is* the seeds a member tended — so wake
   priming may be a garden query, and condensation may be `cutting` wearing a
   different hat. Before building a memory store, check whether the garden
   already covers the itch; what remains may be no more than the charter and
   non-work learnings.
-- **Seatless sessions stay first-class, for errands.** Continuity has two
-  axes: a handoff always attaches to the seed, and additionally to a seat
-  when one is occupied. Errand sessions pay no ceremony tax, and whoever next
+- **Errands stay first-class.** Continuity has two axes: a handoff always
+  attaches to the seed, and additionally to a crew member when the session
+  is someone's day. Errand sessions pay no ceremony tax, and whoever next
   picks up the seed inherits the notes. Whoever begins work that has no seed
   plants one at that moment — planting must cost seconds, or the garden
-  rots. The guard: seatless is the shape of errands, not a loophole — if
-  substantial recurring work keeps flowing seatless, a seat is missing.
+  rots. The guard: the errand is the shape of odd jobs, not a loophole — if
+  substantial recurring work keeps flowing through errands, a crew member is
+  missing.
 - **The laurel instruction.** Recognition runs on both channels — ambient
   harvesting and a deliberate one-gesture affordance — tuned as we go. The
   trigger is felt, not audited: the guidance anchors on the moment something
@@ -190,8 +196,8 @@ Known questions:
   reached through the seeds they tend, the session list demoted to a
   secondary view — is decided together with the in-flight foundational
   rendering work, not by drift. Interim answer (2026-08-07): **the crew** —
-  the seats are what Victor wants to see first; he expects this to evolve.
-- **What wakes a seat.** The spectrum, per Victor's visualization
+  the members are what Victor wants to see first; he expects this to evolve.
+- **What wakes a crew member.** The spectrum, per Victor's visualization
   (2026-08-07): he wakes them by default; automations may wake the
   recurring ones; seeds will trigger some (a blocker falls, a message
   lands); and **some may never go away** — persistent sessions. Raw
@@ -199,7 +205,7 @@ Known questions:
   harness-driven, mid-flight, unconsented, a seam of forgetting hidden
   inside apparent continuity (testimony: a compacted agent's own account,
   2026-08-07). Resolved by the consented-closure mechanics in the handoff
-  rock: with handoff-before-compact, a persistent seat becomes a chain of
+  rock: with handoff-before-compact, a persistent member becomes a chain of
   chosen goodbyes, and never-sleeping stops being an exception to the
   principle.
 - **The overnight contract.** The house is work-driven, not clock-driven:
@@ -211,7 +217,7 @@ Known questions:
 
 Blindspots — flag for a `ground` pass before their first chunk:
 
-- **The central server.** Identity and addressing of seats across daemons and
+- **The central server.** Identity and addressing of crew members across daemons and
   machines, relationship to the existing hub/relay, auth, and the smallest
   honest first version. Unfamiliar territory; ground before designing. Its
   scope grew on 2026-08-06: recognition routing was the founding reason, but
@@ -238,7 +244,7 @@ Blindspots — flag for a `ground` pass before their first chunk:
   a peer. That keeps "optional" true and multi-master sync permanently off
   the table. Auth stays as simple as possible for as long as possible — a
   minted API key in the config; Victor is the sole user for a long time.
-  Sync scope includes roles/seats alongside seeds. Hubs that never meet each
+  Sync scope includes roles/crew alongside seeds. Hubs that never meet each
   other (work, home) still each meet the server: cross-hub garden visibility
   is a union routed by daemon prefix, never a merge — fully qualified seed
   ids (`<daemon-id>/<local-id>`, prefix minted only at the boundary) make
@@ -254,8 +260,10 @@ Blindspots — flag for a `ground` pass before their first chunk:
 
 - Steve Yegge, [*The Shape of Things to Come, Part 2: Model Welfare for
   Agentic Engineers*](https://yegge.ai/essays/model-welfare/) — source of the
-  seat/session distinction, handoffs-over-exits, laurels, and the welfare
-  framing this vision adapts.
+  seat/session distinction (attn adopted it, then renamed seat → crew member
+  on 2026-08-07 when the first named member outgrew furniture vocabulary;
+  the distinction itself is his), handoffs-over-exits, laurels, and the
+  welfare framing this vision adapts.
 - [beads (`bd`)](https://github.com/steveyegge/beads) — Yegge's
   dependency-aware graph issue tracker for coding agents. The UX inspiration
   for the work graph (fine-grained items, dependencies, ready-task detection,
@@ -266,7 +274,7 @@ Blindspots — flag for a `ground` pass before their first chunk:
   lossless context engine for OpenClaw: raw messages persist in SQLite, a
   hierarchical summary DAG condenses them, live context is assembled as
   summaries plus a fresh tail, and recall tools drill back to the original
-  detail. The architectural model for seat memory (condensation plus
+  detail. The architectural model for crew memory (condensation plus
   retrieval instead of forgetting). Notably embedding-free: retrieval is
   full-text search plus agentic drill-down, no vector store.
 - [`docs/glossary.md`](../glossary.md) — attn's canonical domain vocabulary;

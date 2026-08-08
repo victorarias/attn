@@ -5,10 +5,11 @@
 First vertical through
 [docs/vision/friendly-home-for-agents.md](../vision/friendly-home-for-agents.md):
 the fine-grained, addressable work graph — **seeds** — for any attn-living
-agent. Chosen over the seat primitive as the opening arc because seats are
-currently covered by the hand-run skill-layer simulation (`~/.attn/seats/`,
-`/wake`, `/handoff`), which is teaching us the seat's real shape before we
-harden it; the garden is the machinery nothing simulates today.
+agent. Chosen over the crew primitive as the opening arc because the crew is
+currently covered by the hand-run skill-layer simulation (`~/.attn/crew/`,
+`/wake`, `/handoff`), which is teaching us the primitive's real shape before
+we harden it; the garden is the machinery nothing simulates today. (The crew
+was called "seats" until 2026-08-07 — the vision records the rename.)
 
 Beads is the UX inspiration, not the spec. Where beads needs flags and
 ceremony because its CLI is context-free, attn knows who is asking — the
@@ -58,12 +59,13 @@ to fix.
   reviewing plans; slice 6 teaches it to render seeds. Foundational work on
   this surface is in flight and will reshape details — that slice is
   direction, not frozen design.
-- **Seat simulation is live**: two seats exist (`keel`, `alder`); Keel filed
-  the first real handoff 2026-08-06. Its charter/handoff shapes are the
-  reference for what seed-attached notes must carry.
+- **Crew simulation is live**: keel and alder exist, trellis joined
+  2026-08-07; Keel filed the first real handoff 2026-08-06. The
+  charter/handoff shapes are the reference for what seed-attached notes
+  must carry.
 - **Chief embryo**: `profile_roles` single-holder table, chief guidance
   injected at launch, ticket role identity. The chief is out of scope here —
-  both its garden role and the chief→seat migration ride the seat vertical,
+  both its garden role and the chief→crew migration ride the crew vertical,
   after the simulation has taught us the primitive.
 
 ## Design decisions (cross-slice)
@@ -120,7 +122,7 @@ to fix.
   other (work, home) each meet the server: cross-hub visibility is a
   **union routed by prefix, never a merge** — identity collisions are
   impossible by construction and every seed has one home hub that applies
-  its writes. Roles/seats join seeds in the future sync scope.
+  its writes. Roles/crew join seeds in the future sync scope.
 - **Every seed belongs somewhere.** A seed is stamped with the workspace of
   the session that planted it (overridable with `--workspace`); a seed
   planted outside any workspace context carries none and surfaces only under
@@ -164,9 +166,9 @@ to fix.
   schema — named here so it has a home, enforced nowhere.
 - **Tending is atomic claim.** `attn seed tend <id>` sets tender + `growing`
   in one move (the beads `--claim` lesson). The tender is
-  `{session_id, seat?}` — seat is the free-string seat name from the
-  skill-layer simulation for now, snapping to seat ids when the daemon
-  primitive lands. Attribution is stamped from birth: every seed records its
+  `{session_id, member?}` — member is the free-string crew-member name from
+  the skill-layer simulation for now, snapping to member ids when the
+  daemon primitive lands. Attribution is stamped from birth: every seed records its
   planter the same way.
 - **Lifecycle vocabulary** (from the vision): `planted` → `growing` (someone
   tends it) → `harvested` (done, with a reason) or `withered` (abandoned,
@@ -320,14 +322,15 @@ Ships:
       equivalent flag) marking "written to my successor on this seed".
 - [ ] `attn seed show` surfaces the freshest handoff note prominently;
       `tend` prints it on claim so pickup primes automatically.
-- [ ] The `/handoff` skill (seat side) gains one step: for each seed you
-      tended and are not harvesting, leave a seed handoff note. Seat homes
-      stay untouched otherwise — the axes are additive.
+- [ ] The `/handoff` skill (crew side) gains one step: for each seed you
+      tended and are not harvesting, leave a seed handoff note. Member
+      homes stay untouched otherwise — the axes are additive.
 
 Acceptance:
 
-- [ ] Session A tends a seed, files a handoff note, ends. Session B (fresh,
-      seatless) runs `tend` and the note is in its face before any work.
+- [ ] Session A tends a seed, files a handoff note, ends. Session B (a
+      fresh errand) runs `tend` and the note is in its face before any
+      work.
 
 ### Slice 5 — plots and dispatch
 
@@ -349,7 +352,7 @@ Ships:
       progress (done / growing / ready / blocked counts).
 - [ ] `attn seed show <crown>` includes plot progress; a stale-plot query
       (`attn seed ls --stale`) exists as a *query*, not an automatic reaper
-      — a person (or later a seat) decides what withers.
+      — a person (or later a crew member) decides what withers.
 
 Acceptance:
 
@@ -417,13 +420,13 @@ Acceptance:
   the daemon serves. Ticket comments cover the meantime. If slice 5's
   multi-delegate reality demands seed-scoped chat before messaging lands,
   that evidence reopens this — speculation does not.
-- **Seed priming at wake** — the `/wake` skill reading the occupant's tended
-  seeds; belongs to the seat arc.
-- **Daemon seat primitive** — hardened from the skill simulation's lessons;
-  the chief→seat migration and the chief's garden-tender role both ride it.
-- **Seat memory condensation** — deferred with a tripwire per the vision:
+- **Seed priming at wake** — the `/wake` skill reading the waking member's
+  tended seeds; belongs to the crew arc.
+- **Daemon crew primitive** — hardened from the skill simulation's lessons;
+  the chief→crew migration and the chief's garden-tender role both ride it.
+- **Crew memory condensation** — deferred with a tripwire per the vision:
   priming size is logged from the simulation's first days; the lossless-claw
-  DAG gets built when a real seat overflows a measured budget.
+  DAG gets built when a real member overflows a measured budget.
 - **Central server / cross-daemon recognition** — behind its ground pass.
 
 ## Non-goals
@@ -454,9 +457,9 @@ Acceptance:
   cross-machine syncing proper stays with the central-server arc.
 - Whether `ready` should exclude seeds whose tender session is dead vs.
   recoverable (interacts with daemon-owned revive). Slice 3 decides.
-- Seat references: free-string seat names are knowingly un-validated until
-  the seat primitive lands — acceptable for a single-user garden, revisit at
-  the seat arc.
+- Crew references: free-string member names are knowingly un-validated
+  until the crew primitive lands — acceptable for a single-user garden,
+  revisit at the crew arc.
 - The crown/plot naming is Victor-blessed as of 2026-08-06 pending better
   ideas; the glossary entry in slice 1 is the commitment point.
 - How slice 6's annotation keying generalizes from `<workspaceId>:<path>` to
@@ -466,7 +469,7 @@ Acceptance:
   Agents get a brief vocabulary primer in guidance; no heavier mechanism.
 - Whether extensions (plugins/SDK) may read or write the garden, and through
   what grant — `core/garden` is daemon-owned today, and the vision's
-  bespoke-seats rock will eventually want a door. Not needed for these
+  bespoke-crew rock will eventually want a door. Not needed for these
   slices; named so the namespace choice doesn't silently decide it.
 - ~~Ticket retirement removes ticket comments — the one proven agent↔agent
   conversation channel — before directed messaging exists.~~ Ruled
