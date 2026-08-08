@@ -3729,6 +3729,10 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"empty default_model_claude", "default_model_claude", "", false},
 		{"valid default_effort_claude", "default_effort_claude", "high", false},
 		{"empty default_effort_claude", "default_effort_claude", "", false},
+		{"remembered destination new worktree", "new_session_destination_local_/Users/v/projects/attn", "new_worktree", false},
+		{"remembered destination main repo", "new_session_destination_endpoint_ep-1_/srv/projects/attn", "main_repo", false},
+		{"forgotten destination", "new_session_destination_local_/Users/v/projects/attn", "", false},
+		{"unknown destination", "new_session_destination_local_/Users/v/projects/attn", "somewhere_else", true},
 	}
 
 	for _, tt := range tests {

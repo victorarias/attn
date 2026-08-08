@@ -84,6 +84,94 @@ describe('RepoOptions', () => {
     expect(screen.getByTestId('repo-option-0')).not.toHaveClass('selected');
   });
 
+  it('opens on the main repo row when this repo last ran there, and Enter opens it', () => {
+    const onSelectMainRepo = vi.fn();
+    const onCreateWorktree = vi.fn(async () => {});
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        preferredDestination="main_repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={onSelectMainRepo}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={onCreateWorktree}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('repo-option-0')).toHaveClass('selected');
+    expect(screen.getByTestId('repo-new-worktree-input')).not.toHaveFocus();
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    expect(onSelectMainRepo).toHaveBeenCalledTimes(1);
+    expect(onCreateWorktree).not.toHaveBeenCalled();
+  });
+
+  it('returns to the create form with ArrowUp from the remembered main repo row', () => {
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        preferredDestination="main_repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowUp' });
+
+    expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
+  });
+
+  it('keeps the create form focused for a repo remembered as a worktree repo', () => {
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo"
+        preferredDestination="new_worktree"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={vi.fn()}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
+    expect(screen.getByTestId('repo-option-0')).not.toHaveClass('selected');
+  });
+
+  it('lets an exact worktree path win over a remembered main repo', () => {
+    const onSelectWorktree = vi.fn();
+    render(
+      <RepoOptions
+        repoInfo={repoInfo}
+        selectedPath="/tmp/repo--feature"
+        preferredDestination="main_repo"
+        onSelectedPathChange={vi.fn()}
+        onSelectMainRepo={vi.fn()}
+        onSelectWorktree={onSelectWorktree}
+        onCreateWorktree={vi.fn(async () => {})}
+        onRefresh={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('repo-option-1')).toHaveClass('selected');
+
+    fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+    expect(onSelectWorktree).toHaveBeenCalledWith('/tmp/repo--feature');
+  });
+
   it('creates a worktree from the prefilled name with a single Enter', async () => {
     const onCreateWorktree = vi.fn(async () => {});
     render(

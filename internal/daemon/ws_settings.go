@@ -73,6 +73,17 @@ const (
 	SettingAutoSettleCountdownSeconds = "auto_settle_countdown_seconds"
 	SettingKeybindingsConfig          = "keybindings_config"
 	SettingNewSessionYoloPrefix       = "new_session_yolo_"
+	// SettingNewSessionDestinationPrefix + a scope naming one repository on one
+	// target (e.g. "new_session_destination_local_/Users/v/projects/attn")
+	// remembers where that repository's last new session went: a fresh worktree
+	// or the main checkout. The picker opens on the remembered one, because a
+	// repository is habitually one or the other. Empty/unset => new worktree,
+	// which is what the picker has always defaulted to. Values are
+	// DestinationNewWorktree / DestinationMainRepo; opening an existing worktree
+	// is a one-off and writes nothing.
+	SettingNewSessionDestinationPrefix = "new_session_destination_"
+	DestinationNewWorktree             = "new_worktree"
+	DestinationMainRepo                = "main_repo"
 	// SettingChiefModelPrefix + agent (e.g. "chief_model_claude") pins the model a
 	// chief-of-staff launch uses, passed through as --model. Empty/unset => the
 	// agent's own default model. Only consulted for chief launches.
@@ -539,6 +550,9 @@ func (d *Daemon) validateSetting(key, value string) error {
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
 			return validateBooleanSetting(value)
 		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionDestinationPrefix) {
+			return validateNewSessionDestination(value)
+		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
 			// Model names/aliases are free-form (like the reviewer_model
 			// setting); accept any value and let the agent reject bad ones.
@@ -581,6 +595,18 @@ func validateAutoSettleSeconds(label, value string, minSeconds, maxSeconds int) 
 		return fmt.Errorf("%s must be between %d and %d seconds", label, minSeconds, maxSeconds)
 	}
 	return nil
+}
+
+// validateNewSessionDestination accepts an empty value (no remembered choice,
+// so the picker keeps its new-worktree default) or one of the two destinations
+// the picker can record.
+func validateNewSessionDestination(value string) error {
+	switch strings.TrimSpace(value) {
+	case "", DestinationNewWorktree, DestinationMainRepo:
+		return nil
+	default:
+		return fmt.Errorf("new session destination must be %q or %q: %s", DestinationNewWorktree, DestinationMainRepo, value)
+	}
 }
 
 func validateBooleanSetting(value string) error {
