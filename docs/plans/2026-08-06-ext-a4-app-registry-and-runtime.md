@@ -121,9 +121,13 @@ Apply pipeline: parse manifest → codegen → tsc against SDK types →
 `Bun.build` → hash → write artifact under a content-addressed store dir →
 insert `app_versions` row → flip `apps.current_version` in one transaction.
 Failure anywhere before the flip changes nothing (the plugin installer's
-stage-then-rename discipline, with real versions). The flip publishes a fact;
-the runtime drains that app's in-flight handlers and loads the new version.
-`attn app rollback` is the same flip to a prior version row.
+stage-then-rename discipline, with real versions). Re-applying byte-identical
+content mints no new row: the hash is the version's identity, so apply flips
+the pointer to the existing row — a long `attn app dev` session leaves one
+row per distinct build, and the invocation log's "what actually ran" stays
+honest. The flip publishes a fact; the runtime drains that app's in-flight
+handlers and loads the new version. `attn app rollback` is the same flip to
+a prior version row.
 
 ### Bus consumption — real per-app consumers (Fork A)
 
@@ -227,9 +231,11 @@ sustained stretch, the platform flips the app's consumer bit off, publishes
 the fact, and writes a durable notification naming the app, the event, and
 the last error. The running delivery loop observes the flip on its existing
 re-read bounds (per drain pass, 5s mid-burst) — no new wake machinery.
-Initial tripwire: 25 consecutive failures on the same event or 15 minutes
-stalled, whichever first (~several rounds at the 2m retry cap); pending real
-receipts, measured during verification and recorded here. Auto-disable is
+Initial tripwire: 15 minutes stalled on the same event (~5 rounds at the 2m
+retry cap; a failure-count clause was considered and dropped — at the pinned
+backoff, 25 failures is ~38 minutes of wall time, so a 15-minute clock always
+fires first and the count is dead policy); pending real receipts, measured
+during verification and recorded here. Auto-disable is
 load-bearing, not hygiene: an enabled-but-stalled consumer pins the entire
 event log against trim, and a platform where one broken app freezes
 retention for everyone is structurally broken.
@@ -251,7 +257,10 @@ errors, not code.
 `remove <name>` uninstalls: stop and delete the bus consumer, delete the
 registry row. Version history and the invocation log survive removal — they
 are history — and so does the `app/<name>` docstore namespace: deleting user
-data is a separate, explicit act, never an uninstall side effect.
+data is a separate, explicit act, never an uninstall side effect. That act
+has no surface in A4, deliberately: a wipe verb (`attn app wipe <name>` or
+`remove --purge-data`) is deferred until a later stage, and the deferral is
+the decision — remove never grows a data-deleting default.
 
 ## Delivery — epic branch
 
