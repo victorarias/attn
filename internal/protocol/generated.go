@@ -16,6 +16,14 @@ type AddEndpointMessage struct {
 	SshTarget string `json:"ssh_target"`
 }
 
+type AgentAttachMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type AgentClearQueueMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useConversationsStore, selectConversation, type AgentPromptMode } from '../../store/conversations';
+import { useSessionStore } from '../../store/sessions';
 import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
+import type { UISessionState } from '../../types/sessionState';
 import { ToolCard } from './ToolCard';
 import './ConversationPane.css';
 
@@ -10,6 +12,9 @@ interface ConversationPaneProps {
   // Focused leaf of the visible session: only that pane's composer takes focus
   // on its own, so a split never steals the caret from the pane you are in.
   paneActive: boolean;
+  // The daemon's word on the session. `recoverable` is the one this pane acts
+  // on: the host died and its conversation is waiting in a session file.
+  sessionState?: UISessionState;
   // Passed through to the diff an edit tool's card draws.
   resolvedTheme?: ResolvedTheme;
 }
@@ -21,15 +26,40 @@ interface ConversationPaneProps {
  * the agent said and did, and a composer. It sends prompts and reads the store;
  * it holds no picture of the session that the stream did not give it.
  */
-export function ConversationPane({ sessionId, paneActive, resolvedTheme }: ConversationPaneProps) {
+export function ConversationPane({ sessionId, paneActive, sessionState, resolvedTheme }: ConversationPaneProps) {
   const conversation = useConversationsStore(selectConversation(sessionId));
   const promptSent = useConversationsStore((state) => state.promptSent);
-  const { sendAgentPrompt, sendAgentClearQueue } = useDaemonApi();
+  const reloadSession = useSessionStore((state) => state.reloadSession);
+  const { sendAgentPrompt, sendAgentClearQueue, sendAgentAttach } = useDaemonApi();
   const [draft, setDraft] = useState('');
+  const [reloading, setReloading] = useState(false);
+  const [reloadError, setReloadError] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const listRef = useRef<HTMLDivElement | null>(null);
+  const attachedRef = useRef<string | null>(null);
 
-  const { running, awaitingRun, ready, items, queue } = conversation;
+  const { running, awaitingRun, ready, items, queue, lastSeq } = conversation;
+  const recoverable = sessionState === 'recoverable';
+
+  // Ask the host for a snapshot when this client has never seen its stream: a
+  // second window, or this one after a restart. `lastSeq` is the whole test —
+  // it is 0 exactly when nothing from this host has been applied — and the ref
+  // keeps a remount from asking twice for the same session.
+  //
+  // Only a session the daemon says is up gets asked. A launching one is about
+  // to volunteer its own `session_ready` and snapshot; a recoverable one has no
+  // host to answer and needs the reload below instead. Asking either would put
+  // a command error on the socket describing a race rather than a fault.
+  const hostShouldAnswer = sessionState !== undefined
+    && sessionState !== 'launching'
+    && sessionState !== 'recoverable'
+    && sessionState !== 'unknown';
+  useEffect(() => {
+    if (!hostShouldAnswer || lastSeq > 0) return;
+    if (attachedRef.current === sessionId) return;
+    attachedRef.current = sessionId;
+    sendAgentAttach(sessionId);
+  }, [hostShouldAnswer, lastSeq, sendAgentAttach, sessionId]);
   // Open for all of a run, shut only for the round trip that opens one. While
   // the run is live the two sends are steer and follow-up instead of prompt —
   // that is the whole difference, and it is why the user is never left with
@@ -72,6 +102,22 @@ export function ConversationPane({ sessionId, paneActive, resolvedTheme }: Conve
     setDraft('');
   }, [canSend, draft, promptSent, sendAgentPrompt, sessionId]);
 
+  // Bring the conversation back. The daemon relaunches the host from this
+  // session's stored launch intent and the replacement reopens the same session
+  // file, so what comes back is this conversation and not a new one. Reload is
+  // also in the session actions menu; it is here because this pane is where the
+  // user finds out, and a dead conversation with no visible way back is a
+  // one-way door.
+  const reload = useCallback(() => {
+    setReloading(true);
+    setReloadError(null);
+    void reloadSession(sessionId)
+      .catch((error: unknown) => {
+        setReloadError(error instanceof Error ? error.message : String(error));
+      })
+      .finally(() => setReloading(false));
+  }, [reloadSession, sessionId]);
+
   // What Enter does. A run in progress makes it a steer — the interruption is
   // the common case while an agent works, and the follow-up is the one you go
   // out of your way for.
@@ -91,7 +137,7 @@ export function ConversationPane({ sessionId, paneActive, resolvedTheme }: Conve
       <div className="conversation-pane-messages" ref={listRef} data-testid="conversation-messages">
         {items.length === 0 ? (
           <div className="conversation-pane-empty">
-            {ready ? 'Ask this agent something.' : 'Starting the agent...'}
+            {ready ? 'Ask this agent something.' : recoverable ? '' : 'Starting the agent...'}
           </div>
         ) : (
           items.map((item) => (item.kind === 'tool' ? (
@@ -115,6 +161,22 @@ export function ConversationPane({ sessionId, paneActive, resolvedTheme }: Conve
           )))
         )}
       </div>
+      {recoverable && (
+        <div className="conversation-pane-recoverable" data-testid="conversation-recoverable">
+          <span className="conversation-pane-recoverable-text">
+            {reloadError ?? 'This agent stopped. Reload to pick the conversation back up.'}
+          </span>
+          <button
+            type="button"
+            className="conversation-pane-reload"
+            data-testid="conversation-reload"
+            disabled={reloading}
+            onClick={reload}
+          >
+            {reloading ? 'Reloading...' : 'Reload'}
+          </button>
+        </div>
+      )}
       {pending.length > 0 && (
         <div className="conversation-pane-queue" data-testid="conversation-queue">
           <div className="conversation-pane-queue-header">
@@ -149,7 +211,7 @@ export function ConversationPane({ sessionId, paneActive, resolvedTheme }: Conve
           data-testid="conversation-input"
           value={draft}
           disabled={!canSend}
-          placeholder={awaitingRun ? 'Sending...' : running ? 'Steer the agent' : ready ? 'Message the agent' : 'Waiting for the agent'}
+          placeholder={awaitingRun ? 'Sending...' : running ? 'Steer the agent' : ready ? 'Message the agent' : recoverable ? 'Reload to continue' : 'Waiting for the agent'}
           rows={2}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={handleKeyDown}

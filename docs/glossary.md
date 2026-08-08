@@ -252,7 +252,7 @@ it is looking at.
 
 What differs is the surface. A PTY session's surface is a byte stream and a
 terminal grid; a conversation session's is an **envelope** stream going out and
-**verbs** coming in. There is no grid, no scrollback, and no attach.
+**verbs** coming in. There is no grid and no scrollback.
 
 The process running the agent is its **host**. The daemon owns a host's lifetime
 exactly as it owns a PTY worker's: it signals the host to tear down, and kills
@@ -306,6 +306,28 @@ arrived at the wrong time. What has been sent and not yet read is the session's
 queue can be cleared, which drops everything in it at once; what the strip shows
 is always the host's last word about it, never a local guess.
 
+A **conversation snapshot** is the whole of what a client needs to draw a
+conversation it has not been watching: the transcript, whether a run is open, and
+the queue. It is the conversation's answer to the terminal's restore — one
+authority, no merge — so a client that asks for one replaces what it had, and two
+windows on the same conversation show the same thing by construction. The host
+holds the transcript it snapshots, not the session file: a message pi has not
+finished is not on disk yet, and a snapshot rebuilt from disk would stop one
+paragraph short of the truth.
+
+A conversation session is **recoverable** when its host is gone but the
+conversation is not: the history is a session file under attn's data dir, and
+reloading the session starts a replacement host that reopens it. That is the same
+`recoverable` state and the same Reload every other session has, and it covers
+the daemon restarting as well as the host dying on its own. A session whose
+reopened history does not end with the agent speaking comes back
+**`waiting_input`** rather than `idle` — both open a turn and both take a nudge,
+so the difference is not what attn does next but what it tells the user: the
+agent stopped without finishing, and something is owed to it.
+
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —
-comes back from the same `driver.spawn` call a PTY-backed agent uses.
+comes back from the same `driver.spawn` call a PTY-backed agent uses. That
+capability is also what makes its sessions recoverable rather than reaped: a
+conversation always has somewhere to come back from, so it never has to declare
+the PTY agents' `resume`.

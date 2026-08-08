@@ -79,16 +79,16 @@ See `docs/glossary.md` for the vocabulary and
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
   out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
-  `tool_detail`, `clear_queue`, `shutdown`), **stdout/stderr** are pi's and the
+  `tool_detail`, `clear_queue`, `snapshot`, `shutdown`), **stdout/stderr** are pi's and the
   host's own output, captured to `<data-dir>/hosts/log/<session>.log`. Envelopes
   never go on stdout: pi loads the user's own extensions and any one of them
   printing a line would corrupt a shared stream.
 - Two envelope families. **Semantic** kinds (`session_ready`, `run_started`,
   `run_settled`, `tool_started`, `tool_finished`) are attn's vocabulary and the
   daemon may read them. **Renderings** (`message_start`, `message_delta`,
-  `message_end`, `queue_update`, `tool_detail`) are drawn by the app and
-  forwarded opaquely. Adding a rendering is a host + app change; a new semantic
-  kind is a protocol conversation.
+  `message_end`, `queue_update`, `tool_detail`, `conversation_snapshot`) are drawn
+  by the app and forwarded opaquely. Adding a rendering is a host + app change; a
+  new semantic kind is a protocol conversation.
 - **A state declaration is the subset of semantic kinds that carries a `state`**
   (`STATE_DECLARATION_KINDS`: `session_ready`, `run_started`, `run_settled`) —
   the attn state the session is in once that declaration is true (`idle`,
@@ -133,6 +133,29 @@ See `docs/glossary.md` for the vocabulary and
   because `session.clearQueue()` is: pi offers no per-entry removal, and clearing
   then re-queueing the survivors would race the drain. The strip empties on pi's
   answering `queue_update`, never on the click.
+- **The host reopens, it never starts over.** `SessionManager.continueRecent`
+  continues the most recent session file under the session dir and creates one
+  only when there is none — which is both the revive path and the zero-file
+  early-crash fallback, and it takes pi's session-format migrations for free.
+  `buildContextEntries()` (compaction-aware) is what the transcript is rebuilt
+  from. A relaunch is a NEW host, so its `seq` starts at 1 again: `session_ready`
+  is the only envelope that resets a client's spine, and the app must exempt it
+  from its own dedup or drop every envelope of the revived session.
+- **The host holds a transcript, and it is fed the host's own envelopes.** Not
+  pi's events, and not the session file: pi persists a message when it ends, so a
+  snapshot rebuilt from disk stops one paragraph short of what a client watching
+  the stream already has. `TranscriptStore` is the same reducer the app runs,
+  consuming identical input, which is what keeps the two from drifting.
+  `conversation_snapshot` is the rendering that carries it, in answer to the
+  `snapshot` verb, and it is BROADCAST and REPLACES — the host is the authority,
+  the same bargain the terminal's VT dump makes. It is windowed
+  (`SNAPSHOT_ITEM_LIMIT`, `SNAPSHOT_BYTES_LIMIT`); paging past the window is
+  slice 5's.
+- **`session_ready` says why the session went quiet.** A reopened conversation
+  whose last item is not an assistant message declares `waiting_input`;
+  everything else declares `idle`. Both open a turn and both take a nudge, so
+  this is never a behavior choice — it is the honest answer to "what happened
+  here", decidable from the file alone.
 - `seq` is one monotonic spine across both families, minted only by
   `EnvelopeStream`.
 - The mapper never claims exhaustiveness over pi's event union — pi added four

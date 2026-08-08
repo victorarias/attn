@@ -985,7 +985,9 @@ func (d *Daemon) Start() error {
 
 	// PTY exit events are emitted asynchronously from read loops.
 	if hooks, ok := d.ptyBackend.(ptybackend.LifecycleHooks); ok {
-		hooks.SetExitHandler(d.handlePTYExit)
+		// The PTY backend has no use for the finalized/suppressed answer; only
+		// the conversation host's exit acts on it (see handleHostExit).
+		hooks.SetExitHandler(func(info ptybackend.ExitInfo) { d.handlePTYExit(info) })
 		hooks.SetStateHandler(d.handlePTYState)
 	}
 
@@ -1166,8 +1168,18 @@ func (d *Daemon) recoverOnMissingPTY(session *protocol.Session) bool {
 		return true
 	}
 	if d.plugins != nil {
-		if driver, ok := d.plugins.driver(string(session.Agent)); ok && driver.Capabilities["resume"] {
-			return true
+		if driver, ok := d.plugins.driver(string(session.Agent)); ok {
+			if driver.Capabilities["resume"] {
+				return true
+			}
+			// A conversation session is recoverable by definition: its whole
+			// history is the host's own session file under attn's data dir, and a
+			// replacement host reopens it. There is no `resume` capability to
+			// declare — that one describes a driver that can resume a PTY agent's
+			// transcript from an argv flag, which a host does not have.
+			if driver.Capabilities[pluginDriverConversationCapability] {
+				return true
+			}
 		}
 	}
 	return false
@@ -1699,7 +1711,13 @@ func (d *Daemon) doneContext() context.Context {
 	return ctx
 }
 
-func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
+// handlePTYExit finalizes a session whose runtime is gone. It reports whether it
+// actually did: three callers suppress an exit because they own the teardown
+// themselves (a reload replacing the runtime in place, a launch still queueing
+// exits, a superseded run), and a caller that needs to act on the END of a
+// session — as the conversation host's exit does, to mark it recoverable — must
+// not act on an exit that was never the end of anything.
+func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) bool {
 	// A reload (chief assign/demote) killed this worker on purpose and owns the
 	// teardown+respawn itself. Consume the one-shot flag and skip ALL exit
 	// processing — no idle-clobber, no backend Remove (reloadSessionAgent already
@@ -1708,22 +1726,22 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 	// emits runtime_respawned instead (or session_exited itself if the respawn fails).
 	if d.consumeReloading(info.ID) {
 		d.logf("suppressing exit for reloading session %s (runtime replaced in place)", info.ID)
-		return
+		return false
 	}
 	if d.queueExitDuringPluginLaunch(info) {
-		return
+		return false
 	}
 	if d.supersededExitDuringPluginLaunch(info) {
 		if activeRun := d.store.GetAgentDriverRun(info.ID); activeRun.RunID == info.LifecycleID {
 			d.closePluginDriverSession(info.ID, "exited", &info.ExitCode, info.Signal)
 		}
-		return
+		return false
 	}
 	if info.LifecycleID != "" {
 		activeRun := d.store.GetAgentDriverRun(info.ID)
 		if activeRun.RunID != "" && activeRun.RunID != info.LifecycleID {
 			d.logf("ignoring stale plugin PTY exit: session=%s exited_run=%s active_run=%s", info.ID, info.LifecycleID, activeRun.RunID)
-			return
+			return false
 		}
 	}
 	d.stopTranscriptWatcher(info.ID)
@@ -1751,6 +1769,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) {
 		ExitCode: info.ExitCode,
 		Signal:   info.Signal,
 	})
+	return true
 }
 
 // ptyExit is the payload of FactSessionPTYExited. How a process ended is not

@@ -282,6 +282,15 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'pi-host-revive',
+    label: 'Conversation session: kill -9 to recoverable, reload with history, snapshot on a cold client',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-revive'],
+    // Same prereqs as pi-host-conversation. Two sessions, five prompts through
+    // a real agent, one `sleep 45` held open across a SIGKILL, and an app
+    // restart in the middle to get a client that never saw the live stream.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

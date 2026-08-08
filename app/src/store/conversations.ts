@@ -143,6 +143,9 @@ interface ConversationsStore {
   applyEnvelope: (sessionId: string, seq: number, kind: string, body: Record<string, unknown>) => void;
   // Opens the run at send time, before the host has said anything about it.
   promptSent: (sessionId: string) => void;
+  // The host is gone. The transcript stays — a dead conversation is still worth
+  // reading — but nothing about it is live any more.
+  hostExited: (sessionId: string) => void;
   clearConversation: (sessionId: string) => void;
   // Drops every conversation whose session is gone. A transcript outlives its
   // host on purpose — an exited session stays readable — so the sessions list
@@ -180,6 +183,53 @@ function replaceItem(
 const isTool = (callId: string) => (item: ConversationItem) => item.kind === 'tool' && item.callId === callId;
 const isMessage = (id: string) => (item: ConversationItem) => item.kind === 'message' && item.id === id;
 
+function queueFrom(value: unknown): ConversationQueue {
+  if (!value || typeof value !== 'object') return emptyQueue;
+  const body = value as Record<string, unknown>;
+  return { steering: stringList(body, 'steering'), followUp: stringList(body, 'followUp') };
+}
+
+/**
+ * Reads one snapshot item off the wire, or null if it is not one this build
+ * draws. A shape the app does not recognise is dropped rather than rendered as
+ * a blank row: the host is pinned to a pi version the app is not.
+ */
+function snapshotItem(value: unknown): ConversationItem | null {
+  if (!value || typeof value !== 'object') return null;
+  const body = value as Record<string, unknown>;
+  if (body.kind === 'message') {
+    const id = text(body, 'id');
+    if (!id) return null;
+    return {
+      kind: 'message',
+      id,
+      role: text(body, 'role') || 'assistant',
+      text: text(body, 'text'),
+      streaming: flag(body, 'streaming'),
+    };
+  }
+  if (body.kind === 'tool') {
+    const callId = text(body, 'call_id');
+    if (!callId) return null;
+    const status = text(body, 'status');
+    const failure = text(body, 'error');
+    return {
+      kind: 'tool',
+      callId,
+      name: text(body, 'name'),
+      summary: text(body, 'summary'),
+      files: stringList(body, 'files'),
+      status: status === 'running' ? 'running' : status === 'error' ? 'error' : 'ok',
+      error: failure === '' ? undefined : failure,
+      hasDetail: flag(body, 'detail'),
+      hasPatch: flag(body, 'patch'),
+      truncated: flag(body, 'truncated'),
+      fullOutput: flag(body, 'full_output'),
+    };
+  }
+  return null;
+}
+
 function applyToConversation(
   current: ConversationState,
   seq: number,
@@ -188,7 +238,27 @@ function applyToConversation(
 ): ConversationState {
   switch (kind) {
     case 'session_ready':
-      return { ...current, ready: true };
+      // A host that has just come up has no run open, whatever the dead one was
+      // doing when it went. The transcript is left alone: the snapshot that
+      // follows replaces it, and a host too old to send one leaves the user with
+      // the history they were already reading rather than an empty pane.
+      return { ...current, ready: true, running: false, awaitingRun: false, queue: emptyQueue };
+    case 'conversation_snapshot': {
+      const raw = body.items;
+      if (!Array.isArray(raw)) return current;
+      // Replace, never merge. The host's transcript is the authority — the same
+      // contract the terminal's VT dump has — so two clients that attach at
+      // different moments end up drawing the same conversation.
+      const items = raw.map(snapshotItem).filter((item): item is ConversationItem => item !== null);
+      return {
+        ...current,
+        items,
+        ready: true,
+        running: flag(body, 'running'),
+        awaitingRun: false,
+        queue: queueFrom(body.queue),
+      };
+    }
     case 'run_started':
       return { ...current, running: true, awaitingRun: false };
     case 'run_settled': {
@@ -355,11 +425,20 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
 
   applyEnvelope: (sessionId, seq, kind, body) => set((state) => {
     const current = state.conversations[sessionId] ?? emptyConversation;
-    if (seq > 0 && seq <= current.lastSeq) return state;
-    const next = applyToConversation(current, seq, kind, body);
-    if (next === current && seq <= current.lastSeq) return state;
+    // The seq spine belongs to one host process. A revived session is a NEW
+    // host, which mints its envelopes from 1 again — so every envelope of its
+    // life reads as a duplicate of the dead host's and the dedup below would
+    // drop the whole conversation. `session_ready` is where a spine begins: it
+    // is the one kind exempt from the guard, and it resets the cursor so the
+    // envelopes after it are read against the host that sent them.
+    const spineReset = kind === 'session_ready';
+    if (!spineReset && seq > 0 && seq <= current.lastSeq) return state;
+    const base = spineReset ? { ...current, lastSeq: 0 } : current;
+    const lastSeq = spineReset ? seq : Math.max(current.lastSeq, seq);
+    const next = applyToConversation(base, seq, kind, body);
+    if (next === base && lastSeq === current.lastSeq) return state;
     return {
-      conversations: { ...state.conversations, [sessionId]: { ...next, lastSeq: Math.max(current.lastSeq, seq) } },
+      conversations: { ...state.conversations, [sessionId]: { ...next, lastSeq } },
     };
   }),
 
@@ -375,6 +454,22 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
     if (!current.ready || current.running) return state;
     return {
       conversations: { ...state.conversations, [sessionId]: { ...current, running: true, awaitingRun: true } },
+    };
+  }),
+
+  // A host that exited is answering nothing else. Shutting the composer here is
+  // what keeps a user from typing into a session that cannot hear them: the
+  // daemon would answer the prompt with a command error, which is a worse way
+  // to find out. The run flags go with it — whatever was open died with the
+  // host, and a revived one starts from `session_ready`.
+  hostExited: (sessionId) => set((state) => {
+    const current = state.conversations[sessionId];
+    if (!current || (!current.ready && !current.running && !current.awaitingRun)) return state;
+    return {
+      conversations: {
+        ...state.conversations,
+        [sessionId]: { ...current, ready: false, running: false, awaitingRun: false, queue: emptyQueue },
+      },
     };
   }),
 

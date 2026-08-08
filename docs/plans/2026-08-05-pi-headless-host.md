@@ -183,12 +183,39 @@ Goal: crashes and restarts are survivable.
 
 Ships:
 
-- [ ] Revive via reopening the session file through pi's `SessionManager`
-      (migrations come free).
-- [ ] The zero-file early-crash case falls back to fresh session +
-      LaunchIntent prompt.
-- [ ] Attach protocol: windowed conversation snapshot + live stream deduped by
-      seq (mirrors the terminal restore contract).
+- [x] Revive via reopening the session file through pi's `SessionManager`
+      (migrations come free). `SessionManager.continueRecent(cwd, sessionDir)`
+      is the whole of it: it continues the most recent session file under the
+      dir and creates one only when there is none. The daemon side is the shape
+      #651 already built for PTY sessions — a host exit applies `recoverable`,
+      `reload_session` is the only entry, and the stored `LaunchIntent` is what
+      the replacement is spawned from. No parallel mechanism.
+- [x] The zero-file early-crash case falls back to a fresh session — the same
+      `continueRecent` call, which is why it needed no code of its own.
+      **Deviation:** the "+ LaunchIntent prompt" half is moot as specified. The
+      `pi-host` driver does not register the `initial_prompt` capability, so the
+      spawn pipeline refuses a pi-host launch that carries one; there is no
+      stored prompt to re-send. Giving pi-host an initial prompt is what
+      delegation to a conversation agent needs, and it belongs with that.
+- [x] Attach protocol: windowed conversation snapshot + live stream deduped by
+      seq (mirrors the terminal restore contract). `agent_attach` asks;
+      `conversation_snapshot` answers on the envelope stream, broadcast and
+      replacing. The window is `SNAPSHOT_ITEM_LIMIT` (500 items) /
+      `SNAPSHOT_BYTES_LIMIT` (1 MB), with the receipts in their comments.
+
+Two decisions this slice made, both stated where the code is:
+
+- **`waiting_input` is activated here.** A revived conversation whose reopened
+  history does not end with an assistant message declares `waiting_input`;
+  everything else declares `idle`. `idle` and `waiting_input` both open a turn
+  and both accept a nudge, so this never changes what attn does — it changes
+  what attn tells the user about why the session went quiet, and it is decidable
+  from the file alone.
+- **A new host resets the client's seq spine.** A replacement mints envelopes
+  from 1 again, so `session_ready` is exempt from the app's dedup guard and
+  resets `lastSeq`; the `conversation_snapshot` that follows refills the
+  transcript. Without the exemption every envelope of a revived session reads as
+  a duplicate of the dead host's and is dropped.
 
 Acceptance:
 
@@ -196,6 +223,15 @@ Acceptance:
       resumes with history intact and no orphaned processes.
 - [ ] Early-kill case relaunches cleanly.
 - [ ] Reattaching a second client shows identical state.
+
+Left for slice 5, deliberately:
+
+- Paging past the snapshot window. A conversation longer than the window loses
+  its oldest items on a snapshot, and because the snapshot is a broadcast
+  replace, one client attaching can shorten what every other client is showing.
+  Accepted here; it is exactly what scroll-back paging retires.
+- Resuming an arbitrary old session file. Revive reopens the most recent file
+  under the session's own dir and nothing else.
 
 ### Slice 5 — history and depth
 

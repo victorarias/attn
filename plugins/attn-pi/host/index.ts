@@ -39,11 +39,16 @@ import {
   EnvelopeStream,
   PiEventMapper,
   ToolDetailStore,
+  TranscriptStore,
+  conversationInterrupted,
   parseVerb,
+  reconstructTranscript,
   type Envelope,
+  type HostSessionState,
   type HostVerb,
   type HostVerbWithText,
   type RunSettledBody,
+  type SessionEntryLike,
   type SessionReadyBody,
   type ToolDetailBody,
 } from "./envelope";
@@ -159,7 +164,12 @@ async function main(): Promise<void> {
   const pinnedModel = requireEnv("ATTN_PI_HOST_MODEL");
 
   const envelopeOut = createWriteStream("", { fd: ENVELOPE_FD });
+  // The host's own transcript is fed the same envelopes the daemon forwards, so
+  // a snapshot it serves cannot disagree with what a client that watched the
+  // stream ended up holding. See TranscriptStore.
+  const transcript = new TranscriptStore();
   const write = (envelope: Envelope) => {
+    transcript.apply(envelope.kind, envelope.body);
     envelopeOut.write(`${JSON.stringify(envelope)}\n`);
   };
 
@@ -171,7 +181,14 @@ async function main(): Promise<void> {
   // same way a bare `pi` invocation does, so the user's credentials and
   // extensions work without a second setup.
   const agentDir = join(homedir(), ".pi", "agent");
-  const sessionManager = SessionManager.create(cwd, sessionDir);
+  // REVIVE. This directory holds exactly one attn session's pi sessions, so
+  // "the most recent one here" is unambiguously this conversation — and when
+  // there is none, `continueRecent` creates one, which is the whole of the
+  // early-crash case: a host killed before pi's first assistant message leaves
+  // no session file at all (measured, 2026-08-04 spike), and the relaunch is
+  // then an ordinary fresh start. Reopening also migrates the file in place,
+  // which is why the version pi writes is not something attn has to track.
+  const sessionManager = SessionManager.continueRecent(cwd, sessionDir);
   const settingsManager = SettingsManager.create(cwd);
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
   await resourceLoader.reload();
@@ -203,17 +220,41 @@ async function main(): Promise<void> {
     }
   });
 
+  // What came back off disk, if anything did. `buildContextEntries` is the
+  // compaction-aware path pi itself sends to the model, so the pane draws the
+  // same conversation the agent remembers rather than a longer one it has
+  // already summarized away.
+  const history = reconstructTranscript(sessionManager.buildContextEntries() as SessionEntryLike[]);
+  transcript.seed(history.items);
+  for (const [callID, detail] of history.details) toolDetails.put(callID, detail);
+  const interrupted = conversationInterrupted(history.items);
+  if (history.items.length > 0) {
+    console.error(
+      `[attn-pi-host] revived ${history.items.length} item(s) and ${history.details.size} tool detail(s) ` +
+      `from ${session.sessionFile ?? "(no file)"}; interrupted=${interrupted}`,
+    );
+  }
+
+  // A session nobody has spoken to yet is idle, and idle owes the user a turn:
+  // nothing will ever happen in it until they type. A REVIVED one whose last
+  // exchange never finished is `waiting_input` instead — the agent did not stop,
+  // it was stopped, and saying so is the difference between "this agent is done"
+  // and "this agent lost its work". Both open a turn; only the word differs, and
+  // the word is the point. This is what takes the session out of `launching`.
+  const readyState: HostSessionState = interrupted ? "waiting_input" : "idle";
   const ready: SessionReadyBody = {
     session_file: session.sessionFile ?? null,
     model: pinnedModel,
     cwd,
     pi_version: piVersion,
-    // A session nobody has spoken to yet is idle, and idle owes the user a
-    // turn: nothing will ever happen in it until they type. This is what takes
-    // the session out of `launching`.
-    state: "idle",
+    state: readyState,
   };
   stream.emit("session_ready", ready);
+  // Unconditionally, and immediately after: this host is a new process with a
+  // fresh seq spine, so every client watching has to re-seed from it whether or
+  // not it revived anything. `session_ready` is what resets a client's spine and
+  // this is what refills it, in that order.
+  stream.emit("conversation_snapshot", transcript.snapshot());
 
   let running = false;
   let shuttingDown = false;
@@ -353,6 +394,16 @@ async function main(): Promise<void> {
       case "tool_detail":
         void sendToolDetail(verb.callID, verb.full);
         return;
+      case "snapshot": {
+        // Broadcast, like every other envelope, and it replaces what each
+        // client had. That is safe because this transcript is fed the same
+        // envelopes they were — a client cannot be holding something this does
+        // not have, except items older than the window, which is the residual
+        // slice 5's paging exists to retire. Broadcasting is also what makes
+        // "two clients see identical state" true rather than hoped for.
+        stream.emit("conversation_snapshot", transcript.snapshot());
+        return;
+      }
       case "clear_queue": {
         // pi clears both queues together and emits its own queue_update, which
         // is what empties the strip. The app never removes an entry itself, so

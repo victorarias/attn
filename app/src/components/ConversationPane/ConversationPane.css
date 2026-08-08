@@ -185,6 +185,43 @@
   overflow: auto;
 }
 
+/* The host died and the conversation is waiting in a session file. Sits with
+   the queue strip, directly above the composer it explains the state of. */
+.conversation-pane-recoverable {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--color-bg-elevated, transparent);
+}
+
+.conversation-pane-recoverable-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-pane-reload {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.conversation-pane-reload:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
 /* Sent and not yet read. It sits between the transcript and the composer
    because that is where it is in time: after everything the agent has said,
    before whatever the user is about to type. */

@@ -346,7 +346,7 @@ func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) erro
 	}
 	spawnMsg, policy := buildStoredIntentSpawn(session, intent, int(*msg.Cols), int(*msg.Rows))
 	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
-		return rejection.err
+		return rejection.reason()
 	}
 	return nil
 }
