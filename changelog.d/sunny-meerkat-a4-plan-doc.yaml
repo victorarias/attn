@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  Design doc for stage A4 of the extension platform: the user-land unit is
+  renamed from extension to app (plugins stay the device-driver tier), with
+  an app registry (content-addressed versions, frozen declaration
+  snapshots, invocation log), per-app durable bus consumers, one shared
+  supervised Bun sidecar runtime, a declare-codegen-typecheck apply pipeline
+  that never executes app code, auto-disable policy, and the `attn app` CLI.
+  Plan doc: docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.
