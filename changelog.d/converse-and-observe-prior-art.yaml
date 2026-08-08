@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  Amends the converse-and-observe plan with prior-art findings (Claude
+  Code cross-session messaging v2.1.224 and pi-peer): the composed
+  prompt carries a consent boundary on every delivery, a structural
+  loop guard (dedupe, per-sender rate, queue cap) ships in v1, queued
+  results get presence-specific copy, and Claude Code's per-session
+  inbox socket is recorded as a candidate future transport for claude
+  targets.
