@@ -219,10 +219,30 @@ Two decisions this slice made, both stated where the code is:
 
 Acceptance:
 
-- [ ] `kill -9` the host mid-tool-run -> session goes recoverable -> reload
-      resumes with history intact and no orphaned processes.
-- [ ] Early-kill case relaunches cleanly.
-- [ ] Reattaching a second client shows identical state.
+- [x] `kill -9` the host mid-tool-run -> session goes recoverable -> reload
+      resumes with history intact and no orphaned processes. **Partial on the
+      last clause, by physics:** the dead host's process group is empty and the
+      durable spawn record names the live replacement, but the tool subprocess
+      the kill interrupted survives. SIGKILL skips the cooperative teardown pi
+      needs to stop it, and pi detaches each tool child into its own process
+      group, so the group kill cannot reach it either — the slice-1 receipt,
+      neither improved nor worsened by revive, and unfixable from the daemon
+      side because nothing records the child's pid. The scenario records what it
+      found (`stranded-tool-children.json`) instead of asserting it away, and
+      reaps it before exiting. Slice-5 input: recording tool-child pids as
+      `tool_started` arrives would let procreap reach them.
+- [x] Early-kill case relaunches cleanly.
+- [x] Reattaching a second client shows identical state.
+
+All three are the packaged-app scenario `pi-host-revive`
+(`app/scripts/real-app-harness/scenario-pi-host-revive.mjs`), run against a real
+agent on a throwaway profile. The load-bearing assertion is not that the pane
+redraws — it is that the revived *agent* answers a question only the reopened
+session file can answer: the pre-crash exchange plants a word, and the revived
+session is asked for it. The second client is the app restarted mid-scenario,
+which has never seen the host's stream, so everything it draws came from the
+snapshot alone; it drew the same five messages and the same tool card, including
+the bash call the kill interrupted, marked errored.
 
 Left for slice 5, deliberately:
 
@@ -232,6 +252,9 @@ Left for slice 5, deliberately:
   Accepted here; it is exactly what scroll-back paging retires.
 - Resuming an arbitrary old session file. Revive reopens the most recent file
   under the session's own dir and nothing else.
+- Reaching a tool subprocess a hard kill stranded. `tool_started` carries no pid,
+  so procreap has nothing to record; giving it one is the fix, and it belongs
+  with whichever slice wants tool cancellation anyway.
 
 ### Slice 5 — history and depth
 
