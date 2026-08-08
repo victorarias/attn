@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  Adds the converse-and-observe vertical plan (attn agent peek and
+  attn agent msg): passive daemon-served observation of a session and
+  daemon-brokered, sender-attributed messaging, sequenced ahead of the
+  garden build so ticket retirement never orphans agent conversation.
