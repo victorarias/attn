@@ -143,7 +143,7 @@ shows no reaction of any kind.
 - [ ] Protocol: `AgentMsgMessage` / `AgentMsgResult` (`delivered | queued`),
       version bump.
 - [ ] Daemon: `handleAgentMsg` — persist row, compose attributed prompt,
-      deliver via `typeDoorbell`; on guard refusal leave queued; stamp
+      deliver via `typeDoorbell`; on doorbell refusal leave queued; stamp
       `delivered_at` on success.
 - [ ] Redelivery trigger — **new machinery, the load-bearing piece of
       "never a silent drop"**. Nothing re-arms on session state change
