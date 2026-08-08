@@ -153,6 +153,16 @@ const (
 	// one-shot and cache-cold by construction; one that grows past this is treated
 	// as a bug, not accommodated. Empty/unset => DefaultContextWindowCap.
 	SettingHeadlessContextWindowCap = "headless_context_window_cap"
+	// SettingDefaultContextWindowCapPrefix + agent (e.g.
+	// "default_context_window_cap_claude") caps the effective context window of
+	// EVERY interactive launch of that agent (Claude:
+	// CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex: model_auto_compact_token_limit),
+	// so long-lived sessions compact at a chosen threshold instead of the
+	// agent's own default. Unlike the chief cap there is no built-in fallback:
+	// empty/unset => uncapped, preserving the agent's native behavior. A chief
+	// launch still takes chief_context_window_cap over this; see
+	// launchContextWindowCap.
+	SettingDefaultContextWindowCapPrefix = "default_context_window_cap_"
 	// SettingNotebookTasksEnabled is the master switch for ALL keeper async
 	// background duties (per-session summarize, workspace narrate, context
 	// compaction). Default ON: a blank/unset value means enabled, so existing
@@ -478,15 +488,24 @@ func (d *Daemon) resolveLaunchEffort(agent string, chief bool, requested string)
 	return d.defaultLaunchEffort(agent)
 }
 
-// chiefContextWindowCap returns the effective context-window token cap for a
-// chief-of-staff launch, or 0 (no cap) when this is not a chief launch. Mirrors
-// chiefLaunchModel: the policy (what the cap is, and that only the chief gets
-// one) lives here; the driver decides how to apply it.
-func (d *Daemon) chiefContextWindowCap(chief bool) int {
-	if !chief {
-		return 0
+// launchContextWindowCap returns the effective context-window token cap for an
+// interactive launch of the given agent, or 0 (no cap). Mirrors
+// resolveLaunchModel: the policy lives here, the driver only applies it. A
+// chief launch takes chief_context_window_cap (which defaults to
+// DefaultContextWindowCap, so the chief is always capped); every other launch
+// takes default_context_window_cap_<agent>, whose unset state means uncapped —
+// the agent's own compaction behavior.
+func (d *Daemon) launchContextWindowCap(agent string, chief bool) int {
+	if chief {
+		return resolveContextWindowCap(d.store.GetSetting(SettingChiefContextWindowCap))
 	}
-	return resolveContextWindowCap(d.store.GetSetting(SettingChiefContextWindowCap))
+	key := SettingDefaultContextWindowCapPrefix + strings.ToLower(strings.TrimSpace(agent))
+	if v := strings.TrimSpace(d.store.GetSetting(key)); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return 0
 }
 
 // applyHeadlessContextWindowCap pushes the headless_context_window_cap setting
@@ -571,6 +590,11 @@ func (d *Daemon) validateSetting(key, value string) error {
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultEffortPrefix) {
 			// Effort levels are agent-native, same as chief_effort_<agent>.
 			return nil
+		}
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultContextWindowCapPrefix) {
+			// Same bounds as the chief/headless caps; blank here means uncapped
+			// rather than DefaultContextWindowCap (see launchContextWindowCap).
+			return validateContextWindowCap(value)
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {
 			return validateExecutableSetting(value)

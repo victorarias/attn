@@ -3720,6 +3720,10 @@ func TestDaemon_SettingsValidation(t *testing.T) {
 		{"chief context cap below min", "chief_context_window_cap", "5000", true},
 		{"chief context cap above max", "chief_context_window_cap", "9000000", true},
 		{"non-numeric chief context cap", "chief_context_window_cap", "lots", true},
+		{"empty per-agent context cap means uncapped", "default_context_window_cap_claude", "", false},
+		{"valid per-agent context cap", "default_context_window_cap_claude", "800000", false},
+		{"per-agent context cap below min", "default_context_window_cap_codex", "5000", true},
+		{"non-numeric per-agent context cap", "default_context_window_cap_claude", "lots", true},
 		{"empty headless context cap uses default", "headless_context_window_cap", "", false},
 		{"valid headless context cap", "headless_context_window_cap", "200000", false},
 		{"headless context cap below min", "headless_context_window_cap", "1", true},
@@ -3758,17 +3762,33 @@ func TestDaemon_ContextWindowCapResolutionAndGating(t *testing.T) {
 		t.Fatalf("resolveContextWindowCap(200000) = %d, want 200000", got)
 	}
 
-	// chiefContextWindowCap: 0 for non-chief; default for a chief with no setting;
-	// the configured value for a chief that set one.
-	if got := d.chiefContextWindowCap(false); got != 0 {
-		t.Fatalf("non-chief cap = %d, want 0 (uncapped)", got)
+	// launchContextWindowCap: 0 for a non-chief launch with no per-agent
+	// setting; default for a chief with no setting; the configured values
+	// otherwise, with the chief setting winning on chief launches.
+	if got := d.launchContextWindowCap("claude", false); got != 0 {
+		t.Fatalf("non-chief cap with no setting = %d, want 0 (uncapped)", got)
 	}
-	if got := d.chiefContextWindowCap(true); got != agentdriver.DefaultContextWindowCap {
+	if got := d.launchContextWindowCap("claude", true); got != agentdriver.DefaultContextWindowCap {
 		t.Fatalf("chief cap with no setting = %d, want default %d", got, agentdriver.DefaultContextWindowCap)
 	}
 	d.store.SetSetting(SettingChiefContextWindowCap, "160000")
-	if got := d.chiefContextWindowCap(true); got != 160000 {
+	if got := d.launchContextWindowCap("claude", true); got != 160000 {
 		t.Fatalf("chief cap = %d, want 160000", got)
+	}
+	d.store.SetSetting(SettingDefaultContextWindowCapPrefix+"claude", "800000")
+	if got := d.launchContextWindowCap("claude", false); got != 800000 {
+		t.Fatalf("per-agent default cap = %d, want 800000", got)
+	}
+	if got := d.launchContextWindowCap("Claude", false); got != 800000 {
+		t.Fatalf("per-agent default cap (case-insensitive) = %d, want 800000", got)
+	}
+	if got := d.launchContextWindowCap("codex", false); got != 0 {
+		t.Fatalf("other agent's cap = %d, want 0 (uncapped)", got)
+	}
+	// The chief setting still wins on chief launches even with a per-agent
+	// default configured.
+	if got := d.launchContextWindowCap("claude", true); got != 160000 {
+		t.Fatalf("chief cap with per-agent default also set = %d, want 160000", got)
 	}
 }
 

@@ -134,14 +134,14 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 		// A chief launch injected chief guidance at launch; mark it so the
 		// SessionStart hook does not also emit workspace-context guidance.
 		env = append(env, "ATTN_CHIEF_GUIDANCE=append_system_prompt")
-		// Cap the chief's effective context window so auto-compaction fires at the
-		// configured threshold. Gated on this chief branch so delegated interactive
-		// agents (WorkspaceContextPath, not NotebookRoot) are never capped.
-		if opts.AutoCompactWindow > 0 {
-			env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.AutoCompactWindow))
-		}
 	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=append_system_prompt")
+	}
+	// Cap the effective context window so auto-compaction fires at the configured
+	// threshold. The daemon owns the policy of who gets a cap (chief setting vs
+	// default_context_window_cap_<agent>); this only applies what it resolved.
+	if opts.AutoCompactWindow > 0 {
+		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.AutoCompactWindow))
 	}
 	if opts.Executable != "" && opts.Executable != c.DefaultExecutable() {
 		env = append(env, c.ExecutableEnvVar()+"="+opts.Executable)
