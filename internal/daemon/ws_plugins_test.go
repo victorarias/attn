@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/supervise"
 )
 
 func TestDaemon_SetPluginPriority_PersistsAndReordersProviders(t *testing.T) {
@@ -113,6 +114,53 @@ func TestDaemon_PluginsUpdatedMessageIncludesSupervisorBackoff(t *testing.T) {
 	}
 	if plugin.LastExit == nil || !strings.Contains(*plugin.LastExit, "exit code 17") {
 		t.Fatalf("last exit=%v, want exit code 17", plugin.LastExit)
+	}
+}
+
+// A parked plugin must not read as one that is still coming back: nothing is
+// scheduled for it, so it gets its own runtime state rather than the degraded
+// one shared with backoff.
+func TestDaemon_PluginsUpdatedMessageReportsAParkedPlugin(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
+	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+	writeTestPluginManifest(t, d.pluginDir, "doomed-provider")
+	manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "doomed-provider", pluginManifestName))
+	if err != nil {
+		t.Fatalf("load manifest: %v", err)
+	}
+
+	clock := newFakePluginClock()
+	launcher := &fakePluginLauncher{}
+	d.pluginSupervisor = newPluginSupervisor(launcher, clock, nil, supervise.Options{GiveUpAfter: 1})
+	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	launcher.handle(0).exit(pluginExit{ExitCode: intPtr(1)})
+	waitForSupervisor(t, func() bool {
+		snapshot, _ := d.pluginSupervisor.Snapshot(manifest.Name)
+		return snapshot.Phase == pluginPhaseBackoff
+	})
+	clock.Advance(pluginRestartBackoff[0])
+	waitForSupervisor(t, func() bool { return launcher.count() == 2 })
+	launcher.handle(1).exit(pluginExit{ExitCode: intPtr(1)})
+	waitForSupervisor(t, func() bool {
+		snapshot, _ := d.pluginSupervisor.Snapshot(manifest.Name)
+		return snapshot.Phase == pluginPhaseParked
+	})
+
+	plugins := d.pluginsUpdatedMessage().Plugins
+	if len(plugins) != 1 {
+		t.Fatalf("plugin count=%d, want 1", len(plugins))
+	}
+	plugin := plugins[0]
+	if got := protocol.Deref(plugin.RuntimePhase); got != string(pluginPhaseParked) {
+		t.Fatalf("runtime phase=%q, want parked", got)
+	}
+	if plugin.RuntimeState != pluginRuntimeStateParked {
+		t.Fatalf("runtime state=%q, want parked", plugin.RuntimeState)
+	}
+	if plugin.NextRestartAt != nil {
+		t.Fatalf("next restart=%v, want nothing scheduled", plugin.NextRestartAt)
 	}
 }
 
