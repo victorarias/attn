@@ -84,13 +84,13 @@ type SpawnOptions struct {
 	// Empty means the agent's own default.
 	Effort string
 
-	// ChiefContextWindowCap, when > 0, is the token threshold the chief-of-staff
-	// launch caps its context window at; the worker exports it as
-	// ATTN_CHIEF_AUTO_COMPACT_WINDOW and the launched agent applies it (Claude:
+	// ContextWindowCap, when > 0, is the token threshold the launched agent's
+	// context window is capped at; the worker exports it as
+	// ATTN_AUTO_COMPACT_WINDOW and the launched agent applies it (Claude:
 	// CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex: model_auto_compact_token_limit).
-	// Sourced from the chief_context_window_cap setting and set only for chief
-	// launches, so non-chief sessions stay uncapped.
-	ChiefContextWindowCap int
+	// The daemon owns the policy (chief_context_window_cap for chief launches,
+	// default_context_window_cap_<agent> for everything else); 0 means uncapped.
+	ContextWindowCap int
 
 	// UnattendedLaunch is the daemon-owned launch contract. When set, it is the
 	// sole source for agent, executable, approval, trust, model, effort, and

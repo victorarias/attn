@@ -1334,6 +1334,35 @@ describe('SettingsModal chief settings', () => {
     fireEvent.blur(input);
     expect(onSetSetting).not.toHaveBeenCalledWith('chief_context_window_cap', expect.anything());
   });
+
+  it('shows a per-agent context-window cap that is blank when unset', async () => {
+    renderModal({ default_context_window_cap_claude: '800000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    expect(await screen.findByTestId('settings-default-context-cap-claude')).toHaveValue(800000);
+    // Blank means uncapped (the agent's own behavior), not the built-in default.
+    expect(screen.getByTestId('settings-default-context-cap-codex')).toHaveValue(null);
+  });
+
+  it('commits a changed per-agent context-window cap on blur', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const input = await screen.findByTestId('settings-default-context-cap-claude');
+    fireEvent.change(input, { target: { value: '800000' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('default_context_window_cap_claude', '800000');
+  });
+
+  it('clears a per-agent context-window cap back to uncapped', async () => {
+    const onSetSetting = renderModal({ default_context_window_cap_claude: '800000' });
+    fireEvent.click(screen.getByTestId('settings-nav-agents'));
+
+    const input = await screen.findByTestId('settings-default-context-cap-claude');
+    fireEvent.change(input, { target: { value: '' } });
+    fireEvent.blur(input);
+    expect(onSetSetting).toHaveBeenCalledWith('default_context_window_cap_claude', '');
+  });
 });
 
 describe('SettingsModal font size', () => {

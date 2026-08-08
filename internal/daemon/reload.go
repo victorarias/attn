@@ -375,13 +375,12 @@ func (d *Daemon) buildReloadSpawnOptionsFromLaunchParams(session *protocol.Sessi
 		LoginShellEnv:           d.cachedLoginShellEnv(),
 		WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 		AutoApprove:             false,
-		// Carry the chief context-window cap across an in-place reload so a
-		// reloaded chief comes back capped, not just a fresh launch. The wrapper
-		// re-derives the chief's NotebookRoot (and thus emits the cap) via the
-		// NotebookGuide RPC keyed on sessionID, so gate on the persisted chief
-		// role here to stay consistent with that RPC; non-chief sessions resolve
-		// to 0 (uncapped), matching delegated/ordinary reloads.
-		ChiefContextWindowCap: d.chiefContextWindowCap(d.isChiefOfStaffSession(sessionID)),
+		// Carry the context-window cap across an in-place reload so a reloaded
+		// session comes back capped the same way a fresh launch would: the chief
+		// from chief_context_window_cap (gate on the persisted chief role, staying
+		// consistent with the NotebookGuide RPC keyed on sessionID), every other
+		// session from default_context_window_cap_<agent>.
+		ContextWindowCap: d.launchContextWindowCap(session.Agent, d.isChiefOfStaffSession(sessionID)),
 	}
 	if !params.UnattendedLaunch.IsZero() {
 		if err := params.UnattendedLaunch.Validate(); err != nil {
@@ -566,7 +565,7 @@ func (d *Daemon) preparePluginRoleReload(sessionID string, desiredChief bool) (*
 		lock.Unlock()
 		return nil, true, err
 	}
-	opts.ChiefContextWindowCap = d.chiefContextWindowCap(desiredChief)
+	opts.ContextWindowCap = d.launchContextWindowCap(session.Agent, desiredChief)
 	pluginReload, err := d.preparePluginReload(session, &opts, desiredChief)
 	if err != nil {
 		lock.Unlock()

@@ -69,7 +69,7 @@ type SpawnOptions struct {
 	TrustWorkingDirectory   bool
 	Model                   string
 	Effort                  string
-	ChiefContextWindowCap   int
+	ContextWindowCap        int
 	UnattendedLaunch        launchcontract.UnattendedLaunchSpec
 
 	// Theme seeds the colors the session answers OSC 10/11/12 queries with,
@@ -671,12 +671,12 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 		"ATTN_TRUST_WORKING_DIRECTORY",
 		"ATTN_MODEL",
 		"ATTN_EFFORT",
-		"ATTN_CHIEF_AUTO_COMPACT_WINDOW",
+		"ATTN_AUTO_COMPACT_WINDOW",
 	}
 	if os.Getenv("ATTN_PTY_WORKER") == "1" {
 		inheritedKeys := launchKeys
 		if !opts.UnattendedLaunch.IsZero() {
-			inheritedKeys = []string{"ATTN_WORKFLOW_GUIDANCE_ENABLED", "ATTN_CHIEF_AUTO_COMPACT_WINDOW"}
+			inheritedKeys = []string{"ATTN_WORKFLOW_GUIDANCE_ENABLED", "ATTN_AUTO_COMPACT_WINDOW"}
 		}
 		for _, key := range inheritedKeys {
 			if value, ok := os.LookupEnv(key); ok {
@@ -699,8 +699,8 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
 		launchEnv = append(launchEnv, "ATTN_EFFORT="+effort)
 	}
-	if opts.ChiefContextWindowCap > 0 {
-		launchEnv = append(launchEnv, "ATTN_CHIEF_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ChiefContextWindowCap))
+	if opts.ContextWindowCap > 0 {
+		launchEnv = append(launchEnv, "ATTN_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ContextWindowCap))
 	}
 	if launch := opts.UnattendedLaunch; !launch.IsZero() {
 		launchEnv = append(launchEnv,
