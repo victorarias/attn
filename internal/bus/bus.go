@@ -179,6 +179,9 @@ type Bus struct {
 	// stopped is set before Stop cancels, so a registration racing shutdown does
 	// not add to wg while Stop is already waiting on it.
 	stopped bool
+	// retiring holds the names Unregister is between removing and deleting the row
+	// for. See Register for what taking one of them back early would cost.
+	retiring map[string]struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -238,6 +241,7 @@ func New(opts Options) *Bus {
 		retryCap:     nonZeroDuration(opts.RetryCap, DefaultRetryCap),
 		compactable:  append([]string(nil), opts.Compactable...),
 		ephemeral:    map[int]*ephemeralSub{},
+		retiring:     map[string]struct{}{},
 	}
 	if b.now == nil {
 		b.now = time.Now
@@ -448,6 +452,14 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 			return fmt.Errorf("bus: consumer %s already registered", name)
 		}
 	}
+	// A name being unregistered is claimed until its row is gone. Taking it back
+	// inside that window would resume the outgoing consumer's cursor from a row
+	// that is about to be deleted under the new loop — which then drains against a
+	// registration that disappeared and retries that error forever. Same zombie the
+	// delete-last ordering exists to prevent, through the side door.
+	if _, retiring := b.retiring[name]; retiring {
+		return fmt.Errorf("bus: consumer %s is being unregistered; retry once it is gone", name)
+	}
 	d := b.newDurable(name, filter, h)
 
 	// Before Start, the registration is all there is to do: Start persists every
@@ -490,6 +502,10 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 // the same reason Stop's is: a handler that ignores its cancelled context is a
 // bug in the handler, and a retired consumer's late cursor advance is already
 // dropped, so waiting costs nothing a correct handler will notice.
+//
+// The name stays claimed for the whole of it, so a Register that arrives while the
+// loop is winding down is refused rather than served from a row about to be
+// deleted underneath it.
 func (b *Bus) Unregister(name string) error {
 	b.mu.Lock()
 	var (
@@ -505,7 +521,15 @@ func (b *Bus) Unregister(name string) error {
 		b.durables = append(b.durables[:i], b.durables[i+1:]...)
 		break
 	}
+	b.retiring[name] = struct{}{}
 	b.mu.Unlock()
+	// Released whatever happens, including a failed delete: a surviving row is the
+	// ordinary resume-from-cursor case, and the caller already has the error.
+	defer func() {
+		b.mu.Lock()
+		delete(b.retiring, name)
+		b.mu.Unlock()
+	}()
 
 	if found != nil {
 		found.retire()

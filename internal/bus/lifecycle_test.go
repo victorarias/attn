@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -178,6 +179,10 @@ func TestUnregisterDeletesTheRowOnlyAfterTheLoopExits(t *testing.T) {
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
+	// Released on cleanup too, so an assertion that fails before the release below
+	// still frees the handler: otherwise Stop would wait on a loop parked inside it
+	// and the failure would read as a hang.
+	releaseHandler := sync.OnceFunc(func() { close(release) })
 	// The handler deliberately ignores cancellation: the case under test is a
 	// handler still running when Unregister lands.
 	handler := func(context.Context, Event) error {
@@ -192,6 +197,9 @@ func TestUnregisterDeletesTheRowOnlyAfterTheLoopExits(t *testing.T) {
 		t.Fatalf("Start: %v", err)
 	}
 	t.Cleanup(b.Stop)
+	// Registered after Stop's cleanup so it runs before it: cleanups are LIFO, and
+	// Stop waits for the delivery loop that is parked inside the handler.
+	t.Cleanup(releaseHandler)
 
 	d := b.durables[0]
 	var deletedWhileRunning atomic.Bool
@@ -214,7 +222,7 @@ func TestUnregisterDeletesTheRowOnlyAfterTheLoopExits(t *testing.T) {
 	// Wait for Unregister to have retired the consumer, so releasing the handler
 	// really is a result arriving after the unregister began.
 	waitFor(t, "the consumer to be retired", d.isRetired)
-	close(release)
+	releaseHandler()
 
 	if err := <-done; err != nil {
 		t.Fatalf("Unregister: %v", err)
@@ -232,6 +240,68 @@ func TestUnregisterDeletesTheRowOnlyAfterTheLoopExits(t *testing.T) {
 	if _, ok, err := s.GetConsumer("app:slow"); err != nil || ok {
 		t.Fatalf("a late handler result wrote to the deleted registration (found=%v, err=%v)", ok, err)
 	}
+}
+
+// The name is claimed for the whole of Unregister, not just up to the moment it
+// leaves the in-memory set. Serving a Register inside that window would resume the
+// outgoing consumer's cursor from a row that is deleted underneath the new loop,
+// which then drains against a registration that disappeared and retries that error
+// forever — the zombie the delete-last ordering exists to prevent, through the
+// side door.
+func TestRegisterIsRefusedWhileTheNameIsBeingUnregistered(t *testing.T) {
+	s := newMemStore()
+	b := testBus(t, s)
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	releaseHandler := sync.OnceFunc(func() { close(release) })
+	handler := func(context.Context, Event) error {
+		close(entered)
+		<-release
+		return nil
+	}
+	if err := b.Register("app:notes", All, handler); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(b.Stop)
+	// After Stop's cleanup, so it runs before it. See the note above.
+	t.Cleanup(releaseHandler)
+
+	d := b.durables[0]
+	if _, err := b.Publish("work.happened", "", nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	<-entered
+
+	done := make(chan error, 1)
+	go func() { done <- b.Unregister("app:notes") }()
+	waitFor(t, "the consumer to be retired", d.isRetired)
+
+	// The row still exists here: the loop has not exited, so the delete has not run.
+	if _, ok, err := s.GetConsumer("app:notes"); err != nil || !ok {
+		t.Fatalf("expected the row to still exist mid-unregister (found=%v, err=%v)", ok, err)
+	}
+	if err := b.Register("app:notes", All, func(context.Context, Event) error { return nil }); err == nil {
+		t.Fatal("Register was served while the name was being unregistered")
+	}
+
+	releaseHandler()
+	if err := <-done; err != nil {
+		t.Fatalf("Unregister: %v", err)
+	}
+
+	// Once the row is gone the name is free again.
+	rec := newRecorder()
+	if err := b.Register("app:notes", All, rec.handle); err != nil {
+		t.Fatalf("Register after the unregister completed: %v; the name stayed claimed", err)
+	}
+	if _, err := b.Publish("after.reinstall", "", nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	waitFor(t, "the reinstalled consumer to deliver", func() bool { return rec.count() >= 1 })
 }
 
 // A retired consumer writes nothing. Its handler may still be in flight when the
@@ -416,9 +486,11 @@ func TestReinstallAfterUnregisterStartsAtHead(t *testing.T) {
 	}
 }
 
-// A registration that cannot be persisted leaves nothing behind: no consumer in
-// the set, no loop, and the name is free to try again.
-func TestRegisterAfterStartRollsBackWhenThePersistFails(t *testing.T) {
+// A registration that fails anywhere before it is recorded leaves nothing behind:
+// no consumer in the set, no loop, and the name is free to try again. The failure
+// injected here is the log-bounds read, the first of the two store calls; the
+// invariant is the same for either.
+func TestRegisterAfterStartRollsBackWhenRegistrationFails(t *testing.T) {
 	s := newMemStore()
 	b := testBus(t, s)
 	if err := b.Start(); err != nil {
