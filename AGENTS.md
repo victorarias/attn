@@ -387,6 +387,12 @@ carries the enumerated exception list.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor. Disabled consumers do not pin the log; they resume at head with a
   logged gap.
+- A durable consumer can register and unregister while the daemon runs.
+  `Unregister` cancels that consumer alone, waits for its delivery loop to exit,
+  and only then deletes the row: deleting first leaves a live loop reading a
+  registration that disappeared and retrying that error forever. It is
+  idempotent, and every uninstall path must call it — an abandoned enabled row
+  holds the retention floor down against a consumer nobody serves.
 - Operator surface: `attn bus status`, `attn bus disable|enable <consumer>`.
   The enabled bit is database-only on purpose — the kill switch must not depend
   on the daemon it kills.

@@ -154,6 +154,18 @@ At-least-once, stall-don't-skip, cursor-after-handler semantics are untouched
 — apps are the first production durable consumers, and the point is to
 consume that machinery, not fork it.
 
+**Slice 1, as built.** `Register` is callable after `Start` and launches that
+consumer's delivery loop at once; `Unregister(name)` cancels the consumer, waits
+for its loop to exit, and only then deletes the row. Each consumer holds its own
+context, a child of the bus context, and both of the loop's waits — the idle
+select and the retry sleep — watch it, so unregistering a consumer stalled at the
+retry cap does not wait that cap out. The delete-last order is what keeps a live
+loop from reading a registration that disappeared, an error path that would retry
+forever; a handler that completes after the unregister has its cursor advance and
+its failure record dropped silently. `Unregister` is idempotent and deletes rows
+this process never registered, so an orphan an earlier daemon left behind — the
+thing that pins retention against a consumer nobody serves — is clearable.
+
 Per-handler cursors: considered, deferred. Per-app gives up independent
 progress across an app's subscriptions and partial survival of a poisoned
 event. Per-handler costs cross-handler ordering — one cursor means handlers

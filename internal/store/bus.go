@@ -215,6 +215,24 @@ func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) 
 	return err
 }
 
+// DeleteBusConsumer removes a registration. Deleting a row that is not there is
+// success, not an error: the caller is an uninstall path, and an uninstall that
+// fails the second time it runs is a worse surface than one that says nothing.
+//
+// An abandoned row is not harmless. While it exists and is enabled it holds the
+// cursor floor down, so retention and compaction cannot pass it — forever, for a
+// consumer nobody serves. Deleting the row is what ends that.
+func (s *Store) DeleteBusConsumer(name string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`DELETE FROM bus_consumers WHERE name = ?`, name)
+	return err
+}
+
 // ListBusConsumers returns every registration, by name.
 func (s *Store) ListBusConsumers() ([]BusConsumer, error) {
 	s.mu.RLock()
