@@ -416,6 +416,17 @@ func (m *Manager) ToolDetail(sessionID, callID string, full bool) error {
 	return m.send(sessionID, map[string]interface{}{"verb": "tool_detail", "call_id": callID, "full": full})
 }
 
+// Snapshot asks a host for the whole conversation as it stands.
+//
+// The answer comes back the same way a tool detail's does: as an envelope on the
+// host's own stream, reaching every client. That is deliberate — a snapshot is
+// the conversation's version of the terminal's restore dump, and the point of
+// broadcasting it is that two clients attaching to one session are provably
+// looking at the same transcript rather than two independently assembled ones.
+func (m *Manager) Snapshot(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "snapshot"})
+}
+
 // ClearQueue drops everything the agent has been sent and not yet read.
 //
 // The host answers with the agent's own queue state, so the strip a client is

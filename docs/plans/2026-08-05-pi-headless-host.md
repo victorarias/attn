@@ -183,19 +183,78 @@ Goal: crashes and restarts are survivable.
 
 Ships:
 
-- [ ] Revive via reopening the session file through pi's `SessionManager`
-      (migrations come free).
-- [ ] The zero-file early-crash case falls back to fresh session +
-      LaunchIntent prompt.
-- [ ] Attach protocol: windowed conversation snapshot + live stream deduped by
-      seq (mirrors the terminal restore contract).
+- [x] Revive via reopening the session file through pi's `SessionManager`
+      (migrations come free). `SessionManager.continueRecent(cwd, sessionDir)`
+      is the whole of it: it continues the most recent session file under the
+      dir and creates one only when there is none. The daemon side is the shape
+      #651 already built for PTY sessions — a host exit applies `recoverable`,
+      `reload_session` is the only entry, and the stored `LaunchIntent` is what
+      the replacement is spawned from. No parallel mechanism.
+- [x] The zero-file early-crash case falls back to a fresh session — the same
+      `continueRecent` call, which is why it needed no code of its own.
+      **Deviation:** the "+ LaunchIntent prompt" half is moot as specified. The
+      `pi-host` driver does not register the `initial_prompt` capability, so the
+      spawn pipeline refuses a pi-host launch that carries one; there is no
+      stored prompt to re-send. Giving pi-host an initial prompt is what
+      delegation to a conversation agent needs, and it belongs with that.
+- [x] Attach protocol: windowed conversation snapshot + live stream deduped by
+      seq (mirrors the terminal restore contract). `agent_attach` asks;
+      `conversation_snapshot` answers on the envelope stream, broadcast and
+      replacing. The window is `SNAPSHOT_ITEM_LIMIT` (500 items) /
+      `SNAPSHOT_BYTES_LIMIT` (1 MB), with the receipts in their comments.
+
+Two decisions this slice made, both stated where the code is:
+
+- **`waiting_input` is activated here.** A revived conversation whose reopened
+  history does not end with an assistant message declares `waiting_input`;
+  everything else declares `idle`. `idle` and `waiting_input` both open a turn
+  and both accept a nudge, so this never changes what attn does — it changes
+  what attn tells the user about why the session went quiet, and it is decidable
+  from the file alone.
+- **A new host resets the client's seq spine.** A replacement mints envelopes
+  from 1 again, so `session_ready` is exempt from the app's dedup guard and
+  resets `lastSeq`; the `conversation_snapshot` that follows refills the
+  transcript. Without the exemption every envelope of a revived session reads as
+  a duplicate of the dead host's and is dropped.
 
 Acceptance:
 
-- [ ] `kill -9` the host mid-tool-run -> session goes recoverable -> reload
-      resumes with history intact and no orphaned processes.
-- [ ] Early-kill case relaunches cleanly.
-- [ ] Reattaching a second client shows identical state.
+- [x] `kill -9` the host mid-tool-run -> session goes recoverable -> reload
+      resumes with history intact and no orphaned processes. **Partial on the
+      last clause, by physics:** the dead host's process group is empty and the
+      durable spawn record names the live replacement, but the tool subprocess
+      the kill interrupted survives. SIGKILL skips the cooperative teardown pi
+      needs to stop it, and pi detaches each tool child into its own process
+      group, so the group kill cannot reach it either — the slice-1 receipt,
+      neither improved nor worsened by revive, and unfixable from the daemon
+      side because nothing records the child's pid. The scenario records what it
+      found (`stranded-tool-children.json`) instead of asserting it away, and
+      reaps it before exiting. Slice-5 input: recording tool-child pids as
+      `tool_started` arrives would let procreap reach them.
+- [x] Early-kill case relaunches cleanly.
+- [x] Reattaching a second client shows identical state.
+
+All three are the packaged-app scenario `pi-host-revive`
+(`app/scripts/real-app-harness/scenario-pi-host-revive.mjs`), run against a real
+agent on a throwaway profile. The load-bearing assertion is not that the pane
+redraws — it is that the revived *agent* answers a question only the reopened
+session file can answer: the pre-crash exchange plants a word, and the revived
+session is asked for it. The second client is the app restarted mid-scenario,
+which has never seen the host's stream, so everything it draws came from the
+snapshot alone; it drew the same five messages and the same tool card, including
+the bash call the kill interrupted, marked errored.
+
+Left for slice 5, deliberately:
+
+- Paging past the snapshot window. A conversation longer than the window loses
+  its oldest items on a snapshot, and because the snapshot is a broadcast
+  replace, one client attaching can shorten what every other client is showing.
+  Accepted here; it is exactly what scroll-back paging retires.
+- Resuming an arbitrary old session file. Revive reopens the most recent file
+  under the session's own dir and nothing else.
+- Reaching a tool subprocess a hard kill stranded. `tool_started` carries no pid,
+  so procreap has nothing to record; giving it one is the fix, and it belongs
+  with whichever slice wants tool cancellation anyway.
 
 ### Slice 5 — history and depth
 

@@ -3089,6 +3089,12 @@ export function useUiAutomationBridge({
           // "Send" or "Steer": which of the two a plain Enter would do.
           sendLabel: send?.textContent || '',
           followUpAvailable: Boolean(root.querySelector('[data-testid="conversation-follow-up"]')),
+          // The host is gone and the conversation is waiting in its session
+          // file. Present only then, and it carries its own way back — a
+          // revive scenario asserts the banner, clicks it, and asserts the
+          // transcript that comes back.
+          recoverable: Boolean(root.querySelector('[data-testid="conversation-recoverable"]')),
+          reloadAvailable: Boolean(root.querySelector('[data-testid="conversation-reload"]')),
         };
       }
       // --- Ticket detail panel (work-tracker) ------------------------------

@@ -1957,6 +1957,24 @@ model AgentClearQueueMessage {
   id: string;
 }
 
+// Asks a conversation session's host for the whole conversation as it stands.
+//
+// This is the conversation's half of the terminal restore contract. A terminal
+// client attaches and gets the worker's VT dump, then dedups the live byte
+// stream against `last_seq`; a conversation client sends this and gets a
+// `conversation_snapshot` agent_event, then dedups the live envelope stream
+// against the same `seq` spine. There is no result event and nothing to time
+// out: the answer travels the ordinary envelope path, so every client watching
+// the session lands on the same transcript.
+//
+// Sent by a client that has no picture of the session — a second window, a
+// reloaded app, a pane mounted long after the host started. A client that is
+// already following the stream has nothing to ask for.
+model AgentAttachMessage {
+  cmd: "agent_attach";
+  id: string;
+}
+
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
 // TIOCGWINSZ's ws_xpixel/ws_ypixel and XTWINOPS speak, so image emitters can
 // size an image to the space they were given. Absent or 0 means the client has

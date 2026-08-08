@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "216"
+const ProtocolVersion = "217"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -235,6 +235,7 @@ const (
 	CmdAgentPrompt                           = "agent_prompt"
 	CmdAgentToolDetail                       = "agent_tool_detail"
 	CmdAgentClearQueue                       = "agent_clear_queue"
+	CmdAgentAttach                           = "agent_attach"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -1572,6 +1573,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg AgentClearQueueMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal agent_clear_queue: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentAttach:
+		var msg AgentAttachMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_attach: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

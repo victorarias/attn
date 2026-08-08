@@ -1143,6 +1143,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleAgentToolDetail(client, msg.(*protocol.AgentToolDetailMessage))
 	case protocol.CmdAgentClearQueue: // wire: agent_clear_queue
 		d.handleAgentClearQueue(client, msg.(*protocol.AgentClearQueueMessage))
+	case protocol.CmdAgentAttach: // wire: agent_attach
+		d.handleAgentAttach(client, msg.(*protocol.AgentAttachMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession: // wire: kill_session
@@ -1570,6 +1572,10 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdAgentClearQueue: // wire: agent_clear_queue
 		if typed, ok := msg.(*protocol.AgentClearQueueMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdAgentAttach: // wire: agent_attach
+		if typed, ok := msg.(*protocol.AgentAttachMessage); ok {
 			return typed.ID
 		}
 	case protocol.CmdPtyResize: // wire: pty_resize

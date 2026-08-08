@@ -199,7 +199,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '216';
+export const PROTOCOL_VERSION = '217';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2212,6 +2212,9 @@ export function useDaemonSocket({
                 pendingKill.resolve({ success: true });
               }
               ptyTransportRef.current.clearRuntime(data.id);
+              // A conversation session exits the same way, and its store has to
+              // stop claiming a host is listening. A no-op for every PTY session.
+              useConversationsStore.getState().hostExited(data.id);
               emitPtyEvent({
                 event: 'exit',
                 id: data.id,
@@ -3045,6 +3048,19 @@ export function useDaemonSocket({
   // pi's answer about pi's queues and never a local guess.
   const sendAgentClearQueue = useCallback((id: string) => {
     sendOrQueueCommand({ cmd: 'agent_clear_queue', id }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  // Asks a conversation's host for a snapshot of it — what a client that has not
+  // been watching the stream needs before it can draw anything.
+  //
+  // This is the conversation's attach_session, and it answers the same way the
+  // rest of the host's surface does: not here, but as a `conversation_snapshot`
+  // envelope. That envelope is broadcast rather than addressed to this client,
+  // which is deliberate — the host's transcript is the authority, so replacing
+  // with it can only move a client forward, and two windows on one conversation
+  // are identical by construction instead of by coincidence.
+  const sendAgentAttach = useCallback((id: string) => {
+    sendOrQueueCommand({ cmd: 'agent_attach', id }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
 
   // Pushes the app's resolved terminal theme colors to the daemon, which uses
@@ -5178,6 +5194,7 @@ export function useDaemonSocket({
     sendAgentPrompt,
     sendAgentToolDetail,
     sendAgentClearQueue,
+    sendAgentAttach,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

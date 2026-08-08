@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/hostsession"
@@ -247,14 +248,89 @@ func (d *Daemon) applyHostDeclaredState(event hostsession.Event) {
 }
 
 // handleHostExit routes a dead host into the same exit path a dead PTY worker
-// takes: the session's end is the session's end, whatever was running it.
+// takes, and then says the thing that is only true of a conversation: it can
+// come back.
+//
+// A conversation's whole history is pi's session file under attn's data dir, so
+// a host that died — crashed, was killed, took the daemon down with it — left
+// everything a replacement needs. `recoverable` is attn's word for exactly that,
+// and it is what puts the Reload affordance in front of the user instead of a
+// session that reads as finished. It is applied only when the exit was really
+// the end of that runtime: a reload owns its own teardown and respawn, and a
+// closed session has no row left to move.
 func (d *Daemon) handleHostExit(info hostsession.ExitInfo) {
-	d.handlePTYExit(ptybackend.ExitInfo{
+	if !d.handlePTYExit(ptybackend.ExitInfo{
 		ID:          info.SessionID,
 		ExitCode:    info.ExitCode,
 		Signal:      info.Signal,
 		LifecycleID: info.LifecycleID,
+	}) {
+		return
+	}
+	if d.store.Get(info.SessionID) == nil {
+		return
+	}
+	d.applyState(sessionStateChange{
+		sessionID: info.SessionID,
+		state:     string(protocol.SessionStateRecoverable),
+		cause:     hostExitRecovery{},
 	})
+}
+
+// reloadConversationSession is Reload for a session whose runtime is a host.
+//
+// It is the same two moves the PTY path makes — end the old runtime, run the
+// stored launch intent again — with the halves a conversation does not have
+// removed. There is no geometry to reconstruct (a host has no grid, so the
+// pipeline's required cols/rows are a placeholder), no resume flag to rebuild
+// (the replacement host reopens the session file on its own), and no in-place
+// respawn (the host manager holds one process per session, so the old one has
+// to be gone before the new one is asked for).
+//
+// The kill is suppressed the same way the PTY reload suppresses its own: a
+// reload owns the teardown, so the exit must not broadcast `session_exited`,
+// must not mark the session `recoverable`, and must not race the respawn's
+// `launching` with a state applied after it. What the suppressed exit skips and
+// this path still owes the plugin driver is the close notification for the run
+// that just ended, which is why it is sent here by hand.
+func (d *Daemon) reloadConversationSession(session *protocol.Session) error {
+	sessionID := session.ID
+	intent, ok := d.store.LaunchIntent(sessionID)
+	if !ok {
+		return errors.New("no stored launch intent")
+	}
+	killed := false
+	if d.isHostSession(sessionID) {
+		d.markReloading(sessionID)
+		if err := d.ensureHostSessions().Kill(sessionID); err != nil && !errors.Is(err, hostsession.ErrNotFound) {
+			d.clearReloading(sessionID)
+			return err
+		}
+		killed = true
+		// The suppressed exit did not run the driver's close, and the spawn below
+		// opens a new run cursor over the old one.
+		d.closePluginDriverSession(sessionID, "reloaded", nil, "")
+	}
+	// A host draws nothing, so this geometry is never consulted; the spawn
+	// pipeline only refuses a non-positive one.
+	spawnMsg, policy := buildStoredIntentSpawn(session, intent, 80, 24)
+	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
+		d.clearReloading(sessionID)
+		if killed {
+			// The old host is gone and its exit was suppressed, so nothing else
+			// will ever say so. Run the exit now: a session that reads as live
+			// over a host that is not is the one outcome this must never leave
+			// behind, and `recoverable` is both true and the way back.
+			d.handleHostExit(hostsession.ExitInfo{SessionID: sessionID, ExitCode: 1})
+		}
+		return rejection.reason()
+	}
+	// Success. The killed host's exit consumes the flag; the grace timer in
+	// executePreparedSessionReload's counterpart exists for the same reason here
+	// — an exit that never arrives must not suppress a later, unrelated one.
+	time.AfterFunc(reloadStuckFlagGrace, func() { d.clearReloading(sessionID) })
+	d.publishFact(FactSessionRespawned, sessionID, nil)
+	return nil
 }
 
 // deliverToHostSession lands a message in a conversation session's agent.
@@ -336,6 +412,27 @@ func (d *Daemon) handleAgentToolDetail(client *wsClient, msg *protocol.AgentTool
 	if err := d.ensureHostSessions().ToolDetail(sessionID, callID, protocol.Deref(msg.Full)); err != nil {
 		d.logf("agent_tool_detail for session %s call %s failed: %v", sessionID, callID, err)
 		d.sendCommandError(client, protocol.CmdAgentToolDetail, "no live conversation host for session "+sessionID)
+	}
+}
+
+// handleAgentAttach answers the agent_attach command: a client that has no
+// picture of a conversation asks the host for one.
+//
+// Nothing comes back on this client's socket. The host answers on the envelope
+// stream every other rendering travels on, and that answer is a broadcast — the
+// snapshot is the host's own transcript, which is a superset of what any client
+// holds, so replacing with it can only ever move a client forward. That is what
+// makes "a second window shows the same conversation" true by construction
+// rather than by two clients happening to have seen the same bytes.
+func (d *Daemon) handleAgentAttach(client *wsClient, msg *protocol.AgentAttachMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	if sessionID == "" {
+		d.sendCommandError(client, protocol.CmdAgentAttach, "agent_attach is missing a session id")
+		return
+	}
+	if err := d.ensureHostSessions().Snapshot(sessionID); err != nil {
+		d.logf("agent_attach for session %s failed: %v", sessionID, err)
+		d.sendCommandError(client, protocol.CmdAgentAttach, "no live conversation host for session "+sessionID)
 	}
 }
 

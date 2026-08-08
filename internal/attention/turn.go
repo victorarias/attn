@@ -36,8 +36,11 @@ import (
 //     on a clock. A session parked on a cron is not among them — see
 //     sessionstate.settled — so a loop you want left alone is silenced by pinning
 //     its workspace, which is filtered below.
-//   - recoverable never opens one either. The daemon revives it unattended, so
-//     surfacing it would hand the user work the daemon is already doing.
+//   - recoverable never opens one either. A PTY session is revived unattended
+//     when its pane mounts, so surfacing it would hand the user work the daemon
+//     is already doing. A conversation session waits for Reload instead, and its
+//     own pane says so where the user is already looking — a turn would be a
+//     second, worse copy of a banner they can act on directly.
 func OpensTurn(state protocol.SessionState) bool {
 	switch state {
 	case protocol.SessionStateWaitingInput,

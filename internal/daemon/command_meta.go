@@ -113,8 +113,10 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAgentPrompt:              commandMetadata(ScopeSession, true, false),
 	// Unlogged like the prompt, and for the same reason: opening a tool card is
 	// as ordinary as typing, and one card can be opened many times.
-	protocol.CmdAgentToolDetail:                       commandMetadata(ScopeSession, true, false),
-	protocol.CmdAgentClearQueue:                       commandMetadata(ScopeSession, true, false),
+	protocol.CmdAgentToolDetail: commandMetadata(ScopeSession, true, false),
+	protocol.CmdAgentClearQueue: commandMetadata(ScopeSession, true, false),
+	// Unlogged: a window opening is not an event, and every pane mount sends one.
+	protocol.CmdAgentAttach:                           commandMetadata(ScopeSession, true, false),
 	protocol.CmdPtyResize:                             commandMetadata(ScopeSession, true, true),
 	protocol.CmdKillSession:                           commandMetadata(ScopeSession, true, true),
 	protocol.CmdReloadSession:                         commandMetadata(ScopeSession, true, true),

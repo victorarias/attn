@@ -26,6 +26,7 @@ export const RENDER_KINDS = [
   "message_end",
   "queue_update",
   "tool_detail",
+  "conversation_snapshot",
 ] as const;
 
 /**
@@ -52,9 +53,12 @@ export type EnvelopeKind = SemanticKind | RenderKind;
  * code sitting inside the agent's own event loop, so it can say what the
  * session is doing rather than infer it.
  *
- * `waiting_input` is here because a later slice's declaration will use it — an
- * approval request is the agent asking, and only the host knows one is open.
- * Slice 2 declares `working` and `idle` alone.
+ * `idle` and `waiting_input` both open a turn and both accept a nudge, so the
+ * choice between them is never about behavior — it is about telling the user WHY
+ * the session went quiet. A run that ended on its own is `idle`. A conversation
+ * revived from a session file whose last exchange never finished is
+ * `waiting_input`: the agent did not stop, it was stopped, and nothing will move
+ * until the user decides what to do about it (see `conversationInterrupted`).
  */
 export type HostSessionState = "working" | "idle" | "waiting_input";
 
@@ -687,6 +691,411 @@ export class PiEventMapper {
 }
 
 /**
+ * One drawn thing in a conversation, in the shape a snapshot carries it.
+ *
+ * These mirror what the app's own store builds from the live stream, because a
+ * snapshot has to be indistinguishable from having watched the stream from the
+ * start — the client replaces its transcript with one and must not be able to
+ * tell the difference.
+ */
+export interface SnapshotMessageItem {
+  kind: "message";
+  id: string;
+  role: string;
+  text: string;
+  /** The text is still arriving. True only for the message a live run has open. */
+  streaming: boolean;
+}
+
+export interface SnapshotToolItem {
+  kind: "tool";
+  call_id: string;
+  name: string;
+  summary: string;
+  files: string[];
+  status: "running" | "ok" | "error";
+  error?: string;
+  detail: boolean;
+  patch: boolean;
+  truncated: boolean;
+  full_output: boolean;
+}
+
+export type SnapshotItem = SnapshotMessageItem | SnapshotToolItem;
+
+/**
+ * The whole of what a client needs to draw a conversation it has not been
+ * watching: the transcript, what the agent is doing, and what it has not read.
+ *
+ * This is the conversation half of the terminal's restore contract. There, the
+ * daemon worker serializes its terminal and the client writes the dump and then
+ * dedups the live stream against `last_seq`; here the host serializes its
+ * transcript and the client does the same against the envelope spine. The
+ * snapshot REPLACES what the client had, for the same reason the VT dump does:
+ * one authority, no merge, and two clients that attach see the same thing.
+ *
+ * `truncated` says older items exist than `items` carries — the window is
+ * bounded (see SNAPSHOT_ITEM_LIMIT) and paging past it is slice 5's.
+ */
+export interface ConversationSnapshotBody {
+  items: SnapshotItem[];
+  /** Items in the whole conversation, including the ones clipped from `items`. */
+  total: number;
+  truncated: boolean;
+  /** A run is open right now, so the composer sends a steer rather than a prompt. */
+  running: boolean;
+  /** pi's queues as of now, so an attaching client draws what is still unread. */
+  queue: QueueUpdateBody;
+}
+
+/**
+ * How many items one snapshot carries.
+ *
+ * Every item is one DOM node in a pane that draws all of them, so this is a
+ * render budget before it is a wire budget. 500 is past the length of any
+ * conversation that is still readable by scrolling — the measured transcript for
+ * a slice-3 session that read, printed 5,000 lines, edited and slept was 406
+ * CHARACTERS across a handful of items — and a session long enough to feel it is
+ * the scroll-back paging slice 5 owns, not a case to silently truncate.
+ */
+export const SNAPSHOT_ITEM_LIMIT = 500;
+
+/**
+ * How many bytes of item text one snapshot carries.
+ *
+ * The corpus this design is grounded on (claude JSONL transcripts: p50 0.15 MB,
+ * p99 11.6 MB, ~0.4% message text) puts roughly 46 KB of actual message text in
+ * a p99 transcript. 1 MB is ~20x that, and three orders of magnitude under the
+ * daemon's 64 MB envelope-line ceiling. Tool OUTPUT is not in here at all — a
+ * snapshot's tool items are the same name-and-a-line declarations the live
+ * stream sends, and the output is still fetched per card.
+ */
+export const SNAPSHOT_BYTES_LIMIT = 1 << 20;
+
+function itemBytes(item: SnapshotItem): number {
+  if (item.kind === "message") return item.text.length + item.role.length + item.id.length;
+  return item.summary.length + item.name.length + (item.error?.length ?? 0)
+    + item.files.reduce((total, file) => total + file.length, 0);
+}
+
+const isSnapshotTool = (callID: string) => (item: SnapshotItem): item is SnapshotToolItem =>
+  item.kind === "tool" && item.call_id === callID;
+const isSnapshotMessage = (id: string) => (item: SnapshotItem): item is SnapshotMessageItem =>
+  item.kind === "message" && item.id === id;
+
+/**
+ * The host's own copy of the transcript the app is drawing.
+ *
+ * It is fed the host's OWN envelopes — the same bodies, through the same sink —
+ * rather than pi's events, which is what keeps it from drifting from what a
+ * client watching the stream ended up with. There is exactly one reducer on each
+ * side of the wire and they consume identical input.
+ *
+ * Why the host holds one at all: a client attaching mid-run needs the message
+ * that is streaming right now and the tool that is running right now, and
+ * neither is in pi's session file yet — pi persists a message when it ends. A
+ * snapshot rebuilt from disk would hand an attaching client a conversation that
+ * stops one paragraph short of the truth, and a broadcast replace would take
+ * that paragraph away from everyone else too.
+ *
+ * Bounded by both limits above; `dropped` is what makes a clipped snapshot say
+ * so instead of looking complete.
+ */
+export class TranscriptStore {
+  private items: SnapshotItem[] = [];
+  private bytes = 0;
+  private dropped = 0;
+  private running = false;
+  private queue: QueueUpdateBody = { steering: [], followUp: [] };
+
+  constructor(
+    private readonly itemLimit: number = SNAPSHOT_ITEM_LIMIT,
+    private readonly bytesLimit: number = SNAPSHOT_BYTES_LIMIT,
+  ) {}
+
+  /** Replaces the transcript with reconstructed history. Used once, at revive. */
+  seed(items: SnapshotItem[]): void {
+    this.items = [];
+    this.bytes = 0;
+    this.dropped = 0;
+    for (const item of items) this.push(item);
+  }
+
+  /**
+   * Applies one of the host's own envelopes. Kinds that say nothing about the
+   * transcript — a tool's fetched detail, a snapshot itself — are ignored.
+   */
+  apply(kind: EnvelopeKind, body: unknown): void {
+    const fields = (body ?? {}) as Record<string, unknown>;
+    switch (kind) {
+      case "run_started":
+        this.running = true;
+        return;
+      case "run_settled": {
+        this.running = false;
+        // Whatever was open when the run closed is closed. Same rule the app
+        // applies, for the same reason: the host emits message_end before the
+        // settle, so a message still open here ended under the run.
+        for (const item of this.items) {
+          if (item.kind === "message") item.streaming = false;
+          else if (item.status === "running") {
+            item.status = "error";
+            item.error = "the run ended before this tool reported";
+          }
+        }
+        return;
+      }
+      case "queue_update":
+        this.queue = { steering: stringList(fields.steering), followUp: stringList(fields.followUp) };
+        return;
+      case "message_start": {
+        const id = readString(fields, "id");
+        if (id === "" || this.items.some(isSnapshotMessage(id))) return;
+        this.push({ kind: "message", id, role: readString(fields, "role") || "assistant", text: "", streaming: true });
+        return;
+      }
+      case "message_delta": {
+        const id = readString(fields, "id");
+        const delta = readString(fields, "text");
+        if (id === "" || delta === "") return;
+        const open = this.items.find(isSnapshotMessage(id));
+        if (!open) {
+          this.push({ kind: "message", id, role: "assistant", text: delta, streaming: true });
+          return;
+        }
+        open.text += delta;
+        this.bytes += delta.length;
+        this.trim();
+        return;
+      }
+      case "message_end": {
+        const id = readString(fields, "id");
+        if (id === "") return;
+        const settled: SnapshotMessageItem = {
+          kind: "message",
+          id,
+          role: readString(fields, "role") || "assistant",
+          text: readString(fields, "text"),
+          streaming: false,
+        };
+        this.replaceOrPush(isSnapshotMessage(id), settled);
+        return;
+      }
+      case "tool_started": {
+        const callID = readString(fields, "call_id");
+        if (callID === "" || this.items.some(isSnapshotTool(callID))) return;
+        this.push({
+          kind: "tool",
+          call_id: callID,
+          name: readString(fields, "name"),
+          summary: readString(fields, "summary"),
+          files: stringList(fields.files),
+          status: "running",
+          detail: false,
+          patch: false,
+          truncated: false,
+          full_output: false,
+        });
+        return;
+      }
+      case "tool_finished": {
+        const callID = readString(fields, "call_id");
+        if (callID === "") return;
+        const existing = this.items.find(isSnapshotTool(callID));
+        const error = readString(fields, "error");
+        const finished: SnapshotToolItem = {
+          kind: "tool",
+          call_id: callID,
+          name: readString(fields, "name") || existing?.name || "",
+          summary: readString(fields, "summary") || existing?.summary || "",
+          files: stringList(fields.files).length > 0 ? stringList(fields.files) : existing?.files ?? [],
+          status: readString(fields, "status") === "error" ? "error" : "ok",
+          ...(error === "" ? {} : { error }),
+          detail: fields.detail === true,
+          patch: fields.patch === true,
+          truncated: fields.truncated === true,
+          full_output: fields.full_output === true,
+        };
+        this.replaceOrPush(isSnapshotTool(callID), finished);
+        return;
+      }
+      default:
+        return;
+    }
+  }
+
+  snapshot(): ConversationSnapshotBody {
+    return {
+      items: this.items.map((item) => ({ ...item })),
+      total: this.items.length + this.dropped,
+      truncated: this.dropped > 0,
+      running: this.running,
+      queue: { steering: [...this.queue.steering], followUp: [...this.queue.followUp] },
+    };
+  }
+
+  /** For the log line that says how close a real session gets to the window. */
+  get size(): number {
+    return this.items.length;
+  }
+
+  get retainedBytes(): number {
+    return this.bytes;
+  }
+
+  private push(item: SnapshotItem): void {
+    this.items.push(item);
+    this.bytes += itemBytes(item);
+    this.trim();
+  }
+
+  private replaceOrPush(match: (item: SnapshotItem) => boolean, replacement: SnapshotItem): void {
+    const index = this.items.findIndex(match);
+    if (index < 0) {
+      this.push(replacement);
+      return;
+    }
+    this.bytes -= itemBytes(this.items[index]!);
+    this.items[index] = replacement;
+    this.bytes += itemBytes(replacement);
+    this.trim();
+  }
+
+  /** Drops the oldest items until both budgets hold. Never drops the newest. */
+  private trim(): void {
+    while (this.items.length > 1 && (this.items.length > this.itemLimit || this.bytes > this.bytesLimit)) {
+      const dropped = this.items.shift()!;
+      this.bytes -= itemBytes(dropped);
+      this.dropped += 1;
+    }
+  }
+}
+
+/** The subset of a pi session entry this host reads. pi's entry union grows. */
+export interface SessionEntryLike {
+  type: string;
+  id: string;
+  message?: unknown;
+}
+
+/** What reconstructing a session file produced. */
+export interface ReconstructedTranscript {
+  items: SnapshotItem[];
+  /** Each finished call's held detail, so an expanded card works after a revive. */
+  details: Map<string, ToolDetail>;
+}
+
+function contentBlocks(message: unknown): unknown[] {
+  if (!message || typeof message !== "object") return [];
+  const content = (message as { content?: unknown }).content;
+  return Array.isArray(content) ? content : [];
+}
+
+/**
+ * Rebuilds the drawn transcript from a reopened pi session file.
+ *
+ * This is what "history intact" means after a crash: pi's entries are messages
+ * and tool results, and the pane draws messages and tool cards, so the same
+ * derivations the live mapper runs are run again over the file. A tool card
+ * comes back with its summary, its files, its status and its OUTPUT held for an
+ * expand — a revived session whose cards were all empty would be history in name
+ * only.
+ *
+ * Message ids are namespaced `h:` after the entry that produced them, so a
+ * revived host minting `m1` for its next reply cannot collide with a message
+ * that came off disk.
+ */
+export function reconstructTranscript(entries: SessionEntryLike[]): ReconstructedTranscript {
+  const items: SnapshotItem[] = [];
+  const details = new Map<string, ToolDetail>();
+  const toolsByCallID = new Map<string, SnapshotToolItem>();
+
+  for (const entry of entries) {
+    if (entry.type !== "message") continue;
+    const message = entry.message;
+    const role = messageRole(message);
+    if (role === "toolResult") {
+      const callID = readString(message, "toolCallId");
+      const card = callID === "" ? undefined : toolsByCallID.get(callID);
+      if (!card) continue;
+      const result = message as { isError?: unknown; details?: unknown };
+      const text = toolResultText(message);
+      const resultDetails = result.details;
+      const patch = readString(resultDetails, "patch");
+      const fullOutputPath = readString(resultDetails, "fullOutputPath");
+      const truncation = resultDetails && typeof resultDetails === "object"
+        ? (resultDetails as { truncation?: unknown }).truncation
+        : undefined;
+      const truncated = truncation !== null && typeof truncation === "object"
+        && (truncation as { truncated?: unknown }).truncated === true;
+      card.status = result.isError === true ? "error" : "ok";
+      if (result.isError === true && text !== "") card.error = clipSummary(text);
+      card.detail = text !== "" || patch !== "";
+      card.patch = patch !== "";
+      card.truncated = truncated;
+      card.full_output = fullOutputPath !== "";
+      if (card.detail) {
+        details.set(callID, {
+          text,
+          patch: patch === "" ? undefined : patch,
+          truncated,
+          fullOutputPath: fullOutputPath === "" ? undefined : fullOutputPath,
+        });
+      }
+      continue;
+    }
+    const text = messageText(message);
+    if (text !== "") {
+      items.push({ kind: "message", id: `h:${entry.id}`, role, text, streaming: false });
+    }
+    for (const block of contentBlocks(message)) {
+      if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "toolCall") continue;
+      const callID = readString(block, "id");
+      if (callID === "") continue;
+      const name = readString(block, "name");
+      const args = (block as { arguments?: unknown }).arguments;
+      const card: SnapshotToolItem = {
+        kind: "tool",
+        call_id: callID,
+        name,
+        summary: toolSummary(name, args),
+        files: toolFiles(name, args),
+        // Every call starts as running here and is answered by its own
+        // toolResult entry below. One that never gets an answer is a call the
+        // host died inside, which is exactly what conversationInterrupted reads.
+        status: "running",
+        detail: false,
+        patch: false,
+        truncated: false,
+        full_output: false,
+      };
+      toolsByCallID.set(callID, card);
+      items.push(card);
+    }
+  }
+  return { items, details };
+}
+
+/**
+ * Whether a reconstructed conversation stopped mid-thought.
+ *
+ * One rule: a conversation is interrupted unless the agent had the last word.
+ * Every way a run really ends leaves an assistant message behind — pi persists
+ * one per turn, and the turn that decides to stop is a turn. Anything else at
+ * the end means the host died inside the run: a prompt nothing answered, a tool
+ * call with no result, or a result the agent never got to read.
+ *
+ * This is the whole basis for a revived session declaring `waiting_input` rather
+ * than `idle`. An empty conversation is nobody's interruption — it is a fresh
+ * session, which is idle.
+ */
+export function conversationInterrupted(items: SnapshotItem[]): boolean {
+  const last = items[items.length - 1];
+  if (!last) return false;
+  return last.kind !== "message" || last.role !== "assistant";
+}
+
+/**
  * One verb the daemon can send the host over stdin.
  *
  * Three of them carry text, and the difference between them is only WHEN the
@@ -712,12 +1121,17 @@ export class PiEventMapper {
  *   clear_queue  drops everything queued and unread. pi clears both queues at
  *                once — there is no per-entry removal — and answers with its
  *                own `queue_update`, so the strip empties on pi's word.
+ *   snapshot     the whole conversation as it stands, for a client that has not
+ *                been watching the stream. Answered as a `conversation_snapshot`
+ *                envelope, which is the conversation's version of the terminal's
+ *                restore dump.
  */
 export type HostVerbWithText = { verb: "prompt" | "steer" | "follow_up"; text: string };
 export type HostVerb =
   | HostVerbWithText
   | { verb: "shutdown" }
   | { verb: "clear_queue" }
+  | { verb: "snapshot" }
   | { verb: "tool_detail"; callID: string; full: boolean };
 
 const TEXT_VERBS = new Set(["prompt", "steer", "follow_up"]);
@@ -735,6 +1149,7 @@ export function parseVerb(line: string): HostVerb {
   }
   if (verb === "shutdown") return { verb: "shutdown" };
   if (verb === "clear_queue") return { verb: "clear_queue" };
+  if (verb === "snapshot") return { verb: "snapshot" };
   if (verb === "tool_detail") {
     const callID = (value as { call_id?: unknown }).call_id;
     if (typeof callID !== "string" || callID.trim() === "") throw new Error("tool_detail verb needs a call_id");

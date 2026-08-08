@@ -62,6 +62,22 @@ type spawnRejection struct {
 	err          error
 }
 
+// reason is a rejection as one error, for the callers that have no client to
+// send a command error to. A rejection carries one or the other and never both,
+// so reading `err` alone silently turns "missing workspace_id" into success.
+func (r *spawnRejection) reason() error {
+	if r == nil {
+		return nil
+	}
+	if r.err != nil {
+		return r.err
+	}
+	if r.commandError != "" {
+		return errors.New(r.commandError)
+	}
+	return errors.New("spawn rejected")
+}
+
 type spawnOutcome struct {
 	alreadyLive bool
 	err         error
