@@ -3134,7 +3134,7 @@ export function useUiAutomationBridge({
           // What the agent runs on now, and what this machine could switch it
           // to. Empty when the host said nothing about models.
           model: model?.value || '',
-          models: model ? Array.from(model.options).map((option) => option.value).filter(Boolean) : [],
+          models: model ? Array.from(model.options).flatMap((option) => (option.value ? [option.value] : [])) : [],
           // Present only while something is queued: the way out of the queue.
           queueClearAvailable: Boolean(root.querySelector('[data-testid="conversation-queue-clear"]')),
           inputDisabled: Boolean(textarea?.disabled),
