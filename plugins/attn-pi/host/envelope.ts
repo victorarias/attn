@@ -1027,20 +1027,27 @@ export const SNAPSHOT_BYTES_LIMIT = 1 << 20;
  * before the one it is showing must not be told the history is gone when the
  * host is only refusing to send it all at once.
  *
- * RECEIPT PENDING — replace before merge with the numbers the acceptance run
- * logs (`transcript holding N bytes across M item(s)`, emitted at every
- * `agent_settled`).
+ * Receipt (2026-08-09, this machine, 585 real agent conversations off disk —
+ * every claude session under ~/.claude/projects, counting user and assistant
+ * messages, which is what this store holds): p50 5 items, p99 5,442, and the
+ * longest conversation anyone here has ever had was 11,305. 50,000 is 4.4x
+ * that longest one. The acceptance run's own numbers are far smaller (8 items
+ * for a four-turn conversation; 1,200 for the synthesized one it resumed), and
+ * every settle logs what was held, which is where the next remeasurement comes
+ * from.
  */
 export const TRANSCRIPT_RETENTION_ITEMS = 50_000;
 
 /**
  * How many bytes of transcript text this host holds.
  *
- * Same receipt, PENDING with it. This is meant to be a tripwire rather than a
- * working limit — a session that reaches it has been talking for weeks, and the
- * log says so before the oldest items go — so the measurement it is set past is
- * the whole justification for the number. Tool OUTPUT is not in here at all;
- * that is `ToolDetailStore`'s separate budget.
+ * Same corpus, measuring the message TEXT those conversations carry — which is
+ * what this store's bytes are: p50 1.3 KB, p99 1.0 MB, and the largest single
+ * conversation 1.7 MB. 32 MB is ~19x that largest one, and a quarter of the
+ * host's own 130 MB idle RSS. It is a tripwire rather than a working limit: a
+ * conversation that reaches it is well past anything anyone here has had, and
+ * the log says so before the oldest items go. Tool OUTPUT is not in here at
+ * all; that is `ToolDetailStore`'s separate budget.
  */
 export const TRANSCRIPT_RETENTION_BYTES = 32 << 20;
 

@@ -276,8 +276,15 @@ async function main() {
       // 2026-08-09. So candidates are TRIED, and a refusal moves to the next
       // rather than failing the run — what is being proved is that the switch
       // takes effect, not that every model in the catalog still exists.
-      const small = /haiku|mini|flash|small|lite/i;
-      const candidates = [...alternatives].sort((a, b) => Number(small.test(b)) - Number(small.test(a))).slice(0, 3);
+      //
+      // Ordering: the provider currently answering is the one this machine
+      // demonstrably works with, so its models come first; a small one within
+      // that, since this step runs a real prompt on whatever it picks.
+      const providerOf = (name) => name.split('/')[0];
+      const working = providerOf(before.model);
+      const small = /haiku|mini|nano|flash|small|lite/i;
+      const rank = (name) => (providerOf(name) === working ? 0 : 2) + (small.test(name) ? 0 : 1);
+      const candidates = [...alternatives].sort((a, b) => rank(a) - rank(b)).slice(0, 4);
       const refused = [];
       let landed = null;
       for (const target of candidates) {

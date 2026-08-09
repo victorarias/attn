@@ -354,9 +354,17 @@ Three decisions this slice made:
 
 Acceptance:
 
-- [ ] A 100+-turn session scrolls smoothly and pages history on demand.
-- [ ] Resuming an old session works.
-- [ ] Switching model mid-session takes effect next run.
+- [x] A 100+-turn session scrolls smoothly and pages history on demand. 1,200
+      items (600 turns) resumed; the pane drew 500 and the page arrived in
+      32 ms, taking it to 1,000 with no duplicates and no change to the newest
+      item.
+- [x] Resuming an old session works. A new session forked an existing
+      conversation file, drew its six messages, answered a question only that
+      conversation could answer, and wrote to a file of its own — the source was
+      not touched.
+- [x] Switching model mid-session takes effect next run.
+      `openai/gpt-5.6-luna` -> `openai/gpt-4.1-mini` out of 62 offered, and the
+      next prompt ran on it.
 
 All three are the packaged-app scenario `pi-host-history`
 (`app/scripts/real-app-harness/scenario-pi-host-history.mjs`), run against a real
@@ -365,7 +373,21 @@ file read through pi's own `SessionManager` rather than a thousand live turns �
 proving the window needs more items than the window holds, and the cost of that
 proof should be one resume. The scenario also holds the multi-client case
 directly: a second WebSocket client attaches while the app pane is scrolled
-back, and the assertion is that the pane's transcript does not shrink.
+back, and the transcript stays at 1,000 rather than snapping back to 500.
+
+Two defects this run found, neither of which any unit test would have:
+
+- **pi writes the model a session opened on into the file before anything is
+  said.** Reconstruction drew that as "Model switched to X" on conversations
+  that had never switched, and because the row is not an assistant message,
+  every new session also came back declaring `waiting_input`.
+- **A provider that refuses a turn reached nothing.** pi does not raise: it
+  persists the assistant message with `stopReason: "error"` and the provider's
+  own words. The run settled, the composer reopened, and the agent looked like
+  it had chosen silence. It now draws an error row carrying the provider's
+  sentence, live and after a reopen. The scenario proves it the honest way — a
+  model pi's catalog offered had been retired upstream, and the row is what
+  turned a 180-second timeout into a two-second diagnosis.
 
 Deliberately left behind:
 

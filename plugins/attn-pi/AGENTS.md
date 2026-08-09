@@ -184,6 +184,22 @@ See `docs/glossary.md` for the vocabulary and
   stacking. `done` is what separates one still happening from one that settled.
   Reconstruction mints them too: pi's compaction entry becomes the honest top of
   a revived transcript, because everything above it is a summary.
+- **A refused turn is a notice, because pi does not raise.** A provider error
+  arrives as an assistant message with `stopReason: "error"` and the provider's
+  response in `errorMessage` — empty content, run settles, composer reopens.
+  Without a row the agent looks like it chose not to answer. `messageFailure`
+  digs the sentence out of the nested JSON envelopes providers wrap it in, and
+  reconstruction mints the same row so a reopened conversation still explains
+  itself. Measured 2026-08-09: a model pi's catalog offered had been retired by
+  its provider, and the 404 reached nothing.
+- **The model a session opened on is not a switch.** pi writes a `model_change`
+  and a `thinking_level_change` into every session file before anything is said.
+  Reconstruction ignores a `model_change` that precedes the first message —
+  otherwise every new conversation claims to have switched models, and (since
+  the row is not an assistant message) declares `waiting_input` on arrival.
+  Notices are transparent to `conversationInterrupted` for the same reason: a
+  switch is something that happened TO the conversation, not the agent losing
+  its turn.
 - **A model switch is not a state declaration.** `set_model` asks, `model_changed`
   answers with the model actually in force — a refusal comes back as the model
   that is still running, which is why the picker moves on the host's answer and
