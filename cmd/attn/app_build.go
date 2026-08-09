@@ -106,13 +106,22 @@ func applyApp(dir string, progress *os.File) (*protocol.AppApplyResult, appbuild
 }
 
 func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
-	state := "unchanged — byte-identical to the version it already was"
-	if result.VersionCreated {
+	moved := result.PreviousVersionID != nil && *result.PreviousVersionID != result.VersionID
+	// Three outcomes, and the reader has to be able to tell them apart: a new
+	// version, an old version this content already had a row for (so the pointer
+	// moved back onto it), and nothing at all happening.
+	var state string
+	switch {
+	case result.VersionCreated:
 		state = fmt.Sprintf("new, %d bytes", res.BundleBytes)
+	case moved:
+		state = "this content already had a version; nothing new was recorded"
+	default:
+		state = "unchanged — byte-identical to the version it already was"
 	}
 	fmt.Printf("applied app %s: version %d (%s), %s\n",
 		result.Name, result.VersionID, shortHash(result.ContentHash), state)
-	if result.PreviousVersionID != nil && *result.PreviousVersionID != result.VersionID {
+	if moved {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
 	fmt.Printf("  artifact %s\n", result.ArtifactPath)
@@ -155,7 +164,13 @@ func runAppRollback(args []string) {
 		writeJSON(result)
 		return
 	}
-	fmt.Printf("rolled app %s back to version %d (%s)\n", result.Name, result.VersionID, shortHash(result.ContentHash))
+	// Naming a version explicitly can move the pointer forward, and calling that
+	// "rolled back" would be a lie about which direction the app just went.
+	verb := "rolled app %s back to version %d (%s)\n"
+	if result.PreviousVersionID != nil && *result.PreviousVersionID < result.VersionID {
+		verb = "moved app %s forward to version %d (%s)\n"
+	}
+	fmt.Printf(verb, result.Name, result.VersionID, shortHash(result.ContentHash))
 	if result.PreviousVersionID != nil {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
