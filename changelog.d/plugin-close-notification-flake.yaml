@@ -1,0 +1,14 @@
+kind: internal
+area: tests
+change: >
+  Closed attn's longest-standing CI flake: the plugin-driver end-to-end test's
+  missing driver.session_closed notification. The daemon answers a plugin's
+  state report on its read loop after broadcasting the state change, so a
+  session closing in that gap puts driver.session_closed on the wire ahead of
+  the answer. The test fixture treated an unexpected request as fatal and died,
+  taking its connection with it, and the daemon's close notification came back
+  EOF. The fixture now routes messages by shape the way the shipped SDK does —
+  a method is a request to answer, a bare id is the response being waited for —
+  and a scripted-socket test pins that order on every run instead of leaving it
+  to a scheduling race. The SDK README states the full-duplex rule plugin
+  authors have to honour.
