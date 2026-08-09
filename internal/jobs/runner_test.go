@@ -47,7 +47,7 @@ func newBubbleRunner(t *testing.T, tune func(*Options)) (*Runner, *memStore) {
 	store := newMemStore()
 	opts := Options{
 		Store: store,
-		Log:   func(string, ...interface{}) {},
+		Log:   func(string, ...any) {},
 	}
 	if tune != nil {
 		tune(&opts)
@@ -616,7 +616,7 @@ func TestAKindIsSerializedWithItselfButNotWithOthers(t *testing.T) {
 		})
 		mustStart(t, r)
 
-		for i := 0; i < 2; i++ {
+		for i := range 2 {
 			if _, err := r.Enqueue("serial", EnqueueOptions{}); err != nil {
 				t.Fatalf("enqueue serial %d: %v", i, err)
 			}
@@ -628,7 +628,7 @@ func TestAKindIsSerializedWithItselfButNotWithOthers(t *testing.T) {
 		// One serial job and the other kind run together; the second serial job waits.
 		synctest.Wait()
 		got := map[string]bool{}
-		for i := 0; i < 2; i++ {
+		for range 2 {
 			select {
 			case kind := <-bothKinds:
 				got[kind] = true
