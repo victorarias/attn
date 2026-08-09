@@ -249,8 +249,13 @@ Blindspots — flag for a `ground` pass before their first chunk:
   is a union routed by daemon prefix, never a merge — fully qualified seed
   ids (`<daemon-id>/<local-id>`, prefix minted only at the boundary) make
   identity collisions impossible by construction, and every seed has one
-  home hub that applies its writes. The ground pass owns the sync and
-  transport mechanics and the smallest honest first version.
+  home hub that applies its writes. ~~The ground pass owns the sync and
+  transport mechanics and the smallest honest first version.~~ Ground pass
+  done 2026-08-09, and grown on 2026-08-10 into the arc's spine plan: the
+  verified map of the hub/relay, the **home daemon / outpost / enrollment**
+  concepts the pass surfaced, the fence that defers the multi-machine
+  price, and the smallest honest first version of the server all live in
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](../plans/2026-08-10-home-garden-crew-arc.md).
 - **Seed grain and schema.** ~~Study the beads *UX* specifically (not its
   implementation) before committing a schema.~~ Ground pass done 2026-08-06;
   findings and the resulting schema decisions (ids are identity, edges are

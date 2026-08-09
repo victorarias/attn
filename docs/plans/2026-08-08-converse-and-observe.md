@@ -2,6 +2,11 @@
 
 ## Goal
 
+Stage 1 of the **home–garden–crew arc**
+([2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md));
+message state is daemon-local by design, so this vertical needs no fence
+and cross-daemon addressing waits for the arc's uplink.
+
 First vertical through the **agents converse and observe** rock in
 [docs/vision/friendly-home-for-agents.md](../vision/friendly-home-for-agents.md):
 an attn-living agent inspects what another session is doing without
@@ -281,7 +286,12 @@ only channel.
   making polite delivery late.
 - Whether peek's screen text should ever travel to remote/hub sessions
   (relay is a text pipe, so mechanically fine) — out of v1 scope, noted for
-  the server-as-client arc.
+  the server-as-client arc. Cross-daemon msg and peek more broadly hit the
+  missing remote→hub direction the central-server ground pass mapped; when
+  they leave one daemon, they ride the generic "remote daemon asks its hub"
+  channel from
+  [2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md),
+  not a bespoke path.
 
 ## Follow-ups
 
