@@ -114,20 +114,20 @@ Learning questions:
 
 ## Implementation Steps
 
-- [ ] Leg 1: convert 2–3 jobs runner/cron tests to `synctest.Test`; remove
+- [x] Leg 1: convert 2–3 jobs runner/cron tests to `synctest.Test`; remove
       their real sleeps/deadline polls; note speed and determinism delta
-- [ ] Leg 2: add rapid; write stateful `Between` property test in
+- [x] Leg 2: add rapid; write stateful `Between` property test in
       `internal/rankkey`; confirm shrinking output quality with a seeded
       forced failure (then remove the forced failure)
-- [ ] Leg 3: add embedded toxiproxy helper + slow-client eviction test in
+- [x] Leg 3: add embedded toxiproxy helper + slow-client eviction test in
       `internal/daemon`; healthy-client control and post-toxic recovery
       included
-- [ ] Run the full Go suite (`make test`) — legs must not slow it noticeably;
+- [x] Run the full Go suite (`make test`) — legs must not slow it noticeably;
       note per-leg wall-clock cost
-- [ ] Append a Findings section to this plan: per leg, verdict
+- [x] Append a Findings section to this plan: per leg, verdict
       (adopt/drop), evidence, and — for adopts — the one-line rule for when
       future work should reach for the tool
-- [ ] Changelog fragment (internal/testing entry) per repo policy
+- [x] Changelog fragment (internal/testing entry) per repo policy
 
 ## Decisions
 
@@ -155,3 +155,207 @@ Learning questions:
 - Deferred from the wider Antithesis discussion: sometimes-assertions
   catalog, continuous invariant checking, state-corpus seeding — all
   parked, revisit only if the spike changes the cost picture.
+
+---
+
+# Findings
+
+All three legs **adopt**. Every measurement below is from an M-series Mac,
+Go 1.25.3, and is reproducible from the commands quoted.
+
+## Leg 1 — `testing/synctest` on the jobs runner: **adopt**
+
+**Rule:** reach for `synctest.Test` when a test asserts something about
+elapsed time — a backoff, a debounce, a recurrence — or asserts that
+something did *not* happen. Do not reach for it when the code under test
+talks to a real socket or opens its own `database/sql` handle.
+
+Three tests converted: `TestFailuresBackOffThenGoDeadOnce`,
+`TestAKindIsSerializedWithItselfButNotWithOthers` (both
+`internal/jobs/runner_test.go`) and `TestACronEntryFiresOnItsIntervalAndRearms`
+(`cron_test.go`). Assertions unchanged.
+
+**Evidence**
+
+- `go test -count=3 ./internal/jobs`: **0.735–0.893s → 0.449–0.470s**
+  (baseline measured against the pre-change files via `go test -overlay`).
+  Three of roughly thirty tests converted cut the package's wall-clock
+  roughly in half, because what they spent was almost entirely fixed sleeps.
+- Per-test: the three summed to ~95ms (0.005 + 0.05 + 0.04) and now sum to
+  ~15ms.
+- `go test -race -count=20` on the three: clean.
+
+**What the conversion actually removed.** Two things, and the second matters
+more than the speed:
+
+1. The `fakeClock` injected through `Options.Now` and the shortened
+   `PollInterval`. Inside a bubble `time.Now` *is* the fake clock, so a
+   bubbled test runs the runner on its production 1s poll interval and
+   advances an hour of it instantly. `newBubbleRunner` therefore configures
+   neither.
+2. Every `waitFor` poll loop, and with them the difference between a claim
+   and a guess. `TestAKindIsSerializedWithItselfButNotWithOthers` asserts
+   that the second serial job never starts; it used to believe that after
+   sleeping 40ms. `synctest.Wait` returns when every goroutine in the bubble
+   is durably blocked, so the same assertion is now about a system with
+   nothing left to do. Same for "a dead job is never re-selected", which now
+   really does let a fake hour of dispatch passes run first.
+
+**The open question, answered — with a caveat worth knowing.** A throwaway
+probe ran 200 real cgo SQLite writes (`mattn/go-sqlite3`) from a bubbled
+goroutine interleaved with fake-clock sleeps: all 200 rows landed and fake
+time advanced exactly 200s. SQLite I/O is transient blocking and does not
+stall a bubble.
+
+But opening the store *inside* the bubble fails:
+
+```
+panic: deadlock: main bubble goroutine has exited but blocked goroutines remain
+goroutine 40 [select (durable), synctest bubble 1]:
+database/sql.(*DB).connectionOpener(...)
+```
+
+`database/sql.OpenDB` starts a `connectionOpener` goroutine that lives as
+long as the DB. Opened in the bubble it joins the bubble and never exits, so
+`synctest.Test` reports a deadlock even though the test itself passed. Moving
+the `store.New()` call above `synctest.Test` fixes it completely (3/3 runs,
+exact fake time). **Open long-lived resources outside the bubble; put only
+the code under test inside it.**
+
+The generalisation: the bubble is the boundary. `internal/jobs` over its
+in-memory store qualifies. A `internal/daemon` test with real sockets does
+not — a goroutine blocked on a real network read is not durably blocked, so
+time never advances. That is why Leg 3 is not a synctest test.
+
+## Leg 2 — `pgregory.net/rapid` on rankkey: **adopt**
+
+**Rule:** reach for rapid when a unit has a stated invariant and a large
+input space — especially when the interesting failures need a *sequence* of
+operations rather than one bad input. Keep the example tests; rapid explores,
+it does not document.
+
+Two properties in `internal/rankkey/rankkey_property_test.go`: a stateful one
+(`t.Repeat` over insert-front / insert-back / insert-between / append, with
+whole-list order and canonical form re-checked before and after every action)
+and one bounding key growth to at most one digit past the longer bound.
+
+**Evidence**
+
+- Cost: 100 checks per property, **3.4ms + 1.0ms** of check time; package
+  `-count=3` goes **0.383–0.422s → 0.486–0.534s**, so ~35ms a run.
+- Confidence available on demand: `-rapid.checks=200000` passes in 23s and
+  found nothing. `Between` looks genuinely correct.
+- **Shrinking is as advertised.** Against a `Between` mutated to forget its
+  bump (`digits[(da+base)/2]` → `digits[da]`), rapid failed after 2 tests and
+  shrank to the minimal reaching sequence — five `append_new`s to walk the
+  key up to `"z"`, then one `insert_back` — and named the call:
+
+  ```
+  [rapid] failed after 2 tests: Between("z", "") = "z0" ends in the minimum digit
+  [rapid] draw action: "append_new"   (×5)
+  [rapid] draw action: "insert_back"
+  ```
+
+  The hand-rolled LCG stress test already in `rankkey_test.go` catches that
+  mutation too, but reports only `key "90" ends in the minimum digit` — the
+  symptom, with no call and no path to it. Rapid also prints a replayable
+  seed and writes a `.fail` file.
+
+**The finding that justifies the leg on its own.** The growth property
+catches a mutation that **every pre-existing test passes**: a `Between` that
+writes one extra digit it does not need. Brute force, the LCG stress loop,
+and all the example tests go green; rapid fails and shrinks the
+counterexample to `Between("", "")` — the simplest input there is. Nothing in
+the suite was watching key length, and key length is the whole cost model of
+fractional ranking.
+
+Honest limit: the growth property is loose by construction. A mutation that
+merely stops taking the single-digit shortcut (`db-da >= 2` → `>= 3`) stays
+inside "at most one digit past the longer bound" and is caught by nothing,
+including this. A tight bound does not hold in general — repeatedly halving
+one gap must grow keys — so this asserts the shape, not the size.
+
+Operational note: on failure rapid writes `internal/<pkg>/testdata/rapid/…`.
+Those files are meant to be committed as regression seeds; a developer who
+does not want them must delete them.
+
+## Leg 3 — Toxiproxy on the daemon WebSocket: **adopt**
+
+**Rule:** reach for the embedded Toxiproxy when the behavior under test *is*
+the network being bad — backpressure, eviction, reconnect, partition. Not for
+anything a fake or a direct channel write can express; it costs a real
+dependency and real seconds.
+
+`internal/daemon/toxiproxy_slow_client_test.go` runs a proxy in-process (no
+external binary, no HTTP control API — the `ApiServer` exists only to satisfy
+`NewProxy`'s logger and metrics registry) between one test client and the
+daemon's real listener, with a healthy control client on the direct path.
+
+**Evidence**
+
+- The eviction fires over a genuinely throttled TCP link, in under a second,
+  through exactly the intended path:
+  ```
+  hub: WebSocket client slow (1/3 missed)
+  hub: WebSocket client slow (2/3 missed)
+  hub: WebSocket client too slow (3 missed), disconnecting
+  ```
+- Stability: **5/5 passes** at ~3.6–4.2s, **3/3 under `-race`** at ~5.1–6.7s
+  (a decent stand-in for a loaded CI box).
+- Cost: ~4s added to one `internal/daemon` shard of ~70s.
+
+**The surprise, which is the leg's real return.** The eviction is prompt but
+*silent to the client that needs it*. `StatusPolicyViolation "client too
+slow"` is written to a socket already holding everything the hub queued
+before giving up, on a link slow enough to have caused the eviction — so the
+close frame arrives behind all of it. The first version of this test waited
+45 seconds and saw nothing but its own read timeout, while the daemon had
+dropped the client after one second. The test now heals the link and *then*
+reads the close status, because that is the only way the status is
+observable. An app on a degraded link therefore cannot distinguish "evicted
+for being slow" from "the network died" at the moment it matters. Recording
+it, not fixing it — a spike does not change production code.
+
+**Second finding: the flood rate is the experiment.** An unpaced hub fan-out
+outruns *every* client, degraded or not; the first attempt evicted the
+healthy control client too. Reproducing "one bad client, everyone else fine"
+requires offering traffic between the two rates, and the constants in the
+test carry that arithmetic (10 KB/s link, 4 KB messages, 200 messages/s
+offered, 256-slot buffer full in ~1.3s, single write 0.4s against
+`wsWritePump`'s 10s allowance).
+
+**The cost to weigh.** `github.com/Shopify/toxiproxy/v2` is not small. It
+brings 15 transitive modules — the Prometheus client, `gorilla/mux`,
+`zerolog`, `protobuf` — and forced `golang.org/x/sys` and `golang.org/x/text`
+upgrades for the whole module. All test-only in use, but they are in `go.mod`
+and in every build's module graph. Worth it for a fault-injection capability
+we have nowhere else; not worth it for a second copy of something a fake
+already does.
+
+## Suite impact
+
+`make test`, whole suite: baseline commit `414dd441` **4:43.79**, this branch
+**3:49.91** cold and **2:11.64** warm. The legs do not slow the suite; Leg 1
+speeds its package up and Leg 3 adds ~4s to one of five daemon shards.
+
+Two daemon tests failed on the first branch run and neither is ours:
+
+- `TestCodexResumeMappingEndToEnd` — **fails identically on the baseline
+  commit**, cold cache. Pre-existing load flake.
+- `TestStartJobQueueArmsThePeriodicTicks` — failed once under full-suite
+  load, passes 3/3 in isolation and on the re-run. A cron-arming poll,
+  load-sensitive. Note that adding a test to `internal/daemon` reshuffles
+  every shard (`scripts/test-go.sh` partitions round-robin by index), so a
+  new test changes which tests contend with each other.
+
+## Follow-ups earned
+
+- Leg 3's helper is deliberately shaped for reuse: `newToxiProxy(t,
+  upstream)` takes any upstream address, so the hub-transport / remote-relay
+  leg (zero CI coverage today) is a matter of pointing it at a different
+  port.
+- Leg 1: convert remaining timing-paced tests opportunistically when they
+  flake, not as a sweep. `waitFor` and `fakeClock` stay for the unconverted
+  ones.
+- Worth its own ticket: whether the app can be told *why* it was disconnected
+  on a slow link, given the close frame cannot outrun the backlog.
