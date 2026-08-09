@@ -266,7 +266,7 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, win
 		args = append(args, codexMCPServerArgs(name, spec.Command, spec.Args, spec.EnabledTools)...)
 	}
 	args = append(args, codexContextWindowCapArgs(window)...)
-	args = append(args, request.Prompt)
+	args = append(args, codexPrompt(request))
 	return args
 }
 
@@ -409,13 +409,27 @@ func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	}
 	args = append(args, codexFeatureLocks()...)
 	args = append(args, codexContextWindowCapArgs(window)...)
-	args = append(args, request.Prompt)
+	args = append(args, codexPrompt(request))
 	return args
 }
 
 // codexToolFreeHeadlessArgs builds a pure completion invocation. The prompt is
 // the complete model-visible evidence boundary: Codex receives neither native
 // shell/file tools nor user-configured MCP, plugins, apps, or web search.
+// codexPrompt folds SystemPrompt into the prompt. `codex exec` has no
+// system/developer-prompt flag — instructions arrive as the positional argument
+// or on stdin — so a caller that split its prompt in two for Claude's
+// --system-prompt would otherwise have the whole invariant half (the role, the
+// rules, the output contract) silently dropped on Codex. Folding keeps one
+// caller-side shape working on both drivers.
+func codexPrompt(request HeadlessTaskRequest) string {
+	system := strings.TrimSpace(request.SystemPrompt)
+	if system == "" {
+		return request.Prompt
+	}
+	return system + "\n\n" + request.Prompt
+}
+
 func codexToolFreeHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	args := []string{
 		"exec",
@@ -437,7 +451,7 @@ func codexToolFreeHeadlessArgs(request HeadlessTaskRequest, window int) []string
 	}
 	args = append(args, codexFeatureLocks()...)
 	args = append(args, codexContextWindowCapArgs(window)...)
-	args = append(args, request.Prompt)
+	args = append(args, codexPrompt(request))
 	return args
 }
 

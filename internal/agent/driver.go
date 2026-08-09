@@ -413,6 +413,10 @@ type HeadlessTaskRequest struct {
 	// way to get a truly tool-less run. Empty/false is byte-for-byte identical
 	// to today's behavior. Used by the ticket reconciliation classifier, which
 	// judges a pre-extracted transcript slice with no need to touch disk.
+	//
+	// It makes the tools uncallable, not free: their definitions still ship in
+	// the billed prefix. See claudeHeadlessArgs for why they are not also
+	// stripped.
 	DisableTools bool
 
 	// ExtraWritableRoots optionally widens the set of directories the agent may
@@ -451,6 +455,20 @@ type HeadlessTaskRequest struct {
 	// MCP result-sink path), this IS consumed by the driver argv; the validated
 	// object comes back in HeadlessTaskResult.StructuredOutput.
 	OutputSchema json.RawMessage
+
+	// SystemPrompt REPLACES the agent CLI's own system prompt (claude:
+	// --system-prompt). Empty => the CLI's default, which is what every caller
+	// wanted before this field existed.
+	//
+	// This is a cost lever, not a behavior lever. A coding CLI's default system
+	// prompt is written for interactive coding and is thousands of tokens the
+	// run pays for on every invocation; a single-shot judgment or one-line
+	// completion needs none of it. Measured on claude-haiku-4-5, tool-less, with
+	// a --json-schema answer: the billed prefix drops from ~49.8K tokens to
+	// ~37.0K. Receipt: docs/plans/2026-08-07-session-activity.md.
+	//
+	// Codex ignores this field.
+	SystemPrompt string
 }
 
 // usesNativeToolsPath reports whether this request runs through the native-tools

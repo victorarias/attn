@@ -348,6 +348,14 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	if len(tools) == 0 && !request.DisableTools {
 		tools = claudeNativeDefaultTools
 	}
+	// Not trimmed here: --disallowedTools. An empty --allowedTools makes the
+	// native tools uncallable but still ships their definitions in the billed
+	// prefix, and --disallowedTools "*" does drop them (~24.8K prefix tokens to
+	// ~2.3K, measured). It also disables StructuredOutput, the tool the CLI uses
+	// to deliver a --json-schema answer, so a schema-validated run produces
+	// nothing and exits non-zero. Cost saving that can silently cost the answer
+	// is not worth having; the enumerated-list alternative works but has to track
+	// the CLI's tool set forever with the same failure mode when it drifts.
 	args := []string{"--print"}
 	args = append(args, claudeHeadlessIsolationArgs()...)
 	// --strict-mcp-config with no --mcp-config loads ZERO MCP servers. Without
@@ -362,6 +370,13 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	if model := strings.TrimSpace(request.Model); model != "" {
 		args = append(args, "--model", model)
 	}
+	// Reasoning effort, when the caller pinned one. Measured as inert on
+	// claude-haiku-4-5 (none/low/medium/high all produce ~900-1,050 output tokens
+	// on the same input), but a configurable-effort setting has to actually reach
+	// the CLI to be honest about what it does.
+	if effort := strings.TrimSpace(request.ReasoningEffort); effort != "" {
+		args = append(args, "--effort", effort)
+	}
 	// Judgment-run caps + structured output (the reconciliation classifier).
 	// --max-turns is accepted by the CLI though absent from --help (verified
 	// empirically, 2.1.198); --max-budget-usd and --json-schema are documented.
@@ -373,6 +388,11 @@ func claudeHeadlessArgs(request HeadlessTaskRequest) []string {
 	}
 	if len(request.OutputSchema) > 0 {
 		args = append(args, "--json-schema", string(request.OutputSchema))
+	}
+	// Replacing the CLI's own system prompt is the largest single cost lever on a
+	// single-shot run; see HeadlessTaskRequest.SystemPrompt for the measurement.
+	if prompt := strings.TrimSpace(request.SystemPrompt); prompt != "" {
+		args = append(args, "--system-prompt", prompt)
 	}
 	args = append(args,
 		"--no-session-persistence",

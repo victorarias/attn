@@ -3907,7 +3907,9 @@ model SessionInstructionsResult {
 model SessionTranscriptEvent {
   cursor: string;
   timestamp?: string;
-  kind: string; // "user" | "assistant" | "tool_call" | "tool_result" | "error"
+  kind: string; // "user" | "assistant" | "thinking" | "tool_call" | "tool_result" | "error"
+                // "thinking" is the agent's own reasoning (Claude thinking blocks,
+                // Codex agent_reasoning), not text the user was shown.
   role?: string;
   text?: string;
   tool_name?: string;
