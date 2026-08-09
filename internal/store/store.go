@@ -35,8 +35,13 @@ type Store struct {
 	// moment they're needed most.
 	durable bool
 
-	sessions        map[string]*protocol.Session
-	turnStamps      map[string]TurnStamps
+	sessions   map[string]*protocol.Session
+	turnStamps map[string]TurnStamps
+	// activityCursors holds the fallback store's half of the activity record
+	// that protocol.Session has nowhere to put. The line and its stamp ride on
+	// the session (the wire carries both); the transcript cursor is daemon-only
+	// and lives here.
+	activityCursors map[string]string
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
 	profileRoles    map[string]string
@@ -116,6 +121,12 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	if session.ParentSessionID != nil {
 		cloned.ParentSessionID = protocol.Ptr(protocol.Deref(session.ParentSessionID))
 	}
+	if session.Activity != nil {
+		cloned.Activity = protocol.Ptr(protocol.Deref(session.Activity))
+	}
+	if session.ActivityAt != nil {
+		cloned.ActivityAt = protocol.Ptr(protocol.Deref(session.ActivityAt))
+	}
 	if session.Todos != nil {
 		cloned.Todos = append([]string(nil), session.Todos...)
 	}
@@ -180,18 +191,22 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 			s.sessions = make(map[string]*protocol.Session)
 		}
 		stored := cloneSession(session)
-		// pinned_at is absent from the SQLite upsert below, so a re-add never
-		// disturbs it there. Carrying the stored value forward here is what makes
-		// the memory branch say the same thing: the pin is owned by
-		// SetSessionPinned alone, and a respawn cannot silently clear it.
+		// pinned_at, the context-window cap and the activity pair are absent from
+		// the SQLite upsert below, so a re-add never disturbs them there. Carrying
+		// the stored values forward here is what makes the memory branch say the
+		// same thing: each is owned by its own writer (SetSessionPinned,
+		// SetSessionContextWindowCap, UpdateSessionActivity), and a respawn cannot
+		// silently clear any of them.
 		if existing := s.sessions[session.ID]; existing != nil {
 			if existing.PinnedAt != nil {
 				stored.PinnedAt = protocol.Ptr(protocol.Deref(existing.PinnedAt))
 			}
-			// Same ownership rule as the pin: the cap belongs to
-			// SetSessionContextWindowCap, so a re-add carries it forward.
 			if existing.ContextWindowCap != nil {
 				stored.ContextWindowCap = protocol.Ptr(protocol.Deref(existing.ContextWindowCap))
+			}
+			if existing.Activity != nil {
+				stored.Activity = protocol.Ptr(protocol.Deref(existing.Activity))
+				stored.ActivityAt = protocol.Ptr(protocol.Deref(existing.ActivityAt))
 			}
 		}
 		s.sessions[session.ID] = stored
@@ -265,10 +280,10 @@ func (s *Store) Get(id string) *protocol.Session {
 	var stateSince, stateUpdatedAt, lastSeen string
 	var isWorktree int
 	var contextWindowCap int
-	var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
+	var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID, activity, activityAt sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -285,6 +300,8 @@ func (s *Store) Get(id string) *protocol.Session {
 		&pinnedAt,
 		&contextWindowCap,
 		&parentSessionID,
+		&activity,
+		&activityAt,
 		&todosJSON,
 		&lastSeen,
 	)
@@ -301,6 +318,7 @@ func (s *Store) Get(id string) *protocol.Session {
 	if parentSessionID.Valid && parentSessionID.String != "" {
 		session.ParentSessionID = protocol.Ptr(parentSessionID.String)
 	}
+	applyActivity(&session, activity.String, activityAt.String)
 
 	if endpointID.Valid && endpointID.String != "" {
 		session.EndpointID = protocol.Ptr(endpointID.String)
@@ -409,11 +427,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, activity, activity_at, todos, last_seen
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -428,7 +446,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var stateSince, stateUpdatedAt, lastSeen string
 		var isWorktree int
 		var contextWindowCap int
-		var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
+		var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID, activity, activityAt sql.NullString
 
 		err := rows.Scan(
 			&session.ID,
@@ -446,6 +464,8 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&pinnedAt,
 			&contextWindowCap,
 			&parentSessionID,
+			&activity,
+			&activityAt,
 			&todosJSON,
 			&lastSeen,
 		)
@@ -462,6 +482,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		if parentSessionID.Valid && parentSessionID.String != "" {
 			session.ParentSessionID = protocol.Ptr(parentSessionID.String)
 		}
+		applyActivity(&session, activity.String, activityAt.String)
 
 		if endpointID.Valid && endpointID.String != "" {
 			session.EndpointID = protocol.Ptr(endpointID.String)

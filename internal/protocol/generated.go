@@ -4436,6 +4436,12 @@ type RuntimeRespawnedMessage struct {
 }
 
 type Session struct {
+	// Activity corresponds to the JSON schema field "activity".
+	Activity *string `json:"activity,omitempty,omitzero"`
+
+	// ActivityAt corresponds to the JSON schema field "activity_at".
+	ActivityAt *string `json:"activity_at,omitempty,omitzero"`
+
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
 

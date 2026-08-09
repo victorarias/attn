@@ -944,6 +944,8 @@ export enum BranchChangedMessageEvent {
 }
 
 export interface SessionElement {
+    activity?:             string;
+    activity_at?:          string;
     agent:                 string;
     auto_settle_fires_at?: string;
     auto_settle_held?:     boolean;
@@ -4682,6 +4684,8 @@ export enum RuntimeRespawnedMessageEvent {
 }
 
 export interface Session {
+    activity?:             string;
+    activity_at?:          string;
     agent:                 string;
     auto_settle_fires_at?: string;
     auto_settle_held?:     boolean;
@@ -10536,6 +10540,8 @@ const typeMap: any = {
         { json: "session", js: "session", typ: u(undefined, r("SessionElement")) },
     ], "any"),
     "SessionElement": o([
+        { json: "activity", js: "activity", typ: u(undefined, "") },
+        { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
@@ -12800,6 +12806,8 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
     ], "any"),
     "Session": o([
+        { json: "activity", js: "activity", typ: u(undefined, "") },
+        { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
