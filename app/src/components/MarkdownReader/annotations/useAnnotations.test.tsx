@@ -431,7 +431,7 @@ describe('useAnnotations', () => {
       api.handleSelectionChange(selectNeedle(container, 'target words'));
       deletion = api.addDeletion();
     });
-    // missing-overview: a label WITH a tip, so the snapshot behavior is visible.
+    // Any label WITH a tip, so the snapshot behavior is visible.
     const label = QUICK_LABELS.find((l) => l.tip !== undefined)!;
     act(() => {
       api.handleSelectionChange(selectNeedle(container, 'plain prose'));

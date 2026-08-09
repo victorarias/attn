@@ -1,33 +1,9 @@
-// Package bus is attn's durable event bus: the internal spine that carries
-// domain facts from whatever produced them to everything that reacts.
-//
-// A fact is a name, a subject, and a small payload — "this session changed
-// state", "this ticket was commented on". It is NOT a WebSocket message. Most of
-// what the daemon currently pushes to clients is a whole-list snapshot, and a log
-// of snapshots would be a fat stream of UI invalidations that tells a subscriber
-// only that something changed. Facts stay small, stay durable, and are worth
-// subscribing to. Turning a fact into whatever the wire needs — frequently a
-// snapshot re-push — is the consumer's job, not the publisher's.
-//
-// Two kinds of consumer:
-//
-//   - Durable consumers register by name and hold a persisted cursor. Delivery is
-//     strict seq order, one event in flight, cursor advanced after the handler
-//     returns: at-least-once. A consumer that was down catches up from its
-//     bookmark. A handler that keeps failing stalls its own consumer loudly
-//     rather than skipping the event.
-//   - Ephemeral subscribers hold no cursor and start at head. The WebSocket hub
-//     is one: clients already refetch on reconnect, so replaying history into a
-//     hub would duplicate work the frontend already does.
-//
-// What does NOT belong here: byte streams. PTY output, attach traffic, and tile
-// content keep their direct paths. They are high volume, and attach routing is
-// per-client predicate matching, which pub/sub cannot express.
-//
-// The package accepts a Store and a LogFunc at construction and MUST NOT import
-// internal/daemon (the daemon imports this package and adapts internal/store to
-// the Store seam, exactly as it does for internal/jobs).
-//
+// Package bus is attn's durable event bus, carrying domain facts (name,
+// subject, small payload — never byte streams like PTY output or attach
+// traffic). Durable consumers get strict seq order, at-least-once delivery from
+// a persisted cursor; ephemeral subscribers start at head with no cursor.
+// MUST NOT import internal/daemon (the daemon imports this package and adapts
+// internal/store to the Store seam).
 // See docs/plans/2026-08-01-ext-a1-event-bus.md.
 package bus
 
@@ -42,16 +18,14 @@ import (
 )
 
 const (
-	// DefaultRetention is the age window for the durable log. Events older than
-	// this are eligible for trimming, subject to the enabled-consumer cursor floor.
+	// DefaultRetention is the trim age window, floored by enabled-consumer cursors.
 	DefaultRetention = 30 * 24 * time.Hour
 	// DefaultTrimInterval is how often retention runs.
 	DefaultTrimInterval = time.Hour
 	// DefaultBatchSize bounds one read of the forward stream.
 	DefaultBatchSize = 200
-	// DefaultPollInterval is the safety-net wake for a durable consumer. Delivery
-	// is normally driven by publish notifications; this bounds how long a missed
-	// notification, or an externally flipped enabled bit, can go unnoticed.
+	// DefaultPollInterval bounds how long a missed publish notification, or an
+	// externally flipped enabled bit, can go unnoticed.
 	DefaultPollInterval = 5 * time.Second
 	// DefaultRetryBase / DefaultRetryCap bound the capped-exponential retry of a
 	// failing handler.
@@ -60,13 +34,11 @@ const (
 )
 
 // ErrAlreadyStarted is returned by Register once Start has run: the set of
-// durable consumers is fixed at startup, so a delivery loop always exists for
-// every registration.
+// durable consumers is fixed at startup.
 var ErrAlreadyStarted = errors.New("bus: consumers must be registered before Start")
 
-// LogFunc matches the daemon's injected logger shape (see internal/jobs,
-// internal/pty). Runtime logging goes through it — never log.Printf, whose stderr
-// is discarded when the daemon runs in the background.
+// LogFunc is the daemon's injected logger shape. All runtime logging goes
+// through it — never log.Printf, whose stderr is discarded in the background.
 type LogFunc func(format string, args ...interface{})
 
 // Event is one fact on the log.
@@ -96,8 +68,8 @@ type Consumer struct {
 	UpdatedAt time.Time
 }
 
-// Store is the persistence seam. internal/store implements the equivalent
-// methods; the daemon adapts them so neither package imports the other.
+// Store is the persistence seam; the daemon adapts internal/store to it so
+// neither package imports the other.
 type Store interface {
 	Append(e Event, now time.Time) (int64, error)
 	Since(cursor int64, limit int) ([]Event, error)
@@ -107,23 +79,18 @@ type Store interface {
 	SetCursor(name string, cursor int64, now time.Time) error
 	ListConsumers() ([]Consumer, error)
 	Trim(cutoff time.Time) (int, error)
-	// Compact keeps only the newest fact per subject among the named ones, and
-	// only at or below floor. Which names those are is decided here (Options.
-	// Compactable); the SQL lives in the store, the same split Trim uses.
+	// Compact keeps only the newest fact per subject among the named ones, at or
+	// below floor.
 	Compact(names []string, floor int64) (int, error)
-	// Size reports how many facts the log holds and how many bytes of event text
-	// they carry — the receipt that says whether the log is outgrowing the data
-	// it describes.
+	// Size reports the log's row count and event-text bytes.
 	Size() (rows, bytes int64, err error)
 }
 
-// Handler receives one event. Returning an error stalls the consumer on that
-// event and retries with backoff; the cursor does not advance, so the event is
-// redelivered. Handlers must therefore tolerate redelivery.
+// Handler receives one event. An error stalls the consumer with backoff and
+// redelivers the event; handlers must tolerate redelivery.
 type Handler func(ctx context.Context, ev Event) error
 
-// Options configures a Bus. Every duration is optional and falls back to the
-// package defaults.
+// Options configures a Bus; zero durations fall back to the package defaults.
 type Options struct {
 	Store        Store
 	Log          LogFunc
@@ -134,9 +101,8 @@ type Options struct {
 	PollInterval time.Duration
 	RetryBase    time.Duration
 	RetryCap     time.Duration
-	// Compactable names the fact classes whose log rows are pure invalidations,
-	// so the retention pass may keep only the newest one per subject. See
-	// Bus.Trim for what that costs a consumer and why it is sound.
+	// Compactable names fact classes that are pure invalidations, so retention
+	// may keep only the newest per subject (see compact for the cost).
 	Compactable []string
 }
 
@@ -156,17 +122,14 @@ type Bus struct {
 	compactable []string
 
 	// publishMu serializes append + ephemeral fan-out so ephemeral subscribers
-	// observe events in seq order. Durable consumers get ordering from their
-	// cursor and do not need it.
+	// observe events in seq order.
 	publishMu sync.Mutex
-	// marked says the announce mark has been placed from a real log head. Until
-	// it is, the mark's zero value would mean "announce the whole log", so
-	// announcing is held back rather than replaying history at every client.
+	// marked says the announce mark was placed from a real log head. An unset
+	// mark reads as "announce the whole log", so announcing is held back until it
+	// is placed.
 	marked bool
-	// announced is the highest seq already fanned out to ephemeral subscribers,
-	// guarded by publishMu. Both entry points — Publish and Announce — read
-	// forward from it, which is what keeps events appended by somebody else's
-	// transaction in seq order with events this bus appended itself.
+	// announced is the highest seq fanned out to ephemeral subscribers, guarded
+	// by publishMu; both Publish and Announce read the log forward from it.
 	announced int64
 
 	mu        sync.Mutex
@@ -199,9 +162,8 @@ type ephemeralSub struct {
 	fn     func(Event)
 }
 
-// New builds a Bus. A nil Store yields a bus that accepts publishes and drops
-// them, mirroring the store's own nil-db convention so a daemon without a
-// database still runs.
+// New builds a Bus. A nil Store yields a bus that fans out publishes without
+// durability, mirroring the store's nil-db convention.
 func New(opts Options) *Bus {
 	b := &Bus{
 		store:        opts.Store,
@@ -223,24 +185,17 @@ func New(opts Options) *Bus {
 		b.log = func(string, ...interface{}) {}
 	}
 	b.ctx, b.cancel = context.WithCancel(context.Background())
-	// The announce mark starts at head, so a bus attached to an existing log
-	// announces what happens next rather than replaying its history. It is set
-	// here rather than in Start because a Bus that is never started still
-	// publishes and announces — that is the shape of every test daemon — and one
-	// that replayed a month of facts into the wire on its first write would be a
-	// worse failure than a missed one.
+	// Mark at construction, not Start: a never-started Bus still publishes and
+	// announces, and an unplaced mark would replay the whole log on first write.
 	if b.store != nil {
 		b.markHead()
 	}
 	return b
 }
 
-// Publish appends a fact and returns its seq. Payload may be nil (a fact whose
-// subject says everything) or any JSON-marshalable value.
-//
-// The write is synchronous: the caller learns the fact is durable, and the seq is
-// assigned under the same lock that orders ephemeral delivery. This is affordable
-// because the bus carries facts, not streams.
+// Publish appends a fact and returns its seq. Payload may be nil or any
+// JSON-marshalable value. The write is synchronous: the caller learns the fact
+// is durable.
 func (b *Bus) Publish(name, subject string, payload any) (int64, error) {
 	return b.publish(Event{Name: name, Subject: subject}, payload)
 }
@@ -267,9 +222,7 @@ func (b *Bus) publish(ev Event, payload any) (int64, error) {
 	now := b.now()
 	ev.CreatedAt = now
 
-	// Without a store the fact still HAPPENED — only its durability is missing.
-	// Live subscribers are delivered to either way, so a bus configured without a
-	// database degrades to fan-out rather than to silence.
+	// No store: degrade to fan-out rather than silence.
 	if b.store == nil {
 		b.fanoutEphemeral(ev)
 		return 0, nil
@@ -277,36 +230,25 @@ func (b *Bus) publish(ev Event, payload any) (int64, error) {
 
 	seq, err := b.store.Append(ev, now)
 	if err != nil {
-		// Same degradation as the store-less case above, and for the same reason.
-		// These projections were direct broadcasts before the bus existed; a client
-		// must not miss a state change because the durable log had a bad night. The
-		// caller still learns durability was lost.
+		// A failed append must not silence the wire; the caller still learns
+		// durability was lost.
 		b.fanoutEphemeral(ev)
 		return 0, fmt.Errorf("bus: appending %s: %w", ev.Name, err)
 	}
 	ev.Seq = seq
 
-	// Fan out by reading the log forward rather than by handing subscribers the
-	// event in hand. The two are the same message whenever this publish is the
-	// only writer, and they are not the same ORDER when they are not: a fact
-	// appended inside somebody else's transaction (see the document store's
-	// composite write) may sit below this seq and still be unannounced, and
-	// delivering this one first would show subscribers the log out of order.
-	// Reading forward makes the log the ordering authority, whoever wrote to it.
+	// Fan out by reading the log forward, not by delivering the event in hand: a
+	// fact appended by somebody else's transaction may sit below this seq still
+	// unannounced, and delivering this one first would break seq order.
 	b.announceLocked(&ev)
 	b.wakeDurables()
 	return seq, nil
 }
 
-// Announce fans out facts appended to the log outside Publish — by a store
-// transaction that committed a change and its fact together — so ephemeral
-// subscribers see them in seq order beside everything else.
-//
-// It reads forward from the announce mark under the same lock Publish holds,
-// which makes it idempotent and order-correct no matter who calls it when: two
-// writers that commit and then race to announce cannot deliver out of order,
-// and an announce that never happens is repaired by the next one. Callers
-// therefore need no coordination beyond calling it after their commit.
+// Announce fans out facts appended to the log outside Publish (store
+// transactions that commit a change and its fact together). Idempotent and
+// order-correct: callers just call it after their commit, and a missed announce
+// is repaired by the next one.
 func (b *Bus) Announce() {
 	if b.store == nil {
 		return
@@ -318,11 +260,9 @@ func (b *Bus) Announce() {
 }
 
 // markHead sets the announce mark to the log's head and reports whether it
-// learned where the log stands. A mark that was never set is 0, which means
-// "announce everything" — so until this succeeds the bus must not announce at
-// all, or the first write would replay the whole log into every live client.
-// Construction calls it once; announceLocked retries it, because a database
-// that could not be read at construction is usually readable a moment later.
+// succeeded. Until it does the bus must not announce at all — an unset mark
+// would replay the whole log. announceLocked retries it after a failed
+// construction-time call.
 func (b *Bus) markHead() bool {
 	_, head, err := b.store.Bounds()
 	if err != nil {
@@ -338,9 +278,6 @@ func (b *Bus) markHead() bool {
 // event the caller just appended, delivered directly if the log cannot be read
 // — losing durability must not also silence the wire.
 func (b *Bus) announceLocked(fallback *Event) {
-	// Without a mark there is no "everything after here" to deliver, only the
-	// whole log. Deliver the caller's own event, which is what it would have
-	// gotten before reading forward existed, and try again next time.
 	if !b.marked && !b.markHead() {
 		if fallback != nil {
 			b.fanoutEphemeral(*fallback)
@@ -398,12 +335,9 @@ func (b *Bus) wakeDurables() {
 	}
 }
 
-// Register adds a durable consumer. It must be called before Start.
-//
-// A consumer new to the store begins at head: registering a consumer is not a
-// request to replay history. An existing consumer keeps its cursor and its
-// enabled bit — restarting the daemon must neither rewind a consumer nor
-// resurrect one the operator killed.
+// Register adds a durable consumer; must be called before Start. A new
+// consumer begins at head; an existing one keeps its cursor and enabled bit —
+// a restart must neither rewind a consumer nor resurrect a killed one.
 func (b *Bus) Register(name string, filter Filter, h Handler) error {
 	if strings.TrimSpace(name) == "" {
 		return errors.New("bus: consumer name is required")
@@ -433,14 +367,9 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 }
 
 // Subscribe adds an ephemeral subscriber and returns its cancel function. The
-// subscriber holds no cursor, starts at head, and is invoked inline on the
-// publishing goroutine in seq order — so its function must be cheap and must not
-// publish back onto the bus.
-//
-// Seq is 0 when the fact could not be made durable (no store, or a failed
-// append). Ephemeral delivery is deliberately not conditional on durability:
-// these subscribers project onto the wire, and the wire must not go quiet
-// because the log did. A subscriber that cares must check Seq.
+// function runs inline on the publishing goroutine — it must be cheap and must
+// not publish back onto the bus (publishMu is held: deadlock). Seq is 0 when
+// the fact could not be made durable; a subscriber that cares must check.
 func (b *Bus) Subscribe(filter Filter, fn func(Event)) func() {
 	if fn == nil {
 		return func() {}
@@ -506,7 +435,6 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 	}
 	now := b.now()
 	if !ok {
-		// From now: a fresh consumer is not asking for the backlog.
 		if err := b.store.SaveConsumer(Consumer{
 			Name:    d.name,
 			Cursor:  head,
@@ -579,8 +507,8 @@ func (b *Bus) deliver(d *durable) {
 
 // drain reads forward from the consumer's cursor until the log is exhausted.
 func (b *Bus) drain(d *durable) error {
-	// The enabled bit is the kill switch and lives only in the database, so it is
-	// re-read here rather than cached for the process lifetime.
+	// The enabled bit is the kill switch and lives only in the database; re-read
+	// it, never cache it for the process lifetime.
 	rec, ok, err := b.store.GetConsumer(d.name)
 	if err != nil {
 		return fmt.Errorf("reading registration: %w", err)
@@ -597,10 +525,8 @@ func (b *Bus) drain(d *durable) error {
 		return err
 	}
 
-	// A consumer that is behind a busy producer never leaves the loop below, so
-	// re-reading the kill switch once per drain would leave it unreachable for as
-	// long as the burst lasts. Re-read it on the poll interval instead, which is
-	// the bound DefaultPollInterval documents.
+	// A lagging consumer never leaves the loop below, so the kill switch is
+	// re-read on the poll interval, not once per drain.
 	lastCheck := b.now()
 	killed := func() (bool, error) {
 		if b.now().Sub(lastCheck) < b.pollInterval {
@@ -647,8 +573,7 @@ func (b *Bus) drain(d *durable) error {
 				return nil
 			}
 			if !d.filter.Matches(ev.Name) {
-				// Unwanted events still advance the cursor, batched into one write
-				// at the next matching event or at the end of the batch.
+				// Unwanted events still advance the cursor, batched into one write.
 				skipped = ev.Seq
 				continue
 			}
@@ -667,10 +592,8 @@ func (b *Bus) drain(d *durable) error {
 			if err := b.advance(d, ev.Seq); err != nil {
 				return err
 			}
-			// Backoff escalates for an event the handler cannot get past, not over
-			// a consumer's lifetime: a delivery that succeeds ends the streak, so a
-			// consumer that is merely lagging does not ratchet to the retry cap on
-			// occasional transient failures.
+			// A successful delivery ends the failure streak, so a lagging consumer
+			// does not ratchet to the retry cap on transient failures.
 			d.clearFailure()
 		}
 		if skipped != 0 {
@@ -681,10 +604,8 @@ func (b *Bus) drain(d *durable) error {
 	}
 }
 
-// reconcileGap handles a consumer whose cursor sits below the oldest surviving
-// event: retention trimmed past it while it was disabled or dead. It resumes at
-// head — replaying a month of backlog into a just-revived consumer would be worse
-// than the gap — and says so.
+// reconcileGap handles a cursor below the oldest surviving event (retention
+// trimmed past it while disabled or dead): resume at head, with a logged gap.
 func (b *Bus) reconcileGap(d *durable) error {
 	earliest, head, err := b.store.Bounds()
 	if err != nil {
@@ -716,21 +637,14 @@ func (b *Bus) retain() {
 		case <-b.ctx.Done():
 			return
 		case <-ticker.C:
-			// A failed pass is already logged; the next tick retries it.
 			_, _ = b.Trim()
 		}
 	}
 }
 
-// Trim runs one retention pass and reports how many events it removed, by both
-// halves: the age window, and compaction of the fact classes that carry no
-// history. It is exported so the daemon and tests can force a pass without
-// waiting for a tick.
-// It reports what it removed and whether either half failed. The daemon's tick
-// logs the failure and carries on — a pass that could not run is retried an hour
-// later — but a caller that ASKED for a pass has to be able to tell a pass that
-// removed nothing from one that never happened, or a script reads "removed 0"
-// and concludes the log is already clean.
+// Trim runs one retention pass (age window plus compaction) and reports how
+// many events it removed and whether either half failed — a caller must be able
+// to tell "removed 0" from "never ran".
 func (b *Bus) Trim() (int, error) {
 	if b.store == nil {
 		return 0, nil
@@ -756,30 +670,13 @@ func (b *Bus) Trim() (int, error) {
 	return removed + compacted, failed
 }
 
-// compact keeps at most one fact per subject for every compactable name, which
-// is what bounds the log by the size of the data it describes rather than by
-// how often that data is written.
-//
-// A compactable fact is an invalidation: it says a subject changed, and the
-// state itself lives in the store, so five of them about one subject carry no
-// more than the newest. The consequence, stated rather than hidden: for these
-// names durable delivery is at-least-once PER CHANGED SUBJECT, not per write. A
-// consumer that was behind while a document changed five times learns once that
-// it changed, and reads current state — which is what a consumer of this bus is
-// told to do anyway. A workload that needs every intermediate change as a
-// business event is doing event sourcing, and those events are data: they
-// belong in a collection the workload writes, where their growth is its own
-// visible cost.
-//
-// The cursor floor is the same one trimming honors, for two load-bearing
-// reasons. An enabled consumer must never lose a fact it has not read, and
-// below the floor every enabled consumer has read everything, so their delivery
-// is bit-for-bit what it is today. And reconcileGap reads "cursor below the
-// earliest surviving seq" as "everything missing was trimmed"; compacting above
-// the floor would punch holes that assumption misreads and skip a revived
-// consumer past facts that still exist. A stalled enabled consumer therefore
-// pins compaction exactly as it pins trimming — a loud condition already, with
-// `attn bus status` showing the stall and the kill switch to unpin it.
+// compact keeps at most one fact per subject for every compactable name,
+// bounding the log by the data it describes rather than by write frequency.
+// For these names durable delivery is at-least-once PER CHANGED SUBJECT, not
+// per write. Compaction honors the same cursor floor as trimming: an enabled
+// consumer must never lose an unread fact, and compacting above the floor would
+// punch holes that reconcileGap misreads as trimmed history. A stalled enabled
+// consumer pins compaction exactly as it pins trimming.
 func (b *Bus) compact() (int, error) {
 	if len(b.compactable) == 0 {
 		return 0, nil
@@ -800,10 +697,8 @@ func (b *Bus) compact() (int, error) {
 	return n, nil
 }
 
-// consumerFloor is the lowest position every enabled consumer has passed. With
-// no enabled consumer registered it is the log head: nobody is owed anything, so
-// nothing is pinned. Disabled consumers are excluded for the same reason they
-// are excluded from trimming — a killed consumer must not pin the log.
+// consumerFloor is the lowest position every enabled consumer has passed; with
+// none enabled it is the log head. A killed consumer must not pin the log.
 func (b *Bus) consumerFloor() (int64, error) {
 	rows, err := b.store.ListConsumers()
 	if err != nil {
@@ -835,20 +730,15 @@ type ConsumerStatus struct {
 	Lag     int64
 	Filter  string
 	Enabled bool
-	// Live is true when this process has a delivery loop for the consumer. A
-	// registered-but-not-live consumer is one whose owner is gone.
+	// Live is true when this process has a delivery loop for the consumer.
 	Live bool
 	// Stalled carries the current failure message when a handler is failing.
 	Stalled string
 }
 
 // Status reports the log head and every registration, for operator inspection.
-//
-// Rows and Bytes are the log's actual weight rather than head-minus-earliest,
-// which only ever described the seq space. They are the receipt for the
-// invariant compaction upholds — the log stays proportional to the data it
-// describes, never to how often that data is written — so a workload that
-// stresses it shows up as a measurement instead of a suspicion.
+// Rows and Bytes are the log's actual weight — the receipt that it stays
+// proportional to the data it describes, not to write frequency.
 type Status struct {
 	Head      int64
 	Earliest  int64

@@ -82,10 +82,12 @@ describe('SelectionToolbar', () => {
     expect(props.onRequestComment).not.toHaveBeenCalled();
   });
 
-  it('👍 button applies the fixed thumbs-up label instantly (E7)', () => {
+  it('the one-click agreement button applies a label from the shared set (E7)', () => {
     const { props } = renderToolbar();
-    fireEvent.click(screen.getByTitle('Looks good'));
+    fireEvent.click(screen.getByTitle(THUMBS_UP_LABEL.text));
     expect(props.onQuickLabel).toHaveBeenCalledWith(THUMBS_UP_LABEL);
+    expect(THUMBS_UP_LABEL.emoji).toBe('👍');
+    expect(QUICK_LABELS).toContain(THUMBS_UP_LABEL);
   });
 
   it('Cancel button closes', () => {

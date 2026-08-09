@@ -30,23 +30,39 @@ import (
 var ErrStaleAnnotationSave = errors.New("stale annotation save")
 
 // annotationDraftTable names one draft table and its key column. Every draft
-// table has the same columns beyond that key.
+// table has the same columns beyond that key, except the note.
 type annotationDraftTable struct {
 	table string
 	key   string
+	// Whether the draft carries a note beside its list. Markdown drafts do
+	// not: a document-wide comment is already one of their annotations, of
+	// type "global". Terminal annotations have no such type, so the note is a
+	// column — and a table without it reads and writes the empty string, which
+	// keeps one query shape for both.
+	note bool
 }
 
 var (
 	markdownDraftTable = annotationDraftTable{table: "markdown_annotation_drafts", key: "path"}
-	sessionDraftTable  = annotationDraftTable{table: "session_annotation_drafts", key: "session_id"}
+	sessionDraftTable  = annotationDraftTable{table: "session_annotation_drafts", key: "session_id", note: true}
 )
 
-// annotationDraft is one stored draft: the raw list plus the generation floor a
-// client must exceed to write.
+// annotationDraft is one stored draft: the raw list, the note that goes with
+// it, plus the generation floor a client must exceed to write.
 type annotationDraft struct {
 	Annotations string // raw JSON array
+	Note        string // always empty for a table without the column
 	Generation  int    // max(generation, tombstone_generation)
 	UpdatedAt   string
+}
+
+// noteColumn is what a SELECT reads for the note: the column on a table that
+// has one, the empty string on a table that does not.
+func (t annotationDraftTable) noteColumn() string {
+	if t.note {
+		return "note"
+	}
+	return "''"
 }
 
 // get returns the draft for key. A missing row is an empty draft at generation
@@ -57,13 +73,13 @@ func (t annotationDraftTable) get(s *Store, key string) (annotationDraft, error)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var annotations, updatedAt string
+	var annotations, note, updatedAt string
 	var generation, tombstone int
 	query := fmt.Sprintf(
-		"SELECT annotations_json, generation, tombstone_generation, updated_at FROM %s WHERE %s = ?",
-		t.table, t.key,
+		"SELECT annotations_json, %s, generation, tombstone_generation, updated_at FROM %s WHERE %s = ?",
+		t.noteColumn(), t.table, t.key,
 	)
-	err := s.db.QueryRow(query, key).Scan(&annotations, &generation, &tombstone, &updatedAt)
+	err := s.db.QueryRow(query, key).Scan(&annotations, &note, &generation, &tombstone, &updatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return annotationDraft{Annotations: "[]", Generation: 0}, nil
 	}
@@ -72,6 +88,7 @@ func (t annotationDraftTable) get(s *Store, key string) (annotationDraft, error)
 	}
 	return annotationDraft{
 		Annotations: annotations,
+		Note:        note,
 		Generation:  max(generation, tombstone),
 		UpdatedAt:   updatedAt,
 	}, nil
@@ -79,7 +96,7 @@ func (t annotationDraftTable) get(s *Store, key string) (annotationDraft, error)
 
 // save upserts the full list for key, rejecting anything that does not clear
 // the floor with ErrStaleAnnotationSave.
-func (t annotationDraftTable) save(s *Store, key, annotationsJSON string, generation int, now time.Time) error {
+func (t annotationDraftTable) save(s *Store, key, annotationsJSON, note string, generation int, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -97,15 +114,25 @@ func (t annotationDraftTable) save(s *Store, key, annotationsJSON string, genera
 		return ErrStaleAnnotationSave
 	}
 
+	columns, values := "annotations_json", "?"
+	updates := "annotations_json = excluded.annotations_json"
+	args := []any{key, annotationsJSON}
+	if t.note {
+		columns, values = columns+", note", values+", ?"
+		updates += ", note = excluded.note"
+		args = append(args, note)
+	}
+	args = append(args, generation, now.UTC().Format(time.RFC3339))
+
 	query := fmt.Sprintf(`
-		INSERT INTO %s (%s, annotations_json, generation, tombstone_generation, updated_at)
-		VALUES (?, ?, ?, 0, ?)
+		INSERT INTO %s (%s, %s, generation, tombstone_generation, updated_at)
+		VALUES (?, %s, ?, 0, ?)
 		ON CONFLICT(%s) DO UPDATE SET
-			annotations_json = excluded.annotations_json,
+			%s,
 			generation = excluded.generation,
 			updated_at = excluded.updated_at
-	`, t.table, t.key, t.key)
-	if _, err := tx.Exec(query, key, annotationsJSON, generation, now.UTC().Format(time.RFC3339)); err != nil {
+	`, t.table, t.key, columns, values, t.key, updates)
+	if _, err := tx.Exec(query, args...); err != nil {
 		return fmt.Errorf("failed to save %s draft: %w", t.table, err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -133,14 +160,21 @@ func (t annotationDraftTable) clear(s *Store, key string, generation int, now ti
 	}
 	newTombstone := max(generation, max(storedGeneration, tombstone))
 
+	// The note goes with the marks: it was composed to be sent with them, and
+	// leaving it behind after a send would put it in front of the next turn's
+	// annotations as if the user had written it there.
+	noteColumns, noteValues, noteUpdates := "", "", ""
+	if t.note {
+		noteColumns, noteValues, noteUpdates = ", note", ", ''", "note = '',\n\t\t\t"
+	}
 	query := fmt.Sprintf(`
-		INSERT INTO %s (%s, annotations_json, generation, tombstone_generation, updated_at)
-		VALUES (?, '[]', ?, ?, ?)
+		INSERT INTO %s (%s, annotations_json%s, generation, tombstone_generation, updated_at)
+		VALUES (?, '[]'%s, ?, ?, ?)
 		ON CONFLICT(%s) DO UPDATE SET
 			annotations_json = '[]',
-			tombstone_generation = excluded.tombstone_generation,
+			%stombstone_generation = excluded.tombstone_generation,
 			updated_at = excluded.updated_at
-	`, t.table, t.key, t.key)
+	`, t.table, t.key, noteColumns, noteValues, t.key, noteUpdates)
 	if _, err := tx.Exec(query, key, storedGeneration, newTombstone, now.UTC().Format(time.RFC3339)); err != nil {
 		return fmt.Errorf("failed to clear %s draft: %w", t.table, err)
 	}

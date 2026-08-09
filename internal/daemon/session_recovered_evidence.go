@@ -8,33 +8,17 @@ import (
 	"github.com/victorarias/attn/internal/sessionstate"
 )
 
-// Recovering a session's evidence after a daemon restart.
-//
-// The evidence table is in memory, so a new daemon starts knowing nothing about
-// agents that have been running for hours. That is survivable for a busy agent —
-// it repaints its title within a second and the table refills itself — and fatal
-// for a quiet one, which writes nothing at all to its PTY and would therefore
-// never produce a single piece of evidence again. The resolver would then have
-// nothing to say about it for the rest of its life.
-//
-// Three things are recoverable because their sources outlived the daemon:
-//
-//   - The level. The worker holds the last observation its signal observers
-//     emitted, timestamped. A level is a standing claim, so reading it back is
-//     not a guess about the past — it is what the agent is still saying.
-//   - The outstanding harness edge. An approval or a question is not in the
-//     worker, but the session's own persisted state *is* the record that one was
-//     outstanding, and nothing has happened since to answer it.
-//   - The approval route. The surviving worker registry records the effective
-//     launch-time route, with the session's durable launch intent as fallback.
-//
-// What is deliberately not reconstructed is the bracket pair (turn open, tool
-// open). Those are hook-driven and genuinely gone, and inventing them would hold
-// a session `working` on a bracket whose closing hook can never arrive.
+// Recovering a session's evidence after a daemon restart. The in-memory
+// evidence table starts empty, which is fatal for a quiet agent that never
+// writes to its PTY again. Three sources outlived the daemon and are re-seeded:
+// the worker's last signal level, the persisted-state record of an outstanding
+// approval/question edge, and the worker registry's approval route. The bracket
+// pair (turn/tool open) is deliberately NOT reconstructed: it is hook-driven and
+// gone, and inventing it would hold a session `working` on a bracket whose
+// closing hook can never arrive.
 
-// seedRecoveredEvidence files what the worker and the store between them still
-// know about a re-adopted session, so the resolver has a basis for its first
-// tick instead of an empty row.
+// seedRecoveredEvidence files what the worker and store still know about a
+// re-adopted session, so the resolver's first tick has a basis.
 func (d *Daemon) seedRecoveredEvidence(sessionID string, existing *protocol.Session, info ptybackend.SessionInfo) {
 	if d == nil || existing == nil {
 		return
@@ -43,28 +27,18 @@ func (d *Daemon) seedRecoveredEvidence(sessionID string, existing *protocol.Sess
 		d.recordReviewerEvidence(sessionID, route.ReviewerInLoop())
 	}
 	if info.HasLastSignal {
-		// Routed through the ordinary PTY evidence path rather than written
-		// directly: the translation from a title claim to evidence has a case that
-		// matters here — codex announces approvals in its title — and recovery must
-		// not grow a second, subtly different copy of it.
+		// Via the ordinary PTY evidence path: codex announces approvals in its
+		// title, and recovery must not grow a second copy of that translation.
 		d.recordPTYEvidence(sessionID, info.LastSignal)
 	}
 	d.seedRecoveredHarnessEdge(sessionID, existing, info)
 }
 
-// seedRecoveredHarnessEdge restores the "the agent is blocked on a person" edge
-// for a session that was in one of those states when the daemon went down.
-//
-// Without it the level alone decides, and the level cannot tell an agent waiting
-// on an approval from one that has simply finished: both paint the same not-busy
-// glyph. The resolver would read the restored session as a fresh prompt and
-// settle it to idle, which loses the loudest state attn has.
-//
-// The guard is what keeps that from being a lie in the other direction. If the
-// agent painted a title *after* the daemon concluded the approval, then it moved
-// while nobody was watching — the prompt was answered, the turn ran on — and the
-// edge describes a moment that is over. Only a level no newer than the
-// conclusion still corroborates it.
+// seedRecoveredHarnessEdge restores the blocked-on-a-person edge for a session
+// that was in such a state at shutdown; without it the resolver settles the
+// session to idle, losing the loudest state attn has. Guard: a title painted
+// after the state was concluded means the prompt was answered while nobody was
+// watching, so only a level no newer than the conclusion corroborates the edge.
 func (d *Daemon) seedRecoveredHarnessEdge(sessionID string, existing *protocol.Session, info ptybackend.SessionInfo) {
 	claim, ok := recoveredHarnessClaim(existing.State)
 	if !ok {
@@ -84,17 +58,14 @@ func (d *Daemon) seedRecoveredHarnessEdge(sessionID string, existing *protocol.S
 			Detail:     "recovered from persisted state",
 			ObservedAt: concludedAt,
 		}
-		// A session cannot have reached either of these states without having
-		// taken a turn, and the resolver reads "never took a turn" as a session
-		// sitting at a fresh prompt. Saying so keeps a recovered agent from being
-		// described as one that has not started yet.
+		// These states imply a turn was taken; without this the resolver reads the
+		// session as sitting at a fresh prompt.
 		e.TurnEverOpened = true
 	})
 }
 
-// recoveredHarnessClaim maps the two states that mean an outstanding harness edge
-// onto the claim that produced them. Every other state is either resolvable from
-// the level alone or not the resolver's to begin with.
+// recoveredHarnessClaim maps the two outstanding-harness-edge states onto the
+// claim that produced them.
 func recoveredHarnessClaim(state protocol.SessionState) (sessionstate.Claim, bool) {
 	switch state {
 	case protocol.SessionStatePendingApproval:
@@ -106,10 +77,8 @@ func recoveredHarnessClaim(state protocol.SessionState) (sessionstate.Claim, boo
 	}
 }
 
-// parseSessionStateSince is when the daemon last concluded the session's current
-// state. It is the timestamp a recovered edge is stamped with, and the one the
-// level is compared against, so an unparseable stamp means no seeding rather
-// than a made-up instant.
+// parseSessionStateSince is when the daemon last concluded the current state.
+// An unparseable stamp means no seeding rather than a made-up instant.
 func parseSessionStateSince(session *protocol.Session) (time.Time, bool) {
 	stamp, err := time.Parse(time.RFC3339Nano, session.StateSince)
 	if err != nil {

@@ -49,6 +49,7 @@ import {
   type KeeperDutyDescriptor,
   type KeeperDutyKey,
 } from '../utils/keeperDuties';
+import { SessionActivitySettings } from './SessionActivitySettings';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -226,6 +227,11 @@ export function SettingsModal({
   const [headlessContextCap, setHeadlessContextCap] = useState(
     settings.headless_context_window_cap || String(DEFAULT_CONTEXT_WINDOW_CAP),
   );
+  // Per-agent context-window cap (default_context_window_cap_<agent>) applied to
+  // EVERY session of that agent; a chief launch still takes the chief cap above.
+  // Blank => uncapped (the agent's own compaction behavior), unlike the chief and
+  // headless caps whose blank means the built-in default.
+  const [defaultContextCaps, setDefaultContextCaps] = useState<Record<SessionAgent, string>>({});
   // Auto-settle windows, in seconds. Edited locally and committed on blur/Enter
   // like the context caps; the daemon rejects out-of-range values.
   const [autoSettleArm, setAutoSettleArm] = useState(
@@ -388,6 +394,13 @@ export function SettingsModal({
     }
     return out;
   }, [settings, defaultOverrideAgentList]);
+  const actualDefaultContextCaps = useMemo(() => {
+    const out = {} as Record<SessionAgent, string>;
+    for (const agent of defaultOverrideAgentList) {
+      out[agent] = settings[`default_context_window_cap_${agent}`] || '';
+    }
+    return out;
+  }, [settings, defaultOverrideAgentList]);
   // Agents eligible to run any keeper duty: installed, headless-task capable, and one
   // of claude/codex. Any agent already configured on a duty is kept in the list even
   // if it has since become unavailable, so its row still shows the saved selection.
@@ -441,6 +454,7 @@ export function SettingsModal({
     setReviewerModel(actualReviewerModel);
     setChiefContextCap(actualChiefContextCap);
     setHeadlessContextCap(actualHeadlessContextCap);
+    setDefaultContextCaps(actualDefaultContextCaps);
     // The modal mounts before the daemon's settings broadcast arrives, so these
     // two start on the built-in defaults. Without this resync a saved 60/20
     // policy would still be displayed as 30/15, and the commit-on-blur would
@@ -462,7 +476,7 @@ export function SettingsModal({
     setPluginSourcePath('');
     setPluginError(null);
     setPluginActionName(null);
-  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
+  }, [isOpen, actualProjectsDir, actualNotebookRoot, actualAgentExecutables, actualChiefModels, actualChiefEfforts, actualDefaultModels, actualDefaultEfforts, actualDefaultContextCaps, actualEditorExecutable, resolvedDefaultAgent, actualReviewerModel, actualChiefContextCap, actualHeadlessContextCap, actualAutoSettleArm, actualAutoSettleCountdown, actualKeeperConfigs, keeperAgents]);
 
   useEscapeStack(onClose, isOpen);
 
@@ -743,6 +757,18 @@ export function SettingsModal({
       onSetSetting('headless_context_window_cap', next);
     }
   }, [headlessContextCap, actualHeadlessContextCap, onSetSetting]);
+
+  const handleDefaultContextCapChange = useCallback((agent: SessionAgent, value: string) => {
+    setDefaultContextCaps((prev) => ({ ...prev, [agent]: value }));
+  }, []);
+
+  const commitDefaultContextCap = useCallback((agent: SessionAgent) => {
+    const nextValue = (defaultContextCaps[agent] || '').trim();
+    const currentValue = (actualDefaultContextCaps[agent] || '').trim();
+    if (nextValue !== currentValue) {
+      onSetSetting(`default_context_window_cap_${agent}`, nextValue);
+    }
+  }, [actualDefaultContextCaps, defaultContextCaps, onSetSetting]);
 
   const handleAddEndpoint = useCallback(async () => {
     const name = newEndpointName.trim();
@@ -2174,6 +2200,12 @@ export function SettingsModal({
         </div>
       </section>
 
+      <SessionActivitySettings
+        settings={settings}
+        agents={keeperAgents}
+        onSetSetting={onSetSetting}
+      />
+
       <section className="settings-block">
         <div className="settings-block-intro">
           <div className="settings-kicker">Agents</div>
@@ -2379,10 +2411,11 @@ export function SettingsModal({
           <p className="settings-description">
             Token thresholds at which auto-compaction fires instead of waiting for the
             model's full window. Lower caps keep the chief cheaper on each cache-cold
-            wake and keep one-shot headless runs from ballooning. Leave at {DEFAULT_CONTEXT_WINDOW_CAP.toLocaleString()} to
-            use the default. Only the chief session and headless runs (keeper narration,
-            reconciliation, workflow subagents) are affected — regular delegated sessions
-            are never capped.
+            wake and keep one-shot headless runs (keeper narration, reconciliation,
+            workflow subagents) from ballooning; leave those at {DEFAULT_CONTEXT_WINDOW_CAP.toLocaleString()} for
+            the default. The per-agent caps apply to every session of that agent —
+            raise one to make long-lived sessions compact later. Blank means the
+            agent's own compaction behavior; a chief launch still takes the chief cap.
           </p>
         </div>
         <div className="settings-block-body">
@@ -2427,6 +2460,32 @@ export function SettingsModal({
                 className="settings-input"
               />
             </div>
+            {defaultOverrideAgentList.map((agent) => {
+              const inputId = `settings-default-context-cap-${agent}`;
+              return (
+                <div className="settings-field" key={agent}>
+                  <label className="settings-label" htmlFor={inputId}>{agentLabel(agent)} sessions</label>
+                  <input
+                    id={inputId}
+                    data-testid={inputId}
+                    type="number"
+                    min={10000}
+                    max={2000000}
+                    step={1000}
+                    value={defaultContextCaps[agent] || ''}
+                    onChange={(e) => handleDefaultContextCapChange(agent, e.target.value)}
+                    onBlur={() => commitDefaultContextCap(agent)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        commitDefaultContextCap(agent);
+                      }
+                    }}
+                    placeholder="blank — agent default"
+                    className="settings-input"
+                  />
+                </div>
+              );
+            })}
           </div>
         </div>
       </section>

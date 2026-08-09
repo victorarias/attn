@@ -13,53 +13,35 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Annotate-only ground-truth cross-check for reconciliation verdicts. The
-// classifier's verdict is produced from a stale, pre-sliced transcript and
-// can contradict reality (e.g. it can say a PR merge is "pending" hours
-// after the PR actually merged). This never mutates the verdict itself: it
-// extracts PR references from the verdict's free text and appends
-// "Ground-truth check" lines to the posted comment when a referenced PR is
-// positively known to be merged or closed. Two sources feed that knowledge:
-//
-//  1. The daemon's own tracked-PR rows (deterministic, no network). Note the
-//     store only tracks OPEN PRs today (see groundTruthTerminalStates), so
-//     this leg is forward-compatible rather than load-bearing.
-//  2. For referenced PRs ABSENT from the tracked open set — the common shape
-//     of the real bug, since merged/closed PRs vanish from the poller's
-//     `is:open` sweep — up to groundTruthMaxLookups targeted single-request
-//     GitHub lookups resolve the definitive state.
-//
-// Everything degrades to silence: no cwd, no origin remote, no GitHub client
-// for the host, lookup errors, or a still-open PR all produce no annotation,
-// and nothing here can fail the reconcile.
+// Annotate-only ground-truth cross-check for reconciliation verdicts: it never
+// mutates the verdict, only appends "Ground-truth check" lines when a PR the
+// verdict references is positively known merged/closed. Two sources: the
+// daemon's tracked-PR rows (deterministic), and capped GitHub lookups for refs
+// absent from the tracked open set — the common shape, since finished PRs
+// vanish from the `is:open` sweep. Everything degrades to silence; nothing here
+// can fail the reconcile.
 
-// groundTruthMaxLines caps how many Ground-truth check lines can be appended
-// to a single reconciliation comment.
+// groundTruthMaxLines caps Ground-truth check lines per reconciliation comment.
 const groundTruthMaxLines = 5
 
-// groundTruthMaxLookups caps the targeted GitHub lookups per reconcile: a
-// verdict is short free text, so more than a few PR references is noise, and
-// each lookup is a real API request.
+// groundTruthMaxLookups caps the targeted GitHub lookups per reconcile; each is
+// a real API request.
 const groundTruthMaxLookups = 3
 
-// groundTruthLookupTimeout bounds the TOTAL added latency of the lookup leg;
-// the executor's context is wrapped with it so a slow or wedged GitHub call
-// cannot stall the verdict comment.
+// groundTruthLookupTimeout bounds the TOTAL added latency of the lookup leg so
+// a wedged GitHub call cannot stall the verdict comment.
 const groundTruthLookupTimeout = 10 * time.Second
 
-// prStateFetcher resolves a PR's definitive lifecycle state. Production wires
-// github.Client.FetchPRState for the repo's host; tests substitute a fake via
-// the Daemon.ticketReconcilePRFetch seam.
+// prStateFetcher resolves a PR's definitive lifecycle state; tests substitute a
+// fake via the Daemon.ticketReconcilePRFetch seam.
 type prStateFetcher func(repo string, number int) (state string, merged bool, title string, err error)
 
-// groundTruthMaxPRNumber is a garbage guard: PR numbers extracted from free
-// text above this are treated as noise (e.g. a misparsed line number or hash)
-// rather than a real PR reference.
+// groundTruthMaxPRNumber is a garbage guard: numbers above this are treated as
+// noise (a misparsed line number or hash), not a PR reference.
 const groundTruthMaxPRNumber = 100000
 
-// groundTruthCaps records which best-effort limits the ground-truth
-// cross-check hit while building annotation lines. It drives a single debug
-// log line in reconcileGroundTruth; it never changes what gets annotated.
+// groundTruthCaps records which best-effort limits were hit; it drives one log
+// line and never changes what gets annotated.
 type groundTruthCaps struct {
 	lineCap   bool // groundTruthMaxLines reached
 	lookupCap bool // groundTruthMaxLookups reached
@@ -74,9 +56,8 @@ var (
 	prGitHubURLPattern = regexp.MustCompile(`(?i)github\.com/[\w.-]+/[\w.-]+/pull/(\d+)`)
 )
 
-// extractPRRefs scans text for PR number references (#123, "PR 123", and
-// github.com/.../pull/123 URLs), dedupes them, and returns them in first-seen
-// order. Numbers above groundTruthMaxPRNumber are dropped as garbage.
+// extractPRRefs scans text for PR references (#123, "PR 123", pull URLs),
+// deduped, in first-seen order; numbers past groundTruthMaxPRNumber are dropped.
 func extractPRRefs(text string) []int {
 	if strings.TrimSpace(text) == "" {
 		return nil
@@ -96,8 +77,6 @@ func extractPRRefs(text string) []int {
 		refs = append(refs, n)
 	}
 
-	// Match all three patterns over the full text and then sort matches by
-	// position so "first-seen order" is stable across pattern types.
 	type match struct {
 		pos int
 		num string
@@ -108,9 +87,7 @@ func extractPRRefs(text string) []int {
 			matches = append(matches, match{pos: loc[0], num: text[loc[2]:loc[3]]})
 		}
 	}
-	// Sort by position in the source text so "first-seen order" is stable
-	// across pattern types (all three patterns are matched independently
-	// above).
+	// Sort by source position so "first-seen order" is stable across patterns.
 	sort.Slice(matches, func(i, j int) bool { return matches[i].pos < matches[j].pos })
 	for _, m := range matches {
 		add(m.num)
@@ -118,31 +95,19 @@ func extractPRRefs(text string) []int {
 	return refs
 }
 
-// groundTruthTerminalStates are the PR.State values that positively confirm a
-// PR is finished (no longer open on GitHub). This is a positive allowlist,
-// not a "not open" blacklist: `internal/store`'s `prs` table is populated
-// exclusively from `is:open` GitHub search queries and is fully replaced
-// (delete + reinsert) on every poll, so a currently-tracked PR's `State`
-// field never holds a GitHub open/closed/merged value at all — it holds
-// attn's own workflow annotation (today, only protocol.PRStateWaiting =
-// "waiting", meaning "needs attention"). A "not open" blacklist would treat
-// every tracked (i.e. actually still-open) PR as finished and misfire on
-// every verdict that references one. Nothing writes "merged"/"closed" rows
-// today — the production path for finished PRs is the untracked-ref GitHub
-// lookup (groundTruthUntrackedLines) — but this leg starts firing with no
-// further changes if the poller is ever extended to persist terminal states.
+// groundTruthTerminalStates must stay a positive allowlist, never a "not open"
+// blacklist: the prs table holds only `is:open` results and its State field
+// carries attn's workflow annotation ("waiting"), not GitHub lifecycle, so a
+// blacklist would call every tracked still-open PR finished. Nothing writes
+// merged/closed rows today; this leg starts firing if the poller ever does.
 var groundTruthTerminalStates = map[string]bool{
 	"merged": true,
 	"closed": true,
 }
 
-// reconcileGroundTruthLines cross-checks refs against prs (the daemon's own
-// tracked-PR rows for repoSlug) and returns one "Ground-truth check" line per
-// referenced PR whose State positively confirms it is merged or closed. PRs
-// that are still open, in some other non-terminal state, or whose number
-// isn't tracked at all, produce no line — silence is the default; this only
-// fires when attn positively knows the referenced PR is finished. Capped at
-// groundTruthMaxLines lines.
+// reconcileGroundTruthLines cross-checks refs against the tracked-PR rows,
+// emitting one line per PR whose State positively confirms merged/closed;
+// silence otherwise. Capped at groundTruthMaxLines.
 func reconcileGroundTruthLines(refs []int, repoSlug string, prs []*protocol.PR) (lines []string, lineCap bool) {
 	if repoSlug == "" || len(prs) == 0 || len(refs) == 0 {
 		return nil, false
@@ -179,12 +144,10 @@ func groundTruthLine(number int, state, title string) string {
 		number, state, title)
 }
 
-// groundTruthUntrackedLines resolves referenced PRs that are ABSENT from the
-// tracked open set via targeted GitHub lookups. Because the store only tracks
-// open PRs, absence is the expected signature of a merged/closed PR — but it
-// can also mean "never tracked", so each candidate gets one definitive
-// lookup, capped at groundTruthMaxLookups. Merged or closed results produce a
-// line; open results, lookup errors, or a nil fetcher produce silence.
+// groundTruthUntrackedLines resolves refs ABSENT from the tracked open set —
+// absence is the expected signature of a finished PR, but can also mean "never
+// tracked", so each candidate gets one definitive lookup, capped. Merged/closed
+// produce a line; open results, lookup errors, or a nil fetcher produce silence.
 func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]bool, repoSlug string, fetch prStateFetcher) (lines []string, caps groundTruthCaps) {
 	if fetch == nil || repoSlug == "" || len(refs) == 0 {
 		return nil, groundTruthCaps{}
@@ -222,10 +185,9 @@ func groundTruthUntrackedLines(ctx context.Context, refs []int, tracked map[int]
 	return lines, caps
 }
 
-// fetchPRStateCtx runs fetch under ctx: github.Client has no context plumbing
-// (its HTTP client owns a 30s per-request timeout), so the call runs in a
-// goroutine and the result is abandoned if ctx expires first — the goroutine
-// then finishes harmlessly against its own HTTP timeout.
+// fetchPRStateCtx runs fetch under ctx: github.Client has no context plumbing,
+// so the call runs in a goroutine and is abandoned if ctx expires first — it
+// then finishes harmlessly against its own 30s HTTP timeout.
 func fetchPRStateCtx(ctx context.Context, fetch prStateFetcher, repo string, number int) (state string, merged bool, title string, err error) {
 	type result struct {
 		state  string
@@ -246,12 +208,8 @@ func fetchPRStateCtx(ctx context.Context, fetch prStateFetcher, repo string, num
 	}
 }
 
-// reconcileGroundTruth assembles the full cross-check for a verdict: resolve
-// the ticket cwd's origin into host + owner/name slug, extract PR references
-// from the verdict's free text, annotate from tracked rows (deterministic),
-// then resolve untracked references through the host's GitHub client (capped,
-// time-bounded). Returns the lines to append to the comment; empty on any
-// missing prerequisite.
+// reconcileGroundTruth assembles the full cross-check for a verdict and returns
+// the lines to append to the comment; empty on any missing prerequisite.
 func (d *Daemon) reconcileGroundTruth(ctx context.Context, verdict *ticketReconcileVerdict, cwd string) []string {
 	if verdict == nil {
 		return nil

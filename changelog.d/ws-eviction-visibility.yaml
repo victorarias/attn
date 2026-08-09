@@ -1,0 +1,10 @@
+kind: fixed
+area: daemon
+change: >
+  A window the daemon disconnects for falling behind now finds out. The daemon
+  used to hang up with a "client too slow" status that travelled the same
+  backed-up socket as the messages that caused the disconnect, so the app sat in
+  silence for its own timeout while the daemon had already given up on it. It
+  now drops the connection outright instead of waiting out a goodbye nobody is
+  reading, and it remembers the reason: the app reconnects, says who it is, and
+  gets told what happened in a toast instead of a silent reconnect.

@@ -1154,10 +1154,6 @@
   animation: md-qlp-in 0.12s ease-out;
 }
 
-.md-quick-label-picker--above {
-  transform: translateY(-100%);
-}
-
 @keyframes md-qlp-in {
   from {
     opacity: 0;

@@ -1,0 +1,12 @@
+kind: added
+area: terminal
+change: >
+  Annotations now carry a note. The panel has a box under the list for the
+  thing you want done — "split this into two PRs" — and it goes out ahead of
+  the marks when you send, so the marks read as the detail that qualifies it
+  instead of a list you have to introduce yourself. It replaces typing the
+  instruction into the terminal separately and then explaining how it relates
+  to what you marked. The note is drafted like the marks are: held by the
+  daemon, still there when you reopen the session, spent by the send that
+  delivered it and kept by one the session refused. Cmd+Return from inside the
+  note box sends everything.

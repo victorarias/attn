@@ -1,0 +1,13 @@
+kind: fixed
+area: daemon
+change: >
+  Background work due on a whole second now starts on that second instead of up
+  to a second late, and background jobs and notifications written moments apart
+  are listed in the order they happened.
+symptom: >
+  Timestamps for background work were stored in a form whose text order was not
+  time order within a single second, and the daemon compares them as text. A job
+  scheduled on an exact second was passed over until the next second came round,
+  and jobs or notifications recorded inside the same second came back in an
+  arbitrary order in the background-work panel and the notifications list.
+  Existing records are rewritten on first launch.

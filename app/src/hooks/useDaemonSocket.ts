@@ -135,6 +135,8 @@ export interface SessionMessageWindow {
 /** A session's persisted annotations, with the generation floor to write past. */
 export interface SessionAnnotationSet {
   annotations: DaemonSessionAnnotation[];
+  /** What the user wants to say about the turn as a whole. Empty when unset. */
+  note: string;
   generation: number;
 }
 export interface DirectoryEntry {
@@ -223,8 +225,27 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '218';
+export const PROTOCOL_VERSION = '220';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
+
+// Identifies this app process to the daemon across its own reconnects, so a
+// connection the daemon hung up on can be explained on the next one (the close
+// frame saying why cannot get through the backlog that caused the eviction).
+// Minted per app run: after a restart there is no earlier connection to explain.
+const CLIENT_INSTANCE_ID =
+  globalThis.crypto?.randomUUID?.() ?? `client-${Math.random().toString(36).slice(2)}`;
+
+// Turns the daemon's eviction record into something worth reading. "client too
+// slow" is the daemon's own wording for its close frame; the user needs to know
+// which side fell behind and that the app is back.
+export function explainEviction(reason: string, evictedAt: string): string {
+  const when = new Date(evictedAt);
+  const at = Number.isNaN(when.getTime()) ? '' : ` at ${when.toLocaleTimeString()}`;
+  if (reason === 'client too slow') {
+    return `Reconnected. The daemon dropped this window${at} because it fell behind on updates.`;
+  }
+  return `Reconnected. The daemon dropped this window${at}: ${reason}.`;
+}
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
 // definitive result within the client's wait window" from an ordinary
@@ -965,6 +986,10 @@ export function useDaemonSocket({
   const profileMismatchRef = useRef<boolean>(false);
   const profileCheckedRef = useRef<boolean>(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
+  // Why the previous connection ended, when the daemon ended it deliberately
+  // and could only say so afterwards. Set on the connection after the one that
+  // died; the consumer clears it once shown.
+  const [disconnectExplanation, setDisconnectExplanation] = useState<string | null>(null);
   // Bumped on every successful WebSocket connect (including reconnects). The
   // daemon deliberately drops explicit fs_watch refs when a client's socket
   // disconnects, so any consumer that needs a durable server-side
@@ -1313,6 +1338,7 @@ export function useDaemonSocket({
         JSON.stringify({
           cmd: 'client_hello',
           client_kind: 'tauri-app',
+          client_id: CLIENT_INSTANCE_ID,
           version: `protocol-${PROTOCOL_VERSION}`,
           capabilities: [
             WORKSPACE_SESSIONS_CAPABILITY,
@@ -1585,6 +1611,22 @@ export function useDaemonSocket({
                   pending.resolve(undefined);
                 } else {
                   pending.reject(new Error(data.error || 'Chief of staff update failed'));
+                }
+              }
+            }
+            break;
+          }
+
+          case 'session_context_window_cap_result': {
+            if (typeof data.session_id === 'string') {
+              const key = `session_context_cap:${data.session_id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve(undefined);
+                } else {
+                  pending.reject(new Error(data.error || 'Setting the context window cap failed'));
                 }
               }
             }
@@ -2805,6 +2847,19 @@ export function useDaemonSocket({
             break;
           }
 
+          // The daemon dropped our previous connection and is telling us why
+          // now, because it could not tell us then.
+          case 'client_eviction_notice': {
+            console.warn(
+              `[Daemon] Previous connection was dropped at ${data.evicted_at}: ${data.reason} ` +
+              `(${data.undelivered_messages} messages undelivered)`,
+            );
+            setDisconnectExplanation(
+              explainEviction(data.reason ?? 'no reason given', data.evicted_at ?? ''),
+            );
+            break;
+          }
+
           case 'command_error':
             if (data.error === 'daemon_recovering') {
               console.debug('[Daemon] Command deferred while daemon recovers:', data.cmd);
@@ -3048,6 +3103,31 @@ export function useDaemonSocket({
       return;
     }
     ws.send(JSON.stringify({ cmd: 'terminal_pointer_activity', id }));
+  }, []);
+
+  // Reports what this window can see, so the daemon knows whether anyone is
+  // reading the session activity lines it would otherwise spend money
+  // generating. The client reports facts (visible, showing the dashboard, how
+  // long since input); the daemon owns the policy those facts feed.
+  //
+  // Dropped while disconnected rather than queued, like the pointer signal
+  // above: presence is a heartbeat, and a stale report flushed on reconnect
+  // would claim the user was watching at a moment that has already passed.
+  const sendSetClientPresence = useCallback((presence: {
+    visible: boolean;
+    dashboardVisible: boolean;
+    idleSeconds?: number;
+  }) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(JSON.stringify({
+      cmd: 'set_client_presence',
+      visible: presence.visible,
+      dashboard_visible: presence.dashboardVisible,
+      ...(presence.idleSeconds === undefined ? {} : { idle_seconds: presence.idleSeconds }),
+    }));
   }, []);
 
   // Sends a message to a conversation session's host. Fire-and-forget in the
@@ -4018,6 +4098,25 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Pin (cap > 0) or clear (cap 0) a per-session context-window cap. The daemon
+  // stores the pin and reloads a live agent in place so it applies immediately.
+  // Last-writer-wins per session: a second cap for the same session supersedes
+  // the first rather than queueing behind it, so the key is the session id.
+  const sendSetSessionContextWindowCap = useCallback((sessionId: string, cap: number): Promise<void> => {
+    if (!sessionId) {
+      return Promise.reject(new Error('Session is required'));
+    }
+    if (!hasReceivedInitialStateRef.current) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    return sendKeyedRequest<void>(
+      `session_context_cap:${sessionId}`,
+      { cmd: 'set_session_context_window_cap', session_id: sessionId, cap },
+      `Context window cap update timed out for session ${sessionId}`,
+      10_000,
+    );
+  }, [sendKeyedRequest]);
+
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -4333,11 +4432,12 @@ export function useDaemonSocket({
   const sendSessionAnnotationsSave = useCallback((
     sessionId: string,
     annotations: readonly DaemonSessionAnnotation[],
+    note: string,
     generation: number,
   ): Promise<{ stale: boolean }> => {
     return sendRequest(
       'session_annotations_save',
-      { session_id: sessionId, annotations: annotations.map(annotationToWire), generation },
+      { session_id: sessionId, annotations: annotations.map(annotationToWire), note, generation },
       'Session annotation save timed out',
     );
   }, [sendRequest]);
@@ -5174,9 +5274,15 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'clear_warnings' }));
   }, []);
 
+  const clearDisconnectExplanation = useCallback(() => {
+    setDisconnectExplanation(null);
+  }, []);
+
   return {
     isConnected: wsRef.current?.readyState === WebSocket.OPEN,
     connectionError,
+    disconnectExplanation,
+    clearDisconnectExplanation,
     connectionGeneration,
     hasReceivedInitialState,
     settings: settingsRef.current,
@@ -5206,6 +5312,7 @@ export function useDaemonSocket({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendSetSessionContextWindowCap,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,
@@ -5296,6 +5403,7 @@ export function useDaemonSocket({
     sendOpenMarkdown,
     sendRuntimeInput: sendPtyInput,
     sendTerminalPointerActivity,
+    sendSetClientPresence,
     sendSetTerminalTheme,
     isRuntimeAttached,
     sendGetFileDiff,

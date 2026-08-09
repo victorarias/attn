@@ -164,6 +164,43 @@ workspace — so a satellite whose agent closed, or whose pane moved, gets its o
 row back with no cascade. A satellite with no live parent is an **orphan**, and
 orphans keep their rows.
 
+## Session activity, and presence
+
+A session's **activity** is one short present-tense line saying what that agent is
+doing right now — "running the frontend test suite", "waiting for the user to pick
+a branch". It is written from the session's own transcript by a non-interactive
+agent, stored on the session (`sessions.activity`, with the stamp it was generated
+at), and rendered under the session's name on home. Off by default: it costs money
+per session per refresh.
+
+Beside it sits the **activity cursor** (`sessions.activity_cursor`), the transcript
+position the line was generated through. It is the load-bearing half: a session
+whose transcript has not moved past its cursor has written nothing new, so its
+existing line is still true and no run happens. That is what keeps blocked and
+finished agents free however long home stays open.
+
+The **presence tier** is how much of the user's attention attn currently has,
+reduced across every connected client — the highest anyone reports wins. Clients
+report facts (window visible, dashboard showing, seconds since input); the daemon
+turns them into a tier:
+
+- **watching** — the app is visible and showing home. The line is being read, so it
+  refreshes fastest.
+- **present** — input in the app recently, but home is not what is on screen.
+- **away** — nobody can see it. A hard stop, not a slower rate: nothing is
+  generated at all. Safe as a stop because leaving `away` is always an action that
+  restores a higher tier, so the staleness it creates heals itself the moment it
+  would matter.
+
+Presence is a heartbeat, never a latch. A client repeats itself while nothing
+changes, and a report the daemon has not heard renewed expires to `away` — so a
+window that crashes while showing home cannot pin generation on with nobody
+looking.
+
+Distinct from `internal/daemon/presence.go`'s **last user activity**, which watches
+UI-origin commands go past to answer "did the user act on the daemon". Reading a
+screen produces no commands, so that proxy cannot see the case the tier exists for.
+
 ## Ticket
 
 The chief delegates a unit of work to a sub-agent, and that work is tracked as a

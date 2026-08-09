@@ -280,3 +280,135 @@ func TestRedactTextCoversCredentialForms(t *testing.T) {
 		}
 	}
 }
+
+// Thinking is the agent's own reasoning, and it is the densest statement of what
+// a session is currently trying to do — roughly twice the volume of assistant
+// prose in a real transcript. It is emitted as its own kind so a consumer can
+// tell it apart from text the user was actually shown.
+func TestReadEventPageExtractsThinking(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"timestamp":"2026-08-07T10:00:00Z","type":"assistant","message":{"content":[{"type":"thinking","thinking":"The migration is failing because token=super-secret-value is stale."},{"type":"text","text":"Fixing the migration."},{"type":"tool_use","id":"t1","name":"Edit","input":{"file":"m.sql"}}]}}`,
+		`{"timestamp":"2026-08-07T10:00:01Z","type":"assistant","message":{"content":[{"type":"thinking","thinking":"   "}]}}`,
+	)
+	page, err := ReadEventPage(path, "claude", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, e := range page.Events {
+		kinds = append(kinds, e.Kind)
+	}
+	// Assistant prose leads the record; thinking and the tool call follow in
+	// block order. A whitespace-only thinking block emits nothing.
+	want := []string{EventKindAssistant, EventKindThinking, EventKindToolCall}
+	if strings.Join(kinds, ",") != strings.Join(want, ",") {
+		t.Fatalf("kinds = %v, want %v", kinds, want)
+	}
+	thinking := page.Events[1]
+	if thinking.Role != "assistant" {
+		t.Errorf("thinking role = %q, want assistant", thinking.Role)
+	}
+	if !strings.Contains(thinking.Text, "migration is failing") {
+		t.Errorf("thinking text lost: %q", thinking.Text)
+	}
+	// Thinking is unfiltered agent reasoning and leaves the machine for a model,
+	// so it must go through the same redaction as every other event kind.
+	if strings.Contains(thinking.Text, "super-secret-value") {
+		t.Errorf("thinking was not redacted: %q", thinking.Text)
+	}
+}
+
+// Codex carries readable reasoning only in agent_reasoning; its sibling
+// "reasoning" response_item holds encrypted_content and an empty summary, and is
+// absent from some rollouts entirely.
+func TestReadEventPageExtractsCodexAgentReasoning(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"timestamp":"2026-08-07T10:00:00Z","type":"event_msg","payload":{"type":"agent_reasoning","text":"**Preparing workspace and researching CVEs**"}}`,
+		`{"timestamp":"2026-08-07T10:00:01Z","type":"response_item","payload":{"type":"reasoning","summary":[],"encrypted_content":"gAAAAAB..."}}`,
+	)
+	page, err := ReadEventPage(path, "codex", "", 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Events) != 1 {
+		t.Fatalf("events = %d, want 1 (encrypted reasoning must not surface)", len(page.Events))
+	}
+	if page.Events[0].Kind != EventKindThinking {
+		t.Errorf("kind = %q, want %q", page.Events[0].Kind, EventKindThinking)
+	}
+	if !strings.Contains(page.Events[0].Text, "Preparing workspace") {
+		t.Errorf("reasoning text lost: %q", page.Events[0].Text)
+	}
+}
+
+// A cold-start consumer wants the transcript's future, not its past. Reading
+// from byte 0 and discarding costs a full scan of a file that reaches tens of
+// megabytes and produces nothing the caller asked for.
+func TestHeadCursorSkipsEverythingAlreadyWritten(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}`,
+	)
+
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	page, err := ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage: %v", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("head cursor returned %d events, want none", len(page.Events))
+	}
+
+	appendEventTranscript(t, path, `{"type":"assistant","message":{"content":[{"type":"text","text":"third"}]}}`)
+	page, err = ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage after append: %v", err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Text != "third" {
+		t.Fatalf("after append got %d events (%+v), want only the appended one", len(page.Events), page.Events)
+	}
+}
+
+// A partially written final record must stay unread until its writer appends
+// the newline — the same rule ReadEventPage follows.
+func TestHeadCursorLeavesAPartialRecordUnread(t *testing.T) {
+	path := writeEventTranscript(t, `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}`)
+	partial := `{"type":"assistant","message":{"content":[{"type":"text","text":"half`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := f.WriteString(partial); err != nil {
+		t.Fatalf("write partial: %v", err)
+	}
+	f.Close()
+
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	page, err := ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage: %v", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("got %d events, want none until the partial record completes", len(page.Events))
+	}
+}
+
+func TestHeadCursorOnATranscriptWithNoCompleteRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"assistant"`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	if cursor != "" {
+		t.Errorf("cursor = %q, want empty so the reader starts from the beginning", cursor)
+	}
+}

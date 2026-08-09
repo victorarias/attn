@@ -1,0 +1,11 @@
+kind: added
+area: sessions
+change: >
+  The new session picker now remembers, per repository, whether the last
+  session there ran in a fresh worktree or in the main checkout, and opens on
+  that choice next time. Repos you always branch keep costing a single Enter to
+  get a new worktree; repos you always work on directly now cost a single Enter
+  too, instead of an arrow key every time. Opening an existing worktree is
+  treated as a one-off and does not change what the repo is remembered as, and
+  choosing the other destination once is all it takes to change it back. Each
+  remote endpoint remembers its own repos.

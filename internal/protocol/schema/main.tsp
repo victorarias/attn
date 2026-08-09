@@ -142,7 +142,10 @@ model Session {
   auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   auto_settle_held?: boolean;   // True while the auto-settle countdown is frozen because the user is typing or moving the pointer in this session. Mutually exclusive with auto_settle_fires_at by construction: a frozen countdown has no deadline to animate against, so the tile draws a full paused bar and waits. It clears on its own five quiet seconds after the last interaction, when a fresh deadline replaces it.
   pinned_at?: string;           // ISO timestamp this session was individually pinned out of the queue. Presence is the pin, and the instant is the pinned band's sort key. Like a pinned workspace it filters at read: the turn stamps keep accruing underneath, so unpinning surfaces whatever was outstanding at its true age.
+  context_window_cap?: int32;   // Per-session context-window cap in tokens, set by the user on this one session. Absent means no pin — the launch falls back to the chief or per-agent default settings. A pin outranks both, and takes effect at the next launch of the agent (the daemon reloads a live session in place when the pin changes).
   parent_session_id?: string;   // The agent session a shell was split from. Spawn-time provenance resolved by the daemon, always an agent id and never another shell's, so there is no chain to walk. Whether the link is live is judged at read (parent present in the same workspace), so the field itself is never cleared.
+  activity?: string;            // One short present-tense line saying what the agent is doing right now, generated from its transcript by a headless agent. Display only — it never feeds attention, the queue, or state classification. Absent when the feature is off or nothing has been generated for this session yet.
+  activity_at?: string;         // ISO timestamp the activity line was generated. Present whenever activity is, so a client can age out a line the generator has stopped refreshing rather than showing it as current.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -597,6 +600,10 @@ model ClientHelloMessage {
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
   browser_host_token?: string;  // secret available only to the trusted Tauri main webview
+  // Stable for as long as the client process lives, new on every restart. It is
+  // what lets the daemon tell a reconnecting client why it was hung up on
+  // (client_eviction_notice); a client that omits it simply gets no notice.
+  client_id?: string;
 }
 
 model RegisterMessage {
@@ -2075,6 +2082,66 @@ model PtyResizeMessage {
   ypixel?: int32;
 }
 
+// Reports whether the user can currently see this client, and whether what they
+// are seeing is the dashboard. Fire-and-forget: no result event.
+//
+// Only the client knows window visibility, which view is rendered, and when
+// input last happened; only the daemon decides what to do about it. So the
+// client reports facts and never a rate or a tier — the policy that turns these
+// into an activity-generation interval is the daemon's alone.
+//
+// It is a HEARTBEAT, not a latch: send it on every change AND periodically, or
+// the daemon expires this client to "away". That asymmetry is deliberate. A
+// client that crashes or is force-quit while the dashboard is up would otherwise
+// pin generation on forever with nobody looking; expiry fails toward off, which
+// is the safe direction, and the cost of a missed heartbeat is one interval of
+// latency when the user comes back.
+model SetClientPresenceMessage {
+  cmd: "set_client_presence";
+  visible: boolean; // The app window is on screen and not fully occluded.
+  dashboard_visible: boolean; // ...and the view it is rendering is the dashboard.
+  idle_seconds?: float64; // Seconds since the last keyboard or pointer input anywhere in this client. Absent means "no input observed yet this connection".
+}
+
+// ActivityStatusMessage asks what attn believes about session activity right
+// now: the presence tier it has reduced its clients to, and every session's
+// current line with the time it was generated. It is the CLI's way to see a
+// feature whose whole output otherwise lives on the dashboard — including why
+// nothing is being generated, which is almost always the tier.
+model ActivityStatusMessage {
+  cmd: "activity_status";
+}
+
+model ActivityStatusResult {
+  presence_tier: string; // "watching" | "present" | "away"
+  enabled: boolean;
+  error?: string; // Why the feature cannot run — most often that no agent has been chosen.
+  sessions: ActivityStatusSession[];
+}
+
+model ActivityStatusSession {
+  id: string;
+  label: string;
+  activity?: string;
+  activity_at?: string;
+  // Why this session's last generation produced nothing. A run that keeps
+  // failing is rate limited like a successful one, so without this a feature the
+  // user paid to switch on goes quiet and looks identical to one with nothing to
+  // say.
+  error?: string;
+}
+
+// ClearSessionActivityMessage forgets one session's line. The way out for a line
+// that is wrong on a session that will never write again — a session that is
+// still moving replaces its own line on the next refresh, but a finished one
+// would keep the wrong line forever. Clearing also drops the read cursor, so the
+// next line is generated from what happens next rather than from a window that
+// was already summarized.
+model ClearSessionActivityMessage {
+  cmd: "clear_session_activity";
+  id: string;
+}
+
 // Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
 // no result event.
 model SetTerminalThemeMessage {
@@ -2368,16 +2435,23 @@ model SessionAnnotationsGetResultMessage {
   success: boolean;
   error?: string;
   annotations: SessionAnnotation[];
+  // The draft's note: what the user wants to say about the turn as a whole,
+  // alongside the marks on its parts. Empty when there is none.
+  note?: string;
   generation: int32;
 }
 
-// Persist the full annotation list for a session. Whole-list rather than
-// per-annotation edits: the list is small, one writer owns it, and a full save
-// cannot leave the store holding half of an edit.
+// Persist the full annotation list for a session, and the note that goes with
+// it. Whole-draft rather than per-annotation edits: the list is small, one
+// writer owns it, and a full save cannot leave the store holding half of an
+// edit.
 model SessionAnnotationsSaveMessage {
   cmd: "session_annotations_save";
   session_id: string;
   annotations: SessionAnnotation[];
+  // Saved with the marks and cleared with them, because it is one thing the
+  // user is composing and sends in one keystroke.
+  note?: string;
   generation: int32;
   request_id: string;
 }
@@ -2641,6 +2715,16 @@ model SetWorkspaceRankMessage {
   next_workspace_id?: string;
 }
 
+// Pin or clear a per-session context-window cap (tokens). cap > 0 pins; cap 0
+// clears the pin so the launch falls back to the chief or per-agent default
+// settings. A changed pin on a live claude/codex session reloads the agent in
+// place (resume-preserving) so the cap takes effect immediately.
+model SetSessionContextWindowCapMessage {
+  cmd: "set_session_context_window_cap";
+  session_id: string;
+  cap: int32;
+}
+
 // Assign or remove the profile-wide chief-of-staff role. Assigning a new
 // session transfers the singleton role from the previous holder.
 model SetChiefOfStaffMessage {
@@ -2761,6 +2845,17 @@ model RenameResultMessage {
   event: "rename_result";
   cmd: string;
   id: string;
+  success: boolean;
+  error?: string;
+}
+
+// Reply to set_session_context_window_cap, correlated by session_id. cap
+// echoes the pin that is now stored (0 = cleared). The updated session is also
+// broadcast separately via sessions_updated.
+model SessionContextWindowCapResultMessage {
+  event: "session_context_window_cap_result";
+  session_id: string;
+  cap: int32;
   success: boolean;
   error?: string;
 }
@@ -3598,6 +3693,18 @@ model CommandErrorMessage {
   error: string;
 }
 
+// Sent once to a reconnecting client that the hub had hung up on for falling
+// behind, keyed on the client_id it sent with its hello. The close status that
+// explains an eviction travels the same TCP stream as the backlog that caused
+// it, so on the link where it matters it arrives long after the disconnect —
+// this is how the reason reaches the client instead.
+model ClientEvictionNoticeMessage {
+  event: "client_eviction_notice";
+  evicted_at: string;          // RFC3339, when the hub dropped the connection
+  reason: string;              // the close reason the client could not read, e.g. "client too slow"
+  undelivered_messages: int32; // messages the daemon gave up on handing over
+}
+
 model BrowserControlRequestMessage {
   event: "browser_control_request";
   request_id: string;
@@ -3831,29 +3938,70 @@ model DocumentConflict {
   "actual": safeint;
 }
 
+// One document a resuming subscriber already holds, and at which revision.
+//
+// A pair list rather than a map because the generated Go types erase a record's
+// value type to `any`, and a revision that decodes as an untyped number is
+// exactly the value this resume must not get wrong.
+model DocumentRevision {
+  "id": string;
+  "rev": safeint;
+}
+
 // Subscribe to a live query. Unlike every other command here, this one keeps the
 // connection open: the daemon writes a DocSubscribeResult immediately carrying
-// the current result set, then writes a fresh one every time a write to the
-// collection changes what the query returns. The subscription ends when the
-// caller closes the connection.
+// the query's current window, then writes a fresh one every time a write to the
+// collection could have changed it. The subscription ends when the caller closes
+// the connection, or when the collection stops being able to answer the query.
+//
+// `have` is what the subscriber already holds, and is how a reconnecting client
+// resumes without replaying history: the first delivery then carries only the
+// window members whose revision differs from what is declared here. Everything
+// else about that delivery is unchanged, so a fresh subscribe is simply the case
+// where `have` is empty.
+//
+// A query carrying `after` is REFUSED. A live query is a window and a cursor is
+// a walk: the anchor moves under a subscription, so the page it names is not the
+// page it named a write ago. Use `limit` and let each delivery carry the current
+// window. One-shot doc_query keeps `after` exactly as it is, because a single
+// read has one instant and nothing to move under it.
 model DocSubscribeMessage {
   "cmd": "doc_subscribe";
   "query": DocumentQuery;
+  "have"?: DocumentRevision[];
 }
 
-// One delivery of a live query's results. `documents` is always the CURRENT full
-// result set, never a patch — a subscriber renders what it is given and never
-// reconstructs state from a sequence of deliveries. `delivery` counts deliveries
-// on this subscription, starting at 1 for the initial one; it is named for what
-// it counts because a document carries its own `rev` and one word for both would
-// read as though they were related.
+// One delivery of a live query's window, and the whole client contract is one
+// rule:
 //
-// int32 rather than the safeint a document's revision uses: this counter is
-// bounded by how long one connection stays open, not by a document's whole
-// history.
+//   Render `order`. Take each body from `upsert` if it is there, else from your
+//   cache. Forget every cached document not named in `order`.
+//
+// `order` is the query's current result, in the server's own order — the client
+// never re-derives sort position, because document order comes from SQLite's
+// comparison under column affinity and a client re-sorting locally would have to
+// reimplement that exactly. `upsert` carries only the bodies the subscriber does
+// not already hold: the ones it declared at a different revision in `have`, and
+// the ones that have changed since a previous delivery on this connection.
+// There is no `remove` field because removal is derivable from `order`, and a
+// derivable field is a field two implementations can disagree about.
+//
+// The daemon upholds — and a test pins — that every id in `order` is either in
+// `upsert`, or was declared in `have` at its current revision, or arrived in an
+// earlier delivery on this connection. A client that finds a body it does not
+// hold must treat the subscription as broken and resubscribe with no `have`.
+//
+// `as_of_seq` is the log position this window was true at, read in the same
+// transaction as the rows. `delivery` counts deliveries on this subscription,
+// starting at 1; it is named for what it counts because a document carries its
+// own `rev` and one word for both would read as though they were related. int32
+// rather than safeint because the counter is bounded by how long one connection
+// stays open, not by a document's whole history.
 model DocSubscribeResult {
   "delivery": int32;
-  "documents": StoredDocument[];
+  "as_of_seq": safeint;
+  "order": string[];
+  "upsert": StoredDocument[];
 }
 
 // ============================================================================
@@ -3867,9 +4015,12 @@ model Response {
   // `error` text. Present only where a caller has to branch on the answer:
   // `conflict` (retry after re-reading — `error_conflict` carries which
   // revisions disagreed), `undeclared_collection` (the collection is not
-  // there), `invalid_query` (the query itself is wrong). Everything else
-  // carries no code, and a client must treat an unknown code as "broken, stop"
-  // rather than matching the message text.
+  // there), `invalid_query` (the query itself is wrong), and the two that end a
+  // live subscription — `collection_undefined` (the collection was removed;
+  // kill the tile) and `collection_redeclared` (it no longer declares a field
+  // the query used; the tile's query needs rewriting). Everything else carries
+  // no code, and a client must treat an unknown code as "broken, stop" rather
+  // than matching the message text.
   error_code?: string;
   error_conflict?: DocumentConflict;
   data?: string;
@@ -3892,6 +4043,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
+  activity_status_result?: ActivityStatusResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
@@ -3968,7 +4120,9 @@ model SessionInstructionsResult {
 model SessionTranscriptEvent {
   cursor: string;
   timestamp?: string;
-  kind: string; // "user" | "assistant" | "tool_call" | "tool_result" | "error"
+  kind: string; // "user" | "assistant" | "thinking" | "tool_call" | "tool_result" | "error"
+                // "thinking" is the agent's own reasoning (Claude thinking blocks,
+                // Codex agent_reasoning), not text the user was shown.
   role?: string;
   text?: string;
   tool_name?: string;
@@ -4522,6 +4676,7 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | ChiefOfStaffResultMessage
+  | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
@@ -4608,6 +4763,7 @@ alias DaemonEvent =
   | PtyResizedMessage
   | BrowserControlRequestMessage
   | CommandErrorMessage
+  | ClientEvictionNoticeMessage
   | GetPresentationsResultMessage
   | GetPresentationRoundResultMessage
   | PresentSubmitRoundResultMessage

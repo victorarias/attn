@@ -126,6 +126,7 @@ function relativeAge(epochMs: number): string {
 const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
 const SESSION_YOLO_KEY = 'new_session_yolo';
+const SESSION_DESTINATION_KEY = 'new_session_destination';
 const LOCAL_TARGET = '__local__';
 const TERMINAL_AGENT: SessionAgent = 'shell';
 const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
@@ -178,6 +179,27 @@ function yoloSettingKeys(targetId: string, daemonInstanceId?: string): string[] 
     keys.push(`${SESSION_YOLO_KEY}_endpoint_${targetId}`);
   }
   return keys;
+}
+
+// A repo is habitually worked on in a fresh worktree or habitually in its main
+// checkout, and which one is a property of the repo, not of the session being
+// started — so the last destination chosen for it is remembered and reopened.
+// Only the two deliberate choices are recorded: opening an existing worktree is
+// a one-off ("resume that one"), not a habit, and leaves the memory alone.
+type RepoDestination = 'new_worktree' | 'main_repo';
+
+// The remembered destination is scoped to the target as well as the repo path,
+// since the same path on this machine and on a remote endpoint are different
+// checkouts worked on in different ways. Mirrors yoloSettingKeys.
+function repoDestinationSettingKey(repoRoot: string, endpointId?: string): string {
+  const endpoint = endpointId?.trim();
+  const scope = endpoint ? `endpoint_${endpoint}` : 'local';
+  return `${SESSION_DESTINATION_KEY}_${scope}_${repoRoot}`;
+}
+
+function parseRepoDestination(value?: string): RepoDestination | undefined {
+  const normalized = value?.trim();
+  return normalized === 'new_worktree' || normalized === 'main_repo' ? normalized : undefined;
 }
 
 function pickerAgentLabel(agent: SessionAgent): string {
@@ -828,15 +850,33 @@ export function LocationPicker({
     void handleSelectPath(pathToOpen);
   }, [handleSelectPath, highlightedItem, inputValue]);
 
+  const repoDestinationKey = useMemo(
+    () => (repoRootPath ? repoDestinationSettingKey(repoRootPath, selectedEndpointId) : null),
+    [repoRootPath, selectedEndpointId],
+  );
+  const rememberedDestination = repoDestinationKey
+    ? parseRepoDestination(settings[repoDestinationKey])
+    : undefined;
+  // Recorded on the way out, and only when it actually moves — the picker is
+  // opened constantly, and re-storing the same value would broadcast a settings
+  // snapshot to every client for nothing.
+  const rememberRepoDestination = useCallback((destination: RepoDestination) => {
+    if (!repoDestinationKey || settings[repoDestinationKey] === destination) {
+      return;
+    }
+    setSetting(repoDestinationKey, destination);
+  }, [repoDestinationKey, setSetting, settings]);
+
   const handleSelectMainRepo = useCallback(() => {
     if (!hasAvailableAgents) {
       onError?.(noAgentsMessage);
       return;
     }
     if (repoRootPath) {
+      rememberRepoDestination('main_repo');
       launchSelection(repoRootPath);
     }
-  }, [hasAvailableAgents, launchSelection, onError, repoRootPath]);
+  }, [hasAvailableAgents, launchSelection, onError, rememberRepoDestination, repoRootPath]);
 
   const handleSelectWorktree = useCallback((path: string) => {
     if (!hasAvailableAgents) {
@@ -854,6 +894,7 @@ export function LocationPicker({
     if (!repoRootPath || !onCreateWorktree) {
       return;
     }
+    rememberRepoDestination('new_worktree');
 
     if (onCreateWorktreeSession) {
       const selectedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
@@ -897,6 +938,7 @@ export function LocationPicker({
     onCreateWorktree,
     onCreateWorktreeSession,
     onError,
+    rememberRepoDestination,
     repoRootPath,
     agent,
     effectiveAgentAvailability,
@@ -1260,6 +1302,7 @@ export function LocationPicker({
           <RepoOptions
             repoInfo={repoInfo}
             selectedPath={selectedPath || repoRootPath || undefined}
+            preferredDestination={rememberedDestination}
             onSelectedPathChange={(path) => {
               setSelectedPathFromPhysical(path);
             }}

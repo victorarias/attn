@@ -4,15 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 	"nhooyr.io/websocket"
 )
@@ -76,6 +75,17 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 
 	d := NewForTesting(socketPath)
 	d.pluginDir = pluginDir
+	// Tests normally run the daemon mute. This one spans three processes and its
+	// only observed failure is a close notification that never arrives, so keep
+	// the daemon's own account of every exit and every dropped notification —
+	// it is what the failure prints instead of a bare deadline.
+	daemonLog := filepath.Join(tmpDir, "daemon.log")
+	if logger, err := logging.New(daemonLog); err == nil {
+		d.logger = logger
+		t.Cleanup(func() { _ = logger.Close() })
+	} else {
+		t.Logf("daemon log unavailable: %v", err)
+	}
 	d.loginShellEnv = []string{"PATH=" + binDir + string(os.PathListSeparator) + os.Getenv("PATH")}
 	go func() {
 		if err := d.Start(); err != nil {
@@ -109,6 +119,13 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 
 	sessionID := "plugin-driver-e2e"
 	workspaceID := "workspace-" + sessionID
+	fixture := pluginFixtureSession{
+		daemon:    d,
+		sessionID: sessionID,
+		closeLog:  fixtureCloseLog,
+		stderr:    fixtureStderr,
+		daemonLog: daemonLog,
+	}
 	if err := writeWS(ws, map[string]interface{}{
 		"cmd":       protocol.CmdRegisterWorkspace,
 		"id":        workspaceID,
@@ -132,7 +149,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 
 	terminatePluginFixturePTY(t, d, sessionID)
-	firstClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 1)[0]
+	firstClose := waitForPluginFixtureCloseRecords(t, fixture, 1)[0]
 	if firstClose.Params.RunID != records[0].Params.RunID || firstClose.Params.Reason != "exited" {
 		t.Fatalf("first close=%+v, want exited notification for spawned run %q", firstClose.Params, records[0].Params.RunID)
 	}
@@ -154,7 +171,7 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 
 	terminatePluginFixturePTY(t, d, sessionID)
-	secondClose := waitForPluginFixtureCloseRecords(t, fixtureCloseLog, 2)[1]
+	secondClose := waitForPluginFixtureCloseRecords(t, fixture, 2)[1]
 	if secondClose.Params.RunID != resume.Params.RunID || secondClose.Params.Reason != "exited" {
 		t.Fatalf("second close=%+v, want exited notification for resumed run %q", secondClose.Params, resume.Params.RunID)
 	}
@@ -354,28 +371,99 @@ func waitForPluginFixtureRecords(t *testing.T, path string, count int) []pluginD
 	return records
 }
 
-func waitForPluginFixtureCloseRecords(t *testing.T, path string, count int) []pluginDriverCloseRecord {
+// pluginFixtureSession is everything the close wait needs to explain itself when
+// the notification never lands.
+type pluginFixtureSession struct {
+	daemon    *Daemon
+	sessionID string
+	closeLog  string
+	stderr    string
+	daemonLog string
+}
+
+// waitForPluginFixtureCloseRecords waits for the fixture plugin to record
+// `count` driver.session_closed notifications.
+//
+// The notification crosses three processes: the worker sees the PTY child exit,
+// the daemon ends the driver run, the plugin gets driver.session_closed, and the
+// fixture appends to the log. Measured on Linux with six copies of this test
+// running in parallel under CPU load, that whole chain finishes in under 50ms
+// (240 samples, worst 48.2ms). The deadline below is therefore a tripwire two
+// orders of magnitude past any healthy run: reaching it means a link went quiet,
+// not that the machine was slow. A CI flake reaching it told us only that, which
+// is unfixable, so failing here prints who saw what — the daemon's account of
+// the exit, the fixture's stderr (a fixture that died takes its connection with
+// it, and the daemon then drops the notification as "owner disconnected"), and
+// the session state the store ended up in.
+func waitForPluginFixtureCloseRecords(t *testing.T, fixture pluginFixtureSession, count int) []pluginDriverCloseRecord {
 	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		records, ok := readPluginFixtureCloseRecords(fixture.closeLog, count)
+		if ok {
+			return records
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %d fixture plugin close record(s)\n%s", count, fixture.diagnose())
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+}
+
+func readPluginFixtureCloseRecords(path string, count int) ([]pluginDriverCloseRecord, bool) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, false
+	}
 	var records []pluginDriverCloseRecord
-	waitForCondition(t, 5*time.Second, func() bool {
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return false
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		if line == "" {
+			continue
 		}
-		records = nil
-		for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
-			if line == "" {
-				continue
-			}
-			var record pluginDriverCloseRecord
-			if err := json.Unmarshal([]byte(line), &record); err != nil {
-				return false
-			}
-			records = append(records, record)
+		var record pluginDriverCloseRecord
+		if err := json.Unmarshal([]byte(line), &record); err != nil {
+			return nil, false
 		}
-		return len(records) >= count
-	}, "fixture plugin close log")
-	return records
+		records = append(records, record)
+	}
+	return records, len(records) >= count
+}
+
+func (f pluginFixtureSession) diagnose() string {
+	var out strings.Builder
+	state := "session missing from store"
+	if session := f.daemon.store.Get(f.sessionID); session != nil {
+		state = string(session.State)
+	}
+	run := f.daemon.store.GetAgentDriverRun(f.sessionID)
+	fmt.Fprintf(&out, "session state=%s active_run=%q plugin=%q driver_registered=%t\n",
+		state, run.RunID, run.PluginName, f.driverRegistered())
+	records, _ := readPluginFixtureCloseRecords(f.closeLog, 0)
+	fmt.Fprintf(&out, "close records recorded: %d\n", len(records))
+	out.WriteString(pluginFixtureFileTail("fixture stderr", f.stderr, 40))
+	out.WriteString(pluginFixtureFileTail("daemon log", f.daemonLog, 60))
+	return out.String()
+}
+
+func (f pluginFixtureSession) driverRegistered() bool {
+	_, ok := f.daemon.plugins.driver("fixture")
+	return ok
+}
+
+func pluginFixtureFileTail(label, path string, lines int) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Sprintf("--- %s: unreadable (%v)\n", label, err)
+	}
+	trimmed := strings.TrimRight(string(data), "\n")
+	if trimmed == "" {
+		return fmt.Sprintf("--- %s: empty\n", label)
+	}
+	all := strings.Split(trimmed, "\n")
+	if len(all) > lines {
+		all = all[len(all)-lines:]
+	}
+	return fmt.Sprintf("--- %s (last %d lines):\n%s\n", label, len(all), strings.Join(all, "\n"))
 }
 
 func TestPluginDriverFixtureProcess(t *testing.T) {
@@ -388,159 +476,27 @@ func TestPluginDriverFixtureProcess(t *testing.T) {
 		t.Fatalf("dial daemon socket: %v", err)
 	}
 	defer conn.Close()
-	decoder := json.NewDecoder(conn)
 
+	peer := newPluginFixturePeer(t, conn)
 	sendPluginHello(t, conn, os.Getenv("ATTN_PLUGIN_NAME"))
-	if response := readPluginFixtureResponse(t, conn, decoder, "1"); response.Error != nil {
+	if response := peer.awaitResponse("1"); response.Error != nil {
 		t.Fatalf("fixture hello error=%#v", response.Error)
 	}
-	registerPluginFixtureDriver(t, conn, decoder, "fixture", map[string]bool{
-		"resume":          true,
-		"yolo":            true,
-		"state_reporting": true,
-		"model_pin":       true,
-		"effort_pin":      true,
+	peer.callOK("driver.register", pluginDriverRegisterParams{
+		Agent: "fixture",
+		Capabilities: map[string]bool{
+			"resume":          true,
+			"yolo":            true,
+			"state_reporting": true,
+			"model_pin":       true,
+			"effort_pin":      true,
+		},
 	})
 	if err := os.WriteFile(os.Getenv("ATTN_DRIVER_FIXTURE_READY"), []byte("ready"), 0o644); err != nil {
 		t.Fatalf("write fixture ready marker: %v", err)
 	}
 
-	for {
-		request, err := decodePluginFixtureMessage(decoder)
-		if err != nil {
-			return
-		}
-		if request.Method == "attn.health" {
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(request.ID, map[string]bool{"ok": true}))
-			continue
-		}
-		if request.Method == "driver.session_closed" {
-			var params pluginDriverSessionClosedParams
-			if err := json.Unmarshal(request.Params, &params); err != nil {
-				t.Fatalf("decode fixture session close params: %v", err)
-			}
-			appendPluginFixtureCloseRecord(t, pluginDriverCloseRecord{Params: params})
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(request.ID, pluginDriverSessionClosedResult{OK: true}))
-			continue
-		}
-		if request.Method != "driver.spawn" && request.Method != "driver.resume" {
-			continue
-		}
-
-		var params pluginDriverSpawnParams
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			t.Fatalf("decode fixture launch params: %v", err)
-		}
-		appendPluginFixtureRecord(t, pluginDriverFixtureRecord{Method: request.Method, Params: params})
-		script := `IFS= read -r input; printf 'PLUGIN_RUN method=%s cwd=%s input=%s\n' "$ATTN_PLUGIN_FIXTURE_METHOD" "$PWD" "$input"; trap 'exit 0' TERM INT; while :; do sleep 1; done`
-		respondPluginRequest(t, conn, request, pluginDriverSpawnResult{
-			Argv: []string{"/bin/sh", "-c", script},
-			Env:  map[string]string{"ATTN_PLUGIN_FIXTURE_METHOD": request.Method},
-			CWD:  os.Getenv("ATTN_DRIVER_FIXTURE_CWD"),
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 20, "session.report_state", pluginReportStateParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       1,
-			State:     protocol.StateWorking,
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 21, "session.report_metadata", pluginReportMetadataParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       2,
-			Metadata:  json.RawMessage(`{"native_id":"` + request.Method + `-native"}`),
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 22, "session.report_stop", pluginReportStopParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       3,
-			Verdict:   protocol.StateWaitingInput,
-		})
-		if request.Method == "driver.spawn" {
-			waitForPluginFixtureStateTrigger(t)
-			sendPluginFixtureMethod(t, conn, decoder, 23, "session.report_state", pluginReportStateParams{
-				SessionID: params.SessionID,
-				RunID:     params.RunID,
-				Seq:       4,
-				State:     protocol.StateWorking,
-			})
-			sendPluginFixtureMethod(t, conn, decoder, 24, "session.report_stop", pluginReportStopParams{
-				SessionID: params.SessionID,
-				RunID:     params.RunID,
-				Seq:       5,
-				Verdict:   protocol.StateWaitingInput,
-			})
-		}
-	}
-}
-
-func registerPluginFixtureDriver(t *testing.T, conn net.Conn, decoder *json.Decoder, agent string, capabilities map[string]bool) {
-	t.Helper()
-	response := sendPluginFixtureMethodResponse(t, conn, decoder, 2, "driver.register", pluginDriverRegisterParams{
-		Agent:        agent,
-		Capabilities: capabilities,
-	})
-	if response.Error != nil {
-		t.Fatalf("driver.register error=%#v", response.Error)
-	}
-}
-
-func sendPluginFixtureMethod(t *testing.T, conn net.Conn, decoder *json.Decoder, id int, method string, params interface{}) {
-	t.Helper()
-	response := sendPluginFixtureMethodResponse(t, conn, decoder, id, method, params)
-	if response.Error != nil {
-		t.Fatalf("%s error=%#v", method, response.Error)
-	}
-}
-
-func sendPluginFixtureMethodResponse(t *testing.T, conn net.Conn, decoder *json.Decoder, id int, method string, params interface{}) jsonRPCMessage {
-	t.Helper()
-	payload, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("marshal %s params: %v", method, err)
-	}
-	if err := json.NewEncoder(conn).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage([]byte(strconv.Itoa(id))),
-		Method:  method,
-		Params:  payload,
-	}); err != nil {
-		t.Fatalf("send %s: %v", method, err)
-	}
-	return readPluginFixtureResponse(t, conn, decoder, strconv.Itoa(id))
-}
-
-func decodePluginFixtureMessage(decoder *json.Decoder) (jsonRPCMessage, error) {
-	var message jsonRPCMessage
-	err := decoder.Decode(&message)
-	return message, err
-}
-
-func decodePluginFixtureMessageWithDecoder(t *testing.T, decoder *json.Decoder) jsonRPCMessage {
-	t.Helper()
-	message, err := decodePluginFixtureMessage(decoder)
-	if err != nil {
-		t.Fatalf("decode JSON-RPC message: %v", err)
-	}
-	return message
-}
-
-func readPluginFixtureResponse(t *testing.T, conn net.Conn, decoder *json.Decoder, wantID string) jsonRPCMessage {
-	t.Helper()
-	for {
-		message := decodePluginFixtureMessageWithDecoder(t, decoder)
-		if message.Method == pluginHealthMethod {
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(message.ID, map[string]bool{"ok": true}))
-			continue
-		}
-		if message.Method != "" {
-			t.Fatalf("unexpected plugin request %q while waiting for response id=%s", message.Method, wantID)
-		}
-		if jsonRPCIDKey(message.ID) != wantID {
-			t.Fatalf("unexpected plugin response id=%s while waiting for id=%s", jsonRPCIDKey(message.ID), wantID)
-		}
-		return message
-	}
+	peer.serve()
 }
 
 func appendPluginFixtureRecord(t *testing.T, record pluginDriverFixtureRecord) {

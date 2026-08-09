@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -178,76 +179,97 @@ func TestSnoozingAWorkingAgentSuppressesTheTurnItWouldOpen(t *testing.T) {
 // comes back — the worst failure a deferral can have.
 func TestSnoozeWakesAfterARestart(t *testing.T) {
 	d := newTurnDaemon(t)
-	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
 
-	moveTo(d, "s1", protocol.StateIdle)
-	// Written straight to the store, which is the state a restart finds: the
-	// deadline persisted, and no timer in memory to fire on it. Letting it lapse
-	// before the reschedule is the daemon having been down across it.
-	now := time.Now()
-	deadline := now.Add(10 * time.Millisecond)
-	if !d.store.SnoozeTurn("s1", deadline, now) {
-		t.Fatal("setup: the snooze was not stored")
-	}
-	time.Sleep(30 * time.Millisecond)
-	if owed(t, d, "s1") {
-		t.Fatal("setup: the session is not deferred")
-	}
+		moveTo(d, "s1", protocol.StateIdle)
+		// Written straight to the store, which is the state a restart finds: the
+		// deadline persisted, and no timer in memory to fire on it. Letting it lapse
+		// before the reschedule is the daemon having been down across it — an hour
+		// of downtime here costs no wall-clock time.
+		now := time.Now()
+		if !d.store.SnoozeTurn("s1", now.Add(time.Minute), now) {
+			t.Fatal("setup: the snooze was not stored")
+		}
+		time.Sleep(time.Hour)
+		if owed(t, d, "s1") {
+			t.Fatal("setup: the session is not deferred")
+		}
 
-	woken := make(chan string, 1)
-	d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
-	d.rescheduleSnoozeWakes()
+		woken := make(chan string, 1)
+		d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
+		d.rescheduleSnoozeWakes()
 
-	select {
-	case <-woken:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the lapsed snooze never woke after the reschedule")
-	}
-	if !owed(t, d, "s1") {
-		t.Error("the woken session owes no turn although it is sitting idle")
-	}
+		synctest.Wait()
+		select {
+		case <-woken:
+		default:
+			t.Fatal("the lapsed snooze never woke after the reschedule")
+		}
+		if !owed(t, d, "s1") {
+			t.Error("the woken session owes no turn although it is sitting idle")
+		}
+	})
 }
 
 func TestSnoozeTimerFiresOnItsDeadline(t *testing.T) {
 	d := newTurnDaemon(t)
-	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
 
-	moveTo(d, "s1", protocol.StateWaitingInput)
-	woken := make(chan string, 1)
-	d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
+		moveTo(d, "s1", protocol.StateWaitingInput)
+		woken := make(chan string, 1)
+		d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
 
-	snoozeUntil(d, "s1", time.Now().Add(20*time.Millisecond))
-	if owed(t, d, "s1") {
-		t.Fatal("the session still owes a turn immediately after snoozing")
-	}
+		snoozeUntil(d, "s1", time.Now().Add(time.Hour))
+		if owed(t, d, "s1") {
+			t.Fatal("the session still owes a turn immediately after snoozing")
+		}
 
-	select {
-	case <-woken:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the snooze timer never fired")
-	}
-	if !owed(t, d, "s1") {
-		t.Error("the session owes no turn after its snooze elapsed")
-	}
+		// The deadline itself, at its real length: the AfterFunc the snooze armed
+		// fires when the bubble's clock reaches it, not when a test-sized window
+		// happens to elapse.
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		select {
+		case <-woken:
+		default:
+			t.Fatal("the snooze timer never fired")
+		}
+		if !owed(t, d, "s1") {
+			t.Error("the session owes no turn after its snooze elapsed")
+		}
+	})
 }
 
 // Re-snoozing to a later deadline must not be woken by the timer the first
 // snooze armed.
+// Converted to synctest. The claim is a negative — the first snooze's timer must
+// not wake the session — and a 200ms sleep could only make it likely. The bubble
+// runs the superseded deadline's whole window and then settles, so "it did not
+// wake" is a fact about a daemon with nothing left to do.
 func TestResnoozingReplacesThePendingWake(t *testing.T) {
 	d := newTurnDaemon(t)
-	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
-	moveTo(d, "s1", protocol.StateWaitingInput)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+		moveTo(d, "s1", protocol.StateWaitingInput)
 
-	snoozeUntil(d, "s1", time.Now().Add(20*time.Millisecond))
-	snoozeUntil(d, "s1", time.Now().Add(time.Hour))
+		snoozeUntil(d, "s1", time.Now().Add(time.Minute))
+		snoozeUntil(d, "s1", time.Now().Add(time.Hour))
 
-	time.Sleep(200 * time.Millisecond)
-	if owed(t, d, "s1") {
-		t.Error("the superseded timer woke a session that had been re-snoozed for an hour")
-	}
-	if snoozedUntil(t, d, "s1") == "" {
-		t.Error("the superseded timer cleared the live deadline")
-	}
+		// Well past the superseded deadline, and still well short of the live one.
+		time.Sleep(30 * time.Minute)
+		synctest.Wait()
+		if owed(t, d, "s1") {
+			t.Error("the superseded timer woke a session that had been re-snoozed for an hour")
+		}
+		if snoozedUntil(t, d, "s1") == "" {
+			t.Error("the superseded timer cleared the live deadline")
+		}
+	})
 }
 
 // The narrow window the timer's identity check cannot cover: the wake has
@@ -261,44 +283,49 @@ func TestResnoozingReplacesThePendingWake(t *testing.T) {
 // and never comes back again.
 func TestAResnoozeInsideAFiringWakeKeepsTheLaterDeadline(t *testing.T) {
 	d := newTurnDaemon(t)
-	addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
-	moveTo(d, "s1", protocol.StateWaitingInput)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		addTurnSession(t, d, "s1", protocol.SessionAgentCodex, "ws1")
+		moveTo(d, "s1", protocol.StateWaitingInput)
 
-	later := time.Now().Add(time.Hour)
-	var once bool
-	d.snoozeWakeGapHook = func(sessionID string) {
-		if once {
-			return // the replacement's own wake, an hour from now, must not recurse
+		later := time.Now().Add(time.Hour)
+		var once bool
+		d.snoozeWakeGapHook = func(sessionID string) {
+			if once {
+				return // the replacement's own wake, an hour from now, must not recurse
+			}
+			once = true
+			snoozeUntil(d, sessionID, later)
 		}
-		once = true
-		snoozeUntil(d, sessionID, later)
-	}
-	woken := make(chan string, 1)
-	d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
+		woken := make(chan string, 1)
+		d.snoozeWakeHook = func(sessionID string) { woken <- sessionID }
 
-	snoozeUntil(d, "s1", time.Now().Add(20*time.Millisecond))
-	select {
-	case <-woken:
-	case <-time.After(2 * time.Second):
-		t.Fatal("the first snooze's timer never fired")
-	}
+		snoozeUntil(d, "s1", time.Now().Add(time.Minute))
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		select {
+		case <-woken:
+		default:
+			t.Fatal("the first snooze's timer never fired")
+		}
 
-	if owed(t, d, "s1") {
-		t.Error("the expired timer cashed a promise the user had already replaced")
-	}
-	if got := snoozedUntil(t, d, "s1"); got != later.UTC().Format(time.RFC3339Nano) {
-		t.Errorf("live deadline = %q, want the re-snooze's %q", got, later.UTC().Format(time.RFC3339Nano))
-	}
-	// And the replacement's own timer is still armed, so it does come back.
-	d.snoozeMu.Lock()
-	pending, ok := d.snoozeTimers["s1"]
-	d.snoozeMu.Unlock()
-	if !ok {
-		t.Fatal("the expired timer took the replacement's wake with it; the agent would never return")
-	}
-	if !pending.firesAt.Equal(later) {
-		t.Errorf("pending wake fires at %s, want the re-snooze's %s", pending.firesAt, later)
-	}
+		if owed(t, d, "s1") {
+			t.Error("the expired timer cashed a promise the user had already replaced")
+		}
+		if got := snoozedUntil(t, d, "s1"); got != later.UTC().Format(time.RFC3339Nano) {
+			t.Errorf("live deadline = %q, want the re-snooze's %q", got, later.UTC().Format(time.RFC3339Nano))
+		}
+		// And the replacement's own timer is still armed, so it does come back.
+		d.snoozeMu.Lock()
+		pending, ok := d.snoozeTimers["s1"]
+		d.snoozeMu.Unlock()
+		if !ok {
+			t.Fatal("the expired timer took the replacement's wake with it; the agent would never return")
+		}
+		if !pending.firesAt.Equal(later) {
+			t.Errorf("pending wake fires at %s, want the re-snooze's %s", pending.firesAt, later)
+		}
+	})
 }
 
 // A snooze arriving mid-countdown makes the pending auto-settle moot: the turn

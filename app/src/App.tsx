@@ -6,6 +6,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { activityStaleMs } from './utils/activitySettings';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
 
@@ -13,6 +14,7 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
+import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
@@ -97,6 +99,7 @@ import { useTicketBoardScale } from './hooks/useTicketBoardScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
+import { useClientPresence } from './hooks/useClientPresence';
 import { ptySpawn } from './pty/bridge';
 import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
 import { probeUiAfterSwitch, UI_DIAGNOSTICS_FILE_DISPLAY } from './utils/uiDiagnosticsLog';
@@ -738,6 +741,8 @@ function AppContent({
   // threaded down as a hundred props.
   const {
     connectionError,
+    disconnectExplanation,
+    clearDisconnectExplanation,
     connectionGeneration,
     hasReceivedInitialState,
     rateLimit,
@@ -758,6 +763,7 @@ function AppContent({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendSetSessionContextWindowCap,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -827,6 +833,7 @@ function AppContent({
     requestTileContent,
     sendRuntimeInput,
     sendTerminalPointerActivity,
+    sendSetClientPresence,
     sendSetTerminalTheme,
     isRuntimeAttached,
     getRepoInfo,
@@ -1201,7 +1208,10 @@ function AppContent({
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
+      activity: daemonSession?.activity,
+      activityAt: daemonSession?.activity_at,
       pinnedAt: daemonSession?.pinned_at,
+      contextWindowCap: daemonSession?.context_window_cap,
       parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
@@ -1256,6 +1266,15 @@ function AppContent({
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
+
+  // Tells the daemon whether anyone can see the session activity lines it would
+  // otherwise generate. The dashboard is where those lines render, so it is the
+  // difference between the two live tiers; a window nobody is looking at stops
+  // generation entirely.
+  useClientPresence(sendSetClientPresence, {
+    dashboardVisible: view === 'dashboard',
+    connected: hasReceivedInitialState,
+  });
   // Focusable app-shell root: claims keyboard focus on focus-less views (dashboard /
   // empty workspaces) so the global shortcut listener keeps receiving keys.
   const appShellRef = useRef<HTMLDivElement>(null);
@@ -1506,6 +1525,11 @@ function AppContent({
     currentLabel: string;
   } | null>(null);
   const [chiefTransferSaving, setChiefTransferSaving] = useState(false);
+  const [contextCapPromptSession, setContextCapPromptSession] = useState<{
+    id: string;
+    label: string;
+    currentCap?: number;
+  } | null>(null);
 
   const handleTerminalModelRecovered = useCallback(() => {
     showError(
@@ -1611,6 +1635,7 @@ function AppContent({
     || notebookOpen
     || boardSurfaceOpen
     || chiefTransferTarget !== null
+    || contextCapPromptSession !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
@@ -1865,7 +1890,8 @@ function AppContent({
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
       || workspaceContextsOpen || notebookOpen || boardSurfaceOpen
-      || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
+      || chiefTransferTarget !== null || contextCapPromptSession !== null
+      || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
     }
@@ -1873,6 +1899,7 @@ function AppContent({
   }, [
     actionMenuOpen,
     chiefTransferTarget,
+    contextCapPromptSession,
     closedWorktree,
     locationPickerOpen,
     openPRLauncherJob,
@@ -1892,6 +1919,17 @@ function AppContent({
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
+
+  // A disconnect the daemon chose is worth a word, and it can only reach us
+  // after we are back. Longer than the default: it explains something the user
+  // already lived through and may have been puzzled by.
+  useEffect(() => {
+    if (!disconnectExplanation) {
+      return;
+    }
+    showError(disconnectExplanation, { durationMs: 8000 });
+    clearDisconnectExplanation();
+  }, [clearDisconnectExplanation, disconnectExplanation, showError]);
 
   // Backfill the active session's workflow runs into the global slice. The
   // useDaemonSocket workflow_run_updated handler keeps it fresh after this; the
@@ -2571,9 +2609,30 @@ function AppContent({
         run: () => sendPinSession(activeSession.id, !activeSession.pinnedAt),
       }]
       : [];
+    // Only claude and codex launches carry the cap to the agent; the daemon
+    // refuses it for anything else, so the entry is not offered there.
+    const sessionCapItems: ActionMenuItem[] = activeSession && ['claude', 'codex'].includes((activeSession.agent ?? '').toLowerCase())
+      ? [{
+        id: 'set-session-context-cap',
+        title: activeSession.contextWindowCap
+          ? `Change ${activeSession.label}'s context window cap`
+          : `Cap ${activeSession.label}'s context window`,
+        description: activeSession.contextWindowCap
+          ? `Compacts at ${activeSession.contextWindowCap.toLocaleString()} tokens — change or clear the cap`
+          : 'Make this agent compact at a token budget you choose',
+        keywords: ['context', 'window', 'cap', 'compact', 'autocompact', 'tokens', 'agent', 'session'],
+        icon: <ContextActionIcon />,
+        run: () => setContextCapPromptSession({
+          id: activeSession.id,
+          label: activeSession.label,
+          currentCap: activeSession.contextWindowCap,
+        }),
+      }]
+      : [];
     return [
       ...actionMenuItems,
       ...sessionPinItems,
+      ...sessionCapItems,
       {
         id: 'pin-active-workspace',
         title: workspace.pinned ? `Unpin ${workspace.title}` : `Pin ${workspace.title}`,
@@ -3751,6 +3810,7 @@ function AppContent({
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           queueModeEnabled={queueModeEnabled}
+          activityStaleMs={activityStaleMs(settings)}
           followNextTurn={followNextTurn}
           onToggleFollowNextTurn={() => setFollowNextTurn((armed) => !armed)}
           onSelectSession={handleSelectSession}
@@ -4075,6 +4135,14 @@ function AppContent({
           }
         }}
       />
+      {contextCapPromptSession && (
+        <SessionContextCapPrompt
+          sessionLabel={contextCapPromptSession.label}
+          currentCap={contextCapPromptSession.currentCap}
+          onSubmit={(cap) => sendSetSessionContextWindowCap(contextCapPromptSession.id, cap)}
+          onClose={() => setContextCapPromptSession(null)}
+        />
+      )}
       <ErrorToast message={errorMessage} durationMs={errorDurationMs} onDone={clearError} />
       <ChordLeaderHud />
       <WorkspaceContextNavigator

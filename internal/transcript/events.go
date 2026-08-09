@@ -16,8 +16,14 @@ import (
 )
 
 const (
-	EventKindUser       = "user"
-	EventKindAssistant  = "assistant"
+	EventKindUser      = "user"
+	EventKindAssistant = "assistant"
+	// EventKindThinking is the agent's own reasoning: Claude "thinking" content
+	// blocks, Codex "agent_reasoning" payloads. It is where an agent states what
+	// it is trying to do, and there is roughly twice as much of it as assistant
+	// prose, so a consumer asking "what is this session doing right now" wants it.
+	// Consumers that only want what the user was shown should skip this kind.
+	EventKindThinking   = "thinking"
 	EventKindToolCall   = "tool_call"
 	EventKindToolResult = "tool_result"
 	EventKindError      = "error"
@@ -60,6 +66,63 @@ type EventPage struct {
 	Events     []Event
 	NextCursor string
 	AtEnd      bool
+}
+
+// HeadCursor returns a cursor positioned after the last complete record, so a
+// later ReadEventPage returns only what was appended afterwards.
+//
+// It exists for consumers that want the transcript's future and not its past.
+// The alternative — reading from byte 0 and discarding — costs a full scan of a
+// file that reaches tens of megabytes, and produces nothing the caller wanted.
+//
+// A transcript with no complete record yet has nothing to seek past, and comes
+// back with the empty cursor, which reads from the beginning.
+func HeadCursor(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	fingerprint, hasCompleteRecord, err := transcriptFingerprint(f)
+	if err != nil {
+		return "", err
+	}
+	if !hasCompleteRecord {
+		return "", nil
+	}
+	// Seek past the last complete record rather than to the file's end: a
+	// half-written final line must stay unread until its writer appends the
+	// newline, exactly as ReadEventPage treats it. The byte after the file's
+	// last newline is both — the end of the file when it ends cleanly, and the
+	// start of the partial line when it does not.
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	offset, err := offsetAfterLastNewline(f, info.Size())
+	if err != nil || offset <= 0 {
+		return "", err
+	}
+	return encodeEventCursor(fingerprint, offset, 0), nil
+}
+
+// offsetAfterLastNewline returns one past the file's last newline, or 0 when it
+// holds none.
+func offsetAfterLastNewline(f *os.File, size int64) (int64, error) {
+	const chunkSize int64 = 4096
+	for searchEnd := size; searchEnd > 0; {
+		searchStart := max(int64(0), searchEnd-chunkSize)
+		chunk := make([]byte, searchEnd-searchStart)
+		if _, err := f.ReadAt(chunk, searchStart); err != nil {
+			return 0, err
+		}
+		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
+			return searchStart + int64(newline) + 1, nil
+		}
+		searchEnd = searchStart
+	}
+	return 0, nil
 }
 
 // ReadEventPage reads complete JSONL records strictly after cursor. It never
@@ -293,6 +356,7 @@ type eventMessage struct {
 type eventContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
@@ -346,6 +410,7 @@ func parseCodexEvent(envelope eventEnvelope) []Event {
 		var payload struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
+			Text    string `json:"text"`
 			Error   string `json:"error"`
 		}
 		if json.Unmarshal(envelope.Payload, &payload) != nil {
@@ -356,6 +421,12 @@ func parseCodexEvent(envelope eventEnvelope) []Event {
 			return textEvent(envelope.Timestamp, EventKindUser, "user", payload.Message)
 		case "agent_message":
 			return textEvent(envelope.Timestamp, EventKindAssistant, "assistant", payload.Message)
+		case "agent_reasoning":
+			// Codex's readable reasoning summary. Its sibling "reasoning"
+			// response_item carries only encrypted_content and an empty summary,
+			// so this is the sole usable reasoning signal — and it is absent from
+			// some rollouts entirely. Never depend on it being present.
+			return textEvent(envelope.Timestamp, EventKindThinking, "assistant", payload.Text)
 		}
 		if strings.Contains(payload.Type, "error") || payload.Error != "" {
 			return textEvent(envelope.Timestamp, EventKindError, "", firstNonEmpty(payload.Error, payload.Message))
@@ -437,6 +508,18 @@ func parseClaudeEvent(envelope eventEnvelope) []Event {
 		case "text", "input_text", "output_text":
 			if strings.TrimSpace(block.Text) != "" {
 				textParts = append(textParts, block.Text)
+			}
+		case "thinking":
+			// Emitted as its own event rather than folded into textParts: it is
+			// the agent's reasoning, not what the user was shown, and a consumer
+			// must be able to tell them apart.
+			if strings.TrimSpace(block.Thinking) != "" {
+				events = append(events, Event{
+					Timestamp: envelope.Timestamp,
+					Kind:      EventKindThinking,
+					Role:      "assistant",
+					Text:      block.Thinking,
+				})
 			}
 		case "tool_use":
 			events = append(events, Event{

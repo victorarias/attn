@@ -12,8 +12,8 @@ func seedLegacyTask(t *testing.T, s *Store, id, kind, subject, state, meta strin
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (id, kind, subject, state, attempts, next_attempt_at, last_error, meta_json, requeued, created_at, updated_at)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		id, kind, subject, state, 2, at.Format(jobTimeFormat), "boom", meta, 1,
-		at.Format(jobTimeFormat), at.Format(jobTimeFormat))
+		id, kind, subject, state, 2, at.Format(sortableTimeFormat), "boom", meta, 1,
+		at.Format(sortableTimeFormat), at.Format(sortableTimeFormat))
 	if err != nil {
 		t.Fatalf("seed legacy task %s: %v", id, err)
 	}

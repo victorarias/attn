@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/docstore"
 )
 
 func parseOptionalAutomationTime(value string) *time.Time {
@@ -221,7 +222,7 @@ func clearAutomationReviewRequestEdgesTx(tx *sql.Tx, definitionID string, now ti
 // refresh started before this fence cannot launch work under the newly
 // enabled/reapplied revision.
 func fenceAutomationProviderCursorsTx(tx *sql.Tx, definitionID string, now time.Time) error {
-	fence := now.UTC().Format(time.RFC3339Nano)
+	fence := now.UTC().Format(sortableTimeFormat)
 	_, err := tx.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'github_review_requested','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, definitionID, fence)
 	return err
 }
@@ -720,7 +721,7 @@ func (s *Store) GetAutomationScheduleCursor(definitionID string) (time.Time, boo
 	if err != nil {
 		return time.Time{}, false, err
 	}
-	at, err := time.Parse(time.RFC3339Nano, raw)
+	at, err := docstore.ParseTime(raw)
 	if err != nil {
 		return time.Time{}, false, fmt.Errorf("parse automation schedule cursor: %w", err)
 	}
@@ -735,7 +736,7 @@ func (s *Store) SetAutomationScheduleCursor(definitionID string, at time.Time) e
 	if s.db == nil {
 		return errors.New("automation persistence unavailable")
 	}
-	_, err := s.db.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'schedule','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, definitionID, at.UTC().Format(time.RFC3339Nano))
+	_, err := s.db.Exec(`INSERT INTO automation_provider_cursors(definition_id,provider,scope,observed_at) VALUES(?,'schedule','*',?) ON CONFLICT(definition_id,provider,scope) DO UPDATE SET observed_at=excluded.observed_at`, definitionID, at.UTC().Format(sortableTimeFormat))
 	return err
 }
 
@@ -755,12 +756,12 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 		return nil, err
 	}
 	defer tx.Rollback()
-	observedRaw := observedAt.UTC().Format(time.RFC3339Nano)
+	observedRaw := observedAt.UTC().Format(sortableTimeFormat)
 	updatedRaw := formatTicketTime(observedAt)
 	var enableFenceRaw string
 	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope='*'`, definitionID).Scan(&enableFenceRaw)
 	if err == nil {
-		enableFence, parseErr := time.Parse(time.RFC3339Nano, enableFenceRaw)
+		enableFence, parseErr := docstore.ParseTime(enableFenceRaw)
 		if parseErr != nil {
 			return nil, fmt.Errorf("parse automation enable fence: %w", parseErr)
 		}
@@ -774,7 +775,7 @@ func (s *Store) ReconcileAutomationReviewRequests(definitionID, host string, sub
 	var cursorRaw string
 	err = tx.QueryRow(`SELECT observed_at FROM automation_provider_cursors WHERE definition_id=? AND provider='github_review_requested' AND scope=?`, definitionID, host).Scan(&cursorRaw)
 	if err == nil {
-		cursorAt, parseErr := time.Parse(time.RFC3339Nano, cursorRaw)
+		cursorAt, parseErr := docstore.ParseTime(cursorRaw)
 		if parseErr != nil {
 			return nil, fmt.Errorf("parse automation provider cursor: %w", parseErr)
 		}

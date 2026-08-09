@@ -1036,6 +1036,14 @@ function annotationSurfaceState() {
     popupRect: box(popup),
     panelRect: box(panel),
     viewport: { width: window.innerWidth, height: window.innerHeight },
+    // Every terminal grid on screen. The popup is portalled to the body and
+    // positioned against the window, so the DOM no longer says which pane it
+    // belongs to — but landing outside all of them is the failure, and that a
+    // driver can see. A popup over the sidebar or a neighbouring pane is
+    // present, correctly sized, and unusable.
+    paneRects: Array.from(document.querySelectorAll('.terminal-container.ghostty-terminal'))
+      .map((pane) => box(pane))
+      .filter((rect): rect is NonNullable<typeof rect> => rect !== null),
     popupQuote: text(popup, '.anno-popup-quote'),
     // The comment box's current contents, so a driver can tell "reopened an
     // annotation to edit it" from "opened an empty box beside it".
@@ -1062,6 +1070,9 @@ function annotationSurfaceState() {
       rect: box(card),
       removeRect: box(card.querySelector('.anno-card-remove')),
     })),
+    // What goes out ahead of the marks. Null when the panel is closed, which is
+    // also the only time there is nowhere to type it.
+    note: (panel?.querySelector('.anno-panel-note') as HTMLTextAreaElement | null)?.value ?? null,
     footer: text(panel, '.anno-panel-foot'),
     // What an annotate gesture that resolved to nothing said for itself. The
     // whole failure mode this covers is silence, so a driver asserting only on
@@ -1305,7 +1316,14 @@ function clickElementWithModifiers(element: HTMLElement, modifiers?: ClickModifi
     shiftKey: modifiers?.shift ?? false,
     altKey: modifiers?.alt ?? false,
   };
+  // Pointer events first, in the order a real browser fires them. Anything
+  // listening for pointerdown — the modern default for "the user touched the
+  // app" — is otherwise invisible to every scenario that clicks through this
+  // helper, and the scenario reads as passing while the behavior never ran.
+  const pointerInit: PointerEventInit = { ...init, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+  element.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
   element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new PointerEvent('pointerup', pointerInit));
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.dispatchEvent(new MouseEvent('click', init));
 }
@@ -2040,11 +2058,10 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { typed: text };
       }
-      // Pick an option in a <select>. Separate from dom_type because a select
-      // has no text to type into: the value has to be one it offers, and a
-      // scenario asking for one that is not there should be told so rather
-      // than left asserting against an unchanged control.
       case 'dom_select': {
+        // Selects need their own verb: dom_type goes through the input value
+        // setter, which a <select> ignores, and a scenario that drives a settings
+        // pane has no other way to choose an option.
         const selector = typeof payload.selector === 'string' ? payload.selector : null;
         const value = typeof payload.value === 'string' ? payload.value : null;
         if (!selector) throw new Error('dom_select requires selector');

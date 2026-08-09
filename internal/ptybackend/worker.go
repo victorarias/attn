@@ -523,7 +523,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		"ATTN_TRUST_WORKING_DIRECTORY",
 		"ATTN_MODEL",
 		"ATTN_EFFORT",
-		"ATTN_CHIEF_AUTO_COMPACT_WINDOW",
+		"ATTN_AUTO_COMPACT_WINDOW",
 		"ATTN_CACHED_SHELL_ENV",
 		"ATTN_PTY_EXTERNAL_ENV",
 	)
@@ -543,8 +543,8 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
 		workerEnv = append(workerEnv, "ATTN_EFFORT="+effort)
 	}
-	if opts.ChiefContextWindowCap > 0 {
-		workerEnv = append(workerEnv, "ATTN_CHIEF_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ChiefContextWindowCap))
+	if opts.ContextWindowCap > 0 {
+		workerEnv = append(workerEnv, "ATTN_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.ContextWindowCap))
 	}
 	if len(opts.LoginShellEnv) > 0 {
 		if envJSON, err := json.Marshal(opts.LoginShellEnv); err == nil {

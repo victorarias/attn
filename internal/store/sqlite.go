@@ -933,6 +933,37 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// the queue without dragging its workspace along, and the satellite link
 	// from a shell to the agent it was split from. Applied by applyMigration92.
 	{92, "add the session pin and the satellite parent to sessions", ``},
+	// The annotation draft's note: what the user says about the turn as a
+	// whole, saved and cleared with the marks on its parts. Applied by
+	// applyMigration93.
+	{93, "add the note to session annotation drafts", ``},
+	// The same rewrite migration 91 did for documents, for the two other TEXT
+	// stamp columns this package compares as text: the job queue's and the
+	// notifications feed's. A job's scheduled_at is compared against now on every
+	// dispatch sweep, and both feeds list by a stamp, so a variable-width fraction
+	// held a job scheduled on a whole second back until the next second and
+	// scrambled rows written inside one second. Applied by applyMigration94.
+	{94, "store job and notification timestamps in an encoding that sorts", ``},
+	// The last of the rewrite migrations 91 and 94 began, for every remaining TEXT
+	// stamp this package compares or orders as text: the turn stamps that decide
+	// whether a session owes the user a turn, the automation provider cursor that
+	// gates a review-request observation, and the created_at that orders
+	// delegations, endpoints, workspaces and workspace panes. Applied by
+	// applyMigration95.
+	{95, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
+	// The per-session context-window cap pin, in tokens. 0 means no pin — the
+	// launch falls back to the chief or per-agent default settings. Owned by
+	// SetSessionContextWindowCap, absent from the session upsert, so a respawn
+	// cannot clear it — the same contract as pinned_at. Applied by
+	// applyMigration96.
+	{96, "add the context-window cap pin to sessions", ``},
+	// The session's activity line: one short present-tense sentence saying what
+	// the agent is doing right now, generated from its transcript. The cursor
+	// beside it is the transcript offset the line was generated through, which is
+	// what makes a refresh read only the appended bytes and what tells the
+	// generator that a session has written nothing new and needs no run at all.
+	// Applied by applyMigration97. See docs/plans/2026-08-07-session-activity.md.
+	{97, "add the activity line and its transcript cursor to sessions", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1218,6 +1249,31 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 92 {
 			if err := applyMigration92(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 93 {
+			if err := applyMigration93(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 94 {
+			if err := applyMigration94(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 95 {
+			if err := applyMigration95(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 96 {
+			if err := applyMigration96(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 97 {
+			if err := applyMigration97(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2320,6 +2376,55 @@ func applyMigration92(tx *sql.Tx) error {
 	return err
 }
 
+// applyMigration96 adds the per-session context-window cap pin. Guarded on the
+// column existing, so a rewound schema_migrations table re-runs it without
+// erroring on the duplicate.
+func applyMigration96(tx *sql.Tx) error {
+	has, err := columnExists(tx, "sessions", "context_window_cap")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN context_window_cap INTEGER NOT NULL DEFAULT 0")
+	return err
+}
+
+// applyMigration97 adds the activity line, when it was generated, and the
+// transcript cursor it was generated through.
+//
+// All three are owned by UpdateSessionActivity alone and are absent from the
+// session upsert, so a respawn or a state re-add cannot clear them — the same
+// arrangement pinned_at has, and for the same reason.
+//
+// Guarded per column, so a rewound schema_migrations table re-runs it without
+// failing on work already done.
+func applyMigration97(tx *sql.Tx) error {
+	for _, column := range []string{"activity", "activity_at", "activity_cursor"} {
+		has, err := columnExists(tx, "sessions", column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// applyMigration93 adds the note a user writes alongside a session's
+// annotation marks. Guarded on the column, so a rewound schema_migrations
+// table re-runs it without failing on work already done.
+func applyMigration93(tx *sql.Tx) error {
+	has, err := columnExists(tx, "session_annotation_drafts", "note")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE session_annotation_drafts ADD COLUMN note TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
 // applyMigration91 rewrites every stored document stamp into
 // docstore.TimeFormat's fixed-width encoding, so that comparing the stamps as
 // text — which is the only way a TEXT column is compared, and what every sort
@@ -2383,10 +2488,126 @@ func collectionTableIDs(tx *sql.Tx) ([]int64, error) {
 	return ids, rows.Err()
 }
 
+// applyMigration94 rewrites the job queue's and the notifications feed's stored
+// stamps into sortableTimeFormat, for the same reason migration 91 rewrote the
+// document store's: they are TEXT columns compared as text, and the encoding
+// they were written in stripped trailing zeros from the fraction, so text order
+// was not time order inside any one second.
+//
+// The two surfaces move together because they always shared one encoding, and
+// what the wrong one cost them differed: a job scheduled on a whole second sorted
+// above every stamp within that second, so `scheduled_at <= now` did not claim it
+// until the next second, and both feeds' listings (jobs by updated_at,
+// notifications by created_at) came back out of order among rows written
+// together.
+//
+// Idempotent by construction — re-encoding an already-converted stamp yields
+// itself — and an undecodable stamp is left alone and reported, both properties
+// inherited from restampTable. An unread notification's read_at is ” by design;
+// restampTable skips a blank without counting it.
+func applyMigration94(tx *sql.Tx) error {
+	unreadable, err := restampTable(tx, "jobs", "id",
+		[]string{"scheduled_at", "created_at", "updated_at"})
+	if err != nil {
+		return fmt.Errorf("restamping jobs: %w", err)
+	}
+	n, err := restampTable(tx, "notifications", "id", []string{"created_at", "read_at"})
+	if err != nil {
+		return fmt.Errorf("restamping notifications: %w", err)
+	}
+	unreadable += n
+	if unreadable > 0 {
+		log.Printf("[store] migration 94: left %d job/notification timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+	}
+	return nil
+}
+
+// applyMigration95 finishes what migrations 91 and 94 started: after it, no TEXT
+// stamp this package compares or orders as text is written in an encoding whose
+// text order is not time order.
+//
+// What each column cost while it was wrong:
+//
+//   - sessions.turn_opened_at / turn_settled_at are compared against each other
+//     ("a turn is open iff opened > settled"), so a turn settled inside the
+//     second it was opened in read as still open and the next turn silently never
+//     opened. Whole-second opens are routine, not a coincidence: a day-named
+//     snooze wakes on an exact second and the woken turn is stamped with that
+//     deadline. turn_snoozed_until is only ever compared for equality, but it
+//     rides along because WakeTurnAt matches the stored deadline against a
+//     freshly formatted one — restamping it in the same breath as changing the
+//     writer is what keeps a snooze written before this migration wakeable after
+//     it.
+//   - automation_provider_cursors.observed_at gates the cursor advance
+//     (`excluded.observed_at >= ...observed_at`), so an observation could fail to
+//     advance the cursor past one taken microseconds earlier.
+//   - delegation_operations.created_at, workspaces.created_at and
+//     workspace_layout_panes.created_at each order a listing, so rows written
+//     together came back in an arbitrary order.
+//   - workflow_runs.created_at orders the run listing and is written by the CLI
+//     rather than by this package, so the store normalizes whatever spelling a
+//     caller hands it (normalizeWorkflowStamp) instead of the writers being asked
+//     to agree. Its callers reach it through protocol.TimestampNow() too.
+//   - endpoints.created_at / updated_at were the worst of them: written through
+//     protocol.TimestampNow(), which renders the local zone, so the stored values
+//     carry an offset like "+02:00" and the listing misordered across a zone or
+//     DST change as well as across a fraction width. Restamping normalizes them
+//     to UTC, which is why the decode has to be the tolerant one.
+//
+// Idempotent by construction — re-encoding an already-converted stamp yields
+// itself — and an undecodable stamp is left alone and reported, both inherited
+// from restampTable, which also skips the ” that means "no stamp here" on the
+// turn columns and on an unclaimed cursor.
+//
+// The composite-key tables are keyed by rowid: every table here is an ordinary
+// rowid table, and restampTable needs one column that names a row, not the
+// primary key it happens to have.
+func applyMigration95(tx *sql.Tx) error {
+	restamps := []struct {
+		table   string
+		key     string
+		columns []string
+	}{
+		{"sessions", "id", []string{"turn_opened_at", "turn_settled_at", "turn_snoozed_until"}},
+		{"automation_provider_cursors", "rowid", []string{"observed_at"}},
+		{"automation_review_request_edges", "rowid", []string{"last_observed_at"}},
+		{"delegation_operations", "request_id", []string{"created_at", "updated_at"}},
+		{"endpoints", "id", []string{"created_at", "updated_at"}},
+		{"workspaces", "id", []string{"created_at"}},
+		{"workspace_layout_panes", "rowid", []string{"created_at", "updated_at"}},
+		{"workflow_runs", "run_id", []string{"created_at"}},
+	}
+	unreadable := 0
+	for _, r := range restamps {
+		// A table the base schema creates rather than a migration is absent from a
+		// database built up from an older hand-written schema. There is nothing to
+		// rewrite in a table that does not exist yet, and whatever creates it later
+		// writes the new encoding from the start.
+		present, err := tableExists(tx, r.table)
+		if err != nil {
+			return fmt.Errorf("checking for %s: %w", r.table, err)
+		}
+		if !present {
+			continue
+		}
+		n, err := restampTable(tx, r.table, r.key, r.columns)
+		if err != nil {
+			return fmt.Errorf("restamping %s: %w", r.table, err)
+		}
+		unreadable += n
+	}
+	if unreadable > 0 {
+		log.Printf("[store] migration 95: left %d turn/cursor/listing timestamp(s) as they were; they are not RFC3339 and cannot be re-encoded", unreadable)
+	}
+	return nil
+}
+
 // restampTable re-encodes the named stamp columns of every row, returning how
-// many values it could not decode and therefore did not touch. Rows are read out
-// before any are written back, because the driver holds one connection and a
-// write issued while a read is still streaming deadlocks against it.
+// many values it could not decode and therefore did not touch. A blank value is
+// skipped and not counted: it is a column's own "no time here" sentinel, not a
+// timestamp that failed to parse. Rows are read out before any are written back,
+// because the driver holds one connection and a write issued while a read is
+// still streaming deadlocks against it.
 func restampTable(tx *sql.Tx, table, key string, columns []string) (int, error) {
 	rows, err := tx.Query(fmt.Sprintf(`SELECT %s, %s FROM %s`, key, strings.Join(columns, ", "), table))
 	if err != nil {
@@ -2420,6 +2641,9 @@ func restampTable(tx *sql.Tx, table, key string, columns []string) (int, error) 
 		sets := make([]string, 0, len(columns))
 		args := make([]any, 0, len(columns)+1)
 		for i, c := range columns {
+			if r.stamps[i] == "" {
+				continue
+			}
 			t, err := docstore.ParseTime(r.stamps[i])
 			if err != nil {
 				unreadable++

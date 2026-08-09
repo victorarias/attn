@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -195,34 +196,36 @@ func TestCodexNudgeRoundtrip(t *testing.T) {
 // Approval prompts are the sole deferral state. Once the prompt clears, unread
 // activity is rechecked and armed even when the agent returns to active/green.
 func TestNotifyDefersPendingApprovalThenFlushesOnWorking(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	_, agentID, inputs := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	d.store.UpdateState(agentID, protocol.StatePendingApproval)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		_, agentID, inputs := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		d.store.UpdateState(agentID, protocol.StatePendingApproval)
 
-	commentOnTicket(t, d, ticketID, "take a look")
-	if wasNudged(inputs(agentID)) {
-		t.Fatal("approval-waiting codex agent was nudged")
-	}
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("approval-waiting codex agent armed a countdown")
-	}
+		commentOnTicket(t, d, ticketID, "take a look")
+		if wasNudged(inputs(agentID)) {
+			t.Fatal("approval-waiting codex agent was nudged")
+		}
+		if currentNudgeTimer(d, agentID) != nil {
+			t.Fatal("approval-waiting codex agent armed a countdown")
+		}
 
-	d.applyState(sessionStateChange{
-		sessionID: agentID,
-		state:     protocol.StateWorking,
-		cause:     resolverObservation{},
+		d.applyState(sessionStateChange{
+			sessionID: agentID,
+			state:     protocol.StateWorking,
+			cause:     resolverObservation{},
+		})
+		// The countdown the cleared approval arms, run at its production length
+		// rather than hand-fired: what the user gets is a doorbell one window
+		// after the prompt clears, and that is what is asserted.
+		settledNudgeDeadline(t, d, agentID)
+		time.Sleep(defaultNudgeCountdownWindow)
+		synctest.Wait()
+		if !wasNudged(inputs(agentID)) {
+			t.Fatal("deferred nudge was not flushed when approval cleared")
+		}
 	})
-	deadline := time.Now().Add(time.Second)
-	for currentNudgeTimer(d, agentID) == nil && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	fireNudgeNow(t, d, agentID)
-	if !wasNudged(inputs(agentID)) {
-		t.Fatal("deferred nudge was not flushed when approval cleared")
-	}
 }
 
 // A chief that fans work out to siblings must not cross-wire their doorbells: when
@@ -292,26 +295,26 @@ func commentOnTicket(t *testing.T, d *Daemon, ticketID, comment string) {
 func TestTicketNudgesActiveChiefAcrossRuntimes(t *testing.T) {
 	for _, runtime := range []protocol.SessionAgent{protocol.SessionAgentCodex, protocol.SessionAgentClaude} {
 		t.Run(string(runtime), func(t *testing.T) {
-			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-			d.nudgeWindowOverride = time.Hour
-			t.Cleanup(d.stopNudgeCountdowns)
-			chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
-			setSessionAgent(t, d, chiefID, runtime)
-			d.store.UpdateState(chiefID, protocol.StateWorking)
-			d.setSelectedSession(agentID) // preserve the focused-session anti-splice pause
+			d := newBubbleDaemon(t)
+			synctest.Test(t, func(t *testing.T) {
+				stopDaemonBackground(t, d)
+				chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
+				setSessionAgent(t, d, chiefID, runtime)
+				d.store.UpdateState(chiefID, protocol.StateWorking)
+				d.setSelectedSession(agentID) // preserve the focused-session anti-splice pause
 
-			callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "done, please review")
-			deadline := time.Now().Add(time.Second)
-			for currentNudgeTimer(d, chiefID) == nil && time.Now().Before(deadline) {
-				time.Sleep(time.Millisecond)
-			}
-			fireNudgeNow(t, d, chiefID)
-			if !wasNudged(inputs(chiefID)) {
-				t.Fatalf("active %s chief was not nudged", runtime)
-			}
-			if wasNudged(inputs(agentID)) {
-				t.Fatal("the reporting agent was nudged about its own status change")
-			}
+				callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "done, please review")
+				// The chief's own countdown, run out at whatever length the policy
+				// picked for it instead of hand-fired.
+				time.Sleep(time.Until(settledNudgeDeadline(t, d, chiefID)) + time.Second)
+				synctest.Wait()
+				if !wasNudged(inputs(chiefID)) {
+					t.Fatalf("active %s chief was not nudged", runtime)
+				}
+				if wasNudged(inputs(agentID)) {
+					t.Fatal("the reporting agent was nudged about its own status change")
+				}
+			})
 		})
 	}
 }
@@ -320,6 +323,13 @@ func TestTicketNudgesActiveChiefAcrossRuntimes(t *testing.T) {
 // delegate. A consumes one report, the role transfers to B, and the next report
 // reaches only B. The role cursor means B receives exactly the post-transfer
 // unread event: nothing A consumed is replayed and nothing new is skipped.
+// Left unconverted deliberately. Mechanically this test fits in a bubble, but its
+// windows are parked (nudgeWindowOverride) and its final assertion only holds
+// while they are: run the nudge window out for real and the retired chief is
+// doorbelled too, because delegateForNotify leaves it a personal participant on
+// the ticket and nudgeCount cannot tell a personal nudge from a role one. Making
+// it honest means either a narrower probe or a product answer about what a
+// retired chief still hears, and both are outside a test-only sweep.
 func TestChiefTicketContinuityAcrossRoleTransfer(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

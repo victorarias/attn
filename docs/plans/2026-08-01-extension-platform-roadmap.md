@@ -55,7 +55,18 @@ implementation begins. The stage's detailed plan records the answers.
   claimants per hook; the delegation parked-state UX (what the app shows
   while parked).
 - **C2 (gate):** the approval UX itself (where the panel lives, what
-  reject-with-feedback delivers back to the delegating agent).
+  reject-with-feedback delivers back to the delegating agent); **app
+  capability discoverability** — how an agent in an unrelated session
+  learns an installed app's surface exists. Leading idea: a
+  manifest-declared agent entry (one-liner + instructions doc, frozen in
+  the version snapshot, apply still evaluates nothing) that attn
+  materializes into the harness's native skill mechanism at session launch
+  — one-liner always in context, body on demand, removed on
+  disable/remove. With it, the CLI shape for invoking an app's actions
+  (something like `attn app run <name> <action>`; undesigned), and a
+  scoping question that needs a receipt before apps are numerous: do all
+  enabled apps' one-liners belong in every session's context, or does the
+  index scope per workspace/repo?
 - **C3 (Present v2):** record shapes for presentations/stops; parity
   checklist defining what "the parts actually used" means before old
   Present is deleted.
@@ -210,7 +221,9 @@ Tour/Other/Skipped. Old Present deleted at parity on the actually-used parts.
 
 - **Teachability lands with each stage**, not at the end: SDK types (A5),
   scaffold + repo instructions (A4), teaching errors (every stage), the
-  short `ext` skill reference (C2, once the gate proves the surface).
+  short `ext` skill reference (C2, once the gate proves the surface). All
+  of that teaches *authoring*; how a consuming agent discovers an installed
+  app's capability is its own surface, gated at C2 (see Stage gates).
 - **Verification** per repo policy: every stage that touches daemon
   lifecycle, protocol, or UI needs live verification from a non-production
   profile; A2 additionally needs evidence that wire behavior is unchanged.

@@ -141,7 +141,7 @@ func newModelWorldFor(t *testing.T, decl docstore.CollectionSchema, ids []string
 	t.Helper()
 	s := New()
 	base := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(decl, base); err != nil {
+	if _, err := s.DefineDocumentCollection(decl, base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	schema := declOf(t, s, decl.Namespace, decl.Collection)
@@ -1007,7 +1007,7 @@ func (w *modelWorld) checkFullPagination(context string, rng *rand.Rand, ids []s
 // match, since the dumb table's columns mirror the declared fields.
 func (w *modelWorld) redeclare(decl docstore.CollectionSchema, now time.Time) {
 	w.t.Helper()
-	if err := w.s.DefineDocumentCollection(decl, now); err != nil {
+	if _, err := w.s.DefineDocumentCollection(decl, now); err != nil {
 		w.t.Fatalf("redeclare: %v", err)
 	}
 	w.schema = declOf(w.t, w.s, decl.Namespace, decl.Collection)

@@ -6,31 +6,27 @@ import (
 	"time"
 )
 
-// TurnStamps is the pair that decides whether a session owes the user a turn:
-// it does iff OpenedAt is after SettledAt. Both are zero for a session that has
-// never opened a turn.
-//
-// SnoozedUntil rides along rather than deciding anything, because a snooze
-// always settles the open turn as it is written — so a snoozed session already
-// reads as owing nothing, and the deadline is only there to say when it comes
-// back and to keep the next turn from opening before then.
+// TurnStamps decides whether a session owes the user a turn: it does iff
+// OpenedAt is after SettledAt; both zero means no turn ever opened.
+// SnoozedUntil decides nothing — a snooze settles the open turn as it is
+// written, so the deadline only says when the session comes back.
 type TurnStamps struct {
 	OpenedAt     time.Time
 	SettledAt    time.Time
 	SnoozedUntil time.Time
 }
 
-// OpenTurnIfClosed stamps the start of a turn, but only when no turn is already
-// open. Leaving an open turn alone is the whole state machine: a turn keeps the
-// age it was opened at, so a row never moves in the queue while the user works
-// with the agent, and a re-reported state cannot disturb it.
-//
-// It returns true when a turn was opened.
+// OpenTurnIfClosed stamps the start of a turn only when no turn is already
+// open, returning true when one was opened; an open turn keeps its age.
+// Trap: the guard is a TEXT comparison, so the stored encoding must sort in
+// time order within a second — sortableTimeFormat, not RFC3339Nano, whose
+// stripped fractions sorted a settle below its same-second open and silently
+// kept the turn open. Migration 95 rewrote the stored stamps.
 func (s *Store) OpenTurnIfClosed(id string, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stamp := now.UTC().Format(time.RFC3339Nano)
+	stamp := now.UTC().Format(sortableTimeFormat)
 
 	if s.db == nil {
 		if _, ok := s.sessions[id]; !ok {
@@ -44,8 +40,6 @@ func (s *Store) OpenTurnIfClosed(id string, now time.Time) bool {
 		return true
 	}
 
-	// The condition lives in SQL so opening is atomic rather than
-	// read-modify-write.
 	result, err := s.db.Exec(`
 		UPDATE sessions SET turn_opened_at = ?
 		 WHERE id = ? AND (turn_opened_at = '' OR turn_opened_at <= turn_settled_at)`,
@@ -58,9 +52,8 @@ func (s *Store) OpenTurnIfClosed(id string, now time.Time) bool {
 	return err == nil && updated == 1
 }
 
-// SettleTurn closes whatever turn is open, unconditionally. Settling a session
-// that owes nothing is a no-op in effect but still recorded, so a later turn
-// opens against a stamp that is at least this recent.
+// SettleTurn closes whatever turn is open, unconditionally; settling a session
+// that owes nothing is still recorded.
 func (s *Store) SettleTurn(id string, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -76,7 +69,7 @@ func (s *Store) SettleTurn(id string, now time.Time) bool {
 	}
 
 	result, err := s.db.Exec(`UPDATE sessions SET turn_settled_at = ? WHERE id = ?`,
-		now.UTC().Format(time.RFC3339Nano), id)
+		now.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SettleTurn: failed for session %s: %v", id, err)
 		return false
@@ -85,17 +78,10 @@ func (s *Store) SettleTurn(id string, now time.Time) bool {
 	return err == nil && updated == 1
 }
 
-// SnoozeTurn defers a session until `until`: it closes whatever turn is open and
-// records the deadline in the same write.
-//
-// The two halves are one statement on purpose. A snooze that stamped the
-// deadline without settling would leave a turn open *and* suppressed — a row in
-// the queue that no state change can ever move — and the window in which that is
-// true is exactly the window a broadcast can land in.
-//
-// A deadline already in the past is stored as given rather than rejected. The
-// daemon's wake path fires immediately on it, which is what makes a snooze that
-// lapsed while the daemon was down behave like one that lapsed while it was up.
+// SnoozeTurn defers a session until `until`, settling the open turn and
+// recording the deadline in ONE statement — split, a broadcast could observe a
+// turn both open and suppressed. A past deadline is stored as given; the wake
+// path fires immediately on it.
 func (s *Store) SnoozeTurn(id string, until, now time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -113,7 +99,7 @@ func (s *Store) SnoozeTurn(id string, until, now time.Time) bool {
 
 	result, err := s.db.Exec(
 		`UPDATE sessions SET turn_settled_at = ?, turn_snoozed_until = ? WHERE id = ?`,
-		now.UTC().Format(time.RFC3339Nano), until.UTC().Format(time.RFC3339Nano), id)
+		now.UTC().Format(sortableTimeFormat), until.UTC().Format(sortableTimeFormat), id)
 	if err != nil {
 		log.Printf("[store] SnoozeTurn: failed for session %s: %v", id, err)
 		return false
@@ -122,12 +108,8 @@ func (s *Store) SnoozeTurn(id string, until, now time.Time) bool {
 	return err == nil && updated == 1
 }
 
-// WakeTurn clears a session's snooze without opening anything. Whether a turn
-// then opens is the daemon's call — it depends on the state the agent is in at
-// that instant — so this stays the narrow write.
-//
-// It reports whether a snooze was actually cleared, which is what lets the
-// caller stay quiet about a wake for a session that was not snoozed.
+// WakeTurn clears a session's snooze without opening anything — whether a turn
+// then opens is the daemon's call. Reports whether a snooze was cleared.
 func (s *Store) WakeTurn(id string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,29 +134,22 @@ func (s *Store) WakeTurn(id string) bool {
 	return err == nil && updated == 1
 }
 
-// WakeTurnAt clears a session's snooze only if the deadline it holds is exactly
-// the one given. It is what a fired timer uses instead of WakeTurn.
-//
-// A timer proves its identity against the daemon's map, but that map says
-// nothing about the store: a snooze written after the timer expired and before
-// it finished waking has already replaced the deadline, and an unconditional
-// clear would cash a promise the user had just replaced with a later one. The
-// stored deadline is the record of which snooze is current, so the clear is
-// conditioned on it.
-//
-// It reports whether the snooze it was told to end was still the live one.
+// WakeTurnAt clears a snooze only if the stored deadline is exactly the one
+// given — a fired timer uses this instead of WakeTurn, so a snooze re-written
+// while the timer was waking is not clobbered. Reports whether the snooze it
+// was told to end was still the live one.
 func (s *Store) WakeTurnAt(id string, deadline time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	stamp := deadline.UTC().Format(time.RFC3339Nano)
+	stamp := deadline.UTC().Format(sortableTimeFormat)
 
 	if s.db == nil {
 		current, ok := s.turnStamps[id]
 		if !ok || current.SnoozedUntil.IsZero() {
 			return false
 		}
-		if current.SnoozedUntil.UTC().Format(time.RFC3339Nano) != stamp {
+		if current.SnoozedUntil.UTC().Format(sortableTimeFormat) != stamp {
 			return false
 		}
 		current.SnoozedUntil = time.Time{}
@@ -192,9 +167,8 @@ func (s *Store) WakeTurnAt(id string, deadline time.Time) bool {
 	return err == nil && updated == 1
 }
 
-// SnoozedSessions is every live snooze, by session id. The daemon reads it once
-// at start-up to rebuild its wake timers, which is the only thing that makes a
-// snooze survive a restart — the timers themselves are in memory.
+// SnoozedSessions is every live snooze, by session id; the daemon reads it at
+// start-up to rebuild its in-memory wake timers.
 func (s *Store) SnoozedSessions() map[string]time.Time {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -229,8 +203,7 @@ func (s *Store) SnoozedSessions() map[string]time.Time {
 	return snoozed
 }
 
-// TurnStamps reads one session's stamps. Zero values mean no turn has ever
-// opened, which reads as owing nothing.
+// TurnStamps reads one session's stamps; zero values mean no turn ever opened.
 func (s *Store) TurnStamps(id string) TurnStamps {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -263,13 +236,6 @@ func (s *Store) setTurnStampsLocked(id string, stamps TurnStamps) {
 	s.turnStamps[id] = stamps
 }
 
-func parseTurnStamp(value string) time.Time {
-	if value == "" {
-		return time.Time{}
-	}
-	parsed, err := time.Parse(time.RFC3339Nano, value)
-	if err != nil {
-		return time.Time{}
-	}
-	return parsed
-}
+// parseTurnStamp decodes any RFC3339 spelling (pre-migration-95 stamps
+// included), yielding zero time for ” and anything unreadable.
+func parseTurnStamp(value string) time.Time { return parseStoreTime(value) }

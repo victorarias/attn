@@ -606,6 +606,159 @@ describe('LocationPicker', () => {
     });
   });
 
+  // A repo is habitually branched or habitually not, so the picker remembers the
+  // last destination chosen for it and opens there next time.
+  describe('remembered repo destination', () => {
+    const repoRoot = '/home/remote/projects/exsin';
+    const destinationKey = `new_session_destination_local_${repoRoot}`;
+
+    const inspectRepoRoot = () => vi.fn(async () => ({
+      success: true,
+      inspection: {
+        input_path: '~/projects/exsin',
+        resolved_path: repoRoot,
+        home_path: '/home/remote',
+        exists: true,
+        is_directory: true,
+        repo_root: repoRoot,
+      },
+    }));
+    const repoInfoOf = () => vi.fn(async () => ({ success: true, info: buildRepoInfo() }));
+
+    const openChooser = async () => {
+      const input = screen.getByTestId('location-picker-path-input');
+      fireEvent.change(input, { target: { value: '~/projects/exsin' } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(screen.getByTestId('repo-options')).toBeInTheDocument());
+    };
+
+    it('records the main repo when a session is started in the checkout', async () => {
+      const setSetting = vi.fn();
+      const { onSelect } = renderPicker(
+        { onInspectPath: inspectRepoRoot(), onGetRepoInfo: repoInfoOf() },
+        { setSetting },
+      );
+
+      await openChooser();
+      fireEvent.click(screen.getByTestId('repo-option-0'));
+
+      expect(setSetting).toHaveBeenCalledWith(destinationKey, 'main_repo');
+      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined);
+    });
+
+    it('records a new worktree when one is created', async () => {
+      const setSetting = vi.fn();
+      renderPicker(
+        {
+          onInspectPath: inspectRepoRoot(),
+          onGetRepoInfo: repoInfoOf(),
+          onCreateWorktree: vi.fn(async () => ({ success: true, path: '/home/remote/projects/exsin--feat-more' })),
+        },
+        { settings: { [destinationKey]: 'main_repo' }, setSetting },
+      );
+
+      await openChooser();
+      fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'ArrowUp' });
+      fireEvent.change(screen.getByTestId('repo-new-worktree-input'), { target: { value: 'feat-more' } });
+      fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+      await waitFor(() => expect(setSetting).toHaveBeenCalledWith(destinationKey, 'new_worktree'));
+    });
+
+    it('leaves the memory alone when an existing worktree is opened', async () => {
+      const setSetting = vi.fn();
+      const { onSelect } = renderPicker(
+        { onInspectPath: inspectRepoRoot(), onGetRepoInfo: repoInfoOf() },
+        { settings: { [destinationKey]: 'main_repo' }, setSetting },
+      );
+
+      await openChooser();
+      fireEvent.click(screen.getByTestId('repo-option-1'));
+
+      await waitFor(() => {
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-images', 'claude', undefined, false, false, undefined);
+      });
+      expect(setSetting).not.toHaveBeenCalled();
+    });
+
+    it('does not rewrite a choice that already matches what is stored', async () => {
+      const setSetting = vi.fn();
+      renderPicker(
+        { onInspectPath: inspectRepoRoot(), onGetRepoInfo: repoInfoOf() },
+        { settings: { [destinationKey]: 'main_repo' }, setSetting },
+      );
+
+      await openChooser();
+      fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+      expect(setSetting).not.toHaveBeenCalled();
+    });
+
+    it('opens the chooser on the main repo row for a repo remembered as main', async () => {
+      const onCreateWorktree = vi.fn(async () => ({ success: true, path: '/unused' }));
+      const { onSelect } = renderPicker(
+        { onInspectPath: inspectRepoRoot(), onGetRepoInfo: repoInfoOf(), onCreateWorktree },
+        { settings: { [destinationKey]: 'main_repo' } },
+      );
+
+      await openChooser();
+      expect(screen.getByTestId('repo-option-0')).toHaveClass('selected');
+      fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
+
+      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined);
+      expect(onCreateWorktree).not.toHaveBeenCalled();
+    });
+
+    it('scopes the memory to the endpoint, so the same path on a remote is its own repo', async () => {
+      const setSetting = vi.fn();
+      renderPicker(
+        {
+          onInspectPath: vi.fn(async (inputPath: string, endpointId?: string) => ({
+            success: true,
+            inspection: {
+              input_path: inputPath,
+              resolved_path: repoRoot,
+              home_path: '/home/remote',
+              exists: true,
+              is_directory: true,
+              repo_root: repoRoot,
+            },
+            endpoint_id: endpointId,
+          })),
+          onGetRepoInfo: vi.fn(async (_repo: string, endpointId?: string) => ({
+            success: true,
+            info: buildRepoInfo(),
+            endpoint_id: endpointId,
+          })),
+          endpoints: [{
+            id: 'ep-1',
+            name: 'gpu-box',
+            ssh_target: 'ai-sandbox',
+            status: 'connected',
+            enabled: true,
+            capabilities: {
+              protocol_version: '46',
+              agents_available: ['codex'],
+              projects_directory: '/srv/projects',
+            },
+          }],
+        },
+        // Stored for the LOCAL checkout at the same path: the remote must not
+        // read it, and must write under its own key.
+        { settings: { [destinationKey]: 'main_repo' }, setSetting },
+      );
+
+      fireEvent.click(screen.getByRole('radio', { name: /gpu-box/i }));
+      await openChooser();
+
+      expect(screen.getByTestId('repo-new-worktree-input')).toHaveFocus();
+
+      fireEvent.click(screen.getByTestId('repo-option-0'));
+
+      expect(setSetting).toHaveBeenCalledWith(`new_session_destination_endpoint_ep-1_${repoRoot}`, 'main_repo');
+    });
+  });
+
   it('supports dialog-level shortcuts while focus is in the chooser', async () => {
     const onInspectPath = vi.fn(async () => ({
       success: true,

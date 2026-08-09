@@ -15,6 +15,11 @@ interface RepoInfo {
 interface RepoOptionsProps {
   repoInfo: RepoInfo;
   selectedPath?: string;
+  // Where this repo's last session went, remembered by LocationPicker. Only
+  // 'main_repo' changes anything here: it opens the chooser on the main repo
+  // row so Enter reuses the checkout. Absent, or 'new_worktree', keeps the
+  // create form focused.
+  preferredDestination?: 'new_worktree' | 'main_repo';
   onSelectedPathChange: (path: string) => void;
   onSelectMainRepo: () => void;
   onSelectWorktree: (path: string) => void;
@@ -84,14 +89,18 @@ type ForceableError = Error & {
 // the create form is always expanded, pre-named, and focused first — a new
 // worktree off the latest origin/<default> costs a single Enter.
 //
-// The exception is arriving with a specific worktree already selected: that only
-// happens when the typed path resolved to that worktree, which is an explicit
-// "open this one" and must keep Enter meaning "open", not "create".
+// Two things move that first focus onto the destination list instead. Arriving
+// with a specific worktree already selected only happens when the typed path
+// resolved to that worktree, which is an explicit "open this one" and must keep
+// Enter meaning "open", not "create". And a repo whose last session ran in the
+// main checkout (`preferredDestination`) opens on that row, because a repo is
+// habitually branched or habitually not.
 type FocusZone = 'create' | 'destinations';
 
 export const RepoOptions: React.FC<RepoOptionsProps> = ({
   repoInfo,
   selectedPath,
+  preferredDestination,
   onSelectedPathChange,
   onSelectMainRepo,
   onSelectWorktree,
@@ -145,7 +154,7 @@ export const RepoOptions: React.FC<RepoOptionsProps> = ({
   );
 
   const [focusZone, setFocusZone] = useState<FocusZone>(
-    committedDestinationIndex > 0 ? 'destinations' : 'create',
+    committedDestinationIndex > 0 || preferredDestination === 'main_repo' ? 'destinations' : 'create',
   );
   const [focusIndex, setFocusIndex] = useState(committedDestinationIndex);
   // `generatedName` is the last value the generator produced. The field is

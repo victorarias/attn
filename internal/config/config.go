@@ -18,13 +18,8 @@ var binaryName string
 
 func init() {
 	binaryName = filepath.Base(os.Args[0])
-	// Deliberately does NOT call loadConfig() here: package init() runs
-	// before any test's TestMain, so an eager load would hit attnDir()'s
-	// go-test backstop before a package ever gets a chance to set
-	// ATTN_DATA_DIR. Config loading is instead lazy — see
-	// ensureConfigLoaded — triggered by the first call to a function that
-	// actually needs it (DBPath, SocketPath), which by then runs inside a
-	// test body/TestMain, not package init.
+	// No loadConfig() here: package init runs before any TestMain, so an eager
+	// load would trip attnDir()'s go-test backstop. Loading is lazy instead.
 }
 
 // BinaryName returns the name of the running binary (e.g., "attn")
@@ -37,7 +32,6 @@ func SetBinaryName(name string) {
 	binaryName = name
 }
 
-// Config file structure
 type configFile struct {
 	DBPath     string `json:"db_path"`
 	SocketPath string `json:"socket_path"`
@@ -49,14 +43,8 @@ var (
 	configMu     sync.RWMutex
 )
 
-// ensureConfigLoaded performs the first, lazy load of config.json, unless it
-// has already been loaded (by this or an explicit reloadConfig() call).
-// Callers that read loadedConfig (DBPath, SocketPath) must call this before
-// reading it. Lazy rather than init()-time so the first load happens inside
-// a test body/TestMain (after ATTN_DATA_DIR is set) rather than at package
-// init, which runs before any TestMain and would otherwise trip the
-// attnDir() test backstop unconditionally, in every package that merely
-// imports config.
+// ensureConfigLoaded lazily loads config.json on first use. Callers that read
+// loadedConfig (DBPath, SocketPath) must call this first.
 func ensureConfigLoaded() {
 	configMu.RLock()
 	loaded := configLoaded
@@ -71,7 +59,6 @@ func loadConfig() {
 	configMu.Lock()
 	defer configMu.Unlock()
 
-	// Reset to empty
 	loadedConfig = configFile{}
 	configLoaded = true
 
@@ -82,7 +69,7 @@ func loadConfig() {
 
 	data, err := os.ReadFile(configPath)
 	if err != nil {
-		return // Config file doesn't exist, use defaults
+		return // missing config file → defaults
 	}
 
 	json.Unmarshal(data, &loadedConfig)
@@ -93,8 +80,8 @@ func reloadConfig() {
 	loadConfig()
 }
 
-// ReloadForTesting reloads configuration from disk. Exported for tests that
-// manipulate ATTN_PROFILE or ATTN_CONFIG_PATH between subtests.
+// ReloadForTesting reloads configuration from disk, for tests that change
+// ATTN_PROFILE or ATTN_CONFIG_PATH between subtests.
 func ReloadForTesting() {
 	loadConfig()
 }
@@ -102,8 +89,7 @@ func ReloadForTesting() {
 var profileNamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,15}$`)
 
 // Profile returns the active profile name (from ATTN_PROFILE), or "" for the
-// default profile. Invalid profile names return "" — callers that need to
-// validate should use ValidateProfile.
+// default profile; invalid names return "" (use ValidateProfile to reject them).
 func Profile() string {
 	raw := strings.TrimSpace(os.Getenv("ATTN_PROFILE"))
 	if raw == "" {
@@ -117,7 +103,6 @@ func Profile() string {
 }
 
 // ValidateProfile returns an error if ATTN_PROFILE is set to an invalid name.
-// Use this from CLI entry points to fail loudly on typos.
 func ValidateProfile() error {
 	raw := os.Getenv("ATTN_PROFILE")
 	if err := ValidateProfileName(raw); err != nil {
@@ -135,20 +120,13 @@ func ProfileLabel() string {
 }
 
 // DeepLinkScheme returns the macOS URL scheme the running profile's .app is
-// registered under: default → "attn", dev → "attn-dev", agent7 → "attn-agent7".
-// It is the per-profile authority (DeepLinkSchemeForProfile) applied to the
-// active profile, so the scheme a profile's bundle registers at build time and
-// the scheme the CLI opens at runtime can never diverge.
-//
-// Used by the CLI wrapper so `attn` in a profile-scoped shell opens that
-// profile's app, never another profile's.
+// registered under (DeepLinkSchemeForProfile applied to the active profile).
 func DeepLinkScheme() string {
 	return DeepLinkSchemeForProfile(Profile())
 }
 
-// normalizeProfileForDerivation lowercases/trims a profile name and maps the
-// literal "default" and any invalid name to "" so every per-profile derivation
-// helper (bundle id, app name, ports) shares exactly one rule.
+// normalizeProfileForDerivation lowercases/trims and maps "default" and any
+// invalid name to "" — the single rule shared by all per-profile derivations.
 func normalizeProfileForDerivation(profile string) string {
 	p := strings.ToLower(strings.TrimSpace(profile))
 	if p == "" || p == "default" || !profileNamePattern.MatchString(p) {
@@ -157,11 +135,9 @@ func normalizeProfileForDerivation(profile string) string {
 	return p
 }
 
-// BundleIdentifierForProfile returns the macOS bundle identifier for a profile:
-// default → com.attn.manager, dev → com.attn.manager.dev, agent7 →
-// com.attn.manager.agent7. Single source of truth — the Makefile, Rust build,
-// and real-app harness all derive from this (via `attn profile resolve`) instead
-// of re-encoding the mapping.
+// BundleIdentifierForProfile returns the macOS bundle identifier for a profile
+// (com.attn.manager[.<profile>]). Single source of truth: Makefile, Rust build,
+// and harness derive from this via `attn profile resolve`.
 func BundleIdentifierForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {
@@ -171,8 +147,7 @@ func BundleIdentifierForProfile(profile string) string {
 }
 
 // AppNameForProfile returns the .app bundle folder name (without ".app") for a
-// profile: default → attn, dev → attn-dev, agent7 → attn-agent7. Must match the
-// Tauri productName the build produces.
+// profile: attn, or attn-<profile>. Must match the Tauri productName.
 func AppNameForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {
@@ -192,11 +167,8 @@ func AppPathForProfile(profile string) string {
 }
 
 // DeepLinkSchemeForProfile returns the macOS URL scheme a profile's .app
-// registers: default → attn, dev → attn-dev, agent7 → attn-agent7. Each profile
-// bundle registers a distinct scheme so macOS never cross-routes a spawn deep
-// link to the wrong app. The per-profile build (`make install PROFILE=<name>`)
-// bakes this scheme into the bundle, and DeepLinkScheme() reports it at runtime,
-// so the registered and opened schemes are derived from this one function.
+// registers (attn, or attn-<profile>): a distinct scheme per bundle so macOS
+// never cross-routes a spawn deep link to the wrong app.
 func DeepLinkSchemeForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {
@@ -207,8 +179,6 @@ func DeepLinkSchemeForProfile(profile string) string {
 
 // ValidateProfileName validates a profile name against the same rules
 // Profile()/ValidateProfile() apply, without consulting the environment.
-// Use this when you have a profile name from a non-env source (e.g. a
-// CLI argument) and want to reuse the validation logic.
 func ValidateProfileName(name string) error {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
@@ -221,25 +191,10 @@ func ValidateProfileName(name string) error {
 	return nil
 }
 
-// NormalizeProfileName validates and returns the canonical profile name.
-// Use this at every persistence/wire boundary.
-//
-// Two normalization rules:
-//
-//  1. Lowercase + trim, so the value the remote daemon sees in
-//     $ATTN_PROFILE matches the value stored in the local DB — Profile()
-//     on the remote lowercases, so writing a mixed-case form here would
-//     split data dirs (~/.attn-DEV referenced in scripts vs ~/.attn-dev
-//     written by the daemon).
-//
-//  2. The literal "default" maps to "". WSPortForProfile and
-//     DataDirForProfile already treat "default" as the default profile;
-//     hub helpers (remoteBinaryName, ATTN_PROFILE export, log/data dir
-//     scripts) do not. Letting "default" reach those would build
-//     ~/.local/bin/attn-default and ~/.attn-default/ on the remote while
-//     reusing port 9849 — colliding with any real default-profile daemon
-//     on the same host. Canonicalizing here keeps every downstream code
-//     path on a single representation of "the default profile".
+// NormalizeProfileName validates and returns the canonical profile name; use
+// it at every persistence/wire boundary. Lowercase+trim (a mixed-case form
+// would split data dirs on the remote), and the literal "default" maps to ""
+// (letting it through would build ~/.attn-default while reusing port 9849).
 func NormalizeProfileName(name string) (string, error) {
 	if err := ValidateProfileName(name); err != nil {
 		return "", err
@@ -251,16 +206,9 @@ func NormalizeProfileName(name string) (string, error) {
 	return canonical, nil
 }
 
-// attnDir returns the base directory for attn files. This is the single
-// chokepoint every derived path (socket, DB, plugins, logs, PID, workers,
-// ...) funnels through, so ATTN_DATA_DIR and the test backstop below only
-// need to live in one place.
-//
-// Precedence:
-//  1. ATTN_DATA_DIR env var, if set and non-empty — highest precedence,
-//     above ATTN_PROFILE derivation. Returned verbatim (filepath.Clean'd).
-//  2. Profile-aware default: ~/.attn, or ~/.attn-<profile> for a named
-//     profile.
+// attnDir returns the base directory for attn files — the single chokepoint
+// every derived path funnels through, so ATTN_DATA_DIR (highest precedence,
+// above profile derivation) and the test backstop live in one place.
 func attnDir() string {
 	if override := strings.TrimSpace(os.Getenv("ATTN_DATA_DIR")); override != "" {
 		return filepath.Clean(override)
@@ -269,20 +217,11 @@ func attnDir() string {
 	return defaultAttnDir(Profile())
 }
 
-// requireExplicitDataDirUnderTest panics if called from a test binary
-// (testing.Testing()) without ATTN_DATA_DIR set. This is the backstop for
-// the 2026-07-18 incident where a daemon test resolved config.DataDir()
-// straight to the real ~/.attn and destroyed the production database.
-//
-// It is a presence check only — no path comparison, no HOME inspection —
-// so it can't be fooled by symlinks or unusual HOMEs, and it catches every
-// package (including ones that don't exist yet) that forgets to scope its
-// data dir.
-//
-// If you hit this panic: set ATTN_DATA_DIR to a temp dir, either in a
-// package TestMain (os.Setenv, so it applies to the whole package) or in an
-// individual test via t.Setenv for extra per-test isolation. Never redirect
-// HOME to work around this — see docs/plans/2026-07-18-db-loss-mitigation.md.
+// requireExplicitDataDirUnderTest panics if a test binary resolves the data
+// dir without ATTN_DATA_DIR set — a presence-only check (immune to symlinks
+// and odd HOMEs) backstopping the 2026-07-18 production-DB loss. Fix by
+// setting ATTN_DATA_DIR to a temp dir; never redirect HOME — see
+// docs/plans/2026-07-18-db-loss-mitigation.md.
 func requireExplicitDataDirUnderTest() {
 	if testing.Testing() && strings.TrimSpace(os.Getenv("ATTN_DATA_DIR")) == "" {
 		panic("config: ATTN_DATA_DIR is not set under go test — tests must never resolve the real data dir. " +
@@ -291,30 +230,13 @@ func requireExplicitDataDirUnderTest() {
 	}
 }
 
-// ScopeTestEnvironment sets ATTN_DATA_DIR to dataDir and clears
-// ATTN_DB_PATH, ATTN_SOCKET_PATH, ATTN_CONFIG_PATH, and ATTN_PLUGIN_DIR.
-// Call it from a package TestMain (or an individual test) instead of
-// setting ATTN_DATA_DIR directly.
-//
-// Why clear the other four: DBPath, SocketPath, PluginDir, and the
-// config-file path all check their own env-var override before ever
-// reaching the attnDir() chokepoint, so ATTN_DATA_DIR alone does not bound
-// them. A developer's shell can carry an inherited ATTN_DB_PATH pointing at
-// the real ~/.attn/attn.db (e.g. from a scoped profile) even while
-// ATTN_DATA_DIR is set to a temp dir for the current test run; without this
-// clearing, that inherited override would still route test I/O at the real
-// database. This is the same incident class documented in
-// docs/plans/2026-07-18-db-loss-mitigation.md, one step removed: the
-// backstop in requireExplicitDataDirUnderTest only guards attnDir() itself,
-// not these four overrides that sit above it in precedence.
-//
-// It does not touch HOME or ATTN_PROFILE: ATTN_DATA_DIR already outranks
-// profile derivation, and HOME is off-limits for test scoping (see the
-// Decisions section of the plan above).
-//
-// Test-only: panics if called outside testing.Testing(), since it mutates
-// process-global environment and must never be reachable from a production
-// binary.
+// ScopeTestEnvironment sets ATTN_DATA_DIR to dataDir and clears ATTN_DB_PATH,
+// ATTN_SOCKET_PATH, ATTN_CONFIG_PATH, and ATTN_PLUGIN_DIR; call it from a
+// package TestMain instead of setting ATTN_DATA_DIR directly. Those four
+// overrides outrank the attnDir() chokepoint, so an inherited one could still
+// route test I/O at the real database — same incident class as
+// docs/plans/2026-07-18-db-loss-mitigation.md. Test-only: panics outside
+// testing.Testing().
 func ScopeTestEnvironment(dataDir string) {
 	if !testing.Testing() {
 		panic("config.ScopeTestEnvironment is test-only")
@@ -327,10 +249,7 @@ func ScopeTestEnvironment(dataDir string) {
 }
 
 // defaultAttnDir computes the profile-aware default data dir from the real
-// $HOME, ignoring ATTN_DATA_DIR and the test backstop entirely. It is a pure
-// function of (HOME, profile) with no I/O, so it's safe to call directly
-// from tests that want to assert the default-derivation formula without
-// tripping requireExplicitDataDirUnderTest.
+// $HOME, ignoring ATTN_DATA_DIR and the test backstop entirely.
 func defaultAttnDir(profile string) string {
 	home, err := os.UserHomeDir()
 	base := "/tmp/.attn"
@@ -357,16 +276,10 @@ func PluginDir() string {
 	return filepath.Join(attnDir(), "plugins")
 }
 
-// DataDirForProfile computes the canonical data directory for a given
-// profile name (without reading ATTN_PROFILE). Pass "" for the default
-// profile. Callers use this to probe whether the *other* profile's
-// daemon is running, for friendlier error messages.
-//
-// This function deliberately bypasses the attnDir() chokepoint and therefore
-// does not honor ATTN_DATA_DIR overrides or the go-test backstop. The
-// *ForProfile helpers must probe other profiles' directories for cross-profile
-// error messages and must not honor the current process's ATTN_DATA_DIR override.
-// Tests must never write through this path.
+// DataDirForProfile computes the canonical data directory for a profile name
+// ("" for default), without reading ATTN_PROFILE. Deliberately bypasses the
+// attnDir() chokepoint — no ATTN_DATA_DIR override, no go-test backstop — so
+// cross-profile probing works; tests must never write through this path.
 func DataDirForProfile(profile string) string {
 	home, err := os.UserHomeDir()
 	base := "/tmp/.attn"
@@ -383,27 +296,19 @@ func DataDirForProfile(profile string) string {
 	return base + "-" + p
 }
 
-// SocketPathForProfile returns the default socket path for a given profile
-// name, independent of the current process's ATTN_PROFILE. Used for
-// cross-profile probing in error messages; does not consult env overrides
-// or the config file.
-//
-// This function deliberately bypasses the attnDir() chokepoint and therefore
-// does not honor ATTN_DATA_DIR overrides or the go-test backstop. It must not
-// honor the current process's override. Tests must never write through this path.
+// SocketPathForProfile returns the default socket path for a profile name.
+// Same chokepoint bypass as DataDirForProfile; tests must never write here.
 func SocketPathForProfile(profile string) string {
 	return filepath.Join(DataDirForProfile(profile), "attn.sock")
 }
 
-// DBPath returns the SQLite database path
-// Priority: ATTN_DB_PATH env var > config file > default
+// DBPath returns the SQLite database path.
+// Priority: ATTN_DB_PATH env var > config file > default.
 func DBPath() string {
-	// 1. Environment variable (highest priority)
 	if envPath := os.Getenv("ATTN_DB_PATH"); envPath != "" {
 		return envPath
 	}
 
-	// 2. Config file
 	ensureConfigLoaded()
 	configMu.RLock()
 	configPath := loadedConfig.DBPath
@@ -412,19 +317,16 @@ func DBPath() string {
 		return configPath
 	}
 
-	// 3. Default
 	return filepath.Join(attnDir(), "attn.db")
 }
 
-// SocketPath returns the unix socket path
-// Priority: ATTN_SOCKET_PATH env var > config file > default
+// SocketPath returns the unix socket path.
+// Priority: ATTN_SOCKET_PATH env var > config file > default.
 func SocketPath() string {
-	// 1. Environment variable (highest priority)
 	if envPath := os.Getenv("ATTN_SOCKET_PATH"); envPath != "" {
 		return envPath
 	}
 
-	// 2. Config file
 	ensureConfigLoaded()
 	configMu.RLock()
 	configPath := loadedConfig.SocketPath
@@ -433,16 +335,12 @@ func SocketPath() string {
 		return configPath
 	}
 
-	// 3. Default
 	return filepath.Join(attnDir(), "attn.sock")
 }
 
-// ValidateDaemonIsolation rejects daemon configurations that split the
-// runtime root (socket/PID/workers) away from the active profile's data dir
-// while still pointing at that profile's default durable store.
-//
-// That combination lets an auxiliary daemon reconcile the shared session DB
-// against a different worker registry and mistakenly reap live sessions.
+// ValidateDaemonIsolation rejects configurations whose runtime root
+// (socket/PID/workers) is split from the profile's data dir while still using
+// its default DB — an auxiliary daemon on that combination can reap live sessions.
 func ValidateDaemonIsolation(socketPath string) error {
 	socketDir, err := comparableDaemonIsolationPath(filepath.Dir(strings.TrimSpace(socketPath)))
 	if err != nil {
@@ -480,11 +378,9 @@ func comparableDaemonIsolationPath(path string) (string, error) {
 	return CanonicalRuntimePath(path)
 }
 
-// CanonicalRuntimePath returns one absolute representation of a runtime path.
-// It resolves symlinks through the deepest existing ancestor, so a not-yet-
-// created socket or database below a symlinked data directory still compares by
-// its real location. CLI/daemon routing checks must use this instead of comparing
-// raw environment or config strings, which may be relative to different CWDs.
+// CanonicalRuntimePath returns one absolute representation of a runtime path,
+// resolving symlinks through the deepest existing ancestor. Routing checks must
+// compare through this, never raw env/config strings (which may be CWD-relative).
 func CanonicalRuntimePath(path string) (string, error) {
 	trimmed := strings.TrimSpace(path)
 	if trimmed == "" {
@@ -519,10 +415,7 @@ func CanonicalRuntimePath(path string) (string, error) {
 }
 
 // StatePath returns the legacy state file path (for migration/cleanup).
-//
-// This function deliberately bypasses the attnDir() chokepoint and therefore
-// does not honor ATTN_DATA_DIR overrides or the go-test backstop. Tests must
-// never write through this path.
+// Bypasses the attnDir() chokepoint; tests must never write through this path.
 func StatePath() string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -535,12 +428,9 @@ func StatePath() string {
 	return filepath.Join(home, "."+binaryName+"-state"+suffix+".json")
 }
 
-// AppSupportDirForProfile returns the macOS app-support directory a profile's
-// frontend writes into: ~/Library/Application Support/<bundle identifier>.
-// This mirrors Tauri's BaseDirectory.AppLocalData resolution on macOS, so it
-// is the same directory the frontend's disk-based debug logs (see
-// app/src/utils/terminalDiagnosticsLog.ts) land in. macOS only, matching the
-// rest of this package's platform scope.
+// AppSupportDirForProfile returns ~/Library/Application Support/<bundle id> —
+// mirrors Tauri's BaseDirectory.AppLocalData resolution on macOS, where the
+// frontend's disk-based debug logs land.
 func AppSupportDirForProfile(profile string) string {
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -572,10 +462,8 @@ func WSPort() string {
 	return WSPortForProfile(Profile())
 }
 
-// WSPortForProfile returns the default WebSocket port for a given profile name,
-// independent of the current process's ATTN_PROFILE / ATTN_WS_PORT. Pass "" for
-// the default profile. Used by the hub to compute the right port to talk to a
-// profile-scoped remote daemon.
+// WSPortForProfile returns the default WebSocket port for a profile name ("" for
+// default), independent of the current process's ATTN_PROFILE / ATTN_WS_PORT.
 func WSPortForProfile(profile string) string {
 	p := strings.ToLower(strings.TrimSpace(profile))
 	switch p {
@@ -591,8 +479,8 @@ func WSPortForProfile(profile string) string {
 	}
 }
 
-// profileFNV hashes a profile name with FNV-1a (32-bit). Shared by every
-// per-profile port derivation so the algorithm lives in exactly one place.
+// profileFNV hashes a profile name with FNV-1a (32-bit), shared by every
+// per-profile port derivation.
 func profileFNV(profile string) uint32 {
 	h := fnv.New32a()
 	h.Write([]byte(profile))
@@ -606,11 +494,9 @@ func derivedProfilePort(profile string) string {
 	return fmt.Sprintf("%d", port)
 }
 
-// E2EDaemonPortForProfile returns the throwaway-daemon WS port the Playwright
-// e2e harness should use for a profile. Default → 19849 (unchanged). Named
-// profiles hash into [30000,30999] — disjoint from prod 9849, dev 29849, the
-// real-profile band [20000,29848], and Vite 1420/1421 — so an e2e daemon never
-// collides with a *real* daemon of the same profile.
+// E2EDaemonPortForProfile returns the e2e-harness throwaway-daemon WS port:
+// default → 19849, named profiles hash into [30000,30999] — disjoint from prod
+// 9849, dev 29849, the real-profile band [20000,29848], and Vite 1420/1421.
 func E2EDaemonPortForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {
@@ -619,9 +505,8 @@ func E2EDaemonPortForProfile(profile string) string {
 	return fmt.Sprintf("%d", 30000+int(profileFNV(p)%1000))
 }
 
-// E2EVitePortForProfile returns the Vite dev-server port the e2e harness should
-// use for a profile. Default → 1421 (unchanged). Named profiles hash into
-// [31000,31999]. strictPort makes a rare cross-profile collision fail loudly.
+// E2EVitePortForProfile returns the e2e Vite dev-server port: default → 1421,
+// named profiles hash into [31000,31999]; strictPort makes collisions fail loudly.
 func E2EVitePortForProfile(profile string) string {
 	p := normalizeProfileForDerivation(profile)
 	if p == "" {
@@ -696,9 +581,8 @@ func DebugLevel() int {
 const DefaultPprofPort = 6060
 
 // PprofAddr reports whether the opt-in diagnostics endpoint (pprof + expvar) is
-// enabled and, if so, the loopback address to bind. It is strictly off unless
-// ATTN_PPROF is set, and always binds 127.0.0.1 so it adds no remote attack
-// surface (any host in the value is ignored on purpose).
+// enabled and the loopback address to bind. Always 127.0.0.1 — any host in the
+// value is ignored on purpose.
 //
 //	unset / "0" / "off" / "false" / "no" → disabled
 //	"1" / "on" / "true" / "yes"          → enabled on DefaultPprofPort
@@ -714,8 +598,7 @@ func PprofAddr() (addr string, enabled bool) {
 	case "1", "on", "true", "yes":
 		return fmt.Sprintf("127.0.0.1:%d", DefaultPprofPort), true
 	}
-	// Accept "host:port", ":port", or a bare port; ignore the host and force
-	// loopback so the endpoint can never be exposed off the machine.
+	// Force loopback so the endpoint can never be exposed off the machine.
 	portPart := raw
 	if i := strings.LastIndex(portPart, ":"); i >= 0 {
 		portPart = portPart[i+1:]

@@ -22,11 +22,17 @@ func annotationsGet(t *testing.T, d *Daemon, sessionID string) protocol.SessionA
 
 func annotationsSave(t *testing.T, d *Daemon, sessionID string, generation int, annotations []protocol.SessionAnnotation) protocol.SessionAnnotationsSaveResultMessage {
 	t.Helper()
+	return annotationsSaveWithNote(t, d, sessionID, generation, annotations, "")
+}
+
+func annotationsSaveWithNote(t *testing.T, d *Daemon, sessionID string, generation int, annotations []protocol.SessionAnnotation, note string) protocol.SessionAnnotationsSaveResultMessage {
+	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleSessionAnnotationsSave(client, &protocol.SessionAnnotationsSaveMessage{
 		Cmd:         protocol.CmdSessionAnnotationsSave,
 		SessionID:   sessionID,
 		Annotations: annotations,
+		Note:        protocol.Ptr(note),
 		Generation:  generation,
 		RequestID:   "req-save",
 	})
@@ -191,5 +197,51 @@ func TestSessionAnnotations_DroppedWithTheirSession(t *testing.T) {
 	}
 	if result.Generation != 0 {
 		t.Errorf("generation = %d, want a clean slate", result.Generation)
+	}
+}
+
+func TestSessionAnnotations_NoteSurvivesTheSaveWithTheMarks(t *testing.T) {
+	// The note is drafted alongside the marks and belongs to the same draft, so
+	// it comes back from the same get the marks do.
+	d := annotationDaemon(t)
+
+	result := annotationsSaveWithNote(t, d, "session-1", 1,
+		[]protocol.SessionAnnotation{annotation("a1", "msg", "marked")}, "Split this into two PRs.")
+	if !result.Success {
+		t.Fatalf("save failed: %v", protocol.Deref(result.Error))
+	}
+
+	stored := annotationsGet(t, d, "session-1")
+	if protocol.Deref(stored.Note) != "Split this into two PRs." {
+		t.Errorf("note = %q, want the saved note", protocol.Deref(stored.Note))
+	}
+}
+
+func TestSessionAnnotations_NoNoteIsAbsentNotEmpty(t *testing.T) {
+	// An older client sends no note at all; the field stays off the wire so
+	// nothing downstream has to tell "" apart from "not set".
+	d := annotationDaemon(t)
+	annotationsSave(t, d, "session-1", 1, []protocol.SessionAnnotation{annotation("a1", "msg", "marked")})
+
+	stored := annotationsGet(t, d, "session-1")
+	if stored.Note != nil {
+		t.Errorf("note = %q, want absent", protocol.Deref(stored.Note))
+	}
+}
+
+func TestSessionAnnotations_ClearTakesTheNoteWithTheMarks(t *testing.T) {
+	// Clear is what a send does. A note left behind is an instruction already
+	// delivered, waiting to be delivered again.
+	d := annotationDaemon(t)
+	annotationsSaveWithNote(t, d, "session-1", 1,
+		[]protocol.SessionAnnotation{annotation("a1", "msg", "marked")}, "Split this into two PRs.")
+
+	if cleared := annotationsClear(t, d, "session-1", 2); !cleared.Success {
+		t.Fatalf("clear failed: %v", protocol.Deref(cleared.Error))
+	}
+
+	stored := annotationsGet(t, d, "session-1")
+	if stored.Note != nil {
+		t.Errorf("note = %q, want it cleared with the marks", protocol.Deref(stored.Note))
 	}
 }

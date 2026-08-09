@@ -16,13 +16,16 @@ func envHasCap(env []string) bool {
 	return false
 }
 
-// --- Chief (interactive) cap: BuildEnv / BuildCommand emission ---
+// --- Interactive cap: BuildEnv / BuildCommand emission ---
 
-// The chief cap rides SpawnOpts.AutoCompactWindow into the launch. Claude emits
-// the CLAUDE_CODE_AUTO_COMPACT_WINDOW env var; codex emits the
-// model_auto_compact_token_limit config override. Both gate on the chief branch
-// (NotebookRoot set) so delegated interactive agents are never capped.
-func TestClaudeBuildEnv_ChiefContextWindowCap(t *testing.T) {
+// The cap rides SpawnOpts.AutoCompactWindow into the launch. Claude emits the
+// CLAUDE_CODE_AUTO_COMPACT_WINDOW env var; codex emits the
+// model_auto_compact_token_limit config override. The daemon owns the policy
+// of who gets a cap (chief_context_window_cap on chief launches,
+// default_context_window_cap_<agent> on every other launch — see
+// launchContextWindowCap), so the drivers apply whatever it resolved on every
+// launch shape rather than re-gating on the chief branch.
+func TestClaudeBuildEnv_ContextWindowCap(t *testing.T) {
 	t.Run("chief launch emits the cap", func(t *testing.T) {
 		env := (&Claude{}).BuildEnv(SpawnOpts{NotebookRoot: "/nb", AutoCompactWindow: 200000})
 		if !slices.Contains(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW=200000") {
@@ -30,24 +33,28 @@ func TestClaudeBuildEnv_ChiefContextWindowCap(t *testing.T) {
 		}
 	})
 
-	t.Run("delegated launch is never capped", func(t *testing.T) {
+	t.Run("delegated launch emits the cap too", func(t *testing.T) {
 		// A delegated interactive agent carries WorkspaceContextPath, not
-		// NotebookRoot. Even if AutoCompactWindow is somehow set, it must not leak.
-		env := (&Claude{}).BuildEnv(SpawnOpts{WorkspaceContextPath: "/ws", AutoCompactWindow: 200000})
-		if envHasCap(env) {
-			t.Fatalf("delegated env unexpectedly carried the cap: %#v", env)
+		// NotebookRoot; a resolved cap applies to it all the same.
+		env := (&Claude{}).BuildEnv(SpawnOpts{WorkspaceContextPath: "/ws", AutoCompactWindow: 800000})
+		if !slices.Contains(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW=800000") {
+			t.Fatalf("delegated env missing the cap: %#v", env)
 		}
 	})
 
-	t.Run("chief launch with no cap emits nothing", func(t *testing.T) {
-		env := (&Claude{}).BuildEnv(SpawnOpts{NotebookRoot: "/nb", AutoCompactWindow: 0})
-		if envHasCap(env) {
-			t.Fatalf("uncapped chief env unexpectedly carried the cap: %#v", env)
+	t.Run("no cap emits nothing", func(t *testing.T) {
+		for _, opts := range []SpawnOpts{
+			{NotebookRoot: "/nb", AutoCompactWindow: 0},
+			{WorkspaceContextPath: "/ws", AutoCompactWindow: 0},
+		} {
+			if env := (&Claude{}).BuildEnv(opts); envHasCap(env) {
+				t.Fatalf("uncapped env unexpectedly carried the cap: %#v", env)
+			}
 		}
 	})
 }
 
-func TestCodexBuildCommand_ChiefContextWindowCap(t *testing.T) {
+func TestCodexBuildCommand_ContextWindowCap(t *testing.T) {
 	t.Run("chief launch emits the cap override", func(t *testing.T) {
 		cmd := (&Codex{}).BuildCommand(SpawnOpts{
 			SessionID:         "sess-1",
@@ -61,17 +68,28 @@ func TestCodexBuildCommand_ChiefContextWindowCap(t *testing.T) {
 		}
 	})
 
-	t.Run("delegated launch is never capped", func(t *testing.T) {
+	t.Run("delegated launch emits the cap override too", func(t *testing.T) {
 		cmd := (&Codex{}).BuildCommand(SpawnOpts{
 			SessionID:            "sess-1",
 			CWD:                  "/tmp/project",
 			Executable:           "codex",
 			WorkspaceContextPath: "/ws",
-			AutoCompactWindow:    200000,
+			AutoCompactWindow:    800000,
+		})
+		if !argvHasPair(cmd.Args, "-c", "model_auto_compact_token_limit=800000") {
+			t.Fatalf("delegated codex args missing the cap override: %#v", cmd.Args)
+		}
+	})
+
+	t.Run("no cap emits nothing", func(t *testing.T) {
+		cmd := (&Codex{}).BuildCommand(SpawnOpts{
+			SessionID:  "sess-1",
+			CWD:        "/tmp/project",
+			Executable: "codex",
 		})
 		for _, arg := range cmd.Args {
-			if arg == "model_auto_compact_token_limit=200000" {
-				t.Fatalf("delegated codex args unexpectedly carried the cap: %#v", cmd.Args)
+			if strings.HasPrefix(arg, "model_auto_compact_token_limit=") {
+				t.Fatalf("uncapped codex args unexpectedly carried a cap override: %#v", cmd.Args)
 			}
 		}
 	})

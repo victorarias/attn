@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  AGENTS.md gains a "How changes ship" section: standing merge-on-approval
+  gate with an explicit hold-for-Victor list (epic-to-main merges, moving on
+  from spikes, irreversible user-state changes, one-way doors, production
+  lifecycle), the epic-branch vs direct-to-main criterion, Victor's two
+  experience-testing moments with a staged-checkpoint convention, and
+  protocol bumps / DB migrations named as routine mechanics rather than
+  risks to escalate.

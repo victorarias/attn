@@ -17,9 +17,8 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// runDB routes `attn db <command>`: operator-facing database maintenance that
-// sits alongside the daemon's own automatic rotating backups (BackupNow /
-// backupPreMigration in internal/store).
+// runDB routes `attn db <command>`: operator-facing maintenance beside the
+// daemon's automatic rotating backups (internal/store).
 func runDB() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
 		writeDBHelp(os.Stdout)
@@ -81,39 +80,15 @@ func runDBRestore(args []string) {
 	fmt.Println("start the daemon when ready (e.g. `attn daemon ensure`, or reopen the app)")
 }
 
-// restoreDatabase implements `attn db restore` against explicit paths so it
-// is fully unit-testable against temp dirs: it never resolves config's real
-// data dir itself.
-//
-// source is either "" or "latest" (pick the newest rotating attn-<ts>.db
-// snapshot in backupsDir) or an explicit path to any snapshot file, including
-// a pre-migration one.
-//
-// On success it (a) preserves the existing dbPath by renaming it (and its
-// -wal/-shm sidecars, if any) to dbPath+".pre-restore-<UTC ts>" (a no-op, not
-// an error, if dbPath does not currently exist), then (b) copies (not moves
-// — the source backup remains) the resolved snapshot into place as dbPath.
-// Returns the resolved source path and the preserved-db path (empty if there
-// was nothing to preserve).
-//
-// pidPath is the daemon's pid-file lock (see acquireDaemonLock). The lock is
-// acquired before anything else and held for the entire restore, including
-// staging, preserving, and the final swap — not just probed and released up
-// front. A point-in-time-only probe would leave a window in which a daemon
-// could start (or a second `attn db restore` could run) between the probe
-// and the file swap; holding the lock for the whole critical section closes
-// that window, mirroring how the daemon itself holds the same lock for its
-// entire lifetime (daemon.acquirePIDLock).
-//
-// The live dbPath is only ever mutated after the source has been fully and
-// successfully staged, so a bad source (a directory, an unreadable file, or
-// dbPath itself) is rejected before anything at dbPath is touched. Staging
-// happens into a uniquely-named temp file in dbPath's own directory, which
-// also makes the final swap a same-filesystem os.Rename instead of a
-// copy/truncate directly onto the live path — so the live path is either the
-// fully-old file or the fully-new one, never a partially-written one. If the
-// final swap still fails after a preserve-rename has already happened, the
-// preserved copy is rolled back into place so dbPath is never left missing.
+// restoreDatabase implements `attn db restore` against explicit paths so it is
+// unit-testable. source is ""/"latest" (newest rotating snapshot in backupsDir)
+// or an explicit snapshot path. The pid-file flock is held for the ENTIRE
+// restore — a probe-and-release would leave a window for a daemon or a second
+// restore to start before the swap. The live dbPath is mutated only after the
+// source is fully staged into dbPath's own directory (making the swap an
+// atomic same-filesystem rename); the existing db and sidecars are preserved
+// (renamed, never deleted), and a failed swap rolls the preserved copy back so
+// dbPath is never left missing.
 func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, preservedAs string, err error) {
 	release, err := acquireDaemonLock(pidPath)
 	if err != nil {
@@ -147,9 +122,8 @@ func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, 
 		return "", "", fmt.Errorf("stat existing db %s: %w", dbPath, statErr)
 	}
 
-	// Fully materialize the source before touching the live path at all:
-	// this is what turns a bad source (directory, unreadable file, disk
-	// full mid-copy) into a no-op failure instead of a stranded db.
+	// Stage fully before touching the live path: a bad source is a no-op
+	// failure, never a stranded db.
 	stagedPath, err := stageBackupCopy(srcPath, dbPath)
 	if err != nil {
 		return "", "", fmt.Errorf("stage backup %s: %w", srcPath, err)
@@ -167,8 +141,7 @@ func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, 
 			return "", "", err
 		}
 	} else {
-		// Nothing existed at dbPath to preserve; any stray sidecars are not
-		// tied to a preserved copy, so remove them as before.
+		// Nothing to preserve; stray sidecars are removed.
 		for _, suffix := range []string{"-wal", "-shm"} {
 			_ = os.Remove(dbPath + suffix)
 		}
@@ -176,9 +149,8 @@ func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, 
 
 	if err := os.Rename(stagedPath, dbPath); err != nil {
 		if preservedAs != "" {
-			// The live path is now missing because the preserve-rename
-			// already happened; put the preserved copy back rather than
-			// leaving dbPath gone.
+			// The preserve-rename already happened; put the preserved copy
+			// back rather than leaving dbPath gone.
 			_ = os.Rename(preservedAs, dbPath)
 			for _, suffix := range []string{"-wal", "-shm"} {
 				_ = os.Rename(preservedAs+suffix, dbPath+suffix)
@@ -191,34 +163,18 @@ func restoreDatabase(dbPath, backupsDir, source, pidPath string) (restoredFrom, 
 	return srcPath, preservedAs, nil
 }
 
-// preserveExistingDB renames dbPath (and its -wal/-shm sidecars, if any) to a
-// collision-proof dbPath+".pre-restore-<UTC ts>[-N]" path, never deleting
-// them: they can hold uncheckpointed data that only exists there. SQLite
-// derives sidecar names by appending to the main filename, so renaming both
-// to preservedAs+suffix keeps the preserved copy openable and consistent.
-//
-// The timestamp alone is only second-resolution, so two restores within the
-// same second would otherwise collide; the -N suffix loop makes the chosen
-// name unique regardless of how many restores land in the same second. The
-// loop checks the main file AND both sidecar targets before accepting a
-// candidate — a candidate whose main-file path is free but whose -wal or
-// -shm path is already taken (e.g. from an earlier restore that had no
-// sidecars to preserve, leaving that name's main-file slot free) would
-// otherwise let a later rename silently replace that stray file.
-//
-// If the main-file rename succeeds but a sidecar rename then fails, every
-// earlier move in this call is rolled back (in reverse order) before
-// returning, so a sidecar-only filesystem error never strands dbPath
-// missing; a rollback failure is wrapped alongside the original error
-// instead of being discarded.
+// preserveExistingDB renames dbPath and its -wal/-shm sidecars to a
+// collision-proof dbPath+".pre-restore-<UTC ts>[-N]" — never deleting them,
+// since sidecars can hold uncheckpointed data. The -N loop checks the main
+// file AND both sidecar targets, so a stray sidecar under a free main-file
+// name is never silently replaced. A failed sidecar rename rolls back every
+// earlier move so dbPath is never left missing.
 func preserveExistingDB(dbPath string) (string, error) {
 	return preserveExistingDBAt(dbPath, time.Now, os.Rename)
 }
 
-// preserveExistingDBAt is preserveExistingDB with the clock and the rename
-// operation injected, so tests can force a same-second collision
-// deterministically and force a specific rename in the sequence to fail
-// without relying on real filesystem-permission tricks.
+// preserveExistingDBAt injects the clock and rename so tests can force
+// same-second collisions and mid-sequence rename failures deterministically.
 func preserveExistingDBAt(dbPath string, now func() time.Time, rename func(oldpath, newpath string) error) (preservedAs string, err error) {
 	base := dbPath + ".pre-restore-" + now().UTC().Format("20060102-150405")
 	preservedAs = base
@@ -266,9 +222,8 @@ func preserveExistingDBAt(dbPath string, now func() time.Time, rename func(oldpa
 	return preservedAs, nil
 }
 
-// preserveTargetFree reports whether candidate is available to become a
-// preserve-rename destination: neither the main file nor either -wal/-shm
-// sidecar target may already exist there.
+// preserveTargetFree reports whether candidate is free as a preserve-rename
+// destination: neither the main file nor either sidecar target may exist.
 func preserveTargetFree(candidate string) (bool, error) {
 	for _, suffix := range []string{"", "-wal", "-shm"} {
 		if _, err := os.Stat(candidate + suffix); err == nil {
@@ -280,13 +235,10 @@ func preserveTargetFree(candidate string) (bool, error) {
 	return true, nil
 }
 
-// latestRotatingBackup returns the newest canonical rotating backup
-// (attn-<timestamp>.db) in dir, by lexical (== chronological, fixed-width
-// timestamp) sort. It defers to store.IsRotatingBackupName for the canonical
-// filename check (validated timestamp suffix, not just a prefix/suffix
-// match), so a stray non-canonical attn-*.db file cannot be mistaken for the
-// latest backup. Pre-migration snapshots (attn-premigration-*.db) are
-// excluded — "latest" only ever means the newest routine rotation.
+// latestRotatingBackup returns the newest rotating backup (attn-<timestamp>.db)
+// in dir by lexical (== chronological) sort. store.IsRotatingBackupName
+// validates the name, excluding stray attn-*.db files and pre-migration
+// snapshots — "latest" only ever means the newest routine rotation.
 func latestRotatingBackup(dir string) (string, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -311,16 +263,10 @@ func latestRotatingBackup(dir string) (string, error) {
 	return filepath.Join(dir, names[len(names)-1]), nil
 }
 
-// stageBackupCopy copies src's bytes into a new, uniquely-named temp file in
-// dstPath's own directory (never dstPath itself), preserving src's file
-// mode, and fsyncs it before returning. It never removes src — the backup
-// being restored from is left in place. On any error the temp file is
-// removed and the caller gets no path to clean up.
-//
-// Staging in dstPath's directory (rather than copying straight onto dstPath)
-// is what makes the final move a same-filesystem os.Rename: atomic, and safe
-// to attempt even if the source turns out to be bad, because nothing at
-// dstPath has been touched yet.
+// stageBackupCopy copies src into a uniquely-named, fsynced temp file in
+// dstPath's own directory, preserving src's mode; src is never removed and on
+// error the temp file is. Staging there makes the final move a same-filesystem
+// atomic os.Rename, with nothing at dstPath touched if the source is bad.
 func stageBackupCopy(src, dstPath string) (stagedPath string, err error) {
 	in, err := os.Open(src)
 	if err != nil {
@@ -365,28 +311,15 @@ func stageBackupCopy(src, dstPath string) (stagedPath string, err error) {
 	return tmpPath, nil
 }
 
-// acquireDaemonLock acquires and holds the exclusive advisory flock on
-// pidPath, creating the file if it does not yet exist, and returns a release
-// func the caller must call exactly once (a second call is a no-op) when the
-// held section is over.
+// acquireDaemonLock holds the exclusive advisory flock on pidPath until the
+// returned release is called (a second call is a no-op). Acquiring proves no
+// live daemon owns it — the daemon holds this same lock for its whole lifetime
+// (daemon.acquirePIDLock) — and HOLDING it, not probe-then-release, keeps a
+// daemon or a second caller out for the whole critical section. The lock file
+// is never unlinked, so contenders always meet on the same inode.
 //
-// This mirrors the liveness+ownership technique stopProfileDaemon
-// (profile.go) uses: the daemon holds this same exclusive lock on its pid
-// file for its whole lifetime (daemon.acquirePIDLock), so successfully
-// acquiring it ourselves proves no live daemon owns it — the pid on disk, if
-// any, is stale. Unlike a probe-then-release check, the caller keeps holding
-// the lock (via the returned release func) for as long as it needs mutual
-// exclusion, so a daemon cannot start, and a second caller of
-// acquireDaemonLock cannot proceed, until release is called.
-//
-// The lock file is never unlinked here — only unlocked and closed — so a
-// second acquireDaemonLock always contends on the same inode rather than
-// racing a delete-then-recreate against a concurrent acquirer.
-//
-// flockFn is indirected to syscall.Flock so tests can inject a non-EWOULDBLOCK
-// failure (e.g. standing in for ENOLCK) without needing real OS-level
-// conditions to trigger it — EWOULDBLOCK is the only signal that means a live
-// daemon actually holds the lock.
+// flockFn is indirected so tests can inject a non-EWOULDBLOCK failure; only
+// EWOULDBLOCK means a live daemon actually holds the lock.
 var flockFn = syscall.Flock
 
 func acquireDaemonLock(pidPath string) (release func(), err error) {
@@ -399,19 +332,13 @@ func acquireDaemonLock(pidPath string) (release func(), err error) {
 		if errors.Is(flockErr, syscall.EWOULDBLOCK) {
 			return nil, fmt.Errorf("the attn daemon is running; stop it first (quit the app, or `attn daemon stop`) before restoring the database")
 		}
-		// Any other flock failure means we cannot determine whether a
-		// daemon holds the lock. Fail closed rather than risk racing a
-		// live daemon: never proceed with the restore on an inconclusive
-		// lock result.
+		// Indeterminate flock result: fail closed, never restore over a
+		// possibly live daemon.
 		return nil, fmt.Errorf("cannot determine daemon state: %w", flockErr)
 	}
-	// We now hold the lock, but the pid file may still contain a stale pid
-	// left by the last daemon to hold it. Stamp a sentinel over that content
-	// so a concurrent `attn daemon stop` (daemonctl.Stop), which trusts only
-	// content written by the current holder, never signals that stale pid.
-	// The sentinel is never restored on release — content is only
-	// meaningful while the lock is held, and the next daemon to acquire the
-	// lock overwrites it with its own pid as it always has.
+	// Stamp the sentinel over any stale pid so a concurrent `attn daemon stop`,
+	// which trusts only holder-written content, never signals it. Not restored
+	// on release: content only means anything while the lock is held.
 	if err := lockFile.Truncate(0); err != nil {
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()

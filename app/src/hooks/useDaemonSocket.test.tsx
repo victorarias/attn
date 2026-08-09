@@ -3272,7 +3272,36 @@ describe('useDaemonSocket notebook and annotation events', () => {
         emoji: '❓',
         comment: 'why this?',
       }],
+      // A get that carried no note reads as an empty one: the panel's box has
+      // to be settable either way, and there is nothing for "absent" to mean
+      // that "" does not already say.
+      note: '',
       generation: 7,
+    });
+    unmount();
+  });
+
+  it('carries the draft note back with the marks', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSessionAnnotationsGet('session-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+
+    ws.emit({
+      event: 'session_annotations_get_result',
+      request_id: sent.request_id,
+      session_id: 'session-1',
+      success: true,
+      annotations: [],
+      note: 'Split this into two PRs.',
+      generation: 3,
+    });
+
+    await expect(promise).resolves.toEqual({
+      annotations: [],
+      note: 'Split this into two PRs.',
+      generation: 3,
     });
     unmount();
   });
@@ -3288,12 +3317,13 @@ describe('useDaemonSocket notebook and annotation events', () => {
       quote: 'parser',
       emoji: '❓',
       comment: 'why this?',
-    }], 3);
+    }], 'and land the retry wrapper as is', 3);
     await Promise.resolve();
     const sent = lastSent(ws);
     expect(sent).toMatchObject({
       cmd: 'session_annotations_save',
       session_id: 'session-1',
+      note: 'and land the retry wrapper as is',
       generation: 3,
       annotations: [{
         id: 'anno-1',
@@ -3323,7 +3353,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
     // user as a failure.
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.sendSessionAnnotationsSave('session-1', [], 2);
+    const promise = result.current.sendSessionAnnotationsSave('session-1', [], '', 2);
     await Promise.resolve();
     ws.emit({
       event: 'session_annotations_save_result',
@@ -3341,7 +3371,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('rejects a save the daemon failed for any other reason', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.sendSessionAnnotationsSave('session-1', [], 2);
+    const promise = result.current.sendSessionAnnotationsSave('session-1', [], '', 2);
     await Promise.resolve();
     ws.emit({
       event: 'session_annotations_save_result',

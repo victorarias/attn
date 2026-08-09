@@ -10,69 +10,43 @@ import (
 	"github.com/victorarias/attn/internal/docstore"
 )
 
-// SQLite persistence for the document store. This file is only persistence:
-// what a query means, and the SQL a validated one compiles to, live in
-// internal/docstore, which reaches nothing — the same split internal/bus and
-// bus.go use.
-//
-// ONE TABLE PER COLLECTION. `document_collections` is the registry: one row per
-// declared collection, whose row id mints the name of the table holding its
-// documents (`doc_<id>`). A declared field is an indexed VIRTUAL generated
-// column over the body in that table, so a query reads an index instead of
-// scanning, while the body is still stored and returned byte for byte and
-// declaring a field rewrites no document. The measurement behind the shape is
-// in docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
-//
-// Isolation is structural rather than a check: a collection's documents are the
-// only rows in its table, so there is no read or write here that could reach
-// another namespace even if its predicate were wrong.
-//
-// Every identifier spliced into the SQL below comes from docstore — a table
-// name derived from an integer, a column name derived from a field name that
-// matched a validating pattern. None of it is caller text.
+// SQLite persistence for the document store; query semantics and SQL
+// compilation live in internal/docstore. One table per collection
+// (`doc_<registry-id>`); a declared field is an indexed VIRTUAL generated
+// column over the body. Every identifier spliced into SQL here comes from
+// docstore — derived from an integer or a validated field name, never caller
+// text. Design: docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
 
-// documentColumns is the read projection; body is returned byte for byte. The
-// generated columns are never selected: they exist to be filtered and ordered
-// on, and the body already carries what they compute.
-//
-// rev is in the projection rather than fetched on demand because it is the token
-// a read-modify-write hands back, and a caller that had to ask for it separately
-// would be reading a version it did not read the body of.
+// documentColumns is the read projection; body is returned byte for byte, and
+// generated columns are never selected.
 const documentColumns = `id, body, rev, created_at, updated_at`
 
 // DefineDocumentCollection records a collection's declaration and brings its
-// table into line with it, creating the table on first declaration. Redeclaring
-// is how a collection gains or loses a queryable field: an added field is a new
-// generated column plus its index, a removed one drops both, and a field whose
-// type changed is replaced so its column carries the new affinity. Documents are
-// never rewritten — a VIRTUAL column computes from the body, so it applies to
-// every document already stored the moment it exists.
-//
-// Registry row and DDL commit together. A declaration whose table did not get
-// built, or a table no declaration names, would each be a collection that
-// cannot be queried or cannot be found.
-func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now time.Time) error {
+// table into line with it, creating it on first declaration; registry row and
+// DDL commit together. The bool reports a redeclaration (which has watchers to
+// wake) — only the define's own transaction can tell without racing.
+func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now time.Time) (bool, error) {
 	if s.db == nil {
-		return fmt.Errorf("store: no database")
+		return false, fmt.Errorf("store: no database")
 	}
 	if err := schema.Validate(); err != nil {
-		return err
+		return false, err
 	}
 	fields, err := json.Marshal(schema.Fields)
 	if err != nil {
-		return fmt.Errorf("store: encoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: encoding fields for %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	ts := now.UTC().Format(docstore.TimeFormat)
 
 	tx, err := s.db.Begin()
 	if err != nil {
-		return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
 	existing, table, found, err := readCollectionTx(tx, schema.Namespace, schema.Collection)
 	if err != nil {
-		return err
+		return false, err
 	}
 
 	if !found {
@@ -80,37 +54,35 @@ func (s *Store) DefineDocumentCollection(schema docstore.CollectionSchema, now t
 			`INSERT INTO document_collections (namespace, collection, fields_json, updated_at) VALUES (?, ?, ?, ?)`,
 			schema.Namespace, schema.Collection, string(fields), ts)
 		if err != nil {
-			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		id, err := res.LastInsertId()
 		if err != nil {
-			return fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: defining %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		table = docstore.TableName(id)
 		if err := createCollectionTable(tx, table, schema.Fields); err != nil {
-			return fmt.Errorf("store: creating storage for %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: creating storage for %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 	} else {
 		if err := alterCollectionTable(tx, table, existing.Fields, schema.Fields); err != nil {
-			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 		if _, err := tx.Exec(
 			`UPDATE document_collections SET fields_json = ?, updated_at = ? WHERE namespace = ? AND collection = ?`,
 			string(fields), ts, schema.Namespace, schema.Collection); err != nil {
-			return fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
+			return false, fmt.Errorf("store: redeclaring %s/%s: %w", schema.Namespace, schema.Collection, err)
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("store: committing declaration of %s/%s: %w", schema.Namespace, schema.Collection, err)
+		return false, fmt.Errorf("store: committing declaration of %s/%s: %w", schema.Namespace, schema.Collection, err)
 	}
-	return nil
+	return found, nil
 }
 
 // DocumentCollection returns a collection's declaration with its table filled
-// in. The bool is false with a nil error when the collection was never declared
-// — a caller must tell "no such collection" apart from a read failure, because
-// the first is what every query against an undeclared collection has to report.
+// in; the bool is false with a nil error when it was never declared.
 func (s *Store) DocumentCollection(namespace, collection string) (*docstore.CollectionSchema, bool, error) {
 	if s.db == nil {
 		return nil, false, fmt.Errorf("store: no database")
@@ -123,8 +95,7 @@ func (s *Store) DocumentCollection(namespace, collection string) (*docstore.Coll
 	return &schema, true, nil
 }
 
-// ListDocumentCollections returns every declaration, namespace-major. It is the
-// operator's index of what exists.
+// ListDocumentCollections returns every declaration, namespace-major.
 func (s *Store) ListDocumentCollections() ([]docstore.CollectionSchema, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
@@ -155,10 +126,8 @@ func (s *Store) ListDocumentCollections() ([]docstore.CollectionSchema, error) {
 }
 
 // DeleteDocumentCollection removes a declaration and every document under it,
-// reporting how many documents went. Dropping the table is what returns the
-// space, and it happens in the same transaction as the registry delete: a
-// declaration without its table would leave a collection nothing can query, and
-// a table without its declaration would leave rows nothing can name.
+// reporting how many documents went; table drop and registry delete commit
+// together.
 func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("store: no database")
@@ -194,28 +163,13 @@ func (s *Store) DeleteDocumentCollection(namespace, collection string) (int, err
 	return n, nil
 }
 
-// PutDocument writes a document, creating or fully replacing it, and returns the
-// revision it now has. created_at survives a replacement — it is when the record
-// first appeared, which is what a "newest first" query means by it — while
-// updated_at and rev move on every write.
-//
-// The schema names the table, which is why every caller reads the declaration
-// first: an undeclared collection has no storage, and that has to be an error a
-// caller reports rather than a table appearing by surprise.
-//
-// expected is the caller's assertion about what it is overwriting: nil writes
-// unconditionally, docstore.ExpectAbsent writes only if nothing is there, and a
-// revision writes only if the document is still at it. A failed assertion is a
-// *docstore.ConflictError and nothing is written.
-//
-// THE WRITE ITSELF IS ONE STATEMENT, which is what makes the check atomic: each
-// form below refuses in the same statement that would have written. Reading the
-// revision and then writing would be two, and the whole point of this is the
-// window between them. Whether that statement runs in SQLite's implicit
-// transaction (here) or inside one that also appends a fact
-// (CommitDocumentWrite) changes nothing about the check — the same statement
-// runs either way. The re-read below happens only on the failure path, to say
-// what the write lost to.
+// PutDocument writes a document, creating or fully replacing it, and returns
+// its new revision; created_at survives a replacement. expected: nil writes
+// unconditionally, docstore.ExpectAbsent only if nothing is there, a revision
+// only if the document is still at it — a failed assertion is a
+// *docstore.ConflictError and nothing is written. Each form checks and writes
+// in ONE statement; a separate read-then-write would reopen the race the check
+// exists to close.
 func (s *Store) PutDocument(schema docstore.CollectionSchema, id string, body []byte, now time.Time, expected *int64) (int64, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
@@ -233,7 +187,6 @@ func putDocumentWith(q rowQuerier, schema docstore.CollectionSchema, table, id s
 	)
 	switch {
 	case expected == nil:
-		// Upsert: the insert path starts at FirstRev, the update path advances.
 		stmt = `INSERT INTO ` + table + ` (id, body, rev, created_at, updated_at)
 		        VALUES (?, ?, ?, ?, ?)
 		        ON CONFLICT(id) DO UPDATE SET
@@ -243,17 +196,16 @@ func putDocumentWith(q rowQuerier, schema docstore.CollectionSchema, table, id s
 		        RETURNING rev`
 		args = []any{id, string(body), docstore.FirstRev, ts, ts}
 	case *expected == docstore.ExpectAbsent:
-		// DO NOTHING rather than letting the primary key raise: a conflicting
-		// insert then returns no row, which is the same "no row came back" signal
-		// the conditional update gives, so both refusals arrive one way.
+		// DO NOTHING so a conflicting insert refuses via "no row came back",
+		// the same signal the conditional update gives.
 		stmt = `INSERT INTO ` + table + ` (id, body, rev, created_at, updated_at)
 		        VALUES (?, ?, ?, ?, ?)
 		        ON CONFLICT(id) DO NOTHING
 		        RETURNING rev`
 		args = []any{id, string(body), docstore.FirstRev, ts, ts}
 	default:
-		// No insert path at all: expecting a revision is expecting a document,
-		// so a missing one must be refused rather than created.
+		// No insert path: expecting a revision is expecting a document, so a
+		// missing one is refused rather than created.
 		stmt = `UPDATE ` + table + ` SET body = ?, rev = rev + 1, updated_at = ?
 		        WHERE id = ? AND rev = ?
 		        RETURNING rev`
@@ -262,10 +214,8 @@ func putDocumentWith(q rowQuerier, schema docstore.CollectionSchema, table, id s
 
 	var rev int64
 	err := q.QueryRow(stmt, args...).Scan(&rev)
-	// No row came back is how every refusal arrives — but only an expectation can
-	// refuse one. The unconditional upsert always writes a row, so no row from it
-	// is a broken statement rather than a conflict, and reporting it as one would
-	// tell a caller to retry something that will never succeed.
+	// Only an expectation can refuse: the unconditional upsert always writes a
+	// row, so ErrNoRows from it is a broken statement, not a conflict.
 	if err == sql.ErrNoRows && expected != nil {
 		return 0, documentConflictWith(q, schema, table, id, *expected)
 	}
@@ -296,14 +246,9 @@ func getDocumentWith(q rowQuerier, namespace, collection, table, id string) (*do
 	return doc, true, nil
 }
 
-// DeleteDocument removes a document, reporting whether one was there. The caller
-// needs the difference: a delete that removed nothing must not announce a change
-// that did not happen.
-//
-// expected asserts which version is being removed, the same way PutDocument's
-// does — removing a record on the strength of a body you read is the same
-// lost-update hazard as overwriting one. A revision that no longer matches is a
-// *docstore.ConflictError and nothing is deleted.
+// DeleteDocument removes a document, reporting whether one was there. expected
+// asserts which version is being removed, as in PutDocument; a stale revision
+// is a *docstore.ConflictError and nothing is deleted.
 func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expected *int64) (bool, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
@@ -314,9 +259,8 @@ func (s *Store) DeleteDocument(schema docstore.CollectionSchema, id string, expe
 
 func deleteDocumentWith(x execQuerier, schema docstore.CollectionSchema, table, id string, expected *int64) (bool, error) {
 	if expected != nil && *expected == docstore.ExpectAbsent {
-		// "Delete this if it is not there" is not an assertion a delete can act
-		// on, and silently treating it as unconditional would delete a document
-		// the caller was trying to protect.
+		// Treating "expect absent" as unconditional would delete a document the
+		// caller was trying to protect.
 		return false, fmt.Errorf("store: deleting %s/%s/%s: rev %d means the document must not exist, which a delete cannot expect; pass the revision you read, or none to delete unconditionally",
 			schema.Namespace, schema.Collection, id, docstore.ExpectAbsent)
 	}
@@ -341,14 +285,10 @@ func deleteDocumentWith(x execQuerier, schema docstore.CollectionSchema, table, 
 	return n > 0, nil
 }
 
-// documentConflictWith describes a refused write. It reads the document again to
-// name the revision that won, because "your write was refused" without that is
-// an error a caller cannot act on. A read failure here is not worth losing the
-// conflict over — the refusal is the fact, the revision is the detail — so it
-// degrades to reporting the document as absent.
-//
-// The re-read runs on whatever refused the write, which inside a composite is
-// its transaction: reading around it would read a state the refusal never saw.
+// documentConflictWith describes a refused write, re-reading to name the
+// revision that won. The re-read must run on whatever refused the write —
+// inside a composite, its transaction — or it reads a state the refusal never
+// saw.
 func documentConflictWith(q rowQuerier, schema docstore.CollectionSchema, table, id string, expected int64) error {
 	conflict := &docstore.ConflictError{
 		Namespace: schema.Namespace, Collection: schema.Collection, ID: id, Expected: expected,
@@ -366,8 +306,7 @@ func documentConflictWith(q rowQuerier, schema docstore.CollectionSchema, table,
 }
 
 // DocumentWrite is one document mutation: a put of Body, or a removal when
-// Delete is set. Expected is the caller's assertion about the version being
-// replaced or removed, exactly as PutDocument and DeleteDocument take it.
+// Delete is set. Expected is as in PutDocument and DeleteDocument.
 type DocumentWrite struct {
 	Schema   docstore.CollectionSchema
 	ID       string
@@ -376,13 +315,9 @@ type DocumentWrite struct {
 	Expected *int64
 }
 
-// DocumentWriteResult is what a committed write is worth telling a caller.
-//
-// Changed reports whether the store actually moved, and is what separates a
-// delete that removed a document from one that found nothing there. Seq is the
-// fact's position on the durable log and is 0 exactly when Changed is false —
-// nothing changed, so nothing was announced. Rev is the document's new revision
-// and is 0 for a delete, which has no version to report.
+// DocumentWriteResult reports a committed write: Changed says whether the
+// store moved, Seq is the fact's log position (0 exactly when Changed is
+// false), Rev is the new revision (0 for a delete).
 type DocumentWriteResult struct {
 	Rev     int64
 	Seq     int64
@@ -390,23 +325,10 @@ type DocumentWriteResult struct {
 }
 
 // CommitDocumentWrite writes a document and appends the fact describing it in
-// ONE transaction, and is how every fact-bearing writer reaches the store.
-//
-// The composite exists because the two halves used to be separate commits: a
-// document write landed, and its fact was published afterwards and could fail
-// on its own (the bus logged and carried on). A crash between them left the
-// data changed and the log silent — permanently, since nothing re-derives facts
-// — which is the divergence B-track workflows would trigger on. After this,
-// a fact that cannot be made durable fails the whole write: the caller gets an
-// error and a retry instead of a store nobody was told about.
-//
-// The store stays fact-agnostic. It does not know what `document.changed` means
-// or how a subject is spelled; the caller builds the fact and this appends it.
-//
-// A write that changed nothing appends NO fact and returns no seq: a delete
-// that found nothing, or a refusal, is not a change, and waking every live
-// query on the collection to re-render an identical result set is the cost the
-// conditional write exists to avoid.
+// ONE transaction — a fact that cannot be made durable fails the whole write,
+// so the data and the log cannot diverge. The store stays fact-agnostic: the
+// caller builds the fact. A write that changed nothing appends NO fact and
+// returns no seq.
 func (s *Store) CommitDocumentWrite(w DocumentWrite, fact BusEvent, now time.Time) (DocumentWriteResult, error) {
 	table, err := s.documentTable(w.Schema)
 	if err != nil {
@@ -421,8 +343,8 @@ func (s *Store) CommitDocumentWrite(w DocumentWrite, fact BusEvent, now time.Tim
 		return DocumentWriteResult{}, fmt.Errorf("store: writing %s/%s/%s: %w",
 			w.Schema.Namespace, w.Schema.Collection, w.ID, err)
 	}
-	// Rolled back on every path that does not commit, including the ones that
-	// return no error: a delete that removed nothing has nothing to commit.
+	// Also rolls back the no-error paths: a delete that removed nothing has
+	// nothing to commit.
 	defer func() { _ = tx.Rollback() }()
 
 	var out DocumentWriteResult
@@ -459,16 +381,10 @@ func (s *Store) CommitDocumentWrite(w DocumentWrite, fact BusEvent, now time.Tim
 	return out, nil
 }
 
-// queryDocuments runs an already-compiled query. The compiled fragments are
-// built from a validated query against a stored declaration, so the only strings
-// spliced into the statement are ones docstore produced from identifiers it
-// checked; every caller-supplied value arrives as a bound argument.
-//
-// Unexported on purpose. A compiled query carries a table name, a column
-// affinity and a cursor value taken from the declaration it was compiled
-// against, so running one is only correct against the state it was compiled
-// from. Handing that pairing to callers is what produced three silent wrong
-// answers; ReadQuery owns both halves and is the way in from outside.
+// queryDocuments runs an already-compiled query; only docstore-checked
+// identifiers are spliced in, every caller value is a bound argument.
+// Unexported: a compiled query is only correct against the state it was
+// compiled from, so ReadQuery owns both halves and is the way in from outside.
 func (s *Store) queryDocuments(c docstore.Compiled) ([]docstore.Document, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
@@ -503,26 +419,18 @@ func queryDocumentsWith(q rowsQuerier, c docstore.Compiled) ([]docstore.Document
 }
 
 // QueryRead is one answer to one query: the documents, the declaration they
-// were computed against, and the log position they were true at. The
-// declaration is returned rather than assumed because the caller's copy may
-// already be out of date by the time it reads this — the one in here is the one
-// the answer actually means.
+// were computed against, and the log position they were true at.
 type QueryRead struct {
 	Schema    docstore.CollectionSchema
 	Documents []docstore.Document
 	AsOfSeq   int64
 }
 
-// readAsOfSeq is the log position an answer was true at: the highest seq in
-// bus_events, read inside the same transaction as the rows.
-//
-// Every document write commits its fact into that log, so this is exactly "the
-// last change this answer includes". Same transaction, not a second read: read
-// outside it and the number names a state the rows were never in.
-//
-// An empty log yields 0, which is a valid position meaning "before everything"
-// rather than a missing answer. Compaction removes rows but never the newest,
-// so it cannot lower MAX(seq) and the watermark is immune to it.
+// readAsOfSeq is the log position an answer was true at: MAX(seq) in
+// bus_events, read inside the same transaction as the rows — outside it the
+// number names a state the rows were never in. Empty log yields 0 ("before
+// everything"); compaction never removes the newest row, so it cannot lower
+// MAX(seq).
 func readAsOfSeq(q rowQuerier) (int64, error) {
 	var seq int64
 	if err := q.QueryRow(`SELECT COALESCE(MAX(seq), 0) FROM bus_events`).Scan(&seq); err != nil {
@@ -539,10 +447,9 @@ type DocumentRead struct {
 	AsOfSeq  int64
 }
 
-// ReadDocument answers a get in a single read transaction — the declaration,
-// the row, and the log position, all against one state of the database, for the
-// same reason ReadQuery does. The bool is false with a nil error when the
-// collection was never declared.
+// ReadDocument answers a get in a single read transaction, for the same reason
+// ReadQuery does; the bool is false with a nil error when the collection was
+// never declared.
 func (s *Store) ReadDocument(namespace, collection, id string) (DocumentRead, bool, error) {
 	if s.db == nil {
 		return DocumentRead{}, false, fmt.Errorf("store: no database")
@@ -577,12 +484,8 @@ type CountRead struct {
 }
 
 // CountQuery answers "how many match" with the same compile the query itself
-// uses, so a count and the page it describes cannot disagree about what
-// matches. Only the filter half of the compiled query is used: ordering and the
-// limit decide which matches come back, never how many there are.
-//
-// A query carrying an after cursor counts what follows the anchor, which is the
-// same thing paging through the rest of the answer would find.
+// uses, so a count and the page it describes cannot disagree; only the filter
+// half is used, and an after cursor counts what follows the anchor.
 func (s *Store) CountQuery(q docstore.Query) (CountRead, bool, error) {
 	if s.db == nil {
 		return CountRead{}, false, fmt.Errorf("store: no database")
@@ -630,29 +533,11 @@ func (s *Store) CountQuery(q docstore.Query) (CountRead, bool, error) {
 }
 
 // ReadQuery answers a query in a single read transaction, and is the only way
-// to run one from outside the store.
-//
-// Answering takes three reads: the declaration, which names the table and the
-// affinity of every column the SQL will compare; the cursor anchor, whose
-// presence and sort value decide which cursor clause gets compiled; and the
-// SELECT itself. Those used to be three separate transactions with the compile
-// in between, so the statement could be built against one state and executed
-// against another. That is not a narrow race — it produced a page that silently
-// came back empty when the anchor was deleted, a page that handed back the
-// anchor document itself when the anchor gained a sort value, and a filter that
-// silently matched nothing when a field's declared type changed underneath it.
-// None of the three reported an error, and each returned an answer that matched
-// no state the collection was ever in.
-//
-// One transaction removes the class rather than narrowing it: compile-time and
-// execute-time are the same instant, so there is no second state to disagree
-// with. Nothing is committed — a read transaction here buys a consistent
-// snapshot, not atomic writes. It costs one contiguous SHARED lock in place of
-// three brief ones, which is the same total work; what it denies a writer is
-// exactly the gap that produced the wrong answers.
-//
-// found reports whether the collection is declared at all, the same way
-// DocumentCollection does.
+// to run one from outside the store. Declaration read, anchor read, compile,
+// and SELECT must share one transaction: split across transactions the
+// statement can compile against one state and execute against another, which
+// silently returned wrong pages. found reports whether the collection is
+// declared, as in DocumentCollection.
 func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
 	if s.db == nil {
 		return QueryRead{}, false, fmt.Errorf("store: no database")
@@ -661,8 +546,6 @@ func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
 	if err != nil {
 		return QueryRead{}, false, fmt.Errorf("store: reading %s/%s: %w", q.Namespace, q.Collection, err)
 	}
-	// Rolled back rather than committed: a read transaction has nothing to
-	// commit, and rolling back is what releases the snapshot.
 	defer func() { _ = tx.Rollback() }()
 
 	schema, table, found, err := readCollectionTx(tx, q.Namespace, q.Collection)
@@ -672,9 +555,7 @@ func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
 
 	var anchor *docstore.Document
 	if q.After != "" {
-		// A missing anchor stays nil, which is the case Compile refuses by name.
-		// Inside this transaction that refusal is now truthful: the anchor really
-		// is absent from the state the SELECT would have run against.
+		// A missing anchor stays nil; Compile refuses that case by name.
 		doc, ok, err := getDocumentWith(tx, schema.Namespace, schema.Collection, table, q.After)
 		if err != nil {
 			return QueryRead{}, false, err
@@ -699,8 +580,7 @@ func (s *Store) ReadQuery(q docstore.Query) (QueryRead, bool, error) {
 	return QueryRead{Schema: schema, Documents: docs, AsOfSeq: asOf}, true, nil
 }
 
-// CountDocuments reports how many documents a collection holds. It is what the
-// slow-query log reports alongside a duration.
+// CountDocuments reports how many documents a collection holds.
 func (s *Store) CountDocuments(schema docstore.CollectionSchema) (int, error) {
 	table, err := s.documentTable(schema)
 	if err != nil {
@@ -713,10 +593,8 @@ func (s *Store) CountDocuments(schema docstore.CollectionSchema) (int, error) {
 	return n, nil
 }
 
-// QueryPlan returns SQLite's plan for a compiled query, one row per step. It
-// exists so a test can assert that a filtered or sorted query reaches an index
-// rather than scanning the collection — the property this whole physical schema
-// is for, and one that no timing assertion could check without being flaky.
+// QueryPlan returns SQLite's plan for a compiled query, one row per step, so a
+// test can assert a query reaches an index rather than scanning.
 func (s *Store) QueryPlan(c docstore.Compiled) ([]string, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
@@ -763,17 +641,10 @@ func (s *Store) documentTable(schema docstore.CollectionSchema) (string, error) 
 // DDL
 // ---------------------------------------------------------------------------
 
-// createCollectionTable builds a collection's storage: the five stored columns,
-// an index for each reserved ordering column, and a generated column plus index
-// for every declared field.
-//
-// WITHOUT ROWID because a document is addressed by its id and never by position:
-// clustering the row on the id it is looked up by removes a whole B-tree and the
-// hop through it.
-//
-// rev is stored and not indexed. It is only ever read for a document already
-// being looked up by its primary key, or compared inside a write to that same
-// row, so an index over it would serve no query and cost every write.
+// createCollectionTable builds a collection's storage: stored columns, indexes
+// for the reserved ordering columns, and a generated column plus index per
+// declared field. WITHOUT ROWID clusters the row on the id it is looked up by;
+// rev is deliberately unindexed — it serves no query.
 func createCollectionTable(tx *sql.Tx, table string, fields []docstore.FieldSpec) error {
 	if err := docstore.ValidateTableName(table); err != nil {
 		return err
@@ -788,9 +659,7 @@ func createCollectionTable(tx *sql.Tx, table string, fields []docstore.FieldSpec
 		return err
 	}
 	// created_at and updated_at are queryable without being declared, so they
-	// are indexed unconditionally. Each index carries the id tiebreaker, which
-	// is what makes it serve the whole ordering tuple rather than only its
-	// first half — the same tuple the after cursor compares against.
+	// are indexed unconditionally.
 	for _, col := range []string{docstore.FieldCreatedAt, docstore.FieldUpdatedAt} {
 		if err := createFieldIndex(tx, table, col); err != nil {
 			return err
@@ -805,9 +674,8 @@ func createCollectionTable(tx *sql.Tx, table string, fields []docstore.FieldSpec
 }
 
 // alterCollectionTable brings an existing table into line with a new
-// declaration. A field whose type changed is dropped and re-added rather than
-// left alone: its column's affinity is how two stored values compare, so a
-// declaration that says "number" must not keep comparing as text.
+// declaration; a field whose type changed is dropped and re-added so its
+// column carries the new affinity.
 func alterCollectionTable(tx *sql.Tx, table string, before, after []docstore.FieldSpec) error {
 	if err := docstore.ValidateTableName(table); err != nil {
 		return err
@@ -844,10 +712,8 @@ func alterCollectionTable(tx *sql.Tx, table string, before, after []docstore.Fie
 
 func addFieldColumn(tx *sql.Tx, table string, f docstore.FieldSpec) error {
 	col := quoteIdent(docstore.FieldColumn(f.Name))
-	// VIRTUAL, not STORED: the index materialises the values that get compared,
-	// so storing them in the row as well would pay for them twice. SQLite also
-	// refuses to add a STORED column to an existing table, which is what would
-	// make redeclaring a rewrite instead of a one-statement change.
+	// VIRTUAL, not STORED: the index already materialises the compared values,
+	// and SQLite refuses to add a STORED column to an existing table.
 	_, err := tx.Exec(fmt.Sprintf(`ALTER TABLE %s ADD COLUMN %s %s GENERATED ALWAYS AS (%s) VIRTUAL`,
 		table, col, docstore.ColumnAffinity(f.Type), docstore.FieldExpression(f.Name)))
 	if err != nil {
@@ -866,9 +732,8 @@ func dropFieldColumn(tx *sql.Tx, table string, f docstore.FieldSpec) error {
 	return err
 }
 
-// createFieldIndex indexes one column with the id tiebreaker beside it, which is
-// the order every query asks for. One index serves both directions: SQLite walks
-// it backwards for a DESC ordering.
+// createFieldIndex indexes one column with the id tiebreaker beside it — the
+// tuple every query orders and cursors by; SQLite walks it backwards for DESC.
 func createFieldIndex(tx *sql.Tx, table, column string) error {
 	_, err := tx.Exec(fmt.Sprintf(`CREATE INDEX %s ON %s (%s, id)`,
 		quoteIdent(fieldIndexName(table, column)), table, quoteIdent(column)))
@@ -880,9 +745,8 @@ func fieldIndexName(table, column string) string {
 	return table + "_" + column
 }
 
-// quoteIdent renders an identifier for SQL. Every identifier reaching it is
-// already derived from a validated name; the quoting is what makes a field named
-// like a keyword harmless.
+// quoteIdent renders an already-validated identifier for SQL; quoting makes a
+// field named like a keyword harmless.
 func quoteIdent(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }

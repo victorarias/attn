@@ -1,0 +1,11 @@
+# 2026/08/09 19:27:35.088662 [TestLayoutOperationsDoNotModifyTheirInput] [rapid] draw params: "/tmp/notes.md"
+# 2026/08/09 19:27:35.088673 [TestLayoutOperationsDoNotModifyTheirInput] [rapid] draw session: ""
+# 2026/08/09 19:27:35.088675 [TestLayoutOperationsDoNotModifyTheirInput] UpdateTileParams wrote through its input:
+#  got: {Type:split PaneID: TileID: TileKind: TileParams: TileSessionID: SplitID:s1 Direction:vertical Ratio:0.5 RatioLocked:true Children:[{Type:pane PaneID:p0 TileID: TileKind: TileParams: TileSessionID: SplitID: Direction: Ratio:0 RatioLocked:false Children:[]} {Type:tile PaneID: TileID:t1 TileKind:markdown TileParams:/tmp/notes.md TileSessionID: SplitID: Direction: Ratio:0 RatioLocked:false Children:[]}]}
+# want: {Type:split PaneID: TileID: TileKind: TileParams: TileSessionID: SplitID:s1 Direction:vertical Ratio:0.5 RatioLocked:true Children:[{Type:pane PaneID:p0 TileID: TileKind: TileParams: TileSessionID: SplitID: Direction: Ratio:0 RatioLocked:false Children:[]} {Type:tile PaneID: TileID:t1 TileKind:markdown TileParams: TileSessionID: SplitID: Direction: Ratio:0 RatioLocked:false Children:[]}]}
+# 
+v0.4.8#669243102897586036
+0x0
+0x1
+0x0
+0x0

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "218"
+const ProtocolVersion = "220"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -32,6 +32,18 @@ const (
 	// operator that does not exist, a bound of the wrong type, a cursor pointing
 	// at a document that is gone. The message says which.
 	ErrorCodeInvalidQuery = "invalid_query"
+	// ErrorCodeCollectionUndefined ends a live subscription because the
+	// collection it watches was removed. Distinct from
+	// ErrorCodeUndeclaredCollection, which answers a request against a
+	// collection that was never there: this one says an accepted subscription's
+	// target went away underneath it, which is a UI host's "kill the tile"
+	// rather than "the caller asked for the wrong thing".
+	ErrorCodeCollectionUndefined = "collection_undefined"
+	// ErrorCodeCollectionRedeclared ends a live subscription because the
+	// collection was redeclared without a field the query uses. The query can
+	// never be answered again as written, so the tile's query is what has to
+	// change; resubscribing unchanged would fail the same way.
+	ErrorCodeCollectionRedeclared = "collection_redeclared"
 )
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
@@ -242,6 +254,9 @@ const (
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
+	CmdSetClientPresence                     = "set_client_presence"
+	CmdActivityStatus                        = "activity_status"
+	CmdClearSessionActivity                  = "clear_session_activity"
 	CmdSetTerminalTheme                      = "set_terminal_theme"
 	CmdWorkspaceLayoutGet                    = "workspace_layout_get"
 	CmdWorkspaceLayoutAddSessionPane         = "workspace_layout_add_session_pane"
@@ -275,6 +290,7 @@ const (
 	CmdRenameWorkspace                       = "rename_workspace"
 	CmdSetWorkspaceRank                      = "set_workspace_rank"
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
+	CmdSetSessionContextWindowCap            = "set_session_context_window_cap"
 )
 
 // Per-action automations result events (socket + WS share one command set;
@@ -310,6 +326,7 @@ const (
 	EventSessionsUpdated                 = "sessions_updated"
 	EventRenameResult                    = "rename_result"
 	EventChiefOfStaffResult              = "chief_of_staff_result"
+	EventSessionContextWindowCapResult   = "session_context_window_cap_result"
 	EventTicketsUpdated                  = "tickets_updated"
 	EventTicketResult                    = "ticket_result"
 	EventTicketActionResult              = "ticket_action_result"
@@ -414,6 +431,7 @@ const (
 	EventBrowserControlResponse          = "browser_control_response"
 	EventBrowserControlRequest           = "browser_control_request"
 	EventCommandError                    = "command_error"
+	EventClientEvictionNotice            = "client_eviction_notice"
 )
 
 // Session states (values for SessionState enum)
@@ -1629,6 +1647,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdSetClientPresence:
+		var msg SetClientPresenceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_client_presence: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdActivityStatus:
+		var msg ActivityStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal activity_status: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdClearSessionActivity:
+		var msg ClearSessionActivityMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal clear_session_activity: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdSetTerminalTheme:
 		var msg SetTerminalThemeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -1857,6 +1896,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg SetChiefOfStaffMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal set_chief_of_staff: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetSessionContextWindowCap:
+		var msg SetSessionContextWindowCapMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_session_context_window_cap: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

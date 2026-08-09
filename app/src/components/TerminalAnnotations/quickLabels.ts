@@ -1,89 +1,17 @@
-// The labels a highlight can carry, and how a set of annotations becomes the
-// text typed back into the session.
+// The labels a terminal highlight can carry, and how a set of annotations
+// becomes the text typed back into the session.
 //
-// A label is a one-click way to say a thing users otherwise retype every turn.
-// Its `tip` is the instruction the agent actually receives; the `text` is what
-// the user sees. Keeping the two separate is what lets the chip stay short
-// ("Verify this") while the agent gets the sentence that makes it actionable.
+// The set itself is shared with the Markdown reader — see
+// `src/annotations/quickLabels.ts`. This module owns only the payload.
 
-export interface QuickLabel {
-  id: string;
-  emoji: string;
-  text: string;
-  // The instruction sent to the agent. Absent when the label's own name says
-  // everything ("Clarify this", "Needs tests").
-  tip?: string;
-}
+export {
+  QUICK_LABEL_GROUPS,
+  QUICK_LABELS,
+  labelByEmoji,
+  type QuickLabel,
+} from '../../annotations/quickLabels';
 
-// The label row, in the groups it is drawn in. A group is what a divider
-// separates, so the grouping lives here as data rather than as an index the
-// popup counts to — reordering a label cannot silently move the divider.
-//
-// Agreement is its own group because it is the only mark that says "keep
-// going". Ninth in a run of seven corrections it reads as one more complaint,
-// and a reviewer with no quick way to say "this part is right" only ever files
-// the objections.
-export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
-  [
-    // Its tip is the longest here on purpose: "good" alone tells an agent
-    // nothing to do, and the point of marking a thing right is that it
-    // survives the next revision.
-    {
-      id: 'exactly-this',
-      emoji: '💯',
-      text: 'Exactly this',
-      tip: 'This is right and it matters. Preserve this decision and the reasoning behind it — do not revisit or trade it away, and apply the same reasoning where it belongs elsewhere.',
-    },
-  ],
-  [
-    { id: 'clarify-this', emoji: '❓', text: 'Clarify this' },
-    {
-      id: 'verify-this',
-      emoji: '🔍',
-      text: 'Verify this',
-      tip: 'This seems like an assumption. Verify by reading the actual code before proceeding.',
-    },
-    {
-      id: 'give-me-an-example',
-      emoji: '🔬',
-      text: 'Give me an example',
-      tip: 'This is too abstract. Show a before/after, a sample input/output, or a specific scenario.',
-    },
-    {
-      id: 'match-existing-patterns',
-      emoji: '🧬',
-      text: 'Match existing patterns',
-      tip: 'Search the codebase for existing patterns that already solve this. Reuse what exists.',
-    },
-    {
-      id: 'consider-alternatives',
-      emoji: '🔄',
-      text: 'Consider alternatives',
-      tip: 'Propose 2-3 alternative approaches with trade-offs based on the actual codebase.',
-    },
-    {
-      id: 'ensure-no-regression',
-      emoji: '📉',
-      text: 'Ensure no regression',
-      tip: 'Verify this will not break existing behavior. Identify what could regress.',
-    },
-    {
-      id: 'out-of-scope',
-      emoji: '🚫',
-      text: 'Out of scope',
-      tip: 'This is not part of the current task. Remove it and stay focused on what was requested.',
-    },
-    { id: 'needs-tests', emoji: '🧪', text: 'Needs tests' },
-  ],
-];
-
-// Every label, in row order. What the payload resolves against; the grouping
-// above is only how the row is drawn.
-export const QUICK_LABELS: QuickLabel[] = QUICK_LABEL_GROUPS.flat();
-
-export function labelByEmoji(emoji: string): QuickLabel | undefined {
-  return QUICK_LABELS.find((label) => label.emoji === emoji);
-}
+import { labelByEmoji } from '../../annotations/quickLabels';
 
 export interface PayloadAnnotation {
   quote: string;
@@ -101,10 +29,20 @@ export interface PayloadAnnotation {
 // the exact words it is about. Items are ordered by position in the message
 // rather than by when they were made, because the agent reads the payload as a
 // pass over its own answer.
-export function buildAnnotationPayload(annotations: readonly PayloadAnnotation[]): string {
+//
+// The note goes first, before the marks. It is what the user wants done —
+// "let's do x and y" — and the marks are the detail that qualifies it. Sending
+// it after them would make it read as an afterthought, which is exactly the
+// ordering that has people writing "…but also consider what I put below".
+export function buildAnnotationPayload(
+  annotations: readonly PayloadAnnotation[],
+  note = '',
+): string {
   if (annotations.length === 0) return '';
   const ordered = [...annotations].sort((a, b) => a.start - b.start);
   const lines: string[] = ['Feedback on your last message.', ''];
+  const trimmedNote = note.trim();
+  if (trimmedNote) lines.push(trimmedNote, '');
   ordered.forEach((annotation, index) => {
     const label = annotation.emoji ? labelByEmoji(annotation.emoji) : undefined;
     const heading = label

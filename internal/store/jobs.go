@@ -4,30 +4,28 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/victorarias/attn/internal/docstore"
 )
 
-// This is the SQLite persistence for the durable job queue (internal/jobs).
-//
-// Following the tickets/tasks convention, JobRecord is a store-local row type —
-// NOT internal/jobs.Job. The daemon owns the mapping between the two, which
-// keeps this package a leaf (internal/store imports neither internal/jobs nor
-// internal/daemon).
+// SQLite persistence for the durable job queue (internal/jobs). JobRecord is a
+// store-local row type, not internal/jobs.Job; the daemon owns the mapping so
+// this package stays a leaf.
 
-// jobTimeFormat is the stored timestamp encoding. RFC3339Nano preserves the
-// sub-second precision the queue's backoff and debounce timing relies on, and it
-// sorts lexicographically, which is what lets scheduled_at be an index term.
-const jobTimeFormat = time.RFC3339Nano
+// sortableTimeFormat encodes stamps kept in TEXT columns and compared there
+// (jobs, notifications feed): text order must be time order, so the fraction is
+// fixed-width. RFC3339Nano strips trailing zeros and broke that — "…:00Z" sorts
+// above "…:00.5Z" — delaying whole-second scheduled_at claims; migration 94
+// rewrote the stored stamps. Always format from a UTC time.
+const sortableTimeFormat = docstore.TimeFormat
 
-// rowScanner is satisfied by both *sql.Row and *sql.Rows, so one scan helper
-// serves a single-row lookup and a listing. It lives here because the job queue
-// is its heaviest user; the notification surface shares it.
+// rowScanner is satisfied by both *sql.Row and *sql.Rows.
 type rowScanner interface {
 	Scan(dest ...any) error
 }
 
-// JobRecord is one durable job row. Payload and Result are carried opaquely as
-// JSON text because the store never interprets them — only the handler that was
-// enqueued with them does.
+// JobRecord is one durable job row. Payload and Result are opaque JSON text;
+// only the enqueued handler interprets them.
 type JobRecord struct {
 	ID          string
 	Kind        string
@@ -48,8 +46,7 @@ type JobRecord struct {
 const jobColumns = `id, kind, unique_key, priority, payload, result, state, attempts,
 	max_attempts, scheduled_at, last_error, requeued, created_at, updated_at`
 
-// execer is satisfied by both *sql.DB and *sql.Tx, so a write helper serves a
-// standalone call and a step inside someone else's transaction.
+// execer is satisfied by both *sql.DB and *sql.Tx.
 type execer interface {
 	Exec(query string, args ...any) (sql.Result, error)
 }
@@ -62,9 +59,7 @@ func (s *Store) UpsertJob(rec JobRecord) error {
 	return upsertJob(s.db, rec)
 }
 
-// upsertJob is UpsertJob's write, against whichever executor the caller has. The
-// legacy-task handover runs it inside its transaction so the old rows are
-// deleted in the same commit that writes their replacements.
+// upsertJob is UpsertJob's write, against whichever executor the caller has.
 func upsertJob(ex execer, rec JobRecord) error {
 	_, err := ex.Exec(
 		`INSERT INTO jobs (`+jobColumns+`)
@@ -84,9 +79,9 @@ func upsertJob(ex execer, rec JobRecord) error {
 		   created_at=excluded.created_at,
 		   updated_at=excluded.updated_at`,
 		rec.ID, rec.Kind, rec.UniqueKey, rec.Priority, rec.Payload, rec.Result, rec.State,
-		rec.Attempts, rec.MaxAttempts, rec.ScheduledAt.UTC().Format(jobTimeFormat),
+		rec.Attempts, rec.MaxAttempts, rec.ScheduledAt.UTC().Format(sortableTimeFormat),
 		rec.LastError, boolToInt(rec.Requeued),
-		rec.CreatedAt.UTC().Format(jobTimeFormat), rec.UpdatedAt.UTC().Format(jobTimeFormat),
+		rec.CreatedAt.UTC().Format(sortableTimeFormat), rec.UpdatedAt.UTC().Format(sortableTimeFormat),
 	)
 	if err != nil {
 		return fmt.Errorf("store: upsert job %s: %w", rec.ID, err)
@@ -94,9 +89,8 @@ func upsertJob(ex execer, rec JobRecord) error {
 	return nil
 }
 
-// GetJob returns the row for id. The bool is false (with a nil record and nil
-// error) when no such row exists — the queue must tell "no record" apart from a
-// read error.
+// GetJob returns the row for id; the bool is false with a nil error when no
+// such row exists.
 func (s *Store) GetJob(id string) (*JobRecord, bool, error) {
 	if s.db == nil {
 		return nil, false, fmt.Errorf("store: no database")
@@ -113,8 +107,7 @@ func (s *Store) GetJob(id string) (*JobRecord, bool, error) {
 }
 
 // GetJobByUniqueKey returns the row a kind coalesces onto for uniqueKey. An
-// empty key matches nothing: jobs without one are deliberately distinct, so
-// treating "" as a key would silently collapse them into a single record.
+// empty key matches nothing — treating "" as a key would collapse distinct jobs.
 func (s *Store) GetJobByUniqueKey(kind, uniqueKey string) (*JobRecord, bool, error) {
 	if s.db == nil {
 		return nil, false, fmt.Errorf("store: no database")
@@ -156,11 +149,10 @@ func (s *Store) ListJobs() ([]JobRecord, error) {
 	return collectJobRows(rows, "list jobs")
 }
 
-// EligibleJobs returns at most limit jobs claimable at now, ordered the way
-// dispatch claims them: highest priority first, then earliest scheduled, then
-// oldest. Queued and failed rows are both claimable — a failed row whose backoff
-// has elapsed is a retry — and the attempt cap is left to the queue, which knows
-// the runner-wide default a row may be relying on.
+// EligibleJobs returns at most limit jobs claimable at now, in dispatch order:
+// priority desc, scheduled asc, created asc. Queued and failed rows are both
+// claimable (an elapsed-backoff failure is a retry); the attempt cap is the
+// queue's job.
 func (s *Store) EligibleJobs(now time.Time, limit int) ([]JobRecord, error) {
 	if s.db == nil {
 		return nil, fmt.Errorf("store: no database")
@@ -170,22 +162,20 @@ func (s *Store) EligibleJobs(now time.Time, limit int) ([]JobRecord, error) {
 		 WHERE state IN ('queued', 'failed') AND scheduled_at <= ?
 		 ORDER BY priority DESC, scheduled_at ASC, created_at ASC
 		 LIMIT ?`,
-		now.UTC().Format(jobTimeFormat), limit)
+		now.UTC().Format(sortableTimeFormat), limit)
 	if err != nil {
 		return nil, fmt.Errorf("store: eligible jobs: %w", err)
 	}
 	return collectJobRows(rows, "eligible jobs")
 }
 
-// RecoverRunningJobs resets any job left in "running" back to "queued" with
-// scheduled_at = now, returning how many were recovered. A running row at
-// startup means a crash interrupted that job mid-run, so it is re-eligible
-// immediately.
+// RecoverRunningJobs resets jobs left in "running" back to "queued" at now: a
+// running row at startup means a crash interrupted it mid-run.
 func (s *Store) RecoverRunningJobs(now time.Time) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("store: no database")
 	}
-	ts := now.UTC().Format(jobTimeFormat)
+	ts := now.UTC().Format(sortableTimeFormat)
 	res, err := s.db.Exec(
 		`UPDATE jobs SET state='queued', scheduled_at=?, updated_at=? WHERE state='running'`, ts, ts)
 	if err != nil {
@@ -198,16 +188,14 @@ func (s *Store) RecoverRunningJobs(now time.Time) (int, error) {
 	return int(n), nil
 }
 
-// TrimDoneJobs deletes jobs that completed successfully before cutoff and
-// reports how many were removed. Only "done" rows are trimmed: a dead job is the
-// record a failure notification points at, and it is not what grows without
-// bound.
+// TrimDoneJobs deletes "done" rows older than cutoff. Dead jobs stay: a failure
+// notification points at them.
 func (s *Store) TrimDoneJobs(cutoff time.Time) (int, error) {
 	if s.db == nil {
 		return 0, fmt.Errorf("store: no database")
 	}
 	res, err := s.db.Exec(
-		`DELETE FROM jobs WHERE state='done' AND updated_at < ?`, cutoff.UTC().Format(jobTimeFormat))
+		`DELETE FROM jobs WHERE state='done' AND updated_at < ?`, cutoff.UTC().Format(sortableTimeFormat))
 	if err != nil {
 		return 0, fmt.Errorf("store: trim done jobs: %w", err)
 	}
@@ -249,19 +237,12 @@ func scanJobRow(sc rowScanner) (*JobRecord, error) {
 	return &rec, nil
 }
 
-// parseStoreTime decodes a stored timestamp, tolerating the plain RFC3339 form as
-// well as RFC3339Nano. A blank/garbage value yields the zero time rather than an
-// error — a job with an unreadable timestamp is still a real record, and the
-// queue treats a zero scheduled_at as "eligible now".
+// parseStoreTime decodes any RFC3339 form (pre-migration-94 stamps included).
+// Garbage yields the zero time, which the queue treats as "eligible now".
 func parseStoreTime(s string) time.Time {
-	if s == "" {
+	t, err := docstore.ParseTime(s)
+	if err != nil {
 		return time.Time{}
 	}
-	if t, err := time.Parse(jobTimeFormat, s); err == nil {
-		return t.UTC()
-	}
-	if t, err := time.Parse(time.RFC3339, s); err == nil {
-		return t.UTC()
-	}
-	return time.Time{}
+	return t
 }

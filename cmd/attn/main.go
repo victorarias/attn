@@ -216,6 +216,9 @@ func main() {
 		runList()
 	case "presence":
 		runPresence()
+	case "activity":
+		maybePrintProfileBanner()
+		runActivity()
 	case "delegate":
 		maybePrintProfileBanner()
 		runDelegate()
@@ -634,6 +637,7 @@ commands:
   preflight                         diagnose tools, paths, routing, and launch settings
   pr wait-ready <pr>                wait for exact-head checks and approval
   list                              list sessions and workspaces
+  activity [clear <id>]             what each agent is doing right now
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
   db <command>                      database maintenance (restore from backup)
@@ -3058,9 +3062,17 @@ func runAgentDirectly(requestedAgent string) {
 	// reasoning effort (delegate --effort).
 	opts.Model = consumeOneShotEnv("ATTN_MODEL")
 	opts.Effort = consumeOneShotEnv("ATTN_EFFORT")
-	// ATTN_CHIEF_AUTO_COMPACT_WINDOW caps the chief's context window. The worker
-	// exports it only for chief launches, so a delegated agent never sees it.
-	if window := consumeOneShotEnv("ATTN_CHIEF_AUTO_COMPACT_WINDOW"); window != "" {
+	// ATTN_AUTO_COMPACT_WINDOW caps this launch's context window. The daemon
+	// owns the policy: chief_context_window_cap for chief launches,
+	// default_context_window_cap_<agent> for everything else; the worker exports
+	// the resolved value only when a cap applies. The old name is read as a
+	// fallback so a not-yet-restarted daemon still caps its chief through this
+	// newer wrapper binary.
+	window := consumeOneShotEnv("ATTN_AUTO_COMPACT_WINDOW")
+	if window == "" {
+		window = consumeOneShotEnv("ATTN_CHIEF_AUTO_COMPACT_WINDOW")
+	}
+	if window != "" {
 		if n, err := strconv.Atoi(window); err == nil && n > 0 {
 			opts.AutoCompactWindow = n
 		}

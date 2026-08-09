@@ -3,12 +3,10 @@ import { QUICK_LABELS, QUICK_LABEL_GROUPS, buildAnnotationPayload } from './quic
 
 describe('QUICK_LABEL_GROUPS', () => {
   it('keeps agreement in its own group, ahead of everything that asks for a change', () => {
-    // A reviewer who cannot cheaply say "this part is right" files only
-    // objections. Ninth in a run of corrections, the one positive mark reads as
-    // one more complaint — the group is what a divider draws between.
-    expect(QUICK_LABEL_GROUPS[0].map((label) => label.id)).toEqual(['exactly-this']);
-    expect(QUICK_LABEL_GROUPS).toHaveLength(2);
-    expect(QUICK_LABELS[0].emoji).toBe('💯');
+    expect(QUICK_LABEL_GROUPS[0].map((label) => label.id)).toEqual(['i-agree', 'exactly-this']);
+    expect(QUICK_LABEL_GROUPS.length).toBeGreaterThan(1);
+    expect(QUICK_LABELS[0].emoji).toBe('👍');
+    expect(QUICK_LABEL_GROUPS[1][0].id).toBe('this-is-wrong');
   });
 
   it('flattens to the whole row, so a grouped label is still resolvable', () => {
@@ -22,11 +20,11 @@ describe('buildAnnotationPayload', () => {
     // The agent cannot see the highlight. The quote is the only thing that
     // tells it which part of its own answer the feedback lands on.
     const payload = buildAnnotationPayload([
-      { start: 40, emoji: '🧪', comment: '', quote: 'ship it without tests' },
+      { start: 40, emoji: '🧾', comment: '', quote: 'ship it without tests' },
     ]);
 
     expect(payload).toContain('> ship it without tests');
-    expect(payload).toContain('🧪 Needs tests');
+    expect(payload).toContain('🧾 Show the receipt');
   });
 
   it('sends the label instruction, not the label name', () => {
@@ -60,15 +58,13 @@ describe('buildAnnotationPayload', () => {
     expect(payload).toContain('this contradicts the paragraph above');
   });
 
-  it('tells the agent what to do with agreement, not just that it got one', () => {
-    // "💯" alone is a pat on the head. What makes marking a thing right worth
-    // the click is that the agent is told to keep it through the next revision.
+  it('sends agreement as the label alone', () => {
     const payload = buildAnnotationPayload([
       { start: 0, emoji: '💯', comment: '', quote: 'the retry only fires on idempotent verbs' },
     ]);
 
     expect(payload).toContain('💯 Exactly this');
-    expect(payload).toContain('Preserve this decision');
+    expect(payload).not.toContain('Preserve this decision');
   });
 
   it('says what the payload is without instructing the agent how to behave', () => {
@@ -84,5 +80,34 @@ describe('buildAnnotationPayload', () => {
 
   it('is empty with nothing to say', () => {
     expect(buildAnnotationPayload([])).toBe('');
+  });
+
+  describe('with a note', () => {
+    const MARKS = [
+      { start: 40, emoji: '🧾', comment: '', quote: 'the retry wrapper' },
+      { start: 4, emoji: '❓', comment: 'which parser?', quote: 'the parser' },
+    ];
+
+    it('puts the note ahead of the marks it qualifies', () => {
+      // The note is the instruction and the marks are where it lands. Sent
+      // after them it reads as an afterthought, which is the ordering that has
+      // people typing "…and also consider the feedback below".
+      const payload = buildAnnotationPayload(MARKS, 'Split this into two PRs.');
+      const lines = payload.split('\n').filter((line) => line !== '');
+
+      expect(lines[0]).toBe('Feedback on your last message.');
+      expect(lines[1]).toBe('Split this into two PRs.');
+      expect(lines[2]).toMatch(/^## 1\./);
+    });
+
+    it('leaves a whitespace-only note out entirely', () => {
+      expect(buildAnnotationPayload(MARKS, '   \n  ')).toBe(buildAnnotationPayload(MARKS));
+    });
+
+    it('keeps the marks in reading order under the note', () => {
+      const payload = buildAnnotationPayload(MARKS, 'Split this into two PRs.');
+
+      expect(payload.indexOf('the parser')).toBeLessThan(payload.indexOf('the retry wrapper'));
+    });
   });
 });

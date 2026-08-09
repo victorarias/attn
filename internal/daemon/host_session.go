@@ -17,16 +17,9 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
-// Conversation sessions: attn sessions whose agent runs in a headless host
-// process instead of a PTY. The daemon owns the host's lifetime exactly as it
-// owns a PTY worker's; what changes is the surface. There are no bytes, no
-// grid, and no attach — there is an envelope stream the app draws from and a
-// prompt verb going the other way.
-//
-// A plugin driver opts its agent in by registering the "conversation"
-// capability. Everything else about the spawn — argv, env, cwd — comes back
-// from the same driver.spawn call a PTY-backed plugin agent uses, so a
-// conversation agent is configured, listed, and launched like any other.
+// Conversation sessions: the agent runs in a headless host process instead of a
+// PTY — no bytes, grid, or attach, just an envelope stream out and a prompt verb
+// in. A plugin driver opts in via the "conversation" capability.
 
 // pluginDriverConversationCapability is the driver capability that routes an
 // agent's sessions to the host runtime instead of the PTY backend.
@@ -52,11 +45,8 @@ func (d *Daemon) isHostSession(sessionID string) bool {
 	return d.ensureHostSessions().Has(sessionID)
 }
 
-// liveRuntimeSessionIDs is every session with a runtime behind it, PTY-backed
-// or host-backed. Anything that asks "is this session still alive?" — pruning
-// dead rows, reconciling workspace panes, tearing everything down — must ask
-// this and not the PTY backend alone, or a live conversation session reads as
-// abandoned.
+// liveRuntimeSessionIDs is every session with a runtime behind it, PTY- or
+// host-backed. Liveness checks must ask this, never the PTY backend alone.
 func (d *Daemon) liveRuntimeSessionIDs(ctx context.Context) []string {
 	var ids []string
 	if d.ptyBackend != nil {
@@ -65,16 +55,13 @@ func (d *Daemon) liveRuntimeSessionIDs(ctx context.Context) []string {
 	return append(ids, d.ensureHostSessions().SessionIDs()...)
 }
 
-// hostSessionLogPath keeps a host's own stdout/stderr beside the PTY worker
-// logs, one file per session, so a wedged host is diagnosable the same way a
-// wedged worker is.
+// hostSessionLogPath keeps a host's stdout/stderr beside the PTY worker logs,
+// one file per session.
 func hostSessionLogPath(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "log", sessionID+".log")
 }
 
-// hostSessionStateDir is where a host keeps whatever it persists for the
-// session — for pi, its own session file. Under attn's data dir, never the
-// agent's own home, so attn owns what it spawned.
+// hostSessionStateDir is under attn's data dir, never the agent's own home.
 func hostSessionStateDir(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "state", sessionID)
 }
@@ -103,9 +90,7 @@ func hostSessionStateDirHoldsConversation(sessionID string) bool {
 }
 
 // loginShellEnvForSpawn is the user's login shell environment, captured now if
-// the daemon's pre-warm has not landed yet. The PTY path makes the same
-// fallback, for the same reason: the first session of a daemon's life must not
-// get a thinner environment than the second.
+// the pre-warm has not landed, so the first session matches the second.
 func (d *Daemon) loginShellEnvForSpawn() []string {
 	if cached := d.cachedLoginShellEnv(); len(cached) > 0 {
 		return cached
@@ -122,16 +107,10 @@ func (d *Daemon) loginShellEnvForSpawn() []string {
 	return env
 }
 
-// spawnHostSession starts the host for a conversation session. It takes the
-// same launch description the PTY path would have run.
+// spawnHostSession starts the host for a conversation session.
 func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
-	// A host gets the same environment a PTY agent gets, layered the same way:
-	// the daemon's own environment, then the user's login shell on top. Agents
-	// read credentials from there — an API key exported in a shell profile is
-	// the ordinary way pi is authenticated — and a host launched from the app
-	// (which the window server starts with almost no environment) would
-	// otherwise fail its first prompt with "no API key found" for a key the
-	// user has had set for years.
+	// Daemon env, then login shell on top: credentials live in shell profiles and
+	// an app-launched host would otherwise fail its first prompt with "no API key".
 	env := pty.MergeEnvironment(os.Environ(), d.loginShellEnvForSpawn())
 	env = pty.MergeEnvironment(env, opts.ExternalEnv)
 	// The agent's own tools run as grandchildren of this host, and `attn` is how
@@ -178,9 +157,6 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 }
 
 // spawnSessionRuntime starts whichever runtime this session's agent asked for.
-// It is the one fork in the spawn pipeline: everything before it (validation,
-// launch intent, the driver's argv) and everything after it (the session row,
-// panes, facts) is identical for both kinds.
 func (d *Daemon) spawnSessionRuntime(req *spawnRequest, opts ptybackend.SpawnOptions) error {
 	if req.hasPluginDriver && req.pluginDriver.Capabilities[pluginDriverConversationCapability] {
 		return d.spawnHostSession(opts)
@@ -188,8 +164,7 @@ func (d *Daemon) spawnSessionRuntime(req *spawnRequest, opts ptybackend.SpawnOpt
 	return d.ptyBackend.Spawn(context.Background(), opts)
 }
 
-// killSessionRuntime stops a session's runtime, whichever kind it is. Used by
-// the spawn pipeline's rollbacks, where the session may be either.
+// killSessionRuntime stops a session's runtime, whichever kind it is.
 func (d *Daemon) killSessionRuntime(sessionID string) error {
 	if d.isHostSession(sessionID) {
 		if err := d.ensureHostSessions().Kill(sessionID); err != nil && !errors.Is(err, hostsession.ErrNotFound) {
@@ -209,36 +184,20 @@ func (d *Daemon) removeSessionRuntime(sessionID string) error {
 	return d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
-// hostStateDeclarationKinds are the envelope kinds that MOVE the session, and
-// therefore carry the state to apply. Everything else a host emits the daemon
-// only forwards — the renderings the app draws, and the semantic facts about a
-// run that is already open (a tool starting and finishing). Keeping the list
-// here rather than in a switch is what makes "the daemon never keys behavior on
-// anything else" checkable.
-//
-// A tool boundary is deliberately not here. The session is already `working`
-// when one arrives, and re-applying that state would restamp `state_since` on
-// every tool call — resetting the dashboard's "working for 4m" several times a
-// minute for a session whose state never changed.
+// hostStateDeclarationKinds are the envelope kinds that MOVE the session and so
+// carry the state to apply; everything else a host emits is forwarded only. A
+// tool boundary is deliberately absent: applyState restamps `state_since`, so
+// re-applying `working` per tool call would reset "working for 4m" repeatedly.
 var hostStateDeclarationKinds = map[string]bool{
 	"session_ready": true,
 	"run_started":   true,
 	"run_settled":   true,
 }
 
-// handleHostEvent forwards one envelope to every connected client, and applies
-// the state a declaration carries.
-//
-// The forwarding is a stream, not a state change: it takes the same direct path
-// pty_output does rather than riding the event bus.
-//
-// The state is the other half. Every declaration carries the attn state it puts
-// the session in — the host is attn code inside the agent's own loop, so it says
-// what the session is doing instead of leaving the daemon to infer it from a run
-// boundary or a resolver to guess it from evidence a conversation session does
-// not produce. The declaration's own seq is the ordering cursor, which is why a
-// verdict-shaped race cannot happen here: a stale envelope carries a stale seq
-// and the store's strictly-increasing CAS drops it.
+// handleHostEvent forwards one envelope to every connected client and applies
+// the state a declaration carries. The forwarding is a stream, not a state
+// change: pty_output's direct path, not the bus. The declaration's own seq is
+// the ordering cursor, so a stale envelope loses to the store's increasing CAS.
 func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	d.wsHub.BroadcastValue(&protocol.AgentEventMessage{
 		Event: protocol.EventAgentEvent,
@@ -326,16 +285,11 @@ func (d *Daemon) applyHostDeclaredState(event hostsession.Event) {
 }
 
 // handleHostExit routes a dead host into the same exit path a dead PTY worker
-// takes, and then says the thing that is only true of a conversation: it can
-// come back.
-//
-// A conversation's whole history is pi's session file under attn's data dir, so
-// a host that died — crashed, was killed, took the daemon down with it — left
-// everything a replacement needs. `recoverable` is attn's word for exactly that,
-// and it is what puts the Reload affordance in front of the user instead of a
-// session that reads as finished. It is applied only when the exit was really
-// the end of that runtime: a reload owns its own teardown and respawn, and a
-// closed session has no row left to move.
+// takes, then applies `recoverable` — the conversation's whole history is pi's
+// session file under attn's data dir, so a dead host left everything a
+// replacement needs, and Reload is what the user should see instead of a
+// session that reads as finished. Only when the exit really ended that runtime:
+// a reload owns its own teardown, and a closed session has no row left to move.
 func (d *Daemon) handleHostExit(info hostsession.ExitInfo) {
 	if !d.handlePTYExit(ptybackend.ExitInfo{
 		ID:          info.SessionID,
@@ -454,17 +408,14 @@ func (d *Daemon) handleAgentPrompt(client *wsClient, msg *protocol.AgentPromptMe
 		d.logf("agent_prompt (%s) for session %s failed: %v", how, sessionID, err)
 		d.sendCommandError(client, protocol.CmdAgentPrompt, "no live conversation host for session "+sessionID)
 		if how != hostsession.DeliveryPrompt {
-			// A steer or follow-up left the composer open and the run — as far
-			// as this client knows — already running. There is no run to settle
-			// and nothing to reopen; the command error is the whole answer.
+			// A steer or follow-up left the composer open and no run to settle;
+			// the command error is the whole answer.
 			return
 		}
-		// The app closes its composer the moment it sends a prompt, so one that
-		// never reached a host has to come back as the run it will never open.
-		// seq 0 says this is the daemon's own envelope rather than a point on
-		// the host's spine, which is why it cannot collide with one — and why
-		// it declares no state: a session with no host is the exit path's to
-		// describe, not this one's.
+		// The app closed its composer on send, so a prompt that never reached a
+		// host comes back as the run it will never open; seq 0 marks a daemon
+		// envelope, and it declares no state because a session with no host is
+		// the exit path's to describe.
 		d.handleHostEvent(hostsession.Event{
 			SessionID: sessionID,
 			Kind:      "run_settled",

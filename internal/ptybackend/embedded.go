@@ -68,7 +68,7 @@ func embeddedSpawnOptions(opts SpawnOptions) pty.SpawnOptions {
 		TrustWorkingDirectory:   opts.TrustWorkingDirectory,
 		Model:                   opts.Model,
 		Effort:                  opts.Effort,
-		ChiefContextWindowCap:   opts.ChiefContextWindowCap,
+		ContextWindowCap:        opts.ContextWindowCap,
 		UnattendedLaunch:        opts.UnattendedLaunch,
 	}
 }

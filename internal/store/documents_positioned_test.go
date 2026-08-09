@@ -229,7 +229,7 @@ func TestReadingAnUndeclaredCollectionSaysSo(t *testing.T) {
 func TestACountAgreesWithTheQueryItCounts(t *testing.T) {
 	s := New()
 	base := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
-	if err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
+	if _, err := s.DefineDocumentCollection(requestsDeclaration(), base); err != nil {
 		t.Fatalf("define: %v", err)
 	}
 	schema := requestsDecl(t, s)

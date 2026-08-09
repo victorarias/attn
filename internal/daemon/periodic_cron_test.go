@@ -1,8 +1,8 @@
 package daemon
 
 import (
-	"path/filepath"
 	"testing"
+	"testing/synctest"
 
 	"github.com/victorarias/attn/internal/jobs"
 )
@@ -12,33 +12,43 @@ import (
 // They are cron entries on the job queue now, so startJobQueue is what arms
 // them: if this breaks, nothing ticks and nothing says so.
 func TestStartJobQueueArmsThePeriodicTicks(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
-	d.startJobQueue()
-	runner := d.jobQueueRef()
-	t.Cleanup(runner.Stop)
+	d := newBubbleDaemon(t)
+	notebookRoot := t.TempDir()
+	// In a bubble because arming is asynchronous: startJobQueue hands the two cron
+	// entries to the runner, whose dispatch goroutine writes them. Reading the
+	// entries straight afterwards used to be a race the test won on an idle
+	// machine and lost under full-suite load, reported as "notebook_cron is not
+	// armed". synctest.Wait returns only once that goroutine has parked, so the
+	// read happens after the write by construction.
+	synctest.Test(t, func(t *testing.T) {
+		d.store.SetSetting(SettingNotebookRoot, notebookRoot)
+		d.startJobQueue()
+		runner := d.jobQueueRef()
+		t.Cleanup(runner.Stop)
+		synctest.Wait()
 
-	for _, kind := range []string{notebookCronKind, automationScheduleKind} {
-		entry, err := runner.CronEntry(kind)
+		for _, kind := range []string{notebookCronKind, automationScheduleKind} {
+			entry, err := runner.CronEntry(kind)
+			if err != nil {
+				t.Fatalf("cron entry for %s: %v", kind, err)
+			}
+			if entry == nil {
+				t.Fatalf("%s is not armed", kind)
+			}
+			if entry.State != jobs.StateQueued {
+				t.Fatalf("%s entry state = %s, want queued", kind, entry.State)
+			}
+		}
+
+		// The panel lists work the daemon owes, so the two heartbeats must not be in it.
+		list, err := runner.List()
 		if err != nil {
-			t.Fatalf("cron entry for %s: %v", kind, err)
+			t.Fatalf("list: %v", err)
 		}
-		if entry == nil {
-			t.Fatalf("%s is not armed", kind)
+		for _, job := range list {
+			if job.Kind == notebookCronKind || job.Kind == automationScheduleKind {
+				t.Fatalf("the work list included the %s heartbeat: %+v", job.Kind, job)
+			}
 		}
-		if entry.State != jobs.StateQueued {
-			t.Fatalf("%s entry state = %s, want queued", kind, entry.State)
-		}
-	}
-
-	// The panel lists work the daemon owes, so the two heartbeats must not be in it.
-	list, err := runner.List()
-	if err != nil {
-		t.Fatalf("list: %v", err)
-	}
-	for _, job := range list {
-		if job.Kind == notebookCronKind || job.Kind == automationScheduleKind {
-			t.Fatalf("the work list included the %s heartbeat: %+v", job.Kind, job)
-		}
-	}
+	})
 }

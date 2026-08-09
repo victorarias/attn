@@ -450,6 +450,10 @@ func (d *Daemon) queueExitDuringPluginLaunch(info ptybackend.ExitInfo) bool {
 	if !ok || info.LifecycleID == "" || launch.RunID != info.LifecycleID {
 		return false
 	}
+	// The exit is deferred, not delivered: finishPluginSessionLaunch replays it
+	// once the launch it raced is done. Say so, because between here and there
+	// the session looks alive to everything that reads the store.
+	d.logf("deferring plugin PTY exit until launch completes: session=%s run=%s", info.ID, info.LifecycleID)
 	d.pluginExits[info.ID] = info
 	return true
 }
@@ -518,13 +522,19 @@ func (r pendingPluginReport) runID() string {
 	}
 }
 
+// closePluginDriverSession tells the plugin that owns this session's run that
+// the run is over. Both ways out without a notification are silent to the
+// plugin, so they say so in the log: a plugin that never hears its run closed
+// leaks whatever it allocated for it, and the only evidence is here.
 func (d *Daemon) closePluginDriverSession(sessionID, reason string, exitCode *int, signal string) {
 	session := d.store.Get(sessionID)
 	if session == nil {
+		d.logf("plugin session close skipped: session=%s reason=%s no longer in store", sessionID, reason)
 		return
 	}
 	run := d.store.EndAgentDriverRun(sessionID)
 	if run.RunID == "" {
+		d.logf("plugin session close skipped: session=%s reason=%s has no active driver run", sessionID, reason)
 		return
 	}
 	d.notifyPluginDriverSessionClosed(run.PluginName, sessionID, run.RunID, reason, exitCode, signal)
@@ -549,7 +559,11 @@ func (d *Daemon) notifyPluginDriverSessionClosed(pluginName, sessionID, runID, r
 		var result pluginDriverSessionClosedResult
 		if err := plugin.request(ctx, "driver.session_closed", params, &result); err != nil {
 			d.logf("plugin session close notification failed: plugin=%s session=%s run=%s err=%v", pluginName, sessionID, runID, err)
+			return
 		}
+		// The one line that separates "the daemon never sent it" from "the
+		// plugin never acted on it" when a close goes missing.
+		d.logf("plugin session close notified: plugin=%s session=%s run=%s reason=%s", pluginName, sessionID, runID, params.Reason)
 	}()
 }
 
