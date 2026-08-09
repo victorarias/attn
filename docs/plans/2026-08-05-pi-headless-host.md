@@ -192,11 +192,18 @@ Ships:
       the replacement is spawned from. No parallel mechanism.
 - [x] The zero-file early-crash case falls back to a fresh session — the same
       `continueRecent` call, which is why it needed no code of its own.
-      **Deviation:** the "+ LaunchIntent prompt" half is moot as specified. The
-      `pi-host` driver does not register the `initial_prompt` capability, so the
-      spawn pipeline refuses a pi-host launch that carries one; there is no
-      stored prompt to re-send. Giving pi-host an initial prompt is what
-      delegation to a conversation agent needs, and it belongs with that.
+      **Deviation, since closed:** the "+ LaunchIntent prompt" half was moot
+      when this slice landed — the `pi-host` driver registered no
+      `initial_prompt` capability, so the spawn pipeline refused a pi-host
+      launch that carried one and there was no stored prompt to re-send. It was
+      deferred to the work that needed it, delegation to a conversation agent,
+      and shipped there: the driver declares the capability, the prompt travels
+      to the host in `ATTN_PI_HOST_INITIAL_PROMPT`, and the host says it exactly
+      when its reopened history is empty (`launchPromptIsUndelivered`). The
+      daemon stores it in `LaunchIntent.InitialPrompt` for conversation agents
+      only, so this fallback now relaunches the same task rather than an agent
+      with nothing to do. A PTY agent still stores none: its relaunch resumes a
+      transcript, so replaying the brief would re-run finished work.
 - [x] Attach protocol: windowed conversation snapshot + live stream deduped by
       seq (mirrors the terminal restore contract). `agent_attach` asks;
       `conversation_snapshot` answers on the envelope stream, broadcast and
@@ -255,6 +262,51 @@ Left for slice 5, deliberately:
 - Reaching a tool subprocess a hard kill stranded. `tool_started` carries no pid,
   so procreap has nothing to record; giving it one is the fix, and it belongs
   with whichever slice wants tool cancellation anyway.
+
+### Slice 4b — delegation to a conversation agent
+
+Goal: `attn delegate --agent pi-host` works, which is the first time a
+conversation session is asked to do a job rather than hold a chat.
+
+Ships:
+
+- [x] The `initial_prompt` capability on the `pi-host` driver — delegation
+      refuses any agent that cannot be launched with a brief — and the closing
+      of slice 4's deviation above. The brief travels in the environment, not
+      argv: a brief is multi-line prose, and argv is world-readable text a
+      sibling's `pkill -f` can match on.
+- [x] The host decides delivery, because it is the only party that can. It
+      reopens its own history at startup and says the brief exactly when that
+      history is empty, so the same stored prompt handed to every replacement
+      host is spoken once.
+
+Two findings this slice made, both observed rather than reasoned:
+
+- **A host was carrying no session identity, and worse, someone else's.** The
+  environment chain daemon → host → pi → tool subprocess was assumed to carry
+  it, since environment inherits by default. It does — but nothing was putting
+  it there. `spawnHostSession` set the `ATTN_PI_HOST_*` block and stopped; the
+  PTY path's identity block (`buildSpawnEnv`) had no counterpart. Live, the
+  agent's bash tool printed an empty `ATTN_SESSION_ID`. Under test, where the
+  daemon itself was launched from inside an attn session, the host inherited
+  *that* session's id and agent — so a delegated agent's `attn ticket comment`
+  would have reported as whichever session the daemon got its environment from.
+  Fixed by giving the host the same identity block the PTY path builds.
+- **`attn` on a host's PATH was the wrong install.** Bare `attn` resolved off
+  the login shell's PATH to `~/Applications/attn.app` — production — from a
+  session running on a throwaway profile. `launchenv.WithActiveAttnFirst`, which
+  the PTY path already applied, is the fix; the two runtimes owe an agent the
+  same environment.
+
+Skills reach a delegated pi agent with no delivery mechanism of attn's: pi
+inlines `AGENTS.md`/`CLAUDE.md` from the worktree and its ancestors into the
+system prompt, and it scans `~/.agents/skills/` unconditionally — which is
+exactly where attn already installs its own skill. Noted as a dependency rather
+than a design: that install happens on the codex path, so the attn skill is
+present for pi as a side effect of codex being configured.
+
+Acceptance is the packaged-app scenario `pi-host-delegate`
+(`app/scripts/real-app-harness/scenario-pi-host-delegate.mjs`).
 
 ### Slice 5 — history and depth
 

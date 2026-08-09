@@ -315,6 +315,13 @@ func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent
 	if intent.Effort != "" {
 		spawnMsg.Effort = protocol.Ptr(intent.Effort)
 	}
+	// Only a conversation session ever stored one, and its host is what decides
+	// whether to say it again (LaunchIntent.InitialPrompt). Carrying it here is
+	// what makes a relaunch after a zero-file early crash a relaunch of the same
+	// task rather than of an empty session.
+	if intent.InitialPrompt != "" {
+		spawnMsg.InitialPrompt = protocol.Ptr(intent.InitialPrompt)
+	}
 	launch := intent.UnattendedLaunch
 	if !launch.IsZero() {
 		launch = launch.WithLegacyDefaults()

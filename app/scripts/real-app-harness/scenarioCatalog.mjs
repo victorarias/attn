@@ -291,6 +291,15 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'pi-host-delegate',
+    label: 'Delegation to a conversation agent: brief as the first message, the agent reports on its own ticket, a brief survives a crash before the first word',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-delegate'],
+    // Same prereqs as pi-host-conversation. Two delegations through a real
+    // agent, each of which does a small task and comments on its ticket, plus a
+    // SIGKILL of the second host before pi has written anything down.
+    timeoutMs: 900_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

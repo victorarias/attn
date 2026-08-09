@@ -364,7 +364,17 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 	// death after Spawn but before commit would otherwise leave a recoverable
 	// session with no stored launch intent to revive from.
 	plan.priorIntent, plan.hadPriorIntent = d.store.LaunchIntent(session.ID)
-	d.store.SetLaunchIntent(session.ID, launchIntentFromSpawnOptions(plan.spawnOpts, plan.isChief))
+	intent := launchIntentFromSpawnOptions(plan.spawnOpts, plan.isChief)
+	if req.hasPluginDriver && req.pluginDriver.Capabilities[pluginDriverConversationCapability] {
+		// A conversation session's launch prompt outlives the process that was
+		// given it. The host is handed it again on every relaunch and delivers it
+		// only into a conversation it reopens empty — which is the whole of the
+		// zero-file early crash, where a delegation would otherwise come back as
+		// an agent with no brief. See LaunchIntent.InitialPrompt for why no other
+		// runtime gets this.
+		intent.InitialPrompt = req.initialPrompt
+	}
+	d.store.SetLaunchIntent(session.ID, intent)
 	if err := d.spawnSessionRuntime(req, plan.spawnOpts); err != nil {
 		if req.existingSession == nil {
 			d.store.Remove(msg.ID)

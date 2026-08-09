@@ -325,6 +325,17 @@ reopened history does not end with the agent speaking comes back
 so the difference is not what attn does next but what it tells the user: the
 agent stopped without finishing, and something is owed to it.
 
+A **launch prompt** is the first message a session is opened with rather than
+typed into — a delegation brief, most often. It belongs to the session, not to
+the process that first received it: the daemon stores it and hands the same one
+to every replacement host, and the host decides whether to say it by looking at
+the history it just reopened. An empty history means it was never said, which is
+true on a first launch and on a relaunch after a crash so early the agent had not
+spoken yet; anything else means it was, and it is never said twice. Only
+conversation sessions store one — a PTY agent's relaunch resumes its transcript,
+so replaying the brief there would set it to work on something it had already
+finished.
+
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —
 comes back from the same `driver.spawn` call a PTY-backed agent uses. That

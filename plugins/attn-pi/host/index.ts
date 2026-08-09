@@ -41,6 +41,7 @@ import {
   ToolDetailStore,
   TranscriptStore,
   conversationInterrupted,
+  launchPromptIsUndelivered,
   parseVerb,
   reconstructTranscript,
   type Envelope,
@@ -162,6 +163,10 @@ async function main(): Promise<void> {
   const sessionDir = requireEnv("ATTN_PI_HOST_SESSION_DIR");
   const cwd = requireEnv("ATTN_PI_HOST_CWD");
   const pinnedModel = requireEnv("ATTN_PI_HOST_MODEL");
+  // The launch's own first user message, when it had one — today that is a
+  // delegation brief. Optional: an ordinary session is opened empty, for a user
+  // who will type into it.
+  const initialPrompt = process.env.ATTN_PI_HOST_INITIAL_PROMPT?.trim() ?? "";
 
   const envelopeOut = createWriteStream("", { fd: ENVELOPE_FD });
   // The host's own transcript is fed the same envelopes the daemon forwards, so
@@ -420,6 +425,20 @@ async function main(): Promise<void> {
         return;
     }
   };
+
+  // The launch's own first message. The daemon hands the same one to every
+  // replacement host and this is where it is decided whether to say it — see
+  // `launchPromptIsUndelivered`. It opens the session's first run exactly as a
+  // typed prompt would, so pi's own events draw it and it lands in the
+  // transcript; nothing here is a special case downstream.
+  if (initialPrompt !== "") {
+    if (launchPromptIsUndelivered(initialPrompt, history.items)) {
+      console.error(`[attn-pi-host] delivering the launch prompt (${initialPrompt.length} chars) into an empty conversation`);
+      void runPrompt(initialPrompt);
+    } else {
+      console.error(`[attn-pi-host] launch prompt already delivered; ${history.items.length} item(s) reopened`);
+    }
+  }
 
   let buffer = "";
   for await (const chunk of process.stdin) {

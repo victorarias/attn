@@ -1096,6 +1096,28 @@ export function conversationInterrupted(items: SnapshotItem[]): boolean {
 }
 
 /**
+ * Whether a host that has just reopened its conversation still owes it the
+ * message the launch was given.
+ *
+ * A launch prompt — today that is a delegation brief — belongs to the SESSION,
+ * not to the process that first received it, so the daemon hands
+ * the same one to every replacement host. That is what saves a delegation from
+ * a crash before pi's first assistant message, which leaves no session file at
+ * all: the replacement is a fresh session, and a fresh session with no brief is
+ * an agent with nothing to do.
+ *
+ * Emptiness is the whole test, and it is exact rather than approximate: pi
+ * persists nothing until a message ends, so a conversation that reopens with
+ * items in it is one the prompt already reached — including the interrupted
+ * case, where the prompt is there and the answer is not. Asking again there
+ * would make the agent do the task twice; `waiting_input` and a nudge are the
+ * way out of that one, and they are the user's to spend.
+ */
+export function launchPromptIsUndelivered(prompt: string, reopened: SnapshotItem[]): boolean {
+  return prompt.trim() !== "" && reopened.length === 0;
+}
+
+/**
  * One verb the daemon can send the host over stdin.
  *
  * Three of them carry text, and the difference between them is only WHEN the

@@ -1,0 +1,16 @@
+kind: added
+area: sessions
+change: >
+  A conversation agent can now be delegated to. `attn delegate --agent pi-host`
+  opens a conversation session the way it opens any other delegated session — its
+  own ticket, its own worktree — and the brief arrives as the first thing the
+  agent is asked, so the pane shows the task and the reply rather than an empty
+  composer. The brief belongs to the session rather than to the process running
+  it: if that process dies before the agent has said anything at all, the
+  relaunch asks the same question again instead of coming back as an agent with
+  nothing to do. A conversation that already has something in it is never asked
+  twice.
+symptom: >
+  Delegating to a conversation agent was refused outright — it could not be
+  launched with a brief — so the whole of attn's delegation, ticket binding and
+  worktrees included, was closed to it.
