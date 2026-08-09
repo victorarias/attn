@@ -477,6 +477,43 @@ export class DeltaCoalescer {
 }
 
 /** Pulls display text out of whatever shape a pi message carries. */
+/**
+ * Why a turn failed, in words worth showing, or "" if it did not.
+ *
+ * pi does not raise on a provider error: it persists the assistant message with
+ * `stopReason: "error"` and the provider's response in `errorMessage`. That
+ * response is routinely a JSON envelope wrapping another JSON envelope wrapping
+ * the sentence a person would want to read (measured against Google's 404 for a
+ * retired model, 2026-08-09), so this digs for the innermost `error.message`
+ * and falls back to whatever it was handed. It never returns the raw wall of
+ * JSON when a sentence is available, because the row it feeds is one line.
+ */
+export function messageFailure(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  if ((message as { stopReason?: unknown }).stopReason !== "error") return "";
+  const raw = readString(message, "errorMessage");
+  if (raw === "") return "The provider reported an error with no message.";
+  let best = raw;
+  let current: unknown = raw;
+  // Each unwrap peels one `{"error":{"message": ...}}`; the message is itself
+  // JSON often enough that this loops rather than checking once.
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== "string") break;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(current);
+    } catch {
+      break;
+    }
+    const error = parsed && typeof parsed === "object" ? (parsed as { error?: unknown }).error : undefined;
+    const inner = readString(error, "message");
+    if (inner === "") break;
+    best = inner;
+    current = inner;
+  }
+  return best.replace(/\s+/g, " ").trim();
+}
+
 export function messageText(message: unknown): string {
   if (typeof message === "string") return message;
   if (message === null || typeof message !== "object") return "";
@@ -777,6 +814,13 @@ export class PiEventMapper {
         const open = this.currentMessageID;
         this.currentMessageID = null;
         this.currentRole = "assistant";
+        // A turn that failed. pi does not raise — it persists the message with
+        // `stopReason: "error"` and the provider's words — so without this the
+        // run just settles and the user watches an agent answer with silence.
+        // Measured 2026-08-09: a model the provider had retired came back 404
+        // and nothing whatsoever reached the pane.
+        const failure = messageFailure(event.message);
+        if (failure !== "") this.closeNotice("run", "error", `The agent could not answer: ${clipSummary(failure)}`);
         // A tool's output belongs to its card, which fetches it on demand. A
         // message that never said anything is not a message.
         if (UNRENDERED_ROLES.has(role) || (open === null && text === "")) return;
@@ -1334,6 +1378,12 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
       continue;
     }
     if (entry.type === "model_change") {
+      // pi writes a model_change (and a thinking_level_change) into every
+      // session before anything is said — that is the session recording what it
+      // opened on, not a switch. Measured on a fresh conversation, 2026-08-09,
+      // pi 0.83.0. A switch is only a switch once there is a conversation to
+      // switch mid-way through, so this waits for the first thing said.
+      if (!items.some((item) => item.kind === "message")) continue;
       const provider = typeof entry.provider === "string" ? entry.provider : "";
       const modelID = typeof entry.modelId === "string" ? entry.modelId : "";
       if (provider !== "" && modelID !== "") {
@@ -1378,6 +1428,19 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
     if (text !== "") {
       items.push({ kind: "message", id: `h:${entry.id}`, role, text, streaming: false });
     }
+    // The same row the live stream draws for a failed turn. Without it, a
+    // conversation reopened after a provider error shows the prompt and then
+    // nothing, which reads as the agent having ignored it.
+    const failure = messageFailure(message);
+    if (failure !== "") {
+      items.push({
+        kind: "notice",
+        id: `h:${entry.id}:error`,
+        level: "error",
+        text: `The agent could not answer: ${clipSummary(failure)}`,
+        done: true,
+      });
+    }
     for (const block of contentBlocks(message)) {
       if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "toolCall") continue;
       const callID = readString(block, "id");
@@ -1420,7 +1483,13 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
  * session, which is idle.
  */
 export function conversationInterrupted(items: SnapshotItem[]): boolean {
-  const last = items[items.length - 1];
+  // Notices are things that happened TO the conversation — a compaction, a
+  // model switch — not things the agent or the user said, so they are
+  // transparent to who had the last word. A conversation that ended with the
+  // agent speaking and was then switched to another model is not interrupted.
+  let index = items.length - 1;
+  while (index >= 0 && items[index]!.kind === "notice") index -= 1;
+  const last = items[index];
   if (!last) return false;
   return last.kind !== "message" || last.role !== "assistant";
 }

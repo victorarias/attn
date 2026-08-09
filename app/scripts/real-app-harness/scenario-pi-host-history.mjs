@@ -81,11 +81,32 @@ async function sendPrompt(client, sessionId, text) {
   await client.request('dom_click', { selector: sendOf(sessionId) });
 }
 
-function settledWith(client, sessionId, word, description, timeoutMs = 180_000) {
+/**
+ * The error row this run put in the transcript, if it put one there.
+ *
+ * `seen` is what was already on screen before the prompt: an earlier refusal
+ * stays drawn, and it is not this run's news.
+ */
+const failureNotice = (state, seen = new Set()) => (state?.notices || [])
+  .find((notice) => notice.level === 'error' && notice.done && !seen.has(notice.id));
+
+const noticeIds = (state) => new Set((state?.notices || []).map((notice) => notice.id));
+
+/**
+ * Waits for a settled run whose answer contains `word`.
+ *
+ * A run that the provider refused settles too, and would otherwise burn the
+ * whole timeout: the transcript now carries an error row saying why, so this
+ * stops on it and reports the provider's own words.
+ */
+function settledWith(client, sessionId, word, description, { timeoutMs = 180_000, seenNotices = new Set() } = {}) {
   return pollFor(
     async () => {
       const current = await conversationState(client, sessionId);
-      if (!current || current.sendLabel !== 'Send') return null;
+      if (!current) return null;
+      const failed = failureNotice(current, seenNotices);
+      if (failed) throw new Error(`the agent could not answer while waiting for: ${description}. ${failed.text}`);
+      if (current.sendLabel !== 'Send') return null;
       const reply = (current.messages || []).find(
         (message) => message.role === 'assistant' && !message.streaming
           && message.text.toLowerCase().includes(word),
@@ -248,22 +269,55 @@ async function main() {
         note('model switching not exercised: this machine offers one model', { model: before.model });
         return;
       }
-      const target = alternatives[0];
-      await client.request('dom_select', { selector: modelOf(sessionId), value: target });
-      const switched = await pollFor(
-        async () => {
-          const current = await conversationState(client, sessionId);
-          return current && current.model === target ? current : null;
-        },
-        `the host to confirm the switch to ${target}`,
-        60_000,
-      );
-      // The run after the switch is what proves it took: a model the host could
-      // not actually select would refuse here rather than answer.
-      await sendPrompt(client, sessionId, 'Reply with exactly one word: bravo');
-      const settled = await settledWith(client, sessionId, 'bravo', 'a run on the newly selected model');
-      runner.writeJson('model-switch.json', { from: before.model, to: target, state: settled });
-      note('the model switched mid-session and the next run used it', { from: before.model, to: target, models: switched.models.length });
+      // Any alternative proves the switch, so prefer a small one — this step
+      // runs a real prompt on whatever it picks. `getAvailable` answers from
+      // pi's catalog and this machine's credentials, neither of which knows
+      // that a provider retired a model: the first candidate came back 404 on
+      // 2026-08-09. So candidates are TRIED, and a refusal moves to the next
+      // rather than failing the run — what is being proved is that the switch
+      // takes effect, not that every model in the catalog still exists.
+      const small = /haiku|mini|flash|small|lite/i;
+      const candidates = [...alternatives].sort((a, b) => Number(small.test(b)) - Number(small.test(a))).slice(0, 3);
+      const refused = [];
+      let landed = null;
+      for (const target of candidates) {
+        await client.request('dom_select', { selector: modelOf(sessionId), value: target });
+        const switched = await pollFor(
+          async () => {
+            const current = await conversationState(client, sessionId);
+            return current && current.model === target ? current : null;
+          },
+          `the host to confirm the switch to ${target}`,
+          60_000,
+        );
+        // The run after the switch is what proves it took. An earlier
+        // candidate's refusal is still drawn, so this run's news is only what
+        // was not on screen when it started.
+        const seenNotices = noticeIds(switched);
+        await sendPrompt(client, sessionId, 'Reply with exactly one word: bravo');
+        try {
+          const settled = await settledWith(client, sessionId, 'bravo', `a run on ${target}`, { timeoutMs: 120_000, seenNotices });
+          landed = { from: before.model, to: target, refused, models: switched.models.length, state: settled };
+          break;
+        } catch (error) {
+          const failed = failureNotice(await conversationState(client, sessionId), seenNotices);
+          if (!failed) throw error;
+          // The provider refused, and the pane said so rather than going quiet.
+          // That row is itself part of what this slice ships.
+          refused.push({ model: target, reason: failed.text });
+          note('a model the catalog offers was refused by its provider, and the pane said so', { model: target, reason: failed.text });
+        }
+      }
+      if (!landed) {
+        throw new Error(`no offered model would answer: ${JSON.stringify(refused)}`);
+      }
+      runner.writeJson('model-switch.json', landed);
+      note('the model switched mid-session and the next run used it', {
+        from: landed.from,
+        to: landed.to,
+        refusedFirst: refused.length,
+        models: landed.models,
+      });
     });
 
     await runner.step('a_new_session_picks_up_the_old_conversation', async () => {
@@ -332,6 +386,7 @@ async function main() {
       }
       const oldestAtFirst = windowed.messages[0].id;
 
+      const askedAt = Date.now();
       await client.request('dom_click', { selector: earlierOf(sessionId) });
       const paged = await pollFor(
         async () => {
@@ -351,17 +406,23 @@ async function main() {
       if (!ids.includes(oldestAtFirst) || ids.indexOf(oldestAtFirst) === 0) {
         throw new Error('the page did not land above the item it was anchored to');
       }
+      // How long the reader waits between asking for older conversation and
+      // seeing it, at this transcript length. It is polled, so it is an upper
+      // bound — and an upper bound is what "scrolls smoothly" needs.
+      const pagedInMs = Date.now() - askedAt;
       runner.writeJson('paging.json', {
         entries: LONG_CONVERSATION_ENTRIES,
         drawnAtFirst,
         drawnAfterPage: paged.messages.length,
         oldestAtFirst,
         oldestAfterPage: ids[0],
+        pagedInMs,
       });
       note('a transcript past the window paged the rest in on demand', {
         entries: LONG_CONVERSATION_ENTRIES,
         drawnAtFirst,
         drawnAfterPage: paged.messages.length,
+        pagedInMs,
       });
 
       // The edge slice 4 left behind: the snapshot is a BROADCAST replace, so

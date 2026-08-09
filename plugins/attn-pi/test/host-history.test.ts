@@ -4,6 +4,7 @@ import {
   EnvelopeStream,
   PiEventMapper,
   TranscriptStore,
+  conversationInterrupted,
   parseVerb,
   reconstructTranscript,
   snapshotItemKey,
@@ -159,6 +160,56 @@ describe("compaction and retry notices", () => {
     expect(emitted[1]!.body).toEqual({ id: "n1", level: "error", text: "Gave up after 5 retry attempt(s): still overloaded", done: true });
   });
 
+  // The bug this exists for, caught live on 2026-08-09: a model the provider
+  // had retired answered 404, pi persisted an empty assistant message with
+  // `stopReason: "error"`, and the pane showed nothing at all — the composer
+  // simply reopened as if the agent had chosen not to reply.
+  test("a turn the provider refused says so instead of settling in silence", () => {
+    const { emitted, mapper } = harness();
+    const message = {
+      role: "assistant",
+      content: [],
+      stopReason: "error",
+      errorMessage: JSON.stringify({
+        error: {
+          message: JSON.stringify({ error: { code: 404, message: "This model models/gemini-2.0-flash is no\n  longer available.", status: "NOT_FOUND" } }),
+          code: 404,
+        },
+      }),
+    };
+    mapper.handle({ type: "message_start", message });
+    mapper.handle({ type: "message_end", message });
+
+    expect(emitted.map((envelope) => envelope.kind)).toEqual(["notice"]);
+    expect(emitted[0]!.body).toEqual({
+      id: "n1",
+      level: "error",
+      // The provider's sentence, dug out of two layers of JSON envelope and
+      // flattened to the one line the row is.
+      text: "The agent could not answer: This model models/gemini-2.0-flash is no longer available.",
+      done: true,
+    });
+  });
+
+  test("a turn that succeeded draws no failure row", () => {
+    const { emitted, mapper } = harness();
+    const message = { role: "assistant", content: [{ type: "text", text: "hi" }], stopReason: "stop" };
+    mapper.handle({ type: "message_start", message });
+    mapper.handle({ type: "message_end", message });
+    expect(emitted.map((envelope) => envelope.kind)).toEqual(["message_start", "message_end"]);
+  });
+
+  test("a failure the provider did not explain still gets a row", () => {
+    const { emitted, mapper } = harness();
+    const message = { role: "assistant", content: [], stopReason: "error" };
+    mapper.handle({ type: "message_start", message });
+    mapper.handle({ type: "message_end", message });
+    expect(emitted[0]!.body).toMatchObject({
+      level: "error",
+      text: "The agent could not answer: The provider reported an error with no message.",
+    });
+  });
+
   test("an end with no start is still drawn: the record beats the pairing", () => {
     const { emitted, mapper } = harness();
     mapper.handle({ type: "compaction_end", reason: "manual", aborted: true, willRetry: false });
@@ -200,13 +251,62 @@ describe("history off disk", () => {
 
   test("a model change is part of the history a revived conversation shows", () => {
     const { items } = reconstructTranscript([
+      { type: "message", id: "e0", message: { role: "user", content: [{ type: "text", text: "hello" }] } },
       { type: "model_change", id: "e1", provider: "openai", modelId: "gpt-5.6-luna" },
     ]);
-    expect(items).toEqual([{ kind: "notice", id: "h:e1", level: "info", text: "Model switched to openai/gpt-5.6-luna", done: true }]);
+    expect(items[1]).toEqual({ kind: "notice", id: "h:e1", level: "info", text: "Model switched to openai/gpt-5.6-luna", done: true });
+  });
+
+  // Measured on a real fresh conversation (2026-08-09, pi 0.83.0): pi writes a
+  // model_change and a thinking_level_change into the session file before
+  // anything is said. Drawing those is a conversation claiming it switched
+  // models before it existed — and, because the row is not an assistant
+  // message, it also made every new session declare `waiting_input`.
+  test("the model a session opened on is not a switch", () => {
+    const { items } = reconstructTranscript([
+      { type: "model_change", id: "e1", provider: "openai", modelId: "gpt-5.6-luna" },
+      { type: "thinking_level_change", id: "e2", thinkingLevel: "off" },
+    ]);
+    expect(items).toEqual([]);
+    expect(conversationInterrupted(items)).toBe(false);
+  });
+
+  // A conversation reopened after a provider error must not show the prompt
+  // and then nothing — that reads as the agent having ignored it. The turn is
+  // also still owed, so the session comes back waiting rather than idle.
+  test("a turn the provider refused is still explained after a reopen", () => {
+    const { items } = reconstructTranscript([
+      { type: "message", id: "e1", message: { role: "user", content: [{ type: "text", text: "do it" }] } },
+      { type: "message", id: "e2", message: { role: "assistant", content: [], stopReason: "error", errorMessage: "quota exhausted" } },
+    ]);
+    expect(items[1]).toEqual({
+      kind: "notice",
+      id: "h:e2:error",
+      level: "error",
+      text: "The agent could not answer: quota exhausted",
+      done: true,
+    });
+    expect(conversationInterrupted(items)).toBe(true);
   });
 
   test("a model change with nothing to say is dropped rather than drawn blank", () => {
-    expect(reconstructTranscript([{ type: "model_change", id: "e1" }]).items).toEqual([]);
+    const { items } = reconstructTranscript([
+      { type: "message", id: "e0", message: { role: "user", content: [{ type: "text", text: "hello" }] } },
+      { type: "model_change", id: "e1" },
+    ]);
+    expect(items.filter((item) => item.kind === "notice")).toEqual([]);
+  });
+
+  // A switch is something that happened TO the conversation. The agent still
+  // had the last word, so the session is idle rather than waiting for one.
+  test("a model switched after the agent finished does not read as interrupted", () => {
+    const { items } = reconstructTranscript([
+      { type: "message", id: "e0", message: { role: "user", content: [{ type: "text", text: "hello" }] } },
+      { type: "message", id: "e1", message: { role: "assistant", content: [{ type: "text", text: "hi" }] } },
+      { type: "model_change", id: "e2", provider: "openai", modelId: "gpt-5.6-luna" },
+    ]);
+    expect(items[items.length - 1]!.kind).toBe("notice");
+    expect(conversationInterrupted(items)).toBe(false);
   });
 });
 
