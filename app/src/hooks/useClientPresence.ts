@@ -36,10 +36,16 @@ export function useClientPresence(
   options: { dashboardVisible: boolean; connected: boolean },
 ) {
   const { dashboardVisible, connected } = options;
+  // What `report` reads, kept in refs so the callback stays stable across the
+  // long-lived listeners and the heartbeat. Synced in an effect rather than
+  // during render: a render can be replayed or discarded, and a write from one
+  // that never commits would leak into a report.
   const sendRef = useRef(sendSetClientPresence);
-  sendRef.current = sendSetClientPresence;
   const dashboardRef = useRef(dashboardVisible);
-  dashboardRef.current = dashboardVisible;
+  useEffect(() => {
+    sendRef.current = sendSetClientPresence;
+    dashboardRef.current = dashboardVisible;
+  }, [sendSetClientPresence, dashboardVisible]);
 
   const lastInputAtRef = useRef<number | null>(null);
   const lastReportAtRef = useRef(0);
