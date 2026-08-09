@@ -1,11 +1,10 @@
 kind: changed
 area: terminal
 change: >
-  Terminal annotations can now say a thing is right. 💯 "Exactly this" leads the
-  label row, held apart from the seven labels that ask for a change, and tells
-  the agent to preserve the decision and the reasoning behind it rather than
-  revisit it on the next pass. Until now every label was a correction, so the
-  only feedback the surface could carry was an objection. The feedback message
+  Terminal annotations can now say a thing is right. Agreement leads the label
+  row, held apart from the labels that ask for a change. Until now every label
+  was a correction, so the only feedback the surface could carry was an
+  objection. The feedback message
   also stops opening with "Address each annotation" — the annotations are the
   instruction.
 notes: >

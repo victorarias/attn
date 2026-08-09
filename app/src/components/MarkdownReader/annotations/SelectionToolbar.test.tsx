@@ -83,13 +83,10 @@ describe('SelectionToolbar', () => {
   });
 
   it('the one-click agreement button applies a label from the shared set (E7)', () => {
-    // It used to send its own instruction-less 'thumbs-up' label, so agreeing
-    // in one click and agreeing from the picker said different things to the
-    // agent. Now it is the picker's own agreement label, tip and all.
     const { props } = renderToolbar();
     fireEvent.click(screen.getByTitle(THUMBS_UP_LABEL.text));
     expect(props.onQuickLabel).toHaveBeenCalledWith(THUMBS_UP_LABEL);
-    expect(THUMBS_UP_LABEL.tip).toBeTruthy();
+    expect(THUMBS_UP_LABEL.emoji).toBe('👍');
     expect(QUICK_LABELS).toContain(THUMBS_UP_LABEL);
   });
 
