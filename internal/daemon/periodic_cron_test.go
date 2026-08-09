@@ -14,12 +14,11 @@ import (
 func TestStartJobQueueArmsThePeriodicTicks(t *testing.T) {
 	d := newBubbleDaemon(t)
 	notebookRoot := t.TempDir()
-	// In a bubble because arming is asynchronous: startJobQueue hands the two cron
-	// entries to the runner, whose dispatch goroutine writes them. Reading the
-	// entries straight afterwards used to be a race the test won on an idle
-	// machine and lost under full-suite load, reported as "notebook_cron is not
-	// armed". synctest.Wait returns only once that goroutine has parked, so the
-	// read happens after the write by construction.
+	// Arming is synchronous inside startJobQueue, so a missing entry here is never
+	// an early read: either the runner never started or the store refused the
+	// write. Both used to be logged into a test daemon's nil logger and dropped,
+	// which is how this failing under full-suite load survived a triage as a race.
+	// CronEntry carries the reason now, so the fatal below prints it.
 	synctest.Test(t, func(t *testing.T) {
 		d.store.SetSetting(SettingNotebookRoot, notebookRoot)
 		d.startJobQueue()

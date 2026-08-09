@@ -7,11 +7,9 @@ import (
 )
 
 // newTestJobStore builds the queue's persistence over the test daemon's own
-// SQLite store, with the single-instance lock in a per-test temp dir.
-//
-// The lock dir is NOT config.DataDir() (what production uses): a test binary
-// builds many daemons in one process against one scoped data dir, so a shared
-// lock would let the first started runner block every later one.
+// SQLite store, with the single-instance lock in a per-test temp dir. A runner
+// this helper builds is not the daemon's own, so it takes a lock dir of its own
+// rather than contending with startJobQueue's over the daemon's data root.
 func newTestJobStore(t *testing.T, d *Daemon) jobs.Store {
 	t.Helper()
 	return &sqlJobStore{store: d.store, lockDir: t.TempDir(), log: func(string, ...any) {}}

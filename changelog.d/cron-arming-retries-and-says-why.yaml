@@ -1,0 +1,11 @@
+kind: fixed
+area: jobs
+change: >
+  A periodic tick whose recurring record the database refused to write is no
+  longer lost until the next daemon restart. Arming a cron kind now retries on
+  the queue's own backoff until the record lands, and while it has not, the
+  daemon log and any caller reading the entry both name the kind and the
+  underlying error instead of reporting nothing at all. The job queue's
+  single-instance lock also moves next to the daemon's own attn.pid, so one
+  daemon means one queue — the same file in production, and no longer one lock
+  shared by every daemon a test process builds.

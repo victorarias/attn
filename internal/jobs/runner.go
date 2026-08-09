@@ -119,6 +119,11 @@ type Runner struct {
 	mu       sync.Mutex
 	handlers map[string]handler
 	started  bool
+	// startErr is the last Start failure, kept so a caller asking about a cron
+	// entry that is missing because nothing started learns that, not silence.
+	startErr error
+	// pendingArms holds the cron kinds arming could not write yet (cron.go).
+	pendingArms map[string]*pendingArm
 
 	// ioMu serializes every read-modify-write on a job record; without it a
 	// concurrent Enqueue and a claim/finish write would lost-update each other.
@@ -164,6 +169,7 @@ func New(opts Options) *Runner {
 		now:          func() time.Time { return now().UTC() },
 		disabled:     opts.Store == nil,
 		handlers:     make(map[string]handler),
+		pendingArms:  make(map[string]*pendingArm),
 		runs:         make(map[string]*activeRun),
 		inflight:     make(map[string]int),
 		pollInterval: nonZeroDuration(opts.PollInterval, defaultPollInterval),
@@ -240,17 +246,21 @@ func (r *Runner) Start() error {
 		r.mu.Unlock()
 		return errors.New("jobs: runner already started")
 	}
-	if err := r.store.Init(); err != nil {
+	if initErr := r.store.Init(); initErr != nil {
+		startErr := fmt.Errorf("jobs: init store: %w", initErr)
+		r.startErr = startErr
 		r.mu.Unlock()
-		return fmt.Errorf("jobs: init store: %w", err)
+		return startErr
 	}
 	// Exclusive ownership first: a second live Runner on the same store would
 	// double-execute every job.
 	token, err := r.store.AcquireLock()
 	if err != nil {
+		r.startErr = err
 		r.mu.Unlock()
 		return err
 	}
+	r.startErr = nil
 	r.lockToken = token
 	r.started = true
 	r.done = make(chan struct{})
@@ -540,6 +550,9 @@ func (r *Runner) loop() {
 	ticker := time.NewTicker(r.pollInterval)
 	defer ticker.Stop()
 	for {
+		// A cron kind the store refused to arm has no record to dispatch, so this
+		// loop is the only thing left that can bring it back.
+		r.retryCronArming()
 		for {
 			select {
 			case <-r.done:
