@@ -234,29 +234,28 @@ Three adopted patterns; full receipts in
 
 ## How changes ship
 
-The flow is sized by judgment, not a rulebook. When in doubt about which shape
-applies, ask Victor once at kickoff, not mid-flight.
+How much process a change gets is a judgment call, not a rulebook. When in
+doubt, ask the maintainer once before starting, not halfway through.
 
 - **Plan docs are the norm.** Non-trivial work gets a plan doc first — often
   written by the same agent that then implements it in the same session. Only a
   genuinely small change goes straight to a PR with no plan.
-- **A plan lands as one or several PRs.** When the work changes existing
-  behavior, slice PRs target an `epic/*` branch and the epic gets a whole-review
-  pass when it merges to main. When the work builds a new subsystem that cannot
-  break existing experience, slices may merge directly to main as they land.
-  That criterion — can this slice damage what already works? — decides the
-  shape, not the size of the plan.
+- **A plan becomes one or several PRs.** When the work changes existing
+  behavior, the PRs target an `epic/*` branch and the epic branch gets a full
+  review when it merges to main. When the work builds something new that
+  cannot break what already exists, PRs may merge directly to main as they
+  land. One question decides between the two — can this PR damage what already
+  works? — not how big the plan is.
 - **A spike answers a question.** It usually does not merge, but that is not a
-  hard rule. The constant: Victor decides what happens after a spike — merging
-  it, discarding it, or building on its conclusion.
+  hard rule. What is constant: the maintainer decides what happens after a
+  spike — merge it, discard it, or build on what it showed.
 
 ### Merging
 
-The standing gate for every PR: figgyster approved on the current head, CI
-green, zero unresolved threads. When it passes, merge — no per-PR authorization
-from Victor needed.
+Every PR merges once figgyster approved the current head, CI is green, and no
+review threads are unresolved. No per-PR permission needed.
 
-Hold for Victor's explicit go-ahead only for:
+Wait for the maintainer's explicit OK only before:
 
 - merging an epic branch to main;
 - moving on from a spike;
@@ -264,30 +263,32 @@ Hold for Victor's explicit go-ahead only for:
 - one-way doors — a way in shipped without its way out;
 - production installs and releases (already covered above).
 
-### Victor's testing
+### Experience testing
 
-Victor validates **experience**; the harness and figgyster own correctness. His
-pass happens at two moments: very early on spikes (does the idea feel right?)
-and at the end of a substantial series (does the whole feel right?). It is
-never per-PR QA — do not queue an approved PR on his testing.
+The maintainer tests how attn feels to use; the harness and figgyster cover
+correctness. That testing happens at two moments: very early on spikes (is the
+idea right?) and at the end of a substantial series of PRs (does the whole
+thing feel right?). It is never per-PR QA — do not hold an approved PR
+waiting for it.
 
-When a series reaches his checkpoint, stage it: a running profile installed
-from the branch, realistic state, and a short what-to-try list keyed to what
+When a series gets there, prepare the test: a running profile installed from
+the branch, realistic data, and a short list of things to try, focused on what
 changed and what you could not judge yourself — feel, latency, keyboard flow.
-His session should be minutes of directed play, not setup.
+The maintainer should spend those minutes trying things, not setting up.
 
-### Routine mechanics
+### Protocol bumps and migrations
 
 Protocol version bumps and DB migrations are day-to-day work; their checklists
 are in this file. Do them, verify them, and do not present them as risks,
-blockers, or reasons to pause. Escalate by the hold list above — irreversible
-user-state loss, one-way doors, production lifecycle — never by category.
+blockers, or reasons to pause. They need the maintainer's attention only when
+they hit the wait list above — destroying user state, closing a door, touching
+production — never just because they are a migration or a protocol change.
 
 ## Pull requests
 
 Ready-for-review (not draft) and rebase onto main first, per the global guide;
-merging is governed by "How changes ship" above. What is attn-specific is how
-you wait on one.
+when to merge is in "How changes ship" above. What is attn-specific is how you
+wait on one.
 
 To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
 --reviewer <login>` once; do not poll checks, reviews, and comments separately.
