@@ -39,6 +39,10 @@ import {
   DeltaCoalescer,
   EnvelopeStream,
   PiEventMapper,
+  SNAPSHOT_BYTES_LIMIT,
+  SNAPSHOT_ITEM_LIMIT,
+  TRANSCRIPT_RETENTION_BYTES,
+  TRANSCRIPT_RETENTION_ITEMS,
   ToolDetailStore,
   TranscriptStore,
   conversationInterrupted,
@@ -120,6 +124,31 @@ function requireEnv(name: string): string {
 
 function optionalEnv(name: string): string {
   return process.env[name]?.trim() ?? "";
+}
+
+/**
+ * A retention budget from the environment, or the compiled-in default.
+ *
+ * These exist to make the tripwire reachable: 50,000 items and 32 MB are set
+ * past the longest conversation anyone here has ever had, so the only way to
+ * watch a host actually drop history — and the app say so — is to lower them.
+ * They are the escape hatch too, for a machine where a host's memory matters
+ * more than a month of scroll-back.
+ *
+ * A value that is not a positive count is reported and treated as absent,
+ * meaning the DEFAULT rather than zero: a typo in a tuning variable must not
+ * silently reduce a conversation to one item, and refusing to launch over a
+ * diagnostic environment variable is worse than either.
+ */
+function retentionBudget(name: string, fallback: number): number {
+  const raw = optionalEnv(name);
+  if (raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    console.error(`[attn-pi-host] ${name}=${raw} is not a positive whole number; using ${fallback}`);
+    return fallback;
+  }
+  return value;
 }
 
 /**
@@ -233,7 +262,13 @@ async function main(): Promise<void> {
   // The host's own transcript is fed the same envelopes the daemon forwards, so
   // a snapshot it serves cannot disagree with what a client that watched the
   // stream ended up holding. See TranscriptStore.
-  const transcript = new TranscriptStore(epoch);
+  const transcript = new TranscriptStore(
+    epoch,
+    SNAPSHOT_ITEM_LIMIT,
+    SNAPSHOT_BYTES_LIMIT,
+    retentionBudget("ATTN_PI_HOST_RETENTION_ITEMS", TRANSCRIPT_RETENTION_ITEMS),
+    retentionBudget("ATTN_PI_HOST_RETENTION_BYTES", TRANSCRIPT_RETENTION_BYTES),
+  );
   const write = (envelope: Envelope) => {
     transcript.apply(envelope.kind, envelope.body);
     envelopeOut.write(`${JSON.stringify(envelope)}\n`);

@@ -150,6 +150,11 @@ export interface ConversationState {
   // addressed by the oldest item held, so a second request while one is in
   // flight would ask for the same page twice.
   loadingHistory: boolean;
+  // How many items the host's retention budget has dropped for good. No page
+  // will ever answer with them, so unlike `hasMoreBefore` this does not go away
+  // by scrolling: it is the reason the transcript starts where it does, and the
+  // transcript says so rather than appearing to begin mid-thought.
+  droppedBefore: number;
   // The model this session's agent is running on, and everything this machine
   // could switch it to. Both come from the host, which reads them out of pi.
   model: string;
@@ -179,6 +184,7 @@ const emptyConversation: ConversationState = {
   epoch: '',
   hasMoreBefore: false,
   loadingHistory: false,
+  droppedBefore: 0,
   model: '',
   models: [],
   running: false,
@@ -214,6 +220,11 @@ function text(body: Record<string, unknown>, key: string): string {
 
 function flag(body: Record<string, unknown>, key: string): boolean {
   return body[key] === true;
+}
+
+function count(body: Record<string, unknown>, key: string): number {
+  const value = body[key];
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
 }
 
 function stringList(body: Record<string, unknown>, key: string): string[] {
@@ -313,14 +324,21 @@ function snapshotItem(value: unknown): ConversationItem | null {
  * unchanged, so what the client already knew about the conversation behind it
  * still holds; the snapshot's own answer is about the window's start, which is
  * no longer the start of what is drawn.
+ *
+ * `droppedBefore` is the snapshot's own count on both sides. The host is the
+ * authority on what it has thrown away, and within one epoch that number only
+ * grows; across epochs a rebuilt host has read pi's session file from the start,
+ * so carrying the dead host's losses forward would claim a gap this transcript
+ * does not have.
  */
 function mergeSnapshotWindow(
   current: ConversationState,
   epoch: string,
   window: ConversationItem[],
   hasMore: boolean,
-): Pick<ConversationState, 'items' | 'epoch' | 'hasMoreBefore'> {
-  const replace = { items: window, epoch, hasMoreBefore: hasMore };
+  dropped: number,
+): Pick<ConversationState, 'items' | 'epoch' | 'hasMoreBefore' | 'droppedBefore'> {
+  const replace = { items: window, epoch, hasMoreBefore: hasMore, droppedBefore: dropped };
   if (epoch === '' || epoch !== current.epoch || window.length === 0) return replace;
   const anchor = conversationItemKey(window[0]);
   const index = current.items.findIndex((item) => conversationItemKey(item) === anchor);
@@ -329,6 +347,7 @@ function mergeSnapshotWindow(
     items: [...current.items.slice(0, index), ...window],
     epoch,
     hasMoreBefore: current.hasMoreBefore,
+    droppedBefore: dropped,
   };
 }
 
@@ -367,7 +386,13 @@ function applyToConversation(
       // this client already holds. A different epoch means the transcript was
       // rebuilt (a revived host reading pi's session file), and then replacing
       // is the only honest answer — the item ids came from somewhere else.
-      const merged = mergeSnapshotWindow(current, text(body, 'epoch'), window, flag(body, 'has_more'));
+      const merged = mergeSnapshotWindow(
+        current,
+        text(body, 'epoch'),
+        window,
+        flag(body, 'has_more'),
+        count(body, 'dropped'),
+      );
       return {
         ...current,
         ...merged,

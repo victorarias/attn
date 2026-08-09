@@ -52,7 +52,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
   const listRef = useRef<HTMLDivElement | null>(null);
   const attachedRef = useRef<string | null>(null);
 
-  const { running, awaitingRun, ready, items, queue, lastSeq, hasMoreBefore, loadingHistory, model, models } = conversation;
+  const { running, awaitingRun, ready, items, queue, lastSeq, hasMoreBefore, loadingHistory, droppedBefore, model, models } = conversation;
   const recoverable = sessionState === 'recoverable';
 
   // Ask the host for a snapshot when this client has never seen its stream: a
@@ -210,6 +210,19 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
         onScroll={handleScroll}
         data-testid="conversation-messages"
       >
+        {droppedBefore > 0 && !hasMoreBefore && (
+          // The conversation is longer than anything anyone can still be shown:
+          // the host's retention budget dropped the start for good, and no page
+          // will answer for it. Saying so is the difference between a history
+          // that begins mid-thought and one that explains why.
+          <div
+            className="conversation-notice conversation-notice--info conversation-pane-dropped"
+            data-testid="conversation-history-dropped"
+            data-dropped={droppedBefore}
+          >
+            {`${droppedBefore.toLocaleString()} earlier ${droppedBefore === 1 ? 'item' : 'items'} are no longer kept for this conversation.`}
+          </div>
+        )}
         {hasMoreBefore && (
           // Auto-loading covers the reader who scrolls; this covers the one
           // whose transcript is shorter than the pane, where there is no room
