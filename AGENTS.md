@@ -213,6 +213,25 @@ Tests must never resolve `config.DataDir()` or derived paths to production
 
 See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-mitigation.md).
 
+## Testing tools
+
+Three adopted patterns; full receipts in
+[docs/plans/2026-08-09-testing-spike-synctest-rapid-toxiproxy.md](docs/plans/2026-08-09-testing-spike-synctest-rapid-toxiproxy.md).
+
+- A test that asserts elapsed time (backoff, debounce, recurrence) or that
+  something **never** happens runs under `synctest.Test` — no sleeps, no poll
+  loops. Open stores and DB handles outside the bubble; never bubble real
+  sockets, PTYs, or child processes — a goroutine blocked on a real fd is not
+  durably blocked, so fake time never advances.
+- A unit with a stated invariant and a large input space — especially when the
+  interesting failures need a *sequence* of operations — gets a
+  `pgregory.net/rapid` property beside its example tests. Rapid explores, it
+  does not document. Commit the `testdata/rapid/` seeds it writes on failure.
+- Behavior that *is* the network being bad (backpressure, eviction, reconnect)
+  goes through the embedded Toxiproxy helper (`newToxiProxy(t, upstream)`,
+  `internal/daemon`). Anything a fake or direct channel write can express
+  does not — it costs real seconds.
+
 ## Pull requests
 
 PR policy — ready-for-review, rebase onto main first, who approves — comes from

@@ -1,0 +1,10 @@
+kind: internal
+area: docs
+change: >
+  AGENTS.md gains a "Testing tools" section: one-line rules for when a test
+  should use `testing/synctest` (elapsed-time or never-happens assertions),
+  `pgregory.net/rapid` (stated invariant over a large input space), or the
+  embedded Toxiproxy helper (behavior that is the network being bad), with the
+  bubble-boundary and seed-committing gotchas from the adoption spike. Also
+  adds the follow-up plan (docs/plans/2026-08-09-testing-adoption-wave.md)
+  mapping where each tool is applied next.
