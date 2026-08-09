@@ -16,8 +16,14 @@ import (
 )
 
 const (
-	EventKindUser       = "user"
-	EventKindAssistant  = "assistant"
+	EventKindUser      = "user"
+	EventKindAssistant = "assistant"
+	// EventKindThinking is the agent's own reasoning: Claude "thinking" content
+	// blocks, Codex "agent_reasoning" payloads. It is where an agent states what
+	// it is trying to do, and there is roughly twice as much of it as assistant
+	// prose, so a consumer asking "what is this session doing right now" wants it.
+	// Consumers that only want what the user was shown should skip this kind.
+	EventKindThinking   = "thinking"
 	EventKindToolCall   = "tool_call"
 	EventKindToolResult = "tool_result"
 	EventKindError      = "error"
@@ -293,6 +299,7 @@ type eventMessage struct {
 type eventContentBlock struct {
 	Type      string          `json:"type"`
 	Text      string          `json:"text"`
+	Thinking  string          `json:"thinking"`
 	ID        string          `json:"id"`
 	Name      string          `json:"name"`
 	Input     json.RawMessage `json:"input"`
@@ -346,6 +353,7 @@ func parseCodexEvent(envelope eventEnvelope) []Event {
 		var payload struct {
 			Type    string `json:"type"`
 			Message string `json:"message"`
+			Text    string `json:"text"`
 			Error   string `json:"error"`
 		}
 		if json.Unmarshal(envelope.Payload, &payload) != nil {
@@ -356,6 +364,12 @@ func parseCodexEvent(envelope eventEnvelope) []Event {
 			return textEvent(envelope.Timestamp, EventKindUser, "user", payload.Message)
 		case "agent_message":
 			return textEvent(envelope.Timestamp, EventKindAssistant, "assistant", payload.Message)
+		case "agent_reasoning":
+			// Codex's readable reasoning summary. Its sibling "reasoning"
+			// response_item carries only encrypted_content and an empty summary,
+			// so this is the sole usable reasoning signal — and it is absent from
+			// some rollouts entirely. Never depend on it being present.
+			return textEvent(envelope.Timestamp, EventKindThinking, "assistant", payload.Text)
 		}
 		if strings.Contains(payload.Type, "error") || payload.Error != "" {
 			return textEvent(envelope.Timestamp, EventKindError, "", firstNonEmpty(payload.Error, payload.Message))
@@ -437,6 +451,18 @@ func parseClaudeEvent(envelope eventEnvelope) []Event {
 		case "text", "input_text", "output_text":
 			if strings.TrimSpace(block.Text) != "" {
 				textParts = append(textParts, block.Text)
+			}
+		case "thinking":
+			// Emitted as its own event rather than folded into textParts: it is
+			// the agent's reasoning, not what the user was shown, and a consumer
+			// must be able to tell them apart.
+			if strings.TrimSpace(block.Thinking) != "" {
+				events = append(events, Event{
+					Timestamp: envelope.Timestamp,
+					Kind:      EventKindThinking,
+					Role:      "assistant",
+					Text:      block.Thinking,
+				})
 			}
 		case "tool_use":
 			events = append(events, Event{
