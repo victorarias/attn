@@ -130,7 +130,12 @@ func runAppRuntimeStatus(args []string) {
 	if result.Runtime == nil {
 		// Never started is not stopped. Saying "stopped" for a daemon that has had
 		// no reason to start one would send the reader looking for a fault.
-		fmt.Println("  state:    not started — no app has been due a fact since this daemon came up")
+		fmt.Printf("  state:    %s\n", appRuntimeNeverStarted)
+		if result.Apps > 0 && result.AppsEnabled == 0 {
+			// The one case where "has not happened yet" is wrong: this daemon will
+			// never start a runtime, and nothing about waiting will change that.
+			fmt.Printf("            every installed app is disabled, so nothing will start one — `attn app enable <name>`\n")
+		}
 	} else {
 		writeAppRuntimeInfo(*result.Runtime)
 	}

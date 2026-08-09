@@ -28,8 +28,15 @@ func TestRuntimeRestartRefusesAnAppNameAndExplainsWhy(t *testing.T) {
 // A runtime the daemon has never started is rendered as that, not as "stopped":
 // the two send a reader to different places.
 func TestRuntimeCellDistinguishesNeverStartedFromParked(t *testing.T) {
-	if got := appRuntimeCell(nil); !strings.Contains(got, "not started") {
+	got := appRuntimeCell(nil)
+	if !strings.Contains(got, "not started") {
 		t.Fatalf("a runtime that has never run renders as %q", got)
+	}
+	// A disabled app is never due a fact, so a daemon whose apps are all off will
+	// never start a runtime. Saying "no app has been due a fact" reads as
+	// not-yet when it is in fact settled.
+	if !strings.Contains(got, "no enabled app") {
+		t.Fatalf("the never-started sentence is not honest about disabled apps: %q", got)
 	}
 	parked := appRuntimeCell(&protocol.AppRuntimeInfo{Phase: "parked", Generation: 4})
 	if !strings.Contains(parked, "PARKED") || !strings.Contains(parked, "attn app runtime restart") {

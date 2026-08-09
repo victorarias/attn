@@ -324,13 +324,22 @@ func indentBlock(prefix, text string) string {
 	return b.String()
 }
 
+// appRuntimeNeverStarted is what a daemon that has never started a runtime says.
+//
+// "no *enabled* app", because a disabled app is never due a fact: a daemon whose
+// every app is switched off will never start a runtime, and the sentence has to
+// read as the settled state it is rather than as something that has not happened
+// yet. `attn app runtime status` carries the enabled count in the same answer, so
+// a reader who wants the number has it.
+const appRuntimeNeverStarted = "not started — no enabled app has been due a fact since this daemon came up"
+
 // appRuntimeCell says where this app's handlers actually run. It is one line
 // because `attn app runtime status` is the full picture; what belongs here is
 // the answer to "is my app not running because of my app, or because of the
 // runtime" — and a parked runtime is the loudest form of the second.
 func appRuntimeCell(info *protocol.AppRuntimeInfo) string {
 	if info == nil {
-		return "not started — no app has been due a fact since this daemon came up"
+		return appRuntimeNeverStarted
 	}
 	switch {
 	case info.Phase == "parked":
