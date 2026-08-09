@@ -497,6 +497,34 @@
   white-space: nowrap;
 }
 
+/* Holds the label and, under it, what the agent is doing. min-width: 0 is what
+   lets both ellipsize instead of pushing the badges off the row. */
+.session-row-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-row-main .session-name {
+  flex: initial;
+}
+
+.session-activity {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A line nobody has refreshed for a while is still worth reading, but it is no
+   longer a statement about now. */
+.session-activity[data-stale='true'] {
+  opacity: 0.55;
+}
+
 .session-endpoint-badge {
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 999px;

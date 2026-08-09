@@ -98,6 +98,7 @@ import { useTicketBoardScale } from './hooks/useTicketBoardScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
+import { useClientPresence } from './hooks/useClientPresence';
 import { ptySpawn } from './pty/bridge';
 import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
 import { probeUiAfterSwitch, UI_DIAGNOSTICS_FILE_DISPLAY } from './utils/uiDiagnosticsLog';
@@ -830,6 +831,7 @@ function AppContent({
     requestTileContent,
     sendRuntimeInput,
     sendTerminalPointerActivity,
+    sendSetClientPresence,
     sendSetTerminalTheme,
     isRuntimeAttached,
     getRepoInfo,
@@ -1204,6 +1206,8 @@ function AppContent({
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
+      activity: daemonSession?.activity,
+      activityAt: daemonSession?.activity_at,
       pinnedAt: daemonSession?.pinned_at,
       contextWindowCap: daemonSession?.context_window_cap,
       parentSessionId: daemonSession?.parent_session_id,
@@ -1260,6 +1264,15 @@ function AppContent({
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
+
+  // Tells the daemon whether anyone can see the session activity lines it would
+  // otherwise generate. The dashboard is where those lines render, so it is the
+  // difference between the two live tiers; a window nobody is looking at stops
+  // generation entirely.
+  useClientPresence(sendSetClientPresence, {
+    dashboardVisible: view === 'dashboard',
+    connected: hasReceivedInitialState,
+  });
   // Focusable app-shell root: claims keyboard focus on focus-less views (dashboard /
   // empty workspaces) so the global shortcut listener keeps receiving keys.
   const appShellRef = useRef<HTMLDivElement>(null);

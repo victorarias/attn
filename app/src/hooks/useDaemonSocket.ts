@@ -3064,6 +3064,31 @@ export function useDaemonSocket({
     ws.send(JSON.stringify({ cmd: 'terminal_pointer_activity', id }));
   }, []);
 
+  // Reports what this window can see, so the daemon knows whether anyone is
+  // reading the session activity lines it would otherwise spend money
+  // generating. The client reports facts (visible, showing the dashboard, how
+  // long since input); the daemon owns the policy those facts feed.
+  //
+  // Dropped while disconnected rather than queued, like the pointer signal
+  // above: presence is a heartbeat, and a stale report flushed on reconnect
+  // would claim the user was watching at a moment that has already passed.
+  const sendSetClientPresence = useCallback((presence: {
+    visible: boolean;
+    dashboardVisible: boolean;
+    idleSeconds?: number;
+  }) => {
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return;
+    }
+    ws.send(JSON.stringify({
+      cmd: 'set_client_presence',
+      visible: presence.visible,
+      dashboard_visible: presence.dashboardVisible,
+      ...(presence.idleSeconds === undefined ? {} : { idle_seconds: presence.idleSeconds }),
+    }));
+  }, []);
+
   // Sends a prompt to a conversation session's host. Fire-and-forget in the
   // same sense as pty_input: the answer is not a result message but the
   // envelope stream the host starts producing, which lands in the conversations
@@ -5253,6 +5278,7 @@ export function useDaemonSocket({
     sendOpenMarkdown,
     sendRuntimeInput: sendPtyInput,
     sendTerminalPointerActivity,
+    sendSetClientPresence,
     sendSetTerminalTheme,
     isRuntimeAttached,
     sendGetFileDiff,

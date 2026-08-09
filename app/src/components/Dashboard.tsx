@@ -33,7 +33,22 @@ type DashboardSession = {
   // anything the user asked, so listing it under Working or Idle says the one
   // thing that is not true of it — that it is waiting on nothing.
   turnSnoozedUntil?: string;
+  // One present-tense line saying what this agent is doing right now, generated
+  // from its own transcript, and when it was generated. Absent unless the user
+  // turned the feature on and the agent has written something since.
+  activity?: string;
+  activityAt?: string;
 };
+
+/**
+ * How old an activity line gets before the row stops presenting it as current.
+ *
+ * Generation stops entirely when nobody is watching, so a line can outlive the
+ * work it describes by however long the user was away. Three times the slowest
+ * live interval (300s, the present tier): anything past that was not generated
+ * during a slow tick, it was generated before a gap.
+ */
+const ACTIVITY_STALE_MS = 15 * 60 * 1000;
 
 /**
  * The state groups, in the order they read best: the states that used to mean
@@ -196,6 +211,27 @@ export function Dashboard({
     return counts.map((entry) => `${entry.n} ${entry.label}`).join(' · ');
   }, [settledSessions]);
 
+  // The line reads as what the agent is doing, so a line that has stopped being
+  // refreshed must not keep claiming the present tense. Past the staleness
+  // window it is dimmed and says when it was generated — still worth showing,
+  // no longer presented as now.
+  const renderActivityLine = (s: DashboardSession) => {
+    const line = s.activity?.trim();
+    if (!line) return null;
+    const generatedAt = s.activityAt ? Date.parse(s.activityAt) : NaN;
+    const stale = Number.isFinite(generatedAt) && now - generatedAt > ACTIVITY_STALE_MS;
+    return (
+      <span
+        className="session-activity"
+        data-testid={`session-activity-${s.id}`}
+        data-stale={stale ? 'true' : undefined}
+        title={stale ? `as of ${new Date(generatedAt).toLocaleTimeString()}` : undefined}
+      >
+        {line}
+      </span>
+    );
+  };
+
   // `wake` replaces the age on a deferred row rather than joining it: the only
   // question a snoozed row answers is when it comes back, and the turn it would
   // have aged is already closed.
@@ -211,7 +247,10 @@ export function Dashboard({
       onClick={() => onSelectSession(s.id)}
     >
       <StateIndicator state={s.state} size="sm" seed={s.id} />
-      <span className="session-name">{s.label}</span>
+      <div className="session-row-main">
+        <span className="session-name">{s.label}</span>
+        {renderActivityLine(s)}
+      </div>
       {s.chiefOfStaff && <ChiefOfStaffBadge compact />}
       {renderEndpointBadge(s)}
       {age && <span className="session-turn-age">{age}</span>}

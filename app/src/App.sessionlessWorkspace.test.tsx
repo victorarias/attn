@@ -235,6 +235,7 @@ describe('tile-only (sessionless) workspace selection and render', () => {
       sendUnregisterWorkspace: vi.fn(async () => {}),
       sendMuteWorkspace: vi.fn(async () => ({ success: true })),
       sendSetSetting: fn,
+      sendSetClientPresence: fn,
       sendCreateWorktree: vi.fn(async () => ({ success: true, path: '/tmp/new' })),
       sendDeleteWorktree: vi.fn(async () => ({ success: true })),
       sendGetRecentLocations: vi.fn(async () => ({ success: true, locations: [] })),
