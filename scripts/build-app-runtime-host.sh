@@ -79,8 +79,13 @@ remove_bun_linker_signature() {
 }
 
 echo "building the app runtime host${bun_target:+ for ${bun_target}}"
-rm -rf "${stage_dir}"
+# The binary, not the directory: the native stage dir is a Tauri resource path,
+# which cargo's build script resolves before anything has built into it. It is
+# checked in as an empty directory holding a .gitkeep, and removing it here would
+# fail a fresh checkout's `cargo build` with `resource path 'app-runtime' doesn't
+# exist`.
 mkdir -p "${stage_dir}"
+rm -f "${stage_dir}/${binary_name}"
 
 compile_args=("${source_dir}/src/index.ts" --compile --minify --outfile "${stage_dir}/${binary_name}")
 if [[ -n "${bun_target}" ]]; then
