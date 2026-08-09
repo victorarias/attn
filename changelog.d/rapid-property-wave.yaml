@@ -1,0 +1,17 @@
+kind: internal
+area: testing
+change: >
+  Applies property-based testing (`pgregory.net/rapid`) to three units picked for
+  invariant density: the worker's PTY feed segmenter and OSC scanner, where the
+  property is that generated escape streams produce the same result however the
+  read loop cuts them; the document store's query compiler, where the property is
+  that compiled SQL is built only from identifiers the store derived itself,
+  whatever a caller sends; and the workspace layout tree, where random sequences
+  of split / dock / move / remove / resize / normalize must leave a well-formed
+  tree with the leaves and tile metadata they started with. The example tests
+  stay as they are — properties explore, they do not document.
+notes: >
+  Each property is mutation-checked: the receipts, per-property costs, and the
+  one defect rapid turned up (UpdateTileParams and UpdateTileSessionID write
+  through the caller's layout, unlike every other operation in the package) are
+  in the pull request.
