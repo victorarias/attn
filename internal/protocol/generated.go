@@ -28,6 +28,9 @@ type ActivityStatusSession struct {
 	// ActivityAt corresponds to the JSON schema field "activity_at".
 	ActivityAt *string `json:"activity_at,omitempty,omitzero"`
 
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 

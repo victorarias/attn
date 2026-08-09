@@ -492,6 +492,15 @@ type Daemon struct {
 		request agentdriver.HeadlessTaskRequest,
 	) (agentdriver.HeadlessTaskResult, error)
 
+	// sessionActivityRuns is what the scan rate-limits itself against, keyed by
+	// session id. The stored line cannot serve: it records the last SUCCESS, so a
+	// generation that keeps failing leaves it untouched and the scan re-runs it
+	// on every tick. In memory rather than persisted because a daemon restart
+	// costing one extra pass per session is cheaper than a migration, and the
+	// pass is bounded by the same preconditions as any other.
+	sessionActivityRunsMu sync.Mutex
+	sessionActivityRuns   map[string]sessionActivityRun
+
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
 	// context write) since the last daily-narrate cron fire. It is best-effort and

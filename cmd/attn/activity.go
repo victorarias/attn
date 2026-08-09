@@ -89,6 +89,11 @@ func activityStatus(asJSON bool) {
 			line = "—"
 		}
 		fmt.Printf("  %-24s %s%s\n", session.Label, line, activityAgeSuffix(session.ActivityAt))
+		// Under the line rather than instead of it: the last good line is still
+		// worth showing, and the failure is why it has stopped moving.
+		if reason := strings.TrimSpace(protocol.Deref(session.Error)); reason != "" {
+			fmt.Printf("  %-24s   last run failed: %s\n", "", reason)
+		}
 	}
 }
 

@@ -538,7 +538,7 @@ describe('Dashboard pull requests', () => {
 });
 
 describe('Dashboard session activity', () => {
-  const renderWith = (session: Record<string, unknown>) => render(
+  const renderWith = (session: Record<string, unknown>, props: Record<string, unknown> = {}) => render(
     <Dashboard
       sessions={[{ id: 's1', label: 'fix-bot', state: 'working', cwd: '/repo/a', ...session }] as never}
       prs={[]}
@@ -546,6 +546,7 @@ describe('Dashboard session activity', () => {
       onSelectSession={vi.fn()}
       onNewSession={vi.fn()}
       onOpenSettings={vi.fn()}
+      {...props}
     />
   );
 
@@ -563,6 +564,19 @@ describe('Dashboard session activity', () => {
     renderWith({ activity: 'running the frontend test suite', activityAt: longAgo });
 
     expect(screen.getByTestId('session-activity-s1')).toHaveAttribute('data-stale', 'true');
+  });
+
+  // The staleness window follows the configured cadence. Measured against the
+  // default 15 minutes, a user who slowed generation to half an hour would watch
+  // every line dim the moment it was written.
+  it('takes the staleness window from the configured cadence', () => {
+    const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    renderWith(
+      { activity: 'running the frontend test suite', activityAt: twentyMinutesAgo },
+      { activityStaleMs: 90 * 60 * 1000 },
+    );
+
+    expect(screen.getByTestId('session-activity-s1')).not.toHaveAttribute('data-stale');
   });
 
   it('renders no line for a session that has none', () => {

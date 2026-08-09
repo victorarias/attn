@@ -41,14 +41,16 @@ type DashboardSession = {
 };
 
 /**
- * How old an activity line gets before the row stops presenting it as current.
+ * How old an activity line gets before the row stops presenting it as current,
+ * when nobody has told us otherwise.
  *
  * Generation stops entirely when nobody is watching, so a line can outlive the
  * work it describes by however long the user was away. Three times the slowest
- * live interval (300s, the present tier): anything past that was not generated
- * during a slow tick, it was generated before a gap.
+ * default interval (300s, the present tier): anything past that was not
+ * generated during a slow tick, it was generated before a gap. A configured
+ * cadence overrides it — see the activityStaleMs prop.
  */
-const ACTIVITY_STALE_MS = 15 * 60 * 1000;
+const DEFAULT_ACTIVITY_STALE_MS = 15 * 60 * 1000;
 
 /**
  * The state groups, in the order they read best: the states that used to mean
@@ -107,6 +109,10 @@ interface DashboardProps {
   // change it — an app that moves you on its own has to show you the switch.
   followNextTurn?: boolean;
   onToggleFollowNextTurn?: () => void;
+  // How old an activity line may get before it stops being presented as
+  // current. Derived from the configured intervals by App (activityStaleMs), so
+  // a user who slows generation down does not get every line dimmed.
+  activityStaleMs?: number;
 }
 
 export function Dashboard({
@@ -129,6 +135,7 @@ export function Dashboard({
   queueModeEnabled = false,
   followNextTurn = false,
   onToggleFollowNextTurn,
+  activityStaleMs = DEFAULT_ACTIVITY_STALE_MS,
 }: DashboardProps) {
   const now = useNow(TURN_AGE_TICK_MS);
   const [snoozedExpanded, setSnoozedExpanded] = useState(false);
@@ -219,7 +226,7 @@ export function Dashboard({
     const line = s.activity?.trim();
     if (!line) return null;
     const generatedAt = s.activityAt ? Date.parse(s.activityAt) : NaN;
-    const stale = Number.isFinite(generatedAt) && now - generatedAt > ACTIVITY_STALE_MS;
+    const stale = Number.isFinite(generatedAt) && now - generatedAt > activityStaleMs;
     return (
       <span
         className="session-activity"

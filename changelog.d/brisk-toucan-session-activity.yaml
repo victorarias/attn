@@ -11,10 +11,12 @@ change: >
 notes: >
   Lines are only generated while you are actually using attn: fastest while home
   is on screen, slower while you are elsewhere in the app, and not at all once
-  you leave it — walking away costs nothing, and coming back refreshes within one
-  interval. A session that has written nothing since its last line is skipped, so
+  you leave it or once home has sat untouched for ten minutes — walking away
+  costs nothing, and coming back refreshes within one interval. A session that
+  has written nothing since its last line is skipped, so
   blocked and finished agents are free however long home stays open. A line that
   has stopped being refreshed dims and says when it was written rather than
   passing itself off as current. `attn activity` shows the same thing from a
-  terminal, including why nothing is being generated; `attn activity clear <id>`
+  terminal, including why nothing is being generated and what went wrong when a
+  line stops moving; `attn activity clear <id>`
   forgets a line that is wrong, and turning the feature off clears them all.

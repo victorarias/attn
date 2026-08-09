@@ -1,6 +1,7 @@
 package activity
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -41,6 +42,53 @@ func TestReadIsADelta(t *testing.T) {
 	}
 	if !second.Empty() {
 		t.Fatalf("second read returned %d events, want an empty delta", len(second.Events))
+	}
+}
+
+// A delta larger than one page is read to its end, and what comes back is its
+// NEWEST events. Returning the first page instead would answer "what is this
+// agent doing right now" with the oldest thing it did while nobody was looking —
+// and would leave the cursor mid-backlog, so the next window would be stale too.
+func TestReadKeepsTheNewestEventsOfALongDelta(t *testing.T) {
+	lines := make([]string, 0, MaxEvents*3)
+	for i := 0; i < MaxEvents*3; i++ {
+		lines = append(lines, fmt.Sprintf(
+			`{"timestamp":"2026-08-07T10:00:00Z","type":"assistant","message":{"content":[{"type":"text","text":"event-%d"}]}}`, i))
+	}
+	path := writeTranscript(t, lines...)
+
+	window, err := Read(path, "claude", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(window.Events) != MaxEvents {
+		t.Fatalf("events = %d, want %d", len(window.Events), MaxEvents)
+	}
+	newest := fmt.Sprintf("event-%d", MaxEvents*3-1)
+	if got := window.Events[len(window.Events)-1].Text; got != newest {
+		t.Errorf("last event = %q, want %q — the read kept the oldest page", got, newest)
+	}
+	oldest := fmt.Sprintf("event-%d", MaxEvents*3-MaxEvents)
+	if got := window.Events[0].Text; got != oldest {
+		t.Errorf("first event = %q, want %q", got, oldest)
+	}
+
+	// The report counts against the whole delta, not against one page: a caller
+	// told "dropped 1 of 201" about a backlog of 600 would believe it had the story.
+	if window.Report.TotalEvents != MaxEvents*3 {
+		t.Errorf("TotalEvents = %d, want %d", window.Report.TotalEvents, MaxEvents*3)
+	}
+	if want := MaxEvents * 2; window.Report.DroppedOld != want {
+		t.Errorf("DroppedOld = %d, want %d", window.Report.DroppedOld, want)
+	}
+
+	// And the cursor is past the end, so the next read is a genuine delta.
+	next, err := Read(path, "claude", window.NextCursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !next.Empty() {
+		t.Fatalf("follow-up read returned %d events; the cursor stopped short of the end", len(next.Events))
 	}
 }
 

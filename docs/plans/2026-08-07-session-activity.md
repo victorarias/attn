@@ -166,13 +166,23 @@ what clients report:
 
 | tier | the user is | interval |
 |---|---|---|
-| `watching` | the app is visible and showing the dashboard | 120s |
+| `watching` | the app is visible and showing the dashboard, and something has been touched within 10 minutes | 120s |
 | `present` | input in the app within `presence_idle_seconds`, dashboard not showing | 300s |
 | `away` | neither | **nothing is generated** |
 
 `away` is a hard stop, not a slow rate. The app closed, the app in the
 background, the user gone from the keyboard — all produce zero runs and zero
 spend, indefinitely.
+
+The 10 minutes on `watching` exist because home stays on screen when nobody is
+there. Without them the cheapest tier to reach is the only one that never
+expires: `present` drops after 90 idle seconds while `watching` holds forever, so
+an app left on home would generate for every working session until someone came
+back. Ten minutes rather than 90 seconds because this limit must not fire on a
+user who IS there — reading home without touching anything is the whole point of
+the screen. A client that has reported no input at all is measured from when it
+connected, so a window opened a minute ago counts as attention and the same
+window eight hours later does not.
 
 Two preconditions apply inside an active tier, and both are what keep the count
 far below "sessions × rate":
@@ -496,9 +506,20 @@ change, and the feature is off until someone turns it on.
   own agent. Unlike auto-titling (which uses the session's agent), a Codex
   session's activity may be written by Claude Haiku — this is a dashboard
   utility, not something the session should pay for or influence.
-- The run is **tool-less and bounded**: no filesystem access, `MaxTurns` 1, an
-  `OutputSchema` pinning `{"activity": string}`, and a `MaxBudgetUSD` tripwire.
-  It reads a rendered prompt and returns a string.
+- The run is **tool-less and bounded**: no filesystem access, a one-minute
+  deadline on the job, and — on Claude, the one agent CLI with the flags —
+  `MaxTurns` and a `MaxBudgetUSD` tripwire. It reads a rendered prompt and
+  returns a string.
+  - `MaxTurns` is 2, not 1: a headless run that exhausts its turn budget exits
+    non-zero even when it already produced the text, so a 1-turn cap turns a
+    correct answer into a failed job.
+  - There is no `OutputSchema`. The answer IS the final text; asking for it as a
+    schema-validated object bought a second reasoning turn restating what the
+    first already said, and Codex's tool-free path has no schema support at all,
+    so dropping it makes both agents answer the same way.
+  - `codex exec` has no turn or dollar flag to translate the caps into. What
+    bounds Codex is the deadline plus tool-lessness, which leaves a run nothing
+    to loop over.
 - Only sessions with a transcript and a `HeadlessTaskProvider`-capable agent
   participate. Shells and satellites have no transcript and are skipped.
 - Activity is display-only. It must not feed attention routing, the queue, or

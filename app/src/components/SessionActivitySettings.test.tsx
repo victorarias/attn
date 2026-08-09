@@ -1,6 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { SessionActivitySettings } from './SessionActivitySettings';
+import { SessionActivitySettings, activityStaleMs } from './SessionActivitySettings';
 
 const renderPane = (settings: Record<string, string> = {}) => {
   const onSetSetting = vi.fn();
@@ -99,5 +99,22 @@ describe('SessionActivitySettings', () => {
     renderPane({ 'activity.presence_tier': 'away' });
 
     expect(screen.queryByText(/away/i)).toBeNull();
+  });
+});
+
+describe('activityStaleMs', () => {
+  it('is three times the slowest default cadence when nothing is configured', () => {
+    expect(activityStaleMs({})).toBe(15 * 60 * 1000);
+  });
+
+  // The intervals are the user's to set. A fixed window measured against a slower
+  // cadence would dim every line the instant it was written.
+  it('follows a configured cadence', () => {
+    expect(activityStaleMs({ 'activity.intervals': JSON.stringify({ watching: 600, present: 1800 }) }))
+      .toBe(90 * 60 * 1000);
+  });
+
+  it('falls back to the defaults for a value that no longer parses', () => {
+    expect(activityStaleMs({ 'activity.intervals': 'not json' })).toBe(15 * 60 * 1000);
   });
 });

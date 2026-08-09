@@ -443,7 +443,10 @@ type HeadlessTaskRequest struct {
 	// with enforceable turn/dollar caps and schema-validated output, which is why
 	// reconciliation always runs `claude -p` regardless of the judged agent (see
 	// docs/plans/2026-07-01-orphaned-ticket-reconciliation.md). Codex ignores all
-	// three, like AllowedTools.
+	// three, like AllowedTools — `codex exec` has no equivalent flag to translate
+	// them into, so a caller that must be bounded on both drivers has to get its
+	// ceiling from something the caller owns: the run's context deadline, and
+	// DisableTools, which leaves a run with nothing to loop over.
 
 	// MaxTurns caps agentic turns (claude: --max-turns). 0 => uncapped.
 	MaxTurns int
@@ -467,7 +470,10 @@ type HeadlessTaskRequest struct {
 	// a --json-schema answer: the billed prefix drops from ~49.8K tokens to
 	// ~37.0K. Receipt: docs/plans/2026-08-07-session-activity.md.
 	//
-	// Codex ignores this field.
+	// Both drivers honour it, by different means: Claude gets --system-prompt,
+	// Codex has no system/developer-prompt flag at all, so the driver folds this
+	// text in front of Prompt (see codexPrompt). A caller therefore writes one
+	// split prompt and gets the same evidence boundary on either agent.
 	SystemPrompt string
 }
 

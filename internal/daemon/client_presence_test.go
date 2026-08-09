@@ -73,6 +73,63 @@ func TestPresenceTierFromOneClientsReport(t *testing.T) {
 	}
 }
 
+// Home stays on screen when nobody is there. Without an idle stop the cheapest
+// tier to reach would be the only one that never expires, and an app left on
+// home would generate for every working session until someone came back.
+func TestWatchingExpiresAfterALongIdleOnHome(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	const idleLimit = 90 * time.Second
+
+	reading := reported(true, true, presenceWatchingIdleLimit.Seconds()-60, now)
+	if got := reading.tier(now, idleLimit); got != PresenceWatching {
+		t.Errorf("tier = %s just inside the limit, want watching — reading home is a thing people do without touching anything", got)
+	}
+	abandoned := reported(true, true, presenceWatchingIdleLimit.Seconds()+60, now)
+	if got := abandoned.tier(now, idleLimit); got != PresenceAway {
+		t.Errorf("tier = %s past the limit, want away", got)
+	}
+}
+
+// A client that has observed no input at all is the case the limit above would
+// otherwise miss entirely: -1 is not a number that ever crosses a threshold. On
+// home its idleness is measured from the connection instead, which reads a fresh
+// untouched window as attention and the same window hours later as nobody there.
+func TestWatchingWithNoInputMeasuresFromTheConnection(t *testing.T) {
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	const idleLimit = 90 * time.Second
+
+	fresh := clientPresence{
+		Visible: true, DashboardVisible: true, IdleSeconds: -1,
+		ReportedAt: now, FirstReportAt: now.Add(-time.Minute),
+	}
+	if got := fresh.tier(now, idleLimit); got != PresenceWatching {
+		t.Errorf("tier = %s on a window opened a minute ago, want watching", got)
+	}
+	stale := clientPresence{
+		Visible: true, DashboardVisible: true, IdleSeconds: -1,
+		ReportedAt: now, FirstReportAt: now.Add(-8 * time.Hour),
+	}
+	if got := stale.tier(now, idleLimit); got != PresenceAway {
+		t.Errorf("tier = %s on a window open for eight untouched hours, want away", got)
+	}
+}
+
+// FirstReportAt is the floor for a client that never reports input, so it must
+// survive every later report. Resetting it on each heartbeat would restart the
+// clock forever and the limit above would never fire.
+func TestFirstReportAtSurvivesLaterReports(t *testing.T) {
+	client := &wsClient{}
+	first := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	msg := &protocol.SetClientPresenceMessage{Visible: true, DashboardVisible: true}
+
+	client.setPresence(msg, first)
+	client.setPresence(msg, first.Add(time.Hour))
+
+	if got := client.presenceReport().FirstReportAt; !got.Equal(first) {
+		t.Errorf("FirstReportAt = %s after a later report, want the first one (%s)", got, first)
+	}
+}
+
 // The whole reason presence is a heartbeat rather than a latch: a client that
 // crashes or is force-quit while the dashboard is up must not pin generation on
 // forever with nobody looking. Expiry fails toward off.

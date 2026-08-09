@@ -88,19 +88,63 @@ func (r Report) String() string {
 // Empty reports whether the window carries nothing to summarize.
 func (w Window) Empty() bool { return len(w.Events) == 0 }
 
-// Read returns everything appended to the transcript after cursor, capped
-// newest-first. An empty cursor reads from the start, which a caller should
-// avoid on a large transcript: seed at head instead and let the next real
-// movement produce the first line.
+// MaxPages bounds how far Read will walk to reach the end of a delta.
+//
+// A tripwire on the pathological case, not a budget for the normal one. The
+// delta is what one session appended while nobody was looking; the largest
+// measured across a working day is well under a single page, and even an
+// overnight unattended run reaches hundreds rather than the 10,000 events this
+// allows. Crossing it means the cursor is against a transcript that grew beyond
+// anything this is meant to summarize, and the caller re-seeds at head instead.
+const MaxPages = 50
+
+// ErrDeltaTooLarge reports a delta that MaxPages could not reach the end of.
+// The caller re-seeds rather than summarizing a backlog this size, which is the
+// same recovery a mismatched cursor takes.
+var ErrDeltaTooLarge = fmt.Errorf("activity: delta exceeds %d pages of %d events", MaxPages, MaxEvents)
+
+// Read returns the NEWEST events appended to the transcript after cursor.
+//
+// It walks forward to the end rather than returning the first page, because the
+// first page of a large delta is its oldest part — the opposite of what a line
+// about the present needs. Everything before the last MaxEvents is counted and
+// discarded, so the report names the real loss rather than the size of one page.
+//
+// An empty cursor reads from the start, which a caller should avoid on a large
+// transcript: seed at head instead and let the next real movement produce the
+// first line.
 func Read(path, agent, cursor string) (Window, error) {
-	page, err := transcript.ReadEventPage(path, agent, cursor, MaxEvents+1)
-	if err != nil {
-		return Window{}, err
+	window := Window{}
+	at := cursor
+	for page := 0; ; page++ {
+		if page >= MaxPages {
+			return Window{}, ErrDeltaTooLarge
+		}
+		read, err := transcript.ReadEventPage(path, agent, at, MaxEvents+1)
+		if err != nil {
+			return Window{}, err
+		}
+		window.Report.TotalEvents += len(read.Events)
+		window.NextCursor = read.NextCursor
+		// Keep a rolling tail rather than the whole delta: everything older than
+		// the last MaxEvents is going to be dropped anyway, and holding it would
+		// make the read's memory the size of the backlog.
+		window.Events = tail(append(window.Events, read.Events...), MaxEvents+1)
+		if read.AtEnd {
+			break
+		}
+		at = read.NextCursor
 	}
-	window := Window{Events: page.Events, NextCursor: page.NextCursor}
-	window.Report.TotalEvents = len(page.Events)
 	window.cap()
 	return window, nil
+}
+
+// tail keeps the last n elements, reusing the backing array.
+func tail(events []transcript.Event, n int) []transcript.Event {
+	if len(events) <= n {
+		return events
+	}
+	return append(events[:0], events[len(events)-n:]...)
 }
 
 // SeedCursor returns a cursor positioned at the transcript's head without
@@ -118,9 +162,14 @@ func SeedCursor(path string) (string, error) {
 // is left untouched: it already points past everything read, so a dropped burst
 // is dropped once rather than re-read on the next pass.
 func (w *Window) cap() {
-	if len(w.Events) > MaxEvents {
-		w.Report.DroppedOld += len(w.Events) - MaxEvents
+	// Counted against everything the delta held, not against what the tail
+	// happens to be carrying: a caller told "dropped 1" about a backlog of a
+	// thousand would believe it had the whole story.
+	if w.Report.TotalEvents > MaxEvents {
+		w.Report.DroppedOld += w.Report.TotalEvents - MaxEvents
 		w.Report.HitEventCap = true
+	}
+	if len(w.Events) > MaxEvents {
 		w.Events = w.Events[len(w.Events)-MaxEvents:]
 	}
 	total := 0

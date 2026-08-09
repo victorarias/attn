@@ -73,6 +73,26 @@ export function parseActivityIntervalsSetting(raw: string | undefined): { watchi
   return { watching: '120', present: '300' };
 }
 
+/**
+ * How old an activity line may get before a row stops presenting it as current.
+ *
+ * Three times the slowest configured interval, and configured rather than
+ * constant because the intervals are the user's to set: a 30-minute cadence
+ * measured against a fixed 15-minute window would dim every line the instant it
+ * was written, which is the opposite of what dimming is for. Three times,
+ * because a line older than a few missed ticks was not generated during a slow
+ * tick — it was generated before a gap.
+ */
+export function activityStaleMs(settings: Record<string, string>): number {
+  const intervals = parseActivityIntervalsSetting(settings[ACTIVITY_INTERVALS_SETTING]);
+  const seconds = Math.max(
+    Number(intervals.watching) || 0,
+    Number(intervals.present) || 0,
+    INTERVAL_MIN_SECONDS,
+  );
+  return seconds * 3 * 1000;
+}
+
 interface SessionActivitySettingsProps {
   settings: Record<string, string>;
   /** Installed agents that can run a scoped headless task. */

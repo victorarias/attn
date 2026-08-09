@@ -59,6 +59,41 @@ type clientPresence struct {
 	// Negative means the client has observed no input at all this connection.
 	IdleSeconds float64
 	ReportedAt  time.Time
+	// FirstReportAt is when this client first said anything. It is the floor for
+	// idleness on a client that has seen no input: a window opened a minute ago
+	// and not yet touched is plainly being looked at, while the same window eight
+	// hours later is not, and without a floor both look identical.
+	FirstReportAt time.Time
+}
+
+// idleFor returns how long since the user last touched this client, and whether
+// the client knows. Unreported is unknown rather than zero: reading it as "input
+// zero seconds ago" would make every open window count as recent input forever.
+func (p clientPresence) idleFor() (time.Duration, bool) {
+	if p.IdleSeconds < 0 {
+		return 0, false
+	}
+	return time.Duration(p.IdleSeconds * float64(time.Second)), true
+}
+
+// watchingIdle is the same question asked for the watching tier, where unknown
+// falls back to the age of the connection rather than disqualifying the client.
+//
+// The two differ because the tiers rest on different evidence. `present` is a
+// claim about input — with none reported there is nothing to believe. `watching`
+// is a claim about a screen, and the client's report that home is rendered is
+// evidence on its own; a window opened a minute ago and not yet touched is
+// plainly being looked at. What the fallback buys is the far end of the same
+// case: the same untouched window eight hours later, which without a floor is
+// indistinguishable from the fresh one and would generate forever.
+func (p clientPresence) watchingIdle(now time.Time) time.Duration {
+	if idle, ok := p.idleFor(); ok {
+		return idle
+	}
+	if p.FirstReportAt.IsZero() {
+		return 0
+	}
+	return now.Sub(p.FirstReportAt)
 }
 
 // presenceHeartbeatGrace is how long a client's last report stays believable.
@@ -69,6 +104,19 @@ type clientPresence struct {
 // expiring early (a tier drop, then a recovery on the next heartbeat) is worse
 // than the cost of expiring late (one extra generation interval).
 const presenceHeartbeatGrace = 90 * time.Second
+
+// presenceWatchingIdleLimit is how long `watching` survives with no input at
+// all. Home stays on screen when nobody is there, so without this the cheapest
+// case to reach is also the most expensive one to leave: the 300s tier expires
+// after 90 idle seconds while the 120s tier never expires at all, and an app
+// left on home generates for every working session until someone comes back.
+//
+// Ten minutes because this one must not fire on a user who IS there. Reading
+// home is a thing people do without touching anything — scanning what every
+// agent is doing is the whole point of the screen — so the limit is set past any
+// plausible read rather than at the 90s the `present` tier uses, where the user
+// is by definition looking at something else.
+const presenceWatchingIdleLimit = 10 * time.Minute
 
 // tier reduces one client's report to a tier, as of `now`.
 //
@@ -84,10 +132,10 @@ func (p clientPresence) tier(now time.Time, idleLimit time.Duration) PresenceTie
 		// minimized window, and `away` is the cheap guess.
 		return PresenceAway
 	}
-	if p.DashboardVisible {
+	if p.DashboardVisible && p.watchingIdle(now) <= presenceWatchingIdleLimit {
 		return PresenceWatching
 	}
-	if p.IdleSeconds >= 0 && time.Duration(p.IdleSeconds*float64(time.Second)) <= idleLimit {
+	if idle, ok := p.idleFor(); ok && idle <= idleLimit {
 		return PresencePresent
 	}
 	return PresenceAway
@@ -103,11 +151,16 @@ func (c *wsClient) setPresence(msg *protocol.SetClientPresenceMessage, now time.
 	}
 	c.presenceMu.Lock()
 	defer c.presenceMu.Unlock()
+	firstAt := c.presence.FirstReportAt
+	if firstAt.IsZero() {
+		firstAt = now
+	}
 	c.presence = clientPresence{
 		Visible:          msg.Visible,
 		DashboardVisible: msg.DashboardVisible,
 		IdleSeconds:      idle,
 		ReportedAt:       now,
+		FirstReportAt:    firstAt,
 	}
 }
 

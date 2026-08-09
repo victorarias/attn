@@ -383,6 +383,170 @@ func TestActivityScanSkipsASessionThatHasNotWritten(t *testing.T) {
 	assertNoActivityJob(t, d, "session-1")
 }
 
+// A run that fails, times out, or answers with nothing leaves the stored line —
+// and its stamp — untouched. Measured against the line alone, every one of those
+// outcomes is invisible and the scan re-runs the session on every 30s tick, at a
+// rate the user never configured, with the queue resetting the attempt count each
+// time so backoff and the dead-job notification never arrive.
+func TestActivityScanHoldsAFailedRunToTheInterval(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	installActivityRunner(t, d)
+	watchingClient(d)
+	d.store.SetSetting(SettingActivityIntervals, `{"watching":120,"present":300}`)
+
+	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	touchFile(t, transcriptPath, time.Now())
+	// No stored line at all: the failed run never produced one. Only the run
+	// record can hold this session back.
+	d.noteSessionActivityRun("session-1", func(run *sessionActivityRun) {
+		run.ObservedAt = time.Now().Add(-10 * time.Second)
+		run.SpentAt = time.Now().Add(-10 * time.Second)
+	})
+
+	if _, err := d.sessionActivityScanHandler(context.Background(), nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	assertNoActivityJob(t, d, "session-1")
+
+	// Past the interval it tries again — this is a rate limit, not a giving up.
+	d.noteSessionActivityRun("session-1", func(run *sessionActivityRun) {
+		run.ObservedAt = time.Now().Add(-10 * time.Minute)
+		run.SpentAt = time.Now().Add(-10 * time.Minute)
+	})
+	if _, err := d.sessionActivityScanHandler(context.Background(), nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if job, err := d.jobQueue.GetByKey(sessionActivityKind, "session-1"); err != nil || job == nil {
+		t.Fatalf("nothing was queued past the interval (err=%v)", err)
+	}
+}
+
+// A pass that spends nothing — a cold-start seed, an empty window — still counts
+// as having looked. Otherwise the seed leaves no stamp anywhere, the transcript
+// still reads as moved, and the very next tick queues the same session again.
+func TestActivityScanTreatsASpendlessPassAsHavingLooked(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	installActivityRunner(t, d)
+	watchingClient(d)
+
+	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	looked := time.Now()
+	touchFile(t, transcriptPath, looked.Add(-time.Minute))
+	// Looked just now and spent nothing, which is what a seed leaves behind.
+	d.noteSessionActivityRun("session-1", func(run *sessionActivityRun) { run.ObservedAt = looked })
+
+	if _, err := d.sessionActivityScanHandler(context.Background(), nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	assertNoActivityJob(t, d, "session-1")
+
+	// And it is not a permanent block: the moment the session writes again, the
+	// seed's own stamp is what the movement is measured against.
+	touchFile(t, transcriptPath, looked.Add(time.Minute))
+	if _, err := d.sessionActivityScanHandler(context.Background(), nil); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if job, err := d.jobQueue.GetByKey(sessionActivityKind, "session-1"); err != nil || job == nil {
+		t.Fatalf("a session that wrote after the seed was not queued (err=%v)", err)
+	}
+}
+
+// The scan asks every session where its transcript is on every tick, and on
+// Codex answering means walking ~/.codex/sessions and opening rollouts. The
+// answer is remembered, and only two things unfix it.
+func TestActivityTranscriptPathIsRememberedUntilItMoves(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	session := d.store.Get("session-1")
+
+	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	if got := d.sessionActivityTranscript(session); got != transcriptPath {
+		t.Fatalf("resolved %q, want %q", got, transcriptPath)
+	}
+
+	// Move the whole search root out from under the finder. A re-resolve would
+	// now come back empty; the remembered path is still there and still stats.
+	t.Setenv(toolhome.EnvVar, t.TempDir())
+	if got := d.sessionActivityTranscript(session); got != transcriptPath {
+		t.Errorf("resolved %q after the finder went blind, want the remembered %q", got, transcriptPath)
+	}
+
+	// A session that resumes writes to a NEW file while the old one sits on disk
+	// statting perfectly well, so the resume id is what invalidates it.
+	d.store.SetResumeSessionID("session-1", "resume-2")
+	if got := d.sessionActivityTranscript(session); got != "" {
+		t.Errorf("resolved %q after the session resumed, want a fresh resolve (which finds nothing here)", got)
+	}
+
+	// And a transcript that goes away is re-resolved too, rather than handed back
+	// as a path nothing can read.
+	restored := discoverableTranscript(t, "session-1", "first")
+	if got := d.sessionActivityTranscript(session); got != restored {
+		t.Fatalf("resolved %q, want %q", got, restored)
+	}
+	if err := os.Remove(restored); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.sessionActivityTranscript(session); got != "" {
+		t.Errorf("resolved %q after the transcript was removed, want a fresh resolve", got)
+	}
+}
+
+// The run takes seconds, and a user who switches the feature off during them has
+// already had every line cleared. Writing this one now would strand it on home
+// with nothing left to clear it.
+func TestActivityExecutorWritesNothingAfterTheFeatureIsTurnedOff(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	installActivityRunner(t, d)
+	watchingClient(d)
+
+	transcriptPath := writeActivityTranscript(t, "first")
+	d.store.UpdateSessionActivity("session-1", "", time.Now(), seedActivityCursor(t, transcriptPath))
+	appendActivityTranscript(t, transcriptPath, "second")
+
+	d.sessionActivityExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		d.store.SetSetting(SettingActivityEnabled, "false")
+		return agentdriver.HeadlessTaskResult{Text: "running the frontend test suite"}, nil
+	}
+
+	enqueueActivity(t, d, "session-1", transcriptPath)
+	waitForTaskState(t, d, sessionActivityKind, "session-1", jobs.StateDone)
+
+	if got := d.store.GetSessionActivity("session-1").Line; got != "" {
+		t.Errorf("line = %q, written after the feature was turned off", got)
+	}
+}
+
+// A feature that is on, configured, and silently failing is indistinguishable
+// from a broken one. The failure rides back on activity_status, which is the
+// only place a terminal can see it.
+func TestActivityStatusReportsWhyASessionStoppedMoving(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	d.store.SetSetting(SettingActivityEnabled, "true")
+	d.store.SetSetting(SettingActivityConfig, `{"agent":"claude","model":"claude-haiku-4-5"}`)
+	d.store.SetSetting(canonicalExecutableSettingKey("claude"), writeFakeAgentExecutable(t))
+	d.store.UpdateSessionActivity("session-1", "running the test suite", time.Now(), "v1:abc:1:0")
+	d.noteSessionActivityRun("session-1", func(run *sessionActivityRun) { run.Err = "claude exited 1: not logged in" })
+	watchingClient(d)
+
+	resp := socketRoundTrip(t, d, protocol.ActivityStatusMessage{Cmd: protocol.CmdActivityStatus})
+	if !resp.Ok || resp.ActivityStatusResult == nil || len(resp.ActivityStatusResult.Sessions) != 1 {
+		t.Fatalf("activity_status = %+v", resp)
+	}
+	got := resp.ActivityStatusResult.Sessions[0]
+	if got.Error == nil || !strings.Contains(*got.Error, "not logged in") {
+		t.Errorf("session error = %v, want the failure that stopped it", got.Error)
+	}
+	// The last good line is still worth showing; the failure says why it stopped.
+	if protocol.Deref(got.Activity) != "running the test suite" {
+		t.Errorf("activity = %q, want the last good line kept beside the failure", protocol.Deref(got.Activity))
+	}
+}
+
 // away is a hard stop for the tick too, not just for a job already queued.
 func TestActivityScanGeneratesNothingWhenAway(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))

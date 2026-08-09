@@ -1980,6 +1980,11 @@ model ActivityStatusSession {
   label: string;
   activity?: string;
   activity_at?: string;
+  // Why this session's last generation produced nothing. A run that keeps
+  // failing is rate limited like a successful one, so without this a feature the
+  // user paid to switch on goes quiet and looks identical to one with nothing to
+  // say.
+  error?: string;
 }
 
 // ClearSessionActivityMessage forgets one session's line. The way out for a line

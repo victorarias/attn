@@ -473,6 +473,7 @@ export interface ActivityStatusResult {
 export interface SessionElement {
     activity?:    string;
     activity_at?: string;
+    error?:       string;
     id:           string;
     label:        string;
     [property: string]: any;
@@ -481,6 +482,7 @@ export interface SessionElement {
 export interface ActivityStatusSession {
     activity?:    string;
     activity_at?: string;
+    error?:       string;
     id:           string;
     label:        string;
     [property: string]: any;
@@ -10364,12 +10366,14 @@ const typeMap: any = {
     "SessionElement": o([
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: "" },
     ], "any"),
     "ActivityStatusSession": o([
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
+        { json: "error", js: "error", typ: u(undefined, "") },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: "" },
     ], "any"),
