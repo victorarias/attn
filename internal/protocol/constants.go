@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "220"
+const ProtocolVersion = "221"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -120,6 +120,10 @@ const (
 	CmdAppRemove                             = "app_remove"
 	CmdAppApply                              = "app_apply"
 	CmdAppRollback                           = "app_rollback"
+	CmdAppLogs                               = "app_logs"
+	CmdAppRuntimeStatus                      = "app_runtime_status"
+	CmdAppRuntimeRestart                     = "app_runtime_restart"
+	CmdAppWatch                              = "app_watch"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -752,6 +756,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAppRollback:
 		var msg AppRollbackMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppLogs:
+		var msg AppLogsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRuntimeStatus:
+		var msg AppRuntimeStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRuntimeRestart:
+		var msg AppRuntimeRestartMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppWatch:
+		var msg AppWatchMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

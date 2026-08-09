@@ -17,6 +17,8 @@ package apps
 import (
 	"fmt"
 	"regexp"
+	"sort"
+	"strings"
 )
 
 // nameRe is the app-name rule: lowercase letters, digits and dashes, starting
@@ -32,6 +34,43 @@ var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 // attn's longest today is "approval-gate" at 13.
 const MaxNameLength = 64
 
+// reserved is the set of names an app may not take. Two groups, one rule.
+//
+// `runtime` is the shared sidecar's own name: it is the supervised child, the
+// subject of `app.runtime.*` diagnostics and the stem of `runtime.log`. The rest
+// are the `attn app` subcommands. The grammar never confuses either group with an
+// app — a subcommand and its argument sit in different positions — but every
+// human-facing surface would: "app runtime parked" and `attn app logs runtime`
+// stop having one meaning the moment an app can be called that.
+//
+// Refusing them costs nothing while zero real apps exist. Refusing them later is
+// a migration, so the list is deliberately generous rather than minimal.
+var reserved = map[string]string{
+	"runtime":  "the shared app runtime is called `runtime`",
+	"new":      "it is an `attn app` subcommand",
+	"apply":    "it is an `attn app` subcommand",
+	"rollback": "it is an `attn app` subcommand",
+	"enable":   "it is an `attn app` subcommand",
+	"disable":  "it is an `attn app` subcommand",
+	"remove":   "it is an `attn app` subcommand",
+	"list":     "it is an `attn app` subcommand",
+	"status":   "it is an `attn app` subcommand",
+	"logs":     "it is an `attn app` subcommand",
+	"dev":      "it is an `attn app` subcommand",
+}
+
+// ReservedNames lists what ValidateName refuses, sorted. It is exported so an
+// error, a test or a scaffold can name the whole set rather than restate part of
+// it.
+func ReservedNames() []string {
+	out := make([]string, 0, len(reserved))
+	for name := range reserved {
+		out = append(out, name)
+	}
+	sort.Strings(out)
+	return out
+}
+
 // ValidateName reports whether a string can be an app name, and says what is
 // wrong when it cannot.
 func ValidateName(name string) error {
@@ -43,6 +82,10 @@ func ValidateName(name string) error {
 	}
 	if !nameRe.MatchString(name) {
 		return fmt.Errorf("app name %q must be lowercase letters, digits and dashes, starting with a letter or digit (for example approval-gate)", name)
+	}
+	if why, taken := reserved[name]; taken {
+		return fmt.Errorf("app name %q is reserved because %s; an app named %q would make every log line, fact and notification about it ambiguous. Reserved names: %s",
+			name, why, name, strings.Join(ReservedNames(), ", "))
 	}
 	return nil
 }

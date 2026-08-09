@@ -263,6 +263,47 @@ func TestParksAfterGiveUpTripwireAndAnnouncesOnce(t *testing.T) {
 	}
 }
 
+// Stop-then-Ensure is what every "restart" verb is built from, and it has to
+// hand back a full restart budget. A revived child that still carries the
+// attempts that parked it would park again on its first exit, which makes the
+// way back from parked a door that opens once.
+func TestStopClearsTheRestartBudget(t *testing.T) {
+	clock := newFakeClock()
+	launcher := &fakeLauncher{}
+	supervisor := New(Options{Clock: clock, GiveUpAfter: 1})
+	_ = supervisor.Ensure("fixture", launcher.start)
+
+	launcher.handle(0).exit(Exit{Error: "boom"})
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseBackoff
+	})
+	clock.Advance(RestartBackoff[0])
+	waitFor(t, func() bool { return launcher.count() == 2 })
+	launcher.handle(1).exit(Exit{Error: "boom"})
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseParked
+	})
+
+	supervisor.Stop("fixture")
+	if snapshot, _ := supervisor.Snapshot("fixture"); snapshot.RestartAttempt != 0 {
+		t.Fatalf("restart attempts = %d after Stop, want the episode ended", snapshot.RestartAttempt)
+	}
+	if err := supervisor.Ensure("fixture", launcher.start); err != nil {
+		t.Fatalf("Ensure after Stop: %v", err)
+	}
+	waitFor(t, func() bool { return launcher.count() == 3 })
+
+	// The proof that the budget really came back: one exit puts it in backoff
+	// rather than straight back into the park.
+	launcher.handle(2).exit(Exit{Error: "boom"})
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseBackoff
+	})
+}
+
 // Parking is reversible: the consumer's ordinary "this should be running" call
 // revives the child with a clean restart budget.
 func TestEnsureRevivesParkedChild(t *testing.T) {

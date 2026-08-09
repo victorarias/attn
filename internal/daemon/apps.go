@@ -120,18 +120,18 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 	}
 	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations}
 	for _, inv := range recent {
-		result.Recent = append(result.Recent, protocol.AppInvocationInfo{
-			ID:           int(inv.ID),
-			VersionID:    int(inv.VersionID),
-			EventSeq:     int(inv.EventSeq),
-			EventName:    inv.EventName,
-			EventSubject: inv.EventSubject,
-			Handler:      inv.Handler,
-			Status:       inv.Status,
-			Error:        inv.Error,
-			DurationMs:   int(inv.Duration.Milliseconds()),
-			StartedAt:    stampForWire(inv.StartedAt),
-		})
+		result.Recent = append(result.Recent, appInvocationForWire(inv.ID, inv))
+	}
+	// The two things only the running daemon knows: whether the shared runtime is
+	// up, and whether this app is on the auto-disable clock. Both absent when
+	// there is nothing to report, never defaulted.
+	if snapshot, ok := d.appRuntimeSnapshot(); ok {
+		info := d.appRuntimeInfo(snapshot)
+		result.Runtime = &info
+	}
+	if stall, ok := d.appStallSnapshot(name); ok {
+		info := appStallForWire(stall)
+		result.Stall = &info
 	}
 	d.sendDocResponse(conn, protocol.Response{Ok: true, AppStatusResult: &result})
 }
@@ -188,6 +188,12 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 			"app %q: its bus consumer %s was removed while %s was running, so nothing was changed. "+
 				"`attn app status %s` shows what is left.", name, consumer, verb, name))
 		return
+	}
+	if msg.Enabled {
+		// Enabling is the way back from an auto-disable, so it clears the streak
+		// that caused one. Without this the app would be disabled again on its very
+		// next failure, against a clock it never got to restart.
+		d.clearAppStall(name)
 	}
 	d.publishFact(FactAppEnabledChanged, name, appEnabledChanged{
 		Name: name, Consumer: consumer, Enabled: msg.Enabled,

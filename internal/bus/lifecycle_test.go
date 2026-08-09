@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -512,4 +513,83 @@ func TestRegisterAfterStartRollsBackWhenRegistrationFails(t *testing.T) {
 		t.Fatalf("Publish: %v", err)
 	}
 	waitFor(t, "the retried registration to deliver", func() bool { return rec.count() >= 1 })
+}
+
+// An app's subscriptions change when a new version is applied, and the consumer
+// serving it must follow without losing its place. This is the property that
+// rules out unregister-then-register: that pair expresses the same intent and
+// deletes the cursor on the way through, so the app would resume at head and skip
+// whatever was published while it was being updated.
+func TestSetFilterChangesDeliveryAndKeepsTheCursor(t *testing.T) {
+	s := newMemStore()
+	b := testBus(t, s)
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(b.Stop)
+
+	rec := newRecorder()
+	if err := b.Register("app:notes", Filter{"ticket.*"}, rec.handle); err != nil {
+		t.Fatalf("Register: %v", err)
+	}
+	if _, err := b.Publish("ticket.commented", "t1", nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	waitFor(t, "the first subscription to deliver", func() bool { return rec.count() >= 1 })
+
+	before, ok, err := s.GetConsumer("app:notes")
+	if err != nil || !ok {
+		t.Fatalf("reading the consumer: found=%v err=%v", ok, err)
+	}
+
+	if err := b.SetFilter("app:notes", Filter{"session.*"}); err != nil {
+		t.Fatalf("SetFilter: %v", err)
+	}
+
+	after, ok, err := s.GetConsumer("app:notes")
+	if err != nil || !ok {
+		t.Fatalf("reading the consumer after SetFilter: found=%v err=%v", ok, err)
+	}
+	if after.Cursor != before.Cursor {
+		t.Fatalf("cursor moved from %d to %d; changing subscriptions must not move a consumer's position", before.Cursor, after.Cursor)
+	}
+	if after.Filter != "session.*" {
+		t.Fatalf("persisted filter is %q, want session.*; a filter that is not persisted is one a restart forgets", after.Filter)
+	}
+	if !after.Enabled {
+		t.Fatal("SetFilter cleared the enabled bit; the kill switch is not its business")
+	}
+
+	// The new subscription is what the live loop uses, and the old one is gone.
+	if _, err := b.Publish("ticket.commented", "t2", nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if _, err := b.Publish("session.state.changed", "s1", nil); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	waitFor(t, "the new subscription to deliver", func() bool { return rec.count() >= 2 })
+
+	names, _ := rec.snapshot()
+	if len(names) != 2 || names[1] != "session.state.changed" {
+		t.Fatalf("delivered %v; want the second delivery to be the newly subscribed fact and the unsubscribed one to be skipped", names)
+	}
+}
+
+// A caller changing the filter of a consumer nobody serves is told so. Answering
+// success would let an app believe its new subscriptions are live and learn
+// otherwise only from deliveries that never arrive.
+func TestSetFilterRefusesAnUnregisteredConsumer(t *testing.T) {
+	b := testBus(t, newMemStore())
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(b.Stop)
+
+	err := b.SetFilter("app:ghost", All)
+	if err == nil {
+		t.Fatal("SetFilter on an unregistered consumer returned nil")
+	}
+	if !strings.Contains(err.Error(), "app:ghost") {
+		t.Errorf("the refusal does not name the consumer: %v", err)
+	}
 }

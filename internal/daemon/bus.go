@@ -276,6 +276,13 @@ const (
 	// consumer that has to drain the outgoing version's handlers knows which one
 	// that is without racing the pointer it would otherwise read back.
 	FactAppVersionChanged = "app.version.changed"
+	// FactAppRuntimeChanged: the shared app runtime's supervision state moved —
+	// started, connected, backing off, parked, stopped. Subject is the runtime's
+	// child name rather than an app's, because the entity that moved is the one
+	// process every app shares. It carries no payload: the state is the
+	// supervisor's and a reader asks it (`attn app runtime status`) rather than
+	// trusting a copy that was true when the fact was written.
+	FactAppRuntimeChanged = "app.runtime.changed"
 )
 
 // CompactableFacts are the fact classes the retention pass may reduce to one

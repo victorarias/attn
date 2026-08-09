@@ -194,7 +194,8 @@ func runAppDev(args []string) {
 	}
 	// Parse before watching so a directory that is not an app says so now rather
 	// than after the first save.
-	if _, err := appbuild.LoadManifest(abs); err != nil {
+	manifest, err := appbuild.LoadManifest(abs)
+	if err != nil {
 		appFail("dev", err)
 	}
 
@@ -208,14 +209,15 @@ func runAppDev(args []string) {
 	}
 
 	fmt.Printf("watching %s — every change is parsed, typechecked, bundled and applied\n", abs)
-	// Say what this does not show. Streaming what an app actually does needs the
-	// runtime that dispatches to it, which is not in this attn; promising it here
-	// would have the reader wait for output that cannot arrive.
-	fmt.Printf("shows apply results and build errors. Handler invocations are not streamed: nothing dispatches to apps yet — `attn app status <name>` is where that will appear.\n")
+	fmt.Printf("shows apply results, build errors, and every handler invocation as it runs\n")
 	fmt.Printf("ctrl-c to stop\n\n")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+
+	stopWatching := make(chan struct{})
+	defer close(stopWatching)
+	go devWatchInvocations(manifest.Name, stopWatching)
 
 	devApply(abs)
 
@@ -266,6 +268,46 @@ func devApply(dir string) {
 	fmt.Printf("%s  ", stamp)
 	printApplied(result, res)
 	fmt.Printf("  in %s\n\n", time.Since(started).Round(time.Millisecond))
+}
+
+// devDialRetry is how long the invocation stream waits before dialling again
+// after the daemon closed on it. A `dev` session outlives a daemon restart —
+// installing a new build is a normal thing to do while writing an app — and a
+// stream that quietly never came back would read as "my handler stopped
+// running".
+const devDialRetry = 2 * time.Second
+
+// devWatchInvocations prints every invocation of the app being edited, beside
+// the apply results, until dev stops.
+//
+// It says nothing about a daemon it cannot reach. `attn app dev` builds and
+// typechecks perfectly well against a stopped daemon (the apply itself will say
+// so, loudly, with the socket path), and repeating that here every two seconds
+// would bury the build output this command exists to show.
+func devWatchInvocations(app string, stop <-chan struct{}) {
+	for {
+		_ = appClient().AppWatch(app, stop, func(inv protocol.AppInvocationInfo) bool {
+			fmt.Printf("%s  %s\n", time.Now().Format("15:04:05"), devInvocationLine(inv))
+			return true
+		})
+		select {
+		case <-stop:
+			return
+		case <-time.After(devDialRetry):
+		}
+	}
+}
+
+func devInvocationLine(inv protocol.AppInvocationInfo) string {
+	line := fmt.Sprintf("%s  %s(%s) in %dms", inv.Status, inv.Handler, inv.EventName, inv.DurationMs)
+	if inv.EventSubject != "" {
+		line = fmt.Sprintf("%s  %s(%s %s) in %dms",
+			inv.Status, inv.Handler, inv.EventName, inv.EventSubject, inv.DurationMs)
+	}
+	if inv.Error != "" {
+		line += "\n            " + inv.Error
+	}
+	return line
 }
 
 // devRelevant filters the noise. node_modules and .git are large and never part

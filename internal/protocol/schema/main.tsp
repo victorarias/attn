@@ -3920,15 +3920,137 @@ model AppStatusMessage {
 }
 
 // What is known about one app, and only what is known: the registry row, the
-// consumer if there is one, and the invocations recorded so far. Fields the
-// runtime owns are absent until the runtime exists — an app's status must not
-// claim a health it cannot observe.
+// consumer if there is one, the invocations recorded so far, and the shared
+// runtime's state. An app's status must not claim a health it cannot observe, so
+// every field the runtime owns is absent when there is no runtime.
 model AppStatusResult {
   "app": AppSummary;
   "versions": safeint;
   "invocations": safeint;
   // The most recent invocations, newest first, when any have been recorded.
   "recent"?: AppInvocationInfo[];
+  // The shared runtime every app's handlers execute in. Absent until it has been
+  // started once — a daemon with quiet apps starts no sidecar, and reporting a
+  // "stopped" runtime that was never asked to run would read as a fault.
+  "runtime"?: AppRuntimeInfo;
+  // What this app is currently stuck on, when it is stuck. Present only while a
+  // handler is failing on the same event; a successful delivery clears it.
+  "stall"?: AppStallInfo;
+}
+
+// The shared app runtime as the supervisor sees it. One process for every app —
+// isolation between apps is failure attribution, not an OS boundary — so this
+// answer is the same whichever app's status asked for it.
+model AppRuntimeInfo {
+  // "starting" | "connected" | "backoff" | "stopped" | "parked". Parked is the
+  // one that needs acting on: it means attn gave up restarting and no app's
+  // handlers are running until `attn app runtime restart`.
+  "phase": string;
+  // "running" | "stopped" — what attn is trying to achieve, as opposed to where
+  // it currently is.
+  "desired": string;
+  "running": boolean;
+  "connected": boolean;
+  // Increments on every start. The supervisor fences stale processes by it, so a
+  // generation that keeps climbing is a crash loop in one number.
+  "generation": safeint;
+  "restart_attempt": int32;
+  // The connected runtime's process id. Absent when nothing is connected.
+  "pid"?: safeint;
+  "started_at"?: string;
+  "connected_at"?: string;
+  // When the next restart fires, while backing off.
+  "next_restart_at"?: string;
+  // How the last process ended, rendered. Absent when it has never exited.
+  "last_exit"?: string;
+}
+
+// An app that has failed on the same event long enough to be on the clock.
+//
+// `disables_at` is the whole point of reporting this: an app stalled on one
+// event holds the durable log's retention floor open for every other consumer,
+// so attn disables it, and the reader is entitled to know when.
+model AppStallInfo {
+  "event_seq": safeint;
+  "event_name": string;
+  // When the app first failed on this event.
+  "since": string;
+  "attempts": int32;
+  "last_error": string;
+  "disables_at": string;
+}
+
+// The shared runtime's own surface, addressed as `runtime` rather than as an app
+// — which is why no app may be called that.
+model AppRuntimeStatusMessage {
+  "cmd": "app_runtime_status";
+}
+
+model AppRuntimeStatusResult {
+  // Absent when the runtime has never been started in this daemon.
+  "runtime"?: AppRuntimeInfo;
+  // How many apps are registered, and how many of those are enabled — the answer
+  // to "should anything be running at all".
+  "apps": safeint;
+  "apps_enabled": safeint;
+  // The binary that gets launched. Absent, with `host_error` set, when it cannot
+  // be found: a runtime that will never start must say so before it is asked to.
+  "host_path"?: string;
+  "host_error"?: string;
+  // Where the runtime's captured output lands. `attn app logs` reads it.
+  "log_path": string;
+}
+
+// Restart the shared runtime: kill the current process if there is one, and
+// start a fresh generation. It is also the way out of `parked` — a crash-looped
+// runtime is not retried until somebody asks.
+//
+// It takes no app name, deliberately. There is one runtime for every app, so
+// naming one would suggest a per-app restart that does not exist.
+model AppRuntimeRestartMessage {
+  "cmd": "app_runtime_restart";
+}
+
+model AppRuntimeRestartResult {
+  // The phase the runtime was in before the restart, so the answer says what
+  // actually changed — reviving a parked runtime and bouncing a healthy one are
+  // different acts with the same verb.
+  "was": string;
+  "runtime": AppRuntimeInfo;
+}
+
+// The shared runtime's captured stdout and stderr, filtered to one app.
+//
+// Every app's handlers print to the same process's output, so the runtime tags
+// each line with the app that wrote it and this reads the tag back. `runtime` as
+// the name means the whole log, untagged lines included — the runtime's own
+// output, which is where a startup failure appears.
+model AppLogsMessage {
+  "cmd": "app_logs";
+  "name": string;
+  // How many matching lines to return, newest last. 0 means the default.
+  "lines"?: int32;
+}
+
+model AppLogsResult {
+  "name": string;
+  "path": string;
+  // Matching lines in the order they were written, with the app tag removed.
+  "lines": string[];
+  // True when older matching lines were dropped to honour the limit.
+  "truncated": boolean;
+}
+
+// Stream an app's invocations as they are recorded. The connection stays open
+// and one result is written per invocation, which is what `attn app dev` renders
+// beside its apply results: an app author editing a handler sees the handler run.
+model AppWatchMessage {
+  "cmd": "app_watch";
+  "name": string;
+}
+
+model AppWatchResult {
+  "invocation": AppInvocationInfo;
 }
 
 model AppInvocationInfo {
@@ -4102,6 +4224,10 @@ model Response {
   app_remove_result?: AppRemoveResult;
   app_apply_result?: AppApplyResult;
   app_rollback_result?: AppRollbackResult;
+  app_logs_result?: AppLogsResult;
+  app_runtime_status_result?: AppRuntimeStatusResult;
+  app_runtime_restart_result?: AppRuntimeRestartResult;
+  app_watch_result?: AppWatchResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an

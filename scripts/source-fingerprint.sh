@@ -76,6 +76,12 @@ should_exclude_path() {
     plugins/attn-pi/spike-harness/*) return 0 ;;
     plugins/attn-pi/package.json|plugins/attn-pi/bun.lock|plugins/attn-pi/attn-plugin.toml|plugins/attn-pi/README.md) return 1 ;;
     scripts/build-app-profile.sh|scripts/build-bundled-plugins.sh) return 1 ;;
+    # The app runtime host is compiled into the bundle, so its source and its
+    # build script move the fingerprint. The generic scripts/* rule below ignores
+    # everything it does not name.
+    apphost/src/*) return 1 ;;
+    apphost/package.json|apphost/tsconfig.json) return 1 ;;
+    scripts/build-app-runtime-host.sh) return 1 ;;
     app/scripts/real-app-harness/*) return 0 ;;
     app/scripts/*)                  return 0 ;;
     app/e2e/*)                      return 0 ;;

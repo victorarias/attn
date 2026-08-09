@@ -190,7 +190,6 @@ type Bus struct {
 
 type durable struct {
 	name    string
-	filter  Filter
 	handler Handler
 
 	wake chan struct{}
@@ -209,7 +208,11 @@ type durable struct {
 	done     chan struct{}
 	launched bool
 
-	mu       sync.Mutex
+	mu sync.Mutex
+	// filter is under the same lock as the position because SetFilter changes it
+	// while the delivery loop is reading it — an app's subscriptions move when a
+	// new version is applied, and the loop must not be racing the change.
+	filter   Filter
 	cursor   int64
 	enabled  bool
 	stalled  string
@@ -548,6 +551,77 @@ func (b *Bus) Unregister(name string) error {
 	return nil
 }
 
+// SetFilter changes what a registered consumer receives, keeping its cursor and
+// its enabled bit.
+//
+// It exists because a consumer's subscriptions can outlive neither the consumer
+// nor its position: an app declares its event patterns in its manifest, and
+// applying a new version can change them. Unregister-then-Register would express
+// the same intent and delete the cursor on the way through — the app would resume
+// at head and silently skip everything published while it was being updated.
+// Register refuses a name it already serves, so this is the only way to say "same
+// consumer, different subscriptions".
+//
+// A name that is not registered here is an error rather than a silent no-op: the
+// caller believes it is changing a live consumer's behavior, and learning
+// otherwise from later missing deliveries is the worst way to find out.
+func (b *Bus) SetFilter(name string, filter Filter) error {
+	b.mu.Lock()
+	var found *durable
+	for _, d := range b.durables {
+		if d.name == name {
+			found = d
+			break
+		}
+	}
+	started := b.started
+	b.mu.Unlock()
+	if found == nil {
+		return fmt.Errorf("bus: consumer %s is not registered, so its filter cannot be changed", name)
+	}
+	// Persist first, then swap what the loop reads. The other order would have the
+	// loop filtering by a rule no restart would reproduce if the write failed.
+	//
+	// Before Start there is nothing persisted to correct: Register only holds the
+	// consumer in memory, and Start writes every one of them with the filter it
+	// carries at that moment — which is this one.
+	if b.store != nil && started {
+		existing, ok, err := b.store.GetConsumer(name)
+		if err != nil {
+			return fmt.Errorf("bus: reading consumer %s to change its filter: %w", name, err)
+		}
+		if !ok {
+			return fmt.Errorf("bus: consumer %s has no registration to change", name)
+		}
+		if err := b.store.SaveConsumer(Consumer{
+			Name:    name,
+			Cursor:  existing.Cursor,
+			Filter:  filter.String(),
+			Enabled: existing.Enabled,
+		}, b.now()); err != nil {
+			return fmt.Errorf("bus: saving the filter of consumer %s: %w", name, err)
+		}
+	}
+	found.setFilter(filter)
+	return nil
+}
+
+// Registered reports whether this process serves a consumer under name.
+//
+// It is how a caller chooses between Register and SetFilter without guessing
+// from an error string: those two are not interchangeable — one mints a cursor,
+// the other preserves it — and picking the wrong one is silent.
+func (b *Bus) Registered(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, d := range b.durables {
+		if d.name == name {
+			return true
+		}
+	}
+	return false
+}
+
 // newDurable builds a consumer and its cancel scope. Callers that also touch the
 // consumer set hold b.mu; the bus context it reads is fixed at construction.
 func (b *Bus) newDurable(name string, filter Filter, h Handler) *durable {
@@ -657,7 +731,7 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 		if err := b.store.SaveConsumer(Consumer{
 			Name:    d.name,
 			Cursor:  head,
-			Filter:  d.filter.String(),
+			Filter:  d.filterExpr(),
 			Enabled: true,
 		}, now); err != nil {
 			return fmt.Errorf("bus: registering consumer %s: %w", d.name, err)
@@ -669,7 +743,7 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 	if err := b.store.SaveConsumer(Consumer{
 		Name:    d.name,
 		Cursor:  existing.Cursor,
-		Filter:  d.filter.String(),
+		Filter:  d.filterExpr(),
 		Enabled: existing.Enabled,
 	}, now); err != nil {
 		return fmt.Errorf("bus: updating consumer %s: %w", d.name, err)
@@ -799,7 +873,7 @@ func (b *Bus) drain(d *durable) error {
 				}
 				return nil
 			}
-			if !d.filter.Matches(ev.Name) {
+			if !d.matches(ev.Name) {
 				// Unwanted events still advance the cursor, batched into one write
 				// at the next matching event or at the end of the batch.
 				skipped = ev.Seq
@@ -1061,6 +1135,24 @@ func (b *Bus) Status() (Status, error) {
 		out.Consumers = append(out.Consumers, cs)
 	}
 	return out, nil
+}
+
+func (d *durable) matches(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.filter.Matches(name)
+}
+
+func (d *durable) filterExpr() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.filter.String()
+}
+
+func (d *durable) setFilter(f Filter) {
+	d.mu.Lock()
+	d.filter = f
+	d.mu.Unlock()
 }
 
 func (d *durable) position() int64 {
