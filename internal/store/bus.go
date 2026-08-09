@@ -197,22 +197,33 @@ func (s *Store) SetBusConsumerCursor(name string, cursor int64, now time.Time) e
 	return err
 }
 
-// SetBusConsumerEnabled flips the kill switch for a consumer.
-func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) error {
+// SetBusConsumerEnabled flips the kill switch for a consumer, and reports
+// whether there was a row to flip.
+//
+// The report is what a caller checks a moment after reading the registration:
+// between the read and this write the consumer may have been unregistered, and
+// an UPDATE that matches nothing is indistinguishable from a successful flip
+// without it. A caller that answers "disabled" for a consumer that no longer
+// exists has told its user something untrue.
+func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		return nil
+		return false, nil
 	}
 	flag := 0
 	if enabled {
 		flag = 1
 	}
-	_, err := s.db.Exec(`
+	res, err := s.db.Exec(`
 		UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?
 	`, flag, formatTicketTime(now), name)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
 }
 
 // DeleteBusConsumer removes a registration. Deleting a row that is not there is

@@ -49,7 +49,7 @@ func seedAppConsumer(t *testing.T, d *Daemon, name string, enabled bool, cursor 
 	// SaveBusConsumer deliberately never rewrites an existing row's cursor or
 	// enabled bit — re-registering at startup must neither rewind a consumer nor
 	// resurrect one the operator killed — so the seed sets both explicitly.
-	if err := d.store.SetBusConsumerEnabled(apps.ConsumerName(name), enabled, time.Now()); err != nil {
+	if _, err := d.store.SetBusConsumerEnabled(apps.ConsumerName(name), enabled, time.Now()); err != nil {
 		t.Fatalf("seed consumer bit for %s: %v", name, err)
 	}
 	if err := d.store.SetBusConsumerCursor(apps.ConsumerName(name), cursor, time.Now()); err != nil {

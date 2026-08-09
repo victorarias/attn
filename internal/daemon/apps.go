@@ -175,8 +175,18 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 			name, consumer, verb, name))
 		return
 	}
-	if err := d.store.SetBusConsumerEnabled(consumer, msg.Enabled, time.Now()); err != nil {
+	// Between the read above and this write the consumer may have been
+	// unregistered — `attn app remove` running beside this one. Reporting success
+	// then would answer for a consumer that is gone and publish a fact about it.
+	flipped, err := d.store.SetBusConsumerEnabled(consumer, msg.Enabled, time.Now())
+	if err != nil {
 		d.sendError(conn, fmt.Sprintf("%s app %q: %v", verb, name, err))
+		return
+	}
+	if !flipped {
+		d.sendError(conn, fmt.Sprintf(
+			"app %q: its bus consumer %s was removed while %s was running, so nothing was changed. "+
+				"`attn app status %s` shows what is left.", name, consumer, verb, name))
 		return
 	}
 	d.publishFact(FactAppEnabledChanged, name, appEnabledChanged{
