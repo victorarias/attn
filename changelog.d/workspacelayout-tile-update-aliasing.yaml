@@ -1,0 +1,8 @@
+kind: fixed
+area: daemon
+change: >
+  Rebinding a docked tile's params or session no longer writes into the layout
+  tree it was handed. UpdateTileParams and UpdateTileSessionID assigned into the
+  caller's children array, so a caller that read a workspace layout, updated a
+  tile, and then read its own copy again would see the edit already applied —
+  every other layout operation copies its children first. They now do too.
