@@ -4,10 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -478,159 +476,27 @@ func TestPluginDriverFixtureProcess(t *testing.T) {
 		t.Fatalf("dial daemon socket: %v", err)
 	}
 	defer conn.Close()
-	decoder := json.NewDecoder(conn)
 
+	peer := newPluginFixturePeer(t, conn)
 	sendPluginHello(t, conn, os.Getenv("ATTN_PLUGIN_NAME"))
-	if response := readPluginFixtureResponse(t, conn, decoder, "1"); response.Error != nil {
+	if response := peer.awaitResponse("1"); response.Error != nil {
 		t.Fatalf("fixture hello error=%#v", response.Error)
 	}
-	registerPluginFixtureDriver(t, conn, decoder, "fixture", map[string]bool{
-		"resume":          true,
-		"yolo":            true,
-		"state_reporting": true,
-		"model_pin":       true,
-		"effort_pin":      true,
+	peer.callOK("driver.register", pluginDriverRegisterParams{
+		Agent: "fixture",
+		Capabilities: map[string]bool{
+			"resume":          true,
+			"yolo":            true,
+			"state_reporting": true,
+			"model_pin":       true,
+			"effort_pin":      true,
+		},
 	})
 	if err := os.WriteFile(os.Getenv("ATTN_DRIVER_FIXTURE_READY"), []byte("ready"), 0o644); err != nil {
 		t.Fatalf("write fixture ready marker: %v", err)
 	}
 
-	for {
-		request, err := decodePluginFixtureMessage(decoder)
-		if err != nil {
-			return
-		}
-		if request.Method == "attn.health" {
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(request.ID, map[string]bool{"ok": true}))
-			continue
-		}
-		if request.Method == "driver.session_closed" {
-			var params pluginDriverSessionClosedParams
-			if err := json.Unmarshal(request.Params, &params); err != nil {
-				t.Fatalf("decode fixture session close params: %v", err)
-			}
-			appendPluginFixtureCloseRecord(t, pluginDriverCloseRecord{Params: params})
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(request.ID, pluginDriverSessionClosedResult{OK: true}))
-			continue
-		}
-		if request.Method != "driver.spawn" && request.Method != "driver.resume" {
-			continue
-		}
-
-		var params pluginDriverSpawnParams
-		if err := json.Unmarshal(request.Params, &params); err != nil {
-			t.Fatalf("decode fixture launch params: %v", err)
-		}
-		appendPluginFixtureRecord(t, pluginDriverFixtureRecord{Method: request.Method, Params: params})
-		script := `IFS= read -r input; printf 'PLUGIN_RUN method=%s cwd=%s input=%s\n' "$ATTN_PLUGIN_FIXTURE_METHOD" "$PWD" "$input"; trap 'exit 0' TERM INT; while :; do sleep 1; done`
-		respondPluginRequest(t, conn, request, pluginDriverSpawnResult{
-			Argv: []string{"/bin/sh", "-c", script},
-			Env:  map[string]string{"ATTN_PLUGIN_FIXTURE_METHOD": request.Method},
-			CWD:  os.Getenv("ATTN_DRIVER_FIXTURE_CWD"),
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 20, "session.report_state", pluginReportStateParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       1,
-			State:     protocol.StateWorking,
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 21, "session.report_metadata", pluginReportMetadataParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       2,
-			Metadata:  json.RawMessage(`{"native_id":"` + request.Method + `-native"}`),
-		})
-		sendPluginFixtureMethod(t, conn, decoder, 22, "session.report_stop", pluginReportStopParams{
-			SessionID: params.SessionID,
-			RunID:     params.RunID,
-			Seq:       3,
-			Verdict:   protocol.StateWaitingInput,
-		})
-		if request.Method == "driver.spawn" {
-			waitForPluginFixtureStateTrigger(t)
-			sendPluginFixtureMethod(t, conn, decoder, 23, "session.report_state", pluginReportStateParams{
-				SessionID: params.SessionID,
-				RunID:     params.RunID,
-				Seq:       4,
-				State:     protocol.StateWorking,
-			})
-			sendPluginFixtureMethod(t, conn, decoder, 24, "session.report_stop", pluginReportStopParams{
-				SessionID: params.SessionID,
-				RunID:     params.RunID,
-				Seq:       5,
-				Verdict:   protocol.StateWaitingInput,
-			})
-		}
-	}
-}
-
-func registerPluginFixtureDriver(t *testing.T, conn net.Conn, decoder *json.Decoder, agent string, capabilities map[string]bool) {
-	t.Helper()
-	response := sendPluginFixtureMethodResponse(t, conn, decoder, 2, "driver.register", pluginDriverRegisterParams{
-		Agent:        agent,
-		Capabilities: capabilities,
-	})
-	if response.Error != nil {
-		t.Fatalf("driver.register error=%#v", response.Error)
-	}
-}
-
-func sendPluginFixtureMethod(t *testing.T, conn net.Conn, decoder *json.Decoder, id int, method string, params interface{}) {
-	t.Helper()
-	response := sendPluginFixtureMethodResponse(t, conn, decoder, id, method, params)
-	if response.Error != nil {
-		t.Fatalf("%s error=%#v", method, response.Error)
-	}
-}
-
-func sendPluginFixtureMethodResponse(t *testing.T, conn net.Conn, decoder *json.Decoder, id int, method string, params interface{}) jsonRPCMessage {
-	t.Helper()
-	payload, err := json.Marshal(params)
-	if err != nil {
-		t.Fatalf("marshal %s params: %v", method, err)
-	}
-	if err := json.NewEncoder(conn).Encode(jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage([]byte(strconv.Itoa(id))),
-		Method:  method,
-		Params:  payload,
-	}); err != nil {
-		t.Fatalf("send %s: %v", method, err)
-	}
-	return readPluginFixtureResponse(t, conn, decoder, strconv.Itoa(id))
-}
-
-func decodePluginFixtureMessage(decoder *json.Decoder) (jsonRPCMessage, error) {
-	var message jsonRPCMessage
-	err := decoder.Decode(&message)
-	return message, err
-}
-
-func decodePluginFixtureMessageWithDecoder(t *testing.T, decoder *json.Decoder) jsonRPCMessage {
-	t.Helper()
-	message, err := decodePluginFixtureMessage(decoder)
-	if err != nil {
-		t.Fatalf("decode JSON-RPC message: %v", err)
-	}
-	return message
-}
-
-func readPluginFixtureResponse(t *testing.T, conn net.Conn, decoder *json.Decoder, wantID string) jsonRPCMessage {
-	t.Helper()
-	for {
-		message := decodePluginFixtureMessageWithDecoder(t, decoder)
-		if message.Method == pluginHealthMethod {
-			_ = json.NewEncoder(conn).Encode(jsonRPCResult(message.ID, map[string]bool{"ok": true}))
-			continue
-		}
-		if message.Method != "" {
-			t.Fatalf("unexpected plugin request %q while waiting for response id=%s", message.Method, wantID)
-		}
-		if jsonRPCIDKey(message.ID) != wantID {
-			t.Fatalf("unexpected plugin response id=%s while waiting for id=%s", jsonRPCIDKey(message.ID), wantID)
-		}
-		return message
-	}
+	peer.serve()
 }
 
 func appendPluginFixtureRecord(t *testing.T, record pluginDriverFixtureRecord) {

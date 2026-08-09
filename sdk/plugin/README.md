@@ -55,6 +55,16 @@ The SDK handles `attn.health` internally and returns `{ ok: true }`. Plugin
 authors do not need to register a health handler for the daemon to distinguish a
 live plugin from a process that merely started.
 
+The connection is full duplex, and attn does not wait its turn. A request from
+attn — a healthcheck, a `driver.session_closed` for a session whose process just
+exited — can arrive while one of the plugin's own requests is still waiting for
+its response, so the next message on the socket is not necessarily the one the
+plugin asked for. The SDK already routes by shape: a message carrying a method
+goes to its handler, a message carrying only an id resolves the pending request.
+Plugin code that talks to the socket directly must do the same; treating an
+unexpected request as an error loses whichever message attn happened to send
+first, and since the ordering is a scheduling race it loses it rarely.
+
 Create lifecycle hooks use the same registration path:
 
 ```ts
