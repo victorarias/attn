@@ -2527,6 +2527,13 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 			return
 		}
 		d.sendOK(conn)
+	case protocol.CmdSetSessionContextWindowCap: // wire: set_session_context_window_cap
+		m := msg.(*protocol.SetSessionContextWindowCapMessage)
+		if err := d.setSessionContextWindowCap(m.SessionID, m.Cap); err != nil {
+			d.sendError(conn, err.Error())
+			return
+		}
+		d.sendOK(conn)
 	case protocol.CmdCollapseRepo: // wire: collapse_repo
 		d.handleCollapseRepo(conn, msg.(*protocol.CollapseRepoMessage))
 	case protocol.CmdQueryRepos: // wire: query_repos

@@ -4433,6 +4433,9 @@ type Session struct {
 	// ChiefOfStaff corresponds to the JSON schema field "chief_of_staff".
 	ChiefOfStaff *bool `json:"chief_of_staff,omitempty,omitzero"`
 
+	// ContextWindowCap corresponds to the JSON schema field "context_window_cap".
+	ContextWindowCap *int `json:"context_window_cap,omitempty,omitzero"`
+
 	// DelegatedFromChief corresponds to the JSON schema field "delegated_from_chief".
 	DelegatedFromChief *bool `json:"delegated_from_chief,omitempty,omitzero"`
 
@@ -4671,6 +4674,23 @@ type SessionAnnotationsSubmitResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type SessionContextWindowCapResultMessage struct {
+	// Cap corresponds to the JSON schema field "cap".
+	Cap int `json:"cap"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type SessionExitedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -4903,6 +4923,17 @@ type SetPluginPriorityMessage struct {
 
 	// Priority corresponds to the JSON schema field "priority".
 	Priority int `json:"priority"`
+}
+
+type SetSessionContextWindowCapMessage struct {
+	// Cap corresponds to the JSON schema field "cap".
+	Cap int `json:"cap"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
 }
 
 type SetSessionResumeIDMessage struct {

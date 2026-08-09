@@ -49,3 +49,40 @@ func (s *Store) SetSessionPinned(id string, pinned bool, now time.Time) bool {
 	updated, err := result.RowsAffected()
 	return err == nil && updated == 1
 }
+
+// SetSessionContextWindowCap pins a per-session context-window cap in tokens,
+// or clears the pin with cap 0. Like the queue pin, the column is owned by this
+// setter alone — it is absent from the session upsert, so a respawn or state
+// re-add cannot disturb it. The daemon's launch resolver reads the pin ahead of
+// the chief and per-agent default settings.
+//
+// It returns true when a session was updated.
+func (s *Store) SetSessionContextWindowCap(id string, cap int) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if cap < 0 {
+		cap = 0
+	}
+
+	if s.db == nil {
+		session, ok := s.sessions[id]
+		if !ok {
+			return false
+		}
+		if cap == 0 {
+			session.ContextWindowCap = nil
+		} else {
+			session.ContextWindowCap = protocol.Ptr(cap)
+		}
+		return true
+	}
+
+	result, err := s.db.Exec(`UPDATE sessions SET context_window_cap = ? WHERE id = ?`, cap, id)
+	if err != nil {
+		log.Printf("[store] SetSessionContextWindowCap: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, err := result.RowsAffected()
+	return err == nil && updated == 1
+}

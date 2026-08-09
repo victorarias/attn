@@ -52,6 +52,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceSelected:                     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSettleTurn:                            commandMetadata(ScopeSession, false, true),
 	protocol.CmdPinSession:                            commandMetadata(ScopeSession, false, true),
+	protocol.CmdSetSessionContextWindowCap:            commandMetadata(ScopeSession, false, true),
 	protocol.CmdSnoozeTurn:                            commandMetadata(ScopeSession, false, true),
 	protocol.CmdWakeTurn:                              commandMetadata(ScopeSession, false, true),
 	protocol.CmdCancelCountdown:                       commandMetadata(ScopeSession, false, true),

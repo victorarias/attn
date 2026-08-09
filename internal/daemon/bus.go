@@ -90,6 +90,9 @@ const (
 	// released back into it. Distinct from FactWorkspacePinChanged, which moves
 	// a whole workspace and its siblings.
 	FactSessionPinChanged = "session.pin.changed"
+	// FactSessionCapChanged: this session's context-window cap pin was set or
+	// cleared.
+	FactSessionCapChanged = "session.cap.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -290,9 +293,10 @@ func buildWireProjections() []projection {
 		},
 		{
 			// A pin changes what the session says about itself (turn_owed and
-			// pinned_at), and nothing about its workspace, so it re-pushes the one
-			// session rather than recomputing the group around it.
-			filter: bus.Filter{FactSessionPinChanged},
+			// pinned_at, or context_window_cap), and nothing about its workspace,
+			// so it re-pushes the one session rather than recomputing the group
+			// around it.
+			filter: bus.Filter{FactSessionPinChanged, FactSessionCapChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
