@@ -984,9 +984,10 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	//
 	// Rows are carried, never recreated; the only DELETE removes the acting
 	// session's personal subscription — the session-bound second copy of an
-	// attachment the role already holds. A chief that had also subscribed to its
-	// own delegation by hand is indistinguishable from that and loses the
-	// hand-made row too.
+	// attachment the role already holds. It is recognized by the same shared
+	// second, so a subscription the chief made by hand at some other time
+	// survives, and a bystander who happened to write in the delegating second
+	// keeps theirs.
 	// Applied by applyMigration99, whose ALTER is column-guarded.
 	{99, "attribute role-acted ticket events to the role", ``},
 }
@@ -1011,6 +1012,7 @@ const migration99SQL = `
 			WHERE e.ticket_id = ticket_subscriptions.ticket_id
 				AND e.author_role != ''
 				AND e.author = ticket_subscriptions.identity
+				AND e.created_at = ticket_subscriptions.created_at
 		);
 
 		DROP VIEW IF EXISTS ticket_participants;

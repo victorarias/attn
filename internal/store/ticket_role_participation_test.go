@@ -54,21 +54,25 @@ func TestMigration99DetachesPastChiefSessionsFromTheirDelegations(t *testing.T) 
 	if _, err := db.Exec(`
 		INSERT INTO tickets (id, title, description, status, assignee, cwd, last_agent_id, created_at, updated_at) VALUES
 			('minted',  'Minted',  'Delegated from scratch.', 'working', 'agent-1', '/tmp/1', 'codex', '2026-08-01T10:00:00Z', '2026-08-01T10:00:00Z'),
-			('adopted', 'Adopted', 'Filed, then delegated.',  'working', 'agent-2', '/tmp/2', 'codex', '2026-08-01T09:00:00Z', '2026-08-01T11:00:00Z');
+			('adopted', 'Adopted', 'Filed, then delegated.',  'working', 'agent-2', '/tmp/2', 'codex', '2026-08-01T09:00:00Z', '2026-08-01T11:00:00Z'),
+			('watched', 'Watched', 'Delegated, then re-followed by hand.', 'working', 'agent-3', '/tmp/3', 'codex', '2026-08-01T11:30:00Z', '2026-08-01T12:00:00Z');
 
 		INSERT INTO ticket_events (ticket_id, kind, author, from_status, to_status, comment, detail, created_at) VALUES
 			('minted',  'created',        'chief-a',  '', 'working', '', '',        '2026-08-01T10:00:00Z'),
 			('adopted', 'created',        'author-x', '', 'todo',    '', '',        '2026-08-01T09:00:00Z'),
 			('adopted', 'assigned',       'chief-a',  '', '',        '', 'agent-2', '2026-08-01T11:00:00Z'),
-			('adopted', 'status_changed', 'chief-a',  'todo', 'working', '', '',    '2026-08-01T11:00:00Z');
+			('adopted', 'status_changed', 'chief-a',  'todo', 'working', '', '',    '2026-08-01T11:00:00Z'),
+			('watched', 'created',        'chief-a',  '', 'working', '', '',        '2026-08-01T11:30:00Z');
 
 		INSERT INTO ticket_role_owners (role, ticket_id, created_at) VALUES
 			('chief_of_staff', 'minted',  '2026-08-01T10:00:00Z'),
-			('chief_of_staff', 'adopted', '2026-08-01T11:00:00Z');
+			('chief_of_staff', 'adopted', '2026-08-01T11:00:00Z'),
+			('chief_of_staff', 'watched', '2026-08-01T11:30:00Z');
 
 		INSERT INTO ticket_subscriptions (identity, ticket_id, created_at) VALUES
 			('chief-a', 'minted',  '2026-08-01T10:00:00Z'),
 			('chief-a', 'adopted', '2026-08-01T11:00:00Z'),
+			('chief-a', 'watched', '2026-08-01T12:00:00Z'),
 			('watcher', 'minted',  '2026-08-01T10:30:00Z');
 
 		INSERT INTO ticket_event_cursors (identity, ticket_id, cursor, updated_at) VALUES
@@ -112,6 +116,12 @@ func TestMigration99DetachesPastChiefSessionsFromTheirDelegations(t *testing.T) 
 	adopted := participantSet(t, migrated, "adopted")
 	if !adopted["agent-2"] || !adopted["author-x"] {
 		t.Errorf("adopted participants = %v, want the assignee and the original author carried", adopted)
+	}
+	// A subscription the chief made by hand is a different act at a different
+	// time, so the sweep leaves it alone even on a ticket the chief delegated.
+	watching, err := migrated.IsTicketSubscribed("chief-a", "watched")
+	if err != nil || !watching {
+		t.Errorf("hand-made subscription survived = %v (err %v), want it carried", watching, err)
 	}
 	cursor, err := migrated.GetTicketCursor(role, "minted")
 	if err != nil || cursor != 1 {
