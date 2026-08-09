@@ -5,10 +5,9 @@ change: >
   work. "Match existing patterns", "Ensure no regression", "Out of scope" and
   "Needs tests" are gone — a highlight selects a claim in a sentence, and those
   are about the work, so there was nothing for them to attach to. In their place:
-  "This is wrong", the missing opposite of "Exactly this", which tells the agent
-  to check what else it built on the claim; "I don't love this", for doubt you
-  cannot yet articulate, which tells it to rework rather than argue back; "Show
-  the receipt", for a fact asserted without one; "Cut this" for padding;
+  "This is wrong", the missing opposite of "Exactly this"; "I don't love this",
+  for doubt you cannot yet articulate; "Show the receipt", for a fact asserted
+  without one; "Cut this" for padding;
   "Simplify this" for more machinery than the problem needs; and "Your call" /
   "Ask me first" for the two ways of getting the asking wrong. A line under the
   row now names the label you are pointing at, and names the mark already on an
