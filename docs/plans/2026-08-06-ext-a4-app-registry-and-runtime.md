@@ -222,6 +222,29 @@ version), and calls back over the same socket for SDK operations. Byte
 streams stay off the bus per the standing rule; dispatch and results are
 socket RPC, and only domain facts ride the log.
 
+**How the daemon finds the sidecar (decided 2026-08-09, spiked):** the host
+ships as a `bun build --compile` standalone binary, built by attn's own
+pipeline with the repo-pinned bun — the bundled-plugin mechanism
+(`scripts/build-bundled-plugins.sh`, which carries the bun ≥1.3.14
+signability guard). The Bun runtime is embedded in the executable, so a
+GUI-spawned daemon needs no PATH resolution and a user's machine needs no
+toolchain to *run* apps (bun is required only by `apply`, which builds
+CLI-side — slice 4's receipt that `~/.asdf/shims/bun` is invisible to
+`pathutil.EnsureGUIPath()` is what forced the choice). There is no
+PATH-resolution fallback, deliberately: one mechanism, no second failure
+class. Spike receipts: a compiled host dynamic-imports arbitrary absolute
+bundle paths (two in sequence — the hot-reload shape; content-addressed
+version paths make a stale module cache structurally impossible) and
+bundles using node builtins, all under `env -i`.
+
+**The host binary is per-platform, and Linux is in scope for A4**: the
+daemon runs on Linux remotes, so the stage is not done until the host
+cross-compiles (`bun build --compile --target=bun-linux-x64|arm64`) beside
+the Go daemon's existing `build-linux-{amd64,arm64}` targets and the
+runtime is witnessed on a Linux remote (the OrbStack VM) before the
+epic→main merge. A silently darwin-only runtime is a defect, not a
+deferral.
+
 ### Handler contract and SDK (runtime half only)
 
 A handler receives the event and a context scoped to its app:
@@ -339,11 +362,16 @@ fully-CI'd, fully-reviewed merge at the end.
    streams apply results and build errors only — invocation streaming needs
    slice 5, and the command's banner says so.
 5. **Runtime sidecar** — dispatch, handler context, invocation log, per-app
-   consumers wired to slice 1, auto-disable, `logs`.
+   consumers wired to slice 1, auto-disable, `logs`. The compiled host
+   binary cross-compiles for linux amd64/arm64 beside the Go daemon's
+   existing cross targets — tracked here so the stage cannot close
+   darwin-only.
 6. **Exit proof** — the roadmap's exit, run live: an agent writes a real app
    in a scaffolded directory, applies it, sees invocations in the log,
    breaks it and watches auto-disable park it, fixes and re-enables it,
-   rolls it back. Recorded as receipts on the epic→main PR.
+   rolls it back. Recorded as receipts on the epic→main PR. Includes the
+   Linux witness: the runtime dispatching on a Linux remote (the OrbStack
+   VM), so the cross-compiled host is proven, not just built.
 
 Verification: A4 touches daemon lifecycle, protocol, and background runners
 — live verification in a running non-production app is mandatory for slices
