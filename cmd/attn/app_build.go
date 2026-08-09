@@ -77,10 +77,16 @@ func runAppApply(args []string) {
 	printApplied(result, res)
 }
 
-// applyApp runs the pipeline and records the result. It is one function because
-// the two halves are one act: if the daemon refuses what was just built, the
-// artifact this run placed is removed again, so a failed apply leaves the store
-// exactly as it found it.
+// applyApp runs the pipeline and records the result.
+//
+// A refused apply leaves its artifact behind on purpose. Only the daemon knows
+// whether the version row was written, and the CLI cannot tell a refusal from a
+// commit whose response was lost — so removing the artifact here would sometimes
+// delete the bundle a live version points at, which is a broken app rather than
+// wasted bytes. The leftover is inert: nothing lists it, the path is
+// content-addressed so re-applying the same content lands on it and reuses it
+// instead of accumulating, and the daemon re-hashes it before any row can name
+// it.
 func applyApp(dir string, progress *os.File) (*protocol.AppApplyResult, appbuild.Result, error) {
 	res, err := appbuild.Build(context.Background(), appbuild.Options{
 		Dir:      dir,
@@ -97,9 +103,6 @@ func applyApp(dir string, progress *os.File) (*protocol.AppApplyResult, appbuild
 	abs, _ := filepath.Abs(dir)
 	result, err := appClient().AppApply(res.Manifest.Name, res.ContentHash, res.Declaration, abs)
 	if err != nil {
-		if res.ArtifactWritten {
-			_ = os.RemoveAll(filepath.Dir(res.ArtifactPath))
-		}
 		return nil, appbuild.Result{}, err
 	}
 	return result, res, nil
@@ -120,7 +123,7 @@ func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
 		state = "unchanged — byte-identical to the version it already was"
 	}
 	fmt.Printf("applied app %s: version %d (%s), %s\n",
-		result.Name, result.VersionID, shortHash(result.ContentHash), state)
+		result.Name, result.VersionID, appbuild.ShortHash(result.ContentHash), state)
 	if moved {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
@@ -170,7 +173,7 @@ func runAppRollback(args []string) {
 	if result.PreviousVersionID != nil && *result.PreviousVersionID < result.VersionID {
 		verb = "moved app %s forward to version %d (%s)\n"
 	}
-	fmt.Printf(verb, result.Name, result.VersionID, shortHash(result.ContentHash))
+	fmt.Printf(verb, result.Name, result.VersionID, appbuild.ShortHash(result.ContentHash))
 	if result.PreviousVersionID != nil {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
@@ -331,13 +334,4 @@ func appPathArgs(verb string, args []string) (string, bool) {
 		dir = "."
 	}
 	return dir, asJSON
-}
-
-// shortHash matches the daemon's: full hashes belong in --json, not in a
-// sentence.
-func shortHash(hash string) string {
-	if len(hash) <= 12 {
-		return hash
-	}
-	return hash[:12]
 }

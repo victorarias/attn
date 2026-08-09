@@ -13,9 +13,10 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// `attn app` is the app registry's operator surface: what is installed, what
-// state each app is in, and the three verbs that change it — enable, disable,
-// remove.
+// `attn app` is the whole surface an app has: what is installed and what state
+// it is in (`list`, `status`), the lifecycle verbs (`enable`, `disable`,
+// `remove`), and the pipeline that produces a version in the first place
+// (`new`, `apply`, `rollback`, `dev` — those live in app_build.go).
 //
 // An app is a manifest-declared automation running in attn's shared runtime: it
 // consumes facts from the durable bus as `app:<name>`, keeps its state in the

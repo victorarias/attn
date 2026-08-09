@@ -56,6 +56,16 @@ type Result struct {
 // ArtifactName is the file every built app is bundled into.
 const ArtifactName = "bundle.js"
 
+// ShortHash renders a version hash for a human-facing line. The full hash is
+// always available in a command's --json output; a sentence carrying 64
+// characters is a sentence nobody reads.
+func ShortHash(hash string) string {
+	if len(hash) <= 12 {
+		return hash
+	}
+	return hash[:12]
+}
+
 // ArtifactDir is where a version's artifact lives, derived from the app name and
 // the version hash rather than stored, so the CLI that builds it and the daemon
 // that commits it cannot disagree about the location.

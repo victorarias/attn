@@ -103,7 +103,7 @@ func (d *Daemon) handleAppApply(conn net.Conn, msg *protocol.AppApplyMessage) {
 		return
 	}
 	if source := strings.TrimSpace(protocol.Deref(msg.SourcePath)); source != "" {
-		d.logf("app apply %s: version %d (%s) from %s", name, version.ID, shortHash(hash), source)
+		d.logf("app apply %s: version %d (%s) from %s", name, version.ID, appbuild.ShortHash(hash), source)
 	}
 	d.publishAppVersionChanged(name, version, previous, appVersionReasonApply)
 
@@ -212,7 +212,7 @@ func pickRollbackTarget(name string, app store.App, versions []store.AppVersion,
 func versionsSentence(versions []store.AppVersion, current int64) string {
 	parts := make([]string, 0, len(versions))
 	for _, v := range versions {
-		label := fmt.Sprintf("%d (%s)", v.ID, shortHash(v.ContentHash))
+		label := fmt.Sprintf("%d (%s)", v.ID, appbuild.ShortHash(v.ContentHash))
 		if v.ID == current {
 			label += " — current"
 		}
@@ -282,14 +282,4 @@ func validateDeclaration(name, declaration string) error {
 		return fmt.Errorf("the declaration snapshot names app %q, not %q", probe.Name, name)
 	}
 	return nil
-}
-
-// shortHash renders a version hash for a human-facing line. The full hash is
-// always available in the result and in `attn app status --json`; a sentence
-// carrying 64 characters is a sentence nobody reads.
-func shortHash(hash string) string {
-	if len(hash) <= 12 {
-		return hash
-	}
-	return hash[:12]
 }
