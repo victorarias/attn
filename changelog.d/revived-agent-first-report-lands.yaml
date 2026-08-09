@@ -1,0 +1,13 @@
+kind: fixed
+area: daemon
+change: >
+  An agent that dies and comes back can report on its ticket again. attn shows an
+  agent any ticket activity it has not read before letting it write, so the two
+  notes attn itself leaves when a session dies and is reloaded — "ended
+  mid-flight", "running again" — used to block that agent's very first report,
+  every time, on news about its own death. One delegated agent was turned away
+  once, said "done", and its report never landed. attn's own notes about a ticket
+  no longer cost the write: they are printed beside the update and the update
+  goes through. A word from someone else — the user, the chief, another agent —
+  still comes first, and now says so plainly: it is shown, marked read, and the
+  same command run again applies the update.

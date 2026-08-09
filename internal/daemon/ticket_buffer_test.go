@@ -254,8 +254,8 @@ func TestMutationCatchUpRebuildsRemainingUnreadFromNewAttention(t *testing.T) {
 		_, outcome, err := d.store.AddTicketCommentWithOptions(
 			"first", sessionID, "should not land", d.ticketMutationOptions(sessionID), now,
 		)
-		if err == nil && len(outcome.ConflictEvents) > 0 {
-			d.afterTicketMutationCatchUpLocked(sessionID, outcome.ConflictEvents)
+		if err == nil && len(outcome.CatchUp) > 0 {
+			d.afterTicketMutationCatchUpLocked(sessionID, outcome.CatchUp)
 		}
 		d.deliveryMu.Unlock()
 		catchUpDone <- catchUpResult{outcome: outcome, err: err}
@@ -269,7 +269,7 @@ func TestMutationCatchUpRebuildsRemainingUnreadFromNewAttention(t *testing.T) {
 	close(resumeStaleRebuild)
 	<-rebuildDone
 	result := <-catchUpDone
-	if result.err != nil || len(result.outcome.ConflictEvents) == 0 {
+	if result.err != nil || len(result.outcome.CatchUp) == 0 {
 		t.Fatalf("mutation outcome = %+v err=%v, want catch-up", result.outcome, result.err)
 	}
 

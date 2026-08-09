@@ -159,9 +159,10 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 		rollbackInstalledAttachFiles(staged)
 		return nil, err
 	}
-	if len(outcome.ConflictEvents) > 0 {
+	catchUp := ticketMutationCatchUp(ticketID, outcome.CatchUp)
+	d.afterTicketMutationCatchUpLocked(author, outcome.CatchUp)
+	if outcome.Blocked {
 		rollbackInstalledAttachFiles(staged)
-		d.afterTicketMutationCatchUpLocked(author, outcome.ConflictEvents)
 		d.deliveryMu.Unlock()
 		currentStatus := currentTicket.Status
 		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {
@@ -172,7 +173,8 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 			Artifacts:   []protocol.TicketArtifact{},
 			Fingerprint: fingerprint,
 			State:       protocol.TicketStatus(currentStatus),
-			CatchUp:     ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+			CatchUp:     catchUp,
+			Applied:     false,
 		}, nil
 	}
 	d.deliveryMu.Unlock()
@@ -201,6 +203,8 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 		EventSeq:     int(record.EventSeq),
 		State:        protocol.TicketStatus(record.Status),
 		Deduplicated: record.Deduplicated,
+		CatchUp:      catchUp,
+		Applied:      true,
 	}, nil
 }
 

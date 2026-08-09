@@ -4697,6 +4697,7 @@ export interface ObservationElement {
 }
 
 export interface TicketAttachResultObject {
+    applied:      boolean;
     artifacts:    ArtifactElement[];
     catch_up?:    CatchUp;
     deduplicated: boolean;
@@ -4735,6 +4736,7 @@ export enum TicketEventKind {
 }
 
 export interface TicketCommentResultObject {
+    applied:   boolean;
     catch_up?: CatchUp;
     ticket_id: string;
     [property: string]: any;
@@ -4764,6 +4766,7 @@ export interface TicketShowResultObject {
 }
 
 export interface TicketStatusResultObject {
+    applied:   boolean;
     catch_up?: CatchUp;
     status:    TicketStatus;
     ticket_id: string;
@@ -5652,6 +5655,7 @@ export interface FileObject {
 }
 
 export interface TicketAttachResult {
+    applied:      boolean;
     artifacts:    ArtifactElement[];
     catch_up?:    CatchUp;
     deduplicated: boolean;
@@ -5702,6 +5706,7 @@ export enum TicketCommentMessageCmd {
 }
 
 export interface TicketCommentResult {
+    applied:   boolean;
     catch_up?: CatchUp;
     ticket_id: string;
     [property: string]: any;
@@ -5854,6 +5859,7 @@ export interface TicketShowResult {
 }
 
 export interface TicketStatusResult {
+    applied:   boolean;
     catch_up?: CatchUp;
     status:    TicketStatus;
     ticket_id: string;
@@ -13077,6 +13083,7 @@ const typeMap: any = {
         { json: "source", js: "source", typ: "" },
     ], "any"),
     "TicketAttachResultObject": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
@@ -13100,6 +13107,7 @@ const typeMap: any = {
         { json: "to_status", js: "to_status", typ: u(undefined, r("TicketStatus")) },
     ], "any"),
     "TicketCommentResultObject": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -13119,6 +13127,7 @@ const typeMap: any = {
         { json: "ticket", js: "ticket", typ: r("TicketElement") },
     ], "any"),
     "TicketStatusResultObject": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },
@@ -13648,6 +13657,7 @@ const typeMap: any = {
         { json: "source_path", js: "source_path", typ: "" },
     ], "any"),
     "TicketAttachResult": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "artifacts", js: "artifacts", typ: a(r("ArtifactElement")) },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "deduplicated", js: "deduplicated", typ: true },
@@ -13678,6 +13688,7 @@ const typeMap: any = {
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
     "TicketCommentResult": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "ticket_id", js: "ticket_id", typ: "" },
     ], "any"),
@@ -13763,6 +13774,7 @@ const typeMap: any = {
         { json: "ticket", js: "ticket", typ: r("TicketElement") },
     ], "any"),
     "TicketStatusResult": o([
+        { json: "applied", js: "applied", typ: true },
         { json: "catch_up", js: "catch_up", typ: u(undefined, r("CatchUp")) },
         { json: "status", js: "status", typ: r("TicketStatus") },
         { json: "ticket_id", js: "ticket_id", typ: "" },

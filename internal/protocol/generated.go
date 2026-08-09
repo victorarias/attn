@@ -5683,6 +5683,9 @@ type TicketAttachMessage struct {
 }
 
 type TicketAttachResult struct {
+	// Applied corresponds to the JSON schema field "applied".
+	Applied bool `json:"applied"`
+
 	// Artifacts corresponds to the JSON schema field "artifacts".
 	Artifacts []TicketArtifact `json:"artifacts"`
 
@@ -5757,6 +5760,9 @@ type TicketCommentMessage struct {
 }
 
 type TicketCommentResult struct {
+	// Applied corresponds to the JSON schema field "applied".
+	Applied bool `json:"applied"`
+
 	// CatchUp corresponds to the JSON schema field "catch_up".
 	CatchUp *TicketEventBundle `json:"catch_up,omitempty,omitzero"`
 
@@ -5975,6 +5981,9 @@ const TicketStatusFailed TicketStatus = "failed"
 const TicketStatusInReview TicketStatus = "in_review"
 
 type TicketStatusResult struct {
+	// Applied corresponds to the JSON schema field "applied".
+	Applied bool `json:"applied"`
+
 	// CatchUp corresponds to the JSON schema field "catch_up".
 	CatchUp *TicketEventBundle `json:"catch_up,omitempty,omitzero"`
 

@@ -156,8 +156,8 @@ func TestTicketAttachCatchUpRollsBackInstalledFile(t *testing.T) {
 	msg := &protocol.TicketAttachMessage{Cmd: protocol.CmdTicketAttach, SourceSessionID: agentID, Files: []protocol.TicketAttachFile{source}}
 
 	first := callTicketAttach(t, d, msg)
-	if !first.Ok || first.TicketAttachResult == nil || first.TicketAttachResult.CatchUp == nil {
-		t.Fatalf("first response = %+v, want catch-up", first)
+	if !first.Ok || first.TicketAttachResult == nil || first.TicketAttachResult.CatchUp == nil || first.TicketAttachResult.Applied {
+		t.Fatalf("first response = %+v, want catch-up without the attach", first)
 	}
 	destination := filepath.Join(root, "tickets", ticketID, "design.md")
 	if _, err := os.Stat(destination); !os.IsNotExist(err) {
@@ -165,7 +165,7 @@ func TestTicketAttachCatchUpRollsBackInstalledFile(t *testing.T) {
 	}
 
 	retry := callTicketAttach(t, d, msg)
-	if !retry.Ok || retry.TicketAttachResult == nil || retry.TicketAttachResult.CatchUp != nil {
+	if !retry.Ok || retry.TicketAttachResult == nil || retry.TicketAttachResult.CatchUp != nil || !retry.TicketAttachResult.Applied {
 		t.Fatalf("retry response = %+v", retry)
 	}
 	if _, err := os.Stat(destination); err != nil {

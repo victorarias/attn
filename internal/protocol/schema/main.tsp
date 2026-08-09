@@ -779,6 +779,7 @@ model TicketStatusResult {
   ticket_id: string;
   status: TicketStatus;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and the move did not run
 }
 
 // TicketCreateMessage mints a standalone backlog ticket — unbound (no assignee, no
@@ -821,6 +822,7 @@ model TicketCommentMessage {
 model TicketCommentResult {
   ticket_id: string;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and the comment did not post
 }
 
 // PresentOpenMessage opens a new presentation (or a new round on an existing
@@ -1006,6 +1008,7 @@ model TicketAttachResult {
   state: TicketStatus;
   deduplicated: boolean;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and nothing was attached
 }
 
 model TicketAttachResultMessage {
