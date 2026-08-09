@@ -81,6 +81,11 @@ func (m *memStore) Save(j *Job) error {
 		m.saveErr = nil
 		return err
 	}
+	if j.Requeued && j.State == StateRunning {
+		// The flag is only set on a record whose run is still in flight; seeing it
+		// persisted that way is the collision itself, not its aftermath.
+		sawTriggerLandOnARunningJob.Reached()
+	}
 	m.jobs[j.ID] = j.clone()
 	return nil
 }
@@ -107,10 +112,13 @@ func (m *memStore) Eligible(now time.Time, limit int) ([]*Job, error) {
 	defer m.mu.Unlock()
 	out := make([]*Job, 0, len(m.jobs))
 	for _, j := range m.jobs {
-		if now.Before(j.ScheduledAt) {
+		if j.State != StateQueued && j.State != StateFailed {
 			continue
 		}
-		if j.State != StateQueued && j.State != StateFailed {
+		if now.Before(j.ScheduledAt) {
+			// The record is in a runnable state and dispatch is asking; the only
+			// reason it is not going out is the clock.
+			sawJobWithheldByItsSchedule.Reached()
 			continue
 		}
 		out = append(out, j.clone())

@@ -55,6 +55,9 @@ func (m *memStore) Since(cursor int64, limit int) ([]Event, error) {
 			}
 		}
 	}
+	if len(out) > 1 {
+		sawMultiEventBatch.Reached()
+	}
 	return out, nil
 }
 
@@ -231,14 +234,21 @@ type recorder struct {
 	mu     sync.Mutex
 	names  []string
 	seqs   []int64
-	failOn map[int64]int // seq -> remaining failures
+	seen   map[int64]bool // seq -> already handed to this handler once
+	failOn map[int64]int  // seq -> remaining failures
 }
 
-func newRecorder() *recorder { return &recorder{failOn: map[int64]int{}} }
+func newRecorder() *recorder {
+	return &recorder{seen: map[int64]bool{}, failOn: map[int64]int{}}
+}
 
 func (r *recorder) handle(_ context.Context, ev Event) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	if r.seen[ev.Seq] {
+		sawRedelivery.Reached()
+	}
+	r.seen[ev.Seq] = true
 	if n := r.failOn[ev.Seq]; n > 0 {
 		r.failOn[ev.Seq] = n - 1
 		r.seqs = append(r.seqs, ev.Seq)
