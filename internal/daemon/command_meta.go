@@ -157,6 +157,12 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDocQuery:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocCount:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocSubscribe:   commandMetadata(ScopeHubLocal, false, true),
+	// The app registry is the daemon's own database and its own bus, so a hub
+	// answers these itself. None touches a PTY, so none blocks during recovery.
+	protocol.CmdAppList:       commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppStatus:     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppSetEnabled: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRemove:     commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

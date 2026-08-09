@@ -11,11 +11,11 @@
 // a database.
 //
 // The query object is deliberately serializable end to end. Three surfaces will
-// eventually carry it — the Bun sidecar's SDK, extension UI, and `attn doc` —
+// eventually carry it — the Bun sidecar's SDK, app UI, and `attn doc` —
 // and all three must carry the same thing, so a later transport adds transport
 // and not semantics.
 //
-// The store knows nothing about extensions. A namespace is an opaque
+// The store knows nothing about apps. A namespace is an opaque
 // `owner/name` string; who may write under which owner is enforced where the
 // namespace is granted, not here.
 //
@@ -300,7 +300,7 @@ type Compiled struct {
 
 var (
 	// A namespace is `owner/name`: the owner segment is the isolation class a
-	// grant hands out (`ext`, `core`), the name segment identifies the holder.
+	// grant hands out (`app`, `core`), the name segment identifies the holder.
 	namePart      = `[a-z0-9][a-z0-9_-]*`
 	namespaceRe   = regexp.MustCompile(`^` + namePart + `/` + namePart + `$`)
 	collectionRe  = regexp.MustCompile(`^` + namePart + `$`)
@@ -388,10 +388,10 @@ func quoteIdent(name string) string {
 // can index and a person can read.
 func ValidateNamespace(ns string) error {
 	if ns == "" {
-		return fmt.Errorf("docstore: namespace is required, as owner/name (for example ext/approval-gate)")
+		return fmt.Errorf("docstore: namespace is required, as owner/name (for example app/approval-gate)")
 	}
 	if !namespaceRe.MatchString(ns) {
-		return fmt.Errorf("docstore: namespace %q is not owner/name, where each part is lowercase letters, digits, - or _ (for example ext/approval-gate)", ns)
+		return fmt.Errorf("docstore: namespace %q is not owner/name, where each part is lowercase letters, digits, - or _ (for example app/approval-gate)", ns)
 	}
 	return nil
 }

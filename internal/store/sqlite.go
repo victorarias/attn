@@ -951,6 +951,63 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// delegations, endpoints, workspaces and workspace panes. Applied by
 	// applyMigration95.
 	{95, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
+	// The app registry (A4). Three tables, and their absences are as decided as
+	// their columns:
+	//
+	//   - apps has NO enabled column. An app's enabled state IS its bus
+	//     consumer's enabled bit, which is what both stops delivery and releases
+	//     the retention floor. A mirrored column here would be a drift class
+	//     with no job to do.
+	//   - app_versions rows are immutable. Apply inserts, rollback moves
+	//     apps.current_version_id; nothing rewrites a version, and removing an
+	//     app leaves its versions behind as history.
+	//   - app_invocations records the version that actually ran, not the pointer
+	//     the app happens to be on now, so the log stays honest across a
+	//     rollback.
+	//
+	// UNIQUE(app_name, content_hash) is what makes "re-applying byte-identical
+	// content mints no new row" a property of the database rather than a
+	// convention in the apply pipeline.
+	//
+	// Numbered 96 against a database whose highest applied migration is 95 (main
+	// and this epic branch both). Merging the epic into main after another lane
+	// claims 96 means renumbering this one — never reusing a number, per the note
+	// on migration 86.
+	{96, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
+    name               TEXT PRIMARY KEY,
+    current_version_id INTEGER,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_versions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name      TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    declaration   TEXT NOT NULL,
+    artifact_path TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE(app_name, content_hash)
+);
+-- History for one app, newest first: the rollback picker's access path.
+CREATE INDEX IF NOT EXISTS idx_app_versions_app ON app_versions(app_name, id DESC);
+CREATE TABLE IF NOT EXISTS app_invocations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name      TEXT NOT NULL,
+    version_id    INTEGER NOT NULL,
+    event_seq     INTEGER NOT NULL,
+    event_name    TEXT NOT NULL DEFAULT '',
+    event_subject TEXT NOT NULL DEFAULT '',
+    handler       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL,
+    error         TEXT NOT NULL DEFAULT '',
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    started_at    TEXT NOT NULL
+);
+-- One app's recent invocations, and the age window retention trims by. Both
+-- read this index; started_at is written fixed-width so text order is time
+-- order.
+CREATE INDEX IF NOT EXISTS idx_app_invocations_app ON app_invocations(app_name, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(started_at);`},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.

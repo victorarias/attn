@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "216"
+const ProtocolVersion = "217"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -114,6 +114,10 @@ const (
 	CmdDocQuery                              = "doc_query"
 	CmdDocCount                              = "doc_count"
 	CmdDocSubscribe                          = "doc_subscribe"
+	CmdAppList                               = "app_list"
+	CmdAppStatus                             = "app_status"
+	CmdAppSetEnabled                         = "app_set_enabled"
+	CmdAppRemove                             = "app_remove"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -698,6 +702,34 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDocSubscribe:
 		var msg DocSubscribeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppList:
+		var msg AppListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppStatus:
+		var msg AppStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppSetEnabled:
+		var msg AppSetEnabledMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRemove:
+		var msg AppRemoveMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

@@ -281,6 +281,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   field name — never from caller text
 - `internal/jobs`: durable job queue (retry/backoff, coalescing, commit fence,
   cron entries) — every background duty and every periodic tick runs on it
+- `internal/apps`: an app's identity — the name rule, and the bus consumer
+  (`app:<name>`) and document namespace (`app/<name>`) derived from it. An app's
+  enabled state IS its consumer's enabled bit; there is no registry column for
+  it, and nothing stores the derived names. Registry tables and the lifecycle
+  handlers live in `internal/store/apps.go` and `internal/daemon/apps.go`; see
+  `docs/glossary.md` for app vs plugin
 - `internal/supervise`: process supervision for long-lived daemon children
   (restart backoff, generation fencing, stability window, disconnect grace,
   give-up parking, per-child log capture). Consumers name a child and hand over

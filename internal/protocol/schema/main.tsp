@@ -3755,6 +3755,128 @@ model DocSubscribeResult {
 }
 
 // ============================================================================
+// App registry
+// ============================================================================
+//
+// An app is a manifest-declared automation running in attn's shared runtime: it
+// consumes facts from the durable bus as its own consumer `app:<name>`, keeps
+// state in the document namespace `app/<name>`, and is versioned by the content
+// hash of its built artifact. A plugin is the other thing entirely — an
+// integration with its own process — and the two never share a surface.
+//
+// These commands are the half that reads and flips the registry. Applying,
+// rolling back and scaffolding an app arrive with the pipeline that builds one.
+
+// One app as `attn app list` shows it: the registry row, plus the consumer that
+// carries its enabled state. There is no enabled field on the app itself —
+// enabled IS the consumer's bit, and a second copy here would be a value that
+// can disagree with the one the bus actually reads.
+model AppSummary {
+  "name": string;
+  // The version this app currently runs. Absent when no version has been
+  // applied yet: a registry row can exist ahead of its first successful build.
+  "current_version"?: AppVersionInfo;
+  "created_at": string;
+  "updated_at": string;
+  // Absent when the app has no `app:<name>` consumer registered. That is a real
+  // state, not a gap in the answer: it means nothing is delivering facts to
+  // this app.
+  "consumer"?: AppConsumerInfo;
+}
+
+model AppVersionInfo {
+  "id": safeint;
+  // The content hash of the built artifact — the version's identity, which is
+  // why re-applying byte-identical content reports this same version.
+  "content_hash": string;
+  "artifact_path": string;
+  "created_at": string;
+}
+
+// The bus consumer behind an app. `enabled` is the app's enabled state, `lag` is
+// head minus cursor: how many facts the app has yet to be delivered.
+model AppConsumerInfo {
+  "name": string;
+  "enabled": boolean;
+  "cursor": safeint;
+  "lag": safeint;
+  "filter": string;
+}
+
+model AppListMessage {
+  "cmd": "app_list";
+}
+
+model AppListResult {
+  "apps": AppSummary[];
+}
+
+model AppStatusMessage {
+  "cmd": "app_status";
+  "name": string;
+}
+
+// What is known about one app, and only what is known: the registry row, the
+// consumer if there is one, and the invocations recorded so far. Fields the
+// runtime owns are absent until the runtime exists — an app's status must not
+// claim a health it cannot observe.
+model AppStatusResult {
+  "app": AppSummary;
+  "versions": safeint;
+  "invocations": safeint;
+  // The most recent invocations, newest first, when any have been recorded.
+  "recent"?: AppInvocationInfo[];
+}
+
+model AppInvocationInfo {
+  "id": safeint;
+  // The version that actually ran, which is not necessarily the one the app
+  // points at now — a rollback does not rewrite what happened.
+  "version_id": safeint;
+  "event_seq": safeint;
+  "event_name": string;
+  "event_subject": string;
+  "handler": string;
+  "status": string;
+  "error": string;
+  "duration_ms": safeint;
+  "started_at": string;
+}
+
+// Flip an app's enabled state, which is its bus consumer's enabled bit and
+// nothing else. Refused when the app has no consumer: there is no state to flip,
+// and inventing one would leave the app looking enabled while nothing delivers
+// to it.
+model AppSetEnabledMessage {
+  "cmd": "app_set_enabled";
+  "name": string;
+  "enabled": boolean;
+}
+
+model AppSetEnabledResult {
+  "name": string;
+  "consumer": string;
+  "enabled": boolean;
+}
+
+// Uninstall an app: stop and delete its bus consumer, then delete its registry
+// row. What survives is deliberate — version history, the invocation log, and
+// every document under `app/<name>`. The result counts them so the answer says
+// what was kept rather than leaving the caller to guess.
+model AppRemoveMessage {
+  "cmd": "app_remove";
+  "name": string;
+}
+
+model AppRemoveResult {
+  "name": string;
+  "consumer_removed": boolean;
+  "versions_kept": safeint;
+  "invocations_kept": safeint;
+  "namespace_kept": string;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -3813,6 +3935,10 @@ model Response {
   doc_query_result?: DocQueryResult;
   doc_count_result?: DocCountResult;
   doc_subscribe_result?: DocSubscribeResult;
+  app_list_result?: AppListResult;
+  app_status_result?: AppStatusResult;
+  app_set_enabled_result?: AppSetEnabledResult;
+  app_remove_result?: AppRemoveResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an

@@ -39,7 +39,7 @@ func readIDs(t *testing.T, s *Store, q docstore.Query) ([]string, error) {
 
 func pagedByAttempts(after string) docstore.Query {
 	return docstore.Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &docstore.Sort{Field: "attempts"},
 		After:      after,
@@ -110,7 +110,7 @@ func TestAFilterIsBoundUnderTheDeclarationItRunsAgainst(t *testing.T) {
 		"c": `{"attempts":3}`,
 	})
 	numeric := docstore.Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []docstore.Filter{{Field: "attempts", Op: docstore.OpEq, Value: float64(2)}},
 	}

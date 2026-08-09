@@ -8,7 +8,7 @@ import (
 
 func requestsSchema() CollectionSchema {
 	return CollectionSchema{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Fields: []FieldSpec{
 			{Name: "status", Type: FieldString},
@@ -38,7 +38,7 @@ func mustCompile(t *testing.T, q Query, anchor ...*Document) Compiled {
 // compiles to a bounded scan within one collection.
 func TestPendingRequestsNewestFirstCompiles(t *testing.T) {
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: "status", Op: OpEq, Value: "pending"}},
 		Sort:       &Sort{Field: FieldCreatedAt, Desc: true},
@@ -70,7 +70,7 @@ func TestPendingRequestsNewestFirstCompiles(t *testing.T) {
 // against.
 func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "status"},
 	})
@@ -78,7 +78,7 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 		t.Fatalf("order = %q", c.Order)
 	}
 	c = mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "status", Desc: true},
 	})
@@ -86,7 +86,7 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 		t.Fatalf("descending order = %q", c.Order)
 	}
 	// And an unsorted query is still deterministic.
-	if c := mustCompile(t, Query{Namespace: "ext/approval-gate", Collection: "requests"}); c.Order != "id ASC" {
+	if c := mustCompile(t, Query{Namespace: "app/approval-gate", Collection: "requests"}); c.Order != "id ASC" {
 		t.Fatalf("default order = %q", c.Order)
 	}
 }
@@ -95,7 +95,7 @@ func TestEverySortIsMadeTotalByTheDocumentID(t *testing.T) {
 // "newest first" and "changed since" need no schema.
 func TestReservedTimestampsAreQueryableWithoutDeclaration(t *testing.T) {
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: FieldUpdatedAt, Op: OpGt, Value: "2026-08-03T00:00:00Z"}},
 	})
@@ -122,7 +122,7 @@ func TestACollectionCannotDeclareAReservedName(t *testing.T) {
 // offer — the reader has to be able to fix the query from the error alone.
 func TestQueryingAnUndeclaredFieldSaysWhatIsQueryable(t *testing.T) {
 	_, err := Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: "priority", Op: OpEq, Value: "high"}},
 	}.Compile(requestsSchema(), nil)
@@ -136,7 +136,7 @@ func TestQueryingAnUndeclaredFieldSaysWhatIsQueryable(t *testing.T) {
 	}
 	// The same rule applies to sorting, and the error says which one was wrong.
 	_, err = Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "priority"},
 	}.Compile(requestsSchema(), nil)
@@ -160,7 +160,7 @@ func TestAFilterBoundMustMatchTheDeclaredType(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := Query{
-				Namespace:  "ext/approval-gate",
+				Namespace:  "app/approval-gate",
 				Collection: "requests",
 				Filters:    []Filter{{Field: tc.field, Op: OpEq, Value: tc.value}},
 			}.Compile(requestsSchema(), nil)
@@ -178,7 +178,7 @@ func TestAFilterBoundMustMatchTheDeclaredType(t *testing.T) {
 // bind as the 1/0 json_extract yields.
 func TestBoundsBindTheWayJSONExtractCompares(t *testing.T) {
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters: []Filter{
 			{Field: "attempts", Op: OpGte, Value: 3},
@@ -196,7 +196,7 @@ func TestBoundsBindTheWayJSONExtractCompares(t *testing.T) {
 // A query decoded from JSON is the same query — this is the representation the
 // sidecar, the UI, and the CLI all carry.
 func TestAQueryRoundTripsThroughJSON(t *testing.T) {
-	raw := `{"namespace":"ext/approval-gate","collection":"requests",
+	raw := `{"namespace":"app/approval-gate","collection":"requests",
 	         "filters":[{"field":"attempts","op":"gte","value":2}],
 	         "sort":{"field":"created_at","desc":true},"limit":5}`
 	var q Query
@@ -219,10 +219,10 @@ func TestAQueryRoundTripsThroughJSON(t *testing.T) {
 // wire message with no ceiling. Asking past the maximum names both numbers and
 // the way out.
 func TestLimitDefaultsAndItsCeilingNamesTheAsk(t *testing.T) {
-	if c := mustCompile(t, Query{Namespace: "ext/approval-gate", Collection: "requests"}); c.Limit != DefaultLimit {
+	if c := mustCompile(t, Query{Namespace: "app/approval-gate", Collection: "requests"}); c.Limit != DefaultLimit {
 		t.Fatalf("default limit = %d, want %d", c.Limit, DefaultLimit)
 	}
-	_, err := Query{Namespace: "ext/approval-gate", Collection: "requests", Limit: MaxLimit + 1}.Compile(requestsSchema(), nil)
+	_, err := Query{Namespace: "app/approval-gate", Collection: "requests", Limit: MaxLimit + 1}.Compile(requestsSchema(), nil)
 	if err == nil {
 		t.Fatal("a limit above the maximum was accepted")
 	}
@@ -237,12 +237,12 @@ func TestLimitDefaultsAndItsCeilingNamesTheAsk(t *testing.T) {
 // not which owners exist — who may write under an owner is enforced where the
 // namespace is granted.
 func TestNamespaceShapeIsTwoParts(t *testing.T) {
-	for _, ok := range []string{"ext/approval-gate", "core/tickets", "ext/a"} {
+	for _, ok := range []string{"app/approval-gate", "core/tickets", "app/a"} {
 		if err := ValidateNamespace(ok); err != nil {
 			t.Fatalf("%q rejected: %v", ok, err)
 		}
 	}
-	for _, bad := range []string{"", "approval-gate", "ext/", "/name", "Ext/Name", "ext/a/b", "ext name/x"} {
+	for _, bad := range []string{"", "approval-gate", "app/", "/name", "App/Name", "app/a/b", "ext name/x"} {
 		if err := ValidateNamespace(bad); err == nil {
 			t.Fatalf("%q accepted", bad)
 		}
@@ -278,7 +278,7 @@ func TestBodyMustBeAJSONObject(t *testing.T) {
 // and refusing it is what keeps a caller from reading one collection under
 // another's rules.
 func TestAQueryWillNotCompileAgainstAnotherCollectionsDeclaration(t *testing.T) {
-	_, err := Query{Namespace: "ext/other", Collection: "requests"}.Compile(requestsSchema(), nil)
+	_, err := Query{Namespace: "app/other", Collection: "requests"}.Compile(requestsSchema(), nil)
 	if err == nil {
 		t.Fatal("mismatched declaration was accepted")
 	}
@@ -302,7 +302,7 @@ func equalArgs(got, want []any) bool {
 func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 	anchor := &Document{ID: "b", Body: []byte(`{"attempts":7}`)}
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "attempts"},
 		After:      "b",
@@ -322,7 +322,7 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 	// Descending flips both comparisons, and admits the NULLs the descending
 	// order puts last.
 	c = mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "attempts", Desc: true},
 		After:      "b",
@@ -336,7 +336,7 @@ func TestTheAfterCursorComparesTheWholeOrderingTuple(t *testing.T) {
 // An unsorted query's whole order is the id, so its cursor is that one column.
 func TestTheAfterCursorOfAnUnsortedQueryIsTheID(t *testing.T) {
 	c := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		After:      "b",
 	}, &Document{ID: "b", Body: []byte(`{}`)})
@@ -349,7 +349,7 @@ func TestTheAfterCursorOfAnUnsortedQueryIsTheID(t *testing.T) {
 // "end of results", which is a silent truncation of the caller's walk.
 func TestAnAfterCursorWithNoDocumentIsAnError(t *testing.T) {
 	_, err := Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Sort:       &Sort{Field: "attempts"},
 		After:      "vanished",
@@ -365,7 +365,7 @@ func TestAnAfterCursorWithNoDocumentIsAnError(t *testing.T) {
 	// And an anchor that is not the document the cursor named is a caller bug,
 	// not a page: it would silently return the wrong slice.
 	_, err = Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		After:      "b",
 	}.Compile(requestsSchema(), &Document{ID: "c", Body: []byte(`{}`)})
@@ -378,7 +378,7 @@ func TestAnAfterCursorWithNoDocumentIsAnError(t *testing.T) {
 // to suggest is exactly the thing that breaks on ties.
 func TestTheLimitCeilingPointsAtTheCursor(t *testing.T) {
 	_, err := Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Limit:      MaxLimit + 1,
 	}.Compile(requestsSchema(), nil)
@@ -394,7 +394,7 @@ func TestTheLimitCeilingPointsAtTheCursor(t *testing.T) {
 func TestAQueryWillNotCompileWithoutAMintedTable(t *testing.T) {
 	bare := requestsSchema()
 	bare.Table = ""
-	if _, err := (Query{Namespace: "ext/approval-gate", Collection: "requests"}).Compile(bare, nil); err == nil {
+	if _, err := (Query{Namespace: "app/approval-gate", Collection: "requests"}).Compile(bare, nil); err == nil {
 		t.Fatal("a declaration with no table compiled")
 	}
 	for _, forged := range []string{
@@ -406,7 +406,7 @@ func TestAQueryWillNotCompileWithoutAMintedTable(t *testing.T) {
 	} {
 		s := requestsSchema()
 		s.Table = forged
-		if _, err := (Query{Namespace: "ext/approval-gate", Collection: "requests"}).Compile(s, nil); err == nil {
+		if _, err := (Query{Namespace: "app/approval-gate", Collection: "requests"}).Compile(s, nil); err == nil {
 			t.Fatalf("table name %q compiled", forged)
 		}
 	}
