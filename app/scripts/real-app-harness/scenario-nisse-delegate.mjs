@@ -137,7 +137,10 @@ function processTable() {
     .filter(Boolean);
 }
 
-const hostProcesses = () => processTable().filter((entry) => entry.command.includes('attn-nisse'));
+// The host executable, by its own path — not the substring `attn-nisse`, which
+// a profile named `nisse*` also puts in the app bundle path of every sibling
+// process (the plugin driver, the daemon, the app itself).
+const hostProcesses = () => processTable().filter((entry) => entry.command.includes('/bin/attn-nisse'));
 
 function waitForHost(known, description, timeoutMs = 90_000) {
   return pollFor(async () => hostProcesses().find((entry) => !known.includes(entry.pid)) ?? null, description, timeoutMs);
