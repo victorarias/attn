@@ -96,6 +96,46 @@ func TestSessionStateFactProjectsTheSameWireEvent(t *testing.T) {
 	}
 }
 
+// A new activity line reaches clients the same way every other state change
+// does: the generator publishes a subject-only fact and the projection re-reads
+// the session and re-pushes it. The generator never writes to the hub itself.
+func TestActivityFactProjectsTheSessionSnapshot(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopEventBus)
+
+	d.store.Add(&protocol.Session{ID: "sess-1", Directory: "/tmp/x", State: "working"})
+	d.store.UpdateSessionActivity("sess-1", "running the frontend test suite", time.Now(), "v1:abc:512:0")
+
+	var pushed []*protocol.WebSocketEvent
+	d.wsHub.broadcastListener = func(e *protocol.WebSocketEvent) { pushed = append(pushed, e) }
+
+	d.publishFact(FactSessionActivityChanged, "sess-1", nil)
+
+	// The line has to be on the pushed snapshot, not merely announced: a client
+	// that has to ask for it after the event would render a stale row until it
+	// answered.
+	carried := false
+	for _, event := range pushed {
+		if event.Event != protocol.EventSessionStateChanged || event.Session == nil {
+			continue
+		}
+		if event.Session.ID == "sess-1" && protocol.Deref(event.Session.Activity) == "running the frontend test suite" {
+			carried = true
+		}
+	}
+	if !carried {
+		t.Fatalf("no pushed snapshot carried the new activity line; got %+v", pushed)
+	}
+
+	logged, err := d.store.BusEventsSince(0, 10)
+	if err != nil {
+		t.Fatalf("BusEventsSince: %v", err)
+	}
+	if len(logged) != 1 || logged[0].Name != FactSessionActivityChanged || logged[0].Subject != "sess-1" {
+		t.Fatalf("expected one session.activity.changed fact for sess-1, got %+v", logged)
+	}
+}
+
 // Over the real SQLite adapter: a durable consumer that was not running catches
 // up from its persisted cursor when it comes back.
 func TestDurableConsumerCatchesUpOverTheSQLiteAdapter(t *testing.T) {

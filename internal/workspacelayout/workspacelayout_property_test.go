@@ -319,15 +319,17 @@ func TestLayoutStaysAWellFormedTreeUnderRandomOperations(t *testing.T) {
 				params := rapid.SampledFrom(tileParams).Draw(t, "params")
 				session := rapid.SampledFrom(tileSessions).Draw(t, "session")
 
-				// Not run through apply: these two write through their input.
-				// See TestLayoutOperationsDoNotModifyTheirInput.
-				next, ok := UpdateTileParams(m.tree, tileID, params)
+				next, ok := apply(t, func(n Node) (Node, bool) {
+					return UpdateTileParams(n, tileID, params)
+				})
 				if !ok {
 					t.Fatalf("UpdateTileParams on tile %q, which is in the tree, was refused", tileID)
 				}
 				m.tree = next
 
-				next, ok = UpdateTileSessionID(m.tree, tileID, session)
+				next, ok = apply(t, func(n Node) (Node, bool) {
+					return UpdateTileSessionID(n, tileID, session)
+				})
 				if !ok {
 					t.Fatalf("UpdateTileSessionID on tile %q, which is in the tree, was refused", tileID)
 				}
@@ -437,23 +439,14 @@ func TestLayoutStaysAWellFormedTreeUnderRandomOperations(t *testing.T) {
 // Every operation in this package takes a Node by value and returns a new one.
 // That is only true if the children slices are copied rather than written
 // through — a Node value shares its children's backing array with every copy of
-// itself, so writing into it reaches the caller's tree. Split, Remove,
-// SetSplitRatio, DockTile and MoveLeaf all copy before writing.
-// UpdateTileParams and UpdateTileSessionID do not: they assign into
-// node.Children[index] directly, so the layout the caller handed in comes back
-// changed.
+// itself, so writing into it reaches the caller's tree.
 //
-// SKIPPED, and red. It is a real divergence from the rest of the package, but
-// no shipped call site reads its pre-update snapshot again — internal/daemon's
-// three callers (browser.go, workspacelayout.go, tilecontent.go) all use the
-// returned tree and drop the input — so this is a latent trap rather than a live
-// bug, and fixing it means changing production code, which this test-only change
-// deliberately does not do. Delete the Skip when the two functions copy their
-// children like their neighbours; the seed under testdata/rapid replays the
+// The stateful property above holds every operation to this through apply. This
+// one pins the two that once did not, UpdateTileParams and UpdateTileSessionID,
+// on the smallest tree that shows it: a caller that keeps reading the layout it
+// handed in must see what it read. The seed under testdata/rapid replays the
 // counterexample rapid shrank to.
 func TestLayoutOperationsDoNotModifyTheirInput(t *testing.T) {
-	t.Skip("UpdateTileParams/UpdateTileSessionID write through their input; see the comment above")
-
 	rapid.Check(t, func(t *rapid.T) {
 		tree, _ := DockTile(DefaultLayout("p0"), "p0", DirectionVertical, false, "s1",
 			"t1", string(TileKindMarkdown), "", "", DefaultSplitRatio)

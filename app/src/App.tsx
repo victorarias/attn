@@ -6,6 +6,7 @@ import { getVersion } from '@tauri-apps/api/app';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
+import { activityStaleMs } from './utils/activitySettings';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
 
@@ -98,6 +99,7 @@ import { useTicketBoardScale } from './hooks/useTicketBoardScale';
 import { useTheme } from './hooks/useTheme';
 import { useOpenPR, type OpenPRProgress } from './hooks/useOpenPR';
 import { useUiAutomationBridge } from './hooks/useUiAutomationBridge';
+import { useClientPresence } from './hooks/useClientPresence';
 import { ptySpawn } from './pty/bridge';
 import { clearBrowserHostFocus, controlBrowserHost, isBrowserHostOwnedTarget } from './browser/host';
 import { probeUiAfterSwitch, UI_DIAGNOSTICS_FILE_DISPLAY } from './utils/uiDiagnosticsLog';
@@ -739,6 +741,8 @@ function AppContent({
   // threaded down as a hundred props.
   const {
     connectionError,
+    disconnectExplanation,
+    clearDisconnectExplanation,
     connectionGeneration,
     hasReceivedInitialState,
     rateLimit,
@@ -828,6 +832,7 @@ function AppContent({
     requestTileContent,
     sendRuntimeInput,
     sendTerminalPointerActivity,
+    sendSetClientPresence,
     sendSetTerminalTheme,
     isRuntimeAttached,
     getRepoInfo,
@@ -1202,6 +1207,8 @@ function AppContent({
       turnOwed: daemonSession?.turn_owed ?? false,
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
+      activity: daemonSession?.activity,
+      activityAt: daemonSession?.activity_at,
       pinnedAt: daemonSession?.pinned_at,
       contextWindowCap: daemonSession?.context_window_cap,
       parentSessionId: daemonSession?.parent_session_id,
@@ -1258,6 +1265,15 @@ function AppContent({
 
   // View state management
   const [view, setView] = useState<'dashboard' | 'session' | 'grid'>('dashboard');
+
+  // Tells the daemon whether anyone can see the session activity lines it would
+  // otherwise generate. The dashboard is where those lines render, so it is the
+  // difference between the two live tiers; a window nobody is looking at stops
+  // generation entirely.
+  useClientPresence(sendSetClientPresence, {
+    dashboardVisible: view === 'dashboard',
+    connected: hasReceivedInitialState,
+  });
   // Focusable app-shell root: claims keyboard focus on focus-less views (dashboard /
   // empty workspaces) so the global shortcut listener keeps receiving keys.
   const appShellRef = useRef<HTMLDivElement>(null);
@@ -1902,6 +1918,17 @@ function AppContent({
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
+
+  // A disconnect the daemon chose is worth a word, and it can only reach us
+  // after we are back. Longer than the default: it explains something the user
+  // already lived through and may have been puzzled by.
+  useEffect(() => {
+    if (!disconnectExplanation) {
+      return;
+    }
+    showError(disconnectExplanation, { durationMs: 8000 });
+    clearDisconnectExplanation();
+  }, [clearDisconnectExplanation, disconnectExplanation, showError]);
 
   // Backfill the active session's workflow runs into the global slice. The
   // useDaemonSocket workflow_run_updated handler keeps it fresh after this; the
@@ -3767,6 +3794,7 @@ function AppContent({
           endpoints={daemonEndpoints}
           onRebootstrapEndpoint={handleRebootstrapEndpoint}
           queueModeEnabled={queueModeEnabled}
+          activityStaleMs={activityStaleMs(settings)}
           followNextTurn={followNextTurn}
           onToggleFollowNextTurn={() => setFollowNextTurn((armed) => !armed)}
           onSelectSession={handleSelectSession}

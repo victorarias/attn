@@ -1,0 +1,8 @@
+kind: internal
+area: daemon
+change: >
+  Moves the WebSocket test timing knobs (write timeout, keepalive ping
+  interval and pong deadline) from package vars to per-Daemon fields resolved
+  once at pump/loop start, so the eviction tests from the silent-eviction fix
+  hold under the race detector. Zero means the shipped defaults; only tests
+  set the fields, before the connection under test is dialed.

@@ -2,6 +2,42 @@
 
 package protocol
 
+type ActivityStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type ActivityStatusResult struct {
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// PresenceTier corresponds to the JSON schema field "presence_tier".
+	PresenceTier string `json:"presence_tier"`
+
+	// Sessions corresponds to the JSON schema field "sessions".
+	Sessions []ActivityStatusSession `json:"sessions"`
+}
+
+type ActivityStatusSession struct {
+	// Activity corresponds to the JSON schema field "activity".
+	Activity *string `json:"activity,omitempty,omitzero"`
+
+	// ActivityAt corresponds to the JSON schema field "activity_at".
+	ActivityAt *string `json:"activity_at,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+}
+
 type AddEndpointMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -962,6 +998,14 @@ type ChiefOfStaffResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type ClearSessionActivityMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type ClearSessionsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -972,12 +1016,30 @@ type ClearWarningsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type ClientEvictionNoticeMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// EvictedAt corresponds to the JSON schema field "evicted_at".
+	EvictedAt string `json:"evicted_at"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason string `json:"reason"`
+
+	// UndeliveredMessages corresponds to the JSON schema field
+	// "undelivered_messages".
+	UndeliveredMessages int `json:"undelivered_messages"`
+}
+
 type ClientHelloMessage struct {
 	// BrowserHostToken corresponds to the JSON schema field "browser_host_token".
 	BrowserHostToken *string `json:"browser_host_token,omitempty,omitzero"`
 
 	// Capabilities corresponds to the JSON schema field "capabilities".
 	Capabilities []string `json:"capabilities"`
+
+	// ClientID corresponds to the JSON schema field "client_id".
+	ClientID *string `json:"client_id,omitempty,omitzero"`
 
 	// ClientKind corresponds to the JSON schema field "client_kind".
 	ClientKind string `json:"client_kind"`
@@ -4454,6 +4516,10 @@ type ReposUpdatedMessage struct {
 }
 
 type Response struct {
+	// ActivityStatusResult corresponds to the JSON schema field
+	// "activity_status_result".
+	ActivityStatusResult *ActivityStatusResult `json:"activity_status_result,omitempty,omitzero"`
+
 	// AppApplyResult corresponds to the JSON schema field "app_apply_result".
 	AppApplyResult *AppApplyResult `json:"app_apply_result,omitempty,omitzero"`
 
@@ -4661,6 +4727,12 @@ type RuntimeRespawnedMessage struct {
 }
 
 type Session struct {
+	// Activity corresponds to the JSON schema field "activity".
+	Activity *string `json:"activity,omitempty,omitzero"`
+
+	// ActivityAt corresponds to the JSON schema field "activity_at".
+	ActivityAt *string `json:"activity_at,omitempty,omitzero"`
+
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
 
@@ -5144,6 +5216,20 @@ type SetChiefOfStaffMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
+}
+
+type SetClientPresenceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DashboardVisible corresponds to the JSON schema field "dashboard_visible".
+	DashboardVisible bool `json:"dashboard_visible"`
+
+	// IdleSeconds corresponds to the JSON schema field "idle_seconds".
+	IdleSeconds *float64 `json:"idle_seconds,omitempty,omitzero"`
+
+	// Visible corresponds to the JSON schema field "visible".
+	Visible bool `json:"visible"`
 }
 
 type SetEndpointRemoteWebMessage struct {

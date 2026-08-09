@@ -536,3 +536,52 @@ describe('Dashboard pull requests', () => {
     expect(screen.getByText('No PRs need attention')).toBeInTheDocument();
   });
 });
+
+describe('Dashboard session activity', () => {
+  const renderWith = (session: Record<string, unknown>, props: Record<string, unknown> = {}) => render(
+    <Dashboard
+      sessions={[{ id: 's1', label: 'fix-bot', state: 'working', cwd: '/repo/a', ...session }] as never}
+      prs={[]}
+      isLoading={false}
+      onSelectSession={vi.fn()}
+      onNewSession={vi.fn()}
+      onOpenSettings={vi.fn()}
+      {...props}
+    />
+  );
+
+  it('shows what the agent is doing beside its name', () => {
+    renderWith({ activity: 'running the frontend test suite', activityAt: new Date().toISOString() });
+
+    expect(screen.getByTestId('session-activity-s1')).toHaveTextContent('running the frontend test suite');
+    expect(screen.getByTestId('session-activity-s1')).not.toHaveAttribute('data-stale');
+  });
+
+  // Generation stops entirely while nobody is watching, so an old line is a
+  // statement about whenever someone last looked — not about now.
+  it('marks a line that stopped being refreshed as stale', () => {
+    const longAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    renderWith({ activity: 'running the frontend test suite', activityAt: longAgo });
+
+    expect(screen.getByTestId('session-activity-s1')).toHaveAttribute('data-stale', 'true');
+  });
+
+  // The staleness window follows the configured cadence. Measured against the
+  // default 15 minutes, a user who slowed generation to half an hour would watch
+  // every line dim the moment it was written.
+  it('takes the staleness window from the configured cadence', () => {
+    const twentyMinutesAgo = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+    renderWith(
+      { activity: 'running the frontend test suite', activityAt: twentyMinutesAgo },
+      { activityStaleMs: 90 * 60 * 1000 },
+    );
+
+    expect(screen.getByTestId('session-activity-s1')).not.toHaveAttribute('data-stale');
+  });
+
+  it('renders no line for a session that has none', () => {
+    renderWith({});
+
+    expect(screen.queryByTestId('session-activity-s1')).toBeNull();
+  });
+});

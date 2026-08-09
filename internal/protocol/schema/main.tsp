@@ -144,6 +144,8 @@ model Session {
   pinned_at?: string;           // ISO timestamp this session was individually pinned out of the queue. Presence is the pin, and the instant is the pinned band's sort key. Like a pinned workspace it filters at read: the turn stamps keep accruing underneath, so unpinning surfaces whatever was outstanding at its true age.
   context_window_cap?: int32;   // Per-session context-window cap in tokens, set by the user on this one session. Absent means no pin — the launch falls back to the chief or per-agent default settings. A pin outranks both, and takes effect at the next launch of the agent (the daemon reloads a live session in place when the pin changes).
   parent_session_id?: string;   // The agent session a shell was split from. Spawn-time provenance resolved by the daemon, always an agent id and never another shell's, so there is no chain to walk. Whether the link is live is judged at read (parent present in the same workspace), so the field itself is never cleared.
+  activity?: string;            // One short present-tense line saying what the agent is doing right now, generated from its transcript by a headless agent. Display only — it never feeds attention, the queue, or state classification. Absent when the feature is off or nothing has been generated for this session yet.
+  activity_at?: string;         // ISO timestamp the activity line was generated. Present whenever activity is, so a client can age out a line the generator has stopped refreshing rather than showing it as current.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
 }
@@ -598,6 +600,10 @@ model ClientHelloMessage {
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
   browser_host_token?: string;  // secret available only to the trusted Tauri main webview
+  // Stable for as long as the client process lives, new on every restart. It is
+  // what lets the daemon tell a reconnecting client why it was hung up on
+  // (client_eviction_notice); a client that omits it simply gets no notice.
+  client_id?: string;
 }
 
 model RegisterMessage {
@@ -1930,6 +1936,66 @@ model PtyResizeMessage {
   rows: int32;
   xpixel?: int32;
   ypixel?: int32;
+}
+
+// Reports whether the user can currently see this client, and whether what they
+// are seeing is the dashboard. Fire-and-forget: no result event.
+//
+// Only the client knows window visibility, which view is rendered, and when
+// input last happened; only the daemon decides what to do about it. So the
+// client reports facts and never a rate or a tier — the policy that turns these
+// into an activity-generation interval is the daemon's alone.
+//
+// It is a HEARTBEAT, not a latch: send it on every change AND periodically, or
+// the daemon expires this client to "away". That asymmetry is deliberate. A
+// client that crashes or is force-quit while the dashboard is up would otherwise
+// pin generation on forever with nobody looking; expiry fails toward off, which
+// is the safe direction, and the cost of a missed heartbeat is one interval of
+// latency when the user comes back.
+model SetClientPresenceMessage {
+  cmd: "set_client_presence";
+  visible: boolean; // The app window is on screen and not fully occluded.
+  dashboard_visible: boolean; // ...and the view it is rendering is the dashboard.
+  idle_seconds?: float64; // Seconds since the last keyboard or pointer input anywhere in this client. Absent means "no input observed yet this connection".
+}
+
+// ActivityStatusMessage asks what attn believes about session activity right
+// now: the presence tier it has reduced its clients to, and every session's
+// current line with the time it was generated. It is the CLI's way to see a
+// feature whose whole output otherwise lives on the dashboard — including why
+// nothing is being generated, which is almost always the tier.
+model ActivityStatusMessage {
+  cmd: "activity_status";
+}
+
+model ActivityStatusResult {
+  presence_tier: string; // "watching" | "present" | "away"
+  enabled: boolean;
+  error?: string; // Why the feature cannot run — most often that no agent has been chosen.
+  sessions: ActivityStatusSession[];
+}
+
+model ActivityStatusSession {
+  id: string;
+  label: string;
+  activity?: string;
+  activity_at?: string;
+  // Why this session's last generation produced nothing. A run that keeps
+  // failing is rate limited like a successful one, so without this a feature the
+  // user paid to switch on goes quiet and looks identical to one with nothing to
+  // say.
+  error?: string;
+}
+
+// ClearSessionActivityMessage forgets one session's line. The way out for a line
+// that is wrong on a session that will never write again — a session that is
+// still moving replaces its own line on the next refresh, but a finished one
+// would keep the wrong line forever. Clearing also drops the read cursor, so the
+// next line is generated from what happens next rather than from a window that
+// was already summarized.
+model ClearSessionActivityMessage {
+  cmd: "clear_session_activity";
+  id: string;
 }
 
 // Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
@@ -3477,6 +3543,18 @@ model CommandErrorMessage {
   error: string;
 }
 
+// Sent once to a reconnecting client that the hub had hung up on for falling
+// behind, keyed on the client_id it sent with its hello. The close status that
+// explains an eviction travels the same TCP stream as the backlog that caused
+// it, so on the link where it matters it arrives long after the disconnect —
+// this is how the reason reaches the client instead.
+model ClientEvictionNoticeMessage {
+  event: "client_eviction_notice";
+  evicted_at: string;          // RFC3339, when the hub dropped the connection
+  reason: string;              // the close reason the client could not read, e.g. "client too slow"
+  undelivered_messages: int32; // messages the daemon gave up on handing over
+}
+
 model BrowserControlRequestMessage {
   event: "browser_control_request";
   request_id: string;
@@ -3997,6 +4075,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
+  activity_status_result?: ActivityStatusResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;
@@ -4079,7 +4158,9 @@ model SessionInstructionsResult {
 model SessionTranscriptEvent {
   cursor: string;
   timestamp?: string;
-  kind: string; // "user" | "assistant" | "tool_call" | "tool_result" | "error"
+  kind: string; // "user" | "assistant" | "thinking" | "tool_call" | "tool_result" | "error"
+                // "thinking" is the agent's own reasoning (Claude thinking blocks,
+                // Codex agent_reasoning), not text the user was shown.
   role?: string;
   text?: string;
   tool_name?: string;
@@ -4720,6 +4801,7 @@ alias DaemonEvent =
   | PtyResizedMessage
   | BrowserControlRequestMessage
   | CommandErrorMessage
+  | ClientEvictionNoticeMessage
   | GetPresentationsResultMessage
   | GetPresentationRoundResultMessage
   | PresentSubmitRoundResultMessage

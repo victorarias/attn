@@ -160,6 +160,12 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if attention.OpensTurn(protocol.SessionState(change.state)) &&
 		!d.snoozeSuppressesTurn(change.sessionID, protocol.SessionState(change.state)) {
 		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
+		// Reaching a state that wants the user is the moment the activity line
+		// matters most, so it breaks through the tier's interval. It does NOT
+		// break through `away` — enqueueSessionActivity still refuses there, and
+		// that asymmetry is the whole cost model: generating for an empty room
+		// would have cost nearly half of always-on.
+		d.enqueueSessionActivity(change.sessionID)
 	}
 
 	if profile.touch {

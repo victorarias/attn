@@ -278,6 +278,22 @@ func (d *Daemon) startJobQueue() {
 		); err != nil {
 			d.logf("notebook narration: register narrate_workspace: %v", err)
 		}
+		// Session activity joins the same queue. It is gated on its own setting
+		// rather than the notebook's, and it is coalesced per session, so a burst
+		// of transcript movement collapses into one run.
+		if err := runner.RegisterWith(
+			sessionActivityKind,
+			d.sessionActivityHandler,
+			jobs.HandlerConfig{
+				Timeout: sessionActivityTimeout,
+				// Several sessions can move at once while the dashboard is open, and
+				// a line the user is looking at is worth generating promptly. The cap
+				// is what keeps that from becoming an unbounded fan of subprocesses.
+				MaxConcurrent: sessionActivityConcurrency,
+			},
+		); err != nil {
+			d.logf("session activity: register session_activity: %v", err)
+		}
 		// Orphaned-ticket reconciliation joins the same durable queue as a job
 		// kind. It runs regardless of notebook config and is the one kind that wants
 		// real concurrency: a workspace teardown can kill several delegated sessions
@@ -303,6 +319,14 @@ func (d *Daemon) startJobQueue() {
 			jobs.HandlerConfig{Timeout: notebookCronTickTimeout},
 		); err != nil {
 			d.logf("notebook cron: register tick: %v", err)
+		}
+		if err := runner.RegisterCron(
+			sessionActivityScanKind,
+			sessionActivityScanInterval,
+			d.sessionActivityScanHandler,
+			jobs.HandlerConfig{Timeout: sessionActivityScanTimeout},
+		); err != nil {
+			d.logf("session activity: register scan tick: %v", err)
 		}
 		if err := runner.RegisterCron(
 			automationScheduleKind,

@@ -121,25 +121,33 @@ type Daemon struct {
 	// automationDeliveryHook replaces only the final delivery call in focused
 	// provider-observation tests; production always leaves it nil.
 	automationDeliveryHook func(*store.AutomationRun) error
-	listener               net.Listener
-	httpServer             *http.Server
-	httpListener           net.Listener // bound synchronously in Start(); a failure there is fatal
-	httpHandler            http.Handler
-	diagServer             *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
-	wsHub                  *wsHub
-	done                   chan struct{}
-	logger                 *logging.Logger
-	debugLogging           bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry             *github.ClientRegistry
-	hubManager             *hub.Manager
-	classifier             Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches             map[string]*repoCache
-	repoCacheMu            sync.RWMutex
-	gitCoordMu             sync.Mutex
-	gitCoord               *gitCoordinator
-	warnings               []protocol.DaemonWarning
-	warningsMu             sync.RWMutex
-	ptyBackend             ptybackend.Backend
+	// wsWriteTimeout, wsPingInterval, and wsPingTimeout override the WebSocket
+	// write and keepalive pacing; 0 resolves to the shipped defaults (see
+	// websocket.go). Only tests set them, before the connection under test is
+	// dialed — per-Daemon fields captured at pump/loop start rather than
+	// package vars, so an override cannot race a pump that outlives its test.
+	wsWriteTimeout time.Duration
+	wsPingInterval time.Duration
+	wsPingTimeout  time.Duration
+	listener       net.Listener
+	httpServer     *http.Server
+	httpListener   net.Listener // bound synchronously in Start(); a failure there is fatal
+	httpHandler    http.Handler
+	diagServer     *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
+	wsHub          *wsHub
+	done           chan struct{}
+	logger         *logging.Logger
+	debugLogging   bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry     *github.ClientRegistry
+	hubManager     *hub.Manager
+	classifier     Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches     map[string]*repoCache
+	repoCacheMu    sync.RWMutex
+	gitCoordMu     sync.Mutex
+	gitCoord       *gitCoordinator
+	warnings       []protocol.DaemonWarning
+	warningsMu     sync.RWMutex
+	ptyBackend     ptybackend.Backend
 	// hostSessions runs the conversation sessions — the ones whose agent lives
 	// in a headless host process rather than a PTY. See host_session.go.
 	hostSessions    *hostsession.Manager
@@ -486,6 +494,25 @@ type Daemon struct {
 		request agentdriver.HeadlessTaskRequest,
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
+
+	// sessionActivityExecution is the same seam for the activity generator: set
+	// it and a test drives the whole executor — cursor handling, window read,
+	// prompt assembly, sanitizing, store write and fact publish — against a fake
+	// answer, with no subprocess and no spend.
+	sessionActivityExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+
+	// sessionActivityRuns is what the scan rate-limits itself against, keyed by
+	// session id. The stored line cannot serve: it records the last SUCCESS, so a
+	// generation that keeps failing leaves it untouched and the scan re-runs it
+	// on every tick. In memory rather than persisted because a daemon restart
+	// costing one extra pass per session is cheaper than a migration, and the
+	// pass is bounded by the same preconditions as any other.
+	sessionActivityRunsMu sync.Mutex
+	sessionActivityRuns   map[string]sessionActivityRun
 
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
@@ -2020,6 +2047,10 @@ func (d *Daemon) initHTTPServer() {
 	d.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(config.WSBindAddress(), config.WSPort()),
 		Handler: d.httpHandler,
+		// Keep the accepted socket reachable from the handler. A WebSocket
+		// client the hub evicts has to be cut off at the transport, and the
+		// handshake hands back a wrapper with no way down to it.
+		ConnContext: withRawConn,
 	}
 }
 
@@ -2410,6 +2441,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
 	case protocol.CmdTicketShow: // wire: ticket_show
 		d.handleTicketShow(conn, msg.(*protocol.TicketShowMessage))
+	case protocol.CmdActivityStatus: // wire: activity_status
+		d.handleActivityStatus(conn, msg.(*protocol.ActivityStatusMessage))
+	case protocol.CmdClearSessionActivity: // wire: clear_session_activity
+		d.handleClearSessionActivity(conn, msg.(*protocol.ClearSessionActivityMessage))
 	case protocol.CmdTicketSubscribe: // wire: ticket_subscribe
 		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
 	case protocol.CmdTicketUnsubscribe: // wire: ticket_unsubscribe

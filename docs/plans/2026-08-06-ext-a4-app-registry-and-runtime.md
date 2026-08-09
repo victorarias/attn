@@ -331,8 +331,9 @@ fully-CI'd, fully-reviewed merge at the end.
    package published and no npm dependency in a scaffolded app — the eventual
    published package can take over the same specifier without touching app
    code. Staging lives inside the artifact store (`apps/.staging`) because a
-   rename out of `/tmp` crosses filesystems on Linux. Protocol 219 adds
-   `app_apply`/`app_rollback`; the flip publishes `app.version.changed`
+   rename out of `/tmp` crosses filesystems on Linux. The protocol gains
+   `app_apply`/`app_rollback` (shipped as 219; the epic's protocol and
+   migration numbers renumber at each main sync — the tree is authoritative); the flip publishes `app.version.changed`
    (payload carries the previous id so the slice-5 runtime need not race the
    pointer), and like the other app facts it has no projection. `attn app dev`
    streams apply results and build errors only — invocation streaming needs

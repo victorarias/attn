@@ -34,3 +34,6 @@ app/src-tauri/*.gen.conf.json
 
 # Native libghostty-vt build output (source of truth: scripts/build-libghostty-vt.sh)
 /third_party/
+
+# activity-bench corpus and results: real transcript excerpts, never committed
+.activity-bench/

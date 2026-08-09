@@ -2,7 +2,7 @@ package daemon
 
 import (
 	"context"
-	"errors"
+	"encoding/json"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -98,18 +98,30 @@ const (
 	floodInterval        = 5 * time.Millisecond
 )
 
-// The hub evicts a client that misses maxSlowCount consecutive broadcasts,
-// closing it with StatusPolicyViolation "client too slow". Nothing exercised
-// that path over a real degraded connection — only by filling the buffer
-// directly — so nothing showed what a client on a slow network actually
-// experiences.
+// evictionDeathBudget is how long an evicted client on a working transport may
+// keep believing it is connected. The daemon offers the close frame
+// evictionCloseGrace (1s) and then aborts the socket, so five seconds is a
+// tripwire: a working eviction lands in milliseconds.
+const evictionDeathBudget = 5 * time.Second
+
+// The hub evicts a client that misses maxSlowCount consecutive broadcasts. The
+// interesting part is not that it decides to — it is what the client on the
+// other end of the degraded link learns, and when.
 //
-// What it experiences, as this test pins down: the daemon hangs up promptly,
-// but the close frame explaining why is queued behind everything already
-// written to that socket. On a link slow enough to trigger the eviction, the
-// reason is slow to arrive for exactly the same reason the eviction happened.
-// The client sees the disconnect; it learns the cause only once the link
-// recovers.
+// It cannot be told over that connection. A WebSocket close frame is ordinary
+// stream data, queued behind everything already handed to the pipe, and the
+// pipe is slow by definition here. Nor can the daemon get ahead of that queue
+// by force. Measured through this proxy: the daemon aborts its socket with
+// SO_LINGER 0 one second after the eviction, and the throttled client still
+// reads for another 65 seconds and then sees a plain EOF — because the bytes
+// are no longer in either kernel, they are inside the proxy, and a userspace
+// hop forwards no reset. (Directly between two kernels the same abort lands
+// instantly: the client reads what its receive buffer already held and then
+// gets ECONNRESET, 0ms after the abort — that case is
+// TestEvictedClientIsNotFedItsBacklogFirst.)
+//
+// So what this test pins is the answer that does arrive: the daemon remembers
+// the eviction, and hands the reason to the same client on its next connection.
 func TestWebSocketSlowClientIsEvictedOverADegradedLink(t *testing.T) {
 	wsPort := useFreeWSPort(t)
 
@@ -148,8 +160,10 @@ func TestWebSocketSlowClientIsEvictedOverADegradedLink(t *testing.T) {
 	healthyReads := drainWS(ctx, healthy)
 
 	// The subject: the same daemon, reached over a link we are about to throttle.
-	// It never reads, so nothing drains its socket either.
-	slow := dialDaemonWS(t, ctx, proxy.addr)
+	// It never reads, so nothing drains its socket either. It names itself, which
+	// is what lets the daemon explain the eviction when it comes back.
+	const slowClientID = "slow-client-under-test"
+	slow := dialDaemonWSAs(t, ctx, proxy.addr, slowClientID)
 	defer slow.Close(websocket.StatusNormalClosure, "")
 	proxy.throttleDownstream("molasses", slowLinkRateKBPerSec)
 
@@ -170,21 +184,6 @@ func TestWebSocketSlowClientIsEvictedOverADegradedLink(t *testing.T) {
 		t.Fatalf("hub holds %d clients after the eviction, want 1 (the healthy one)", remaining)
 	}
 
-	// Heal the link and the queued bytes drain at full speed, close frame
-	// included. Only now can the evicted client read the reason it was dropped.
-	proxy.healDownstream("molasses")
-	closeErr := readUntilClosed(ctx, slow)
-	var status websocket.CloseError
-	if !errors.As(closeErr, &status) {
-		t.Fatalf("evicted client ended with %v, want a WebSocket close", closeErr)
-	}
-	if status.Code != websocket.StatusPolicyViolation {
-		t.Fatalf("evicted client closed with %v (%q), want StatusPolicyViolation", status.Code, status.Reason)
-	}
-	if status.Reason != "client too slow" {
-		t.Errorf("close reason = %q, want %q", status.Reason, "client too slow")
-	}
-
 	// The eviction is per-client. The healthy client shares the hub, the
 	// broadcast, and the wsHub.mu the eviction runs under.
 	if err := healthyReads.err(); err != nil {
@@ -200,9 +199,23 @@ func TestWebSocketSlowClientIsEvictedOverADegradedLink(t *testing.T) {
 	})
 
 	// Recovery: over the healed link, a client on the same proxied path is an
-	// ordinary client again.
-	recovered := dialDaemonWS(t, ctx, proxy.addr)
+	// ordinary client again — and the first thing it hears is why it lost the
+	// last one. That reason could not travel the connection it describes; this
+	// is the path that carries it.
+	proxy.healDownstream("molasses")
+	recovered := dialDaemonWSAs(t, ctx, proxy.addr, slowClientID)
 	defer recovered.Close(websocket.StatusNormalClosure, "")
+	notice := readEventUntil(t, ctx, recovered, protocol.EventClientEvictionNotice)
+	if got := asString(notice["reason"]); got != slowClientCloseReason {
+		t.Errorf("eviction notice reason = %q, want %q", got, slowClientCloseReason)
+	}
+	if got, ok := notice["undelivered_messages"].(float64); !ok || got < 1 {
+		t.Errorf("eviction notice undelivered_messages = %v, want at least 1", notice["undelivered_messages"])
+	}
+	if _, err := time.Parse(time.RFC3339, asString(notice["evicted_at"])); err != nil {
+		t.Errorf("eviction notice evicted_at = %q, want RFC3339: %v", notice["evicted_at"], err)
+	}
+
 	recoveredReads := drainWS(ctx, recovered)
 	d.wsHub.Broadcast(&protocol.WebSocketEvent{Event: protocol.EventInitialState})
 	waitForCond(t, 10*time.Second, "the reconnected client to receive", func() bool {
@@ -210,6 +223,42 @@ func TestWebSocketSlowClientIsEvictedOverADegradedLink(t *testing.T) {
 	})
 	if err := recoveredReads.err(); err != nil {
 		t.Fatalf("reconnected client failed over the healed link: %v", err)
+	}
+}
+
+// dialDaemonWSAs connects and identifies itself with a client id, which is how a
+// client that reconnects can be recognised as the one that was evicted.
+func dialDaemonWSAs(t *testing.T, ctx context.Context, addr, clientID string) *websocket.Conn {
+	t.Helper()
+	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	conn, _, err := websocket.Dial(dialCtx, "ws://"+addr+"/ws", nil)
+	if err != nil {
+		t.Fatalf("dial %s: %v", addr, err)
+	}
+	conn.SetReadLimit(64 << 20)
+	sendClientHelloAs(t, conn, clientID)
+	return conn
+}
+
+// readEventUntil reads past whatever else the daemon is sending until the named
+// event arrives, and fails if the connection ends first.
+func readEventUntil(t *testing.T, ctx context.Context, conn *websocket.Conn, event string) map[string]interface{} {
+	t.Helper()
+	readCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	for {
+		_, data, err := conn.Read(readCtx)
+		if err != nil {
+			t.Fatalf("waiting for %s: %v", event, err)
+		}
+		var msg map[string]interface{}
+		if err := json.Unmarshal(data, &msg); err != nil {
+			continue // binary frames and anything unparsed are not what we are after
+		}
+		if asString(msg["event"]) == event {
+			return msg
+		}
 	}
 }
 
