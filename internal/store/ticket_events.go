@@ -35,10 +35,15 @@ const (
 // TicketEvent is one entry in the append-only event log; Seq is the global
 // monotonic id, and the payload columns are kind-specific.
 type TicketEvent struct {
-	Seq        int64
-	TicketID   string
-	Kind       TicketEventKind
-	Author     string
+	Seq      int64
+	TicketID string
+	Kind     TicketEventKind
+	Author   string
+	// AuthorRole is the durable role the author was acting as. Empty for an
+	// ordinary action. When set, Author stays the session for audit provenance
+	// while participation attaches to the role, so the attachment survives the
+	// role moving to another session.
+	AuthorRole string
 	FromStatus TicketStatus
 	ToStatus   TicketStatus
 	Comment    string
@@ -108,9 +113,9 @@ func appendTicketEventTx(tx *sql.Tx, e TicketEvent, now time.Time) (int64, bool,
 	}
 
 	res, err := tx.Exec(`
-		INSERT INTO ticket_events (ticket_id, kind, author, from_status, to_status, comment, detail, created_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-	`, e.TicketID, string(e.Kind), e.Author, string(e.FromStatus), string(e.ToStatus), e.Comment, e.Detail, formatTicketTime(now))
+		INSERT INTO ticket_events (ticket_id, kind, author, author_role, from_status, to_status, comment, detail, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, e.TicketID, string(e.Kind), e.Author, e.AuthorRole, string(e.FromStatus), string(e.ToStatus), e.Comment, e.Detail, formatTicketTime(now))
 	if err != nil {
 		return 0, false, err
 	}
@@ -132,7 +137,7 @@ func scanTicketEventRows(rows *sql.Rows) ([]TicketEvent, error) {
 			from, to  string
 			createdAt string
 		)
-		if err := rows.Scan(&e.Seq, &e.TicketID, &kind, &e.Author, &from, &to, &e.Comment, &e.Detail, &createdAt); err != nil {
+		if err := rows.Scan(&e.Seq, &e.TicketID, &kind, &e.Author, &e.AuthorRole, &from, &to, &e.Comment, &e.Detail, &createdAt); err != nil {
 			return nil, err
 		}
 		e.Kind = TicketEventKind(kind)
@@ -154,7 +159,7 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT seq, ticket_id, kind, author, from_status, to_status, comment, detail, created_at
+		SELECT seq, ticket_id, kind, author, author_role, from_status, to_status, comment, detail, created_at
 		FROM ticket_events WHERE seq > ? ORDER BY seq ASC
 	`, cursor)
 	if err != nil {
@@ -164,11 +169,11 @@ func (s *Store) TicketEventsSince(cursor int64) ([]TicketEvent, error) {
 }
 
 // The participation rule has exactly one definition: the ticket_participants
-// view (migration 82) — assignment, NON-COMMENT event authorship, explicit
-// subscription, durable role ownership. Queries below ask the view, never
-// restate the rule. Carve-outs baked into it: comment authorship confers no
-// participation, and a created event on a role-owned ticket is audit
-// provenance (the role, not the minting session, is the participant).
+// view (migration 82, refined by 99) — assignment, NON-COMMENT event
+// authorship, explicit subscription, durable role ownership. Queries below ask
+// the view, never restate the rule. Carve-outs baked into it: comment
+// authorship confers no participation, and an event carrying an author_role is
+// the ROLE's participation, not the acting session's.
 
 // UnreadTicketEvents returns every event an identity has not consumed across
 // the tickets it participates in, excluding its own, ordered by ticket then
@@ -188,7 +193,7 @@ func (s *Store) UnreadTicketEventsFor(cursorIdentity, authorIdentity string) ([]
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT e.seq, e.ticket_id, e.kind, e.author, e.from_status, e.to_status, e.comment, e.detail, e.created_at
+		SELECT e.seq, e.ticket_id, e.kind, e.author, e.author_role, e.from_status, e.to_status, e.comment, e.detail, e.created_at
 		FROM ticket_events e
 		LEFT JOIN ticket_event_cursors c
 			ON c.identity = ? AND c.ticket_id = e.ticket_id

@@ -964,6 +964,86 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// generator that a session has written nothing new and needs no run at all.
 	// Applied by applyMigration97. See docs/plans/2026-08-07-session-activity.md.
 	{97, "add the activity line and its transcript cursor to sessions", ``},
+	// 98 is burned on another branch (the app registry); do not reuse it.
+	//
+	// Participation earned by acting as a durable role belongs to the ROLE, not
+	// to the session that filled it at the time. The event now says so directly:
+	// author stays the session for audit provenance, author_role names the role
+	// it acted as, and the view attributes participation accordingly. That
+	// replaces migration 82's approximation — "a created event on a
+	// role-owned ticket is the role's" — which was right for a ticket the chief
+	// minted and wrong for a backlog ticket the chief later adopted, where it
+	// silently dropped the original author's participation.
+	//
+	// The backfill recognizes the delegating transaction by its timestamp: the
+	// role owner row is written in the same transaction as the events the acting
+	// session wrote (created when the chief minted the ticket, assigned plus
+	// status_changed when it adopted one), so all of them share a second. Only
+	// those three kinds are considered, so a comment or an attach that happened to
+	// land in the same second on the same ticket is not swept up with them.
+	//
+	// Rows are carried, never recreated; the only DELETE removes the acting
+	// session's personal subscription — the session-bound second copy of an
+	// attachment the role already holds. A chief that had also subscribed to its
+	// own delegation by hand is indistinguishable from that and loses the
+	// hand-made row too.
+	// Applied by applyMigration99, whose ALTER is column-guarded.
+	{99, "attribute role-acted ticket events to the role", ``},
+}
+
+// migration99SQL is everything migration 99 does after its guarded ALTER.
+const migration99SQL = `
+		UPDATE ticket_events SET author_role = (
+			SELECT ro.role FROM ticket_role_owners ro
+			WHERE ro.ticket_id = ticket_events.ticket_id
+				AND ro.created_at = ticket_events.created_at
+			LIMIT 1
+		)
+		WHERE kind IN ('created', 'assigned', 'status_changed') AND EXISTS (
+			SELECT 1 FROM ticket_role_owners ro
+			WHERE ro.ticket_id = ticket_events.ticket_id
+				AND ro.created_at = ticket_events.created_at
+		);
+
+		DELETE FROM ticket_subscriptions
+		WHERE EXISTS (
+			SELECT 1 FROM ticket_events e
+			WHERE e.ticket_id = ticket_subscriptions.ticket_id
+				AND e.author_role != ''
+				AND e.author = ticket_subscriptions.identity
+		);
+
+		DROP VIEW IF EXISTS ticket_participants;
+		CREATE VIEW ticket_participants (ticket_id, identity) AS
+			SELECT id, assignee FROM tickets WHERE assignee != ''
+			UNION
+			SELECT e.ticket_id, e.author FROM ticket_events e
+			WHERE e.author != '' AND e.kind != 'commented' AND e.author_role = ''
+			UNION
+			SELECT e.ticket_id, ('role:' || e.author_role) FROM ticket_events e
+			WHERE e.kind != 'commented' AND e.author_role != ''
+			UNION
+			SELECT ticket_id, identity FROM ticket_subscriptions WHERE identity != ''
+			UNION
+			SELECT ticket_id, ('role:' || role) FROM ticket_role_owners WHERE role != '';
+`
+
+// applyMigration99 adds ticket_events.author_role, then backfills and redefines
+// the participant view from migration99SQL. The ALTER is column-guarded so a
+// rewound schema_migrations table re-runs it without failing on work already
+// done; the rest is idempotent on its own.
+func applyMigration99(tx *sql.Tx) error {
+	has, err := columnExists(tx, "ticket_events", "author_role")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := tx.Exec("ALTER TABLE ticket_events ADD COLUMN author_role TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(migration99SQL)
+	return err
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1274,6 +1354,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 97 {
 			if err := applyMigration97(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 99 {
+			if err := applyMigration99(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
