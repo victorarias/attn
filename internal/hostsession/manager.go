@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victorarias/attn/internal/procreap"
 )
 
 // Event is one host envelope: the daemon acts on session/seq/kind, forwards Body.
@@ -26,6 +28,10 @@ type Event struct {
 	Seq       int
 	Kind      string
 	Body      map[string]interface{}
+	// LifecycleID matches the run this host was spawned for, for the same
+	// reason ExitInfo carries one: a superseded host that is still draining
+	// must not be able to describe the session that replaced it.
+	LifecycleID string
 }
 
 // ExitInfo reports a host that is gone, after its group has been swept.
@@ -47,6 +53,11 @@ type SpawnOptions struct {
 	CWD         string
 	// LogPath collects the host's own stdout/stderr, kept off the envelope fd.
 	LogPath string
+	// RegistryPath is where the host's durable record lives (see registry.go).
+	// Written right after spawn, removed once the host is fully gone, and read
+	// by `attn profile clean` to reap hosts a dead daemon left behind. Empty
+	// means no record is kept.
+	RegistryPath string
 }
 
 // terminationGrace bounds cooperative teardown after SIGTERM before the group
@@ -60,15 +71,18 @@ const terminationGrace = 3 * time.Second
 const envelopeDrainGrace = 2 * time.Second
 
 type host struct {
-	sessionID   string
-	lifecycleID string
-	cmd         *exec.Cmd
-	pgid        int
-	stdin       *os.File
-	envelopes   *os.File
-	logFile     *os.File
-	// reaped closes when the process is gone; exited once teardown is complete.
-	// Kill escalates on the first and returns on the second.
+	sessionID    string
+	lifecycleID  string
+	cmd          *exec.Cmd
+	pgid         int
+	registryPath string
+	stdin        *os.File
+	envelopes    *os.File
+	logFile      *os.File
+	// reaped closes when the process is gone; exited once teardown is complete —
+	// drained and deregistered, so a caller that gets a nil error from Kill can
+	// spawn the same session id again. Kill escalates on the first, returns on
+	// the second.
 	reaped   chan struct{}
 	exited   chan struct{}
 	drained  chan struct{}
@@ -159,16 +173,27 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	stdinR.Close()
 
 	h := &host{
-		sessionID:   opts.SessionID,
-		lifecycleID: opts.LifecycleID,
-		cmd:         cmd,
-		pgid:        cmd.Process.Pid,
-		stdin:       stdinW,
-		envelopes:   envelopeR,
-		logFile:     logFile,
-		reaped:      make(chan struct{}),
-		exited:      make(chan struct{}),
-		drained:     make(chan struct{}),
+		sessionID:    opts.SessionID,
+		lifecycleID:  opts.LifecycleID,
+		cmd:          cmd,
+		pgid:         cmd.Process.Pid,
+		registryPath: opts.RegistryPath,
+		stdin:        stdinW,
+		envelopes:    envelopeR,
+		logFile:      logFile,
+		reaped:       make(chan struct{}),
+		exited:       make(chan struct{}),
+		drained:      make(chan struct{}),
+	}
+	// The durable record must exist before anything can observe the host: a
+	// daemon that dies right after this line has already left the trace `attn
+	// profile clean` reaps by. A failed write is logged, not fatal — the host
+	// is healthy, only the crash-recovery net has a hole the log names.
+	if opts.RegistryPath != "" {
+		entry := procreap.NewEntry(opts.SessionID, cmd.Process.Pid, cmd.Process.Pid, opts.Command)
+		if err := procreap.WriteEntry(opts.RegistryPath, entry); err != nil {
+			m.logf("host session %s: recording host registry entry failed: %v", opts.SessionID, err)
+		}
 	}
 	m.mu.Lock()
 	m.hosts[opts.SessionID] = h
@@ -231,7 +256,13 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 		if envelope.SessionID != "" && envelope.SessionID != h.sessionID {
 			m.logf("host session %s: envelope claims session %s; using the spawned one", h.sessionID, envelope.SessionID)
 		}
-		m.onEvent(Event{SessionID: h.sessionID, Seq: envelope.Seq, Kind: envelope.Kind, Body: envelope.Body})
+		m.onEvent(Event{
+			SessionID:   h.sessionID,
+			Seq:         envelope.Seq,
+			Kind:        envelope.Kind,
+			Body:        envelope.Body,
+			LifecycleID: h.lifecycleID,
+		})
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
@@ -271,6 +302,14 @@ func (m *Manager) monitor(h *host) {
 	}
 	m.mu.Unlock()
 
+	// The process and its group are gone; retire the durable record so the
+	// registry only ever names hosts that may still be running.
+	if h.registryPath != "" {
+		if err := procreap.RemoveEntry(h.registryPath); err != nil {
+			m.logf("host session %s: removing host registry entry failed: %v", h.sessionID, err)
+		}
+	}
+
 	close(h.exited)
 
 	m.logf("host session %s exited code=%d signal=%q pgid=%d", h.sessionID, exitCode, signal, h.pgid)
@@ -291,9 +330,95 @@ func exitStatus(cmd *exec.Cmd, waitErr error) (int, string) {
 	return state.ExitCode(), ""
 }
 
-// Prompt sends one prompt verb to a live host.
-func (m *Manager) Prompt(sessionID, text string) error {
-	return m.send(sessionID, map[string]interface{}{"verb": "prompt", "text": text})
+// Delivery is when a host should let its agent read a message.
+type Delivery string
+
+const (
+	// DeliveryPrompt is the first word of a run. A host refuses it mid-run.
+	DeliveryPrompt Delivery = "prompt"
+	// DeliverySteer lands at the agent's next turn boundary, interrupting the
+	// run in progress. This is what a doorbell uses.
+	DeliverySteer Delivery = "steer"
+	// DeliveryFollowUp lands only when the run would otherwise settle, so it
+	// queues behind the work instead of cutting into it.
+	DeliveryFollowUp Delivery = "follow_up"
+)
+
+// Deliver sends one message to a live host, to be read at `how`.
+//
+// The host, not this manager, decides what a steer means on a session with no
+// run open: it starts one. So a caller never has to know what the agent is
+// doing to reach it.
+func (m *Manager) Deliver(sessionID string, how Delivery, text string) error {
+	switch how {
+	case DeliveryPrompt, DeliverySteer, DeliveryFollowUp:
+	default:
+		return fmt.Errorf("unsupported host delivery %q", how)
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": string(how), "text": text})
+}
+
+// ToolDetail asks a host for what an expanded tool card shows.
+//
+// The answer does not come back here: it arrives as another envelope on the
+// host's own stream, addressed by the same call id, and reaches every client
+// through the ordinary forwarding path. Two clients with the same card open
+// therefore cost one fetch, and neither has a request to time out.
+//
+// `full` asks for pi's untruncated output file rather than the clipped result
+// it handed the model; it means nothing for a call that produced no such file,
+// and the host answers with what it has.
+func (m *Manager) ToolDetail(sessionID, callID string, full bool) error {
+	if callID == "" {
+		return errors.New("tool detail needs a call id")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "tool_detail", "call_id": callID, "full": full})
+}
+
+// Snapshot asks a host for the whole conversation as it stands.
+//
+// The answer comes back the same way a tool detail's does: as an envelope on the
+// host's own stream, reaching every client. That is deliberate — a snapshot is
+// the conversation's version of the terminal's restore dump, and the point of
+// broadcasting it is that two clients attaching to one session are provably
+// looking at the same transcript rather than two independently assembled ones.
+func (m *Manager) Snapshot(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "snapshot"})
+}
+
+// History asks a host for the page of transcript items older than `before`.
+//
+// The answer travels the same broadcast path a snapshot does, addressed by the
+// anchor rather than by a request — so a second window sitting at the same place
+// in the conversation is served by one read, and a client holding a different
+// anchor drops the page. A host that holds nothing before the anchor answers an
+// empty page rather than nothing at all, which is how a client learns it has
+// reached the start of what this host can serve.
+func (m *Manager) History(sessionID, before string) error {
+	if before == "" {
+		return errors.New("history needs a before cursor")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "history", "before": before})
+}
+
+// SetModel switches the model a host's agent runs on, from its next run.
+//
+// The host answers with a `model_changed` envelope carrying the model actually
+// in force — including when the switch was refused — so nothing here has to
+// guess whether it landed, and every client sees the same answer.
+func (m *Manager) SetModel(sessionID, model string) error {
+	if model == "" {
+		return errors.New("set model needs a model")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "set_model", "model": model})
+}
+
+// ClearQueue drops everything the agent has been sent and not yet read.
+//
+// The host answers with the agent's own queue state, so the strip a client is
+// drawing empties on the agent's word rather than on this call returning.
+func (m *Manager) ClearQueue(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "clear_queue"})
 }
 
 func (m *Manager) send(sessionID string, verb map[string]interface{}) error {

@@ -161,6 +161,40 @@
   gap: 8px;
 }
 
+/* Pick up an existing conversation instead of starting a fresh one. Shown only
+   for agents that HAVE conversations, and only for a local session. */
+.picker-resume-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.picker-resume-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.picker-resume-select {
+  background: var(--color-bg-input);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  max-width: 420px;
+  padding: 4px 8px;
+}
+
+.picker-resume-error {
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+}
+
 .picker-agent-warning {
   padding: 8px 16px;
   border-bottom: 1px solid var(--color-border-subtle);

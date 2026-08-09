@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  Decision record for how the daemon's long-lived child processes are reaped:
+  each writes a durable record as its own file under the data dir, and the
+  reaper iterates that directory rather than reading the SQLite store. Captures
+  why the store is the wrong home for crash-recovery state, what the three
+  registries are, and the condition that would flip the argument.

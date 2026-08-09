@@ -126,7 +126,7 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 }
 
 func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
-	return ensureAttnCodexSkillInstalled()
+	return ensureAttnAgentsSkillInstalled()
 }
 
 func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {

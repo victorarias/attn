@@ -255,14 +255,58 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-present-submit-closes-window'],
   },
   {
-    id: 'pi-host-conversation',
-    label: 'Conversation session: pi-host round trip, second prompt after settle, no orphans on close',
-    command: ['pnpm', 'run', 'real-app:scenario-pi-host-conversation'],
+    id: 'nisse-conversation',
+    label: 'Conversation session: nisse round trip, second prompt after settle, no orphans on close',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-conversation'],
     // Needs the attn-pi plugin installed in the target profile
     // (`attn plugin install-bundled attn-pi`) and pi credentials, the same way
     // the codex/claude scenarios need theirs. Boots a real agent and runs three
     // prompts, the last of which holds a `sleep 45` open.
     timeoutMs: 300_000,
+  },
+  {
+    id: 'nisse-nudge',
+    label: 'Conversation session: steer mid-run, nudge an idle session, state and turn',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-nudge'],
+    // Same prereqs as nisse-conversation. Holds a `sleep 25` open so the
+    // steer is provably queued, then runs two more prompts through the agent.
+    timeoutMs: 420_000,
+  },
+  {
+    id: 'nisse-tools',
+    label: 'Conversation session: tool cards, on-demand detail, full output, patch as a diff, queue cancel',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-tools'],
+    // Same prereqs as nisse-conversation. Four prompts through a real agent,
+    // the last of which holds a `sleep 30` open so a steer is provably queued
+    // before it is cancelled.
+    timeoutMs: 600_000,
+  },
+  {
+    id: 'nisse-revive',
+    label: 'Conversation session: kill -9 to recoverable, reload with history, snapshot on a cold client',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-revive'],
+    // Same prereqs as nisse-conversation. Two sessions, five prompts through
+    // a real agent, one `sleep 45` held open across a SIGKILL, and an app
+    // restart in the middle to get a client that never saw the live stream.
+    timeoutMs: 600_000,
+  },
+  {
+    id: 'nisse-delegate',
+    label: 'Delegation to a conversation agent: brief as the first message, the agent reports on its own ticket, a brief survives a crash before the first word',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-delegate'],
+    // Same prereqs as nisse-conversation. Two delegations through a real
+    // agent, each of which does a small task and comments on its ticket, plus a
+    // SIGKILL of the second host before pi has written anything down.
+    timeoutMs: 900_000,
+  },
+  {
+    id: 'nisse-history',
+    label: 'Conversation session: resume an existing conversation file, page a long transcript, switch model mid-session',
+    command: ['pnpm', 'run', 'real-app:scenario-nisse-history'],
+    // Same prereqs as nisse-conversation. Three sessions and four prompts
+    // through a real agent; the long transcript is a synthesized session file
+    // rather than a thousand live turns, so its cost is one resume.
+    timeoutMs: 600_000,
   },
   {
     id: 'focus-probe',

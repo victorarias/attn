@@ -20,8 +20,9 @@ import (
 //   - idle opens one too, covering both a finished unread run and a
 //     never-spoken-to session at its prompt, indistinguishable on purpose.
 //   - launching, working, scheduled never do (see sessionstate.settled for
-//     cron-parked sessions); recoverable never does — the daemon revives it
-//     unattended.
+//     cron-parked sessions); recoverable never does — a PTY session is revived
+//     unattended, and a conversation session's own pane offers Reload where the
+//     user is already looking.
 func OpensTurn(state protocol.SessionState) bool {
 	switch state {
 	case protocol.SessionStateWaitingInput,

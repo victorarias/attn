@@ -16,6 +16,92 @@
   gap: 12px;
 }
 
+/* The model this conversation runs on, and the way to change it. A thin strip
+   rather than a dialog: switching model mid-conversation is a thing done in
+   passing, and it takes effect on the next run either way. */
+.conversation-pane-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conversation-model-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conversation-model {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  max-width: 260px;
+}
+
+.conversation-model:disabled {
+  opacity: 0.5;
+}
+
+/* The way back through a long conversation. Sits at the top of the transcript
+   so it scrolls with it: the reader arrives at it, rather than it hovering. */
+.conversation-pane-earlier {
+  flex: 0 0 auto;
+  align-self: center;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+}
+
+.conversation-pane-earlier:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Something that happened TO the conversation — a compaction, a retry, a model
+   switch — drawn between the things said in it. Quieter than a message on
+   purpose: it is context for the gap, not part of the exchange. */
+.conversation-notice {
+  align-self: center;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  max-width: 100%;
+}
+
+.conversation-notice[data-done='false'] {
+  border-style: dashed;
+}
+
+.conversation-notice--warn {
+  color: var(--color-warning);
+}
+
+.conversation-notice--error {
+  color: var(--color-error);
+}
+
+/* The top of a conversation whose start the host no longer keeps. It is not a
+   notice from the agent's side of the exchange, so it sits apart from the first
+   item rather than between two of them. */
+.conversation-pane-dropped {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
 .conversation-pane-empty {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);
@@ -51,6 +137,229 @@
 .conversation-message--error .conversation-message-role,
 .conversation-message--error .conversation-message-text {
   color: var(--color-error);
+}
+
+/* One tool call. Collapsed it is a single line — name, what it was done to,
+   how it went — and it stays that way until someone opens it. Nothing here
+   animates: attn renders GPU terminals beside agents that run all day, and a
+   card that repaints while a tool runs would do it on every one of them. */
+.conversation-tool {
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.conversation-tool-header {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+  text-align: left;
+  cursor: pointer;
+}
+
+.conversation-tool-caret {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+}
+
+.conversation-tool-name {
+  flex: 0 0 auto;
+  font-weight: 600;
+}
+
+.conversation-tool-summary {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--color-text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-tool-status {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* A failure is the one thing worth colouring: a card that reads the same
+   whether the tool worked or not makes the reader open every one of them. */
+.conversation-tool--error {
+  border-color: var(--color-error);
+}
+
+.conversation-tool--error .conversation-tool-status {
+  color: var(--color-error);
+}
+
+/* The headline of a failure, shown without opening the card. */
+.conversation-tool-error {
+  padding: 0 8px 6px 24px;
+  color: var(--color-error);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conversation-tool-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  border-top: 1px solid var(--color-border);
+}
+
+.conversation-tool-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-tool-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-tool-note--error {
+  color: var(--color-error);
+}
+
+.conversation-tool-action {
+  padding: 3px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.conversation-tool-action:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Tool output is bounded here as well as at the host: a card is a glance at
+   what happened, and an 8,000-line file dropped into the transcript would push
+   everything the agent said off the screen. Scroll it in place instead. */
+.conversation-tool-output {
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.conversation-tool-patch {
+  max-height: 420px;
+  overflow: auto;
+}
+
+/* The host died and the conversation is waiting in a session file. Sits with
+   the queue strip, directly above the composer it explains the state of. */
+.conversation-pane-recoverable {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 8px 12px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--color-border);
+  border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0;
+  background: var(--color-bg-elevated, transparent);
+}
+
+.conversation-pane-recoverable-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+.conversation-pane-reload {
+  flex: 0 0 auto;
+  padding: 2px 10px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.conversation-pane-reload:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Sent and not yet read. It sits between the transcript and the composer
+   because that is where it is in time: after everything the agent has said,
+   before whatever the user is about to type. */
+.conversation-pane-queue {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px 0;
+}
+
+.conversation-pane-queue-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.conversation-queue-clear {
+  padding: 2px 8px;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.conversation-queued {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 4px 8px;
+  border-left: 2px solid var(--accent);
+  background: var(--color-bg-elevated, transparent);
+  border-radius: 0 4px 4px 0;
+}
+
+.conversation-queued-label {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conversation-queued-text {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .conversation-pane-composer {
@@ -89,7 +398,21 @@
   cursor: pointer;
 }
 
-.conversation-pane-send:disabled {
+.conversation-pane-send:disabled,
+.conversation-pane-followup:disabled {
   opacity: 0.5;
   cursor: default;
+}
+
+/* The quieter of the two sends: cutting in is the common intent mid-run, so
+   the follow-up reads as the deliberate alternative rather than the default. */
+.conversation-pane-followup {
+  flex: 0 0 auto;
+  padding: 8px 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
 }

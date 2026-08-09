@@ -3,17 +3,16 @@
 /**
  * Real-app scenario: a conversation session, end to end.
  *
- * A `pi-host` session has no PTY. Its agent runs in a headless host process the
+ * A `nisse` session has no PTY. Its agent runs in a headless host process the
  * daemon spawns as a process-group leader, and everything the user sees comes
  * from that host's envelope stream. This scenario proves the whole chain in the
  * packaged app:
  *
- *   1. create a `pi-host` session and wait for its composer to open
+ *   1. create a `nisse` session and wait for its composer to open
  *      (`session_ready` reached the app),
- *   2. type a prompt into the real composer and click Send — the composer
- *      closes while the run is open,
- *   3. assert the reply streams into the pane and the composer reopens on
- *      settle,
+ *   2. type a prompt into the real composer and click Send,
+ *   3. assert the reply streams into the pane and the run settles (the send
+ *      button goes back from Steer to Send),
  *   4. send a SECOND prompt after settle and assert its own reply,
  *   5. start a long-running tool subprocess, close the session while it is
  *      live, and assert the host's group AND that subprocess are gone. pi
@@ -38,8 +37,13 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
 
-const INPUT = '[data-testid="conversation-input"]';
-const SEND = '[data-testid="conversation-send"]';
+// Composer selectors are pane-scoped. The app mounts a pane per conversation
+// session, so a bare [data-testid="conversation-input"] resolves to whichever
+// one is first in the DOM — and a run that types into another session's
+// composer looks exactly like a host that never got the prompt.
+const paneOf = (sessionId) => `[data-testid="conversation-pane-${sessionId}"]`;
+const INPUT = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-input"]`;
+const SEND = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-send"]`;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -84,35 +88,32 @@ function processTable() {
 }
 
 function hostProcesses() {
-  return processTable().filter((entry) => entry.command.includes('attn-pi-host'));
+  // The host executable, by its own path — not the substring `attn-nisse`, which
+  // a profile named `nisse*` also puts in the app bundle path of every sibling
+  // process (the plugin driver, the daemon, the app itself).
+  return processTable().filter((entry) => entry.command.includes('/bin/attn-nisse'));
 }
 
 async function sendPrompt(client, sessionId, text) {
-  await client.request('dom_type', { selector: INPUT, text });
-  await client.request('dom_click', { selector: SEND });
+  await client.request('dom_type', { selector: INPUT(sessionId), text });
+  await client.request('dom_click', { selector: SEND(sessionId) });
 }
 
 async function waitForReply(client, sessionId, expected, description) {
-  // The run has to open and close: a reply asserted without seeing the run
-  // settle would pass on a host that streamed and then wedged.
-  await pollFor(
-    async () => {
-      const state = await conversationState(client, sessionId);
-      return state?.inputDisabled === true ? state : null;
-    },
-    `${description}: the composer to close while the run is open`,
-    60_000,
-  );
+  // The run has to close, not just produce text: a reply asserted on its own
+  // would pass on a host that streamed and then wedged. The composer stays open
+  // for the whole run — Enter is a steer while the agent works — so the signal
+  // that the run ended is the send button going back to a plain send.
   return pollFor(
     async () => {
       const state = await conversationState(client, sessionId);
-      if (!state || state.inputDisabled) return null;
+      if (!state || state.sendLabel !== 'Send') return null;
       const reply = state.messages.find(
         (message) => message.role === 'assistant' && message.text.toLowerCase().includes(expected),
       );
       return reply && !reply.streaming ? state : null;
     },
-    `${description}: an assistant reply containing "${expected}" with the composer reopened`,
+    `${description}: an assistant reply containing "${expected}" with the run settled`,
     120_000,
   );
 }
@@ -120,20 +121,20 @@ async function waitForReply(client, sessionId, expected, description) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-conversation.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-conversation.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-CONVERSATION',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-conversation',
-    metadata: { agent: 'pi-host', focus: 'conversation round trip, second prompt, no orphans on close' },
+    prefix: 'nisse-conversation',
+    metadata: { agent: 'nisse', focus: 'conversation round trip, second prompt, no orphans on close' },
   });
 
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -148,7 +149,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-repo');
       fs.mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
@@ -172,8 +173,8 @@ async function main() {
       const before = hostProcesses().map((entry) => entry.pid);
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionId = created.sessionId;
       await observer.waitForSession({ id: sessionId, timeoutMs: 30_000 });
@@ -188,7 +189,7 @@ async function main() {
         90_000,
       );
       const host = hostProcesses().find((entry) => !before.includes(entry.pid));
-      if (!host) throw new Error('no attn-pi-host process appeared for the session');
+      if (!host) throw new Error('no attn-nisse process appeared for the session');
       hostPid = host.pid;
       hostGroup = host.pgid;
       note('host is up and the composer is open', { hostPid: host.pid, hostPgid: hostGroup, placeholder: state.placeholder });

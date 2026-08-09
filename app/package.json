@@ -89,7 +89,12 @@
     "e2e:settings-visual": "playwright test e2e/settings-visual.spec.ts",
     "e2e:headed": "playwright test --headed",
     "doctor": "npx react-doctor@latest",
-    "real-app:scenario-pi-host-conversation": "node scripts/real-app-harness/scenario-pi-host-conversation.mjs"
+    "real-app:scenario-nisse-conversation": "node scripts/real-app-harness/scenario-nisse-conversation.mjs",
+    "real-app:scenario-nisse-nudge": "node scripts/real-app-harness/scenario-nisse-nudge.mjs",
+    "real-app:scenario-nisse-tools": "node scripts/real-app-harness/scenario-nisse-tools.mjs",
+    "real-app:scenario-nisse-revive": "node scripts/real-app-harness/scenario-nisse-revive.mjs",
+    "real-app:scenario-nisse-delegate": "node scripts/real-app-harness/scenario-nisse-delegate.mjs",
+    "real-app:scenario-nisse-history": "node scripts/real-app-harness/scenario-nisse-history.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -60,6 +61,22 @@ type spawnPlan struct {
 type spawnRejection struct {
 	commandError string
 	err          error
+}
+
+// reason is a rejection as one error, for the callers that have no client to
+// send a command error to. A rejection carries one or the other and never both,
+// so reading `err` alone silently turns "missing workspace_id" into success.
+func (r *spawnRejection) reason() error {
+	if r == nil {
+		return nil
+	}
+	if r.err != nil {
+		return r.err
+	}
+	if r.commandError != "" {
+		return errors.New(r.commandError)
+	}
+	return errors.New("spawn rejected")
 }
 
 type spawnOutcome struct {
@@ -204,6 +221,24 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 	if configuredExecutable == "" {
 		configuredExecutable = legacyExecutableFromSpawnMessage(msg, req.agent)
 	}
+	// A conversation to pick up has to still be there. The picker lists files
+	// that exist, but a spawn can arrive after a cleanup or a profile reset has
+	// taken one away, and the launch intent re-offers the same path to every
+	// replacement host. Without this the fork throws, the host exits, the revive
+	// re-forks the same missing path, and the user watches a session flap with
+	// nothing said. Refusing here says which file and stops.
+	//
+	// Only when the host would actually open it: a dir that already holds this
+	// conversation's own history continues that and never looks at the resume
+	// file, so an established session stays revivable long after the file it was
+	// picked up from is gone.
+	if resume := strings.TrimSpace(protocol.Deref(msg.ResumeConversationFile)); resume != "" && !hostSessionStateDirHoldsConversation(msg.ID) {
+		if info, err := os.Stat(resume); err != nil {
+			return nil, &spawnRejection{err: fmt.Errorf("cannot pick up the conversation at %s: %w", resume, err)}
+		} else if info.IsDir() {
+			return nil, &spawnRejection{err: fmt.Errorf("cannot pick up the conversation at %s: it is a directory, not a conversation file", resume)}
+		}
+	}
 	plan := &spawnPlan{cleanupInitialPrompt: func() {}, instructionsRollback: func() {}}
 	if !req.hasPluginDriver {
 		initialPromptFile, cleanup, err := d.writeInitialPromptFile(msg.ID, req.initialPrompt)
@@ -214,7 +249,7 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 		plan.cleanupInitialPromptOnReturn = initialPromptFile != ""
 		plan.spawnOpts.InitialPromptFile = initialPromptFile
 	}
-	plan.spawnOpts = ptybackend.SpawnOptions{ID: msg.ID, CWD: req.cwd, Agent: req.agent, Label: req.label, Cols: uint16(msg.Cols), Rows: uint16(msg.Rows), ResumeSessionID: req.resumeSessionID, ResumePicker: protocol.Deref(msg.ResumePicker), YoloMode: protocol.Deref(msg.YoloMode), InitialPromptFile: plan.spawnOpts.InitialPromptFile, Theme: d.currentTerminalTheme(), Executable: strings.TrimSpace(configuredExecutable), ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable), CodexExecutable: protocol.Deref(msg.CodexExecutable), CopilotExecutable: protocol.Deref(msg.CopilotExecutable), LoginShellEnv: d.cachedLoginShellEnv(), WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)), AutoApprove: parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)), Model: strings.TrimSpace(protocol.Deref(msg.Model)), Effort: strings.TrimSpace(protocol.Deref(msg.Effort))}
+	plan.spawnOpts = ptybackend.SpawnOptions{ID: msg.ID, CWD: req.cwd, Agent: req.agent, Label: req.label, Cols: uint16(msg.Cols), Rows: uint16(msg.Rows), ResumeSessionID: req.resumeSessionID, ResumePicker: protocol.Deref(msg.ResumePicker), YoloMode: protocol.Deref(msg.YoloMode), InitialPromptFile: plan.spawnOpts.InitialPromptFile, Theme: d.currentTerminalTheme(), Executable: strings.TrimSpace(configuredExecutable), ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable), CodexExecutable: protocol.Deref(msg.CodexExecutable), CopilotExecutable: protocol.Deref(msg.CopilotExecutable), LoginShellEnv: d.cachedLoginShellEnv(), WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)), AutoApprove: parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)), Model: strings.TrimSpace(protocol.Deref(msg.Model)), Effort: strings.TrimSpace(protocol.Deref(msg.Effort)), ResumeConversationFile: strings.TrimSpace(protocol.Deref(msg.ResumeConversationFile))}
 	// The frontend sets chief_of_staff only on initial creation, not on
 	// reconnect/resume spawns after a daemon restart. Fall back to the
 	// persisted profile-roles table so chief settings survive respawns.
@@ -349,7 +384,17 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 	// death after Spawn but before commit would otherwise leave a recoverable
 	// session with no stored launch intent to revive from.
 	plan.priorIntent, plan.hadPriorIntent = d.store.LaunchIntent(session.ID)
-	d.store.SetLaunchIntent(session.ID, launchIntentFromSpawnOptions(plan.spawnOpts, plan.isChief))
+	intent := launchIntentFromSpawnOptions(plan.spawnOpts, plan.isChief)
+	if req.hasPluginDriver && req.pluginDriver.Capabilities[pluginDriverConversationCapability] {
+		// A conversation session's launch prompt outlives the process that was
+		// given it. The host is handed it again on every relaunch and delivers it
+		// only into a conversation it reopens empty — which is the whole of the
+		// zero-file early crash, where a delegation would otherwise come back as
+		// an agent with no brief. See LaunchIntent.InitialPrompt for why no other
+		// runtime gets this.
+		intent.InitialPrompt = req.initialPrompt
+	}
+	d.store.SetLaunchIntent(session.ID, intent)
 	if err := d.spawnSessionRuntime(req, plan.spawnOpts); err != nil {
 		if req.existingSession == nil {
 			d.store.Remove(msg.ID)

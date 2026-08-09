@@ -1,0 +1,11 @@
+kind: fixed
+area: sessions
+change: >
+  A delegated conversation agent now knows how to use attn — tickets, status
+  reports, the vocabulary — on any machine, not only one that also has codex
+  configured. attn installs its agent skill when it starts the session rather
+  than as a side effect of setting up a different agent.
+symptom: >
+  Without codex installed, a delegated conversation agent got the repository's
+  own guidance but never attn's skill, so it had no idea it was working a ticket
+  or how to report on one.

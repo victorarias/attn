@@ -1,0 +1,7 @@
+kind: internal
+area: testing
+change: >
+  The conversation scenarios now type into their own session's composer. A bare
+  composer selector resolved to whichever pane came first in the DOM, so any
+  other conversation session already open in the profile made a run look like a
+  host that never received the prompt.

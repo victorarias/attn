@@ -33,10 +33,20 @@ type pluginReport struct {
 // barrier. It deliberately produces no per-session effects or broadcasts.
 type startupRecovery struct{}
 
+// hostExitRecovery is a conversation session whose headless host is gone while
+// the daemon is still running. It moves the session to `recoverable`, which the
+// resolver does not own, so the exit evidence the same death recorded cannot
+// then settle it to something that reads as finished.
+//
+// It broadcasts, unlike startupRecovery: a client is watching this session right
+// now and its whole picture of "can I type here?" comes off the state.
+type hostExitRecovery struct{}
+
 func (liveSignal) isSessionStateCause()          {}
 func (resolverObservation) isSessionStateCause() {}
 func (pluginReport) isSessionStateCause()        {}
 func (startupRecovery) isSessionStateCause()     {}
+func (hostExitRecovery) isSessionStateCause()    {}
 
 type sessionStateChange struct {
 	sessionID string
@@ -73,6 +83,8 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
+	case hostExitRecovery:
+		return stateEffectProfile{syncNudge: true, broadcast: true}, true
 	default:
 		return stateEffectProfile{}, false
 	}
@@ -88,6 +100,8 @@ func sessionStateCauseName(cause sessionStateCause) string {
 		return "plugin_report"
 	case startupRecovery:
 		return "startup_recovery"
+	case hostExitRecovery:
+		return "host_exit_recovery"
 	default:
 		return "unknown"
 	}
@@ -161,7 +175,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, startupRecovery, resolverObservation:
+	case liveSignal, startupRecovery, resolverObservation, hostExitRecovery:
 		return d.store.UpdateState(change.sessionID, change.state)
 	case pluginReport:
 		return d.store.ApplyAgentDriverState(change.sessionID, cause.runID, cause.seq, change.state)

@@ -1,0 +1,10 @@
+kind: added
+area: sessions
+change: >
+  Meet **nisse**, attn's own agent, and the new kind of session it runs in: a
+  conversation. nisse is not a terminal program attn drives — it runs inside
+  attn, and its pane is a message list and a composer rather than a terminal.
+  Type a prompt, watch the reply stream in, send the next one when it settles.
+  attn owns nisse's process the way it owns a terminal session's, so closing the
+  session takes down everything the agent started with it. Start one the way you
+  start any session and pick `nisse` as the agent.

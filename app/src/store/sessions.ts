@@ -38,6 +38,10 @@ export interface Session {
   // (the post-launch promote path can't resume a zero-turn session). Set only at
   // creation via the new-session dialog's "create as chief" toggle.
   chiefOfStaff?: boolean;
+  // The conversation file this session was started from, carried until the
+  // spawn args are taken. The daemon persists it in the launch intent, so a
+  // revive does not need it back from here.
+  resumeConversationFile?: string;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
@@ -81,6 +85,9 @@ interface SessionStore {
     yoloMode: boolean | undefined,
     workspaceId: string,
     chiefOfStaff?: boolean,
+    // An existing conversation to pick up from. Only a conversation agent reads
+    // it; every other agent ignores it.
+    resumeConversationFile?: string,
   ) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
@@ -187,6 +194,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     yoloMode: boolean | undefined,
     providedWorkspaceId: string,
     chiefOfStaff?: boolean,
+    resumeConversationFile?: string,
   ) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
@@ -205,6 +213,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       endpointId,
       yoloMode: yoloMode ?? false,
       chiefOfStaff: chiefOfStaff ?? false,
+      resumeConversationFile,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: '',
@@ -284,6 +293,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       resume_session_id: null,
       yolo_mode: session.yoloMode ?? null,
       ...(session.chiefOfStaff ? { chief_of_staff: true } : {}),
+      ...(session.resumeConversationFile ? { resume_conversation_file: session.resumeConversationFile } : {}),
       ...(selectedExecutable ? { executable: selectedExecutable } : {}),
       ...(session.agent === 'claude' && selectedExecutable
         ? { claude_executable: selectedExecutable }

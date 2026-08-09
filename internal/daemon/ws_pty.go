@@ -315,6 +315,18 @@ func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent
 	if intent.Effort != "" {
 		spawnMsg.Effort = protocol.Ptr(intent.Effort)
 	}
+	// Only a conversation session ever stored one, and its host is what decides
+	// whether to say it again (LaunchIntent.InitialPrompt). Carrying it here is
+	// what makes a relaunch after a zero-file early crash a relaunch of the same
+	// task rather than of an empty session.
+	if intent.InitialPrompt != "" {
+		spawnMsg.InitialPrompt = protocol.Ptr(intent.InitialPrompt)
+	}
+	// Same reason, for the conversation this session was started from: a host
+	// that died before pi wrote anything has to be told again where to fork.
+	if intent.ResumeConversationFile != "" {
+		spawnMsg.ResumeConversationFile = protocol.Ptr(intent.ResumeConversationFile)
+	}
 	launch := intent.UnattendedLaunch
 	if !launch.IsZero() {
 		launch = launch.WithLegacyDefaults()
@@ -346,7 +358,7 @@ func (d *Daemon) reviveSessionForAttach(msg *protocol.AttachSessionMessage) erro
 	}
 	spawnMsg, policy := buildStoredIntentSpawn(session, intent, int(*msg.Cols), int(*msg.Rows))
 	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
-		return rejection.err
+		return rejection.reason()
 	}
 	return nil
 }

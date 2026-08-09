@@ -270,8 +270,8 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 					d.logf("failed to ensure Claude attn skill: %v", err)
 				}
 			case string(protocol.SessionAgentCodex):
-				if err := agentdriver.EnsureCodexSkillInstalled(); err != nil {
-					d.logf("failed to ensure Codex attn skill: %v", err)
+				if err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
+					d.logf("failed to ensure ~/.agents attn skill: %v", err)
 				}
 			case string(protocol.SessionAgentCopilot):
 				if err := agentdriver.EnsureCopilotSkillInstalled(); err != nil {

@@ -23,6 +23,7 @@
      action-error text) render instead of collapsing to an invisible no-op. */
   --color-accent: #5b8cff;
   --color-error: #ef4444;
+  --color-warning: #f59e0b;
 
   color-scheme: dark;
 

@@ -288,8 +288,8 @@ a ticket binding — so nothing that reasons about sessions has to know which ki
 it is looking at.
 
 What differs is the surface. A PTY session's surface is a byte stream and a
-terminal grid; a conversation session's is an **envelope** stream going out and a
-**prompt** verb coming in. There is no grid, no scrollback, and no attach.
+terminal grid; a conversation session's is an **envelope** stream going out and
+**verbs** coming in. There is no grid and no scrollback.
 
 The process running the agent is its **host**. The daemon owns a host's lifetime
 exactly as it owns a PTY worker's: it signals the host to tear down, and kills
@@ -301,16 +301,135 @@ number, a `kind`, and a body. Kinds fall in two families, and the split is what
 lets an agent's own vocabulary grow without the daemon changing:
 
 - **Declarations** are what the daemon understands and acts on — `session_ready`,
-  `run_started`, `run_settled`. These are the host telling attn something true
-  about the session.
+  `run_started`, `run_settled`, `tool_started`, `tool_finished`. These are the
+  host telling attn something true about the session.
 - **Renderings** are what the app draws — `message_start`, `message_delta`,
-  `message_end`. The daemon forwards them opaquely and holds no opinion about
-  them.
+  `message_end`, `queue_update`, `tool_detail`, `conversation_page`, `notice`,
+  `model_changed`. The daemon forwards them opaquely and holds no opinion about
+  them, with one exception: it reads `model_changed` to remember which model the
+  session should relaunch on.
+
+A **state declaration** is the subset of declarations that carries the attn state
+it puts the session in — the run boundaries — so the daemon reads state off the
+host rather than inferring it from the kind. That is what makes a conversation
+session move through `working` and `idle` like any other agent, and it is the
+path a future `pending_approval` travels on too. Tool boundaries are declarations
+without a state: they say what the agent did, not where the session now is.
+
+A **tool call** appears in the transcript as a card: the tool's name, one line
+naming what it was pointed at, and how it ended. What the call actually read,
+wrote or printed is **detail**, and it stays in the host until someone opens the
+card and the app asks for it. That is deliberate — a transcript that inlines
+every tool's output is one nobody can scroll, and most of them are never
+looked at.
 
 A **run** is one prompt and everything the agent does in response to it, from
 `run_started` to `run_settled`. A run is what a turn is opened and settled
 around, the same way a PTY agent's stop is.
 
+Three verbs put a message in front of the agent, and which one you use is a
+statement about *when* it should be read:
+
+- a **prompt** opens a run, and is what the composer sends when nothing is
+  running;
+- a **steer** cuts in at the agent's next turn boundary — the interruption, and
+  what every attn doorbell (a ticket nudge, a chief nudge, a Present notice)
+  becomes for a conversation session, since there is no PTY to type into;
+- a **follow-up** waits for the run to finish and is read before it settles, so
+  the agent never stops with one unread.
+
+A steer or a follow-up sent to a session with no run open starts one. That is
+what makes a doorbell safe to ring at any moment: nothing is dropped for having
+arrived at the wrong time. What has been sent and not yet read is the session's
+**queue**, which the host reports as it fills and drains — queued, then seen. The
+queue can be cleared, which drops everything in it at once; what the strip shows
+is always the host's last word about it, never a local guess.
+
+A **conversation snapshot** is what a client needs to draw a conversation it has
+not been watching: the newest stretch of the transcript, whether a run is open,
+and the queue. It is the conversation's answer to the terminal's restore — one
+authority — so what it carries is what the client draws, and two windows on the
+same conversation show the same thing by construction. The host holds the
+transcript it snapshots, not the session file: a message pi has not finished is
+not on disk yet, and a snapshot rebuilt from disk would stop one paragraph short
+of the truth.
+
+A snapshot is only a **window** onto a long conversation, and everything older is
+**scroll-back** the host still holds and serves a **page** at a time, on request,
+as the reader scrolls up. A snapshot also names its **epoch** — the host process
+that built it — which is what lets a client tell "the same conversation, redrawn"
+from "a different host rebuilt this": the first is spliced onto the scroll-back
+the client has already paged in, the second replaces it. Without that
+distinction, one window opening a long conversation would shorten what every
+other window is showing.
+
+Scroll-back a client is holding can outlive what the host still keeps. The host
+bounds its own transcript, and a conversation that talks long enough for the
+host to drop its oldest items leaves a window that paged those items in still
+drawing them — quietly showing more than a window opened fresh would, until the
+next page request comes back empty. It is bounded and it is inherent to paging
+something that is broadcast: the client's copy is the client's, and the host
+never reaches back into it.
+
+A conversation whose start the host has dropped says so. Once there is no page
+left to ask for and items are known to be gone, the transcript is headed by a
+row naming how many — the same honesty a compaction row gives, for the same
+reason: a history that appears to begin mid-thought is indistinguishable from
+one that did.
+
+A conversation can be **resumed**: a new session picks up an existing
+conversation instead of starting empty. The old conversation is copied into the
+new session's own storage rather than continued in place, so the session it came
+from is untouched and two sessions never write to one history. That is distinct
+from reloading a `recoverable` session, which returns to its own conversation.
+
+A **notice** is a row in the transcript that explains a silence the agent is not
+responsible for — a compaction, a retry. It settles in place rather than
+stacking: the row that says a thing is happening becomes the row that says it
+finished.
+
+A conversation session is **recoverable** when its host is gone but the
+conversation is not: the history is a session file under attn's data dir, and
+reloading the session starts a replacement host that reopens it. That is the same
+`recoverable` state and the same Reload every other session has, and it covers
+the daemon restarting as well as the host dying on its own. A session whose
+reopened history does not end with the agent speaking comes back
+**`waiting_input`** rather than `idle` — both open a turn and both take a nudge,
+so the difference is not what attn does next but what it tells the user: the
+agent stopped without finishing, and something is owed to it.
+
+A **launch prompt** is the first message a session is opened with rather than
+typed into — a delegation brief, most often. It belongs to the session, not to
+the process that first received it: the daemon stores it and hands the same one
+to every replacement host, and the host decides whether to say it by looking at
+the history it just reopened. An empty history means it was never said, which is
+true on a first launch and on a relaunch after a crash so early the agent had not
+spoken yet; anything else means it was, and it is never said twice. Only
+conversation sessions store one — a PTY agent's relaunch resumes its transcript,
+so replaying the brief there would set it to work on something it had already
+finished.
+
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —
-comes back from the same `driver.spawn` call a PTY-backed agent uses.
+comes back from the same `driver.spawn` call a PTY-backed agent uses. That
+capability is also what makes its sessions recoverable rather than reaped: a
+conversation always has somewhere to come back from, so it never has to declare
+the PTY agents' `resume`.
+
+## nisse
+
+**nisse** is attn's own agent. It is the first conversation agent: pi's SDK runs
+the loop and the model, and everything around that loop — the host process and
+its lifetime, the envelope stream, the verbs, the delegation, the pane you read
+it in — is attn's. That is why it carries a name of attn's rather than pi's.
+
+A nisse is the Scandinavian household spirit that keeps a house going while
+everyone sleeps and works tirelessly for as long as you leave out its porridge.
+attn is the house, nisse lives in it, and your attention is the porridge.
+
+The word is only ever the agent. Say **host** for the process a conversation
+agent runs in — that machinery is agent-agnostic and would run a second
+conversation agent unchanged — and say **pi** for the engine underneath. On the
+wire and in the CLI the agent is `nisse` (`attn delegate --agent nisse`); its
+launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
+`plugins/attn-pi`, which also registers the PTY-backed `pi` agent.

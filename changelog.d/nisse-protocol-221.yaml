@@ -1,0 +1,7 @@
+kind: internal
+area: protocol
+change: >
+  Protocol version 221. Conversation sessions and the revived-agent ticket fix
+  each reached 220 on their own branch; the merge resolves them onto one number
+  so a daemon and an app can never agree on a version while disagreeing on the
+  schema behind it.
