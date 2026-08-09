@@ -38,8 +38,13 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
 
-const INPUT = '[data-testid="conversation-input"]';
-const SEND = '[data-testid="conversation-send"]';
+// Composer selectors are pane-scoped. The app mounts a pane per conversation
+// session, so a bare [data-testid="conversation-input"] resolves to whichever
+// one is first in the DOM — and a run that types into another session's
+// composer looks exactly like a host that never got the prompt.
+const paneOf = (sessionId) => `[data-testid="conversation-pane-${sessionId}"]`;
+const INPUT = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-input"]`;
+const SEND = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-send"]`;
 const QUEUE_CLEAR = '[data-testid="conversation-queue-clear"]';
 
 const toggleFor = (callId) =>
@@ -199,8 +204,8 @@ async function main() {
     });
 
     await runner.step('a_read_draws_a_collapsed_card', async () => {
-      await client.request('dom_type', { selector: INPUT, text: READ_PROMPT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: READ_PROMPT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       const settled = await settledWith(client, sessionId, 'alpha', 'the read run to settle');
 
       const card = cardFor(settled, 'read');
@@ -234,8 +239,8 @@ async function main() {
     });
 
     await runner.step('a_clipped_output_offers_the_whole_of_itself', async () => {
-      await client.request('dom_type', { selector: INPUT, text: BASH_PROMPT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: BASH_PROMPT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       const settled = await settledWith(client, sessionId, 'bravo', 'the bash run to settle');
 
       const card = cardFor(settled, 'bash');
@@ -280,8 +285,8 @@ async function main() {
     });
 
     await runner.step('an_edit_draws_as_a_diff', async () => {
-      await client.request('dom_type', { selector: INPUT, text: EDIT_PROMPT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: EDIT_PROMPT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       const settled = await settledWith(client, sessionId, 'charlie', 'the edit run to settle');
 
       const card = cardFor(settled, 'edit');
@@ -302,8 +307,8 @@ async function main() {
     });
 
     await runner.step('a_queued_steer_can_be_cancelled', async () => {
-      await client.request('dom_type', { selector: INPUT, text: HOLD_PROMPT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: HOLD_PROMPT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       await pollFor(
         async () => {
           const current = await conversationState(client, sessionId);
@@ -313,8 +318,8 @@ async function main() {
         90_000,
       );
 
-      await client.request('dom_type', { selector: INPUT, text: CANCELLED_STEER });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: CANCELLED_STEER });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       const withQueue = await pollFor(
         async () => {
           const current = await conversationState(client, sessionId);

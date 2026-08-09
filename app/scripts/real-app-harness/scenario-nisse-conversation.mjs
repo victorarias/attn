@@ -37,8 +37,13 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
 
-const INPUT = '[data-testid="conversation-input"]';
-const SEND = '[data-testid="conversation-send"]';
+// Composer selectors are pane-scoped. The app mounts a pane per conversation
+// session, so a bare [data-testid="conversation-input"] resolves to whichever
+// one is first in the DOM — and a run that types into another session's
+// composer looks exactly like a host that never got the prompt.
+const paneOf = (sessionId) => `[data-testid="conversation-pane-${sessionId}"]`;
+const INPUT = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-input"]`;
+const SEND = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-send"]`;
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -90,8 +95,8 @@ function hostProcesses() {
 }
 
 async function sendPrompt(client, sessionId, text) {
-  await client.request('dom_type', { selector: INPUT, text });
-  await client.request('dom_click', { selector: SEND });
+  await client.request('dom_type', { selector: INPUT(sessionId), text });
+  await client.request('dom_click', { selector: SEND(sessionId) });
 }
 
 async function waitForReply(client, sessionId, expected, description) {

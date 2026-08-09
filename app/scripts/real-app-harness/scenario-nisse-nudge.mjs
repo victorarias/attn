@@ -40,8 +40,13 @@ import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 import { currentHarnessProfile } from './harnessProfile.mjs';
 
-const INPUT = '[data-testid="conversation-input"]';
-const SEND = '[data-testid="conversation-send"]';
+// Composer selectors are pane-scoped. The app mounts a pane per conversation
+// session, so a bare [data-testid="conversation-input"] resolves to whichever
+// one is first in the DOM — and a run that types into another session's
+// composer looks exactly like a host that never got the prompt.
+const paneOf = (sessionId) => `[data-testid="conversation-pane-${sessionId}"]`;
+const INPUT = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-input"]`;
+const SEND = (sessionId) => `${paneOf(sessionId)} [data-testid="conversation-send"]`;
 
 // Long enough that the steer is provably queued rather than racing the reply,
 // short enough that the run settles well inside the scenario timeout.
@@ -163,8 +168,8 @@ async function main() {
     });
 
     await runner.step('run_opens_and_declares_working', async () => {
-      await client.request('dom_type', { selector: INPUT, text: HOLD_PROMPT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: HOLD_PROMPT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
       const session = await observer.waitFor(
         () => {
           const current = observer.getSession(sessionId);
@@ -187,8 +192,8 @@ async function main() {
     });
 
     const { queued } = await runner.step('steer_lands_at_the_turn_boundary', async () => {
-      await client.request('dom_type', { selector: INPUT, text: STEER_TEXT });
-      await client.request('dom_click', { selector: SEND });
+      await client.request('dom_type', { selector: INPUT(sessionId), text: STEER_TEXT });
+      await client.request('dom_click', { selector: SEND(sessionId) });
 
       // Queued: pi has it, the agent has not read it. It sits here for as long
       // as the agent stays inside its tool call.
