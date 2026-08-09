@@ -96,6 +96,8 @@ func TestReadFileDiff_HeadRefFileDoesNotExist(t *testing.T) {
 	}
 }
 
+// Boundary-bound: both the fixture repository and handleGetFileDiff itself shell
+// out to git, and a child process is a real fd nobody is durably blocked on.
 func TestHandleGetFileDiff_EchoesRequestID(t *testing.T) {
 	dir, _, shaV1, shaV2 := fileDiffTestRepo(t, "src/file.ts", "v1", "v2")
 

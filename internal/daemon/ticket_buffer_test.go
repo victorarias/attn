@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -101,79 +102,68 @@ func TestTicketDeadlineOnlyBypassesObserverBufferForDoneTransition(t *testing.T)
 }
 
 func TestDoneTransitionPullsObserversForwardAndPiggybacksBufferedActivity(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Minute
-	d.ticketBufferWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefID, assignees, _ := delegateMany(t, d, "codex", "finish the design", "investigate the follow-up")
-	assignee, otherAssignee := assignees[0], assignees[1]
-	ticketID := boundTicketID(t, d, assignee)
-	otherTicketID := boundTicketID(t, d, otherAssignee)
-	d.setSelectedSession(assignee)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Minute
+		d.ticketBufferWindowOverride = time.Hour
+		stopDaemonBackground(t, d)
+		chiefID, assignees, _ := delegateMany(t, d, "codex", "finish the design", "investigate the follow-up")
+		assignee, otherAssignee := assignees[0], assignees[1]
+		ticketID := boundTicketID(t, d, assignee)
+		otherTicketID := boundTicketID(t, d, otherAssignee)
+		d.setSelectedSession(assignee)
 
-	subscriberID := "subscriber"
-	d.store.Add(&protocol.Session{ID: subscriberID, Label: subscriberID, Agent: protocol.SessionAgentCodex, Directory: t.TempDir(), State: protocol.StateIdle})
-	for _, subscribedTicketID := range []string{ticketID, otherTicketID} {
-		if err := d.store.AddTicketSubscription(subscriberID, subscribedTicketID, time.Now()); err != nil {
+		subscriberID := "subscriber"
+		d.store.Add(&protocol.Session{ID: subscriberID, Label: subscriberID, Agent: protocol.SessionAgentCodex, Directory: t.TempDir(), State: protocol.StateIdle})
+		for _, subscribedTicketID := range []string{ticketID, otherTicketID} {
+			if err := d.store.AddTicketSubscription(subscriberID, subscribedTicketID, time.Now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+		for _, observer := range []string{chiefID, subscriberID} {
+			_ = callTicketInbox(t, d, observer)
+			if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(observer), time.Now()); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		if _, err := d.store.AddTicketComment(ticketID, assignee, "implementation finished", time.Now()); err != nil {
 			t.Fatal(err)
 		}
-	}
-	for _, observer := range []string{chiefID, subscriberID} {
-		_ = callTicketInbox(t, d, observer)
-		if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(observer), time.Now()); err != nil {
+		d.notifyTicketObservers(ticketID)
+		if _, err := d.store.AddTicketComment(otherTicketID, otherAssignee, "related investigation update", time.Now()); err != nil {
 			t.Fatal(err)
 		}
-	}
-
-	if _, err := d.store.AddTicketComment(ticketID, assignee, "implementation finished", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	d.notifyTicketObservers(ticketID)
-	if _, err := d.store.AddTicketComment(otherTicketID, otherAssignee, "related investigation update", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	d.notifyTicketObservers(otherTicketID)
-	for _, observer := range []string{chiefID, subscriberID} {
-		deadline := waitForNudgeDeadline(t, d, observer)
-		if deadline.Before(time.Now().Add(59 * time.Minute)) {
-			t.Fatalf("%s comment deadline = %s, want buffered", observer, deadline)
+		d.notifyTicketObservers(otherTicketID)
+		for _, observer := range []string{chiefID, subscriberID} {
+			deadline := settledNudgeDeadline(t, d, observer)
+			if deadline.Before(time.Now().Add(59 * time.Minute)) {
+				t.Fatalf("%s comment deadline = %s, want buffered", observer, deadline)
+			}
 		}
-	}
 
-	callSetTicketStatus(t, d, assignee, string(protocol.DispatchWorkStateCompleted), "accepted plan attached")
-	for _, observer := range []string{chiefID, subscriberID} {
-		waitForNudgeDeadlineBefore(t, d, observer, time.Now().Add(61*time.Second))
-	}
-	// A daemon restart loses only the in-memory countdown. Rebuilding from the
-	// durable unread completion event must retain immediate eligibility.
-	d.cancelNudgeCountdown(chiefID, "simulate daemon restart")
-	d.notifyUnreadTicketSession(chiefID, time.Now())
-	waitForNudgeDeadlineBefore(t, d, chiefID, time.Now().Add(61*time.Second))
-
-	watch := protocol.TicketInboxModeWatch
-	chiefBundles := callTicketInboxMode(t, d, chiefID, &watch)
-	assertDoneFlushBundles(t, chiefBundles, ticketID, assignee, otherTicketID, otherAssignee)
-	subscriberBundles := callTicketInbox(t, d, subscriberID)
-	assertDoneFlushBundles(t, subscriberBundles, ticketID, assignee, otherTicketID, otherAssignee)
-	if again := callTicketInbox(t, d, chiefID); len(again) != 0 {
-		t.Fatalf("chief replayed completion = %+v", again)
-	}
-	if again := callTicketInbox(t, d, subscriberID); len(again) != 0 {
-		t.Fatalf("subscriber replayed completion = %+v", again)
-	}
-}
-
-func waitForNudgeDeadlineBefore(t *testing.T, d *Daemon, sessionID string, before time.Time) time.Time {
-	t.Helper()
-	limit := time.Now().Add(time.Second)
-	for time.Now().Before(limit) {
-		if deadline := currentNudgeDeadline(d, sessionID); !deadline.IsZero() && deadline.Before(before) {
-			return deadline
+		callSetTicketStatus(t, d, assignee, string(protocol.DispatchWorkStateCompleted), "accepted plan attached")
+		for _, observer := range []string{chiefID, subscriberID} {
+			settledNudgeDeadlineBefore(t, d, observer, time.Now().Add(61*time.Second))
 		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("%s deadline = %s, want before %s", sessionID, currentNudgeDeadline(d, sessionID), before)
-	return time.Time{}
+		// A daemon restart loses only the in-memory countdown. Rebuilding from the
+		// durable unread completion event must retain immediate eligibility.
+		d.cancelNudgeCountdown(chiefID, "simulate daemon restart")
+		d.notifyUnreadTicketSession(chiefID, time.Now())
+		settledNudgeDeadlineBefore(t, d, chiefID, time.Now().Add(61*time.Second))
+
+		watch := protocol.TicketInboxModeWatch
+		chiefBundles := callTicketInboxMode(t, d, chiefID, &watch)
+		assertDoneFlushBundles(t, chiefBundles, ticketID, assignee, otherTicketID, otherAssignee)
+		subscriberBundles := callTicketInbox(t, d, subscriberID)
+		assertDoneFlushBundles(t, subscriberBundles, ticketID, assignee, otherTicketID, otherAssignee)
+		if again := callTicketInbox(t, d, chiefID); len(again) != 0 {
+			t.Fatalf("chief replayed completion = %+v", again)
+		}
+		if again := callTicketInbox(t, d, subscriberID); len(again) != 0 {
+			t.Fatalf("subscriber replayed completion = %+v", again)
+		}
+	})
 }
 
 func assertDoneFlushBundles(t *testing.T, bundles []protocol.TicketEventBundle, ticketID, assignee, otherTicketID, otherAssignee string) {
@@ -202,6 +192,12 @@ func assertDoneFlushBundles(t *testing.T, bundles []protocol.TicketEventBundle, 
 	}
 }
 
+// Boundary-bound: the claim under test is that the catch-up goroutine stays
+// parked on d.deliveryMu while reconstruction holds it. A goroutine blocked on a
+// sync.Mutex is explicitly NOT durably blocked, so a bubble cannot tell "still
+// waiting for the lock" from "about to run" — synctest.Wait would never return.
+// The 100ms here is the wall-clock price of an assertion the fake clock cannot
+// make.
 func TestMutationCatchUpRebuildsRemainingUnreadFromNewAttention(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Second
@@ -284,30 +280,32 @@ func TestMutationCatchUpRebuildsRemainingUnreadFromNewAttention(t *testing.T) {
 }
 
 func TestExplicitInboxConsumesDuringObserverBuffer(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Second
-	d.ticketBufferWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	if bundles := callTicketInbox(t, d, chiefID); len(bundles) != 0 {
-		t.Fatalf("initial chief inbox = %+v", bundles)
-	}
-	if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	d.setSelectedSession(agentID)
-	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateNeedsInput), "need a decision")
-	deadline := waitForNudgeDeadline(t, d, chiefID)
-	if deadline.Before(time.Now().Add(59 * time.Minute)) {
-		t.Fatalf("needs-input observer deadline = %s, want buffered", deadline)
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Second
+		d.ticketBufferWindowOverride = time.Hour
+		stopDaemonBackground(t, d)
+		chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		if bundles := callTicketInbox(t, d, chiefID); len(bundles) != 0 {
+			t.Fatalf("initial chief inbox = %+v", bundles)
+		}
+		if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		d.setSelectedSession(agentID)
+		callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateNeedsInput), "need a decision")
+		deadline := settledNudgeDeadline(t, d, chiefID)
+		if deadline.Before(time.Now().Add(59 * time.Minute)) {
+			t.Fatalf("needs-input observer deadline = %s, want buffered", deadline)
+		}
 
-	bundles := callTicketInbox(t, d, chiefID)
-	if len(bundles) != 1 || bundles[0].TicketID != ticketID {
-		t.Fatalf("explicit inbox = %+v, want immediate catch-up", bundles)
-	}
-	if currentNudgeTimer(d, chiefID) != nil {
-		t.Fatal("explicit inbox left the buffered countdown armed")
-	}
+		bundles := callTicketInbox(t, d, chiefID)
+		if len(bundles) != 1 || bundles[0].TicketID != ticketID {
+			t.Fatalf("explicit inbox = %+v, want immediate catch-up", bundles)
+		}
+		if currentNudgeTimer(d, chiefID) != nil {
+			t.Fatal("explicit inbox left the buffered countdown armed")
+		}
+	})
 }

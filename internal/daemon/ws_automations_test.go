@@ -930,6 +930,10 @@ func TestAutomationDefinitionGetWSAfterToggleDerivesFromSpecJSON(t *testing.T) {
 // automationMu for longer than the frontend's 30s client timeout lets the
 // toggle flip after the UI has already reported "timed out" — invisible to
 // the user who believes their click had no effect.
+// Boundary-bound: the behavior under test IS a goroutine waiting on
+// d.automationMu. A goroutine blocked on a sync.Mutex is explicitly not
+// durably blocked, so a bubble's clock would never reach the release and the
+// deadline would never fire.
 func TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub(), wsAutomationMutationTimeout: 50 * time.Millisecond}
@@ -1012,6 +1016,8 @@ func TestAutomationSetEnabledWSDeadlineAbortsWithoutMutating(t *testing.T) {
 // same already-delivered run once the held lock frees. automationDeliveryHook
 // does not apply here — it only affects deliverObservedAutomationRun's
 // provider-observation path, not automationRun's manual-run path.
+// Boundary-bound for the same reason as the deadline test above: both retries
+// queue on d.automationMu, and a mutex wait is invisible to a bubble.
 func TestAutomationRunWSRetryWithSameRequestIDDoesNotDuplicate(t *testing.T) {
 	s := store.New()
 	d := &Daemon{store: s, wsHub: newWSHub()}

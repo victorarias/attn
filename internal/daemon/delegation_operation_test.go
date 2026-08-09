@@ -139,6 +139,9 @@ func TestDelegationOperationConcurrentRetriesConverge(t *testing.T) {
 	}
 }
 
+// Boundary-bound twice over: the launch creates a real git worktree (child
+// process), and the acceptance assertion measures real elapsed wall-clock —
+// under a fake clock time.Since would read zero and prove nothing.
 func TestDelegationOperationAcceptedBeforeSlowPreparation(t *testing.T) {
 	root := t.TempDir()
 	mainRepo := filepath.Join(root, "repo")

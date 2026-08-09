@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/jobs"
@@ -365,34 +366,38 @@ func TestCompactContextTimeoutAndCancellationProtectContext(t *testing.T) {
 		},
 	} {
 		t.Run(name, func(t *testing.T) {
-			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-			setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-			d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
-			d.keeperCompactThreshold = 1
-			if name == "timeout" {
-				d.keeperCompactTimeout = 20 * time.Millisecond
-			} else {
-				d.keeperCompactTimeout = time.Second
-			}
-			started := make(chan struct{})
-			d.workspaceContextCompactionExecution = func(
-				ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
-			) (keeperCompactExecution, error) {
-				close(started)
-				<-ctx.Done()
-				return keeperCompactExecution{}, ctx.Err()
-			}
-			installTestCompactQueue(t, d)
-			if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
-				t.Fatalf("seed context: %v", err)
-			}
-			if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
-				t.Fatalf("enqueue: %v", err)
-			}
-			<-started
-			stop(t, d)
-			deadline := time.Now().Add(2 * time.Second)
-			for {
+			d := newBubbleDaemon(t)
+			synctest.Test(t, func(t *testing.T) {
+				stopDaemonBackground(t, d)
+				setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+				d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+				d.keeperCompactThreshold = 1
+				if name == "timeout" {
+					d.keeperCompactTimeout = 20 * time.Millisecond
+				} else {
+					d.keeperCompactTimeout = time.Second
+				}
+				started := make(chan struct{})
+				d.workspaceContextCompactionExecution = func(
+					ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
+				) (keeperCompactExecution, error) {
+					close(started)
+					<-ctx.Done()
+					return keeperCompactExecution{}, ctx.Err()
+				}
+				installTestCompactQueue(t, d)
+				if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
+					t.Fatalf("seed context: %v", err)
+				}
+				if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
+					t.Fatalf("enqueue: %v", err)
+				}
+				<-started
+				stop(t, d)
+				// Past the run timeout on the bubble clock: the timeout case needs it to
+				// elapse, the cancellation case has already aborted and only settles.
+				time.Sleep(2 * d.keeperCompactTimeout)
+				synctest.Wait()
 				current, err := d.store.GetWorkspaceContext("workspace-1")
 				if err != nil {
 					t.Fatalf("get current context: %v", err)
@@ -404,14 +409,10 @@ func TestCompactContextTimeoutAndCancellationProtectContext(t *testing.T) {
 				if err != nil {
 					t.Fatalf("get task: %v", err)
 				}
-				if task != nil && task.State != jobs.StateRunning {
-					break
+				if task == nil || task.State == jobs.StateRunning {
+					t.Fatalf("compaction run did not stop: %+v", task)
 				}
-				if time.Now().After(deadline) {
-					t.Fatal("compaction run did not stop")
-				}
-				time.Sleep(5 * time.Millisecond)
-			}
+			})
 		})
 	}
 }
@@ -420,50 +421,52 @@ func TestCompactContextTimeoutAndCancellationProtectContext(t *testing.T) {
 // fence: a Cancel that arrives after the executor has entered its commit waits
 // for the durable write to finish untorn.
 func TestCompactContextCancellationWaitsForAdmittedCommit(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
-	d.keeperCompactThreshold = 1
-	d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
-	commitStarted := make(chan struct{})
-	releaseCommit := make(chan struct{})
-	d.workspaceContextBeforeKeeperApply = func() {
-		close(commitStarted)
-		<-releaseCommit
-	}
-	installTestCompactQueue(t, d)
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
-		t.Fatalf("seed context: %v", err)
-	}
-	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	<-commitStarted
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+		d.keeperCompactThreshold = 1
+		d.workspaceContextCompactionExecution = fakeCompaction(keeperCandidate)
+		commitStarted := make(chan struct{})
+		releaseCommit := make(chan struct{})
+		d.workspaceContextBeforeKeeperApply = func() {
+			close(commitStarted)
+			<-releaseCommit
+		}
+		installTestCompactQueue(t, d)
+		if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
+			t.Fatalf("seed context: %v", err)
+		}
+		if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		<-commitStarted
 
-	cancelID := jobIDForKey(t, d.jobQueue, compactContextKind, "workspace-1")
-	cancelDone := make(chan struct{})
-	go func() {
-		d.jobQueue.Cancel(cancelID)
-		close(cancelDone)
-	}()
-	select {
-	case <-cancelDone:
-		t.Fatal("cancellation returned before the admitted commit finished")
-	case <-time.After(20 * time.Millisecond):
-	}
-	close(releaseCommit)
-	select {
-	case <-cancelDone:
-	case <-time.After(time.Second):
-		t.Fatal("cancellation did not return after commit completion")
-	}
-	current, err := d.store.GetWorkspaceContext("workspace-1")
-	if err != nil {
-		t.Fatalf("get current context: %v", err)
-	}
-	if current.Content != keeperCandidate || current.Revision != 2 {
-		t.Fatalf("admitted commit was not applied: %+v", current)
-	}
+		cancelID := jobIDForKey(t, d.jobQueue, compactContextKind, "workspace-1")
+		cancelDone := make(chan struct{})
+		go func() {
+			d.jobQueue.Cancel(cancelID)
+			close(cancelDone)
+		}()
+		// The bubble settles with the commit still held, so the cancel is parked on the
+		// fence — not merely slower than a tolerance window.
+		synctest.Wait()
+		select {
+		case <-cancelDone:
+			t.Fatal("cancellation returned before the admitted commit finished")
+		default:
+		}
+		close(releaseCommit)
+		requireDone(t, cancelDone, "cancellation did not return after commit completion")
+		current, err := d.store.GetWorkspaceContext("workspace-1")
+		if err != nil {
+			t.Fatalf("get current context: %v", err)
+		}
+		if current.Content != keeperCandidate || current.Revision != 2 {
+			t.Fatalf("admitted commit was not applied: %+v", current)
+		}
+	})
 }
 
 // TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext proves the
@@ -505,56 +508,55 @@ func TestWorkspaceDeletionCancelsCompactionBeforeRemovingContext(t *testing.T) {
 // context-write trigger enqueues a coalesced compaction once the doc crosses the
 // size threshold, and that the runner runs it to a committed revision.
 func TestWorkspaceContextCompactionEnqueuesOnThresholdViaTrigger(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
-	d.keeperCompactThreshold = 1
-	d.keeperCompactDebounce = 5 * time.Millisecond
-	calls := make(chan struct{}, 1)
-	d.workspaceContextCompactionExecution = func(
-		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
-	) (keeperCompactExecution, error) {
-		select {
-		case calls <- struct{}{}:
-		default:
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+		d.keeperCompactThreshold = 1
+		d.keeperCompactDebounce = 5 * time.Millisecond
+		calls := make(chan struct{}, 1)
+		d.workspaceContextCompactionExecution = func(
+			context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+		) (keeperCompactExecution, error) {
+			select {
+			case calls <- struct{}{}:
+			default:
+			}
+			return keeperCompactExecution{Candidate: keeperCandidate}, nil
 		}
-		return keeperCompactExecution{Candidate: keeperCandidate}, nil
-	}
-	installTestCompactQueue(t, d)
+		installTestCompactQueue(t, d)
 
-	checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{SourceSessionID: "session-1"})
-	if err != nil {
-		t.Fatalf("checkout context: %v", err)
-	}
-	if err := os.WriteFile(checkout.Path, []byte(keeperSource), 0o600); err != nil {
-		t.Fatalf("edit context: %v", err)
-	}
-	if _, changed, err := d.updateWorkspaceContext(&protocol.WorkspaceContextUpdateMessage{SourceSessionID: "session-1"}); err != nil || !changed {
-		t.Fatalf("publish context: changed=%v err=%v", changed, err)
-	}
+		checkout, err := d.checkoutWorkspaceContext(&protocol.WorkspaceContextCheckoutMessage{SourceSessionID: "session-1"})
+		if err != nil {
+			t.Fatalf("checkout context: %v", err)
+		}
+		if err := os.WriteFile(checkout.Path, []byte(keeperSource), 0o600); err != nil {
+			t.Fatalf("edit context: %v", err)
+		}
+		if _, changed, err := d.updateWorkspaceContext(&protocol.WorkspaceContextUpdateMessage{SourceSessionID: "session-1"}); err != nil || !changed {
+			t.Fatalf("publish context: changed=%v err=%v", changed, err)
+		}
 
-	select {
-	case <-calls:
-	case <-time.After(time.Second):
-		t.Fatal("trigger did not enqueue a compaction")
-	}
-	deadline := time.Now().Add(time.Second)
-	for {
+		// The debounce is a real delay the runner honors; run it out on the bubble clock.
+		time.Sleep(2 * d.keeperCompactDebounce)
+		synctest.Wait()
+		select {
+		case <-calls:
+		default:
+			t.Fatal("trigger did not enqueue a compaction")
+		}
 		current, getErr := d.store.GetWorkspaceContext("workspace-1")
 		if getErr != nil {
 			t.Fatalf("get current context: %v", getErr)
 		}
-		if current.Revision == 2 {
-			if current.Content != keeperCandidate {
-				t.Fatalf("compacted content = %q", current.Content)
-			}
-			break
-		}
-		if time.Now().After(deadline) {
+		if current.Revision != 2 {
 			t.Fatalf("context revision = %d, want 2", current.Revision)
 		}
-		time.Sleep(5 * time.Millisecond)
-	}
+		if current.Content != keeperCandidate {
+			t.Fatalf("compacted content = %q", current.Content)
+		}
+	})
 }
 
 // TestWorkspaceContextCompactionInlineFallbackWhenQueueDisabled proves that with
@@ -594,51 +596,41 @@ func TestWorkspaceContextCompactionInlineFallbackWhenQueueDisabled(t *testing.T)
 // size re-check: a doc edited below the threshold during the debounce window is a
 // no-op success (no LLM pass, no revision bump).
 func TestWorkspaceContextCompactionReChecksThresholdAfterDebounce(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
-	// Threshold far above the seeded doc size so the run-time re-check no-ops.
-	d.keeperCompactThreshold = 1 << 20
-	executed := false
-	d.workspaceContextCompactionExecution = func(
-		context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
-	) (keeperCompactExecution, error) {
-		executed = true
-		return keeperCompactExecution{Candidate: keeperCandidate}, nil
-	}
-	installTestCompactQueue(t, d)
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
-		t.Fatalf("seed context: %v", err)
-	}
-	// Enqueue directly (the trigger would gate it, but a pre-debounce enqueue may
-	// have outlived a shrink); the executor must re-check and no-op.
-	if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	deadline := time.Now().Add(time.Second)
-	for {
-		task, err := d.jobQueue.GetByKey(compactContextKind, "workspace-1")
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+		// Threshold far above the seeded doc size so the run-time re-check no-ops.
+		d.keeperCompactThreshold = 1 << 20
+		executed := false
+		d.workspaceContextCompactionExecution = func(
+			context.Context, keeperCompactConfig, *protocol.WorkspaceContext,
+		) (keeperCompactExecution, error) {
+			executed = true
+			return keeperCompactExecution{Candidate: keeperCandidate}, nil
+		}
+		installTestCompactQueue(t, d)
+		if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
+			t.Fatalf("seed context: %v", err)
+		}
+		// Enqueue directly (the trigger would gate it, but a pre-debounce enqueue may
+		// have outlived a shrink); the executor must re-check and no-op.
+		if _, err := d.jobQueue.Enqueue(compactContextKind, jobs.EnqueueOptions{UniqueKey: "workspace-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, compactContextKind, "workspace-1", jobs.StateDone)
+		if executed {
+			t.Fatal("executor ran despite the doc being below the size threshold")
+		}
+		current, err := d.store.GetWorkspaceContext("workspace-1")
 		if err != nil {
-			t.Fatalf("get task: %v", err)
+			t.Fatalf("get current context: %v", err)
 		}
-		if task != nil && task.State == jobs.StateDone {
-			break
+		if current.Revision != 1 {
+			t.Fatalf("context was modified by a below-threshold run: %+v", current)
 		}
-		if time.Now().After(deadline) {
-			t.Fatalf("task did not finish: %+v", task)
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	if executed {
-		t.Fatal("executor ran despite the doc being below the size threshold")
-	}
-	current, err := d.store.GetWorkspaceContext("workspace-1")
-	if err != nil {
-		t.Fatalf("get current context: %v", err)
-	}
-	if current.Revision != 1 {
-		t.Fatalf("context was modified by a below-threshold run: %+v", current)
-	}
+	})
 }
 
 // TestWorkspaceTeardownDoesNotPanicBeforeTheJobQueueExists proves the runtime
@@ -697,50 +689,58 @@ func TestWorkspaceTeardownDoesNotPanicBeforeTheJobQueueExists(t *testing.T) {
 // keep that bound so a hung/runaway agent cannot block the synchronous IPC
 // response indefinitely.
 func TestManualWorkspaceContextCompactionAppliesTimeout(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
-	d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
-	d.keeperCompactThreshold = 1
-	d.keeperCompactTimeout = 20 * time.Millisecond
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "workspace-1")
+		d.store.SetSetting(SettingKeeperCompact, `{"agent":"codex","model":"gpt-test"}`)
+		d.keeperCompactThreshold = 1
+		d.keeperCompactTimeout = 20 * time.Millisecond
 
-	gotDeadline := make(chan bool, 1)
-	d.workspaceContextCompactionExecution = func(
-		ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
-	) (keeperCompactExecution, error) {
-		_, hasDeadline := ctx.Deadline()
-		gotDeadline <- hasDeadline
-		// A runaway agent: block until the context aborts. With a deadline the
-		// manual command returns promptly; without one it would hang here forever.
-		<-ctx.Done()
-		return keeperCompactExecution{}, ctx.Err()
-	}
-	if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
-		t.Fatalf("seed context: %v", err)
-	}
-
-	done := make(chan error, 1)
-	go func() {
-		_, err := d.compactWorkspaceContextForSession(context.Background(), "session-1")
-		done <- err
-	}()
-
-	select {
-	case hasDeadline := <-gotDeadline:
-		if !hasDeadline {
-			t.Fatal("manual compaction executor ctx has NO deadline")
+		gotDeadline := make(chan bool, 1)
+		d.workspaceContextCompactionExecution = func(
+			ctx context.Context, _ keeperCompactConfig, _ *protocol.WorkspaceContext,
+		) (keeperCompactExecution, error) {
+			_, hasDeadline := ctx.Deadline()
+			gotDeadline <- hasDeadline
+			// A runaway agent: block until the context aborts. With a deadline the
+			// manual command returns promptly; without one it would hang here forever.
+			<-ctx.Done()
+			return keeperCompactExecution{}, ctx.Err()
 		}
-	case <-time.After(time.Second):
-		t.Fatal("manual compaction executor was not invoked")
-	}
-
-	select {
-	case err := <-done:
-		if !errors.Is(err, context.DeadlineExceeded) {
-			t.Fatalf("manual compaction error = %v, want context deadline exceeded", err)
+		if _, _, err := d.store.UpdateWorkspaceContext("workspace-1", keeperSource, "session-1", 0); err != nil {
+			t.Fatalf("seed context: %v", err)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("manual compaction did not abort within the configured timeout")
-	}
+
+		done := make(chan error, 1)
+		go func() {
+			_, err := d.compactWorkspaceContextForSession(context.Background(), "session-1")
+			done <- err
+		}()
+
+		synctest.Wait()
+		select {
+		case hasDeadline := <-gotDeadline:
+			if !hasDeadline {
+				t.Fatal("manual compaction executor ctx has NO deadline")
+			}
+		default:
+			t.Fatal("manual compaction executor was not invoked")
+		}
+
+		// Past the configured per-run timeout: without a deadline on the executor's
+		// context the runaway agent would still be blocked here.
+		time.Sleep(2 * d.keeperCompactTimeout)
+		synctest.Wait()
+		select {
+		case err := <-done:
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("manual compaction error = %v, want context deadline exceeded", err)
+			}
+		default:
+			t.Fatal("manual compaction did not abort within the configured timeout")
+		}
+	})
 }
 
 // TestMigrateKeeperCompactSettingKey covers the one-time rename of the persisted

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/launchcontract"
@@ -14,9 +15,19 @@ import (
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
 
+// spawnProbeReadDeadline bounds how long the plugin probe waits for a second
+// driver.spawn request that must never arrive.
+const spawnProbeReadDeadline = 250 * time.Millisecond
+
 func newSpawnCharacterizationDaemon(t *testing.T) (*Daemon, *fakeSpawnBackend, *wsClient, string) {
 	t.Helper()
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	return newSpawnCharacterizationDaemonOn(t, NewForTesting(filepath.Join(t.TempDir(), "test.sock")))
+}
+
+// newSpawnCharacterizationDaemonOn is newSpawnCharacterizationDaemon against a
+// daemon the caller built outside a synctest bubble.
+func newSpawnCharacterizationDaemonOn(t *testing.T, d *Daemon) (*Daemon, *fakeSpawnBackend, *wsClient, string) {
+	t.Helper()
 	backend := &fakeSpawnBackend{}
 	d.ptyBackend = backend
 	client := newWorkspaceProtocolTestClient()
@@ -237,82 +248,87 @@ func TestSpawnCharacterizationRejectsPluginChiefWithoutResumeCapability(t *testi
 }
 
 func TestSpawnCharacterizationPluginChiefResumeFailureMentionsCapability(t *testing.T) {
-	d, _, client, cwd := newSpawnCharacterizationDaemon(t)
-	plugin, done := startPluginPipe(t, d, "characterization-plugin-error", nil)
-	defer func() { _ = plugin.Close(); <-done }()
-	registerTestPluginDriver(t, plugin, "characterization-error", map[string]bool{"launch_instructions": true})
-	addTestWorkspace(d, "workspace", cwd)
-	msg := spawnCharacterizationMessage("plugin-chief-error", "workspace", cwd)
-	msg.Agent, msg.ChiefOfStaff = "characterization-error", protocol.Ptr(true)
-	d.handleSpawnSession(client, msg)
-	select {
-	case outbound := <-client.send:
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, _, client, cwd := newSpawnCharacterizationDaemonOn(t, base)
+		stopDaemonBackground(t, d)
+		plugin, done := startPluginPipe(t, d, "characterization-plugin-error", nil)
+		defer func() { _ = plugin.Close(); <-done }()
+		registerTestPluginDriver(t, plugin, "characterization-error", map[string]bool{"launch_instructions": true})
+		addTestWorkspace(d, "workspace", cwd)
+		msg := spawnCharacterizationMessage("plugin-chief-error", "workspace", cwd)
+		msg.Agent, msg.ChiefOfStaff = "characterization-error", protocol.Ptr(true)
+		d.handleSpawnSession(client, msg)
+		outbound := requireOutbound(t, client, "no spawn failure reached the client")
 		if !strings.Contains(string(outbound.payload), "resume capability") {
 			t.Fatalf("failure payload = %s, want resume capability", outbound.payload)
 		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for spawn failure")
-	}
+	})
 }
 
 func TestSpawnCharacterizationAlreadyLivePluginRespawnSkipsPluginPrep(t *testing.T) {
-	d, backend, client, cwd := newSpawnCharacterizationDaemon(t)
-	plugin, pluginDone := startPluginPipe(t, d, "characterization-live-plugin", nil)
-	defer func() { _ = plugin.Close(); <-pluginDone }()
-	registerTestPluginDriver(t, plugin, "characterization-live", nil)
-	addTestWorkspace(d, "workspace", cwd)
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, backend, client, cwd := newSpawnCharacterizationDaemonOn(t, base)
+		stopDaemonBackground(t, d)
+		plugin, pluginDone := startPluginPipe(t, d, "characterization-live-plugin", nil)
+		defer func() { _ = plugin.Close(); <-pluginDone }()
+		registerTestPluginDriver(t, plugin, "characterization-live", nil)
+		addTestWorkspace(d, "workspace", cwd)
 
-	driverSpawns := make(chan bool, 1)
-	go func() {
-		request := decodeJSONRPCMessage(t, plugin)
-		if request.Method != "driver.spawn" {
-			driverSpawns <- false
-			return
-		}
-		respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"characterization-live"}})
+		driverSpawns := make(chan bool, 1)
+		go func() {
+			request := decodeJSONRPCMessage(t, plugin)
+			if request.Method != "driver.spawn" {
+				driverSpawns <- false
+				return
+			}
+			respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"characterization-live"}})
 
-		_ = plugin.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
-		var secondRequest jsonRPCMessage
-		if err := json.NewDecoder(plugin).Decode(&secondRequest); err != nil {
-			driverSpawns <- false
-			return
-		}
-		driverSpawns <- secondRequest.Method == "driver.spawn"
-		if secondRequest.Method == "driver.spawn" {
-			respondPluginRequest(t, plugin, secondRequest, pluginDriverSpawnResult{Argv: []string{"characterization-live"}})
-		}
-	}()
+			_ = plugin.SetReadDeadline(time.Now().Add(spawnProbeReadDeadline))
+			var secondRequest jsonRPCMessage
+			if err := json.NewDecoder(plugin).Decode(&secondRequest); err != nil {
+				driverSpawns <- false
+				return
+			}
+			driverSpawns <- secondRequest.Method == "driver.spawn"
+			if secondRequest.Method == "driver.spawn" {
+				respondPluginRequest(t, plugin, secondRequest, pluginDriverSpawnResult{Argv: []string{"characterization-live"}})
+			}
+		}()
 
-	msg := spawnCharacterizationMessage("already-live-plugin", "workspace", cwd)
-	msg.Agent = "characterization-live"
-	d.handleSpawnSession(client, msg)
-	expectSpawnResult(t, client, msg.ID, true)
-
-	backend.mu.Lock()
-	backend.sessionIDs = []string{msg.ID}
-	backend.mu.Unlock()
-
-	secondSpawnDone := make(chan struct{})
-	go func() {
+		msg := spawnCharacterizationMessage("already-live-plugin", "workspace", cwd)
+		msg.Agent = "characterization-live"
 		d.handleSpawnSession(client, msg)
-		close(secondSpawnDone)
-	}()
-	select {
-	case <-secondSpawnDone:
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for already-live spawn result")
-	}
-	expectSpawnResult(t, client, msg.ID, true)
+		expectSpawnResult(t, client, msg.ID, true)
 
-	select {
-	case gotSecondDriverSpawn := <-driverSpawns:
-		if gotSecondDriverSpawn {
-			t.Fatal("already-live respawn sent a second driver.spawn request")
+		backend.mu.Lock()
+		backend.sessionIDs = []string{msg.ID}
+		backend.mu.Unlock()
+
+		secondSpawnDone := make(chan struct{})
+		go func() {
+			d.handleSpawnSession(client, msg)
+			close(secondSpawnDone)
+		}()
+		requireDone(t, secondSpawnDone, "the already-live spawn never returned")
+		expectSpawnResult(t, client, msg.ID, true)
+
+		// The probe reports only once its own 250ms read deadline expires, and a
+		// settled bubble is exactly the state where nothing else will move the
+		// clock — so run it out.
+		time.Sleep(spawnProbeReadDeadline)
+		synctest.Wait()
+		select {
+		case gotSecondDriverSpawn := <-driverSpawns:
+			if gotSecondDriverSpawn {
+				t.Fatal("already-live respawn sent a second driver.spawn request")
+			}
+		default:
+			t.Fatal("the plugin spawn probe never reported")
 		}
-	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for plugin spawn probe")
-	}
-	if got := spawnCount(backend); got != 1 {
-		t.Fatalf("Spawn calls = %d, want 1", got)
-	}
+		if got := spawnCount(backend); got != 1 {
+			t.Fatalf("Spawn calls = %d, want 1", got)
+		}
+	})
 }

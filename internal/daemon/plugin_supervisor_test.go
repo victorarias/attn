@@ -7,208 +7,224 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
 func TestPluginSupervisorRestartsExitsWithCappedBackoff(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	manifest := pluginManifest{Name: "fixture"}
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		manifest := pluginManifest{Name: "fixture"}
 
-	if err := supervisor.Ensure(manifest); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-	for attempt := 1; attempt <= len(pluginRestartBackoff)+2; attempt++ {
-		handle := launcher.handle(attempt - 1)
-		handle.exit(pluginExit{ExitCode: intPtr(0)})
-		waitForSupervisor(t, func() bool {
+		if err := supervisor.Ensure(manifest); err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		for attempt := 1; attempt <= len(pluginRestartBackoff)+2; attempt++ {
+			handle := launcher.handle(attempt - 1)
+			handle.exit(pluginExit{ExitCode: intPtr(0)})
+			requireSupervisor(t, func() bool {
+				snapshot, _ := supervisor.Snapshot("fixture")
+				return snapshot.Phase == pluginPhaseBackoff && snapshot.RestartAttempt == attempt
+			}, fmt.Sprintf("exit %d did not land the plugin in backoff at that attempt", attempt))
 			snapshot, _ := supervisor.Snapshot("fixture")
-			return snapshot.Phase == pluginPhaseBackoff && snapshot.RestartAttempt == attempt
-		})
-		snapshot, _ := supervisor.Snapshot("fixture")
-		index := attempt - 1
-		if index >= len(pluginRestartBackoff) {
-			index = len(pluginRestartBackoff) - 1
+			index := attempt - 1
+			if index >= len(pluginRestartBackoff) {
+				index = len(pluginRestartBackoff) - 1
+			}
+			wantDelay := pluginRestartBackoff[index]
+			if got := snapshot.NextRestartAt.Sub(clock.Now()); got != wantDelay {
+				t.Fatalf("attempt %d delay=%s, want %s", attempt, got, wantDelay)
+			}
+			clock.Advance(wantDelay)
+			requireSupervisor(t, func() bool { return launcher.count() == attempt+1 },
+				fmt.Sprintf("the elapsed backoff did not start attempt %d", attempt+1))
 		}
-		wantDelay := pluginRestartBackoff[index]
-		if got := snapshot.NextRestartAt.Sub(clock.Now()); got != wantDelay {
-			t.Fatalf("attempt %d delay=%s, want %s", attempt, got, wantDelay)
-		}
-		clock.Advance(wantDelay)
-		waitForSupervisor(t, func() bool { return launcher.count() == attempt+1 })
-	}
+	})
 }
 
 func TestPluginSupervisorRetriesStartFailure(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{startErrors: []error{errors.New("bun missing")}}
-	supervisor := newTestPluginSupervisor(clock, launcher)
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{startErrors: []error{errors.New("bun missing")}}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
 
-	if err := supervisor.Ensure(pluginManifest{Name: "fixture"}); err == nil {
-		t.Fatal("Ensure error=nil, want start failure")
-	}
-	snapshot, _ := supervisor.Snapshot("fixture")
-	if snapshot.Phase != pluginPhaseBackoff || snapshot.RestartAttempt != 1 || snapshot.LastExit == nil {
-		t.Fatalf("snapshot=%+v, want first backoff with exit", snapshot)
-	}
-	clock.Advance(250 * time.Millisecond)
-	waitForSupervisor(t, func() bool { return launcher.count() == 2 })
-	snapshot, _ = supervisor.Snapshot("fixture")
-	if snapshot.Phase != pluginPhaseStarting || !snapshot.Running {
-		t.Fatalf("snapshot=%+v, want restarted process", snapshot)
-	}
+		if err := supervisor.Ensure(pluginManifest{Name: "fixture"}); err == nil {
+			t.Fatal("Ensure error=nil, want start failure")
+		}
+		snapshot, _ := supervisor.Snapshot("fixture")
+		if snapshot.Phase != pluginPhaseBackoff || snapshot.RestartAttempt != 1 || snapshot.LastExit == nil {
+			t.Fatalf("snapshot=%+v, want first backoff with exit", snapshot)
+		}
+		clock.Advance(250 * time.Millisecond)
+		requireSupervisor(t, func() bool { return launcher.count() == 2 }, "the retry after a start failure never launched")
+		snapshot, _ = supervisor.Snapshot("fixture")
+		if snapshot.Phase != pluginPhaseStarting || !snapshot.Running {
+			t.Fatalf("snapshot=%+v, want restarted process", snapshot)
+		}
+	})
 }
 
 func TestPluginSupervisorResetsAttemptsOnlyAfterStableConnection(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
-	launcher.handle(0).exit(pluginExit{Error: "crash"})
-	waitForSupervisor(t, func() bool {
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
+		launcher.handle(0).exit(pluginExit{Error: "crash"})
+		requireSupervisor(t, func() bool {
+			snapshot, _ := supervisor.Snapshot("fixture")
+			return snapshot.RestartAttempt == 1
+		}, "the crash did not record a restart attempt")
+		clock.Advance(250 * time.Millisecond)
+		requireSupervisor(t, func() bool { return launcher.count() == 2 }, "the elapsed backoff did not restart the plugin")
 		snapshot, _ := supervisor.Snapshot("fixture")
-		return snapshot.RestartAttempt == 1
+		if !supervisor.NoteConnected("fixture", snapshot.Generation) {
+			t.Fatal("NoteConnected rejected current generation")
+		}
+		clock.Advance(pluginStableConnection - time.Millisecond)
+		snapshot, _ = supervisor.Snapshot("fixture")
+		if snapshot.RestartAttempt != 1 {
+			t.Fatalf("attempt=%d before stability window, want 1", snapshot.RestartAttempt)
+		}
+		clock.Advance(time.Millisecond)
+		snapshot, _ = supervisor.Snapshot("fixture")
+		if snapshot.RestartAttempt != 0 || snapshot.Phase != pluginPhaseConnected {
+			t.Fatalf("snapshot=%+v after stability window, want connected attempt 0", snapshot)
+		}
 	})
-	clock.Advance(250 * time.Millisecond)
-	waitForSupervisor(t, func() bool { return launcher.count() == 2 })
-	snapshot, _ := supervisor.Snapshot("fixture")
-	if !supervisor.NoteConnected("fixture", snapshot.Generation) {
-		t.Fatal("NoteConnected rejected current generation")
-	}
-	clock.Advance(pluginStableConnection - time.Millisecond)
-	snapshot, _ = supervisor.Snapshot("fixture")
-	if snapshot.RestartAttempt != 1 {
-		t.Fatalf("attempt=%d before stability window, want 1", snapshot.RestartAttempt)
-	}
-	clock.Advance(time.Millisecond)
-	snapshot, _ = supervisor.Snapshot("fixture")
-	if snapshot.RestartAttempt != 0 || snapshot.Phase != pluginPhaseConnected {
-		t.Fatalf("snapshot=%+v after stability window, want connected attempt 0", snapshot)
-	}
 }
 
 func TestPluginSupervisorDisconnectGraceReconnectAndKill(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
-	snapshot, _ := supervisor.Snapshot("fixture")
-	generation := snapshot.Generation
-	if !supervisor.NoteConnected("fixture", generation) {
-		t.Fatal("NoteConnected rejected current generation")
-	}
-
-	supervisor.NoteDisconnected("fixture", generation)
-	clock.Advance(pluginDisconnectGrace - time.Millisecond)
-	if got := launcher.handle(0).killCount(); got != 0 {
-		t.Fatalf("kills before grace=%d, want 0", got)
-	}
-	if !supervisor.NoteConnected("fixture", generation) {
-		t.Fatal("same-generation reconnect was rejected")
-	}
-	clock.Advance(time.Millisecond)
-	if got := launcher.handle(0).killCount(); got != 0 {
-		t.Fatalf("kills after canceled grace=%d, want 0", got)
-	}
-
-	supervisor.NoteDisconnected("fixture", generation)
-	clock.Advance(pluginDisconnectGrace)
-	if got := launcher.handle(0).killCount(); got != 1 {
-		t.Fatalf("kills after expired grace=%d, want 1", got)
-	}
-	waitForSupervisor(t, func() bool {
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
 		snapshot, _ := supervisor.Snapshot("fixture")
-		return snapshot.Phase == pluginPhaseBackoff
+		generation := snapshot.Generation
+		if !supervisor.NoteConnected("fixture", generation) {
+			t.Fatal("NoteConnected rejected current generation")
+		}
+
+		supervisor.NoteDisconnected("fixture", generation)
+		clock.Advance(pluginDisconnectGrace - time.Millisecond)
+		if got := launcher.handle(0).killCount(); got != 0 {
+			t.Fatalf("kills before grace=%d, want 0", got)
+		}
+		if !supervisor.NoteConnected("fixture", generation) {
+			t.Fatal("same-generation reconnect was rejected")
+		}
+		clock.Advance(time.Millisecond)
+		if got := launcher.handle(0).killCount(); got != 0 {
+			t.Fatalf("kills after canceled grace=%d, want 0", got)
+		}
+
+		supervisor.NoteDisconnected("fixture", generation)
+		clock.Advance(pluginDisconnectGrace)
+		if got := launcher.handle(0).killCount(); got != 1 {
+			t.Fatalf("kills after expired grace=%d, want 1", got)
+		}
+		requireSupervisor(t, func() bool {
+			snapshot, _ := supervisor.Snapshot("fixture")
+			return snapshot.Phase == pluginPhaseBackoff
+		}, "the kill after the expired grace did not land the plugin in backoff")
 	})
 }
 
 func TestPluginSupervisorRestartsProcessThatNeverConnects(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
 
-	clock.Advance(pluginDisconnectGrace)
-	if got := launcher.handle(0).killCount(); got != 1 {
-		t.Fatalf("kills after startup grace=%d, want 1", got)
-	}
-	waitForSupervisor(t, func() bool {
-		snapshot, _ := supervisor.Snapshot("fixture")
-		return snapshot.Phase == pluginPhaseBackoff && snapshot.RestartAttempt == 1
+		clock.Advance(pluginDisconnectGrace)
+		if got := launcher.handle(0).killCount(); got != 1 {
+			t.Fatalf("kills after startup grace=%d, want 1", got)
+		}
+		requireSupervisor(t, func() bool {
+			snapshot, _ := supervisor.Snapshot("fixture")
+			return snapshot.Phase == pluginPhaseBackoff && snapshot.RestartAttempt == 1
+		}, "the never-connected kill did not land the plugin in backoff")
+		clock.Advance(pluginRestartBackoff[0])
+		requireSupervisor(t, func() bool { return launcher.count() == 2 }, "the elapsed backoff did not restart the plugin")
 	})
-	clock.Advance(pluginRestartBackoff[0])
-	waitForSupervisor(t, func() bool { return launcher.count() == 2 })
 }
 
 func TestPluginSupervisorIntentionalStopAndShutdownNeverRestart(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	_ = supervisor.Ensure(pluginManifest{Name: "one"})
-	_ = supervisor.Ensure(pluginManifest{Name: "two"})
-	one, _ := supervisor.Snapshot("one")
-	if !supervisor.NoteConnected("one", one.Generation) {
-		t.Fatal("connect one")
-	}
-	supervisor.NoteDisconnected("one", one.Generation)
-	supervisor.Stop("one", pluginStopRemove)
-
-	stopped, _ := supervisor.Snapshot("one")
-	if stopped.Phase != pluginPhaseStopped || stopped.Running || stopped.Desired != pluginDesiredStopped {
-		t.Fatalf("stopped snapshot=%+v", stopped)
-	}
-	if supervisor.NoteConnected("one", one.Generation) {
-		t.Fatal("stale generation reconnect accepted")
-	}
-	clock.Advance(time.Hour)
-	if got := launcher.count(); got != 2 {
-		t.Fatalf("starts after intentional stop=%d, want 2", got)
-	}
-
-	supervisor.Shutdown()
-	clock.Advance(time.Hour)
-	if got := launcher.count(); got != 2 {
-		t.Fatalf("starts after shutdown=%d, want 2", got)
-	}
-	for _, name := range []string{"one", "two"} {
-		snapshot, _ := supervisor.Snapshot(name)
-		if snapshot.Phase != pluginPhaseStopped || snapshot.Running {
-			t.Fatalf("%s snapshot=%+v after shutdown", name, snapshot)
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		_ = supervisor.Ensure(pluginManifest{Name: "one"})
+		_ = supervisor.Ensure(pluginManifest{Name: "two"})
+		one, _ := supervisor.Snapshot("one")
+		if !supervisor.NoteConnected("one", one.Generation) {
+			t.Fatal("connect one")
 		}
-	}
+		supervisor.NoteDisconnected("one", one.Generation)
+		supervisor.Stop("one", pluginStopRemove)
+
+		stopped, _ := supervisor.Snapshot("one")
+		if stopped.Phase != pluginPhaseStopped || stopped.Running || stopped.Desired != pluginDesiredStopped {
+			t.Fatalf("stopped snapshot=%+v", stopped)
+		}
+		if supervisor.NoteConnected("one", one.Generation) {
+			t.Fatal("stale generation reconnect accepted")
+		}
+		clock.Advance(time.Hour)
+		if got := launcher.count(); got != 2 {
+			t.Fatalf("starts after intentional stop=%d, want 2", got)
+		}
+
+		supervisor.Shutdown()
+		clock.Advance(time.Hour)
+		if got := launcher.count(); got != 2 {
+			t.Fatalf("starts after shutdown=%d, want 2", got)
+		}
+		for _, name := range []string{"one", "two"} {
+			snapshot, _ := supervisor.Snapshot(name)
+			if snapshot.Phase != pluginPhaseStopped || snapshot.Running {
+				t.Fatalf("%s snapshot=%+v after shutdown", name, snapshot)
+			}
+		}
+	})
 }
 
 func TestPluginSupervisorSnapshotsStartingConnectedBackoffAndStopped(t *testing.T) {
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	supervisor := newTestPluginSupervisor(clock, launcher)
-	_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
+	synctest.Test(t, func(t *testing.T) {
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		supervisor := newTestPluginSupervisor(t, clock, launcher)
+		_ = supervisor.Ensure(pluginManifest{Name: "fixture"})
 
-	snapshot, _ := supervisor.Snapshot("fixture")
-	if snapshot.Phase != pluginPhaseStarting || !snapshot.Running || snapshot.Connected {
-		t.Fatalf("starting snapshot=%+v", snapshot)
-	}
-	if !supervisor.NoteConnected("fixture", snapshot.Generation) {
-		t.Fatal("connect current generation")
-	}
-	snapshot, _ = supervisor.Snapshot("fixture")
-	if snapshot.Phase != pluginPhaseConnected || !snapshot.Connected {
-		t.Fatalf("connected snapshot=%+v", snapshot)
-	}
-	launcher.handle(0).exit(pluginExit{Error: "boom"})
-	waitForSupervisor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		if snapshot.Phase != pluginPhaseStarting || !snapshot.Running || snapshot.Connected {
+			t.Fatalf("starting snapshot=%+v", snapshot)
+		}
+		if !supervisor.NoteConnected("fixture", snapshot.Generation) {
+			t.Fatal("connect current generation")
+		}
 		snapshot, _ = supervisor.Snapshot("fixture")
-		return snapshot.Phase == pluginPhaseBackoff
+		if snapshot.Phase != pluginPhaseConnected || !snapshot.Connected {
+			t.Fatalf("connected snapshot=%+v", snapshot)
+		}
+		launcher.handle(0).exit(pluginExit{Error: "boom"})
+		requireSupervisor(t, func() bool {
+			snapshot, _ = supervisor.Snapshot("fixture")
+			return snapshot.Phase == pluginPhaseBackoff
+		}, "the exit did not land the plugin in backoff")
+		if snapshot.LastExit == nil || snapshot.NextRestartAt.IsZero() {
+			t.Fatalf("backoff snapshot=%+v", snapshot)
+		}
+		supervisor.Stop("fixture", pluginStopRemove)
+		snapshot, _ = supervisor.Snapshot("fixture")
+		if snapshot.Phase != pluginPhaseStopped {
+			t.Fatalf("stopped snapshot=%+v", snapshot)
+		}
 	})
-	if snapshot.LastExit == nil || snapshot.NextRestartAt.IsZero() {
-		t.Fatalf("backoff snapshot=%+v", snapshot)
-	}
-	supervisor.Stop("fixture", pluginStopRemove)
-	snapshot, _ = supervisor.Snapshot("fixture")
-	if snapshot.Phase != pluginPhaseStopped {
-		t.Fatalf("stopped snapshot=%+v", snapshot)
-	}
 }
 
 func TestExecPluginProcessLauncherRunsExecutableWithoutBun(t *testing.T) {
@@ -245,10 +261,17 @@ func TestExecPluginProcessLauncherRunsExecutableWithoutBun(t *testing.T) {
 	}
 }
 
-func newTestPluginSupervisor(clock *fakePluginClock, launcher *fakePluginLauncher) *pluginSupervisor {
-	return newPluginSupervisor(launcher, clock, func(manifest pluginManifest, generation uint64) []string {
+// newTestPluginSupervisor builds a supervisor over the fake clock and launcher, and
+// shuts it down on cleanup. The shutdown is load-bearing inside a bubble: every
+// supervised plugin owns a goroutine parked on its process handle's exit channel,
+// and one still parked when the test body returns is a blocked bubble goroutine.
+func newTestPluginSupervisor(t *testing.T, clock *fakePluginClock, launcher *fakePluginLauncher) *pluginSupervisor {
+	t.Helper()
+	supervisor := newPluginSupervisor(launcher, clock, func(manifest pluginManifest, generation uint64) []string {
 		return []string{fmt.Sprintf("ATTN_PLUGIN_NAME=%s", manifest.Name), fmt.Sprintf("ATTN_PLUGIN_GENERATION=%d", generation)}
 	}, nil)
+	t.Cleanup(supervisor.Shutdown)
+	return supervisor
 }
 
 type fakePluginLauncher struct {
@@ -391,14 +414,14 @@ func (t *fakePluginTimer) Stop() bool {
 	return true
 }
 
-func waitForSupervisor(t *testing.T, condition func() bool) {
+// requireSupervisor asserts a supervisor condition holds once the bubble has
+// settled. The supervisor reacts to a process exit and to a fired backoff timer on
+// its own goroutine; synctest.Wait() returns after those have run, so the condition
+// is read against a settled supervisor rather than polled at it.
+func requireSupervisor(t *testing.T, condition func() bool, what string) {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(time.Millisecond)
+	synctest.Wait()
+	if !condition() {
+		t.Fatal(what)
 	}
-	t.Fatal("supervisor condition did not become true")
 }

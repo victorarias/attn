@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/git"
@@ -801,26 +802,32 @@ func TestDelegateRejectsRemoteSourceSession(t *testing.T) {
 }
 
 func TestDelegateWebSocketCommandReturnsResult(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
-	consumeDelegatedPrompt(t, backend)
-	client := newWorkspaceProtocolTestClient()
-	client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		backend := &fakeSpawnBackend{}
+		_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+		consumeDelegatedPrompt(t, backend)
+		client := newWorkspaceProtocolTestClient()
+		client.setIdentity("test", "protocol-"+protocol.ProtocolVersion, []string{protocol.CapabilityWorkspaceSessions})
 
-	payload, err := json.Marshal(protocol.DelegateMessage{
-		Cmd:             protocol.CmdDelegate,
-		SourceSessionID: sourceSessionID,
-		Brief:           "Handle this through the websocket dispatcher.",
-		Agent:           protocol.Ptr("codex"),
-	})
-	if err != nil {
-		t.Fatalf("marshal delegate message: %v", err)
-	}
-	d.handleClientMessage(client, payload)
+		payload, err := json.Marshal(protocol.DelegateMessage{
+			Cmd:             protocol.CmdDelegate,
+			SourceSessionID: sourceSessionID,
+			Brief:           "Handle this through the websocket dispatcher.",
+			Agent:           protocol.Ptr("codex"),
+		})
+		if err != nil {
+			t.Fatalf("marshal delegate message: %v", err)
+		}
+		d.handleClientMessage(client, payload)
 
-	select {
-	case outbound := <-client.send:
+		// handleDelegateWS polls the operation every 100ms until it leaves
+		// accepted/preparing. A settled bubble means that poll is the only thing
+		// left that can move, so run a generous number of them out — on the fake
+		// clock they are free.
+		time.Sleep(time.Second)
+		outbound := requireOutbound(t, client, "no delegate_result reached the client")
 		var result protocol.DelegateResultMessage
 		if err := json.Unmarshal(outbound.payload, &result); err != nil {
 			t.Fatalf("decode delegate result: %v", err)
@@ -831,9 +838,7 @@ func TestDelegateWebSocketCommandReturnsResult(t *testing.T) {
 		if result.Result.WorkspaceID != "workspace-source" {
 			t.Fatalf("workspace = %q, want workspace-source", result.Result.WorkspaceID)
 		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for delegate_result")
-	}
+	})
 }
 
 func TestDelegateKillsSpawnedRuntimeWhenPersistenceFails(t *testing.T) {

@@ -14,6 +14,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/automation"
@@ -455,22 +456,21 @@ location: {type: directory, path: "` + t.TempDir() + `"}
 }
 
 func TestAutomationRecoveryWaitsForInitialGitHubDiscovery(t *testing.T) {
-	ready := make(chan struct{})
-	recovered := make(chan struct{})
-	go recoverAutomationsAfterGitHubReady(ready, func() { close(recovered) })
+	synctest.Test(t, func(t *testing.T) {
+		ready := make(chan struct{})
+		recovered := make(chan struct{})
+		go recoverAutomationsAfterGitHubReady(ready, func() { close(recovered) })
 
-	select {
-	case <-recovered:
-		t.Fatal("automation recovery ran before GitHub host discovery completed")
-	case <-time.After(50 * time.Millisecond):
-	}
+		synctest.Wait()
+		select {
+		case <-recovered:
+			t.Fatal("automation recovery ran before GitHub host discovery completed")
+		default:
+		}
 
-	close(ready)
-	select {
-	case <-recovered:
-	case <-time.After(time.Second):
-		t.Fatal("automation recovery did not resume after GitHub host discovery completed")
-	}
+		close(ready)
+		requireDone(t, recovered, "automation recovery did not resume after GitHub host discovery completed")
+	})
 }
 
 func TestAutomationRecoveryLeavesGitHubRunsForFreshProviderObservation(t *testing.T) {
@@ -588,6 +588,8 @@ location:
 	}
 }
 
+// Boundary-bound: the GitHub client talks to an httptest.NewServer over a real
+// TCP socket, so the observer's work is not durably blocked.
 func TestManualPRRefreshFeedsGitHubAutomationObserver(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

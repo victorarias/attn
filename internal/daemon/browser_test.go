@@ -3,8 +3,10 @@ package daemon
 import (
 	"encoding/json"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -129,41 +131,43 @@ func TestBrowserControlRejectsNonObjectParams(t *testing.T) {
 }
 
 func TestOpenBrowserRetargetsExistingTileAtSameURL(t *testing.T) {
-	d, _, workspaceID := setupMarkdownWorkspace(t)
-	d.setSelectedSession("session-1")
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, _, workspaceID := setupMarkdownWorkspaceOn(t, base)
+		stopDaemonBackground(t, d)
+		d.setSelectedSession("session-1")
 
-	firstClient, firstServer := net.Pipe()
-	go d.handleOpenBrowser(firstServer, &protocol.OpenBrowserMessage{
-		Cmd: protocol.CmdOpenBrowser,
-		URL: "http://localhost:3000",
-	})
-	var firstResp protocol.Response
-	if err := json.NewDecoder(firstClient).Decode(&firstResp); err != nil || !firstResp.Ok {
-		t.Fatalf("first open browser response = (%+v, %v)", firstResp, err)
-	}
-	_ = firstClient.Close()
+		firstClient, firstServer := net.Pipe()
+		go d.handleOpenBrowser(firstServer, &protocol.OpenBrowserMessage{
+			Cmd: protocol.CmdOpenBrowser,
+			URL: "http://localhost:3000",
+		})
+		var firstResp protocol.Response
+		if err := json.NewDecoder(firstClient).Decode(&firstResp); err != nil || !firstResp.Ok {
+			t.Fatalf("first open browser response = (%+v, %v)", firstResp, err)
+		}
+		_ = firstClient.Close()
 
-	host := newWorkspaceProtocolTestClient()
-	host.trustedTauriOrigin = true
-	host.browserHostAuthenticated = true
-	host.connectedAt = time.Now()
-	host.setIdentity("tauri-app", "test", []string{
-		protocol.CapabilityWorkspaceSessions,
-		protocol.CapabilityBrowserHost,
-	})
-	d.wsHub.mu.Lock()
-	d.wsHub.clients[host] = true
-	d.wsHub.mu.Unlock()
+		host := newWorkspaceProtocolTestClient()
+		host.trustedTauriOrigin = true
+		host.browserHostAuthenticated = true
+		host.connectedAt = time.Now()
+		host.setIdentity("tauri-app", "test", []string{
+			protocol.CapabilityWorkspaceSessions,
+			protocol.CapabilityBrowserHost,
+		})
+		d.wsHub.mu.Lock()
+		d.wsHub.clients[host] = true
+		d.wsHub.mu.Unlock()
 
-	secondClient, secondServer := net.Pipe()
-	defer secondClient.Close()
-	go d.handleOpenBrowser(secondServer, &protocol.OpenBrowserMessage{
-		Cmd: protocol.CmdOpenBrowser,
-		URL: "http://localhost:3000",
-	})
+		secondClient, secondServer := net.Pipe()
+		defer secondClient.Close()
+		go d.handleOpenBrowser(secondServer, &protocol.OpenBrowserMessage{
+			Cmd: protocol.CmdOpenBrowser,
+			URL: "http://localhost:3000",
+		})
 
-	select {
-	case outbound := <-host.send:
+		outbound := requireOutbound(t, host, "no browser navigation request reached the host")
 		var request protocol.BrowserControlRequestMessage
 		if err := json.Unmarshal(outbound.payload, &request); err != nil {
 			t.Fatal(err)
@@ -174,15 +178,13 @@ func TestOpenBrowserRetargetsExistingTileAtSameURL(t *testing.T) {
 			protocol.Deref(request.Text) != "http://localhost:3000" {
 			t.Fatalf("request = %+v", request)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for browser navigation request")
-	}
 
-	_ = secondClient.SetReadDeadline(time.Now().Add(2 * time.Second))
-	var secondResp protocol.Response
-	if err := json.NewDecoder(secondClient).Decode(&secondResp); err != nil || !secondResp.Ok {
-		t.Fatalf("second open browser response = (%+v, %v)", secondResp, err)
-	}
+		_ = secondClient.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var secondResp protocol.Response
+		if err := json.NewDecoder(secondClient).Decode(&secondResp); err != nil || !secondResp.Ok {
+			t.Fatalf("second open browser response = (%+v, %v)", secondResp, err)
+		}
+	})
 }
 
 func TestOpenBrowserTargetsSelectedSession(t *testing.T) {
@@ -375,44 +377,46 @@ func TestBrowserControlTargetUsesExplicitWorkspace(t *testing.T) {
 }
 
 func TestBrowserControlBrokersToCapableClient(t *testing.T) {
-	d, _, _ := setupMarkdownWorkspace(t)
-	d.setSelectedSession("session-1")
-	largeResult := strings.Repeat("A", 64*1024)
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, _, _ := setupMarkdownWorkspaceOn(t, base)
+		stopDaemonBackground(t, d)
+		d.setSelectedSession("session-1")
+		largeResult := strings.Repeat("A", 64*1024)
 
-	openClient, openServer := net.Pipe()
-	go d.handleOpenBrowser(openServer, &protocol.OpenBrowserMessage{
-		Cmd: protocol.CmdOpenBrowser,
-		URL: "http://localhost:3000",
-	})
-	var openResp protocol.Response
-	if err := json.NewDecoder(openClient).Decode(&openResp); err != nil || !openResp.Ok {
-		t.Fatalf("open browser response = (%+v, %v)", openResp, err)
-	}
-	_ = openClient.Close()
+		openClient, openServer := net.Pipe()
+		go d.handleOpenBrowser(openServer, &protocol.OpenBrowserMessage{
+			Cmd: protocol.CmdOpenBrowser,
+			URL: "http://localhost:3000",
+		})
+		var openResp protocol.Response
+		if err := json.NewDecoder(openClient).Decode(&openResp); err != nil || !openResp.Ok {
+			t.Fatalf("open browser response = (%+v, %v)", openResp, err)
+		}
+		_ = openClient.Close()
 
-	host := newWorkspaceProtocolTestClient()
-	host.trustedTauriOrigin = true
-	host.browserHostAuthenticated = true
-	host.connectedAt = time.Now()
-	host.setIdentity("tauri-app", "test", []string{
-		protocol.CapabilityWorkspaceSessions,
-		protocol.CapabilityBrowserHost,
-	})
-	d.wsHub.mu.Lock()
-	d.wsHub.clients[host] = true
-	d.wsHub.mu.Unlock()
+		host := newWorkspaceProtocolTestClient()
+		host.trustedTauriOrigin = true
+		host.browserHostAuthenticated = true
+		host.connectedAt = time.Now()
+		host.setIdentity("tauri-app", "test", []string{
+			protocol.CapabilityWorkspaceSessions,
+			protocol.CapabilityBrowserHost,
+		})
+		d.wsHub.mu.Lock()
+		d.wsHub.clients[host] = true
+		d.wsHub.mu.Unlock()
 
-	clientConn, serverConn := net.Pipe()
-	defer clientConn.Close()
-	go d.handleBrowserControl(serverConn, &protocol.BrowserControlMessage{
-		Cmd:      protocol.CmdBrowserControl,
-		Action:   "type",
-		Selector: protocol.Ptr("#query"),
-		Text:     protocol.Ptr("browser text"),
-	})
+		clientConn, serverConn := net.Pipe()
+		defer clientConn.Close()
+		go d.handleBrowserControl(serverConn, &protocol.BrowserControlMessage{
+			Cmd:      protocol.CmdBrowserControl,
+			Action:   "type",
+			Selector: protocol.Ptr("#query"),
+			Text:     protocol.Ptr("browser text"),
+		})
 
-	select {
-	case outbound := <-host.send:
+		outbound := requireOutbound(t, host, "no browser control request reached the host")
 		var request protocol.BrowserControlRequestMessage
 		if err := json.Unmarshal(outbound.payload, &request); err != nil {
 			t.Fatal(err)
@@ -429,57 +433,57 @@ func TestBrowserControlBrokersToCapableClient(t *testing.T) {
 			Success:   true,
 			Data:      protocol.Ptr(largeResult),
 		})
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for browser control request")
-	}
 
-	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
-	var resp protocol.Response
-	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
-		t.Fatal(err)
-	}
-	if !resp.Ok || protocol.Deref(resp.Data) != largeResult {
-		t.Fatalf("response = %+v", resp)
-	}
+		_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+		var resp protocol.Response
+		if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+			t.Fatal(err)
+		}
+		if !resp.Ok || protocol.Deref(resp.Data) != largeResult {
+			t.Fatalf("response = %+v", resp)
+		}
+	})
 }
 
 func TestRemoteBrowserControlReturnsResultToHubClient(t *testing.T) {
-	d, _, workspaceID := setupMarkdownWorkspace(t)
-	d.setSelectedSession("session-1")
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, _, workspaceID := setupMarkdownWorkspaceOn(t, base)
+		stopDaemonBackground(t, d)
+		d.setSelectedSession("session-1")
 
-	openClient, openServer := net.Pipe()
-	go d.handleOpenBrowser(openServer, &protocol.OpenBrowserMessage{
-		Cmd: protocol.CmdOpenBrowser,
-		URL: "http://localhost:3000",
-	})
-	var openResp protocol.Response
-	if err := json.NewDecoder(openClient).Decode(&openResp); err != nil || !openResp.Ok {
-		t.Fatalf("open browser response = (%+v, %v)", openResp, err)
-	}
-	_ = openClient.Close()
+		openClient, openServer := net.Pipe()
+		go d.handleOpenBrowser(openServer, &protocol.OpenBrowserMessage{
+			Cmd: protocol.CmdOpenBrowser,
+			URL: "http://localhost:3000",
+		})
+		var openResp protocol.Response
+		if err := json.NewDecoder(openClient).Decode(&openResp); err != nil || !openResp.Ok {
+			t.Fatalf("open browser response = (%+v, %v)", openResp, err)
+		}
+		_ = openClient.Close()
 
-	host := newWorkspaceProtocolTestClient()
-	host.trustedTauriOrigin = true
-	host.browserHostAuthenticated = true
-	host.connectedAt = time.Now()
-	host.setIdentity("tauri-app", "test", []string{
-		protocol.CapabilityWorkspaceSessions,
-		protocol.CapabilityBrowserHost,
-	})
-	d.wsHub.mu.Lock()
-	d.wsHub.clients[host] = true
-	d.wsHub.mu.Unlock()
+		host := newWorkspaceProtocolTestClient()
+		host.trustedTauriOrigin = true
+		host.browserHostAuthenticated = true
+		host.connectedAt = time.Now()
+		host.setIdentity("tauri-app", "test", []string{
+			protocol.CapabilityWorkspaceSessions,
+			protocol.CapabilityBrowserHost,
+		})
+		d.wsHub.mu.Lock()
+		d.wsHub.clients[host] = true
+		d.wsHub.mu.Unlock()
 
-	hubClient := newWorkspaceProtocolTestClient()
-	go d.handleRemoteBrowserControl(hubClient, &protocol.BrowserControlMessage{
-		Cmd:         protocol.CmdBrowserControl,
-		Action:      "get_title",
-		RequestID:   protocol.Ptr("remote-request-1"),
-		WorkspaceID: protocol.Ptr(workspaceID),
-	})
+		hubClient := newWorkspaceProtocolTestClient()
+		go d.handleRemoteBrowserControl(hubClient, &protocol.BrowserControlMessage{
+			Cmd:         protocol.CmdBrowserControl,
+			Action:      "get_title",
+			RequestID:   protocol.Ptr("remote-request-1"),
+			WorkspaceID: protocol.Ptr(workspaceID),
+		})
 
-	select {
-	case outbound := <-host.send:
+		outbound := requireOutbound(t, host, "no browser control request reached the host")
 		var request protocol.BrowserControlRequestMessage
 		if err := json.Unmarshal(outbound.payload, &request); err != nil {
 			t.Fatal(err)
@@ -490,14 +494,10 @@ func TestRemoteBrowserControlReturnsResultToHubClient(t *testing.T) {
 			Success:   true,
 			Data:      protocol.Ptr(`"Remote title"`),
 		})
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for browser host request")
-	}
 
-	select {
-	case outbound := <-hubClient.send:
+		hubOutbound := requireOutbound(t, hubClient, "no browser control response reached the hub client")
 		var response protocol.BrowserControlResponseMessage
-		if err := json.Unmarshal(outbound.payload, &response); err != nil {
+		if err := json.Unmarshal(hubOutbound.payload, &response); err != nil {
 			t.Fatal(err)
 		}
 		if response.Event != protocol.EventBrowserControlResponse ||
@@ -506,9 +506,7 @@ func TestRemoteBrowserControlReturnsResultToHubClient(t *testing.T) {
 			protocol.Deref(response.Data) != `"Remote title"` {
 			t.Fatalf("response = %+v", response)
 		}
-	case <-time.After(2 * time.Second):
-		t.Fatal("timed out waiting for browser control response")
-	}
+	})
 }
 
 func TestBrowserControlIgnoresResultFromDifferentHost(t *testing.T) {
