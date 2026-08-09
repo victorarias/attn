@@ -61,6 +61,10 @@ function suppressTerminalMouseDuringResize(durationMs = RESIZE_MOUSE_SUPPRESSION
   );
 }
 
+// The tile's content request is an effect dependency, so the no-op stand-in
+// has to keep one identity.
+const noRequestContent = () => {};
+
 function zoomLayoutTowardLeaf(node: TerminalLayoutNode, leafId: string): TerminalLayoutNode {
   if (node.type !== 'split') {
     return node;
@@ -1134,7 +1138,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 onUpdateTile?.(tileLeaf.tileId, tileLeaf.tileParams ?? '', sessionId)
               )}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
-              onRequestContent={onRequestTileContent ?? (() => {})}
+              onRequestContent={onRequestTileContent ?? noRequestContent}
               bodyRef={tileBodyRefFor(tileLeaf.tileId)}
             />
           </div>
