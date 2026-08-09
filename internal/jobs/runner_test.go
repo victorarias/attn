@@ -7,6 +7,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -33,6 +34,27 @@ func newTestRunner(t *testing.T, tune func(*Options)) (*Runner, *memStore, *fake
 	r := New(opts)
 	t.Cleanup(r.Stop)
 	return r, store, clock
+}
+
+// newBubbleRunner builds a started runner for a synctest bubble. Inside a bubble
+// the time package runs on a fake clock, so the runner needs no injected clock
+// (time.Now IS the fake clock, moved by time.Sleep) and no shortened poll
+// interval (production's 1s tick costs no wall-clock time). Stop is registered
+// on the bubble's own T, whose cleanups run inside the bubble — the dispatch
+// goroutines it joins live there.
+func newBubbleRunner(t *testing.T, tune func(*Options)) (*Runner, *memStore) {
+	t.Helper()
+	store := newMemStore()
+	opts := Options{
+		Store: store,
+		Log:   func(string, ...any) {},
+	}
+	if tune != nil {
+		tune(&opts)
+	}
+	r := New(opts)
+	t.Cleanup(r.Stop)
+	return r, store
 }
 
 // waitFor polls cond until it holds or the deadline passes. Every wait in this
@@ -241,75 +263,86 @@ func TestATriggerArrivingMidRunRunsTheJobAgain(t *testing.T) {
 	}
 }
 
+// Converted to synctest (spike leg 1). time.Sleep moves the bubble's fake clock,
+// so the backoff windows are advanced by sleeping exactly the interval under
+// test; synctest.Wait replaces every poll loop by blocking until the dispatch
+// loop and the run it launched are done, which is what "the attempt failed"
+// actually means.
 func TestFailuresBackOffThenGoDeadOnce(t *testing.T) {
-	r, _, clock := newTestRunner(t, func(o *Options) {
-		o.MaxAttempts = 3
-		o.BackoffBase = time.Minute
-	})
-	var deadCalls atomic.Int32
-	var deadState atomic.Value
-	r.OnTerminalFailure(func(j *Job) {
-		deadCalls.Add(1)
-		deadState.Store(string(j.State))
-	})
-	mustRegister(t, r, "flaky", func(context.Context, *Job) (any, error) {
-		return nil, errors.New("boom")
-	})
-	mustStart(t, r)
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := newBubbleRunner(t, func(o *Options) {
+			o.MaxAttempts = 3
+			o.BackoffBase = time.Minute
+		})
+		var deadCalls atomic.Int32
+		var deadState atomic.Value
+		r.OnTerminalFailure(func(j *Job) {
+			deadCalls.Add(1)
+			deadState.Store(string(j.State))
+		})
+		mustRegister(t, r, "flaky", func(context.Context, *Job) (any, error) {
+			return nil, errors.New("boom")
+		})
+		mustStart(t, r)
 
-	job, err := r.Enqueue("flaky", EnqueueOptions{})
-	if err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
+		job, err := r.Enqueue("flaky", EnqueueOptions{})
+		if err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
 
-	// Attempt 1 fails and schedules a retry one base interval out.
-	waitFor(t, "the first attempt to fail", func() bool {
-		return mustGet(t, r, job.ID).State == StateFailed
+		// Attempt 1 fails and schedules a retry one base interval out.
+		synctest.Wait()
+		after1 := mustGet(t, r, job.ID)
+		if after1.State != StateFailed {
+			t.Fatalf("state after the first attempt = %s, want failed", after1.State)
+		}
+		if got, want := after1.ScheduledAt, time.Now().UTC().Add(time.Minute); !got.Equal(want) {
+			t.Errorf("retry scheduled at %s, want %s (one base interval)", got, want)
+		}
+
+		// Attempt 2 fails and doubles the delay.
+		time.Sleep(time.Minute)
+		synctest.Wait()
+		after2 := mustGet(t, r, job.ID)
+		if after2.State != StateFailed || after2.Attempts != 2 {
+			t.Fatalf("after the second attempt: state %s attempts %d, want failed/2", after2.State, after2.Attempts)
+		}
+		if got, want := after2.ScheduledAt, time.Now().UTC().Add(2*time.Minute); !got.Equal(want) {
+			t.Errorf("second retry scheduled at %s, want %s (doubled)", got, want)
+		}
+
+		// Attempt 3 hits the cap and the job dies.
+		time.Sleep(2 * time.Minute)
+		synctest.Wait()
+		dead := mustGet(t, r, job.ID)
+		if dead.State != StateDead {
+			t.Fatalf("state after the third attempt = %s, want dead", dead.State)
+		}
+		if dead.Attempts != 3 {
+			t.Errorf("attempts = %d, want 3", dead.Attempts)
+		}
+		if dead.LastError != "boom" {
+			t.Errorf("last error = %q, want boom", dead.LastError)
+		}
+
+		// The terminal hook is the notification surface's signal: it must fire once on
+		// the crossing, not on every transient failure and not again afterwards.
+		if got := deadCalls.Load(); got != 1 {
+			t.Errorf("terminal-failure hook fired %d times, want exactly 1", got)
+		}
+		if got := deadState.Load(); got != string(StateDead) {
+			t.Errorf("terminal-failure hook saw state %v, want dead", got)
+		}
+
+		// A dead job stays dead: nothing re-selects it once the cap is spent. An hour
+		// of fake time really does pass here — every poll tick in it runs a dispatch
+		// pass — so this is the claim itself, not a sleep standing in for it.
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := mustGet(t, r, job.ID); got.Attempts != 3 {
+			t.Errorf("dead job was retried (attempts = %d)", got.Attempts)
+		}
 	})
-	after1 := mustGet(t, r, job.ID)
-	if got, want := after1.ScheduledAt, clock.now().Add(time.Minute); !got.Equal(want) {
-		t.Errorf("retry scheduled at %s, want %s (one base interval)", got, want)
-	}
-
-	// Attempt 2 fails and doubles the delay.
-	clock.advance(time.Minute)
-	waitFor(t, "the second attempt", func() bool {
-		j := mustGet(t, r, job.ID)
-		return j.State == StateFailed && j.Attempts == 2
-	})
-	after2 := mustGet(t, r, job.ID)
-	if got, want := after2.ScheduledAt, clock.now().Add(2*time.Minute); !got.Equal(want) {
-		t.Errorf("second retry scheduled at %s, want %s (doubled)", got, want)
-	}
-
-	// Attempt 3 hits the cap and the job dies.
-	clock.advance(2 * time.Minute)
-	waitFor(t, "the job to die", func() bool {
-		return mustGet(t, r, job.ID).State == StateDead
-	})
-	dead := mustGet(t, r, job.ID)
-	if dead.Attempts != 3 {
-		t.Errorf("attempts = %d, want 3", dead.Attempts)
-	}
-	if dead.LastError != "boom" {
-		t.Errorf("last error = %q, want boom", dead.LastError)
-	}
-
-	// The terminal hook is the notification surface's signal: it must fire once on
-	// the crossing, not on every transient failure and not again afterwards.
-	if got := deadCalls.Load(); got != 1 {
-		t.Errorf("terminal-failure hook fired %d times, want exactly 1", got)
-	}
-	if got := deadState.Load(); got != string(StateDead) {
-		t.Errorf("terminal-failure hook saw state %v, want dead", got)
-	}
-
-	// A dead job stays dead: nothing re-selects it once the cap is spent.
-	clock.advance(time.Hour)
-	time.Sleep(20 * testPoll)
-	if got := mustGet(t, r, job.ID); got.Attempts != 3 {
-		t.Errorf("dead job was retried (attempts = %d)", got.Attempts)
-	}
 }
 
 func TestAJobCanRaiseItsOwnAttemptCap(t *testing.T) {
@@ -551,54 +584,66 @@ func TestPriorityOrdersTheQueue(t *testing.T) {
 	}
 }
 
+// Converted to synctest (spike leg 1). The load-bearing assertion here is a
+// negative — the second serial job must NOT start — which a real sleep can only
+// make probable. synctest.Wait blocks until the dispatch loop has nothing left
+// to do, so "it never started" is a fact about a settled system rather than
+// about 40ms of waiting.
 func TestAKindIsSerializedWithItselfButNotWithOthers(t *testing.T) {
-	r, _, _ := newTestRunner(t, nil)
-	var serialInflight, serialPeak atomic.Int32
-	release := make(chan struct{})
-	bothKinds := make(chan string, 2)
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := newBubbleRunner(t, nil)
+		var serialInflight, serialPeak atomic.Int32
+		release := make(chan struct{})
+		bothKinds := make(chan string, 2)
 
-	mustRegister(t, r, "serial", func(context.Context, *Job) (any, error) {
-		n := serialInflight.Add(1)
-		for {
-			peak := serialPeak.Load()
-			if n <= peak || serialPeak.CompareAndSwap(peak, n) {
-				break
+		mustRegister(t, r, "serial", func(context.Context, *Job) (any, error) {
+			n := serialInflight.Add(1)
+			for {
+				peak := serialPeak.Load()
+				if n <= peak || serialPeak.CompareAndSwap(peak, n) {
+					break
+				}
+			}
+			bothKinds <- "serial"
+			<-release
+			serialInflight.Add(-1)
+			return nil, nil
+		})
+		mustRegister(t, r, "other", func(context.Context, *Job) (any, error) {
+			bothKinds <- "other"
+			<-release
+			return nil, nil
+		})
+		mustStart(t, r)
+
+		for i := range 2 {
+			if _, err := r.Enqueue("serial", EnqueueOptions{}); err != nil {
+				t.Fatalf("enqueue serial %d: %v", i, err)
 			}
 		}
-		bothKinds <- "serial"
-		<-release
-		serialInflight.Add(-1)
-		return nil, nil
-	})
-	mustRegister(t, r, "other", func(context.Context, *Job) (any, error) {
-		bothKinds <- "other"
-		<-release
-		return nil, nil
-	})
-	mustStart(t, r)
-
-	for i := 0; i < 2; i++ {
-		if _, err := r.Enqueue("serial", EnqueueOptions{}); err != nil {
-			t.Fatalf("enqueue serial %d: %v", i, err)
+		if _, err := r.Enqueue("other", EnqueueOptions{}); err != nil {
+			t.Fatalf("enqueue other: %v", err)
 		}
-	}
-	if _, err := r.Enqueue("other", EnqueueOptions{}); err != nil {
-		t.Fatalf("enqueue other: %v", err)
-	}
 
-	// One serial job and the other kind run together; the second serial job waits.
-	got := map[string]bool{}
-	for i := 0; i < 2; i++ {
-		got[<-bothKinds] = true
-	}
-	if !got["serial"] || !got["other"] {
-		t.Fatalf("kinds running together = %v, want both serial and other", got)
-	}
-	time.Sleep(20 * testPoll)
-	if peak := serialPeak.Load(); peak != 1 {
-		t.Errorf("peak concurrent serial runs = %d, want 1", peak)
-	}
-	close(release)
+		// One serial job and the other kind run together; the second serial job waits.
+		synctest.Wait()
+		got := map[string]bool{}
+		for range 2 {
+			select {
+			case kind := <-bothKinds:
+				got[kind] = true
+			default:
+				t.Fatalf("only %v started once dispatch settled, want both serial and other", got)
+			}
+		}
+		if !got["serial"] || !got["other"] {
+			t.Fatalf("kinds running together = %v, want both serial and other", got)
+		}
+		if peak := serialPeak.Load(); peak != 1 {
+			t.Errorf("peak concurrent serial runs = %d, want 1", peak)
+		}
+		close(release)
+	})
 }
 
 func TestAnUnregisteredKindFailsInPlace(t *testing.T) {
