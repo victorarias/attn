@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -30,11 +31,22 @@ type TicketMutationOptions struct {
 	ExpectedEventSeq *int64
 }
 
-// TicketMutationOutcome reports a CLI catch-up conflict. A non-empty slice means
-// the transaction advanced only this ticket's applicable cursors and deliberately
-// did not execute the mutation callback.
+// TicketMutationOutcome reports unread activity the mutation consumed. CatchUp is
+// owed to the caller either way; Blocked says whether reading it also cost the
+// caller its write — true means the transaction advanced this ticket's applicable
+// cursors and deliberately did not execute the mutation callback.
 type TicketMutationOutcome struct {
-	ConflictEvents []TicketEvent
+	CatchUp []TicketEvent
+	Blocked bool
+}
+
+// blocksTicketMutation reports whether an unread event must be read before the
+// caller may write. Only another participant's word does. attn's own bookkeeping
+// (the crash stamp, the crashed→working flip, a reconciliation verdict) records
+// what happened TO a session while it was dead, so refusing on it made a revived
+// agent's first report fail every time — on activity describing its own death.
+func blocksTicketMutation(event TicketEvent) bool {
+	return strings.TrimSpace(event.Author) != TicketAuthorAttn
 }
 
 func (s *Store) withTicketMutation(
@@ -55,6 +67,7 @@ func (s *Store) withTicketMutation(
 	}
 	defer tx.Rollback()
 
+	var outcome TicketMutationOutcome
 	if options.ExpectedEventSeq != nil {
 		actual, err := latestTicketEventSeqTx(tx, ticketID)
 		if err != nil {
@@ -64,20 +77,23 @@ func (s *Store) withTicketMutation(
 			return TicketMutationOutcome{}, fmt.Errorf("%w: expected event %d, latest is %d", ErrStaleTicketEventSeq, *options.ExpectedEventSeq, actual)
 		}
 	} else if len(options.Observers) > 0 {
-		conflicts, err := consumeTargetTicketEventsTx(tx, ticketID, options.Observers, now)
+		consumed, err := consumeTargetTicketEventsTx(tx, ticketID, options.Observers, now)
 		if err != nil {
 			return TicketMutationOutcome{}, err
 		}
-		if len(conflicts) > 0 {
+		if len(consumed) > 0 {
 			if key := strings.TrimSpace(options.AttentionKey); key != "" {
 				if err := setTicketDeliveryAttentionTx(tx, key, now); err != nil {
 					return TicketMutationOutcome{}, err
 				}
 			}
-			if err := tx.Commit(); err != nil {
-				return TicketMutationOutcome{}, err
+			if slices.ContainsFunc(consumed, blocksTicketMutation) {
+				if err := tx.Commit(); err != nil {
+					return TicketMutationOutcome{}, err
+				}
+				return TicketMutationOutcome{CatchUp: consumed, Blocked: true}, nil
 			}
-			return TicketMutationOutcome{ConflictEvents: conflicts}, nil
+			outcome.CatchUp = consumed
 		}
 	}
 
@@ -87,7 +103,7 @@ func (s *Store) withTicketMutation(
 	if err := tx.Commit(); err != nil {
 		return TicketMutationOutcome{}, err
 	}
-	return TicketMutationOutcome{}, nil
+	return outcome, nil
 }
 
 func latestTicketEventSeqTx(tx *sql.Tx, ticketID string) (int64, error) {

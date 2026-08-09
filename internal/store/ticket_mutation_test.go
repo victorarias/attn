@@ -31,7 +31,7 @@ func TestTicketMutationConsumesTargetUnreadBeforeMutating(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated != nil || len(outcome.ConflictEvents) != 1 || outcome.ConflictEvents[0].Comment != "new target context" {
+	if updated != nil || !outcome.Blocked || len(outcome.CatchUp) != 1 || outcome.CatchUp[0].Comment != "new target context" {
 		t.Fatalf("first attempt updated=%+v outcome=%+v", updated, outcome)
 	}
 	target, _ := s.GetTicket("target")
@@ -51,8 +51,81 @@ func TestTicketMutationConsumesTargetUnreadBeforeMutating(t *testing.T) {
 	}
 
 	updated, outcome, err = s.SetTicketStatusWithOptions("target", TicketStatusDone, "worker", "done", options, now.Add(4*time.Second))
-	if err != nil || updated == nil || len(outcome.ConflictEvents) != 0 || updated.Status != TicketStatusDone {
+	if err != nil || updated == nil || outcome.Blocked || len(outcome.CatchUp) != 0 || updated.Status != TicketStatusDone {
 		t.Fatalf("retry updated=%+v outcome=%+v err=%v", updated, outcome, err)
+	}
+}
+
+// attn's own bookkeeping is delivered, not charged for: an agent whose ticket
+// carries only attn-authored unread events writes on the first attempt and gets
+// those events back beside the result.
+func TestTicketMutationAppliesThroughAttnAuthoredCatchUp(t *testing.T) {
+	s := New()
+	defer s.Close()
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	if _, err := s.CreateTicket(Ticket{ID: "target", Title: "Target", Assignee: "worker", Status: TicketStatusWorking}, "chief", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetTicketStatus("target", TicketStatusCrashed, TicketAuthorAttn, "agent process ended mid-flight without reporting", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetTicketStatus("target", TicketStatusWorking, TicketAuthorAttn, "session was reloaded and is running again", now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	options := TicketMutationOptions{
+		Observers:    []TicketMutationObserver{{CursorIdentity: "worker", AuthorIdentity: "worker"}},
+		AttentionKey: "worker",
+	}
+
+	updated, outcome, err := s.SetTicketStatusWithOptions("target", TicketStatusInReview, "worker", "PR is up", options, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outcome.Blocked || updated == nil || updated.Status != TicketStatusInReview {
+		t.Fatalf("first attempt updated=%+v outcome=%+v", updated, outcome)
+	}
+	if len(outcome.CatchUp) != 2 {
+		t.Fatalf("catch-up = %+v, want the crash and revive records delivered", outcome.CatchUp)
+	}
+	unread, err := s.UnreadTicketEventsFor("worker", "worker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unread) != 0 {
+		t.Fatalf("unread after delivery = %+v, want the cursor advanced", unread)
+	}
+}
+
+// A peer's word in the same unread batch still costs the write: the agent must
+// read it before it may report over it.
+func TestTicketMutationBlocksWhenAttnCatchUpCarriesAPeerEvent(t *testing.T) {
+	s := New()
+	defer s.Close()
+	now := time.Date(2026, 8, 9, 12, 0, 0, 0, time.UTC)
+	if _, err := s.CreateTicket(Ticket{ID: "target", Title: "Target", Assignee: "worker", Status: TicketStatusWorking}, "chief", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.SetTicketStatus("target", TicketStatusCrashed, TicketAuthorAttn, "agent process ended mid-flight without reporting", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AddTicketComment("target", "chief", "scope changed while you were down", now.Add(2*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	options := TicketMutationOptions{
+		Observers:    []TicketMutationObserver{{CursorIdentity: "worker", AuthorIdentity: "worker"}},
+		AttentionKey: "worker",
+	}
+
+	updated, outcome, err := s.SetTicketStatusWithOptions("target", TicketStatusDone, "worker", "done", options, now.Add(3*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated != nil || !outcome.Blocked || len(outcome.CatchUp) != 2 {
+		t.Fatalf("updated=%+v outcome=%+v, want blocked with both records shown", updated, outcome)
+	}
+	target, _ := s.GetTicket("target")
+	if target.Status != TicketStatusCrashed {
+		t.Fatalf("blocked mutation changed status to %s", target.Status)
 	}
 }
 

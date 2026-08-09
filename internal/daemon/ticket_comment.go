@@ -48,10 +48,11 @@ func (d *Daemon) handleTicketComment(conn net.Conn, msg *protocol.TicketCommentM
 	}
 	result := &protocol.TicketCommentResult{
 		TicketID: ticketID,
-		CatchUp:  ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+		CatchUp:  ticketMutationCatchUp(ticketID, outcome.CatchUp),
+		Applied:  !outcome.Blocked,
 	}
-	if len(outcome.ConflictEvents) > 0 {
-		d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.ConflictEvents)
+	d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.CatchUp)
+	if outcome.Blocked {
 		d.deliveryMu.Unlock()
 		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketCommentResult: result})
 		return
