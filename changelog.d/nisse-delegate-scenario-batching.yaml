@@ -1,0 +1,6 @@
+kind: internal
+area: testing
+change: >
+  The packaged-app delegation scenario now asks its agent for two separate shell
+  calls, so a model that batches "read the file" and "report what it said" into
+  one line no longer fails a witness it actually satisfied.

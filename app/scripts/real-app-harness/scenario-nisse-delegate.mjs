@@ -143,14 +143,25 @@ function waitForHost(known, description, timeoutMs = 90_000) {
   return pollFor(async () => hostProcesses().find((entry) => !known.includes(entry.pid)) ?? null, description, timeoutMs);
 }
 
-/** The delegation brief: a real task, done with the agent's own tools. */
+/**
+ * The delegation brief: a real task, done with the agent's own tools.
+ *
+ * Steps 1 and 2 are demanded as SEPARATE bash calls on purpose. Told only to do
+ * them "in order", a model batches both into one shell line — `cat AGENTS.md;
+ * attn ticket status … --comment "… codename="` — and composes the comment
+ * before it has seen the file, so the guidance witness fails on an agent that
+ * did read the guidance (observed 2026-08-09). One call cannot carry what the
+ * next one has to have learned.
+ */
 function briefFor(token) {
   return [
     'Do these three things, in order, using your bash tool. Do not ask for',
-    'confirmation and do nothing else.',
+    'confirmation and do nothing else. Steps 1 and 2 are two separate bash',
+    'calls: you cannot know what to write in step 2 until step 1 has answered.',
     '',
     '1. Read AGENTS.md in the current directory and note the codename it records.',
-    '2. Run this command, with <codename> replaced by what you read in step 1:',
+    '2. In a second, separate bash call, run this command, with <codename>',
+    '   replaced by what you read in step 1:',
     `     attn ticket status ready_for_review --comment "${token} codename=<codename>"`,
     '3. Reply with the single word: done',
   ].join('\n');
