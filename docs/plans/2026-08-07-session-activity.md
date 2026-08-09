@@ -584,10 +584,20 @@ tier intervals, per-kind clip budgets, and whether a cheaper model holds up.
       agent; and a projection test so the broadcast is not a direct hub write.
 - [x] Glossary entries for **activity** and **presence tier**, drawing the line
       against the Notebook's journal and summaries. Changelog fragment.
-- [ ] Live verification on a throwaway profile: enable with each agent, watch
+- [x] Live verification on a throwaway profile: enable with each agent, watch
       lines appear while the dashboard is visible, confirm hiding the dashboard
       slows generation and leaving the app stops it entirely, confirm returning
       resumes, disable.
+
+      Done 2026-08-09 on profile `actlive1` against a working Claude session.
+      Claude (`claude-haiku-4-5`) and Codex (`gpt-5.6-luna`, ~4s per run) both
+      produced lines; home rendered them under the session name. Home visible
+      refreshed on the 120s cadence; leaving home held a line at 5m old while
+      the session kept working, and returning to home regenerated it at once,
+      caught up on everything that had happened meanwhile. `attn activity`
+      reported the tier and the lines, `attn activity clear` emptied line and
+      cursor and the next scan re-seeded and generated again, and disabling
+      cleared every line and cursor in the database.
 
 ## Decisions
 
