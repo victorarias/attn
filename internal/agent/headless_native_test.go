@@ -107,6 +107,35 @@ func TestClaudeHeadlessArgsHonorsAllowedToolsOverride(t *testing.T) {
 	assertContainsNone(t, "Claude native override args", args, "Read,Write,Edit,Grep,Glob")
 }
 
+func TestClaudeHeadlessArgsReplacesSystemPromptWhenAsked(t *testing.T) {
+	args := claudeHeadlessArgs(HeadlessTaskRequest{
+		Model:        "claude-test",
+		Prompt:       "classify this",
+		SystemPrompt: "You are a terse classifier.",
+	})
+	assertContainsAll(t, "Claude system-prompt args", args,
+		"--system-prompt", "You are a terse classifier.")
+	// --system-prompt REPLACES; --append-system-prompt (the interactive-launch
+	// flag) adds. Emitting the wrong one loses the whole saving silently.
+	assertContainsNone(t, "Claude system-prompt args", args, "--append-system-prompt")
+	// The prompt stays the trailing positional.
+	if args[len(args)-1] != "classify this" {
+		t.Fatalf("prompt must stay last, got %q:\n%v", args[len(args)-1], args)
+	}
+
+	// Unset leaves the CLI's own default in place, which is what every caller
+	// before this field expected.
+	plain := claudeHeadlessArgs(HeadlessTaskRequest{Model: "claude-test", Prompt: "compact"})
+	assertContainsNone(t, "Claude default system prompt", plain, "--system-prompt")
+
+	// A tool-less run must NOT disallow tools: --disallowedTools also disables
+	// StructuredOutput, so a --json-schema run produces no answer at all.
+	toolless := claudeHeadlessArgs(HeadlessTaskRequest{
+		Model: "claude-test", Prompt: "classify", DisableTools: true,
+	})
+	assertContainsNone(t, "Claude tool-less args", toolless, "--disallowedTools")
+}
+
 func TestCodexHeadlessArgsUsesWorkspaceWriteAndDropsMCPPin(t *testing.T) {
 	args := codexHeadlessArgs(HeadlessTaskRequest{
 		Model:   "gpt-test",

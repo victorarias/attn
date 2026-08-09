@@ -490,6 +490,25 @@ type Daemon struct {
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
 
+	// sessionActivityExecution is the same seam for the activity generator: set
+	// it and a test drives the whole executor — cursor handling, window read,
+	// prompt assembly, sanitizing, store write and fact publish — against a fake
+	// answer, with no subprocess and no spend.
+	sessionActivityExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+
+	// sessionActivityRuns is what the scan rate-limits itself against, keyed by
+	// session id. The stored line cannot serve: it records the last SUCCESS, so a
+	// generation that keeps failing leaves it untouched and the scan re-runs it
+	// on every tick. In memory rather than persisted because a daemon restart
+	// costing one extra pass per session is cheaper than a migration, and the
+	// pass is bounded by the same preconditions as any other.
+	sessionActivityRunsMu sync.Mutex
+	sessionActivityRuns   map[string]sessionActivityRun
+
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
 	// context write) since the last daily-narrate cron fire. It is best-effort and
@@ -2414,6 +2433,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
 	case protocol.CmdTicketShow: // wire: ticket_show
 		d.handleTicketShow(conn, msg.(*protocol.TicketShowMessage))
+	case protocol.CmdActivityStatus: // wire: activity_status
+		d.handleActivityStatus(conn, msg.(*protocol.ActivityStatusMessage))
+	case protocol.CmdClearSessionActivity: // wire: clear_session_activity
+		d.handleClearSessionActivity(conn, msg.(*protocol.ClearSessionActivityMessage))
 	case protocol.CmdTicketSubscribe: // wire: ticket_subscribe
 		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
 	case protocol.CmdTicketUnsubscribe: // wire: ticket_unsubscribe

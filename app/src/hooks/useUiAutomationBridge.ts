@@ -1316,7 +1316,14 @@ function clickElementWithModifiers(element: HTMLElement, modifiers?: ClickModifi
     shiftKey: modifiers?.shift ?? false,
     altKey: modifiers?.alt ?? false,
   };
+  // Pointer events first, in the order a real browser fires them. Anything
+  // listening for pointerdown — the modern default for "the user touched the
+  // app" — is otherwise invisible to every scenario that clicks through this
+  // helper, and the scenario reads as passing while the behavior never ran.
+  const pointerInit: PointerEventInit = { ...init, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+  element.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
   element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new PointerEvent('pointerup', pointerInit));
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.dispatchEvent(new MouseEvent('click', init));
 }
@@ -2050,6 +2057,25 @@ export function useUiAutomationBridge({
         }
         await settleUi(2);
         return { typed: text };
+      }
+      case 'dom_select': {
+        // Selects need their own verb: dom_type goes through the input value
+        // setter, which a <select> ignores, and a scenario that drives a settings
+        // pane has no other way to choose an option.
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        const value = typeof payload.value === 'string' ? payload.value : null;
+        if (!selector) throw new Error('dom_select requires selector');
+        if (value === null) throw new Error('dom_select requires value');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLSelectElement)) {
+          throw new Error(`dom_select target is not a select: ${selector}`);
+        }
+        if (![...element.options].some((option) => option.value === value)) {
+          throw new Error(`dom_select has no option ${value} in ${selector}`);
+        }
+        setControlValue(element, value);
+        await settleUi(2);
+        return { selected: value };
       }
       case 'get_window_bounds': {
         if (!isTauri()) {

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "218"
+const ProtocolVersion = "219"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -248,6 +248,9 @@ const (
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
+	CmdSetClientPresence                     = "set_client_presence"
+	CmdActivityStatus                        = "activity_status"
+	CmdClearSessionActivity                  = "clear_session_activity"
 	CmdSetTerminalTheme                      = "set_terminal_theme"
 	CmdWorkspaceLayoutGet                    = "workspace_layout_get"
 	CmdWorkspaceLayoutAddSessionPane         = "workspace_layout_add_session_pane"
@@ -1592,6 +1595,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg ReloadSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal reload_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetClientPresence:
+		var msg SetClientPresenceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_client_presence: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdActivityStatus:
+		var msg ActivityStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal activity_status: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdClearSessionActivity:
+		var msg ClearSessionActivityMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal clear_session_activity: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

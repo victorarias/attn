@@ -142,6 +142,26 @@ const (
 	// "false" stops new narrations and retires queued narrations without launching
 	// their agent. Raw session summaries and context compaction remain independent.
 	SettingNotebookNarrateWorkspaceEnabled = "notebook.narrate_workspace.enabled"
+	// SettingActivityEnabled gates session activity: one short present-tense line
+	// per session saying what its agent is doing right now, generated from the
+	// transcript. Off by default — it spends money per session per refresh and
+	// sends transcript excerpts to a model, so it is an explicit opt-in.
+	SettingActivityEnabled = "activity.enabled"
+	// SettingActivityConfig selects the generator. JSON
+	// {"agent":"claude"|"codex","model":"<id>","effort":"<effort>"}; empty means
+	// UNCONFIGURED, and there is deliberately no default agent — see
+	// parseActivityConfig. Model and effort fall back per agent once one is
+	// chosen.
+	SettingActivityConfig = "activity.config"
+	// SettingActivityIntervals is the per-presence-tier cadence, JSON
+	// {"watching":120,"present":300} in seconds. One setting rather than two
+	// because they are a single policy; the `away` tier is absent by design,
+	// since stop is not a rate.
+	SettingActivityIntervals = "activity.intervals"
+	// SettingActivityPresenceIdleSeconds is how long after the last input in the
+	// app the `present` tier survives. Default 90 and UNMEASURED; safe because
+	// `away` is self-healing.
+	SettingActivityPresenceIdleSeconds = "activity.presence_idle_seconds"
 	// SettingChiefContextWindowCap caps the chief-of-staff session's effective
 	// context window (in tokens): auto-compaction triggers at this threshold
 	// instead of at the model's full window, so each cache-cold chief wake
@@ -219,6 +239,13 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 		} else {
 			d.cancelAllAutoSettle()
 		}
+	}
+	// Turning session activity off has to take the lines with it. They are
+	// stored on the session and would otherwise keep sitting on home describing
+	// work from whenever the feature was last on — a switch that stops the
+	// spending but not the claim is the worst of both.
+	if msg.Key == SettingActivityEnabled && !parseBooleanSetting(msg.Value) {
+		d.clearAllSessionActivity()
 	}
 	d.publishSettingsFact(FactSettingChanged, msg.Key)
 }
@@ -385,6 +412,22 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	// (128000) rather than an absent key when the operator has not set one.
 	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
 	settings[SettingHeadlessContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingHeadlessContextWindowCap]))
+	// Session activity. The toggle and the intervals are surfaced EFFECTIVE, so
+	// the pane shows the concrete defaults rather than absent keys. activity.config
+	// is deliberately NOT normalized: blank means no agent has been chosen, and
+	// substituting one here would be the app quietly choosing how the user's money
+	// gets spent. The pane must require the choice.
+	settings[SettingActivityEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingActivityEnabled]))
+	settings[SettingActivityPresenceIdleSeconds] = strconv.Itoa(int(d.presenceIdleLimit() / time.Second))
+	if intervals, err := parseActivityIntervals(stored[SettingActivityIntervals]); err == nil {
+		if encoded, err := json.Marshal(intervals); err == nil {
+			settings[SettingActivityIntervals] = string(encoded)
+		}
+	}
+	// The presence tier is deliberately NOT here. It is live state, and settings
+	// are only re-pushed when a setting changes, so a copy parked in this
+	// snapshot goes stale within seconds of the user moving. `attn activity`
+	// computes it per request, which is the only way to read it honestly.
 
 	tailscale := d.tailscaleStateSnapshot()
 	if tailscale.status != "" {
@@ -544,7 +587,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingNotebookNarrateWorkspaceEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingNotebookNarrateWorkspaceEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled, SettingActivityEnabled:
 		return validateBooleanSetting(value)
 	case SettingModelCaptureIntervalSeconds:
 		return validateModelCaptureInterval(value)
@@ -562,6 +605,18 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNotebookNarrationSetting(notebookSummarizeSessionKind, value)
 	case SettingNotebookNarrateWorkspace:
 		return d.validateNotebookNarrationSetting(notebookNarrateWorkspaceKind, value)
+	case SettingActivityConfig:
+		return d.validateActivitySetting(value)
+	case SettingActivityIntervals:
+		_, err := parseActivityIntervals(value)
+		return err
+	case SettingActivityPresenceIdleSeconds:
+		return validateBoundedIntSetting(
+			"session activity presence idle",
+			value,
+			activityPresenceIdleMinSeconds,
+			activityPresenceIdleMaxSeconds,
+		)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
 	case SettingNotebookCronFrequency:

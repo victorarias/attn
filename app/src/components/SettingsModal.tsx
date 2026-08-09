@@ -49,6 +49,7 @@ import {
   type KeeperDutyDescriptor,
   type KeeperDutyKey,
 } from '../utils/keeperDuties';
+import { SessionActivitySettings } from './SessionActivitySettings';
 import './SettingsModal.css';
 
 interface SettingsModalProps {
@@ -2198,6 +2199,12 @@ export function SettingsModal({
           </div>
         </div>
       </section>
+
+      <SessionActivitySettings
+        settings={settings}
+        agents={keeperAgents}
+        onSetSetting={onSetSetting}
+      />
 
       <section className="settings-block">
         <div className="settings-block-intro">

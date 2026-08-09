@@ -69,6 +69,13 @@ type wsClient struct {
 	capabilities map[string]struct{}
 	identityMu   sync.RWMutex
 
+	// What this client last reported it can see, and when. Read on its own lock
+	// because it is rewritten on every heartbeat while identity is written once.
+	// A client that never reports leaves the zero value here, which reads as
+	// away — see client_presence.go.
+	presence   clientPresence
+	presenceMu sync.RWMutex
+
 	// Git status subscription state
 	gitStatusDir        string
 	gitStatusStop       chan struct{}
@@ -1292,6 +1299,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleReloadSession(client, msg.(*protocol.ReloadSessionMessage))
 	case protocol.CmdSetTerminalTheme: // wire: set_terminal_theme
 		d.handleSetTerminalTheme(client, msg.(*protocol.SetTerminalThemeMessage))
+	case protocol.CmdSetClientPresence: // wire: set_client_presence
+		d.handleSetClientPresence(client, msg.(*protocol.SetClientPresenceMessage))
 	case protocol.CmdWorkspaceLayoutGet: // wire: workspace_layout_get
 		d.handleWorkspaceLayoutGet(client, msg.(*protocol.WorkspaceLayoutGetMessage))
 	case protocol.CmdWorkspaceLayoutAddSessionPane: // wire: workspace_layout_add_session_pane

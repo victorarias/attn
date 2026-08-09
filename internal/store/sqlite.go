@@ -957,6 +957,13 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// cannot clear it — the same contract as pinned_at. Applied by
 	// applyMigration96.
 	{96, "add the context-window cap pin to sessions", ``},
+	// The session's activity line: one short present-tense sentence saying what
+	// the agent is doing right now, generated from its transcript. The cursor
+	// beside it is the transcript offset the line was generated through, which is
+	// what makes a refresh read only the appended bytes and what tells the
+	// generator that a session has written nothing new and needs no run at all.
+	// Applied by applyMigration97. See docs/plans/2026-08-07-session-activity.md.
+	{97, "add the activity line and its transcript cursor to sessions", ``},
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1262,6 +1269,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 96 {
 			if err := applyMigration96(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 97 {
+			if err := applyMigration97(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2374,6 +2386,31 @@ func applyMigration96(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN context_window_cap INTEGER NOT NULL DEFAULT 0")
 	return err
+}
+
+// applyMigration97 adds the activity line, when it was generated, and the
+// transcript cursor it was generated through.
+//
+// All three are owned by UpdateSessionActivity alone and are absent from the
+// session upsert, so a respawn or a state re-add cannot clear them — the same
+// arrangement pinned_at has, and for the same reason.
+//
+// Guarded per column, so a rewound schema_migrations table re-runs it without
+// failing on work already done.
+func applyMigration97(tx *sql.Tx) error {
+	for _, column := range []string{"activity", "activity_at", "activity_cursor"} {
+		has, err := columnExists(tx, "sessions", column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		if _, err := tx.Exec("ALTER TABLE sessions ADD COLUMN " + column + " TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // applyMigration93 adds the note a user writes alongside a session's

@@ -172,6 +172,9 @@
   "changed_key": "claude_executable",
   "event": "settings_updated",
   "settings": {
+    "activity.enabled": "false",
+    "activity.intervals": "{\"watching\":120,\"present\":300}",
+    "activity.presence_idle_seconds": "90",
     "auto_approve_enabled": "false",
     "auto_settle_arm_seconds": "30",
     "auto_settle_countdown_seconds": "15",
