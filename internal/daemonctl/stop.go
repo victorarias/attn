@@ -18,19 +18,13 @@ const (
 	stopSigkillWait = 2 * time.Second
 )
 
-// NonDaemonHolderSentinel is written into the pid file by non-daemon
-// processes that take the daemon lock (e.g. `attn db restore`, via
-// cmd/attn's acquireDaemonLock), replacing any stale daemon pid, so a
-// concurrent Stop observing a held lock never trusts a pid the current
-// holder didn't write. Content is only meaningful while the lock is held;
-// the next daemon acquire overwrites it with its own pid as usual.
+// NonDaemonHolderSentinel is written into the pid file by non-daemon lock
+// holders (e.g. `attn db restore`), so a concurrent Stop observing a held lock
+// never trusts a pid the current holder didn't write.
 const NonDaemonHolderSentinel = "non-daemon-holder"
 
-// flockFn is indirected to syscall.Flock so tests can inject a
-// non-EWOULDBLOCK failure (e.g. standing in for ENOLCK) without needing real
-// OS-level conditions to trigger it — EWOULDBLOCK is the only signal that
-// means a live daemon (or another non-daemon holder) actually holds the
-// lock; every other flock error is indeterminate and must fail closed.
+// flockFn is indirected so tests can inject a non-EWOULDBLOCK failure. Only
+// EWOULDBLOCK means the lock is held; every other flock error fails closed.
 var flockFn = syscall.Flock
 
 // StopResult describes the outcome of a Stop call.
@@ -41,22 +35,11 @@ type StopResult struct {
 	Note    string // human-readable detail for nil-error, not-stopped outcomes, e.g. "not running (no pid file)"
 }
 
-// Stop stops the daemon that owns pidPath, using the pid file's exclusive
-// flock as the liveness+ownership gate (mirrors stopProfileDaemon's semantics
-// exactly): if the lock can be acquired, no daemon or other holder owns the
-// file, so any pid on disk is stale and must never be signaled. Only
-// EWOULDBLOCK on the flock attempt means the lock is genuinely held; any
-// other flock error is indeterminate and fails closed rather than trusting a
-// pid nobody currently vouches for. When the lock is held, only content the
-// current holder is known to have written under that lock is trusted: the
-// daemon's own pid, or NonDaemonHolderSentinel for non-daemon holders like
-// `attn db restore` — anything else is a malformed-pid error. Not-running
-// outcomes (no pid file, stale pid file, sentinel-held lock, ESRCH on
-// signal) are nil-error results with Stopped=false and a Note. Errors are
-// reserved for genuine failures: open/read failures, an indeterminate flock
-// result, malformed pid contents, a pid matching this process or its parent
-// (refuse), SIGTERM delivery failure, or a process that survives SIGKILL
-// escalation.
+// Stop stops the daemon that owns pidPath. The pid file's exclusive flock is
+// the liveness+ownership gate (mirrors stopProfileDaemon): an acquirable lock
+// means any pid on disk is stale and never signaled; only EWOULDBLOCK means
+// held, any other flock error fails closed. Not-running outcomes are
+// nil-error results with Stopped=false and a Note; errors are genuine failures.
 func Stop(pidPath string) (StopResult, error) {
 	lockFile, err := os.OpenFile(pidPath, os.O_RDWR, 0)
 	if os.IsNotExist(err) {
@@ -66,26 +49,20 @@ func Stop(pidPath string) (StopResult, error) {
 		return StopResult{}, fmt.Errorf("could not open pid file: %w", err)
 	}
 	if flockErr := flockFn(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); flockErr == nil {
-		// Acquired the lock → no live daemon (or other holder) owns it. The
-		// pid on disk is stale; signaling it could hit a recycled, unrelated
-		// process.
+		// Acquired → no live holder; the pid on disk is stale and could be a
+		// recycled, unrelated process.
 		_ = syscall.Flock(int(lockFile.Fd()), syscall.LOCK_UN)
 		lockFile.Close()
 		return StopResult{Note: "not running (stale pid file)"}, nil
 	} else if !errors.Is(flockErr, syscall.EWOULDBLOCK) {
-		// Any other flock failure means we cannot determine whether the
-		// lock is held. Fail closed rather than risk trusting a pid nobody
-		// currently vouches for.
+		// Indeterminate flock result: fail closed.
 		lockFile.Close()
 		return StopResult{}, fmt.Errorf("cannot determine daemon state: %w", flockErr)
 	}
 	lockFile.Close()
 
-	// The lock is held (EWOULDBLOCK) → some process owns this file and, by
-	// convention, wrote content under the lock proving what it is: the
-	// daemon writes its own pid, and non-daemon holders (acquireDaemonLock,
-	// e.g. `attn db restore`) overwrite it with NonDaemonHolderSentinel. Only
-	// numeric content is trusted as a signalable pid.
+	// Lock held: trust only content written under the lock — the daemon's own
+	// pid or NonDaemonHolderSentinel. Only numeric content is signalable.
 	data, err := os.ReadFile(pidPath)
 	if err != nil {
 		return StopResult{}, fmt.Errorf("could not read pid file: %w", err)
@@ -98,18 +75,13 @@ func Stop(pidPath string) (StopResult, error) {
 	if err != nil || pid <= 0 {
 		return StopResult{}, fmt.Errorf("malformed pid file %q", pidText)
 	}
-	// Never signal our own process tree (e.g. stopping the profile we're
-	// running under): killing it would take down this very command.
+	// Never signal our own process tree.
 	if pid == os.Getpid() || pid == os.Getppid() {
 		return StopResult{}, fmt.Errorf("refusing to stop pid %d: it is this command's own process tree", pid)
 	}
-	// Content ordering alone cannot prove pid genuinely holds the lock: a
-	// holder acquires the flock before it writes its own pid (or the
-	// sentinel), so a Stop racing that window sees EWOULDBLOCK plus
-	// whatever stale content was there first. Require positive proof
-	// instead: pid must itself have the file open right now. A stale pid
-	// (recycled or not), or a holder caught between acquiring the flock
-	// and writing its content, fails this check and is never signaled.
+	// A holder acquires the flock before writing its pid, so a racing Stop can
+	// see EWOULDBLOCK plus stale content. Require positive proof: pid must
+	// have the file open right now, or it is never signaled.
 	holds, err := pidHoldsPIDFile(pid, pidPath)
 	if err != nil {
 		return StopResult{}, fmt.Errorf("could not verify pid %d holds the daemon lock: %w", pid, err)
@@ -134,8 +106,8 @@ func Stop(pidPath string) (StopResult, error) {
 	return StopResult{}, fmt.Errorf("pid %d did not exit after SIGKILL", pid)
 }
 
-// lsofPath resolves the `lsof` binary once: PATH first, falling back to its
-// standard macOS location, since Stop may run with a trimmed PATH.
+// lsofPath resolves `lsof` once: PATH first, then its standard macOS location,
+// since Stop may run with a trimmed PATH.
 var lsofPath = resolveLsofPath()
 
 func resolveLsofPath() string {
@@ -145,19 +117,10 @@ func resolveLsofPath() string {
 	return "/usr/sbin/lsof"
 }
 
-// pidHoldsPIDFile reports whether pid currently has pidPath open, via
-// `lsof -t -- <path>`. This is the positive ownership proof that closes the
-// acquire-flock-then-write-content ordering gap: unlike trusting the
-// content under a held lock, a process cannot appear here without an open
-// file descriptor on pidPath at the moment of the check, regardless of how
-// far it has gotten writing content.
-//
-// Fail-closed: any exec/parse error is returned as an error (never signaled
-// on an inconclusive result). lsof exiting 1 with no output means "no
-// process holds the file" — not an error, just holds=false. Note Stop's own
-// process may itself have pidPath open at probe time (from the earlier
-// contention check) — the check below tests membership of the specific
-// content pid, not exclusivity, so that is harmless.
+// pidHoldsPIDFile reports whether pid has pidPath open (`lsof -t`) — the
+// positive proof that closes the acquire-flock-then-write ordering gap.
+// Fail-closed on exec/parse errors; lsof exit 1 with no output means no holder.
+// It tests membership, not exclusivity, so Stop's own open fd is harmless.
 func pidHoldsPIDFile(pid int, pidPath string) (bool, error) {
 	cmd := exec.Command(lsofPath, "-t", "--", pidPath)
 	var stdout, stderr bytes.Buffer

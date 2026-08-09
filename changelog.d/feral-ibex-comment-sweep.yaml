@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  Comment sweep across the Go source: design-doc retellings, narration, and
+  review-directed justification are cut; invariants and measured receipts stay,
+  compressed to a line or two. AGENTS.md now states the policy — comments say
+  what the code cannot show, package headers link to the design doc instead of
+  retelling it.

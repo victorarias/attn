@@ -1,69 +1,11 @@
-// Package testinv keeps an inventory of interesting states a package's tests are
-// supposed to reach, and fails the run when one of them stops being reached.
-//
-// The problem it exists for: a test suite can keep passing while it quietly
-// stops exercising the thing it was written for. The assertion still holds, but
-// the state it was meant to hold *about* is no longer produced — a refactor
-// removed the delay a backoff test was pacing on, a faster consumer means the
-// batch loop never sees a batch, a fixture drifted and the race the test provokes
-// no longer happens. Line coverage cannot see any of that: the lines still run.
-// It is a condition, not a location, that went missing.
-//
-// A cataloged state names such a condition and marks the spot where it occurs:
-//
-//	// package-level, in a _test.go file
-//	var sawBacklogBatch = testinv.Sometimes("a drain is handed a batch of more than one event")
-//
-//	func TestMain(m *testing.M) { os.Exit(testinv.Run(m)) }
-//
-//	// wherever the condition can be observed
-//	if len(batch) > 1 {
-//		sawBacklogBatch.Reached()
-//	}
-//
-// Reached says "this happened at least once" — not "this must happen here", and
-// not "this must happen every time". Any test in the package may be the one that
-// reaches it; no test owns it. That is the point: the claim is about the run, so
-// it survives the individual test that happens to satisfy it being rewritten or
-// deleted.
-//
-// # Scope
-//
-// One package, one process. `go test` runs each package in its own binary, so
-// the inventory is per-package and Run checks it when that package's tests are
-// done. Suite-wide aggregation would need a file drop and a summary step; it is
-// not built here.
-//
-// # Where a mark may live
-//
-// Marks belong in test files or test-only helpers. In practice the best host is
-// a test double that production code calls through — the package's in-memory
-// Store, its fake clock, its recording handler — because the condition it
-// observes is produced by the real code under test while the observation itself
-// costs production nothing. A condition that is only visible from inside
-// production code cannot be cataloged this way, and that is a deliberate limit,
-// not an oversight.
-//
-// # When enforcement is off
-//
-// A filtered run (`-run`, `-skip`, `-short`, `-list`) cannot be expected to reach
-// the whole inventory, so Run reports what it skipped and checks nothing. Be
-// aware that go test suppresses a passing binary's output, so that notice only
-// reaches the terminal under -v: a mark defends an unfiltered suite run, and
-// never a developer's inner loop.
-//
-// # What it costs
-//
-// A package that never calls Sometimes registers nothing and Run is m.Run. A
-// mark reads before it writes, so after the first hit it is an atomic load and a
-// predicted branch — 3.0ns, and no contended store per hit. Placing one inside a
-// test double that production code calls on a hot path is not a judgement call.
-//
-// # Reporting
-//
-// ATTN_TESTINV_VERBOSE=1 lists the whole inventory, reached and missing, instead
-// of only reporting what went wrong. `go test` hides a passing binary's output,
-// so pair it with -v.
+// Package testinv catalogs states a package's tests must reach at least once
+// per unfiltered run, and fails the run when one stops being reached — a
+// condition (not a location) that quietly stops occurring is invisible to line
+// coverage. Register marks in package-level vars in _test.go files with
+// Sometimes, route TestMain through Run, call Reached where the state occurs.
+// Scope is one package, one process. Marks live only in test files or test
+// doubles; filtered runs (-run, -skip, -short, -list) are reported, not
+// enforced. ATTN_TESTINV_VERBOSE=1 lists the whole inventory (pair with -v).
 package testinv
 
 import (
@@ -79,7 +21,7 @@ import (
 	"testing"
 )
 
-// Mark is one cataloged state. Get one from Sometimes; call Reached where the
+// Mark is one cataloged state: get it from Sometimes, call Reached where the
 // state occurs.
 type Mark struct {
 	what string
@@ -87,8 +29,8 @@ type Mark struct {
 	hit  atomic.Bool
 }
 
-// Reached records that the state happened. Safe from any goroutine, and cheap
-// enough to sit on a hot path: after the first hit it is a plain atomic load.
+// Reached records that the state happened. Safe from any goroutine; after the
+// first hit it is an atomic load and a predicted branch — measured 3.0ns.
 func (m *Mark) Reached() {
 	if m == nil || m.hit.Load() {
 		return
@@ -96,11 +38,10 @@ func (m *Mark) Reached() {
 	m.hit.Store(true)
 }
 
-// WasReached reports whether the state has happened yet. Tests that want to
-// assert about the catalog itself use this; ordinary marks do not need it.
+// WasReached reports whether the state has happened yet.
 func (m *Mark) WasReached() bool { return m != nil && m.hit.Load() }
 
-// String is the mark's description, so a mark drops into a %s without ceremony.
+// String is the mark's description.
 func (m *Mark) String() string {
 	if m == nil {
 		return "<nil mark>"
@@ -108,9 +49,8 @@ func (m *Mark) String() string {
 	return m.what
 }
 
-// catalog is one package's inventory. There is exactly one per test binary; the
-// type exists so the registry's own rules can be tested without registering into
-// the binary that is doing the testing.
+// catalog is one package's inventory; a type so the registry's rules can be
+// tested without registering into the binary doing the testing.
 type catalog struct {
 	mu      sync.Mutex
 	entries []*Mark
@@ -121,13 +61,9 @@ func newCatalog() *catalog { return &catalog{byWhat: map[string]string{}} }
 
 var defaultCatalog = newCatalog()
 
-// Sometimes registers a state that this package's tests must reach at least once
-// per unfiltered run, and returns the mark to call Reached on.
-//
-// Call it from a package-level var in a _test.go file: registration has to happen
-// before TestMain runs, and a var initializer is the only place that is
-// guaranteed. Descriptions must be unique within the package — a duplicate makes
-// the report ambiguous about which site went quiet, so it panics.
+// Sometimes registers a state this package's tests must reach at least once per
+// unfiltered run. Call it from a package-level var in a _test.go file —
+// registration must precede TestMain. A duplicate description panics.
 func Sometimes(what string) *Mark { return defaultCatalog.add(what, callerSite(2)) }
 
 func (c *catalog) add(what, site string) *Mark {
@@ -147,25 +83,9 @@ func (c *catalog) add(what, site string) *Mark {
 	return m
 }
 
-// Run runs the package's tests and then checks the inventory. Use it as the whole
-// body of TestMain:
-//
-//	func TestMain(m *testing.M) { os.Exit(testinv.Run(m)) }
-//
-// A package that already has a TestMain wraps its own setup around this call the
-// way it wrapped m.Run — Run substitutes for m.Run, it does not replace TestMain:
-//
-//	func TestMain(m *testing.M) {
-//		dir, _ := os.MkdirTemp("", "attn-test")
-//		config.ScopeTestEnvironment(dir)
-//		code := testinv.Run(m)
-//		os.RemoveAll(dir)
-//		os.Exit(code)
-//	}
-//
-// The returned code is the tests' own when they failed; a complete inventory
-// leaves it alone, and a state that was never reached turns a passing run into a
-// failing one.
+// Run substitutes for m.Run inside TestMain (it does not replace TestMain): it
+// runs the tests, then turns a passing run into a failing one when a cataloged
+// state was never reached.
 func Run(m *testing.M) int {
 	code := m.Run()
 
@@ -180,8 +100,7 @@ func Run(m *testing.M) int {
 	return code
 }
 
-// state is one inventory entry as review sees it, so review can be tested
-// without registering marks in the package under test.
+// state is one inventory entry as review sees it.
 type state struct {
 	what    string
 	site    string
@@ -199,10 +118,8 @@ func (c *catalog) snapshot() []state {
 	return out
 }
 
-// review turns the inventory into the text the run prints and says whether the
-// run should fail. skipped is the reason enforcement does not apply, or "";
-// testsPassed decides how the advice is worded, because "the tests still pass"
-// is only worth saying when they did.
+// review renders the inventory report and says whether the run should fail.
+// skipped is the reason enforcement does not apply, or "".
 func review(states []state, skipped string, testsPassed, verbose bool) (report string, incomplete bool) {
 	if len(states) == 0 {
 		return "", false
@@ -267,9 +184,8 @@ func plural(n int) string {
 	return fmt.Sprintf("%d cataloged states", n)
 }
 
-// filterReason names why this run cannot be expected to reach the whole
-// inventory, or "" when it can. Testing's flags are parsed by m.Run, so this is
-// only meaningful after it returns.
+// filterReason names why this run cannot reach the whole inventory, or "".
+// Testing's flags are parsed by m.Run, so only meaningful after it returns.
 func filterReason() string {
 	if v := testFlag("test.run"); v != "" {
 		return "this run is filtered by -run " + v
@@ -294,13 +210,11 @@ func testFlag(name string) string {
 	return f.Value.String()
 }
 
-// callerSite is the file:line the mark was registered from, so the report can
-// point at the var rather than making someone grep for the description.
+// callerSite is the package-relative file:line the mark was registered from.
 func callerSite(skip int) string {
 	_, file, line, ok := runtime.Caller(skip)
 	if !ok {
 		return "unknown"
 	}
-	// Package-relative is enough to find it and does not leak the build path.
 	return fmt.Sprintf("%s:%d", filepath.Join(filepath.Base(filepath.Dir(file)), filepath.Base(file)), line)
 }

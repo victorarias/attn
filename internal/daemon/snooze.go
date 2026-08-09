@@ -9,43 +9,23 @@ import (
 	"github.com/victorarias/attn/internal/statetrace"
 )
 
-// Snooze is the queue's *not now*.
-//
-// Settle answers "I dealt with this"; nothing else answered "come back later",
-// so an agent you could not act on yet had to be either settled — a lie, since
-// the turn returns the moment it stops again — or left in the band making the
-// queue mean less. Snooze closes the turn and stops the next one from opening
-// until a deadline the user named.
-//
-// It suppresses turns at the moment they would *open*, rather than filtering
-// them out at read the way the shell/chief/pinned/muted exclusions do. The
-// difference is what the user sees when the deadline passes: a read filter keeps
-// stamping, so the turn resurfaces at its original age and lands at the head of
-// the band, while suppression means the turn opens at the wake instant and lands
-// at the tail. The vision asks for the tail — you deferred it, so the clock on
-// what you owe starts when you said you would come back.
-//
-// Because a snooze always settles as it is written, attention.Owed needs to know
-// nothing about it: a snoozed session simply has no turn open. The deadline
-// rides the wire only so the sidebar can park the row and say when it returns.
-//
-// The timers are in memory and the deadline is in the store, which is what makes
-// a snooze survive a restart — see rescheduleSnoozeWakes.
+// Snooze is the queue's *not now*: it closes the turn and stops the next one
+// from opening until a user-named deadline. It suppresses turns as they would
+// OPEN, not at read like the shell/chief/pinned/muted exclusions, so a lapsed
+// snooze resurfaces at the tail of the band and attention.Owed needs to know
+// nothing about it. Timers are in memory, the deadline is in the store — see
+// rescheduleSnoozeWakes.
 
-// snoozeTimer is a session's pending wake. firesAt is kept beside the timer
-// because time.Timer exposes no deadline accessor and the reschedule path needs
-// to know whether a stored deadline is the one already armed.
+// snoozeTimer is a session's pending wake. firesAt exists because time.Timer
+// exposes no deadline accessor.
 type snoozeTimer struct {
 	timer   *time.Timer
 	firesAt time.Time
 }
 
-// handleSnoozeTurn defers a session until the instant the client computed.
-//
-// The client owns the arithmetic on purpose: "tomorrow" and "Monday" are
-// calendar questions that need the user's timezone and locale, and a remote
-// endpoint's daemon shares neither. The daemon takes an instant and schedules
-// against it.
+// handleSnoozeTurn defers a session until the instant the client computed. The
+// client owns the arithmetic on purpose: "tomorrow" needs the user's timezone
+// and locale, which a remote endpoint's daemon shares neither of.
 func (d *Daemon) handleSnoozeTurn(msg *protocol.SnoozeTurnMessage) {
 	if d == nil || d.store == nil || msg == nil {
 		return
@@ -62,11 +42,8 @@ func (d *Daemon) handleSnoozeTurn(msg *protocol.SnoozeTurnMessage) {
 	if !d.store.SnoozeTurn(sessionID, until, time.Now()) {
 		return
 	}
-	// A snooze settles, so any countdown aimed at the same turn is moot — leaving
-	// one running would promise a second settle on a turn that is already closed.
+	// A snooze settles, so a countdown aimed at the same turn is moot.
 	d.cancelAutoSettle(sessionID, "snoozed")
-	// A snooze is a settle with a reason, and the trace is where the pairing with
-	// the state it closed survives.
 	d.traceSettle(sessionID)
 	d.scheduleSnoozeWake(sessionID, until)
 	d.broadcastSessionStateChanged(sessionID)
@@ -84,32 +61,23 @@ func (d *Daemon) handleWakeTurn(msg *protocol.WakeTurnMessage) {
 	d.wakeSnooze(sessionID, time.Now(), "user")
 }
 
-// wakeSnooze clears a snooze and opens a turn if the session is sitting in a
-// state that wants the user. `at` is the instant the turn is stamped with, which
-// is the deadline for a timer wake and now for every other cause: a snooze that
-// lapsed while the daemon was down has genuinely been owed since it lapsed, and
-// the queue orders by how long you have owed something.
-//
-// Waking a session that is busy opens nothing. That is not a missed turn — the
-// agent is working, and the next state that wants the user opens one normally,
-// now that nothing is suppressing it.
+// wakeSnooze clears a snooze and opens a turn if the state wants the user. `at`
+// stamps it: the deadline for a timer wake (one that lapsed while the daemon was
+// down has been owed since then), now otherwise.
 func (d *Daemon) wakeSnooze(sessionID string, at time.Time, cause string) {
 	if d == nil || d.store == nil || sessionID == "" {
 		return
 	}
 	d.cancelSnoozeWake(sessionID)
 	if !d.store.WakeTurn(sessionID) {
-		// No snooze was live. Staying silent keeps a redundant wake — a timer that
-		// lost a race with a hand wake, say — from broadcasting.
+		// No snooze was live; a redundant wake must not broadcast.
 		return
 	}
 	d.finishSnoozeWake(sessionID, at, cause)
 }
 
-// finishSnoozeWake is everything a wake does once the deadline is cleared: open
-// the turn if the agent is sitting in a state that wants the user, record it,
-// and say so. Shared by the hand wake and the timer, which differ only in how
-// they decide the snooze was theirs to end.
+// finishSnoozeWake is everything a wake does once the deadline is cleared,
+// shared by the hand wake and the timer.
 func (d *Daemon) finishSnoozeWake(sessionID string, at time.Time, cause string) {
 	if session := d.store.Get(sessionID); session != nil && attention.OpensTurn(session.State) {
 		d.store.OpenTurnIfClosed(sessionID, d.turnOpensAtOnWake(sessionID, at))
@@ -127,19 +95,9 @@ func (d *Daemon) finishSnoozeWake(sessionID string, at time.Time, cause string) 
 	d.broadcastSessionStateChanged(sessionID)
 }
 
-// turnOpensAtOnWake is the instant a woken turn is stamped with.
-//
-// Normally that is the deadline: a snooze that lapsed at 11:00 has been owed
-// since 11:00, whether or not the daemon was running to notice. But membership
-// is `opened > settled`, and the settle that created the deferral is stamped at
-// the moment it was pressed — so a deadline that is not after it produces a turn
-// that reads as already closed, and the agent is silently lost rather than
-// deferred. That happens for a snooze whose deadline was already stale when it
-// arrived: clock skew across endpoints, or a client sending an instant it
-// computed a while ago.
-//
-// Such a deferral was over before it began, so it ends when we notice, and the
-// turn is owed from then.
+// turnOpensAtOnWake stamps a woken turn with the deadline — unless membership
+// (`opened > settled`) would read it as already closed and silently lose the
+// agent, in which case the turn is owed from now.
 func (d *Daemon) turnOpensAtOnWake(sessionID string, deadline time.Time) time.Time {
 	if deadline.After(d.store.TurnStamps(sessionID).SettledAt) {
 		return deadline
@@ -148,8 +106,6 @@ func (d *Daemon) turnOpensAtOnWake(sessionID string, deadline time.Time) time.Ti
 }
 
 // currentStateClaim is the session's state as a string, or "" if it is gone.
-// The trace wants the state a wake landed on, the same way traceSettle wants the
-// state a settle closed.
 func (d *Daemon) currentStateClaim(sessionID string) string {
 	session := d.store.Get(sessionID)
 	if session == nil {
@@ -158,20 +114,10 @@ func (d *Daemon) currentStateClaim(sessionID string) string {
 	return string(session.State)
 }
 
-// snoozeSuppressesTurn is the gate applyState consults before opening a turn.
-//
-// It reports whether this session is deferred past the state it just reached. A
-// state that breaks through both returns false *and* clears the snooze, because
-// a deferral interrupted by something the user could not have anticipated is
-// over: they are back in the loop with that agent, and silently resuming the
-// remainder later would re-assert an intent they have since moved past.
-//
-// It is called from inside applyState, after the state is committed and before
-// the turn opens, so the break-through opens the very turn the state would have
-// opened had nothing been deferred. The reason is read from the resolver's own
-// record rather than threaded through sessionStateChange: publishResolution
-// files it immediately before applying, so it already describes the state being
-// committed, and a caller outside the resolver has no reason to supply.
+// snoozeSuppressesTurn is the gate applyState consults after the state commits
+// and before the turn opens. A break-through state returns false AND clears the
+// snooze, so the break-through opens the very turn the state would have; the
+// reason comes from the resolver's record, filed immediately before applying.
 func (d *Daemon) snoozeSuppressesTurn(sessionID string, state protocol.SessionState) bool {
 	if d == nil || d.store == nil {
 		return false
@@ -191,9 +137,8 @@ func (d *Daemon) snoozeSuppressesTurn(sessionID string, state protocol.SessionSt
 	return false
 }
 
-// scheduleSnoozeWake arms (or replaces) a session's wake timer. A deadline
-// already in the past fires immediately, which is what makes a snooze that
-// lapsed during a restart behave like one that lapsed while the daemon was up.
+// scheduleSnoozeWake arms (or replaces) a session's wake timer; a past deadline
+// fires immediately, so a snooze that lapsed during a restart still wakes.
 func (d *Daemon) scheduleSnoozeWake(sessionID string, until time.Time) {
 	if d == nil || sessionID == "" {
 		return
@@ -214,10 +159,9 @@ func (d *Daemon) scheduleSnoozeWakeLocked(sessionID string, until time.Time) {
 	if window < 0 {
 		window = 0
 	}
-	// The ready channel is the handshake auto_settle.go and nudge_countdown.go
-	// both use: the closure blocks until `timer` is published, so the identity
-	// check in the fire path reads a fully written value even when a zero window
-	// fires immediately.
+	// Same ready-channel handshake as auto_settle.go: the closure blocks until
+	// `timer` is published, so the fire path's identity check reads a fully
+	// written value even when a zero window fires immediately.
 	ready := make(chan struct{})
 	var timer *time.Timer
 	timer = time.AfterFunc(window, func() {
@@ -228,23 +172,10 @@ func (d *Daemon) scheduleSnoozeWakeLocked(sessionID string, until time.Time) {
 	close(ready)
 }
 
-// fireSnoozeWake is the timer arriving.
-//
-// Two checks, because a fired timer can be stale in two different ways. The
-// identity check under the lock keeps a timer that lost a cancel-or-replace race
-// from waking a session at all. The deadline check in the store keeps one that
-// won that race but was replaced *in the gap between* — the lock is dropped
-// before the wake, and a snooze landing in that window has already written a
-// later deadline and armed its own timer. Clearing unconditionally there would
-// cash a promise the user had just replaced, waking the agent immediately
-// instead of at the time they chose; and the cancel wakeSnooze does would take
-// the replacement's timer with it, so the later deadline would never fire
-// either.
-//
-// So the timer path never cancels — its own entry is already gone, and anything
-// in the map now belongs to a newer snooze — and it clears only the deadline it
-// was armed for. Losing either check means someone else owns this session's
-// deferral now, and the right thing to do is nothing.
+// fireSnoozeWake is the timer arriving. Two staleness checks: the identity check
+// under the lock catches a lost cancel-or-replace race, and WakeTurnAt catches a
+// replacement made in the gap after the lock is dropped — clearing
+// unconditionally there would wake the agent instead of at the later deadline.
 func (d *Daemon) fireSnoozeWake(sessionID string, self *time.Timer, deadline time.Time) {
 	d.snoozeMu.Lock()
 	entry, ok := d.snoozeTimers[sessionID]
@@ -255,8 +186,8 @@ func (d *Daemon) fireSnoozeWake(sessionID string, self *time.Timer, deadline tim
 	delete(d.snoozeTimers, sessionID)
 	d.snoozeMu.Unlock()
 
-	// The hook fires however this ends: it means "this timer has finished", which
-	// is the only thing a test can wait on without knowing which snooze won.
+	// Fires however this ends: the only thing a test can wait on without knowing
+	// which snooze won.
 	if d.snoozeWakeHook != nil {
 		defer d.snoozeWakeHook(sessionID)
 	}
@@ -308,10 +239,8 @@ func (d *Daemon) stopSnoozeTimers() {
 	}
 }
 
-// rescheduleSnoozeWakes rebuilds the wake timers from the store at start-up.
-// The deadlines are persisted but the timers are not, so without this a snooze
-// would survive a restart as a session that never comes back — the worst
-// possible failure for a feature whose whole promise is that it returns.
+// rescheduleSnoozeWakes rebuilds the wake timers from the store at start-up;
+// without it a snooze survives a restart as a session that never comes back.
 func (d *Daemon) rescheduleSnoozeWakes() {
 	if d == nil || d.store == nil {
 		return
@@ -322,9 +251,8 @@ func (d *Daemon) rescheduleSnoozeWakes() {
 }
 
 // decorateSessionWithSnooze stamps the broadcast clone with a live snooze
-// deadline. A deadline in the past is left off: the wake is racing this
-// broadcast, and announcing a snooze that has already lapsed would park the row
-// in the snoozed section for as long as it took the timer to land.
+// deadline. A lapsed deadline is left off: the wake is racing this broadcast,
+// and announcing it would park the row snoozed until the timer lands.
 func (d *Daemon) decorateSessionWithSnooze(session *protocol.Session) {
 	if session == nil || d.store == nil {
 		return
