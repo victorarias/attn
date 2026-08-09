@@ -121,25 +121,33 @@ type Daemon struct {
 	// automationDeliveryHook replaces only the final delivery call in focused
 	// provider-observation tests; production always leaves it nil.
 	automationDeliveryHook func(*store.AutomationRun) error
-	listener               net.Listener
-	httpServer             *http.Server
-	httpListener           net.Listener // bound synchronously in Start(); a failure there is fatal
-	httpHandler            http.Handler
-	diagServer             *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
-	wsHub                  *wsHub
-	done                   chan struct{}
-	logger                 *logging.Logger
-	debugLogging           bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry             *github.ClientRegistry
-	hubManager             *hub.Manager
-	classifier             Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches             map[string]*repoCache
-	repoCacheMu            sync.RWMutex
-	gitCoordMu             sync.Mutex
-	gitCoord               *gitCoordinator
-	warnings               []protocol.DaemonWarning
-	warningsMu             sync.RWMutex
-	ptyBackend             ptybackend.Backend
+	// wsWriteTimeout, wsPingInterval, and wsPingTimeout override the WebSocket
+	// write and keepalive pacing; 0 resolves to the shipped defaults (see
+	// websocket.go). Only tests set them, before the connection under test is
+	// dialed — per-Daemon fields captured at pump/loop start rather than
+	// package vars, so an override cannot race a pump that outlives its test.
+	wsWriteTimeout time.Duration
+	wsPingInterval time.Duration
+	wsPingTimeout  time.Duration
+	listener       net.Listener
+	httpServer     *http.Server
+	httpListener   net.Listener // bound synchronously in Start(); a failure there is fatal
+	httpHandler    http.Handler
+	diagServer     *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
+	wsHub          *wsHub
+	done           chan struct{}
+	logger         *logging.Logger
+	debugLogging   bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry     *github.ClientRegistry
+	hubManager     *hub.Manager
+	classifier     Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches     map[string]*repoCache
+	repoCacheMu    sync.RWMutex
+	gitCoordMu     sync.Mutex
+	gitCoord       *gitCoordinator
+	warnings       []protocol.DaemonWarning
+	warningsMu     sync.RWMutex
+	ptyBackend     ptybackend.Backend
 	// hostSessions runs the conversation sessions — the ones whose agent lives
 	// in a headless host process rather than a PTY. See host_session.go.
 	hostSessions    *hostsession.Manager

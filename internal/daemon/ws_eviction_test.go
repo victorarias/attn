@@ -200,14 +200,11 @@ func TestEvictedClientLearnsWhyOnItsNextConnection(t *testing.T) {
 // connection ending is the library's own doing — asserted here because the
 // notice is worthless if the client never gets disconnected in the first place.
 func TestWriteStallEndsTheConnectionAndIsRemembered(t *testing.T) {
-	restore := wsWriteTimeout
-	wsWriteTimeout = 300 * time.Millisecond
-	t.Cleanup(func() { wsWriteTimeout = restore })
-
 	wsPort := useFreeWSPort(t)
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 	d := NewForTesting(sockPath)
+	d.wsWriteTimeout = 300 * time.Millisecond
 	go d.Start()
 	defer d.Stop()
 	waitForSocket(t, sockPath, 5*time.Second)
@@ -284,14 +281,11 @@ func TestWriteStallEndsTheConnectionAndIsRemembered(t *testing.T) {
 // an unanswered ping with nothing owed is a connection that died, and a client
 // that comes back from that has nothing to be told.
 func TestUnansweredPingIsAnEvictionOnlyWhenTheDaemonOwesTheClient(t *testing.T) {
-	restoreInterval, restoreTimeout := wsPingInterval, wsPingTimeout
-	wsPingInterval, wsPingTimeout = 200*time.Millisecond, 200*time.Millisecond
-	t.Cleanup(func() { wsPingInterval, wsPingTimeout = restoreInterval, restoreTimeout })
-
 	wsPort := useFreeWSPort(t)
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 	d := NewForTesting(sockPath)
+	d.wsPingInterval, d.wsPingTimeout = 200*time.Millisecond, 200*time.Millisecond
 	go d.Start()
 	defer d.Stop()
 	waitForSocket(t, sockPath, 5*time.Second)
@@ -340,8 +334,9 @@ func TestUnansweredPingIsAnEvictionOnlyWhenTheDaemonOwesTheClient(t *testing.T) 
 
 	// Back to the shipped keepalive before reconnecting: a 200ms pong deadline
 	// is a trap for a healthy client too, and this leg is about what the daemon
-	// says, not how fast it pings.
-	wsPingInterval, wsPingTimeout = restoreInterval, restoreTimeout
+	// says, not how fast it pings. The ping loops of the two dropped clients
+	// captured their pacing at start, so this write races nothing.
+	d.wsPingInterval, d.wsPingTimeout = 0, 0
 	second := dialDaemonWSAs(t, ctx, addr, stalledID)
 	defer second.Close(websocket.StatusNormalClosure, "")
 	notice := readEventUntil(t, ctx, second, protocol.EventClientEvictionNotice)

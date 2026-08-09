@@ -789,15 +789,23 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 	go d.fetchAllPRDetails()
 }
 
-// wsWriteTimeout bounds one message hand-off. Carried over unchanged from when
-// this pump was written; a client that cannot take one message in ten seconds
-// is not a slow client, it is a stopped one. Measured against a real app whose
-// socket had been frozen: a 400-session snapshot left 409,117 bytes stuck in
-// the client's receive queue and the pump sat on this deadline for its full
-// length, while the hub's slow-count never reached 2.
+// defaultWSWriteTimeout bounds one message hand-off. Carried over unchanged
+// from when this pump was written; a client that cannot take one message in
+// ten seconds is not a slow client, it is a stopped one. Measured against a
+// real app whose socket had been frozen: a 400-session snapshot left 409,117
+// bytes stuck in the client's receive queue and the pump sat on this deadline
+// for its full length, while the hub's slow-count never reached 2.
 //
-// A variable so tests can shrink it; nothing else writes to it.
-var wsWriteTimeout = 10 * time.Second
+// Tests shrink it per daemon via Daemon.wsWriteTimeout; the pump captures the
+// resolved value once at start.
+const defaultWSWriteTimeout = 10 * time.Second
+
+func (d *Daemon) wsWriteTimeoutDuration() time.Duration {
+	if d.wsWriteTimeout > 0 {
+		return d.wsWriteTimeout
+	}
+	return defaultWSWriteTimeout
+}
 
 // wsWritePump hands one message at a time to a client.
 //
@@ -809,6 +817,7 @@ var wsWriteTimeout = 10 * time.Second
 // itself needs no help here: the library tears it down when its own write
 // deadline expires.
 func (d *Daemon) wsWritePump(client *wsClient) {
+	writeTimeout := d.wsWriteTimeoutDuration()
 	stalled := false
 	defer func() {
 		code, reason := client.closeStatus()
@@ -824,7 +833,7 @@ func (d *Daemon) wsWritePump(client *wsClient) {
 	}()
 
 	for message := range client.send {
-		ctx, cancel := context.WithTimeout(context.Background(), wsWriteTimeout)
+		ctx, cancel := context.WithTimeout(context.Background(), writeTimeout)
 		wsType := websocket.MessageText
 		if message.kind != messageKindText {
 			wsType = websocket.MessageBinary
@@ -839,9 +848,9 @@ func (d *Daemon) wsWritePump(client *wsClient) {
 			// The library reports a timed-out write and a write to a connection
 			// closed underneath it through the same error, and which one it
 			// picks is a race. The clock is ours and says which happened.
-			stalled = elapsed >= wsWriteTimeout
+			stalled = elapsed >= writeTimeout
 			if stalled {
-				d.logf("WebSocket client took longer than %s to accept a message, giving up on it", wsWriteTimeout)
+				d.logf("WebSocket client took longer than %s to accept a message, giving up on it", writeTimeout)
 			}
 			return
 		}
@@ -865,12 +874,27 @@ func (d *Daemon) wsMsgPump(client *wsClient) {
 	d.logf("WebSocket message pump exited")
 }
 
-// The keepalive. Variables so tests can shrink them; nothing else writes to
-// them. Both carried over unchanged from when this loop was written.
-var (
-	wsPingInterval = 30 * time.Second
-	wsPingTimeout  = 10 * time.Second
+// The keepalive defaults, both carried over unchanged from when this loop was
+// written. Tests shrink them per daemon via Daemon.wsPingInterval and
+// Daemon.wsPingTimeout; the loop captures the resolved values once at start.
+const (
+	defaultWSPingInterval = 30 * time.Second
+	defaultWSPingTimeout  = 10 * time.Second
 )
+
+func (d *Daemon) wsPingIntervalDuration() time.Duration {
+	if d.wsPingInterval > 0 {
+		return d.wsPingInterval
+	}
+	return defaultWSPingInterval
+}
+
+func (d *Daemon) wsPingTimeoutDuration() time.Duration {
+	if d.wsPingTimeout > 0 {
+		return d.wsPingTimeout
+	}
+	return defaultWSPingTimeout
+}
 
 // wsPingLoop sends periodic pings to keep the connection alive and detect dead
 // clients.
@@ -883,7 +907,8 @@ var (
 // daemon is still holding messages for is one that could not keep up, and that
 // one deserves an answer when it comes back.
 func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
-	ticker := time.NewTicker(wsPingInterval)
+	pingTimeout := d.wsPingTimeoutDuration()
+	ticker := time.NewTicker(d.wsPingIntervalDuration())
 	defer ticker.Stop()
 
 	for {
@@ -891,7 +916,7 @@ func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), wsPingTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), pingTimeout)
 			err := client.conn.Ping(ctx)
 			cancel()
 			if err != nil {
