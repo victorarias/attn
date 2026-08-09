@@ -937,6 +937,29 @@ func (c *Client) AppendJournal(sourceSessionID, date, entry string) (*protocol.J
 	return resp.JournalAppendResult, nil
 }
 
+// ActivityStatus reports the presence tier the daemon has reduced its clients
+// to, whether the feature is on, why it cannot run if it cannot, and every
+// session's current activity line.
+func (c *Client) ActivityStatus() (*protocol.ActivityStatusResult, error) {
+	resp, err := c.send(protocol.ActivityStatusMessage{Cmd: protocol.CmdActivityStatus})
+	if err != nil {
+		return nil, err
+	}
+	if resp.ActivityStatusResult == nil {
+		return nil, errors.New("daemon returned no activity status")
+	}
+	return resp.ActivityStatusResult, nil
+}
+
+// ClearSessionActivity forgets one session's activity line and its read cursor.
+func (c *Client) ClearSessionActivity(sessionID string) error {
+	_, err := c.send(protocol.ClearSessionActivityMessage{
+		Cmd: protocol.CmdClearSessionActivity,
+		ID:  sessionID,
+	})
+	return err
+}
+
 func (c *Client) queryResponse(filter string) (*protocol.Response, error) {
 	var filterPtr *string
 	if filter != "" {

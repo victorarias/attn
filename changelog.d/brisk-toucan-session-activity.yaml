@@ -1,0 +1,20 @@
+kind: added
+area: app
+change: >
+  Home can now show one short line per session saying what that agent is doing
+  right now — "running the frontend test suite", "waiting on a branch choice" —
+  written from the session's own transcript by a non-interactive agent. It is off
+  by default and asks you to pick the agent yourself (Claude or Codex, with the
+  model and refresh rates configurable) in Settings › Agents › Session activity,
+  because the two differ enough in speed and price that choosing for you would be
+  choosing how your money is spent.
+notes: >
+  Lines are only generated while you are actually using attn: fastest while home
+  is on screen, slower while you are elsewhere in the app, and not at all once
+  you leave it — walking away costs nothing, and coming back refreshes within one
+  interval. A session that has written nothing since its last line is skipped, so
+  blocked and finished agents are free however long home stays open. A line that
+  has stopped being refreshed dims and says when it was written rather than
+  passing itself off as current. `attn activity` shows the same thing from a
+  terminal, including why nothing is being generated; `attn activity clear <id>`
+  forgets a line that is wrong, and turning the feature off clears them all.

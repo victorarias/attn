@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
@@ -357,4 +359,64 @@ func (d *Daemon) advanceSessionActivityCursor(sessionID string, stored store.Ses
 	}
 	d.store.SetSessionActivityCursor(sessionID, next)
 	return nil
+}
+
+// clearAllSessionActivity forgets every line, one fact per session so each row
+// re-renders. Used when the feature is switched off: the lines are the feature's
+// only output, and leaving them behind would leave home asserting something attn
+// has stopped keeping true.
+func (d *Daemon) clearAllSessionActivity() {
+	for _, session := range d.store.List("") {
+		if d.store.GetSessionActivity(session.ID).Line == "" {
+			continue
+		}
+		d.store.UpdateSessionActivity(session.ID, "", time.Time{}, "")
+		d.publishFact(FactSessionActivityChanged, session.ID, nil)
+	}
+}
+
+// handleActivityStatus answers what the daemon believes about session activity
+// right now. It exists because the feature's entire output otherwise lives on
+// the dashboard: from a terminal, or on a headless daemon, there is no other way
+// to see whether lines are being generated or why they are not.
+func (d *Daemon) handleActivityStatus(conn net.Conn, _ *protocol.ActivityStatusMessage) {
+	result := protocol.ActivityStatusResult{
+		PresenceTier: d.PresenceTier().String(),
+		Enabled:      d.activityEnabled(),
+		Sessions:     []protocol.ActivityStatusSession{},
+	}
+	if _, err := d.activityConfigured(); err != nil {
+		result.Error = protocol.Ptr(err.Error())
+	}
+	for _, session := range d.store.List("") {
+		if !sessionGeneratesActivity(session) {
+			continue
+		}
+		entry := protocol.ActivityStatusSession{ID: session.ID, Label: session.Label}
+		if stored := d.store.GetSessionActivity(session.ID); stored.Line != "" {
+			entry.Activity = protocol.Ptr(stored.Line)
+			if !stored.At.IsZero() {
+				entry.ActivityAt = protocol.Ptr(string(protocol.NewTimestamp(stored.At)))
+			}
+		}
+		result.Sessions = append(result.Sessions, entry)
+	}
+	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, ActivityStatusResult: &result})
+}
+
+// handleClearSessionActivity forgets one session's line, and the cursor with it
+// so the next line describes what happens next rather than a window that was
+// already summarized.
+func (d *Daemon) handleClearSessionActivity(conn net.Conn, msg *protocol.ClearSessionActivityMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	if sessionID == "" {
+		d.sendError(conn, "clear session activity: id is required")
+		return
+	}
+	if !d.store.UpdateSessionActivity(sessionID, "", time.Time{}, "") {
+		d.sendError(conn, "clear session activity: session not found: "+sessionID)
+		return
+	}
+	d.publishFact(FactSessionActivityChanged, sessionID, nil)
+	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true})
 }

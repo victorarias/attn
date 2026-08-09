@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/toolhome"
 	"github.com/victorarias/attn/internal/transcript"
 )
@@ -488,4 +490,109 @@ func seedActivityCursor(t *testing.T, path string) string {
 		t.Fatalf("seed cursor: %v", err)
 	}
 	return cursor
+}
+
+// --- the CLI surface: activity_status and clear_session_activity ---
+
+func socketRoundTrip(t *testing.T, d *Daemon, msg any) protocol.Response {
+	t.Helper()
+	server, conn := net.Pipe()
+	defer conn.Close()
+	go d.handleConnection(server)
+	if err := json.NewEncoder(conn).Encode(msg); err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	var resp protocol.Response
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	return resp
+}
+
+// The tier is the answer to "why is nothing appearing" far more often than
+// anything else, and from a terminal there is no other way to see it.
+func TestActivityStatusReportsTheTierAndEveryLine(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	d.store.SetSetting(SettingActivityEnabled, "true")
+	d.store.SetSetting(SettingActivityConfig, `{"agent":"claude","model":"claude-haiku-4-5"}`)
+	d.store.SetSetting(canonicalExecutableSettingKey("claude"), writeFakeAgentExecutable(t))
+	d.store.UpdateSessionActivity("session-1", "running the frontend test suite", time.Now(), "v1:abc:1:0")
+	watchingClient(d)
+
+	resp := socketRoundTrip(t, d, protocol.ActivityStatusMessage{Cmd: protocol.CmdActivityStatus})
+	if !resp.Ok || resp.ActivityStatusResult == nil {
+		t.Fatalf("activity_status failed: %+v", resp)
+	}
+	status := resp.ActivityStatusResult
+	if status.PresenceTier != "watching" {
+		t.Errorf("presence_tier = %q, want watching", status.PresenceTier)
+	}
+	if !status.Enabled {
+		t.Error("enabled = false with the setting on")
+	}
+	if status.Error != nil {
+		t.Errorf("error = %q on a runnable configuration", *status.Error)
+	}
+	if len(status.Sessions) != 1 || protocol.Deref(status.Sessions[0].Activity) != "running the frontend test suite" {
+		t.Fatalf("sessions = %+v", status.Sessions)
+	}
+}
+
+// An enabled feature with no agent chosen produces nothing and says nothing on
+// the dashboard. Naming it here is the difference between "attn is broken" and
+// "finish setting it up".
+func TestActivityStatusNamesAnUnfinishedSetup(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.store.SetSetting(SettingActivityEnabled, "true")
+
+	resp := socketRoundTrip(t, d, protocol.ActivityStatusMessage{Cmd: protocol.CmdActivityStatus})
+	if resp.ActivityStatusResult == nil || resp.ActivityStatusResult.Error == nil {
+		t.Fatalf("no error reported for an enabled feature with no agent: %+v", resp.ActivityStatusResult)
+	}
+	if !strings.Contains(*resp.ActivityStatusResult.Error, "agent") {
+		t.Errorf("error = %q, want it to name the missing agent", *resp.ActivityStatusResult.Error)
+	}
+}
+
+// A session that has finished never writes again, so its wrong line would stay
+// wrong forever. Clearing drops the cursor too, so the next line comes from what
+// happens next rather than the window that produced the wrong one.
+func TestClearSessionActivityForgetsTheLineAndTheCursor(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateIdle)
+	d.store.UpdateSessionActivity("session-1", "wrong line", time.Now(), "v1:abc:1:0")
+
+	resp := socketRoundTrip(t, d, protocol.ClearSessionActivityMessage{
+		Cmd: protocol.CmdClearSessionActivity, ID: "session-1",
+	})
+	if !resp.Ok {
+		t.Fatalf("clear failed: %+v", resp)
+	}
+	if got := d.store.GetSessionActivity("session-1"); got != (store.SessionActivity{}) {
+		t.Errorf("activity = %+v after a clear, want nothing", got)
+	}
+}
+
+// Switching the feature off has to take its output with it: a switch that stops
+// the spending but leaves home asserting stale work is the worst of both.
+func TestDisablingActivityClearsEveryLine(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopEventBus)
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	addActivitySession(t, d, "session-2", protocol.SessionStateIdle)
+	d.store.SetSetting(SettingActivityEnabled, "true")
+	d.store.UpdateSessionActivity("session-1", "running the test suite", time.Now(), "v1:abc:1:0")
+	d.store.UpdateSessionActivity("session-2", "reading the plan", time.Now(), "v1:abc:1:0")
+
+	d.handleSetSettingWS(&wsClient{}, &protocol.SetSettingMessage{
+		Cmd: protocol.CmdSetSetting, Key: SettingActivityEnabled, Value: "false",
+	})
+
+	for _, id := range []string{"session-1", "session-2"} {
+		if got := d.store.GetSessionActivity(id).Line; got != "" {
+			t.Errorf("%s still reads %q after the feature was turned off", id, got)
+		}
+	}
 }

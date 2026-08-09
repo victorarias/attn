@@ -245,6 +245,13 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 			d.cancelAllAutoSettle()
 		}
 	}
+	// Turning session activity off has to take the lines with it. They are
+	// stored on the session and would otherwise keep sitting on home describing
+	// work from whenever the feature was last on — a switch that stops the
+	// spending but not the claim is the worst of both.
+	if msg.Key == SettingActivityEnabled && !parseBooleanSetting(msg.Value) {
+		d.clearAllSessionActivity()
+	}
 	d.publishSettingsFact(FactSettingChanged, msg.Key)
 }
 

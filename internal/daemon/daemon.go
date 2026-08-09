@@ -2416,6 +2416,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleTicketList(conn, msg.(*protocol.TicketListMessage))
 	case protocol.CmdTicketShow: // wire: ticket_show
 		d.handleTicketShow(conn, msg.(*protocol.TicketShowMessage))
+	case protocol.CmdActivityStatus: // wire: activity_status
+		d.handleActivityStatus(conn, msg.(*protocol.ActivityStatusMessage))
+	case protocol.CmdClearSessionActivity: // wire: clear_session_activity
+		d.handleClearSessionActivity(conn, msg.(*protocol.ClearSessionActivityMessage))
 	case protocol.CmdTicketSubscribe: // wire: ticket_subscribe
 		d.handleTicketSubscribe(conn, msg.(*protocol.TicketSubscribeMessage))
 	case protocol.CmdTicketUnsubscribe: // wire: ticket_unsubscribe

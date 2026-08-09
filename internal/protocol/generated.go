@@ -2,6 +2,39 @@
 
 package protocol
 
+type ActivityStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type ActivityStatusResult struct {
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// PresenceTier corresponds to the JSON schema field "presence_tier".
+	PresenceTier string `json:"presence_tier"`
+
+	// Sessions corresponds to the JSON schema field "sessions".
+	Sessions []ActivityStatusSession `json:"sessions"`
+}
+
+type ActivityStatusSession struct {
+	// Activity corresponds to the JSON schema field "activity".
+	Activity *string `json:"activity,omitempty,omitzero"`
+
+	// ActivityAt corresponds to the JSON schema field "activity_at".
+	ActivityAt *string `json:"activity_at,omitempty,omitzero"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+}
+
 type AddEndpointMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -736,6 +769,14 @@ type ChiefOfStaffResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type ClearSessionActivityMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type ClearSessionsMessage struct {
@@ -4248,6 +4289,10 @@ type ReposUpdatedMessage struct {
 }
 
 type Response struct {
+	// ActivityStatusResult corresponds to the JSON schema field
+	// "activity_status_result".
+	ActivityStatusResult *ActivityStatusResult `json:"activity_status_result,omitempty,omitzero"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
 

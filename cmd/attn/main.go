@@ -216,6 +216,9 @@ func main() {
 		runList()
 	case "presence":
 		runPresence()
+	case "activity":
+		maybePrintProfileBanner()
+		runActivity()
 	case "delegate":
 		maybePrintProfileBanner()
 		runDelegate()
@@ -634,6 +637,7 @@ commands:
   preflight                         diagnose tools, paths, routing, and launch settings
   pr wait-ready <pr>                wait for exact-head checks and approval
   list                              list sessions and workspaces
+  activity [clear <id>]             what each agent is doing right now
   present <command>                 open a review presentation and read feedback
   debug <command>                   probe debug artifacts (incidents, logs)
   db <command>                      database maintenance (restore from backup)

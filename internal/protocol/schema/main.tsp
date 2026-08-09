@@ -1959,6 +1959,40 @@ model SetClientPresenceMessage {
   idle_seconds?: float64; // Seconds since the last keyboard or pointer input anywhere in this client. Absent means "no input observed yet this connection".
 }
 
+// ActivityStatusMessage asks what attn believes about session activity right
+// now: the presence tier it has reduced its clients to, and every session's
+// current line with the time it was generated. It is the CLI's way to see a
+// feature whose whole output otherwise lives on the dashboard — including why
+// nothing is being generated, which is almost always the tier.
+model ActivityStatusMessage {
+  cmd: "activity_status";
+}
+
+model ActivityStatusResult {
+  presence_tier: string; // "watching" | "present" | "away"
+  enabled: boolean;
+  error?: string; // Why the feature cannot run — most often that no agent has been chosen.
+  sessions: ActivityStatusSession[];
+}
+
+model ActivityStatusSession {
+  id: string;
+  label: string;
+  activity?: string;
+  activity_at?: string;
+}
+
+// ClearSessionActivityMessage forgets one session's line. The way out for a line
+// that is wrong on a session that will never write again — a session that is
+// still moving replaces its own line on the next refresh, but a finished one
+// would keep the wrong line forever. Clearing also drops the read cursor, so the
+// next line is generated from what happens next rather than from a window that
+// was already summarized.
+model ClearSessionActivityMessage {
+  cmd: "clear_session_activity";
+  id: string;
+}
+
 // Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
 // no result event.
 model SetTerminalThemeMessage {
@@ -3854,6 +3888,7 @@ model Response {
   ticket_inbox_result?: TicketInboxResult;
   ticket_list_result?: TicketListResult;
   ticket_show_result?: TicketShowResult;
+  activity_status_result?: ActivityStatusResult;
   ticket_attach_result?: TicketAttachResult;
   ticket_create_result?: TicketCreateResult;
   ticket_comment_result?: TicketCommentResult;

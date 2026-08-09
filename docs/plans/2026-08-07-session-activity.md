@@ -554,35 +554,35 @@ tier intervals, per-kind clip budgets, and whether a cheaper model holds up.
       the prompt on Codex, which has no such flag. `--effort` wired on the Claude
       headless path, where it was never passed.
 - [x] `cmd/activity-bench`: corpus, run, report, deterministic checks.
-- [ ] Migration + store columns + `UpdateSessionActivity`; protocol fields,
+- [x] Migration + store columns + `UpdateSessionActivity`; protocol fields,
       `make generate-types`, `ProtocolVersion++`, `useDaemonSocket.ts`.
-- [ ] **Presence.** `set_client_presence` command; per-connection state cleared
+- [x] **Presence.** `set_client_presence` command; per-connection state cleared
       on disconnect and expired on heartbeat silence; tier reduction across
       clients; the tier readable for diagnosis.
-- [ ] **Frontend presence reporting.** Window visibility + dashboard route +
+- [x] **Frontend presence reporting.** Window visibility + dashboard route +
       input recency, sent on change and on a heartbeat.
-- [ ] `activity.*` settings with validators (near-copy of
+- [x] `activity.*` settings with validators (near-copy of
       `parseNotebookNarrationConfig` / `validateNotebookNarrationSetting`),
       including the no-default-agent rule: enabling without a selected agent is a
       reported error, never a silent fallback.
-- [ ] The job kind, executor, prompt builder, and one-line sanitizer.
-- [ ] Tier-driven trigger: cursor movement throttled at the tier interval, turn
+- [x] The job kind, executor, prompt builder, and one-line sanitizer.
+- [x] Tier-driven trigger: cursor movement throttled at the tier interval, turn
       opening bypassing the interval, `away` suppressing everything; the
       `FactSessionActivityChanged` fact and its `wireProjections` entry.
-- [ ] Cold-start and cursor-mismatch re-seeding.
-- [ ] Settings UI: toggle, required agent choice, model, effort, both intervals.
-- [ ] Dashboard rendering, ageing out a line well past its interval rather than
+- [x] Cold-start and cursor-mismatch re-seeding.
+- [x] Settings UI: toggle, required agent choice, model, effort, both intervals.
+- [x] Dashboard rendering, ageing out a line well past its interval rather than
       showing a stale line as current.
-- [ ] CLI: `activity` in `attn list --json`; a way to clear a wrong line; a way
+- [x] CLI: `activity` in `attn list --json`; a way to clear a wrong line; a way
       to see the current presence tier, since a feature that silently stops
       needs a way to tell "off" from "away".
-- [ ] Tests: the interval suppresses cursor movement inside the window and fires
+- [x] Tests: the interval suppresses cursor movement inside the window and fires
       on the first movement after it; a turn opening fires inside the window;
       `away` suppresses both; a client that stops heartbeating expires to `away`;
       the tier is the max across clients; cursor advance; cursor-mismatch
       re-seed; truncation reporting; settings validation including the missing
       agent; and a projection test so the broadcast is not a direct hub write.
-- [ ] Glossary entries for **activity** and **presence tier**, drawing the line
+- [x] Glossary entries for **activity** and **presence tier**, drawing the line
       against the Notebook's journal and summaries. Changelog fragment.
 - [ ] Live verification on a throwaway profile: enable with each agent, watch
       lines appear while the dashboard is visible, confirm hiding the dashboard
