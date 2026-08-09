@@ -14,10 +14,11 @@
 //   stderr  this host's diagnostics, captured to the same log.
 
 import { createWriteStream } from "node:fs";
-import { existsSync, mkdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
 import { open } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import { randomUUID } from "node:crypto";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -48,6 +49,7 @@ import {
   type HostSessionState,
   type HostVerb,
   type HostVerbWithText,
+  type ModelChangedBody,
   type RunSettledBody,
   type SessionEntryLike,
   type SessionReadyBody,
@@ -116,6 +118,55 @@ function requireEnv(name: string): string {
   return value;
 }
 
+function optionalEnv(name: string): string {
+  return process.env[name]?.trim() ?? "";
+}
+
+/**
+ * The pi session this host runs, and whether it is picking one up or continuing
+ * its own.
+ *
+ * Two rules, and the order between them is the whole of it:
+ *
+ * 1. A session dir that already holds a file is this conversation's own history,
+ *    and it is continued. That covers every relaunch — revive after a crash, a
+ *    reload the user asked for — and it is why a resumed conversation does not
+ *    re-fork itself back to the day it was picked up.
+ * 2. Only an EMPTY dir consults the resume file, and it FORKS rather than
+ *    opening in place. The fork puts a full copy of the history under this attn
+ *    session's own dir, so the session the user resumed from is never written to
+ *    by two hosts, and everything downstream — revive, `attn profile clean`,
+ *    the layout the packaged scenarios assert — keeps its one-dir-per-session
+ *    shape. pi records the source as `parentSession` in the new file's header,
+ *    so the lineage is on disk rather than only in attn's launch intent.
+ *
+ * With no resume file an empty dir is a fresh conversation, which is what
+ * `continueRecent` does when it finds nothing.
+ */
+function openSession(cwd: string, sessionDir: string, resumeFile: string): SessionManager {
+  if (resumeFile !== "" && !holdsSession(sessionDir)) {
+    console.error(`[attn-pi-host] forking ${resumeFile} into ${sessionDir}`);
+    return SessionManager.forkFrom(resumeFile, cwd, sessionDir);
+  }
+  return SessionManager.continueRecent(cwd, sessionDir);
+}
+
+/**
+ * Whether this session's own dir already holds a pi session file.
+ *
+ * The dir belongs to exactly one attn session, so any session file in it is
+ * this conversation's own history and nothing else's — which is what makes the
+ * bare "is there one" question sufficient to tell a first launch from a
+ * relaunch.
+ */
+function holdsSession(sessionDir: string): boolean {
+  try {
+    return readdirSync(sessionDir).some((name) => name.endsWith(".jsonl"));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Splits "provider/model-id" into pi's two-part model identity. The slash form
  * is what attn's `--model` pin and the `default_model_pi-host` setting carry.
@@ -167,12 +218,18 @@ async function main(): Promise<void> {
   // delegation brief. Optional: an ordinary session is opened empty, for a user
   // who will type into it.
   const initialPrompt = process.env.ATTN_PI_HOST_INITIAL_PROMPT?.trim() ?? "";
+  const resumeFile = optionalEnv("ATTN_PI_HOST_RESUME_FILE");
 
   const envelopeOut = createWriteStream("", { fd: ENVELOPE_FD });
+  // This host process's identity, minted fresh every launch. It rides on every
+  // snapshot and page so a client can tell "more of the conversation I am
+  // already showing" from "a replacement host rebuilt this from disk and its
+  // item ids are its own". See ConversationSnapshotBody.epoch.
+  const epoch = randomUUID();
   // The host's own transcript is fed the same envelopes the daemon forwards, so
   // a snapshot it serves cannot disagree with what a client that watched the
   // stream ended up holding. See TranscriptStore.
-  const transcript = new TranscriptStore();
+  const transcript = new TranscriptStore(epoch);
   const write = (envelope: Envelope) => {
     transcript.apply(envelope.kind, envelope.body);
     envelopeOut.write(`${JSON.stringify(envelope)}\n`);
@@ -186,14 +243,16 @@ async function main(): Promise<void> {
   // same way a bare `pi` invocation does, so the user's credentials and
   // extensions work without a second setup.
   const agentDir = join(homedir(), ".pi", "agent");
-  // REVIVE. This directory holds exactly one attn session's pi sessions, so
-  // "the most recent one here" is unambiguously this conversation — and when
-  // there is none, `continueRecent` creates one, which is the whole of the
-  // early-crash case: a host killed before pi's first assistant message leaves
-  // no session file at all (measured, 2026-08-04 spike), and the relaunch is
-  // then an ordinary fresh start. Reopening also migrates the file in place,
-  // which is why the version pi writes is not something attn has to track.
-  const sessionManager = SessionManager.continueRecent(cwd, sessionDir);
+  // REVIVE and RESUME, in one call. This directory holds exactly one attn
+  // session's pi sessions, so "the most recent one here" is unambiguously this
+  // conversation — and when there is none, either the launch named a
+  // conversation to pick up (fork it in) or `continueRecent` creates a fresh
+  // one, which is the whole of the early-crash case: a host killed before pi's
+  // first assistant message leaves no session file at all (measured, 2026-08-04
+  // spike), and the relaunch is then an ordinary fresh start. Reopening also
+  // migrates the file in place, which is why the version pi writes is not
+  // something attn has to track. See openSession.
+  const sessionManager = openSession(cwd, sessionDir, resumeFile);
   const settingsManager = SettingsManager.create(cwd);
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
   await resourceLoader.reload();
@@ -222,6 +281,13 @@ async function main(): Promise<void> {
         `[attn-pi-host] holding ${toolDetails.retainedBytes} bytes of tool detail ` +
         `across ${toolDetails.size} call(s), budget ${TOOL_DETAIL_BUDGET_BYTES} bytes`,
       );
+      // The other budget, and the receipt behind the retention tripwire: this
+      // is the line a remeasurement reads to find out how close a real
+      // conversation gets to the archive scroll-back is served from.
+      console.error(
+        `[attn-pi-host] transcript holding ${transcript.retainedBytes} bytes across ${transcript.size} item(s), ` +
+        `${transcript.droppedItems} dropped past retention`,
+      );
     }
   });
 
@@ -240,6 +306,27 @@ async function main(): Promise<void> {
     );
   }
 
+  // What pi says it is running, in the "provider/model-id" form attn pins with.
+  // A resumed conversation carries the model it was last switched to, so this
+  // is asked of the session rather than assumed from the launch pin.
+  const currentModelName = (): string => {
+    const model = session.model;
+    return model ? `${model.provider}/${model.id}` : "";
+  };
+
+  // Which models a switch can actually land on. pi's catalog carries hundreds
+  // and this machine is authenticated for a handful; asking pi which is which
+  // is what keeps the picker from offering choices it would then refuse.
+  let availableModels: string[] = [];
+  try {
+    availableModels = (await session.modelRuntime.getAvailable()).map((entry) => `${entry.provider}/${entry.id}`);
+  } catch (error) {
+    // Availability can need the network. A session that cannot enumerate models
+    // still runs on the one it was pinned to, so this is a smaller picker, not
+    // a failed launch.
+    console.error(`[attn-pi-host] listing available models failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // A session nobody has spoken to yet is idle, and idle owes the user a turn:
   // nothing will ever happen in it until they type. A REVIVED one whose last
   // exchange never finished is `waiting_input` instead — the agent did not stop,
@@ -249,10 +336,11 @@ async function main(): Promise<void> {
   const readyState: HostSessionState = interrupted ? "waiting_input" : "idle";
   const ready: SessionReadyBody = {
     session_file: session.sessionFile ?? null,
-    model: pinnedModel,
+    model: currentModelName() || pinnedModel,
     cwd,
     pi_version: piVersion,
     state: readyState,
+    models: availableModels,
   };
   stream.emit("session_ready", ready);
   // Unconditionally, and immediately after: this host is a new process with a
@@ -370,6 +458,31 @@ async function main(): Promise<void> {
     stream.emit("tool_detail", body);
   };
 
+  /**
+   * Switches the model the agent runs on.
+   *
+   * pi applies it to the live session and persists it, and it takes effect from
+   * the next run: a request already streaming keeps the model it started with,
+   * which is the only coherent answer — an in-flight request cannot change the
+   * model that is answering it.
+   *
+   * The answer is always emitted, refusal included. A picker that silently
+   * stayed on the old model would be the worst of the three outcomes.
+   */
+  const setModel = async (pinned: string) => {
+    const body: ModelChangedBody = { model: pinned };
+    try {
+      await session.setModel(resolveModel(pinned));
+      body.model = currentModelName() || pinned;
+      console.error(`[attn-pi-host] model switched to ${body.model}`);
+    } catch (error) {
+      body.model = currentModelName() || pinnedModel;
+      body.error = error instanceof Error ? error.message : String(error);
+      console.error(`[attn-pi-host] set_model ${pinned} refused: ${body.error}`);
+    }
+    stream.emit("model_changed", body);
+  };
+
   const shutdown = () => {
     if (shuttingDown) return;
     shuttingDown = true;
@@ -400,15 +513,27 @@ async function main(): Promise<void> {
         void sendToolDetail(verb.callID, verb.full);
         return;
       case "snapshot": {
-        // Broadcast, like every other envelope, and it replaces what each
-        // client had. That is safe because this transcript is fed the same
-        // envelopes they were — a client cannot be holding something this does
-        // not have, except items older than the window, which is the residual
-        // slice 5's paging exists to retire. Broadcasting is also what makes
-        // "two clients see identical state" true rather than hoped for.
+        // Broadcast, like every other envelope. It carries the NEWEST window of
+        // this transcript and the epoch that minted it, so a client already
+        // showing part of this conversation splices it onto what it has instead
+        // of losing the scroll-back it paged in — while a client that has never
+        // seen this host replaces wholesale. That is what makes "two clients see
+        // identical state" true without one attaching client shortening the
+        // other's view.
         stream.emit("conversation_snapshot", transcript.snapshot());
         return;
       }
+      case "history": {
+        // Answered even when this host holds nothing before the anchor: an empty
+        // page with has_more false is how a client learns it has reached the
+        // start, and how a client whose anchor belongs to another window learns
+        // to stop asking.
+        stream.emit("conversation_page", transcript.page(verb.before));
+        return;
+      }
+      case "set_model":
+        void setModel(verb.model);
+        return;
       case "clear_queue": {
         // pi clears both queues together and emits its own queue_update, which
         // is what empties the strip. The app never removes an entry itself, so

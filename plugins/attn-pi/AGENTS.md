@@ -79,7 +79,8 @@ See `docs/glossary.md` for the vocabulary and
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
   out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
-  `tool_detail`, `clear_queue`, `snapshot`, `shutdown`), **stdout/stderr** are pi's and the
+  `tool_detail`, `clear_queue`, `snapshot`, `history`, `set_model`,
+  `shutdown`), **stdout/stderr** are pi's and the
   host's own output, captured to `<data-dir>/hosts/log/<session>.log`. Envelopes
   never go on stdout: pi loads the user's own extensions and any one of them
   printing a line would corrupt a shared stream.
@@ -87,8 +88,10 @@ See `docs/glossary.md` for the vocabulary and
   `run_settled`, `tool_started`, `tool_finished`) are attn's vocabulary and the
   daemon may read them. **Renderings** (`message_start`, `message_delta`,
   `message_end`, `queue_update`, `tool_detail`, `conversation_snapshot`) are drawn
-  by the app and forwarded opaquely. Adding a rendering is a host + app change; a
-  new semantic kind is a protocol conversation.
+  by the app and forwarded opaquely — as are `conversation_page`, `notice` and
+  `model_changed`. Adding a rendering is a host + app change; a new semantic kind
+  is a protocol conversation. `model_changed` is the one rendering the daemon
+  also reads, and only to rewrite the launch intent.
 - **A state declaration is the subset of semantic kinds that carries a `state`**
   (`STATE_DECLARATION_KINDS`: `session_ready`, `run_started`, `run_settled`) —
   the attn state the session is in once that declaration is true (`idle`,
@@ -137,6 +140,12 @@ See `docs/glossary.md` for the vocabulary and
   continues the most recent session file under the session dir and creates one
   only when there is none — which is both the revive path and the zero-file
   early-crash fallback, and it takes pi's session-format migrations for free.
+  An **empty** session dir is the only thing that consults
+  `ATTN_PI_HOST_RESUME_FILE`, and it FORKS (`SessionManager.forkFrom`) rather
+  than appending: the named conversation is copied into this session's own dir,
+  so the session it was picked up from is never written to and a revive of the
+  resuming session never rewinds to the source. Two sessions on one file is the
+  failure this ordering exists to make impossible.
   `buildContextEntries()` (compaction-aware) is what the transcript is rebuilt
   from. A relaunch is a NEW host, so its `seq` starts at 1 again: `session_ready`
   is the only envelope that resets a client's spine, and the app must exempt it
@@ -149,8 +158,40 @@ See `docs/glossary.md` for the vocabulary and
   `conversation_snapshot` is the rendering that carries it, in answer to the
   `snapshot` verb, and it is BROADCAST and REPLACES — the host is the authority,
   the same bargain the terminal's VT dump makes. It is windowed
-  (`SNAPSHOT_ITEM_LIMIT`, `SNAPSHOT_BYTES_LIMIT`); paging past the window is
-  slice 5's.
+  (`SNAPSHOT_ITEM_LIMIT`, `SNAPSHOT_BYTES_LIMIT`).
+- **Two budgets, and confusing them is the bug.** `SNAPSHOT_*_LIMIT` bounds what
+  one message CARRIES; `TRANSCRIPT_RETENTION_*` bounds what the host HOLDS. They
+  are different numbers on purpose: a client asking for the page before the one
+  it is showing must not be told the history is gone when the host is only
+  refusing to send it all at once. Retention is a tripwire — a conversation that
+  reaches it has been talking for weeks — and every settle logs what was held,
+  which is where the next remeasurement comes from.
+- **`epoch` is the transcript's seq spine.** A snapshot names the host process
+  that built it. A replacement host rebuilds the transcript from pi's file and
+  mints its own item ids, so nothing it sends can be spliced onto the dead
+  host's items — same epoch merges, a new epoch replaces. Without it, the
+  broadcast-replace bargain means one client attaching to a long conversation
+  shortens what every other client is showing.
+- **Scroll-back is asked for by item, not by offset.** The `history` verb names
+  the oldest item a client is holding; `conversation_page` answers with what
+  precedes it, and is BROADCAST like everything else. A client takes a page only
+  when the epoch matches AND the anchor is its own oldest item — a window
+  scrolled somewhere else would otherwise splice a page into the middle of its
+  transcript and leave a hole.
+- **A notice is a row that explains a silence.** Compaction and retry reach the
+  app as `notice` (`id`, `level`, `text`, `done`), keyed so the row that says
+  "compacting" becomes the row that says "compacted" in place rather than
+  stacking. `done` is what separates one still happening from one that settled.
+  Reconstruction mints them too: pi's compaction entry becomes the honest top of
+  a revived transcript, because everything above it is a summary.
+- **A model switch is not a state declaration.** `set_model` asks, `model_changed`
+  answers with the model actually in force — a refusal comes back as the model
+  that is still running, which is why the picker moves on the host's answer and
+  never on the click. The daemon rewrites `LaunchIntent.Model` from it, so a
+  revive relaunches on the model the user chose rather than the one the spawn
+  pinned; it is deliberately kept out of `STATE_DECLARATION_KINDS` because
+  `applyState` restamps `state_since` and a picker change must not reset "working
+  for 4m".
 - **`session_ready` says why the session went quiet.** A reopened conversation
   whose last item is not an assistant message declares `waiting_input`;
   everything else declares `idle`. Both open a turn and both take a nudge, so

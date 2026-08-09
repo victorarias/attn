@@ -427,6 +427,33 @@ func (m *Manager) Snapshot(sessionID string) error {
 	return m.send(sessionID, map[string]interface{}{"verb": "snapshot"})
 }
 
+// History asks a host for the page of transcript items older than `before`.
+//
+// The answer travels the same broadcast path a snapshot does, addressed by the
+// anchor rather than by a request — so a second window sitting at the same place
+// in the conversation is served by one read, and a client holding a different
+// anchor drops the page. A host that holds nothing before the anchor answers an
+// empty page rather than nothing at all, which is how a client learns it has
+// reached the start of what this host can serve.
+func (m *Manager) History(sessionID, before string) error {
+	if before == "" {
+		return errors.New("history needs a before cursor")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "history", "before": before})
+}
+
+// SetModel switches the model a host's agent runs on, from its next run.
+//
+// The host answers with a `model_changed` envelope carrying the model actually
+// in force — including when the switch was refused — so nothing here has to
+// guess whether it landed, and every client sees the same answer.
+func (m *Manager) SetModel(sessionID, model string) error {
+	if model == "" {
+		return errors.New("set model needs a model")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "set_model", "model": model})
+}
+
 // ClearQueue drops everything the agent has been sent and not yet read.
 //
 // The host answers with the agent's own queue state, so the strip a client is

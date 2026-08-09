@@ -76,7 +76,7 @@ import {
   markdownAnnotationKey,
   type PendingMarkdownAnnotations,
 } from './daemonMarkdownAnnotationEvents';
-import { pendingRequestKey, type PendingRequests } from './daemonPendingRequests';
+import { pendingRequestKey, settlePendingRequest, type PendingRequests } from './daemonPendingRequests';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
@@ -86,6 +86,30 @@ import { useAutomationsStore } from '../store/automations';
 
 // Short names for daemon payloads used throughout the app.
 export type DaemonSession = GeneratedSession;
+
+/**
+ * A conversation this daemon has already recorded, and can start a new session
+ * from. Display-only: the resume itself carries `file` back to the daemon, which
+ * hands it to a host that forks it through pi's own reader.
+ */
+export interface PastConversation {
+  session_id: string;
+  file: string;
+  cwd: string;
+  preview: string;
+  /** Last write, epoch ms. */
+  modified: number;
+  bytes: number;
+  /** A session is running on this conversation right now. */
+  live: boolean;
+}
+
+export interface PastConversationsResult {
+  conversations: PastConversation[];
+  /** More exist than are listed; these are the newest. */
+  truncated: boolean;
+}
+
 export type Ticket = GeneratedTicket;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
@@ -199,7 +223,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '217';
+export const PROTOCOL_VERSION = '218';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -2154,6 +2178,19 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'past_conversations_result':
+            settlePendingRequest(
+              pendingActionsRef.current,
+              'list_past_conversations',
+              data,
+              (event): PastConversationsResult => ({
+                conversations: Array.isArray(event.conversations) ? (event.conversations as PastConversation[]) : [],
+                truncated: event.truncated === true,
+              }),
+              'Listing past conversations failed',
+            );
+            break;
+
           case 'agent_event': {
             // One envelope from a conversation session's host. The daemon does
             // not read the render kinds, so this is the only place they are
@@ -2891,6 +2928,7 @@ export function useDaemonSocket({
       ...(args.label && { label: args.label }),
       ...(args.resume_session_id && { resume_session_id: args.resume_session_id }),
       ...(args.resume_picker && { resume_picker: args.resume_picker }),
+      ...(args.resume_conversation_file && { resume_conversation_file: args.resume_conversation_file }),
       ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
       ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
       ...(args.spawned_from && { spawned_from: args.spawned_from }),
@@ -3062,6 +3100,42 @@ export function useDaemonSocket({
   const sendAgentAttach = useCallback((id: string) => {
     sendOrQueueCommand({ cmd: 'agent_attach', id }, { waitForInitialState: true });
   }, [sendOrQueueCommand]);
+
+  // Asks for the page of conversation older than the item this client is showing
+  // at the top of its transcript.
+  //
+  // Addressed by that anchor rather than by a request id, and answered by a
+  // broadcast `conversation_page`, for the same reason the snapshot is: two
+  // windows scrolled to the same place in a long conversation cost the host one
+  // read, and a window standing somewhere else recognises the anchor as not its
+  // own and ignores the page.
+  const sendAgentHistory = useCallback((id: string, before: string) => {
+    sendOrQueueCommand({ cmd: 'agent_history', id, before }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  // Switches the model a conversation's agent runs on, from its next run.
+  //
+  // Nothing comes back here. The host reports the model actually in force in a
+  // `model_changed` envelope — including when pi refused the switch — so a
+  // picker that moved early is corrected by the host rather than left showing a
+  // model the agent is not on.
+  const sendAgentSetModel = useCallback((id: string, model: string) => {
+    sendOrQueueCommand({ cmd: 'agent_set_model', id, model }, { waitForInitialState: true });
+  }, [sendOrQueueCommand]);
+
+  // Lists the conversations this daemon has already recorded, so one can be
+  // picked up in a new session.
+  //
+  // A request/result pair, unlike the rest of the conversation surface: this is
+  // one window's question about files on disk, and nothing about the answer
+  // changes what any other window is showing.
+  const sendListPastConversations = useCallback((): Promise<PastConversationsResult> => {
+    return sendRequest<PastConversationsResult>(
+      'list_past_conversations',
+      {},
+      'Listing past conversations timed out',
+    );
+  }, [sendRequest]);
 
   // Pushes the app's resolved terminal theme colors to the daemon, which uses
   // them to seed the worker's authoritative color model and answer OSC
@@ -5195,6 +5269,9 @@ export function useDaemonSocket({
     sendAgentToolDetail,
     sendAgentClearQueue,
     sendAgentAttach,
+    sendAgentHistory,
+    sendAgentSetModel,
+    sendListPastConversations,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

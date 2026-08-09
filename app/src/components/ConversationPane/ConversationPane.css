@@ -16,6 +16,84 @@
   gap: 12px;
 }
 
+/* The model this conversation runs on, and the way to change it. A thin strip
+   rather than a dialog: switching model mid-conversation is a thing done in
+   passing, and it takes effect on the next run either way. */
+.conversation-pane-header {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.conversation-model-label {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conversation-model {
+  background: var(--color-bg-input);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  font-size: var(--font-size-xs);
+  padding: 2px 6px;
+  max-width: 260px;
+}
+
+.conversation-model:disabled {
+  opacity: 0.5;
+}
+
+/* The way back through a long conversation. Sits at the top of the transcript
+   so it scrolls with it: the reader arrives at it, rather than it hovering. */
+.conversation-pane-earlier {
+  flex: 0 0 auto;
+  align-self: center;
+  background: none;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+}
+
+.conversation-pane-earlier:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+/* Something that happened TO the conversation — a compaction, a retry, a model
+   switch — drawn between the things said in it. Quieter than a message on
+   purpose: it is context for the gap, not part of the exchange. */
+.conversation-notice {
+  align-self: center;
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  max-width: 100%;
+}
+
+.conversation-notice[data-done='false'] {
+  border-style: dashed;
+}
+
+.conversation-notice--warn {
+  color: var(--color-warning);
+}
+
+.conversation-notice--error {
+  color: var(--color-error);
+}
+
 .conversation-pane-empty {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);

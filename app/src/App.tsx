@@ -792,6 +792,7 @@ function AppContent({
     sendNotebookBacklinks,
     sendNotebookToChief,
     sendGetRecentLocations,
+    sendListPastConversations,
     sendBrowseDirectory,
     sendInspectPath,
     sendCreateWorktreeFromBranch,
@@ -922,7 +923,7 @@ function AppContent({
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
-    options?: { chiefOfStaff?: boolean },
+    options?: { chiefOfStaff?: boolean; resumeConversationFile?: string },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -931,7 +932,7 @@ function AppContent({
     let paneAdded = false;
     try {
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
-      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff);
+      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff, options?.resumeConversationFile);
       localCreated = true;
       // Capture spawn args synchronously, before any await that could let a daemon
       // sessions broadcast prune the just-created local session. At this point its
@@ -2025,7 +2026,14 @@ function AppContent({
   }, [activeLocalSession?.workspaceId, handleNewWorkspace]);
 
   const handleLocationSelect = useCallback(
-    async (path: string, agent: SessionAgent, endpointId?: string, yoloMode = false, chiefOfStaff = false) => {
+    async (
+      path: string,
+      agent: SessionAgent,
+      endpointId?: string,
+      yoloMode = false,
+      chiefOfStaff = false,
+      resumeConversationFile?: string,
+    ) => {
       const jobId = sessionCreationJobIdRef.current + 1;
       sessionCreationJobIdRef.current = jobId;
       let selectedAgent: SessionAgent;
@@ -2072,7 +2080,15 @@ function AppContent({
         error: null,
       });
       try {
-        const sessionId = await createWorkspaceSession(folderName, path, undefined, selectedAgent, endpointId, yoloMode, { chiefOfStaff });
+        const sessionId = await createWorkspaceSession(
+          folderName,
+          path,
+          undefined,
+          selectedAgent,
+          endpointId,
+          yoloMode,
+          { chiefOfStaff, resumeConversationFile },
+        );
         setSessionCreationJob((current) => (
           current?.id === jobId
             ? { ...current, sessionId, phase: 'starting_session' }
@@ -4017,6 +4033,8 @@ function AppContent({
         agentAvailability={agentAvailability}
         endpoints={daemonEndpoints}
         chiefExists={hasChiefOfStaff}
+        conversationAgents={conversationPaneAgents}
+        onListPastConversations={sendListPastConversations}
       />
       <UndoToast />
       <SessionCreationProgress

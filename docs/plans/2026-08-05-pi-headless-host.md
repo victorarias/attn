@@ -314,16 +314,67 @@ Goal: long sessions and old sessions are first-class.
 
 Ships:
 
-- [ ] Scroll-back paging of older window ranges.
-- [ ] Resume of arbitrary existing session files.
-- [ ] Model switching mid-session.
-- [ ] Compaction/retry surfaced in the UI from their events.
+- [x] Scroll-back paging of older window ranges. The `history` verb names the
+      oldest item a client holds; `conversation_page` answers with what precedes
+      it. Behind the window the host keeps an archive bounded by
+      `TRANSCRIPT_RETENTION_ITEMS` / `TRANSCRIPT_RETENTION_BYTES` — a separate
+      budget from the window on purpose.
+- [x] Resume of arbitrary existing session files. The picker lists the
+      conversations under `<data-dir>/hosts/state` and a chosen one rides into
+      `LaunchIntent.ResumeConversationFile`; the host forks it
+      (`SessionManager.forkFrom`) into the new session's own dir.
+- [x] Model switching mid-session (`set_model` / `model_changed`), with the
+      daemon rewriting the launch intent so a revive keeps the choice.
+- [x] Compaction/retry surfaced in the UI as `notice` rows, from the host's own
+      events and from reconstruction.
+
+Three decisions this slice made:
+
+- **The epoch, and why the truncation edge needed one.** A snapshot is a
+  broadcast replace, so on a conversation longer than the window, one client
+  attaching used to shorten what every other client was showing. The snapshot
+  now names the host process that built it: a same-epoch snapshot is spliced
+  onto scroll-back the client already paged in, a different epoch replaces. It
+  is the transcript's version of the seq-spine reset a new host already forced.
+- **A page is addressed by item, not by offset.** `conversation_page` is
+  broadcast like everything else, and a client takes one only when the epoch
+  matches and the anchor is its own oldest item. An offset would have been
+  correct only for the window that asked.
+- **Resume forks, and only into an empty session dir.** The named conversation
+  is copied into this session's own storage, so the session it came from is
+  never written to and a revive of the resuming session never rewinds to the
+  source. The order matters: revive (a non-empty dir) never consults the resume
+  file at all.
+- **`model_changed` is deliberately not a state declaration.** `applyState`
+  restamps `state_since` on every apply, so routing a picker change through it
+  would reset "working for 4m". The daemon reads the envelope directly and
+  rewrites `LaunchIntent.Model`; a refusal comes back as the model still in
+  force, and blanking the pin on that would launch the next revive on a default
+  nobody chose.
 
 Acceptance:
 
 - [ ] A 100+-turn session scrolls smoothly and pages history on demand.
 - [ ] Resuming an old session works.
 - [ ] Switching model mid-session takes effect next run.
+
+All three are the packaged-app scenario `pi-host-history`
+(`app/scripts/real-app-harness/scenario-pi-host-history.mjs`), run against a real
+agent on a throwaway profile. The long transcript is a synthesized pi session
+file read through pi's own `SessionManager` rather than a thousand live turns —
+proving the window needs more items than the window holds, and the cost of that
+proof should be one resume. The scenario also holds the multi-client case
+directly: a second WebSocket client attaches while the app pane is scrolled
+back, and the assertion is that the pane's transcript does not shrink.
+
+Deliberately left behind:
+
+- **No CLI surface.** There is no CLI spawn path for conversation sessions at
+  all today, so resume-from-file, paging and model switching have nothing to
+  hang off. When one lands, `--resume` and `--model` are the shape.
+- **Reaching a tool subprocess a hard kill stranded** (slice 4's handoff).
+  `tool_started` still carries no pid.
+- **Remote/Linux host distribution**, per the epic's non-goals.
 
 ### Later (named, unplanned)
 

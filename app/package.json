@@ -93,7 +93,8 @@
     "real-app:scenario-pi-host-nudge": "node scripts/real-app-harness/scenario-pi-host-nudge.mjs",
     "real-app:scenario-pi-host-tools": "node scripts/real-app-harness/scenario-pi-host-tools.mjs",
     "real-app:scenario-pi-host-revive": "node scripts/real-app-harness/scenario-pi-host-revive.mjs",
-    "real-app:scenario-pi-host-delegate": "node scripts/real-app-harness/scenario-pi-host-delegate.mjs"
+    "real-app:scenario-pi-host-delegate": "node scripts/real-app-harness/scenario-pi-host-delegate.mjs",
+    "real-app:scenario-pi-host-history": "node scripts/real-app-harness/scenario-pi-host-history.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

@@ -69,7 +69,7 @@ interface UseUiAutomationBridgeArgs {
   daemonReady?: boolean;
   connectionError?: string | null;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { chiefOfStaff?: boolean }) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { chiefOfStaff?: boolean; resumeConversationFile?: string }) => Promise<string>;
   selectSession: (sessionId: string) => void;
   selectWorkspace: (workspaceId: string) => void;
   moveWorkspaceLeafToWorkspace: (
@@ -2040,6 +2040,27 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { typed: text };
       }
+      // Pick an option in a <select>. Separate from dom_type because a select
+      // has no text to type into: the value has to be one it offers, and a
+      // scenario asking for one that is not there should be told so rather
+      // than left asserting against an unchanged control.
+      case 'dom_select': {
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        const value = typeof payload.value === 'string' ? payload.value : null;
+        if (!selector) throw new Error('dom_select requires selector');
+        if (value === null) throw new Error('dom_select requires value');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLSelectElement)) {
+          throw new Error(`dom_select target is not a select: ${selector}`);
+        }
+        const offered = Array.from(element.options).map((option) => option.value);
+        if (!offered.includes(value)) {
+          throw new Error(`dom_select value ${value} is not offered by ${selector}; options: ${offered.join(', ')}`);
+        }
+        setControlValue(element, value);
+        await settleUi(2);
+        return { selected: value };
+      }
       case 'get_window_bounds': {
         if (!isTauri()) {
           return null;
@@ -2285,10 +2306,19 @@ export function useUiAutomationBridge({
           ? payload.endpoint_id
           : undefined;
         const chiefOfStaff = payload.chief_of_staff === true;
+        // An existing conversation this session picks up from — the automation
+        // half of the picker's resume bar. Only a conversation agent reads it.
+        const resumeConversationFile = typeof payload.resume_conversation_file === 'string'
+          && payload.resume_conversation_file.length > 0
+          ? payload.resume_conversation_file
+          : undefined;
         if (!cwd) {
           throw new Error('create_session requires cwd');
         }
-        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId, undefined, { chiefOfStaff });
+        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId, undefined, {
+          chiefOfStaff,
+          resumeConversationFile,
+        });
         await settleUi();
         window.setTimeout(() => {
           fitSessionActivePane(sessionId);
@@ -3075,12 +3105,36 @@ export function useUiAutomationBridge({
             detailError: body?.querySelector('[data-testid="conversation-tool-detail-error"]')?.textContent || '',
           };
         });
+        // The rows that explain a silence: a compaction, a retry, a model
+        // switch. `done` is what separates one still happening from one that
+        // settled, which is the whole point of drawing them.
+        const notices = Array.from(root.querySelectorAll('.conversation-notice')).map((node) => {
+          const element = node as HTMLElement;
+          return {
+            id: (element.dataset.testid || '').replace('conversation-notice-', ''),
+            level: element.dataset.level || '',
+            done: element.dataset.done === 'true',
+            text: element.textContent || '',
+          };
+        });
+        const modelPicker = root.querySelector('[data-testid="conversation-model"]');
+        const model = modelPicker instanceof HTMLSelectElement ? modelPicker : null;
         const send = root.querySelector('[data-testid="conversation-send"]');
+        const earlier = root.querySelector('[data-testid="conversation-load-earlier"]');
         return {
           sessionId,
           messages,
           tools,
+          notices,
           queued,
+          // The host holds conversation older than what is drawn. Present only
+          // then; a scenario clicks it and asserts the transcript grew upwards.
+          loadEarlierAvailable: Boolean(earlier),
+          loadingHistory: Boolean(earlier instanceof HTMLButtonElement && earlier.disabled),
+          // What the agent runs on now, and what this machine could switch it
+          // to. Empty when the host said nothing about models.
+          model: model?.value || '',
+          models: model ? Array.from(model.options).map((option) => option.value).filter(Boolean) : [],
           // Present only while something is queued: the way out of the queue.
           queueClearAvailable: Boolean(root.querySelector('[data-testid="conversation-queue-clear"]')),
           inputDisabled: Boolean(textarea?.disabled),

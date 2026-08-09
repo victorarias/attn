@@ -56,6 +56,9 @@ function toolResultEntry(id: string, callID: string, text: string, extra: Record
 const tools = (items: SnapshotItem[]): SnapshotToolItem[] =>
   items.filter((item): item is SnapshotToolItem => item.kind === "tool");
 
+const ids = (items: SnapshotItem[]): string[] =>
+  items.map((item) => (item.kind === "tool" ? item.call_id : item.id));
+
 describe("reconstructTranscript", () => {
   test("rebuilds messages and tool cards in the order they happened", () => {
     const { items } = reconstructTranscript([
@@ -255,26 +258,47 @@ describe("TranscriptStore", () => {
     expect(store.snapshot().queue).toEqual({ steering: ["stop"], followUp: ["then this"] });
   });
 
-  test("drops the oldest items past the window and says it did", () => {
-    const store = new TranscriptStore(3, 1 << 20);
+  test("windows the newest items and says older ones are still reachable", () => {
+    const store = new TranscriptStore("e1", 3, 1 << 20);
     for (const id of ["m1", "m2", "m3", "m4", "m5"]) {
       store.apply("message_end", { id, role: "assistant", text: id });
     }
     const snapshot = store.snapshot();
-    expect(snapshot.items.map((item) => (item.kind === "message" ? item.id : ""))).toEqual(["m3", "m4", "m5"]);
+    expect(ids(snapshot.items)).toEqual(["m3", "m4", "m5"]);
     expect(snapshot.total).toBe(5);
     expect(snapshot.truncated).toBe(true);
+    // The window clipped them; retention did not. The difference is what scroll
+    // -back exists to serve.
+    expect(snapshot.has_more).toBe(true);
+    expect(snapshot.epoch).toBe("e1");
   });
 
   test("the byte budget binds before the item budget when text is large", () => {
-    const store = new TranscriptStore(100, 64);
+    const store = new TranscriptStore("e1", 100, 64);
     store.apply("message_end", { id: "m1", role: "assistant", text: "x".repeat(80) });
     store.apply("message_end", { id: "m2", role: "assistant", text: "y".repeat(80) });
     const snapshot = store.snapshot();
-    // The newest item is never dropped, even alone over budget: a snapshot with
+    // The newest item always travels, even alone over budget: a snapshot with
     // nothing in it would be worse than one that names what it clipped.
     expect(snapshot.items).toHaveLength(1);
     expect(snapshot.truncated).toBe(true);
+    expect(snapshot.has_more).toBe(true);
+  });
+
+  test("history past the retention tripwire is gone, and the snapshot says so", () => {
+    const store = new TranscriptStore("e1", 3, 1 << 20, 4, 1 << 20);
+    for (const id of ["m1", "m2", "m3", "m4", "m5"]) {
+      store.apply("message_end", { id, role: "assistant", text: id });
+    }
+    const snapshot = store.snapshot();
+    expect(snapshot.total).toBe(5);
+    // Four retained, three windowed: one page of scroll-back is left and the
+    // fifth item is gone for good.
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.has_more).toBe(true);
+    expect(ids(store.page("message:m3").items)).toEqual(["m2"]);
+    expect(store.page("message:m2").items).toEqual([]);
+    expect(store.page("message:m2").has_more).toBe(false);
   });
 
   test("seeding replaces the transcript with reconstructed history", () => {

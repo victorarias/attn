@@ -14,6 +14,13 @@ export interface PtySpawnArgs {
   shell?: boolean;
   resume_session_id?: string | null;
   resume_picker?: boolean | null;
+  /**
+   * An existing conversation file this session picks up from. Only a
+   * conversation agent reads it — a PTY-backed agent resumes through
+   * resume_session_id. The host FORKS the file, so the conversation it was
+   * copied from is never written to.
+   */
+  resume_conversation_file?: string;
   yolo_mode?: boolean | null;
   chief_of_staff?: boolean | null;
   /**

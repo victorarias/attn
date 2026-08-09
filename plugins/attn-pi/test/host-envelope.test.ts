@@ -290,10 +290,10 @@ describe("PiEventMapper", () => {
 
     mapper.handle({ type: "bash_execution_update", delta: "line" });
     mapper.handle({ type: "bash_execution_update", delta: "line" });
-    mapper.handle({ type: "summarization_retry_scheduled" });
+    mapper.handle({ type: "a_pi_event_from_a_later_release" });
 
     expect(emitted).toEqual([]);
-    expect(unknown).toEqual(["bash_execution_update", "summarization_retry_scheduled"]);
+    expect(unknown).toEqual(["bash_execution_update", "a_pi_event_from_a_later_release"]);
   });
 });
 
