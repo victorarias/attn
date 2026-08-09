@@ -399,6 +399,65 @@ func (s *Store) ListAppInvocations(name string, limit int) ([]AppInvocation, err
 	return out, rows.Err()
 }
 
+// TrimAppInvocations drops invocations that started before cutoff, then drops
+// everything past the newest perApp rows of each app. It reports how many went.
+//
+// Two limits because they answer two different questions. The age window is when
+// a row stops being useful: an invocation whose event has aged off the durable
+// log cannot be re-examined against it. The per-app cap is how large the log is
+// allowed to get, which the age window cannot bound — how many rows thirty days
+// holds depends entirely on how loud the app's subscription is, and the loudest
+// one in attn is three orders of magnitude above the quietest. Both values and
+// their receipts live with the caller (internal/daemon, AppInvocationRetention
+// and AppInvocationsPerApp) — the store keeps no policy. A perApp of zero or
+// less skips the cap.
+//
+// Both sweeps run across every app in one statement rather than per app:
+// retention is a property of the table, and a sweep that walked the registry
+// would miss the rows of an app that has been removed, which are exactly the ones
+// nothing will ever read again.
+func (s *Store) TrimAppInvocations(cutoff time.Time, perApp int) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	removed := 0
+	res, err := s.db.Exec(`DELETE FROM app_invocations WHERE started_at < ?`,
+		cutoff.UTC().Format(sortableTimeFormat))
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	removed += int(n)
+
+	if perApp <= 0 {
+		return removed, nil
+	}
+	// The ordering matches ListAppInvocations exactly — newest first, id breaking
+	// a same-timestamp tie — so what the cap keeps is what a reader can see.
+	res, err = s.db.Exec(`
+		DELETE FROM app_invocations WHERE id IN (
+			SELECT id FROM (
+				SELECT id, ROW_NUMBER() OVER (
+					PARTITION BY app_name ORDER BY started_at DESC, id DESC
+				) AS rank FROM app_invocations
+			) WHERE rank > ?
+		)`, perApp)
+	if err != nil {
+		return removed, err
+	}
+	n, err = res.RowsAffected()
+	if err != nil {
+		return removed, err
+	}
+	return removed + int(n), nil
+}
+
 func scanApp(row rowScanner) (App, error) {
 	var (
 		app       App

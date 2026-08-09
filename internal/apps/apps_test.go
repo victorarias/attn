@@ -45,6 +45,42 @@ func TestNameErrorsSayWhatIsWrong(t *testing.T) {
 	}
 }
 
+// The reserved set is refused by the same rule every surface uses, so a manifest,
+// the CLI and the daemon cannot disagree about whether `runtime` is an app.
+func TestReservedNamesAreRefused(t *testing.T) {
+	for _, name := range ReservedNames() {
+		err := ValidateName(name)
+		if err == nil {
+			t.Fatalf("ValidateName(%q) = nil, want a refusal", name)
+		}
+		// The refusal teaches: why this one, and what else is taken.
+		if !strings.Contains(err.Error(), "reserved") {
+			t.Errorf("ValidateName(%q) does not say the name is reserved: %v", name, err)
+		}
+		for _, other := range ReservedNames() {
+			if !strings.Contains(err.Error(), other) {
+				t.Errorf("ValidateName(%q) does not list reserved name %q: %v", name, other, err)
+			}
+		}
+	}
+}
+
+// `runtime` is the one that is not a subcommand: it is the supervised child's own
+// name, and the reason the whole list exists. Naming it explicitly keeps a future
+// edit to the map from quietly dropping it.
+func TestRuntimeIsReserved(t *testing.T) {
+	if err := ValidateName("runtime"); err == nil {
+		t.Fatal("an app could be named runtime, which collides with the shared runtime")
+	}
+	// A name that merely contains a reserved word is still fine — the rule is the
+	// whole name, not a substring.
+	for _, ok := range []string{"runtime-monitor", "my-runtime", "statusboard"} {
+		if err := ValidateName(ok); err != nil {
+			t.Errorf("ValidateName(%q) = %v, want nil", ok, err)
+		}
+	}
+}
+
 func TestDerivedIdentities(t *testing.T) {
 	if got := ConsumerName("approval-gate"); got != "app:approval-gate" {
 		t.Errorf("ConsumerName = %q", got)

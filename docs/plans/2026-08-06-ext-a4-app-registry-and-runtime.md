@@ -365,7 +365,7 @@ fully-CI'd, fully-reviewed merge at the end.
    consumers wired to slice 1, auto-disable, `logs`. The compiled host
    binary cross-compiles for linux amd64/arm64 beside the Go daemon's
    existing cross targets — tracked here so the stage cannot close
-   darwin-only.
+   darwin-only. *Shipped:* see "Slice 5 receipts" below.
 6. **Exit proof** — the roadmap's exit, run live: an agent writes a real app
    in a scaffolded directory, applies it, sees invocations in the log,
    breaks it and watches auto-disable park it, fixes and re-enables it,
@@ -377,6 +377,65 @@ Verification: A4 touches daemon lifecycle, protocol, and background runners
 — live verification in a running non-production app is mandatory for slices
 3–6; slices 1–2 are daemon-internal and carry harness tests plus the live
 proof at slice 6.
+
+### Slice 5 receipts
+
+Measured 2026-08-09 on an M-series Mac, throwaway profile `a4rt5` installed
+from the branch, against a scaffolded app (`ticketwatch`) subscribing to
+`ticket.*` and writing a document per fact.
+
+**Cold start — `appRuntimeConnectWait = 10s`.** The runtime starts lazily, on
+the first fact an app is due, so the first dispatch after a daemon start pays
+the whole cold start. First invocation end to end — spawn the compiled host,
+connect back over the unix socket, hello, import the bundle, run the handler,
+write a document — was **77ms**. The ten-second wait is ~130× that. A delivery
+that hits it stalls and retries rather than failing anything permanently.
+
+**Handler duration — `appDispatchTimeout = 60s`.** Warm invocations of the
+same document-writing handler ran at **0–1ms** (n=10, one burst), and the
+in-`app dev` measurement agreed at 1ms. Sixty seconds is between four and five
+orders of magnitude past that, which is the point: the timeout exists only so a
+handler awaiting something that never resolves becomes a failure the app owns,
+instead of holding its delivery open forever and pinning the log's retention
+floor for everybody.
+
+**Invocation log size — `AppInvocationRetention = 30d` *and*
+`AppInvocationsPerApp = 20,000`.** Measured over 7.5 days of Victor's
+production event log (275,845 facts): the loudest fact by a wide margin is
+`session.state.changed` at **1,141/hour** — and it is what a scaffolded app
+subscribes to out of the box. Thirty days of that is ~820,000 invocation rows,
+well over a hundred megabytes for a single app, on a database that is 51MB
+today. The quietest domain an app would realistically watch, `ticket.*`, runs
+at **27/day** — three orders of magnitude below.
+
+So the age window cannot bound this table on its own, and a second limit is not
+redundancy: the age window says when a row stops being *useful* (an invocation
+whose event has aged off the durable log cannot be re-read against it, which is
+why it matches the bus's own `DefaultRetention`), and the per-app cap says how
+large the log is allowed to *get*. 20,000 rows is ~17 hours of the loudest
+possible app — a whole working day of "what did it do this morning" — and about
+4MB. At the ticket rate it is two years, so for anything quiet the age window
+trims first and the cap is never felt.
+
+**Backoff, observed rather than asserted.** A handler made to throw produced
+attempts at 22:57:07, :11, :19 and :35 on the same event seq — 4s, 8s, 16s —
+with the consumer's cursor parked one behind throughout, then version 4 of the
+app succeeded on that same seq and the cursor advanced. Stall-don't-skip, live.
+
+**Fixed on the way through**, both found by doing the verification rather than
+by a test:
+
+- `UNAME_S` was referenced by three Makefile recipes and defined by none, so it
+  expanded to empty and `make install-daemon` skipped code signing entirely.
+  The copied binary kept its ad-hoc linker signature inside a properly signed
+  bundle and macOS answered `daemon ensure` with `Killed: 9`. The daemon-only
+  install tier did not work for anyone; now it does.
+- `scripts/build-app-runtime-host.sh` resolved a relative `stage_dir` against
+  the wrong directory: it `cd`s to `apphost/` before invoking bun, and bun
+  reads `--outfile` from its own cwd. Both Linux cross-builds reported success
+  and left an empty tree, writing the ELF under `apphost/dist/` instead. The
+  native build was unaffected because its default stage dir is absolute — which
+  is exactly how a cross-only break stays invisible.
 
 ## Out of scope
 

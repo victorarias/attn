@@ -105,6 +105,11 @@ func (d *Daemon) handleAppApply(conn net.Conn, msg *protocol.AppApplyMessage) {
 	if source := strings.TrimSpace(protocol.Deref(msg.SourcePath)); source != "" {
 		d.logf("app apply %s: version %d (%s) from %s", name, version.ID, appbuild.ShortHash(hash), source)
 	}
+	// Subscriptions and collections both come from the manifest, so both can
+	// differ from the version before this one. Re-pointing here rather than off
+	// the fact keeps it synchronous with the apply: the reply the author reads
+	// means the new version is already the one that will run.
+	d.syncAppRuntimeForVersion(name)
 	d.publishAppVersionChanged(name, version, previous, appVersionReasonApply)
 
 	result := protocol.AppApplyResult{
@@ -157,6 +162,7 @@ func (d *Daemon) handleAppRollback(conn net.Conn, msg *protocol.AppRollbackMessa
 		d.sendError(conn, fmt.Sprintf("app rollback %s: %v", name, err))
 		return
 	}
+	d.syncAppRuntimeForVersion(name)
 	d.publishAppVersionChanged(name, target, app.CurrentVersionID, appVersionReasonRollback)
 
 	result := protocol.AppRollbackResult{

@@ -172,6 +172,13 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAppRemove:     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppApply:      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppRollback:   commandMetadata(ScopeHubLocal, false, true),
+	// The shared runtime is the hub's own child process, so these are hub-local
+	// for the same reason. app_watch holds its connection open for as long as the
+	// caller wants invocations, so it is logged once at open like the rest.
+	protocol.CmdAppLogs:           commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRuntimeStatus:  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRuntimeRestart: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppWatch:          commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

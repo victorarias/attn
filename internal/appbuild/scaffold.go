@@ -186,6 +186,7 @@ You can write the whole thing from this file. Nothing else needs reading.
     attn app apply .        build and install this app
     attn app dev .          the same, on every save
     attn app status %s
+    attn app logs %s        what the app printed
     attn app rollback %s
     attn app disable %s     stop delivering to it, keep it installed
 
@@ -228,9 +229,15 @@ document body is stored and read back untouched.
 ## Failure
 
 A handler that throws fails that delivery. attn retries it with backoff rather
-than skipping it, records every attempt, and if the app stays stuck on one event
-long enough, disables the app — one broken app must not hold everyone's event log
-open. `+"`attn app enable %s`"+` puts it back.
+than skipping it, records every attempt, and if the app stays stuck on the same
+event for fifteen minutes, disables the app — one broken app must not hold
+everyone's event log open. `+"`attn app enable %s`"+` puts it back, with a clean
+slate.
+
+Every app's handlers run in one shared process, so anything you print goes to a
+log attn tags per app: `+"`attn app logs %s`"+` reads your lines back, and
+`+"`attn app logs runtime`"+` shows the whole thing — which is where a runtime
+that will not start says why.
 
 ## Rules worth knowing before you start
 
@@ -243,5 +250,5 @@ open. `+"`attn app enable %s`"+` puts it back.
   version, and `+"`attn app rollback`"+` is a pointer move, not a rebuild.
 - attn does not remember where this directory is. It is yours; keep it wherever
   you keep code.
-`, name, name, name, name, SDKModule, name)
+`, name, name, name, name, name, SDKModule, name, name)
 }

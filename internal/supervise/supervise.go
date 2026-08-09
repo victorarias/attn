@@ -284,6 +284,12 @@ func (s *Supervisor) Ensure(name string, start StartFunc) error {
 }
 
 // Stop kills a child and stops supervising it until the next Ensure.
+//
+// It also ends the crash-loop episode: the restart budget counts restarts the
+// supervisor chose, and a deliberate stop is not one of them. Without the reset,
+// stop-then-start — which is what a "restart" verb is — would revive a parked
+// child with no budget left, and the next single exit would park it again. That
+// makes the way back from parked a door that opens once.
 func (s *Supervisor) Stop(name string) {
 	s.mu.Lock()
 	c := s.children[name]
@@ -293,6 +299,7 @@ func (s *Supervisor) Stop(name string) {
 	}
 	c.desired = DesiredStopped
 	c.phase = PhaseStopped
+	c.restartAttempt = 0
 	c.generation++
 	c.connectedAt = time.Time{}
 	c.nextRestartAt = time.Time{}

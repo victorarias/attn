@@ -17,9 +17,7 @@ notes: >
   compiler holds your entrypoint to, and the manifest and the bundle together
   make the content hash. Applying the same app twice records nothing the second
   time — same hash, same version, no new row. Rollback is a pointer, so it
-  builds nothing and every version stays on disk. `attn app dev` today streams
-  apply results and build errors; handler invocations are not streamed because
-  nothing dispatches to apps yet. Typechecking uses a pinned TypeScript that
+  builds nothing and every version stays on disk. Typechecking uses a pinned TypeScript that
   attn installs once, on the first apply, and shares across apps; bundling uses
   bun, which must be on your PATH.
   Design: docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.

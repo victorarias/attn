@@ -56,6 +56,10 @@ func runApp() {
 		runAppSetEnabled(args, false)
 	case "remove":
 		runAppRemove(args)
+	case "logs":
+		runAppLogs(args)
+	case "runtime":
+		runAppRuntime(args)
 	default:
 		fmt.Fprintf(os.Stderr, "app: unknown command %q\n", os.Args[2])
 		writeAppHelp(os.Stderr)
@@ -90,7 +94,9 @@ commands:
         one, or the one you name. Builds nothing: the artifact is still on disk.
 
   dev <path>
-        apply on every change. Shows apply results and build errors.
+        apply on every change, and print every handler invocation as it runs.
+        Shows apply results and build errors too, so one window is the whole
+        edit-run-read loop.
 
   list [--json]
         every registered app: the version it runs, whether it is enabled, and
@@ -119,6 +125,21 @@ commands:
         row. Version history, the invocation log and every document under
         app/<name> survive — deleting your data is a separate act, and this is
         not it.
+
+  logs <name> [--lines N]
+        what the app printed. Every app's handlers run in one shared process, so
+        its output is tagged per app and this reads the tag back. The name
+        "runtime" means the whole log, tags and all — that is where a runtime
+        that will not start says why.
+
+  runtime status [--json]
+        the shared runtime every app's handlers run in: whether it is up, which
+        binary it launches, and how many apps are installed and enabled.
+
+  runtime restart
+        kill the running runtime and start a fresh one. Also the way back from
+        "parked", which is where a runtime that crash-looped ends up. There is
+        one runtime for every app, so this takes no app name.
 `)
 }
 
@@ -250,6 +271,15 @@ func runAppStatus(args []string) {
 			apps.ConsumerName(app.Name))
 	}
 	fmt.Printf("  documents:  %s\n", apps.Namespace(app.Name))
+	fmt.Printf("  runtime:    %s\n", appRuntimeCell(result.Runtime))
+	if result.Stall != nil {
+		// The stall clock is the only thing here that ends with the app being
+		// switched off, so it says when, not just that.
+		fmt.Printf("  stalled:    on event %d (%s) since %s, %d attempt(s)\n",
+			result.Stall.EventSeq, result.Stall.EventName, result.Stall.Since, result.Stall.Attempts)
+		fmt.Print(indentBlock("              ", result.Stall.LastError))
+		fmt.Printf("              disables itself at %s unless it succeeds first\n", result.Stall.DisablesAt)
+	}
 	fmt.Printf("  history:    %d version(s), %d invocation(s)\n", result.Versions, result.Invocations)
 	if len(result.Recent) == 0 {
 		fmt.Println("  recent:     no invocations recorded")
@@ -259,11 +289,66 @@ func runAppStatus(args []string) {
 	w := tabwriter.NewWriter(os.Stdout, 4, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "\tSTARTED\tVERSION\tSEQ\tEVENT\tHANDLER\tSTATUS\tMS\tERROR")
 	for _, inv := range result.Recent {
+		// One line per invocation, so the error is its first line only — a
+		// JavaScript stack pasted into a column destroys the table it is in. The
+		// stall block above carries the whole thing for the failure that matters,
+		// and `attn app logs <name>` has what the handler printed.
 		fmt.Fprintf(w, "\t%s\t%d\t%d\t%s\t%s\t%s\t%d\t%s\n",
 			inv.StartedAt, inv.VersionID, inv.EventSeq, inv.EventName, inv.Handler,
-			inv.Status, inv.DurationMs, inv.Error)
+			inv.Status, inv.DurationMs, firstErrorLine(inv.Error))
 	}
 	w.Flush()
+}
+
+// firstErrorLine is one row's worth of an error, with a marker when there is
+// more. Without the marker a reader has no way to know a stack was cut.
+func firstErrorLine(text string) string {
+	line, rest, found := strings.Cut(strings.TrimRight(text, "\n"), "\n")
+	if found && strings.TrimSpace(rest) != "" {
+		return line + " …"
+	}
+	return line
+}
+
+// indentBlock puts prefix in front of every line of text, so a multi-line value
+// in an aligned block stays inside its column. A handler's error carries the
+// JavaScript stack that threw it, which is the most useful thing on the screen
+// and also the only value here that is never one line.
+func indentBlock(prefix, text string) string {
+	var b strings.Builder
+	for _, line := range strings.Split(strings.TrimRight(text, "\n"), "\n") {
+		b.WriteString(prefix)
+		b.WriteString(line)
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+// appRuntimeNeverStarted is what a daemon that has never started a runtime says.
+//
+// "no *enabled* app", because a disabled app is never due a fact: a daemon whose
+// every app is switched off will never start a runtime, and the sentence has to
+// read as the settled state it is rather than as something that has not happened
+// yet. `attn app runtime status` carries the enabled count in the same answer, so
+// a reader who wants the number has it.
+const appRuntimeNeverStarted = "not started — no enabled app has been due a fact since this daemon came up"
+
+// appRuntimeCell says where this app's handlers actually run. It is one line
+// because `attn app runtime status` is the full picture; what belongs here is
+// the answer to "is my app not running because of my app, or because of the
+// runtime" — and a parked runtime is the loudest form of the second.
+func appRuntimeCell(info *protocol.AppRuntimeInfo) string {
+	if info == nil {
+		return appRuntimeNeverStarted
+	}
+	switch {
+	case info.Phase == "parked":
+		return "PARKED — it crash-looped and attn stopped restarting it, so no app's handlers run. `attn app runtime restart`"
+	case info.Connected:
+		return fmt.Sprintf("running (%s), generation %d", info.Phase, info.Generation)
+	default:
+		return fmt.Sprintf("%s — not connected yet", info.Phase)
+	}
 }
 
 func runAppSetEnabled(args []string, enabled bool) {

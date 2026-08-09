@@ -18,6 +18,9 @@ coverage.out
 app/src-tauri/binaries/
 app/src-tauri/bundled-plugins/*
 !app/src-tauri/bundled-plugins/.gitkeep
+app/src-tauri/app-runtime/*
+!app/src-tauri/app-runtime/.gitkeep
+dist/app-runtime/
 
 # Claude Code local config. settings.json is the shared, checked-in part (repo
 # hooks); everything else here is per-machine. The pattern must exclude the
