@@ -1938,6 +1938,27 @@ model PtyResizeMessage {
   ypixel?: int32;
 }
 
+// Reports whether the user can currently see this client, and whether what they
+// are seeing is the dashboard. Fire-and-forget: no result event.
+//
+// Only the client knows window visibility, which view is rendered, and when
+// input last happened; only the daemon decides what to do about it. So the
+// client reports facts and never a rate or a tier — the policy that turns these
+// into an activity-generation interval is the daemon's alone.
+//
+// It is a HEARTBEAT, not a latch: send it on every change AND periodically, or
+// the daemon expires this client to "away". That asymmetry is deliberate. A
+// client that crashes or is force-quit while the dashboard is up would otherwise
+// pin generation on forever with nobody looking; expiry fails toward off, which
+// is the safe direction, and the cost of a missed heartbeat is one interval of
+// latency when the user comes back.
+model SetClientPresenceMessage {
+  cmd: "set_client_presence";
+  visible: boolean; // The app window is on screen and not fully occluded.
+  dashboard_visible: boolean; // ...and the view it is rendering is the dashboard.
+  idle_seconds?: float64; // Seconds since the last keyboard or pointer input anywhere in this client. Absent means "no input observed yet this connection".
+}
+
 // Pushes the app's resolved terminal theme colors to the daemon. Fire-and-forget:
 // no result event.
 model SetTerminalThemeMessage {

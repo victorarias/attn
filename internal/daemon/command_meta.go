@@ -75,6 +75,10 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdGetSettings:                           commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSetSetting:                            commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSetTerminalTheme:                      commandMetadata(ScopeHubLocal, false, true),
+	// Unlogged: it is a heartbeat from every connected client on a fixed cadence,
+	// so logging it would bury daemon.log in lines nobody reads. `attn presence`
+	// is how you see the tier instead.
+	protocol.CmdSetClientPresence: commandMetadata(ScopeHubLocal, false, false),
 	protocol.CmdListPlugins:                           commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdInstallPlugin:                         commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdInstallBundledPlugin:                  commandMetadata(ScopeHubLocal, false, true),

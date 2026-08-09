@@ -4927,6 +4927,20 @@ type SetChiefOfStaffMessage struct {
 	SessionID string `json:"session_id"`
 }
 
+type SetClientPresenceMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// DashboardVisible corresponds to the JSON schema field "dashboard_visible".
+	DashboardVisible bool `json:"dashboard_visible"`
+
+	// IdleSeconds corresponds to the JSON schema field "idle_seconds".
+	IdleSeconds *float64 `json:"idle_seconds,omitempty,omitzero"`
+
+	// Visible corresponds to the JSON schema field "visible".
+	Visible bool `json:"visible"`
+}
+
 type SetEndpointRemoteWebMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`

@@ -248,6 +248,7 @@ const (
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
+	CmdSetClientPresence                     = "set_client_presence"
 	CmdSetTerminalTheme                      = "set_terminal_theme"
 	CmdWorkspaceLayoutGet                    = "workspace_layout_get"
 	CmdWorkspaceLayoutAddSessionPane         = "workspace_layout_add_session_pane"
@@ -1592,6 +1593,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg ReloadSessionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal reload_session: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetClientPresence:
+		var msg SetClientPresenceMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_client_presence: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
