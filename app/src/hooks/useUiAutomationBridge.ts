@@ -1316,7 +1316,14 @@ function clickElementWithModifiers(element: HTMLElement, modifiers?: ClickModifi
     shiftKey: modifiers?.shift ?? false,
     altKey: modifiers?.alt ?? false,
   };
+  // Pointer events first, in the order a real browser fires them. Anything
+  // listening for pointerdown — the modern default for "the user touched the
+  // app" — is otherwise invisible to every scenario that clicks through this
+  // helper, and the scenario reads as passing while the behavior never ran.
+  const pointerInit: PointerEventInit = { ...init, pointerId: 1, pointerType: 'mouse', isPrimary: true };
+  element.dispatchEvent(new PointerEvent('pointerdown', pointerInit));
   element.dispatchEvent(new MouseEvent('mousedown', init));
+  element.dispatchEvent(new PointerEvent('pointerup', pointerInit));
   element.dispatchEvent(new MouseEvent('mouseup', init));
   element.dispatchEvent(new MouseEvent('click', init));
 }
