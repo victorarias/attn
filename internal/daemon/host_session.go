@@ -11,6 +11,7 @@ import (
 
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/hostsession"
+	"github.com/victorarias/attn/internal/launchenv"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -110,7 +111,22 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 	// user has had set for years.
 	env := pty.MergeEnvironment(os.Environ(), d.loginShellEnvForSpawn())
 	env = pty.MergeEnvironment(env, opts.ExternalEnv)
+	// The agent's own tools run as grandchildren of this host, and `attn` is how
+	// they report — a delegated agent comments on its ticket by shelling out.
+	// Two things have to be true for that to land anywhere: the `attn` they find
+	// must be the one that spawned them, and it must know which session is
+	// speaking. Neither is inherited. Without the first, a session on a
+	// non-production profile resolves the production app off the login shell's
+	// PATH; without the second, `attn ticket comment` has no session to attribute
+	// and the delegation reports as nobody. This is the PTY path's identity block
+	// (see buildSpawnEnv in internal/pty/manager.go) — the two runtimes owe the
+	// agent the same environment.
+	env = launchenv.WithActiveAttnFirst(env, launchenv.ActiveAttnExecutable())
 	env = pty.MergeEnvironment(env, []string{
+		"ATTN_INSIDE_APP=1",
+		"ATTN_DAEMON_MANAGED=1",
+		"ATTN_SESSION_ID=" + opts.ID,
+		"ATTN_AGENT=" + opts.Agent,
 		"ATTN_PI_HOST_SESSION_ID=" + opts.ID,
 		"ATTN_PI_HOST_SESSION_DIR=" + hostSessionStateDir(opts.ID),
 		"ATTN_PI_HOST_CWD=" + opts.CWD,

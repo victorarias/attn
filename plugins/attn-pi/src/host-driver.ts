@@ -18,6 +18,13 @@ import type { DriverRegisterResult, DriverSpawnParams, DriverSpawnResult } from 
  * this connection, but the consequence is what the capability is for — the
  * evidence resolver must not have an opinion about a session it can see no
  * evidence for.
+ *
+ * `initial_prompt` it declares too, and that is what makes a `pi-host` session
+ * delegable: attn's delegation refuses any agent that cannot be launched with a
+ * brief. The prompt travels in the environment rather than in argv — a brief is
+ * multi-line prose, and argv is world-readable text that a sibling's `pkill -f`
+ * can match on. The host decides when to deliver it; see
+ * ATTN_PI_HOST_INITIAL_PROMPT in `host/index.ts`.
  */
 export const hostAgentName = "pi-host";
 
@@ -47,6 +54,7 @@ export class PiHostDriver {
       agent: hostAgentName,
       capabilities: {
         conversation: true,
+        initial_prompt: true,
         model_pin: true,
         state_reporting: true,
       },
@@ -65,10 +73,14 @@ export class PiHostDriver {
     const health = this.health();
     if (!health.ok) throw new Error(health.message);
     const model = params.model?.trim() || defaultHostModel;
+    const initialPrompt = params.initial_prompt?.trim() ?? "";
     return {
       argv: [...this.hostCommand],
       cwd: params.cwd,
-      env: { ATTN_PI_HOST_MODEL: model },
+      env: {
+        ATTN_PI_HOST_MODEL: model,
+        ...(initialPrompt === "" ? {} : { ATTN_PI_HOST_INITIAL_PROMPT: initialPrompt }),
+      },
     };
   }
 }

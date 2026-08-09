@@ -190,7 +190,22 @@ See `docs/glossary.md` for the vocabulary and
   host wedged past the grace window. Never "simplify" the teardown to a group
   kill.
 - A host gets the same environment a PTY agent gets — the daemon's own plus the
-  user's login shell — because that is where an agent's credentials live.
+  user's login shell — because that is where an agent's credentials live. It
+  gets the PTY path's **identity block** too (`ATTN_SESSION_ID`, `ATTN_AGENT`,
+  `ATTN_DAEMON_MANAGED`, `ATTN_INSIDE_APP`, and the active attn first on PATH),
+  and that half is not cosmetic: the agent's tools shell out to `attn` to report,
+  so without it a delegated agent's `attn ticket comment` is attributed to
+  whichever session the daemon inherited its own environment from, and bare
+  `attn` resolves to whichever install is on the login shell's PATH rather than
+  to the profile that spawned the session. Both were observed, not theorized.
+- **`ATTN_PI_HOST_INITIAL_PROMPT`** carries the launch's own first user message
+  when it had one — today that is a delegation brief. It is
+  in the environment rather than argv because a brief is multi-line prose and
+  argv is world-readable text a sibling's `pkill -f` can match on. The daemon
+  hands the same prompt to every replacement host, so delivery is the host's
+  decision, not the daemon's: it says it exactly when its reopened history is
+  empty (`launchPromptIsUndelivered`), which is true only for a first launch or
+  for a relaunch after a crash so early that pi wrote no session file.
 
 `spike-harness/` drives pi's SDK without attn and is the gate a pi version bump
 has to pass; see its README.

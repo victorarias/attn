@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   TranscriptStore,
   conversationInterrupted,
+  launchPromptIsUndelivered,
   parseVerb,
   reconstructTranscript,
   type SessionEntryLike,
@@ -162,6 +163,34 @@ describe("conversationInterrupted", () => {
 
   test("a conversation nobody has spoken in is not interrupted", () => {
     expect(conversationInterrupted([])).toBe(false);
+  });
+});
+
+describe("launchPromptIsUndelivered", () => {
+  const brief = "Fix the flaky test and report on the ticket.";
+
+  test("a host that reopened nothing still owes the launch its brief", () => {
+    // The zero-file early crash: killed before pi's first assistant message, so
+    // the replacement opens a session that never heard the brief.
+    expect(launchPromptIsUndelivered(brief, [])).toBe(true);
+  });
+
+  test("a reopened conversation is never asked the same thing twice", () => {
+    const { items } = reconstructTranscript([userEntry("e1", brief), assistantEntry("e2", "On it.")]);
+    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+  });
+
+  test("an interrupted conversation already carries the brief, so it is not re-sent", () => {
+    // The prompt was persisted and the answer was not. Re-sending would make the
+    // agent do the work twice; this reopens as `waiting_input` instead.
+    const { items } = reconstructTranscript([userEntry("e1", brief)]);
+    expect(conversationInterrupted(items)).toBe(true);
+    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+  });
+
+  test("a session launched without a brief is owed nothing", () => {
+    expect(launchPromptIsUndelivered("", [])).toBe(false);
+    expect(launchPromptIsUndelivered("   ", [])).toBe(false);
   });
 });
 
