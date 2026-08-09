@@ -502,6 +502,9 @@ func TestAutoSettleSettingsSurfaceEffectiveDefaults(t *testing.T) {
 // opens a fresh one; if the transition wins the timer sees a non-working session
 // and declines. Either way the user still owes this session a turn, which is why
 // that is the invariant asserted rather than a particular interleaving.
+// Boundary-bound: the hook holds the settle open while a concurrent transition
+// parks on autoSettleFireMu. A goroutine blocked on a sync.Mutex is not durably
+// blocked, so a bubble has no instant at which to call the race staged.
 func TestAutoSettle_ConcurrentApprovalKeepsTheTurn(t *testing.T) {
 	d, id := newAutoSettleDaemon(t)
 	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {

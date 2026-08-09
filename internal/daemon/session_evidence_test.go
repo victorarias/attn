@@ -458,6 +458,9 @@ func TestEvidenceIsNotRecordedForAnUnknownSession(t *testing.T) {
 //
 // The hook parks the writer *after* it has read the store row and *before* it
 // appends — the exact window that leaks when the check sits outside the lock.
+// Boundary-bound: the removal is supposed to park on the evidence table's lock
+// while the writer holds it, and a mutex wait is invisible to a bubble — there
+// is no settled instant that means "the removal got as far as it can".
 func TestEvidenceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-evidence-race"

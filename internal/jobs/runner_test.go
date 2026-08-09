@@ -3,7 +3,9 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -791,6 +793,103 @@ func TestRetentionTrimsCompletedJobsAndKeepsDeadOnes(t *testing.T) {
 		}
 		if store.count() != 1 {
 			t.Errorf("store holds %d records, want 1", store.count())
+		}
+	})
+}
+
+// TestThePeriodicRetentionPassTrimsOnItsOwnInterval covers the runner's own
+// retention ticker, which the test above deliberately parks. Until the bubble
+// arrived the pass had never executed in any test at all: its ticker ran on real
+// time while the tests ran on an injected clock, so an hour of test time never
+// reached it. Here it runs at its shipped interval, with nobody calling Trim.
+func TestThePeriodicRetentionPassTrimsOnItsOwnInterval(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var mu sync.Mutex
+		var trims []string
+		r, store := newBubbleRunner(t, func(o *Options) {
+			o.MaxAttempts = 1
+			o.Retention = 24 * time.Hour
+			// TrimInterval is left at DefaultTrimInterval (1h) on purpose: the
+			// interval under test is the shipped one.
+			o.Log = func(format string, args ...any) {
+				if !strings.HasPrefix(format, "jobs: trimmed") {
+					return
+				}
+				mu.Lock()
+				trims = append(trims, fmt.Sprintf(format, args...))
+				mu.Unlock()
+			}
+		})
+		trimCount := func() int {
+			mu.Lock()
+			defer mu.Unlock()
+			return len(trims)
+		}
+		mustRegister(t, r, "ok", func(context.Context, *Job) (any, error) { return nil, nil })
+		mustRegister(t, r, "bad", func(context.Context, *Job) (any, error) {
+			return nil, errors.New("boom")
+		})
+		mustStart(t, r)
+
+		old, err := r.Enqueue("ok", EnqueueOptions{})
+		if err != nil {
+			t.Fatalf("enqueue ok: %v", err)
+		}
+		dead, err := r.Enqueue("bad", EnqueueOptions{})
+		if err != nil {
+			t.Fatalf("enqueue bad: %v", err)
+		}
+		synctest.Wait()
+		if got := mustGet(t, r, old.ID).State; got != StateDone {
+			t.Fatalf("the succeeding job settled at %s, want done", got)
+		}
+		if got := mustGet(t, r, dead.ID).State; got != StateDead {
+			t.Fatalf("the failing job settled at %s, want dead", got)
+		}
+
+		// Just inside the retention window: 23 ticks have fired and every one of
+		// them found nothing old enough to take.
+		time.Sleep(24*time.Hour - time.Minute)
+		synctest.Wait()
+		if j, _ := r.Get(old.ID); j == nil {
+			t.Error("a job younger than the retention window was trimmed")
+		}
+		if got := trimCount(); got != 0 {
+			t.Errorf("retention reported %d trims inside the window, want 0: %v", got, trims)
+		}
+
+		// A second completed job, enqueued a minute before the first ages out. It
+		// is the control: the pass that takes the old record must leave it alone.
+		young, err := r.Enqueue("ok", EnqueueOptions{})
+		if err != nil {
+			t.Fatalf("enqueue young: %v", err)
+		}
+		synctest.Wait()
+		if got := mustGet(t, r, young.ID).State; got != StateDone {
+			t.Fatalf("the second job settled at %s, want done", got)
+		}
+
+		// Past the window plus one interval: the first tick after the record aged
+		// out is the one that takes it. A pass on any interval longer than an hour
+		// would still be holding it here.
+		time.Sleep(time.Hour + 2*time.Minute)
+		synctest.Wait()
+		if j, _ := r.Get(old.ID); j != nil {
+			t.Error("the aged-out job survived the periodic retention pass")
+		}
+		if j, _ := r.Get(young.ID); j == nil {
+			t.Error("the periodic pass trimmed a job younger than the retention window")
+		}
+		if j, _ := r.Get(dead.ID); j == nil {
+			t.Error("the periodic pass trimmed the dead job; it is the actionable record")
+		}
+		if got := store.count(); got != 2 {
+			t.Errorf("store holds %d records, want 2 (the young one and the dead one)", got)
+		}
+		if got := trimCount(); got != 1 {
+			t.Errorf("retention reported %d trimming passes, want exactly 1: %v", got, trims)
+		} else if want := "jobs: trimmed 1 completed job(s) older than 24h0m0s"; trims[0] != want {
+			t.Errorf("retention pass reported %q, want %q", trims[0], want)
 		}
 	})
 }

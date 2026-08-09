@@ -175,6 +175,9 @@ func TestTraceIsDroppedWhenTheSessionRecordGoes(t *testing.T) {
 //
 // The hook fires inside the recorder's lock, which is exactly where the removal
 // must be attempted for the race to be real.
+// Boundary-bound for the same reason as the evidence twin: the removal blocks on
+// the recorder's lock inside forgetStateTrace, and a bubble cannot observe a
+// goroutine waiting for a mutex.
 func TestTraceDoesNotLeakWhenRemovalRacesTheWrite(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-racing"

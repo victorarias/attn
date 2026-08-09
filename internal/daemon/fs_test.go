@@ -16,6 +16,17 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
+// Boundary-bound, the whole paced set in this file. Four tests
+// (TestFsWriteBroadcastsUiChange, TestFsWriteNormalizesEchoedPath,
+// TestFsChangedExternalEditNotSelfWrite,
+// TestFsCommandsOmittedRootResolvesToNotebookRoot) start the real hub with
+// `go d.wsHub.run()`, whose loop has no exit path — a bubble would never end.
+// The rest (TestFsCommandsWithExplicitRootActOnThatDirectory,
+// TestFsWriteBroadcastsResolvedRoot, TestFsRenameDeleteNotebookCouplingIsRootConditional)
+// start a real fsnotify watcher through fsWatch, whose goroutine parks in kqueue
+// and so is never durably blocked. Giving the hub a quit channel is a production
+// change, which is why these stay on real time.
+
 // newFsDaemon returns a test daemon whose root (notebook.root, shared by the fs
 // surface) points at an isolated temp dir.
 func newFsDaemon(t *testing.T) *Daemon {

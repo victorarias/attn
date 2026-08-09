@@ -31,29 +31,27 @@ func currentNudgeDeadline(d *Daemon, sessionID string) time.Time {
 	return time.Time{}
 }
 
-func waitForNudgeDeadline(t *testing.T, d *Daemon, sessionID string) time.Time {
-	t.Helper()
-	limit := time.Now().Add(time.Second)
-	for time.Now().Before(limit) {
-		if deadline := currentNudgeDeadline(d, sessionID); !deadline.IsZero() {
-			return deadline
-		}
-		time.Sleep(time.Millisecond)
-	}
-	t.Fatalf("no nudge deadline armed for %s", sessionID)
-	return time.Time{}
-}
-
-// settledNudgeDeadline is waitForNudgeDeadline for a synctest bubble: arming can
-// happen on another goroutine, so settle the bubble first and then read the
-// deadline once. A missing deadline here means nothing is going to arm one, not
-// that the poll was early.
+// settledNudgeDeadline reads a session's armed countdown deadline inside a
+// synctest bubble: arming can happen on another goroutine, so settle the bubble
+// first and then read the deadline once. A missing deadline here means nothing is
+// going to arm one, not that the poll was early.
 func settledNudgeDeadline(t *testing.T, d *Daemon, sessionID string) time.Time {
 	t.Helper()
 	synctest.Wait()
 	deadline := currentNudgeDeadline(d, sessionID)
 	if deadline.IsZero() {
 		t.Fatalf("no nudge deadline armed for %s once the daemon settled", sessionID)
+	}
+	return deadline
+}
+
+// settledNudgeDeadlineBefore is settledNudgeDeadline for the pull-forward case:
+// the deadline that matters is not merely armed, it has moved ahead of a bound.
+func settledNudgeDeadlineBefore(t *testing.T, d *Daemon, sessionID string, before time.Time) time.Time {
+	t.Helper()
+	deadline := settledNudgeDeadline(t, d, sessionID)
+	if !deadline.Before(before) {
+		t.Fatalf("%s deadline = %s, want before %s", sessionID, deadline, before)
 	}
 	return deadline
 }
@@ -271,6 +269,9 @@ func TestNudgeCountdownCancelsOnPendingApproval(t *testing.T) {
 	}
 }
 
+// Boundary-bound: the fence being tested is doorbellMu, and the state goroutine
+// proves it by parking on that mutex. A bubble cannot see a goroutine waiting
+// for a lock, so it has no way to say "held" rather than "not yet run".
 func TestDoorbellWriteDoesNotInterleaveWithPendingApproval(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	sessionID := "doorbell-state-fence"
