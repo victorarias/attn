@@ -84,13 +84,14 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 	result := &protocol.TicketStatusResult{
 		TicketID: ticketID,
 		Status:   protocol.TicketStatus(status),
-		CatchUp:  ticketMutationCatchUp(ticketID, outcome.ConflictEvents),
+		CatchUp:  ticketMutationCatchUp(ticketID, outcome.CatchUp),
+		Applied:  !outcome.Blocked,
 	}
-	if len(outcome.ConflictEvents) > 0 {
+	d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.CatchUp)
+	if outcome.Blocked {
 		if current, getErr := d.store.GetTicket(ticketID); getErr == nil && current != nil {
 			result.Status = protocol.TicketStatus(current.Status)
 		}
-		d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.ConflictEvents)
 		d.deliveryMu.Unlock()
 		_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketStatusResult: result})
 		return
