@@ -1,0 +1,12 @@
+kind: internal
+area: docs
+change: >
+  Lands the daemon-in-a-bubble design doc
+  (docs/plans/2026-08-09-daemon-in-a-bubble.md) on main — probe receipts and
+  the no-go on an in-memory transport seam — fixing the dangling reference
+  from the synctest sweep's triage map. AGENTS.md's synctest rule is expanded
+  with the sweep's proven house rules: build long-lived resources outside the
+  bubble and drive them inside, seed timestamps inside, complete teardown,
+  child processes silently pin the bubble clock, and synctest.Wait() (not
+  time.Sleep) is the race detector's happens-before edge. Also corrects one
+  stale conversion count in the wave plan's triage map.

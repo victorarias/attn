@@ -241,8 +241,8 @@ needs its own lock.
 
 ### Converted in this PR
 
-- `internal/jobs` — all 9 remaining paced tests (`runner_test.go` ×6 beyond the
-  spike's three, `cron_test.go` ×3). `waitFor` deleted.
+- `internal/jobs` — all remaining paced tests (`runner_test.go` ×14 beyond the
+  spike's two pre-existing call sites, `cron_test.go` ×3). `waitFor` deleted.
 - `internal/workflow` — `cancel_test.go`, `concurrency_test.go` (the cap
   saturation probe, previously a 5s deadline poll over an atomic),
   `ordinal_test.go`. `waitForInFlight` deleted.
