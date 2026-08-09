@@ -13,6 +13,7 @@ import { UndoToast } from './components/UndoToast';
 import { WorktreeCleanupPrompt } from './components/WorktreeCleanupPrompt';
 import { CloseSessionPrompt } from './components/CloseSessionPrompt';
 import { ChiefOfStaffTransferPrompt } from './components/ChiefOfStaffTransferPrompt';
+import { SessionContextCapPrompt } from './components/SessionContextCapPrompt';
 import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
@@ -758,6 +759,7 @@ function AppContent({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendSetSessionContextWindowCap,
     sendUnregisterSession,
     sendSetSetting,
     sendCreateWorktree,
@@ -1201,6 +1203,7 @@ function AppContent({
       turnOpenedAt: daemonSession?.turn_opened_at,
       turnSnoozedUntil: daemonSession?.turn_snoozed_until,
       pinnedAt: daemonSession?.pinned_at,
+      contextWindowCap: daemonSession?.context_window_cap,
       parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
@@ -1505,6 +1508,11 @@ function AppContent({
     currentLabel: string;
   } | null>(null);
   const [chiefTransferSaving, setChiefTransferSaving] = useState(false);
+  const [contextCapPromptSession, setContextCapPromptSession] = useState<{
+    id: string;
+    label: string;
+    currentCap?: number;
+  } | null>(null);
 
   const handleTerminalModelRecovered = useCallback(() => {
     showError(
@@ -1610,6 +1618,7 @@ function AppContent({
     || notebookOpen
     || boardSurfaceOpen
     || chiefTransferTarget !== null
+    || contextCapPromptSession !== null
     || closedWorktree !== null
     || pendingSessionClose !== null
     || sessionCreationJob !== null
@@ -1864,7 +1873,8 @@ function AppContent({
     }
     if (settingsOpen || shortcutsOpen || locationPickerOpen || whatsNew.isOpen
       || workspaceContextsOpen || notebookOpen || boardSurfaceOpen
-      || chiefTransferTarget !== null || closedWorktree !== null || pendingSessionClose !== null
+      || chiefTransferTarget !== null || contextCapPromptSession !== null
+      || closedWorktree !== null || pendingSessionClose !== null
       || sessionCreationJob !== null || openPRLauncherJob !== null) {
       return;
     }
@@ -1872,6 +1882,7 @@ function AppContent({
   }, [
     actionMenuOpen,
     chiefTransferTarget,
+    contextCapPromptSession,
     closedWorktree,
     locationPickerOpen,
     openPRLauncherJob,
@@ -2555,9 +2566,30 @@ function AppContent({
         run: () => sendPinSession(activeSession.id, !activeSession.pinnedAt),
       }]
       : [];
+    // Only claude and codex launches carry the cap to the agent; the daemon
+    // refuses it for anything else, so the entry is not offered there.
+    const sessionCapItems: ActionMenuItem[] = activeSession && ['claude', 'codex'].includes((activeSession.agent ?? '').toLowerCase())
+      ? [{
+        id: 'set-session-context-cap',
+        title: activeSession.contextWindowCap
+          ? `Change ${activeSession.label}'s context window cap`
+          : `Cap ${activeSession.label}'s context window`,
+        description: activeSession.contextWindowCap
+          ? `Compacts at ${activeSession.contextWindowCap.toLocaleString()} tokens — change or clear the cap`
+          : 'Make this agent compact at a token budget you choose',
+        keywords: ['context', 'window', 'cap', 'compact', 'autocompact', 'tokens', 'agent', 'session'],
+        icon: <ContextActionIcon />,
+        run: () => setContextCapPromptSession({
+          id: activeSession.id,
+          label: activeSession.label,
+          currentCap: activeSession.contextWindowCap,
+        }),
+      }]
+      : [];
     return [
       ...actionMenuItems,
       ...sessionPinItems,
+      ...sessionCapItems,
       {
         id: 'pin-active-workspace',
         title: workspace.pinned ? `Unpin ${workspace.title}` : `Pin ${workspace.title}`,
@@ -4057,6 +4089,14 @@ function AppContent({
           }
         }}
       />
+      {contextCapPromptSession && (
+        <SessionContextCapPrompt
+          sessionLabel={contextCapPromptSession.label}
+          currentCap={contextCapPromptSession.currentCap}
+          onSubmit={(cap) => sendSetSessionContextWindowCap(contextCapPromptSession.id, cap)}
+          onClose={() => setContextCapPromptSession(null)}
+        />
+      )}
       <ErrorToast message={errorMessage} durationMs={errorDurationMs} onDone={clearError} />
       <ChordLeaderHud />
       <WorkspaceContextNavigator

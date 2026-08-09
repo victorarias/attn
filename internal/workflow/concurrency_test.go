@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -69,22 +70,6 @@ func (s *blockingStub) Run(ctx context.Context, call AgentCall) (json.RawMessage
 // releaseAll lets every currently-parked and future Run proceed.
 func (s *blockingStub) releaseAll() { close(s.release) }
 
-// waitForInFlight blocks until inFlight reaches want (the cap is fully saturated)
-// or the deadline elapses. Returning true proves the cap was REACHED; the caller
-// separately asserts it was never EXCEEDED via maxInFlight. Polling an atomic is
-// the deterministic substitute for sleeping: we make a positive observation that
-// exactly `want` goroutines are simultaneously inside Run, rather than guessing.
-func (s *blockingStub) waitForInFlight(want int64, timeout time.Duration) bool {
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if s.inFlight.Load() == want {
-			return true
-		}
-		time.Sleep(time.Millisecond)
-	}
-	return false
-}
-
 func echoPrompt(prompt string) json.RawMessage {
 	b, _ := json.Marshal("R:" + prompt)
 	return b
@@ -109,53 +94,64 @@ func boomOrEchoStub() AgentStub {
 //
 // Determinism: the run goroutine launches N agents whose Run() all park inside
 // the stub. With a cap of `cap`, the semaphore admits exactly `cap` of them; the
-// rest block on `rs.sem <- struct{}{}` and never enter Run. We poll until exactly
-// `cap` are in flight (a positive observation, not a sleep), then release. As each
-// finishes it frees a slot, admitting the next, so the high-water-mark can never
-// exceed `cap`. If the semaphore were broken (e.g. unbounded), inFlight would
-// blow past `cap` and maxInFlight would record it — failing the test.
+// rest block on `rs.sem <- struct{}{}` and never enter Run. As each finishes it
+// frees a slot, admitting the next, so the high-water-mark can never exceed
+// `cap`. If the semaphore were broken (e.g. unbounded), inFlight would blow past
+// `cap` and maxInFlight would record it — failing the test.
+//
+// Runs in a synctest bubble: the saturation check used to poll an atomic against
+// a 5s deadline, which could only ever say "capN were in flight at some moment I
+// happened to look". synctest.Wait returns when every goroutine in the bubble is
+// durably blocked — the admitted agents parked in the stub, the rest parked on
+// the semaphore — so the reading is of a system that has finished admitting.
+// "Exactly capN, and no more are coming" is now the claim rather than the hope.
 func assertCapSaturatedAndBounded(t *testing.T, script string, capN, wantLive int) RunResult {
 	t.Helper()
-	stub := newBlockingStub(echoPrompt)
-	eng := New(Config{
-		Stub:            stub,
-		ConcurrencyCap:  capN,
-		WatchdogTimeout: 10 * time.Second,
-	})
+	var result RunResult
+	synctest.Test(t, func(t *testing.T) {
+		stub := newBlockingStub(echoPrompt)
+		eng := New(Config{
+			Stub:            stub,
+			ConcurrencyCap:  capN,
+			WatchdogTimeout: 10 * time.Second,
+		})
 
-	done := make(chan RunResult, 1)
-	go func() {
-		r, _ := eng.Run(context.Background(), script, nil)
-		done <- r
-	}()
+		done := make(chan RunResult, 1)
+		go func() {
+			r, _ := eng.Run(context.Background(), script, nil)
+			done <- r
+		}()
 
-	// Wait until the cap is fully saturated: exactly `capN` goroutines inside Run.
-	if !stub.waitForInFlight(int64(capN), 5*time.Second) {
-		// Release so the run goroutine can unwind before we fail.
+		// Dispatch has settled: exactly `capN` goroutines are inside Run.
+		synctest.Wait()
+		if got := stub.inFlight.Load(); got != int64(capN) {
+			// Release so the run goroutine can unwind before we fail.
+			stub.releaseAll()
+			<-done
+			t.Fatalf("cap never saturated: inFlight settled at %d, want %d (semaphore not admitting up to the cap?)",
+				got, capN)
+		}
+
+		// The cap is saturated. Now release everything and let the run finish.
 		stub.releaseAll()
-		<-done
-		t.Fatalf("cap never saturated: inFlight reached %d, want %d (semaphore not admitting up to the cap?)",
-			stub.inFlight.Load(), capN)
-	}
+		r := <-done
 
-	// The cap is saturated. Now release everything and let the run finish.
-	stub.releaseAll()
-	r := <-done
-
-	if r.Status != StatusCompleted {
-		t.Fatalf("status=%s err=%v", r.Status, r.Err)
-	}
-	if got := stub.maxInFlight.Load(); got != int64(capN) {
-		t.Fatalf("max in-flight = %d, want exactly the cap %d (cap was %s)",
-			got, capN, capVerdict(got, int64(capN)))
-	}
-	if int(stub.calls.Load()) != wantLive {
-		t.Fatalf("total live Run calls = %d, want %d (some agents never dispatched)", stub.calls.Load(), wantLive)
-	}
-	if r.LiveCalls != wantLive {
-		t.Fatalf("LiveCalls = %d, want %d", r.LiveCalls, wantLive)
-	}
-	return r
+		if r.Status != StatusCompleted {
+			t.Fatalf("status=%s err=%v", r.Status, r.Err)
+		}
+		if got := stub.maxInFlight.Load(); got != int64(capN) {
+			t.Fatalf("max in-flight = %d, want exactly the cap %d (cap was %s)",
+				got, capN, capVerdict(got, int64(capN)))
+		}
+		if int(stub.calls.Load()) != wantLive {
+			t.Fatalf("total live Run calls = %d, want %d (some agents never dispatched)", stub.calls.Load(), wantLive)
+		}
+		if r.LiveCalls != wantLive {
+			t.Fatalf("LiveCalls = %d, want %d", r.LiveCalls, wantLive)
+		}
+		result = r
+	})
+	return result
 }
 
 func capVerdict(got, capN int64) string {

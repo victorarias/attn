@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/pty"
@@ -118,136 +119,172 @@ func TestConnCtx_HandleRequest_SetThemeReachesSession(t *testing.T) {
 	}
 }
 
+// The runtime's two self-stop clocks — exit cleanup and the orphan watch — run
+// inside synctest bubbles at their shipped lengths. Under real time these tests
+// had to swap 45 seconds and 12 hours for tens of milliseconds and then wait a
+// tolerance window on top; the numbers under test were the test's, not the
+// product's. A bubble's fake clock makes 12 hours free, so the shipped TTL is
+// what fires, and a negative ("this must NOT stop") holds across the whole
+// window rather than across whatever slice the test could afford to wait.
+//
+// The Runtime here owns no socket, no PTY and no child process — it is a struct
+// with timers and a stop channel — so nothing pins the bubble to real time.
+
 func TestRuntime_ExitedSessionCleansUpAfterTTLWithoutConnections(t *testing.T) {
-	origTTL := exitedSessionCleanupTTL
-	exitedSessionCleanupTTL = 15 * time.Millisecond
-	defer func() { exitedSessionCleanupTTL = origTTL }()
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{})}
+		r.noteSessionExited()
 
-	r := &Runtime{stopCh: make(chan struct{})}
-	r.noteSessionExited()
-
-	select {
-	case <-r.stopCh:
-		// expected
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for runtime stop after exit TTL")
-	}
+		time.Sleep(exitedSessionCleanupTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			// expected
+		default:
+			t.Fatal("the runtime did not stop when the exit TTL elapsed")
+		}
+	})
 }
 
 func TestRuntime_ExitCleanupWaitsForConnectionsToClose(t *testing.T) {
-	origTTL := exitedSessionCleanupTTL
-	exitedSessionCleanupTTL = 15 * time.Millisecond
-	defer func() { exitedSessionCleanupTTL = origTTL }()
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{})}
+		r.noteConnAuthed()
+		r.noteSessionExited()
 
-	r := &Runtime{stopCh: make(chan struct{})}
-	r.noteConnAuthed()
-	r.noteSessionExited()
+		// Well past the TTL, which an authed connection must hold off entirely.
+		time.Sleep(4 * exitedSessionCleanupTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			t.Fatal("runtime stopped while authed connection was still active")
+		default:
+		}
 
-	select {
-	case <-r.stopCh:
-		t.Fatal("runtime stopped while authed connection was still active")
-	case <-time.After(50 * time.Millisecond):
-		// expected
-	}
+		r.noteConnClosed()
 
-	r.noteConnClosed()
-
-	select {
-	case <-r.stopCh:
-		// expected
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for runtime stop after connection close")
-	}
+		time.Sleep(exitedSessionCleanupTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			// expected
+		default:
+			t.Fatal("the runtime did not stop once the last connection closed")
+		}
+	})
 }
 
 func TestRuntime_OrphanWatchStopsIdleUnownedWorker(t *testing.T) {
-	r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 15 * time.Millisecond}
-	r.noteOutputActivity()
-	r.armOrphanWatch()
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{}), orphanTTL: orphanedWorkerTTL}
+		r.noteOutputActivity()
+		r.armOrphanWatch()
 
-	select {
-	case <-r.stopCh:
-		// expected
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for orphan watch to stop idle unowned worker")
-	}
+		time.Sleep(orphanedWorkerTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			// expected
+		default:
+			t.Fatal("the orphan watch did not stop an idle unowned worker at its TTL")
+		}
+	})
 }
 
 func TestRuntime_OrphanWatchCanceledByAuthedConn(t *testing.T) {
-	r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 15 * time.Millisecond}
-	r.noteOutputActivity()
-	r.armOrphanWatch()
-	r.noteConnAuthed()
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{}), orphanTTL: orphanedWorkerTTL}
+		r.noteOutputActivity()
+		r.armOrphanWatch()
+		r.noteConnAuthed()
 
-	select {
-	case <-r.stopCh:
-		t.Fatal("orphan watch stopped runtime while a daemon connection was authed")
-	case <-time.After(60 * time.Millisecond):
-		// expected
-	}
+		time.Sleep(4 * orphanedWorkerTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			t.Fatal("orphan watch stopped runtime while a daemon connection was authed")
+		default:
+		}
 
-	r.noteConnClosed()
+		r.noteConnClosed()
 
-	select {
-	case <-r.stopCh:
-		// expected: watch re-armed when the last authed connection dropped
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for orphan stop after last connection closed")
-	}
+		time.Sleep(orphanedWorkerTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			// expected: watch re-armed when the last authed connection dropped
+		default:
+			t.Fatal("the orphan watch did not stop the worker after the last connection closed")
+		}
+	})
 }
 
 func TestRuntime_OrphanWatchDeferredByOutputActivity(t *testing.T) {
-	r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 50 * time.Millisecond}
-	r.noteOutputActivity()
-	r.armOrphanWatch()
-
-	// Keep the child "busy" past the first deadline; the watch must defer.
-	deadline := time.Now().Add(120 * time.Millisecond)
-	for time.Now().Before(deadline) {
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{}), orphanTTL: orphanedWorkerTTL}
 		r.noteOutputActivity()
+		r.armOrphanWatch()
+
+		// Keep the child "busy" well past the first deadline; the watch must defer
+		// every time output arrives, however long the TTL is.
+		for i := 0; i < 4; i++ {
+			r.noteOutputActivity()
+			time.Sleep(orphanedWorkerTTL / 2)
+			synctest.Wait()
+			select {
+			case <-r.stopCh:
+				t.Fatal("orphan watch stopped runtime while output was still flowing")
+			default:
+			}
+		}
+
+		// Once output goes quiet, the worker stops after a full idle TTL.
+		time.Sleep(orphanedWorkerTTL)
+		synctest.Wait()
 		select {
 		case <-r.stopCh:
-			t.Fatal("orphan watch stopped runtime while output was still flowing")
-		case <-time.After(10 * time.Millisecond):
+			// expected
+		default:
+			t.Fatal("the orphan watch did not stop the worker once output went quiet")
 		}
-	}
-
-	// Once output goes quiet, the worker stops after a full idle TTL.
-	select {
-	case <-r.stopCh:
-		// expected
-	case <-time.After(500 * time.Millisecond):
-		t.Fatal("timed out waiting for orphan stop after output went quiet")
-	}
+	})
 }
 
 func TestRuntime_OrphanWatchDisabledByZeroTTL(t *testing.T) {
-	r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 0}
-	r.armOrphanWatch()
+	synctest.Test(t, func(t *testing.T) {
+		r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 0}
+		r.armOrphanWatch()
 
-	select {
-	case <-r.stopCh:
-		t.Fatal("orphan watch fired despite zero TTL")
-	case <-time.After(60 * time.Millisecond):
-		// expected
-	}
+		time.Sleep(4 * orphanedWorkerTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			t.Fatal("orphan watch fired despite zero TTL")
+		default:
+		}
+	})
 }
 
 func TestRuntime_OrphanWatchNotArmedAfterExit(t *testing.T) {
-	origTTL := exitedSessionCleanupTTL
-	exitedSessionCleanupTTL = time.Hour
-	defer func() { exitedSessionCleanupTTL = origTTL }()
+	synctest.Test(t, func(t *testing.T) {
+		origTTL := exitedSessionCleanupTTL
+		exitedSessionCleanupTTL = 10 * orphanedWorkerTTL
+		defer func() { exitedSessionCleanupTTL = origTTL }()
 
-	r := &Runtime{stopCh: make(chan struct{}), orphanTTL: 15 * time.Millisecond}
-	r.noteSessionExited()
-	r.armOrphanWatch()
+		r := &Runtime{stopCh: make(chan struct{}), orphanTTL: orphanedWorkerTTL}
+		r.noteSessionExited()
+		r.armOrphanWatch()
 
-	select {
-	case <-r.stopCh:
-		t.Fatal("orphan watch fired for an exited session (exit cleanup owns that path)")
-	case <-time.After(60 * time.Millisecond):
-		// expected
-	}
+		// Past the orphan TTL but short of the exit cleanup this test parked, so a
+		// stop here could only have come from the watch that must not be armed.
+		time.Sleep(2 * orphanedWorkerTTL)
+		synctest.Wait()
+		select {
+		case <-r.stopCh:
+			t.Fatal("orphan watch fired for an exited session (exit cleanup owns that path)")
+		default:
+		}
+	})
 }
 
 func TestConnCtx_NextReadTimeout(t *testing.T) {

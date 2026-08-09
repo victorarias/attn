@@ -558,11 +558,20 @@ var kittySegBattery = []kittySegCase{
 	},
 }
 
+// segTB is the slice of a test handle the segmenter runner needs. It is an
+// interface rather than *testing.T so the property tests can drive the same
+// runner with rapid's own handle; neither type satisfies the other, and
+// testing.TB cannot be implemented outside the testing package.
+type segTB interface {
+	Helper()
+	Fatalf(format string, args ...any)
+}
+
 // runKittySegmenter feeds chunks through one segmenter and returns the
 // normalized emissions plus whatever it still holds back. It also proves the
 // segmenter never writes into the caller's chunk: the read loop hands over a
 // buffer it reuses, and the same bytes are on their way to the wire.
-func runKittySegmenter(t *testing.T, chunks []string) ([]kittyEmission, string) {
+func runKittySegmenter(t segTB, chunks []string) ([]kittyEmission, string) {
 	t.Helper()
 	seg := &feedSegmenter{}
 	var out []kittyEmission
@@ -574,13 +583,13 @@ func runKittySegmenter(t *testing.T, chunks []string) ([]kittyEmission, string) 
 
 // feedKitty pushes one chunk through seg, appending its emissions to out in
 // normalized form and checking the per-call contract.
-func feedKitty(t *testing.T, seg *feedSegmenter, chunk string, out []kittyEmission) []kittyEmission {
+func feedKitty(t segTB, seg *feedSegmenter, chunk string, out []kittyEmission) []kittyEmission {
 	t.Helper()
 	input := []byte(chunk)
 	seg.Feed(input, func(s feedSegment) {
 		switch {
 		case len(s.Bytes) == 0:
-			t.Fatal("emit called with an empty run")
+			t.Fatalf("emit called with an empty run")
 		case s.Kind != feedSegPlain:
 			out = append(out, kittyEmission{kind: s.Kind, bytes: string(s.Bytes)})
 		default:

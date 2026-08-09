@@ -489,13 +489,20 @@ func (d *Daemon) resolveLaunchEffort(agent string, chief bool, requested string)
 }
 
 // launchContextWindowCap returns the effective context-window token cap for an
-// interactive launch of the given agent, or 0 (no cap). Mirrors
+// interactive launch of sessionID's agent, or 0 (no cap). Mirrors
 // resolveLaunchModel: the policy lives here, the driver only applies it. A
-// chief launch takes chief_context_window_cap (which defaults to
+// per-session pin (set_session_context_window_cap) wins outright — it is the
+// user's explicit act on this one session, so it outranks even the chief cap.
+// Otherwise a chief launch takes chief_context_window_cap (which defaults to
 // DefaultContextWindowCap, so the chief is always capped); every other launch
 // takes default_context_window_cap_<agent>, whose unset state means uncapped —
 // the agent's own compaction behavior.
-func (d *Daemon) launchContextWindowCap(agent string, chief bool) int {
+func (d *Daemon) launchContextWindowCap(sessionID, agent string, chief bool) int {
+	if session := d.store.Get(strings.TrimSpace(sessionID)); session != nil {
+		if cap := protocol.Deref(session.ContextWindowCap); cap > 0 {
+			return cap
+		}
+	}
 	if chief {
 		return resolveContextWindowCap(d.store.GetSetting(SettingChiefContextWindowCap))
 	}

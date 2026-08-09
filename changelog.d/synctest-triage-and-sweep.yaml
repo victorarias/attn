@@ -1,0 +1,11 @@
+kind: internal
+area: testing
+change: >
+  Time-paced tests across the daemon, job queue, workflow engine and pty
+  worker now run inside `testing/synctest` bubbles, so they execute the
+  shipped schedules — a 12-hour orphan TTL, a 30-second git-status safety
+  interval, the real auto-settle and nudge windows — instead of turned-down
+  stand-ins, and their negative assertions hold against a settled system
+  rather than a tolerance window. Retires the load-sensitive cron-arming
+  flake. The triage map behind the sweep, including what cannot be bubbled
+  and why, is in docs/plans/2026-08-09-testing-adoption-wave.md.

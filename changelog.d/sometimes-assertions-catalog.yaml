@@ -1,0 +1,16 @@
+kind: internal
+area: testing
+change: >
+  Test suites can now catalog the interesting states they are supposed to reach.
+  A package registers a state with `testinv.Sometimes`, marks the site with
+  `Reached`, and runs its tests through `testinv.Run` from `TestMain`; a
+  cataloged state that stops happening fails the package and names itself, even
+  though every test still passes. It catches the decay line coverage cannot see —
+  a test whose precondition quietly stopped arising, leaving the assertion true
+  and empty. Marks are placed in `internal/bus` and `internal/jobs`, hosted in
+  the test doubles the real code runs through, so production code carries
+  nothing.
+notes: >
+  Adopt-or-drop evidence, including the mutation that leaves every bus test green
+  while only the catalog goes red, and the rule for when a state is worth
+  cataloging, is in docs/plans/2026-08-09-sometimes-assertions-catalog.md.

@@ -213,10 +213,89 @@ Tests must never resolve `config.DataDir()` or derived paths to production
 
 See [docs/plans/2026-07-18-db-loss-mitigation.md](docs/plans/2026-07-18-db-loss-mitigation.md).
 
+## Testing tools
+
+Three adopted patterns; full receipts in
+[docs/plans/2026-08-09-testing-spike-synctest-rapid-toxiproxy.md](docs/plans/2026-08-09-testing-spike-synctest-rapid-toxiproxy.md).
+
+- A test that asserts elapsed time (backoff, debounce, recurrence) or that
+  something **never** happens runs under `synctest.Test` — no sleeps, no poll
+  loops. House rules, with receipts in `internal/daemon/synctest_test.go`:
+  build long-lived resources (daemon, store, DB handles) *outside* the bubble
+  and drive them *inside*; seed anything time-stamped inside the bubble (its
+  clock starts in 2000, so a fixture stamped with real `time.Now` is decades
+  in the future); tear down completely — any goroutine still alive at bubble
+  exit is a panic even when every assertion passed. A child process or
+  fsnotify watcher does not error — it silently pins the bubble clock to real
+  time; those tests stay outside. `synctest.Wait()` is a happens-before edge
+  for the race detector; `time.Sleep()` is not, so timer-written state still
+  needs its own lock.
+- A unit with a stated invariant and a large input space — especially when the
+  interesting failures need a *sequence* of operations — gets a
+  `pgregory.net/rapid` property beside its example tests. Rapid explores, it
+  does not document. Commit the `testdata/rapid/` seeds it writes on failure.
+- Behavior that *is* the network being bad (backpressure, eviction, reconnect)
+  goes through the embedded Toxiproxy helper (`newToxiProxy(t, upstream)`,
+  `internal/daemon`). Anything a fake or direct channel write can express
+  does not — it costs real seconds.
+
+## How changes ship
+
+How much process a change gets is a judgment call, not a rulebook. When in
+doubt, ask the maintainer.
+
+- **Plan docs are the norm.** Non-trivial work gets a plan doc first — often
+  written by the same agent that then implements it in the same session. Only a
+  genuinely small change goes straight to a PR with no plan.
+- **A plan becomes one or several PRs.** When the work changes existing
+  behavior, the PRs target an `epic/*` branch and the epic branch gets a full
+  review when it merges to main. When the work builds something new that
+  cannot break what already exists, PRs may merge directly to main as they
+  land. One question decides between the two — can this PR damage what already
+  works? — not how big the plan is.
+- **A spike answers a question.** It usually does not merge, but that is not a
+  hard rule. What is constant: the maintainer decides what happens after a
+  spike — merge it, discard it, or build on what it showed.
+
+### Merging
+
+Every PR merges once figgyster approved the current head, CI is green, and no
+review threads are unresolved. No per-PR permission needed.
+
+Wait for the maintainer's explicit OK only before:
+
+- merging an epic branch to main;
+- moving on from a spike;
+- changes that irreversibly destroy or convert existing user state;
+- one-way doors — a way in shipped without its way out;
+- production installs and releases (already covered above).
+
+### Experience testing
+
+The maintainer tests how attn feels to use; the harness and figgyster cover
+correctness. That testing happens at two moments: very early on spikes (is the
+idea right?) and at the end of a substantial series of PRs (does the whole
+thing feel right?). It is never per-PR QA — do not hold an approved PR
+waiting for it.
+
+When a series gets there, prepare the test: a running profile installed from
+the branch, realistic data, and a short list of things to try, focused on what
+changed and what you could not judge yourself — feel, latency, keyboard flow.
+The maintainer should spend those minutes trying things, not setting up.
+
+### Protocol bumps and migrations
+
+Protocol version bumps and DB migrations are day-to-day work; their checklists
+are in this file. Do them, verify them, and do not present them as risks,
+blockers, or reasons to pause. They need the maintainer's attention only when
+they hit the wait list above — destroying user state, closing a door, touching
+production — never just because they are a migration or a protocol change.
+
 ## Pull requests
 
-PR policy — ready-for-review, rebase onto main first, who approves — comes from
-the global guide. What is attn-specific is how you wait on one.
+Ready-for-review (not draft) and rebase onto main first, per the global guide;
+when to merge is in "How changes ship" above. What is attn-specific is how you
+wait on one.
 
 To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
 --reviewer <login>` once; do not poll checks, reviews, and comments separately.

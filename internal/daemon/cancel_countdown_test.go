@@ -3,6 +3,7 @@ package daemon
 import (
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -74,57 +75,62 @@ func TestCancelCountdown_NoCountdownIsHarmless(t *testing.T) {
 // from the same unread events — so without a standing cancel the nudge the user
 // just called off comes straight back.
 func TestCancelCountdown_NudgeStaysCancelledAcrossSelectionChange(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	d.store.UpdateState(agentID, protocol.StateIdle)
-	commentOnTicket(t, d, ticketID, "take a look at the failing test")
-	if currentNudgeTimer(d, agentID) == nil {
-		t.Fatal("precondition: no nudge countdown armed")
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		d.store.UpdateState(agentID, protocol.StateIdle)
+		commentOnTicket(t, d, ticketID, "take a look at the failing test")
+		if currentNudgeTimer(d, agentID) == nil {
+			t.Fatal("precondition: no nudge countdown armed")
+		}
 
-	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: agentID})
+		d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: agentID})
 
-	// Select the cancelled session and then leave it: the pause/resume pair is
-	// the path that re-arms.
-	d.setSelectedSession(agentID)
-	d.setSelectedSession(chiefID)
-	time.Sleep(50 * time.Millisecond) // the resume runs on its own goroutine
+		// Select the cancelled session and then leave it: the pause/resume pair is
+		// the path that re-arms.
+		d.setSelectedSession(agentID)
+		d.setSelectedSession(chiefID)
+		// The resume runs on its own goroutine. synctest.Wait returns once it has
+		// finished and every other bubble goroutine is parked, so "no timer" is a
+		// statement about the settled daemon rather than about a 50ms window.
+		synctest.Wait()
 
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("the cancelled nudge re-armed on a selection change")
-	}
-	// The activity did not go away, and neither did the way back to it.
-	clone := d.sessionForBroadcast(d.store.Get(agentID))
-	if !protocol.Deref(clone.TicketUnread) {
-		t.Fatal("cancelling the countdown also cleared the unread indicator")
-	}
+		if currentNudgeTimer(d, agentID) != nil {
+			t.Fatal("the cancelled nudge re-armed on a selection change")
+		}
+		// The activity did not go away, and neither did the way back to it.
+		clone := d.sessionForBroadcast(d.store.Get(agentID))
+		if !protocol.Deref(clone.TicketUnread) {
+			t.Fatal("cancelling the countdown also cleared the unread indicator")
+		}
+	})
 }
 
 // "Not now" is an answer about what is pending, not a mute. Ticket activity that
 // arrives after the cancel is new information and gets to ask again.
 func TestCancelCountdown_NewerTicketActivityReArmsTheNudge(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	_, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	d.store.UpdateState(agentID, protocol.StateIdle)
-	commentOnTicket(t, d, ticketID, "take a look at the failing test")
-	if currentNudgeTimer(d, agentID) == nil {
-		t.Fatal("precondition: no nudge countdown armed")
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		_, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		d.store.UpdateState(agentID, protocol.StateIdle)
+		commentOnTicket(t, d, ticketID, "take a look at the failing test")
+		if currentNudgeTimer(d, agentID) == nil {
+			t.Fatal("precondition: no nudge countdown armed")
+		}
 
-	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: agentID})
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("precondition: cancel did not stop the countdown")
-	}
+		d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: agentID})
+		if currentNudgeTimer(d, agentID) != nil {
+			t.Fatal("precondition: cancel did not stop the countdown")
+		}
 
-	commentOnTicket(t, d, ticketID, "actually, this is now blocking the release")
+		commentOnTicket(t, d, ticketID, "actually, this is now blocking the release")
 
-	waitForNudgeDeadline(t, d, agentID)
+		settledNudgeDeadline(t, d, agentID)
+	})
 }
 
 // Cancelling the settle half keeps the turn owed. This is the behavior the whole

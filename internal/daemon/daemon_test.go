@@ -3765,30 +3765,92 @@ func TestDaemon_ContextWindowCapResolutionAndGating(t *testing.T) {
 	// launchContextWindowCap: 0 for a non-chief launch with no per-agent
 	// setting; default for a chief with no setting; the configured values
 	// otherwise, with the chief setting winning on chief launches.
-	if got := d.launchContextWindowCap("claude", false); got != 0 {
+	if got := d.launchContextWindowCap("sess-1", "claude", false); got != 0 {
 		t.Fatalf("non-chief cap with no setting = %d, want 0 (uncapped)", got)
 	}
-	if got := d.launchContextWindowCap("claude", true); got != agentdriver.DefaultContextWindowCap {
+	if got := d.launchContextWindowCap("sess-1", "claude", true); got != agentdriver.DefaultContextWindowCap {
 		t.Fatalf("chief cap with no setting = %d, want default %d", got, agentdriver.DefaultContextWindowCap)
 	}
 	d.store.SetSetting(SettingChiefContextWindowCap, "160000")
-	if got := d.launchContextWindowCap("claude", true); got != 160000 {
+	if got := d.launchContextWindowCap("sess-1", "claude", true); got != 160000 {
 		t.Fatalf("chief cap = %d, want 160000", got)
 	}
 	d.store.SetSetting(SettingDefaultContextWindowCapPrefix+"claude", "800000")
-	if got := d.launchContextWindowCap("claude", false); got != 800000 {
+	if got := d.launchContextWindowCap("sess-1", "claude", false); got != 800000 {
 		t.Fatalf("per-agent default cap = %d, want 800000", got)
 	}
-	if got := d.launchContextWindowCap("Claude", false); got != 800000 {
+	if got := d.launchContextWindowCap("sess-1", "Claude", false); got != 800000 {
 		t.Fatalf("per-agent default cap (case-insensitive) = %d, want 800000", got)
 	}
-	if got := d.launchContextWindowCap("codex", false); got != 0 {
+	if got := d.launchContextWindowCap("sess-1", "codex", false); got != 0 {
 		t.Fatalf("other agent's cap = %d, want 0 (uncapped)", got)
 	}
 	// The chief setting still wins on chief launches even with a per-agent
 	// default configured.
-	if got := d.launchContextWindowCap("claude", true); got != 160000 {
+	if got := d.launchContextWindowCap("sess-1", "claude", true); got != 160000 {
 		t.Fatalf("chief cap with per-agent default also set = %d, want 160000", got)
+	}
+
+	// A per-session pin outranks everything: the chief setting on chief
+	// launches, and the per-agent default on plain ones.
+	d.store.Add(&protocol.Session{ID: "sess-pinned", Label: "pinned", Agent: protocol.SessionAgentClaude, Directory: "/tmp"})
+	if !d.store.SetSessionContextWindowCap("sess-pinned", 300000) {
+		t.Fatalf("SetSessionContextWindowCap failed")
+	}
+	if got := d.launchContextWindowCap("sess-pinned", "claude", false); got != 300000 {
+		t.Fatalf("pinned cap = %d, want 300000", got)
+	}
+	if got := d.launchContextWindowCap("sess-pinned", "claude", true); got != 300000 {
+		t.Fatalf("pinned cap on a chief launch = %d, want 300000 (pin outranks chief setting)", got)
+	}
+	// Clearing the pin falls back to the settings.
+	if !d.store.SetSessionContextWindowCap("sess-pinned", 0) {
+		t.Fatalf("clear SetSessionContextWindowCap failed")
+	}
+	if got := d.launchContextWindowCap("sess-pinned", "claude", false); got != 800000 {
+		t.Fatalf("cleared pin cap = %d, want per-agent default 800000", got)
+	}
+}
+
+// TestDaemon_SetSessionContextWindowCap covers the write path behind
+// set_session_context_window_cap: validation, idempotence, and the pin landing
+// on the session record that broadcasts carry.
+func TestDaemon_SetSessionContextWindowCap(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.store.Add(&protocol.Session{ID: "sess-cap", Label: "capped", Agent: protocol.SessionAgentClaude, Directory: "/tmp"})
+	d.store.Add(&protocol.Session{ID: "sess-shell", Label: "shell", Agent: protocol.SessionAgentShell, Directory: "/tmp"})
+
+	if err := d.setSessionContextWindowCap("", 200000); err == nil {
+		t.Fatalf("missing session_id accepted")
+	}
+	if err := d.setSessionContextWindowCap("sess-missing", 200000); err == nil {
+		t.Fatalf("unknown session accepted")
+	}
+	if err := d.setSessionContextWindowCap("sess-shell", 200000); err == nil {
+		t.Fatalf("shell session accepted a cap it can never apply")
+	}
+	for _, invalid := range []int{-1, 1, contextWindowCapMin - 1, contextWindowCapMax + 1} {
+		if err := d.setSessionContextWindowCap("sess-cap", invalid); err == nil {
+			t.Fatalf("out-of-bounds cap %d accepted", invalid)
+		}
+	}
+
+	if err := d.setSessionContextWindowCap("sess-cap", 500000); err != nil {
+		t.Fatalf("set cap: %v", err)
+	}
+	if got := protocol.Deref(d.store.Get("sess-cap").ContextWindowCap); got != 500000 {
+		t.Fatalf("stored cap = %d, want 500000", got)
+	}
+	// Repeating the same pin is a no-op, not an error.
+	if err := d.setSessionContextWindowCap("sess-cap", 500000); err != nil {
+		t.Fatalf("idempotent set errored: %v", err)
+	}
+	// 0 clears the pin.
+	if err := d.setSessionContextWindowCap("sess-cap", 0); err != nil {
+		t.Fatalf("clear cap: %v", err)
+	}
+	if d.store.Get("sess-cap").ContextWindowCap != nil {
+		t.Fatalf("cleared cap still stored")
 	}
 }
 

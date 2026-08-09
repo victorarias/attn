@@ -951,6 +951,12 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// delegations, endpoints, workspaces and workspace panes. Applied by
 	// applyMigration95.
 	{95, "store turn, cursor and listing timestamps in an encoding that sorts", ``},
+	// The per-session context-window cap pin, in tokens. 0 means no pin — the
+	// launch falls back to the chief or per-agent default settings. Owned by
+	// SetSessionContextWindowCap, absent from the session upsert, so a respawn
+	// cannot clear it — the same contract as pinned_at. Applied by
+	// applyMigration96.
+	{96, "add the context-window cap pin to sessions", ``},
 	// The app registry (A4). Three tables, and their absences are as decided as
 	// their columns:
 	//
@@ -969,11 +975,10 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// content mints no new row" a property of the database rather than a
 	// convention in the apply pipeline.
 	//
-	// Numbered 96 against a database whose highest applied migration is 95 (main
-	// and this epic branch both). Merging the epic into main after another lane
-	// claims 96 means renumbering this one — never reusing a number, per the note
-	// on migration 86.
-	{96, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
+	// Originally numbered 96 on the epic branch; renumbered to 97 when main
+	// claimed 96 for the context-window cap pin — never reusing a number, per
+	// the note on migration 86.
+	{97, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
     name               TEXT PRIMARY KEY,
     current_version_id INTEGER,
     created_at         TEXT NOT NULL,
@@ -1308,6 +1313,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 95 {
 			if err := applyMigration95(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 96 {
+			if err := applyMigration96(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2407,6 +2417,18 @@ func applyMigration92(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN parent_session_id TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+// applyMigration96 adds the per-session context-window cap pin. Guarded on the
+// column existing, so a rewound schema_migrations table re-runs it without
+// erroring on the duplicate.
+func applyMigration96(tx *sql.Tx) error {
+	has, err := columnExists(tx, "sessions", "context_window_cap")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN context_window_cap INTEGER NOT NULL DEFAULT 0")
 	return err
 }
 

@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -79,37 +80,43 @@ func TestPipelineOrdinalStabilityUnderReorder(t *testing.T) {
 		t.Fatalf("expected 2 stage-1 ordinals, got %v (all=%v)", st1, baseline)
 	}
 
+	// Runs in a synctest bubble. The separation between the two stage-1 releases
+	// used to be a 15ms sleep hoping the first resolution landed first;
+	// synctest.Wait returns only when the engine has nothing left to do, so the
+	// releases are genuinely serialized and the two orders are genuinely opposite.
 	runWithReleaseOrder := func(order []string) map[string]string {
-		stub := NewScriptedStub(scriptedDeterministicResult)
-		eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
-		done := make(chan RunResult, 1)
-		go func() {
-			r, _ := eng.Run(context.Background(), script, nil)
-			done <- r
-		}()
-		// Release stage-0 calls so the pipeline can reach stage 1.
-		for ord := range baseline {
-			if !containsSeg(ord, "st1") {
+		out := map[string]string{}
+		synctest.Test(t, func(t *testing.T) {
+			stub := NewScriptedStub(scriptedDeterministicResult)
+			eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
+			done := make(chan RunResult, 1)
+			go func() {
+				r, _ := eng.Run(context.Background(), script, nil)
+				done <- r
+			}()
+			// Release stage-0 calls so the pipeline can reach stage 1.
+			for ord := range baseline {
+				if !containsSeg(ord, "st1") {
+					stub.Release(ord)
+				}
+			}
+			// Now release the two stage-1 calls in the requested order, each fully
+			// resolved before the next, so the resolutions truly interleave differently.
+			for _, ord := range order {
+				synctest.Wait()
 				stub.Release(ord)
 			}
-		}
-		// Now release the two stage-1 calls in the requested order, with a gap so
-		// the resolutions truly interleave differently.
-		for _, ord := range order {
-			time.Sleep(15 * time.Millisecond)
-			stub.Release(ord)
-		}
-		stub.ReleaseAll()
-		r := <-done
-		if r.Status != StatusCompleted {
-			t.Fatalf("status=%s err=%v", r.Status, r.Err)
-		}
-		out := map[string]string{}
-		for _, e := range r.Journal.Entries() {
-			var s string
-			_ = json.Unmarshal(e.Result, &s)
-			out[e.Ordinal] = s
-		}
+			stub.ReleaseAll()
+			r := <-done
+			if r.Status != StatusCompleted {
+				t.Fatalf("status=%s err=%v", r.Status, r.Err)
+			}
+			for _, e := range r.Journal.Entries() {
+				var s string
+				_ = json.Unmarshal(e.Result, &s)
+				out[e.Ordinal] = s
+			}
+		})
 		return out
 	}
 
@@ -141,36 +148,42 @@ func TestPipelineOrdinalStabilityUnderReorder(t *testing.T) {
 }
 
 // releaseOrderedMap runs script under a fresh ScriptedStub, releases the given
-// ordinals (in order, with a gap so resolutions truly interleave) and then opens
-// all remaining gates. It returns the ordinal->result mapping. The phased release
+// ordinals (in order, each fully resolved before the next) and then opens all
+// remaining gates. It returns the ordinal->result mapping. The phased release
 // lets a test drive the post-await continuations to resolve in a chosen order.
+//
+// Runs in a synctest bubble: the second wave's separation was a 15ms sleep, and
+// is now synctest.Wait — the engine having nothing left to do, which is what the
+// sleep was standing in for.
 func releaseOrderedMap(t *testing.T, script string, firstWave, secondWave []string) map[string]string {
 	t.Helper()
-	stub := NewScriptedStub(scriptedDeterministicResult)
-	eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
-	done := make(chan RunResult, 1)
-	go func() {
-		r, _ := eng.Run(context.Background(), script, nil)
-		done <- r
-	}()
-	for _, ord := range firstWave {
-		stub.Release(ord)
-	}
-	for _, ord := range secondWave {
-		time.Sleep(15 * time.Millisecond)
-		stub.Release(ord)
-	}
-	stub.ReleaseAll()
-	r := <-done
-	if r.Status != StatusCompleted {
-		t.Fatalf("status=%s err=%v", r.Status, r.Err)
-	}
 	out := map[string]string{}
-	for _, e := range r.Journal.Entries() {
-		var s string
-		_ = json.Unmarshal(e.Result, &s)
-		out[e.Ordinal] = s
-	}
+	synctest.Test(t, func(t *testing.T) {
+		stub := NewScriptedStub(scriptedDeterministicResult)
+		eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
+		done := make(chan RunResult, 1)
+		go func() {
+			r, _ := eng.Run(context.Background(), script, nil)
+			done <- r
+		}()
+		for _, ord := range firstWave {
+			stub.Release(ord)
+		}
+		for _, ord := range secondWave {
+			synctest.Wait()
+			stub.Release(ord)
+		}
+		stub.ReleaseAll()
+		r := <-done
+		if r.Status != StatusCompleted {
+			t.Fatalf("status=%s err=%v", r.Status, r.Err)
+		}
+		for _, e := range r.Journal.Entries() {
+			var s string
+			_ = json.Unmarshal(e.Result, &s)
+			out[e.Ordinal] = s
+		}
+	})
 	return out
 }
 
@@ -321,26 +334,30 @@ func TestParallelOrdinalStabilityUnderReorder(t *testing.T) {
 	}
 	sort.Strings(ords)
 
+	// Runs in a synctest bubble; see runWithReleaseOrder in
+	// TestPipelineOrdinalStabilityUnderReorder for why the sleeps are gone.
 	runWithReleaseOrder := func(order []string) map[string]string {
-		stub := NewScriptedStub(scriptedDeterministicResult)
-		eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
-		done := make(chan RunResult, 1)
-		go func() {
-			r, _ := eng.Run(context.Background(), script, nil)
-			done <- r
-		}()
-		for _, ord := range order {
-			time.Sleep(10 * time.Millisecond)
-			stub.Release(ord)
-		}
-		stub.ReleaseAll()
-		r := <-done
 		out := map[string]string{}
-		for _, e := range r.Journal.Entries() {
-			var s string
-			_ = json.Unmarshal(e.Result, &s)
-			out[e.Ordinal] = s
-		}
+		synctest.Test(t, func(t *testing.T) {
+			stub := NewScriptedStub(scriptedDeterministicResult)
+			eng := New(Config{Stub: stub, WatchdogTimeout: 5 * time.Second})
+			done := make(chan RunResult, 1)
+			go func() {
+				r, _ := eng.Run(context.Background(), script, nil)
+				done <- r
+			}()
+			for _, ord := range order {
+				synctest.Wait()
+				stub.Release(ord)
+			}
+			stub.ReleaseAll()
+			r := <-done
+			for _, e := range r.Journal.Entries() {
+				var s string
+				_ = json.Unmarshal(e.Result, &s)
+				out[e.Ordinal] = s
+			}
+		})
 		return out
 	}
 

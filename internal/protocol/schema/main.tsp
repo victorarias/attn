@@ -142,6 +142,7 @@ model Session {
   auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   auto_settle_held?: boolean;   // True while the auto-settle countdown is frozen because the user is typing or moving the pointer in this session. Mutually exclusive with auto_settle_fires_at by construction: a frozen countdown has no deadline to animate against, so the tile draws a full paused bar and waits. It clears on its own five quiet seconds after the last interaction, when a fresh deadline replaces it.
   pinned_at?: string;           // ISO timestamp this session was individually pinned out of the queue. Presence is the pin, and the instant is the pinned band's sort key. Like a pinned workspace it filters at read: the turn stamps keep accruing underneath, so unpinning surfaces whatever was outstanding at its true age.
+  context_window_cap?: int32;   // Per-session context-window cap in tokens, set by the user on this one session. Absent means no pin — the launch falls back to the chief or per-agent default settings. A pin outranks both, and takes effect at the next launch of the agent (the daemon reloads a live session in place when the pin changes).
   parent_session_id?: string;   // The agent session a shell was split from. Spawn-time provenance resolved by the daemon, always an agent id and never another shell's, so there is no chain to walk. Whether the link is live is judged at read (parent present in the same workspace), so the field itself is never cleared.
   todos?: string[];             // Optional: can be empty/absent
   last_seen: string;            // ISO timestamp, always set
@@ -2504,6 +2505,16 @@ model SetWorkspaceRankMessage {
   next_workspace_id?: string;
 }
 
+// Pin or clear a per-session context-window cap (tokens). cap > 0 pins; cap 0
+// clears the pin so the launch falls back to the chief or per-agent default
+// settings. A changed pin on a live claude/codex session reloads the agent in
+// place (resume-preserving) so the cap takes effect immediately.
+model SetSessionContextWindowCapMessage {
+  cmd: "set_session_context_window_cap";
+  session_id: string;
+  cap: int32;
+}
+
 // Assign or remove the profile-wide chief-of-staff role. Assigning a new
 // session transfers the singleton role from the previous holder.
 model SetChiefOfStaffMessage {
@@ -2624,6 +2635,17 @@ model RenameResultMessage {
   event: "rename_result";
   cmd: string;
   id: string;
+  success: boolean;
+  error?: string;
+}
+
+// Reply to set_session_context_window_cap, correlated by session_id. cap
+// echoes the pin that is now stored (0 = cleared). The updated session is also
+// broadcast separately via sessions_updated.
+model SessionContextWindowCapResultMessage {
+  event: "session_context_window_cap_result";
+  session_id: string;
+  cap: int32;
   success: boolean;
   error?: string;
 }
@@ -4549,6 +4571,7 @@ alias DaemonEvent =
   | WorkspaceLayoutActionResultMessage
   | RenameResultMessage
   | ChiefOfStaffResultMessage
+  | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage

@@ -1005,6 +1005,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handlePinWorkspaceWS(client, msg.(*protocol.PinWorkspaceMessage))
 	case protocol.CmdPinSession: // wire: pin_session
 		d.handlePinSession(client, msg.(*protocol.PinSessionMessage))
+	case protocol.CmdSetSessionContextWindowCap: // wire: set_session_context_window_cap
+		d.handleSetSessionContextWindowCap(client, msg.(*protocol.SetSessionContextWindowCapMessage))
 	case protocol.CmdRefreshPRs: // wire: refresh_prs
 		d.handleRefreshPRsWS(client)
 	case protocol.CmdFetchPRDetails: // wire: fetch_pr_details
@@ -1374,6 +1376,12 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		// would write to a session the hub does not have and the next snapshot
 		// from the endpoint would put the row straight back in the queue.
 		if typed, ok := msg.(*protocol.PinSessionMessage); ok {
+			return typed.SessionID
+		}
+	case protocol.CmdSetSessionContextWindowCap: // wire: set_session_context_window_cap
+		// Same shape as the queue pin: the cap is a column on the session row,
+		// and the reload that applies it runs where the worker lives.
+		if typed, ok := msg.(*protocol.SetSessionContextWindowCapMessage); ok {
 			return typed.SessionID
 		}
 	case protocol.CmdSessionMessagesGet: // wire: session_messages_get

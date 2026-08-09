@@ -1,0 +1,14 @@
+kind: internal
+area: testing
+change: >
+  Three testing tools evaluated against real seams and adopted. testing/synctest
+  paces three jobs runner/cron tests on a fake clock, so backoff, debounce, and
+  cron windows advance at their real cadence for free and "it never happened"
+  assertions are settled facts rather than expired sleeps. pgregory.net/rapid
+  explores rankkey.Between with a stateful property test and one bounding key
+  growth, which catches a Between that spends precision it does not need — a
+  mutation every pre-existing test passes. An embedded Toxiproxy drives the
+  daemon's slow-WebSocket-client eviction over a genuinely throttled TCP link,
+  the first coverage of that path through a degraded network. Findings and the
+  rules for reaching for each tool:
+  docs/plans/2026-08-09-testing-spike-synctest-rapid-toxiproxy.md.

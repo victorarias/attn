@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -159,219 +160,252 @@ func TestParseGitDiffNumstat(t *testing.T) {
 	}
 }
 
+// The scheduler tests below run inside synctest bubbles at the production
+// debounce and safety intervals. They used to turn those intervals down to tens
+// of milliseconds so a test could outrun them; under a fake clock a 30-second
+// safety window costs nothing to wait out, so the schedule under test is the
+// shipped one. Nothing here touches a real repo — getGitStatusForDaemon is
+// stubbed and the client's send channel is buffered — so the whole scheduler
+// fits in a bubble.
 func TestGitStatusSchedulerCoalescesDirtyRefreshes(t *testing.T) {
-	restore := overrideGitStatusSchedulerForTesting(10*time.Millisecond, time.Hour, time.Hour, time.Hour)
-	defer restore()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		var inFlight atomic.Int32
+		var overlapped atomic.Bool
+		firstStarted := make(chan struct{})
+		releaseFirst := make(chan struct{})
 
-	var calls atomic.Int32
-	var inFlight atomic.Int32
-	var overlapped atomic.Bool
-	firstStarted := make(chan struct{})
-	releaseFirst := make(chan struct{})
+		previousGetGitStatus := getGitStatusForDaemon
+		getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+			if inFlight.Add(1) > 1 {
+				overlapped.Store(true)
+			}
+			defer inFlight.Add(-1)
 
-	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
-		if inFlight.Add(1) > 1 {
-			overlapped.Store(true)
+			call := calls.Add(1)
+			if call == 1 {
+				close(firstStarted)
+				<-releaseFirst
+			}
+			return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
 		}
-		defer inFlight.Add(-1)
+		defer func() {
+			getGitStatusForDaemon = previousGetGitStatus
+		}()
 
-		call := calls.Add(1)
-		if call == 1 {
-			close(firstStarted)
-			<-releaseFirst
+		d := &Daemon{}
+		client := &wsClient{send: make(chan outboundMessage, 10)}
+		d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
+			Cmd:       protocol.CmdSubscribeGitStatus,
+			Directory: "/repo",
+		})
+		t.Cleanup(client.stopGitStatusPoll)
+
+		<-firstStarted
+		for i := 0; i < 5; i++ {
+			client.requestGitStatusRefresh(gitStatusRefreshRequest{reason: gitStatusRefreshReasonDirty})
 		}
-		return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
-	}
-	defer func() {
-		getGitStatusForDaemon = previousGetGitStatus
-	}()
+		close(releaseFirst)
 
-	d := &Daemon{}
-	client := &wsClient{send: make(chan outboundMessage, 10)}
-	d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
-		Cmd:       protocol.CmdSubscribeGitStatus,
-		Directory: "/repo",
+		// One debounce later the whole burst has collapsed into a single refresh,
+		// and several debounces after that nothing more has run.
+		time.Sleep(gitStatusRefreshDebounce)
+		synctest.Wait()
+		if got := calls.Load(); got != 2 {
+			t.Fatalf("git status calls = %d, want 2", got)
+		}
+		time.Sleep(5 * gitStatusRefreshDebounce)
+		synctest.Wait()
+
+		if got := calls.Load(); got != 2 {
+			t.Fatalf("git status calls = %d, want 2", got)
+		}
+		if overlapped.Load() {
+			t.Fatal("git status refreshes overlapped")
+		}
 	})
-	defer client.stopGitStatusPoll()
-
-	<-firstStarted
-	for i := 0; i < 5; i++ {
-		client.requestGitStatusRefresh(gitStatusRefreshRequest{reason: gitStatusRefreshReasonDirty})
-	}
-	close(releaseFirst)
-
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 2
-	})
-	time.Sleep(50 * time.Millisecond)
-
-	if got := calls.Load(); got != 2 {
-		t.Fatalf("git status calls = %d, want 2", got)
-	}
-	if overlapped.Load() {
-		t.Fatal("git status refreshes overlapped")
-	}
 }
 
 func TestGitOperationMarksMatchingStatusSubscriptionDirty(t *testing.T) {
-	restore := overrideGitStatusSchedulerForTesting(10*time.Millisecond, time.Hour, time.Hour, time.Hour)
-	defer restore()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		previousGetGitStatus := getGitStatusForDaemon
+		getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+			call := calls.Add(1)
+			return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
+		}
+		defer func() {
+			getGitStatusForDaemon = previousGetGitStatus
+		}()
 
-	var calls atomic.Int32
-	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
-		call := calls.Add(1)
-		return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
-	}
-	defer func() {
-		getGitStatusForDaemon = previousGetGitStatus
-	}()
+		hub := newWSHub()
+		d := &Daemon{wsHub: hub}
+		client := &wsClient{send: make(chan outboundMessage, 10)}
+		hub.clients[client] = true
 
-	hub := newWSHub()
-	d := &Daemon{wsHub: hub}
-	client := &wsClient{send: make(chan outboundMessage, 10)}
-	hub.clients[client] = true
+		d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
+			Cmd:       protocol.CmdSubscribeGitStatus,
+			Directory: "/repo",
+		})
+		t.Cleanup(client.stopGitStatusPoll)
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("git status calls after subscribing = %d, want 1", got)
+		}
 
-	d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
-		Cmd:       protocol.CmdSubscribeGitStatus,
-		Directory: "/repo",
-	})
-	defer client.stopGitStatusPoll()
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 1
-	})
+		finish := d.beginGitOperation(protocol.GitOperationKindDeleteWorktree, "/repo/worktree", nil)
+		finish(nil)
 
-	finish := d.beginGitOperation(protocol.GitOperationKindDeleteWorktree, "/repo/worktree", nil)
-	finish(nil)
-
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 2
+		time.Sleep(gitStatusRefreshDebounce)
+		synctest.Wait()
+		if got := calls.Load(); got != 2 {
+			t.Fatalf("git status calls after the git operation = %d, want 2", got)
+		}
 	})
 }
 
 func TestGitStatusSchedulerDelaysSafetyRefreshAfterSlowRun(t *testing.T) {
-	restore := overrideGitStatusSchedulerForTesting(10*time.Millisecond, 20*time.Millisecond, time.Hour, time.Millisecond)
-	defer restore()
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		previousGetGitStatus := getGitStatusForDaemon
+		getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+			call := calls.Add(1)
+			// Slower than gitStatusSlowRefreshDuration, so the scheduler classifies
+			// the repo as slow and backs its safety refresh off.
+			time.Sleep(gitStatusSlowRefreshDuration + time.Second)
+			return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
+		}
+		defer func() {
+			getGitStatusForDaemon = previousGetGitStatus
+		}()
 
-	var calls atomic.Int32
-	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
-		call := calls.Add(1)
-		time.Sleep(5 * time.Millisecond)
-		return testGitStatus(dir, fmt.Sprintf("file-%d.txt", call)), nil
-	}
-	defer func() {
-		getGitStatusForDaemon = previousGetGitStatus
-	}()
+		d := &Daemon{}
+		client := &wsClient{send: make(chan outboundMessage, 10)}
+		d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
+			Cmd:       protocol.CmdSubscribeGitStatus,
+			Directory: "/repo",
+		})
+		t.Cleanup(client.stopGitStatusPoll)
 
-	d := &Daemon{}
-	client := &wsClient{send: make(chan outboundMessage, 10)}
-	d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
-		Cmd:       protocol.CmdSubscribeGitStatus,
-		Directory: "/repo",
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("git status calls after subscribing = %d, want 1", got)
+		}
+
+		// Past the normal safety interval, which a slow repo must not be polled on.
+		time.Sleep(2 * gitStatusSafetyInterval)
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("git status calls = %d, want 1 slow run without normal safety refresh", got)
+		}
+
+		// Delayed, not abandoned: the slow interval still comes around.
+		time.Sleep(gitStatusSlowSafetyInterval)
+		synctest.Wait()
+		if got := calls.Load(); got != 2 {
+			t.Fatalf("git status calls after the slow safety interval = %d, want 2", got)
+		}
 	})
-	defer client.stopGitStatusPoll()
-
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 1
-	})
-	time.Sleep(60 * time.Millisecond)
-
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("git status calls = %d, want 1 slow run without normal safety refresh", got)
-	}
 }
 
 func TestGitStatusSchedulerUsesTrackedOnlyAfterLimitedRefresh(t *testing.T) {
-	restore := overrideGitStatusSchedulerForTesting(10*time.Millisecond, time.Hour, time.Hour, time.Hour)
-	defer restore()
-
-	var calls atomic.Int32
-	modes := make(chan gitStatusMode, 2)
-	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string, mode gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
-		modes <- mode
-		call := calls.Add(1)
-		status := testGitStatus(dir, fmt.Sprintf("file-%d.txt", call))
-		if call == 1 {
-			status.Limited = protocol.Ptr(true)
-			status.Mode = protocol.Ptr(string(gitStatusModeTrackedOnly))
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		modes := make(chan gitStatusMode, 2)
+		previousGetGitStatus := getGitStatusForDaemon
+		getGitStatusForDaemon = func(dir string, mode gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+			modes <- mode
+			call := calls.Add(1)
+			status := testGitStatus(dir, fmt.Sprintf("file-%d.txt", call))
+			if call == 1 {
+				status.Limited = protocol.Ptr(true)
+				status.Mode = protocol.Ptr(string(gitStatusModeTrackedOnly))
+			}
+			return status, nil
 		}
-		return status, nil
-	}
-	defer func() {
-		getGitStatusForDaemon = previousGetGitStatus
-	}()
+		defer func() {
+			getGitStatusForDaemon = previousGetGitStatus
+		}()
 
-	d := &Daemon{}
-	client := &wsClient{send: make(chan outboundMessage, 10)}
-	d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
-		Cmd:       protocol.CmdSubscribeGitStatus,
-		Directory: "/repo",
-	})
-	defer client.stopGitStatusPoll()
+		d := &Daemon{}
+		client := &wsClient{send: make(chan outboundMessage, 10)}
+		d.handleSubscribeGitStatus(client, &protocol.SubscribeGitStatusMessage{
+			Cmd:       protocol.CmdSubscribeGitStatus,
+			Directory: "/repo",
+		})
+		t.Cleanup(client.stopGitStatusPoll)
 
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 1
-	})
-	client.requestGitStatusRefresh(gitStatusRefreshRequest{reason: gitStatusRefreshReasonDirty})
-	waitForGitStatusTestCondition(t, 500*time.Millisecond, func() bool {
-		return calls.Load() == 2
-	})
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("git status calls after subscribing = %d, want 1", got)
+		}
+		client.requestGitStatusRefresh(gitStatusRefreshRequest{reason: gitStatusRefreshReasonDirty})
+		time.Sleep(gitStatusRefreshDebounce)
+		synctest.Wait()
+		if got := calls.Load(); got != 2 {
+			t.Fatalf("git status calls after the dirty refresh = %d, want 2", got)
+		}
 
-	first := <-modes
-	second := <-modes
-	if first != gitStatusModeFull {
-		t.Fatalf("first mode = %q, want %q", first, gitStatusModeFull)
-	}
-	if second != gitStatusModeTrackedOnly {
-		t.Fatalf("second mode = %q, want %q", second, gitStatusModeTrackedOnly)
-	}
+		first := <-modes
+		second := <-modes
+		if first != gitStatusModeFull {
+			t.Fatalf("first mode = %q, want %q", first, gitStatusModeFull)
+		}
+		if second != gitStatusModeTrackedOnly {
+			t.Fatalf("second mode = %q, want %q", second, gitStatusModeTrackedOnly)
+		}
+	})
 }
 
 func TestGitStatusCoordinatorSharesInFlightStatusForRepoAndMode(t *testing.T) {
-	var calls atomic.Int32
-	started := make(chan struct{})
-	release := make(chan struct{})
-	previousGetGitStatus := getGitStatusForDaemon
-	getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
-		call := calls.Add(1)
-		if call == 1 {
-			close(started)
-			<-release
-		}
-		return testGitStatus(dir, "src/shared.ts"), nil
-	}
-	defer func() {
-		getGitStatusForDaemon = previousGetGitStatus
-	}()
-
-	d := &Daemon{}
-	results := make(chan *protocol.GitStatusUpdateMessage, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			status, _, err := d.coordinator().Status("/repo", gitStatusModeFull)
-			if err != nil {
-				t.Errorf("Status failed: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		var calls atomic.Int32
+		started := make(chan struct{})
+		release := make(chan struct{})
+		previousGetGitStatus := getGitStatusForDaemon
+		getGitStatusForDaemon = func(dir string, _ gitStatusMode) (*protocol.GitStatusUpdateMessage, error) {
+			call := calls.Add(1)
+			if call == 1 {
+				close(started)
+				<-release
 			}
-			results <- status
-		}()
-	}
-
-	<-started
-	time.Sleep(20 * time.Millisecond)
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("git status calls while first refresh is in flight = %d, want 1", got)
-	}
-	close(release)
-
-	for i := 0; i < 2; i++ {
-		status := <-results
-		if status == nil || len(status.Unstaged) != 1 || status.Unstaged[0].Path != "src/shared.ts" {
-			t.Fatalf("status = %+v, want shared status result", status)
+			return testGitStatus(dir, "src/shared.ts"), nil
 		}
-	}
+		defer func() {
+			getGitStatusForDaemon = previousGetGitStatus
+		}()
+
+		d := &Daemon{}
+		results := make(chan *protocol.GitStatusUpdateMessage, 2)
+		for i := 0; i < 2; i++ {
+			go func() {
+				status, _, err := d.coordinator().Status("/repo", gitStatusModeFull)
+				if err != nil {
+					t.Errorf("Status failed: %v", err)
+				}
+				results <- status
+			}()
+		}
+
+		<-started
+		// The sharing claim is a negative one, and this is where a bubble pays: the
+		// old 20ms sleep could only say "no second call had started yet by the time
+		// I looked". synctest.Wait returns when both callers are durably blocked —
+		// one inside the stub, one parked on the shared refresh's done channel — so
+		// the count is of a system that has finished deciding.
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("git status calls while first refresh is in flight = %d, want 1", got)
+		}
+		close(release)
+
+		for i := 0; i < 2; i++ {
+			status := <-results
+			if status == nil || len(status.Unstaged) != 1 || status.Unstaged[0].Path != "src/shared.ts" {
+				t.Fatalf("status = %+v, want shared status result", status)
+			}
+		}
+	})
 }
 
 func TestTrackedOnlyStatusResultStaysLimited(t *testing.T) {
@@ -467,47 +501,49 @@ func TestSameOrNestedPath(t *testing.T) {
 }
 
 func TestGitCoordinatorSharesInFlightFileDiff(t *testing.T) {
-	previousReadFileDiff := readFileDiffForDaemon
-	var calls atomic.Int32
-	started := make(chan struct{})
-	release := make(chan struct{})
-	readFileDiffForDaemon = func(_, _, _, _ string, _ bool) (fileDiffContent, error) {
-		call := calls.Add(1)
-		if call == 1 {
-			close(started)
-			<-release
-		}
-		return fileDiffContent{original: "before", modified: "after"}, nil
-	}
-	defer func() {
-		readFileDiffForDaemon = previousReadFileDiff
-	}()
-
-	d := &Daemon{}
-	results := make(chan fileDiffContent, 2)
-	for i := 0; i < 2; i++ {
-		go func() {
-			content, err := d.coordinator().FileDiff("/repo", "src/file.ts", "HEAD", "", false)
-			if err != nil {
-				t.Errorf("FileDiff failed: %v", err)
+	synctest.Test(t, func(t *testing.T) {
+		previousReadFileDiff := readFileDiffForDaemon
+		var calls atomic.Int32
+		started := make(chan struct{})
+		release := make(chan struct{})
+		readFileDiffForDaemon = func(_, _, _, _ string, _ bool) (fileDiffContent, error) {
+			call := calls.Add(1)
+			if call == 1 {
+				close(started)
+				<-release
 			}
-			results <- content
-		}()
-	}
-
-	<-started
-	time.Sleep(20 * time.Millisecond)
-	if got := calls.Load(); got != 1 {
-		t.Fatalf("file diff calls while first refresh is in flight = %d, want 1", got)
-	}
-	close(release)
-
-	for i := 0; i < 2; i++ {
-		content := <-results
-		if content.original != "before" || content.modified != "after" {
-			t.Fatalf("file diff content = %+v, want shared content", content)
+			return fileDiffContent{original: "before", modified: "after"}, nil
 		}
-	}
+		defer func() {
+			readFileDiffForDaemon = previousReadFileDiff
+		}()
+
+		d := &Daemon{}
+		results := make(chan fileDiffContent, 2)
+		for i := 0; i < 2; i++ {
+			go func() {
+				content, err := d.coordinator().FileDiff("/repo", "src/file.ts", "HEAD", "", false)
+				if err != nil {
+					t.Errorf("FileDiff failed: %v", err)
+				}
+				results <- content
+			}()
+		}
+
+		<-started
+		synctest.Wait()
+		if got := calls.Load(); got != 1 {
+			t.Fatalf("file diff calls while first refresh is in flight = %d, want 1", got)
+		}
+		close(release)
+
+		for i := 0; i < 2; i++ {
+			content := <-results
+			if content.original != "before" || content.modified != "after" {
+				t.Fatalf("file diff content = %+v, want shared content", content)
+			}
+		}
+	})
 }
 
 func containsArg(args []string, want string) bool {
@@ -519,25 +555,6 @@ func containsArg(args []string, want string) bool {
 	return false
 }
 
-func overrideGitStatusSchedulerForTesting(debounce, safety, slowSafety, slowThreshold time.Duration) func() {
-	previousDebounce := gitStatusRefreshDebounce
-	previousSafety := gitStatusSafetyInterval
-	previousSlowSafety := gitStatusSlowSafetyInterval
-	previousSlowThreshold := gitStatusSlowRefreshDuration
-
-	gitStatusRefreshDebounce = debounce
-	gitStatusSafetyInterval = safety
-	gitStatusSlowSafetyInterval = slowSafety
-	gitStatusSlowRefreshDuration = slowThreshold
-
-	return func() {
-		gitStatusRefreshDebounce = previousDebounce
-		gitStatusSafetyInterval = previousSafety
-		gitStatusSlowSafetyInterval = previousSlowSafety
-		gitStatusSlowRefreshDuration = previousSlowThreshold
-	}
-}
-
 func testGitStatus(dir, path string) *protocol.GitStatusUpdateMessage {
 	return &protocol.GitStatusUpdateMessage{
 		Event:     protocol.EventGitStatusUpdate,
@@ -546,16 +563,4 @@ func testGitStatus(dir, path string) *protocol.GitStatusUpdateMessage {
 		Unstaged:  []protocol.GitFileChange{{Path: path, Status: "modified"}},
 		Untracked: []protocol.GitFileChange{},
 	}
-}
-
-func waitForGitStatusTestCondition(t *testing.T, timeout time.Duration, condition func() bool) {
-	t.Helper()
-	deadline := time.Now().Add(timeout)
-	for time.Now().Before(deadline) {
-		if condition() {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatal("timed out waiting for condition")
 }
