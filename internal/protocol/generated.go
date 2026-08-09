@@ -748,12 +748,30 @@ type ClearWarningsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type ClientEvictionNoticeMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// EvictedAt corresponds to the JSON schema field "evicted_at".
+	EvictedAt string `json:"evicted_at"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason string `json:"reason"`
+
+	// UndeliveredMessages corresponds to the JSON schema field
+	// "undelivered_messages".
+	UndeliveredMessages int `json:"undelivered_messages"`
+}
+
 type ClientHelloMessage struct {
 	// BrowserHostToken corresponds to the JSON schema field "browser_host_token".
 	BrowserHostToken *string `json:"browser_host_token,omitempty,omitzero"`
 
 	// Capabilities corresponds to the JSON schema field "capabilities".
 	Capabilities []string `json:"capabilities"`
+
+	// ClientID corresponds to the JSON schema field "client_id".
+	ClientID *string `json:"client_id,omitempty,omitzero"`
 
 	// ClientKind corresponds to the JSON schema field "client_kind".
 	ClientKind string `json:"client_kind"`

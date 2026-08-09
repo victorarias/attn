@@ -359,3 +359,45 @@ Two daemon tests failed on the first branch run and neither is ours:
   ones.
 - Worth its own ticket: whether the app can be told *why* it was disconnected
   on a slow link, given the close frame cannot outrun the backlog.
+  **Answered — the eviction now hangs up and explains itself on the client's
+  next connection.** Two measurements settled the design. Between two kernels,
+  aborting the socket with SO_LINGER 0 reaches the peer immediately: a probe
+  wrote 1 MB into a stalled connection, aborted, and the client read the
+  400,368 bytes its receive buffer already held and then got ECONNRESET, 0 ms
+  after the abort. Through the toxiproxy hop it reaches nobody: the bytes are
+  inside the proxy rather than in either kernel, a userspace hop forwards no
+  reset, and the client read on for another 65 s and saw a plain EOF. So
+  nothing the daemon does can outrun a buffering middlebox — which is why the
+  fix is two-part: hang up within a second (`evictionCloseGrace`, after
+  offering the close frame), and carry the reason on the next `client_hello`
+  as `client_eviction_notice`, keyed on a client id the app repeats across
+  reconnects. The leg's test keeps the eviction, the healthy control, and the
+  recovery, and now pins the notice arriving over the same degraded link;
+  `TestEvictedClientIsNotFedItsBacklogFirst` covers the kernel-to-kernel case
+  the proxy cannot express.
+
+  A third measurement, from the live app rather than a test, moved where the
+  fix had to go. The hub's slow-count rule is not how a real client dies. With
+  the app's socket frozen and 400 sessions in the store, one snapshot was
+  enough: the write pump sat on its 10 s deadline with 409,117 bytes stuck in
+  the client's receive queue and 145,951 more queued on the daemon's side, and
+  the hub's slow-count never reached 2. The connection then ended through the
+  write pump, which knew nothing about evictions and filed nothing — so the app
+  reconnected to a daemon with no answer for it. Both exits now file the same
+  record. The transport needs no extra help on that path: the library tears the
+  connection down when its own write deadline expires, confirmed by mutation
+  (`TestWriteStallEndsTheConnectionAndIsRemembered` still sees the connection
+  end with the abort removed).
+
+  The keepalive turned out to be the exit that fires in practice. With the
+  app's socket frozen, the unanswered ping beat both the slow-count and the
+  write deadline to it in every live run — and that path did two wrong things.
+  It filed nothing, so a client that reconnected got no answer; and it closed
+  through the WebSocket close handshake, which waits five seconds for a peer
+  that has already stopped answering (live: ping failed 20:22:32, socket gone
+  20:22:37; in a test with the keepalive shrunk, 5.4s versus 1.4s once it hangs
+  up instead). It now hangs up like the hub does, and files the disconnect —
+  but only when the daemon is still holding messages for that client. An
+  unanswered ping with nothing owed is a connection that died, not a client
+  that fell behind, and a laptop coming out of sleep must not be told it was
+  too slow.

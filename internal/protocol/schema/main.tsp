@@ -598,6 +598,10 @@ model ClientHelloMessage {
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
   browser_host_token?: string;  // secret available only to the trusted Tauri main webview
+  // Stable for as long as the client process lives, new on every restart. It is
+  // what lets the daemon tell a reconnecting client why it was hung up on
+  // (client_eviction_notice); a client that omits it simply gets no notice.
+  client_id?: string;
 }
 
 model RegisterMessage {
@@ -3477,6 +3481,18 @@ model CommandErrorMessage {
   error: string;
 }
 
+// Sent once to a reconnecting client that the hub had hung up on for falling
+// behind, keyed on the client_id it sent with its hello. The close status that
+// explains an eviction travels the same TCP stream as the backlog that caused
+// it, so on the link where it matters it arrives long after the disconnect —
+// this is how the reason reaches the client instead.
+model ClientEvictionNoticeMessage {
+  event: "client_eviction_notice";
+  evicted_at: string;          // RFC3339, when the hub dropped the connection
+  reason: string;              // the close reason the client could not read, e.g. "client too slow"
+  undelivered_messages: int32; // messages the daemon gave up on handing over
+}
+
 model BrowserControlRequestMessage {
   event: "browser_control_request";
   request_id: string;
@@ -4532,6 +4548,7 @@ alias DaemonEvent =
   | PtyResizedMessage
   | BrowserControlRequestMessage
   | CommandErrorMessage
+  | ClientEvictionNoticeMessage
   | GetPresentationsResultMessage
   | GetPresentationRoundResultMessage
   | PresentSubmitRoundResultMessage

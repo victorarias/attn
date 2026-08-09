@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"nhooyr.io/websocket"
@@ -23,10 +24,19 @@ import (
 
 // wsClient represents a connected WebSocket client
 type wsClient struct {
-	conn        *websocket.Conn
-	send        chan outboundMessage
-	recv        chan []byte // incoming messages for ordered processing
-	slowCount   int         // tracks consecutive failed sends
+	conn *websocket.Conn
+	// rawConn is the TCP connection the HTTP server accepted, kept because the
+	// WebSocket wrapper offers no way back to the socket and an evicted client
+	// has to be cut off at that level. Nil for connections served outside
+	// initHTTPServer (tests).
+	rawConn   net.Conn
+	send      chan outboundMessage
+	recv      chan []byte // incoming messages for ordered processing
+	slowCount int         // tracks consecutive failed sends
+	// writing is set while the write pump has a message in the socket. Together
+	// with the queue depth it answers the only question anyone asks about a
+	// client that went quiet: does the daemon still owe it anything?
+	writing     atomic.Bool
 	sendMu      sync.RWMutex
 	sendClosed  bool
 	closeCode   websocket.StatusCode
@@ -52,8 +62,12 @@ type wsClient struct {
 	// Identity + capabilities declared via client_hello.
 	clientKind    string
 	clientVersion string
-	capabilities  map[string]struct{}
-	identityMu    sync.RWMutex
+	// clientID survives this client's reconnects (it is the client process that
+	// mints it), which is what makes it possible to answer a returning client
+	// about the connection before this one. Empty for clients that omit it.
+	clientID     string
+	capabilities map[string]struct{}
+	identityMu   sync.RWMutex
 
 	// Git status subscription state
 	gitStatusDir        string
@@ -131,6 +145,34 @@ func (c *wsClient) setIdentity(kind, version string, caps []string) {
 	for _, cap := range caps {
 		c.capabilities[cap] = struct{}{}
 	}
+}
+
+// setClientID records the identity that spans this client's reconnects. Kept
+// apart from setIdentity, which describes only the connection it is called on.
+func (c *wsClient) setClientID(id string) {
+	c.identityMu.Lock()
+	defer c.identityMu.Unlock()
+	c.clientID = id
+}
+
+// ClientID is the identity this client carries across its own reconnects, or
+// empty if it never claimed one.
+func (c *wsClient) ClientID() string {
+	c.identityMu.RLock()
+	defer c.identityMu.RUnlock()
+	return c.clientID
+}
+
+// owed counts the messages the daemon is still holding for this client: the
+// queue plus the one it is currently trying to hand over. Zero means the daemon
+// has nothing for it, which is how a connection that simply died is told apart
+// from a client that could not keep up.
+func (c *wsClient) owed() int {
+	n := len(c.send)
+	if c.writing.Load() {
+		n++
+	}
+	return n
 }
 
 func (c *wsClient) closeSendChannel() {
@@ -351,19 +393,27 @@ type outboundMessage struct {
 
 // wsHub manages all WebSocket connections
 type wsHub struct {
-	clients           map[*wsClient]bool
-	broadcast         chan outboundMessage
-	register          chan *wsClient
-	unregister        chan *wsClient
-	mu                sync.RWMutex
+	clients    map[*wsClient]bool
+	broadcast  chan outboundMessage
+	register   chan *wsClient
+	unregister chan *wsClient
+	mu         sync.RWMutex
+	// evictions remembers, per client_id, why the hub hung up — read back on the
+	// client's next hello. Its own lock: evictions are filed under h.mu.
+	evictions         map[string]evictionRecord
+	evictionMu        sync.Mutex
 	logf              func(format string, args ...interface{})
 	broadcastListener BroadcastListener // Optional listener for testing
 	wireTap           WireTap           // Optional full-trace listener for testing
 }
 
 const (
-	maxSlowCount   = 3 // disconnect after this many consecutive failed sends
-	maxPTYDimValue = 65535
+	maxSlowCount = 3 // disconnect after this many consecutive failed sends
+	// slowClientCloseReason is both the WebSocket close reason and, when the
+	// close frame cannot get through, the reason repeated to the client on its
+	// next connection.
+	slowClientCloseReason = "client too slow"
+	maxPTYDimValue        = 65535
 	// The kernel's winsize fields are all uint16, pixels included.
 	maxPTYPixelValue                 = 65535
 	defaultWebSocketReadBytes        = 1 << 20
@@ -434,7 +484,7 @@ func (h *wsHub) run() {
 			// Remove slow clients outside the iteration
 			for _, client := range toRemove {
 				delete(h.clients, client)
-				client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, "client too slow")
+				h.evict(client, slowClientCloseReason)
 			}
 			h.mu.Unlock()
 		}
@@ -498,7 +548,7 @@ func (h *wsHub) SendRawTextToMatchingClients(payload []byte, match func(*wsClien
 	}
 	for _, client := range toRemove {
 		delete(h.clients, client)
-		client.closeSendChannelWithStatus(websocket.StatusPolicyViolation, "client too slow")
+		h.evict(client, slowClientCloseReason)
 	}
 	h.mu.Unlock()
 }
@@ -683,6 +733,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	client := &wsClient{
 		conn:               conn,
+		rawConn:            rawConnFrom(r.Context()),
 		send:               make(chan outboundMessage, 256),
 		recv:               make(chan []byte, 256), // buffer for incoming messages
 		connectedAt:        time.Now(),
@@ -738,21 +789,60 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 	go d.fetchAllPRDetails()
 }
 
+// wsWriteTimeout bounds one message hand-off. Carried over unchanged from when
+// this pump was written; a client that cannot take one message in ten seconds
+// is not a slow client, it is a stopped one. Measured against a real app whose
+// socket had been frozen: a 400-session snapshot left 409,117 bytes stuck in
+// the client's receive queue and the pump sat on this deadline for its full
+// length, while the hub's slow-count never reached 2.
+//
+// A variable so tests can shrink it; nothing else writes to it.
+var wsWriteTimeout = 10 * time.Second
+
+// wsWritePump hands one message at a time to a client.
+//
+// A write that runs out of time is the eviction the hub's slow-count rule was
+// meant to catch and usually does not: one full snapshot to a client that has
+// stopped draining exhausts the deadline long before 256 more messages queue up
+// behind it. It is the same fact about the same client, so it is filed the same
+// way — for the client's return, since nothing can reach it now. The transport
+// itself needs no help here: the library tears it down when its own write
+// deadline expires.
 func (d *Daemon) wsWritePump(client *wsClient) {
+	stalled := false
 	defer func() {
 		code, reason := client.closeStatus()
+		if stalled {
+			code, reason = websocket.StatusPolicyViolation, slowClientCloseReason
+			d.wsHub.rememberEviction(client.ClientID(), evictionRecord{
+				at:          time.Now(),
+				reason:      reason,
+				undelivered: len(client.send) + 1,
+			})
+		}
 		client.conn.Close(code, reason)
 	}()
 
 	for message := range client.send {
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), wsWriteTimeout)
 		wsType := websocket.MessageText
 		if message.kind != messageKindText {
 			wsType = websocket.MessageBinary
 		}
+		start := time.Now()
+		client.writing.Store(true)
 		err := client.conn.Write(ctx, wsType, message.payload)
+		client.writing.Store(false)
+		elapsed := time.Since(start)
 		cancel()
 		if err != nil {
+			// The library reports a timed-out write and a write to a connection
+			// closed underneath it through the same error, and which one it
+			// picks is a race. The clock is ours and says which happened.
+			stalled = elapsed >= wsWriteTimeout
+			if stalled {
+				d.logf("WebSocket client took longer than %s to accept a message, giving up on it", wsWriteTimeout)
+			}
 			return
 		}
 	}
@@ -775,9 +865,25 @@ func (d *Daemon) wsMsgPump(client *wsClient) {
 	d.logf("WebSocket message pump exited")
 }
 
-// wsPingLoop sends periodic pings to keep the connection alive and detect dead clients
+// The keepalive. Variables so tests can shrink them; nothing else writes to
+// them. Both carried over unchanged from when this loop was written.
+var (
+	wsPingInterval = 30 * time.Second
+	wsPingTimeout  = 10 * time.Second
+)
+
+// wsPingLoop sends periodic pings to keep the connection alive and detect dead
+// clients.
+//
+// This is the exit a stalled app actually takes: measured live with the app's
+// socket frozen, the unanswered ping beat both the hub's slow-count and the
+// write pump's deadline to it, twice out of two. So it has to say the same
+// thing they do — but only when it is the same thing. A client that owes the
+// daemon nothing and stops answering is a connection that died; a client the
+// daemon is still holding messages for is one that could not keep up, and that
+// one deserves an answer when it comes back.
 func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(wsPingInterval)
 	defer ticker.Stop()
 
 	for {
@@ -785,12 +891,24 @@ func (d *Daemon) wsPingLoop(client *wsClient, done <-chan struct{}) {
 		case <-done:
 			return
 		case <-ticker.C:
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), wsPingTimeout)
 			err := client.conn.Ping(ctx)
 			cancel()
 			if err != nil {
 				d.logf("WebSocket ping failed: %v", err)
-				client.conn.Close(websocket.StatusGoingAway, "ping timeout")
+				if owed := client.owed(); owed > 0 {
+					d.logf("WebSocket client stopped answering with %d messages still owed to it; filing that for its return", owed)
+					d.wsHub.rememberEviction(client.ClientID(), evictionRecord{
+						at:          time.Now(),
+						reason:      slowClientCloseReason,
+						undelivered: owed,
+					})
+				}
+				// Not conn.Close: that waits out its close handshake against a
+				// peer that has already stopped answering, which is five more
+				// seconds of a connection both ends are done with (measured
+				// live: ping failed at 20:22:32, the socket went at 20:22:37).
+				client.hangUp(websocket.StatusGoingAway, "ping timeout", evictionCloseGrace)
 				return
 			}
 		}
