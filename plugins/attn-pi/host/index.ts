@@ -118,7 +118,7 @@ function requirePinnedPi(): string {
 function requireEnv(name: string): string {
   const value = process.env[name]?.trim();
   if (!value) {
-    throw new Error(`${name} is required; attn's daemon sets it when it spawns the pi host`);
+    throw new Error(`${name} is required; attn's daemon sets it when it spawns nisse`);
   }
   return value;
 }
@@ -130,7 +130,7 @@ function optionalEnv(name: string): string {
 /** `retentionBudget` reading the environment and reporting on the host's log. */
 function retentionFromEnv(name: string, fallback: number): number {
   return retentionBudget(name, optionalEnv(name), fallback, (message) =>
-    console.error(`[attn-pi-host] ${message}`));
+    console.error(`[nisse] ${message}`));
 }
 
 /**
@@ -160,7 +160,7 @@ function openSession(
   resumeFile: string,
 ): { sessionManager: SessionManager; forked: boolean } {
   if (resumeFile !== "" && !holdsSession(sessionDir)) {
-    console.error(`[attn-pi-host] forking ${resumeFile} into ${sessionDir}`);
+    console.error(`[nisse] forking ${resumeFile} into ${sessionDir}`);
     return { sessionManager: SessionManager.forkFrom(resumeFile, cwd, sessionDir), forked: true };
   }
   return { sessionManager: SessionManager.continueRecent(cwd, sessionDir), forked: false };
@@ -184,7 +184,7 @@ function holdsSession(sessionDir: string): boolean {
 
 /**
  * Splits "provider/model-id" into pi's two-part model identity. The slash form
- * is what attn's `--model` pin and the `default_model_pi-host` setting carry.
+ * is what attn's `--model` pin and the `default_model_nisse` setting carry.
  */
 function resolveModel(pinned: string) {
   const split = pinned.indexOf("/");
@@ -225,15 +225,15 @@ async function readOutputTail(path: string, limit: number): Promise<{ text: stri
 
 async function main(): Promise<void> {
   const piVersion = requirePinnedPi();
-  const sessionID = requireEnv("ATTN_PI_HOST_SESSION_ID");
-  const sessionDir = requireEnv("ATTN_PI_HOST_SESSION_DIR");
-  const cwd = requireEnv("ATTN_PI_HOST_CWD");
-  const pinnedModel = requireEnv("ATTN_PI_HOST_MODEL");
+  const sessionID = requireEnv("ATTN_NISSE_SESSION_ID");
+  const sessionDir = requireEnv("ATTN_NISSE_SESSION_DIR");
+  const cwd = requireEnv("ATTN_NISSE_CWD");
+  const pinnedModel = requireEnv("ATTN_NISSE_MODEL");
   // The launch's own first user message, when it had one — today that is a
   // delegation brief. Optional: an ordinary session is opened empty, for a user
   // who will type into it.
-  const initialPrompt = process.env.ATTN_PI_HOST_INITIAL_PROMPT?.trim() ?? "";
-  const resumeFile = optionalEnv("ATTN_PI_HOST_RESUME_FILE");
+  const initialPrompt = process.env.ATTN_NISSE_INITIAL_PROMPT?.trim() ?? "";
+  const resumeFile = optionalEnv("ATTN_NISSE_RESUME_FILE");
 
   const envelopeOut = createWriteStream("", { fd: ENVELOPE_FD });
   // This host process's identity, minted fresh every launch. It rides on every
@@ -248,8 +248,8 @@ async function main(): Promise<void> {
     epoch,
     SNAPSHOT_ITEM_LIMIT,
     SNAPSHOT_BYTES_LIMIT,
-    retentionFromEnv("ATTN_PI_HOST_RETENTION_ITEMS", TRANSCRIPT_RETENTION_ITEMS),
-    retentionFromEnv("ATTN_PI_HOST_RETENTION_BYTES", TRANSCRIPT_RETENTION_BYTES),
+    retentionFromEnv("ATTN_NISSE_RETENTION_ITEMS", TRANSCRIPT_RETENTION_ITEMS),
+    retentionFromEnv("ATTN_NISSE_RETENTION_BYTES", TRANSCRIPT_RETENTION_BYTES),
   );
   const write = (envelope: Envelope) => {
     transcript.apply(envelope.kind, envelope.body);
@@ -288,7 +288,7 @@ async function main(): Promise<void> {
   const deltas = new DeltaCoalescer(DELTA_WINDOW_MS, (id, text) => stream.emit("message_delta", { id, text }));
   const toolDetails = new ToolDetailStore(TOOL_DETAIL_BUDGET_BYTES);
   const mapper = new PiEventMapper(stream, deltas, (type) => {
-    console.error(`[attn-pi-host] unmapped pi event type ${type} (pi ${piVersion})`);
+    console.error(`[nisse] unmapped pi event type ${type} (pi ${piVersion})`);
   }, toolDetails);
 
   session.subscribe((event) => {
@@ -299,14 +299,14 @@ async function main(): Promise<void> {
     // session gets, and it is the receipt anyone remeasuring the budget reads.
     if ((event as { type?: string }).type === "agent_settled") {
       console.error(
-        `[attn-pi-host] holding ${toolDetails.retainedBytes} bytes of tool detail ` +
+        `[nisse] holding ${toolDetails.retainedBytes} bytes of tool detail ` +
         `across ${toolDetails.size} call(s), budget ${TOOL_DETAIL_BUDGET_BYTES} bytes`,
       );
       // The other budget, and the receipt behind the retention tripwire: this
       // is the line a remeasurement reads to find out how close a real
       // conversation gets to the archive scroll-back is served from.
       console.error(
-        `[attn-pi-host] transcript holding ${transcript.retainedBytes} bytes across ${transcript.size} item(s), ` +
+        `[nisse] transcript holding ${transcript.retainedBytes} bytes across ${transcript.size} item(s), ` +
         `${transcript.droppedItems} dropped past retention`,
       );
     }
@@ -322,7 +322,7 @@ async function main(): Promise<void> {
   const interrupted = conversationInterrupted(history.items);
   if (history.items.length > 0) {
     console.error(
-      `[attn-pi-host] revived ${history.items.length} item(s) and ${history.details.size} tool detail(s) ` +
+      `[nisse] revived ${history.items.length} item(s) and ${history.details.size} tool detail(s) ` +
       `from ${session.sessionFile ?? "(no file)"}; interrupted=${interrupted}`,
     );
   }
@@ -345,7 +345,7 @@ async function main(): Promise<void> {
     // Availability can need the network. A session that cannot enumerate models
     // still runs on the one it was pinned to, so this is a smaller picker, not
     // a failed launch.
-    console.error(`[attn-pi-host] listing available models failed: ${error instanceof Error ? error.message : String(error)}`);
+    console.error(`[nisse] listing available models failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   // A session nobody has spoken to yet is idle, and idle owes the user a turn:
@@ -384,7 +384,7 @@ async function main(): Promise<void> {
       // forever waiting for a reply nobody is writing. Settle the run here and
       // carry the reason, so the pane says what went wrong instead of hanging.
       const message = error instanceof Error ? error.message : String(error);
-      console.error(`[attn-pi-host] prompt failed: ${error instanceof Error ? error.stack : String(error)}`);
+      console.error(`[nisse] prompt failed: ${error instanceof Error ? error.stack : String(error)}`);
       deltas.flush();
       const settled: RunSettledBody = { state: "idle", error: message };
       stream.emit("run_settled", settled);
@@ -412,14 +412,14 @@ async function main(): Promise<void> {
       if (verb.verb === "prompt") return runPrompt(verb.text);
       // Not a violation and not a queue: the message opens the run it would
       // have interrupted.
-      console.error(`[attn-pi-host] ${verb.verb} on an idle session: starting a run`);
+      console.error(`[nisse] ${verb.verb} on an idle session: starting a run`);
       return runPrompt(verb.text);
     }
     if (verb.verb === "prompt") {
       // The app's composer sends steer while a run is open, so a plain prompt
       // arriving mid-run is a contract violation worth naming rather than a
       // case to guess an intent for.
-      console.error("[attn-pi-host] refused prompt: a run is already open");
+      console.error("[nisse] refused prompt: a run is already open");
       return;
     }
     try {
@@ -429,7 +429,7 @@ async function main(): Promise<void> {
       // Queueing can refuse the text outright (pi rejects extension commands
       // here). Say so in the log; the run itself is unharmed and the queue the
       // app is drawing simply never gained an entry.
-      console.error(`[attn-pi-host] ${verb.verb} failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[nisse] ${verb.verb} failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   };
 
@@ -445,7 +445,7 @@ async function main(): Promise<void> {
     const held = toolDetails.get(callID);
     if (!held) {
       const reason = toolDetails.missingReason(callID);
-      console.error(`[attn-pi-host] ${reason}`);
+      console.error(`[nisse] ${reason}`);
       const body: ToolDetailBody = { call_id: callID, text: "", full: false, truncated: false, error: reason };
       stream.emit("tool_detail", body);
       return;
@@ -495,11 +495,11 @@ async function main(): Promise<void> {
     try {
       await session.setModel(resolveModel(pinned));
       body.model = currentModelName() || pinned;
-      console.error(`[attn-pi-host] model switched to ${body.model}`);
+      console.error(`[nisse] model switched to ${body.model}`);
     } catch (error) {
       body.model = currentModelName() || pinnedModel;
       body.error = error instanceof Error ? error.message : String(error);
-      console.error(`[attn-pi-host] set_model ${pinned} refused: ${body.error}`);
+      console.error(`[nisse] set_model ${pinned} refused: ${body.error}`);
     }
     stream.emit("model_changed", body);
   };
@@ -514,7 +514,7 @@ async function main(): Promise<void> {
     try {
       session.dispose();
     } catch (error) {
-      console.error(`[attn-pi-host] dispose failed: ${error instanceof Error ? error.message : String(error)}`);
+      console.error(`[nisse] dispose failed: ${error instanceof Error ? error.message : String(error)}`);
     }
     envelopeOut.end();
     process.exit(0);
@@ -562,7 +562,7 @@ async function main(): Promise<void> {
         // queued instead of a lie.
         const dropped = session.clearQueue();
         console.error(
-          `[attn-pi-host] cleared the queue: ${dropped.steering.length} steering, ${dropped.followUp.length} follow-up`,
+          `[nisse] cleared the queue: ${dropped.steering.length} steering, ${dropped.followUp.length} follow-up`,
         );
         return;
       }
@@ -580,12 +580,12 @@ async function main(): Promise<void> {
   if (initialPrompt !== "") {
     if (launchPromptIsUndelivered(initialPrompt, history.items, forked)) {
       console.error(
-        `[attn-pi-host] delivering the launch prompt (${initialPrompt.length} chars) into a conversation ` +
+        `[nisse] delivering the launch prompt (${initialPrompt.length} chars) into a conversation ` +
           `that has not been told what it is for (forked=${forked}, ${history.items.length} item(s) reopened)`,
       );
       void runPrompt(initialPrompt);
     } else {
-      console.error(`[attn-pi-host] launch prompt already delivered; ${history.items.length} item(s) reopened`);
+      console.error(`[nisse] launch prompt already delivered; ${history.items.length} item(s) reopened`);
     }
   }
 
@@ -600,7 +600,7 @@ async function main(): Promise<void> {
         try {
           handleVerb(parseVerb(line));
         } catch (error) {
-          console.error(`[attn-pi-host] bad verb: ${error instanceof Error ? error.message : String(error)}`);
+          console.error(`[nisse] bad verb: ${error instanceof Error ? error.message : String(error)}`);
         }
       }
       newline = buffer.indexOf("\n");
@@ -612,6 +612,6 @@ async function main(): Promise<void> {
 }
 
 main().catch((error) => {
-  console.error(`[attn-pi-host] fatal: ${error instanceof Error ? error.stack : String(error)}`);
+  console.error(`[nisse] fatal: ${error instanceof Error ? error.stack : String(error)}`);
   process.exit(1);
 });

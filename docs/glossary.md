@@ -378,3 +378,21 @@ comes back from the same `driver.spawn` call a PTY-backed agent uses. That
 capability is also what makes its sessions recoverable rather than reaped: a
 conversation always has somewhere to come back from, so it never has to declare
 the PTY agents' `resume`.
+
+## nisse
+
+**nisse** is attn's own agent. It is the first conversation agent: pi's SDK runs
+the loop and the model, and everything around that loop — the host process and
+its lifetime, the envelope stream, the verbs, the delegation, the pane you read
+it in — is attn's. That is why it carries a name of attn's rather than pi's.
+
+A nisse is the Scandinavian household spirit that keeps a house going while
+everyone sleeps and works tirelessly for as long as you leave out its porridge.
+attn is the house, nisse lives in it, and your attention is the porridge.
+
+The word is only ever the agent. Say **host** for the process a conversation
+agent runs in — that machinery is agent-agnostic and would run a second
+conversation agent unchanged — and say **pi** for the engine underneath. On the
+wire and in the CLI the agent is `nisse` (`attn delegate --agent nisse`); its
+launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
+`plugins/attn-pi`, which also registers the PTY-backed `pi` agent.

@@ -3,7 +3,7 @@
 /**
  * Real-app scenario: a conversation session dying and coming back.
  *
- * A `pi-host` session's whole history lives in pi's session file under attn's
+ * A `nisse` session's whole history lives in pi's session file under attn's
  * data dir, so a host that died left behind everything a replacement needs.
  * This scenario proves that end to end, in the packaged app, against a real
  * agent:
@@ -99,7 +99,7 @@ function processTable() {
     .filter(Boolean);
 }
 
-const hostProcesses = () => processTable().filter((entry) => entry.command.includes('attn-pi-host'));
+const hostProcesses = () => processTable().filter((entry) => entry.command.includes('attn-nisse'));
 
 /** The host that appeared for this session, once one has. */
 function waitForHost(known, description) {
@@ -178,22 +178,22 @@ function parkedRecoverable(client, sessionId, description, timeoutMs = 90_000) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-revive.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-revive.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host revive scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse revive scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
   const dataDir = dataDirForProfile(profile);
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-REVIVE',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-revive',
+    prefix: 'nisse-revive',
     metadata: {
-      agent: 'pi-host',
+      agent: 'nisse',
       focus: 'crash to recoverable, reload with history, dead host reaped, snapshot on a cold client, zero-file relaunch',
     },
   });
@@ -227,7 +227,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-revive-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-revive-repo');
       fs.mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
@@ -251,8 +251,8 @@ async function main() {
       const before = hostProcesses().map((entry) => entry.pid);
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-revive-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-revive-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionId = created.sessionId;
       await observer.waitForSession({ id: sessionId, timeoutMs: 30_000 });
@@ -393,8 +393,8 @@ async function main() {
       const before = hostProcesses().map((entry) => entry.pid);
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-early-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-early-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       earlySessionId = created.sessionId;
       await observer.waitForSession({ id: earlySessionId, timeoutMs: 30_000 });
@@ -402,7 +402,7 @@ async function main() {
       await composerOpen(client, earlySessionId, 'the early session composer to open');
       const host = await waitForHost(before, 'the host for the early session');
 
-      // Where the host points pi's SessionManager (ATTN_PI_HOST_SESSION_DIR).
+      // Where the host points pi's SessionManager (ATTN_NISSE_SESSION_DIR).
       // Empty here is the condition this step exists for.
       const sessionsDir = path.join(dataDir, 'hosts', 'state', earlySessionId);
       const filesAtKill = fs.existsSync(sessionsDir) ? fs.readdirSync(sessionsDir) : [];

@@ -190,22 +190,22 @@ function writeLongConversation(file, entries) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-history.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-history.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host history scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse history scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
   const dataDir = dataDirForProfile(profile);
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-HISTORY',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-history',
+    prefix: 'nisse-history',
     metadata: {
-      agent: 'pi-host',
+      agent: 'nisse',
       focus: 'resume an existing conversation file, page a long transcript, survive another client attaching, switch model mid-session',
     },
   });
@@ -220,7 +220,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-history-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-history-repo');
       fs.mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
@@ -243,8 +243,8 @@ async function main() {
     const { originalFile } = await runner.step('hold_a_conversation_worth_resuming', async () => {
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-history-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-history-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionIds.push(created.sessionId);
       await observer.waitForSession({ id: created.sessionId, timeoutMs: 30_000 });
@@ -330,8 +330,8 @@ async function main() {
     await runner.step('a_new_session_picks_up_the_old_conversation', async () => {
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-resume-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-resume-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
         resume_conversation_file: originalFile,
       });
       sessionIds.push(created.sessionId);
@@ -370,8 +370,8 @@ async function main() {
 
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-long-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-long-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
         resume_conversation_file: synthetic.file,
       });
       const sessionId = created.sessionId;

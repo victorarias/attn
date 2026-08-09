@@ -3,12 +3,12 @@
 /**
  * Real-app scenario: a conversation session, end to end.
  *
- * A `pi-host` session has no PTY. Its agent runs in a headless host process the
+ * A `nisse` session has no PTY. Its agent runs in a headless host process the
  * daemon spawns as a process-group leader, and everything the user sees comes
  * from that host's envelope stream. This scenario proves the whole chain in the
  * packaged app:
  *
- *   1. create a `pi-host` session and wait for its composer to open
+ *   1. create a `nisse` session and wait for its composer to open
  *      (`session_ready` reached the app),
  *   2. type a prompt into the real composer and click Send,
  *   3. assert the reply streams into the pane and the run settles (the send
@@ -83,7 +83,7 @@ function processTable() {
 }
 
 function hostProcesses() {
-  return processTable().filter((entry) => entry.command.includes('attn-pi-host'));
+  return processTable().filter((entry) => entry.command.includes('attn-nisse'));
 }
 
 async function sendPrompt(client, sessionId, text) {
@@ -113,20 +113,20 @@ async function waitForReply(client, sessionId, expected, description) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-conversation.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-conversation.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-CONVERSATION',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-conversation',
-    metadata: { agent: 'pi-host', focus: 'conversation round trip, second prompt, no orphans on close' },
+    prefix: 'nisse-conversation',
+    metadata: { agent: 'nisse', focus: 'conversation round trip, second prompt, no orphans on close' },
   });
 
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -141,7 +141,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-repo');
       fs.mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
@@ -165,8 +165,8 @@ async function main() {
       const before = hostProcesses().map((entry) => entry.pid);
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionId = created.sessionId;
       await observer.waitForSession({ id: sessionId, timeoutMs: 30_000 });
@@ -181,7 +181,7 @@ async function main() {
         90_000,
       );
       const host = hostProcesses().find((entry) => !before.includes(entry.pid));
-      if (!host) throw new Error('no attn-pi-host process appeared for the session');
+      if (!host) throw new Error('no attn-nisse process appeared for the session');
       hostPid = host.pid;
       hostGroup = host.pgid;
       note('host is up and the composer is open', { hostPid: host.pid, hostPgid: hostGroup, placeholder: state.placeholder });

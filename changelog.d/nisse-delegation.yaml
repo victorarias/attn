@@ -1,7 +1,7 @@
 kind: added
 area: sessions
 change: >
-  A conversation agent can now be delegated to. `attn delegate --agent pi-host`
+  A conversation agent can now be delegated to. `attn delegate --agent nisse`
   opens a conversation session the way it opens any other delegated session — its
   own ticket, its own worktree — and the brief arrives as the first thing the
   agent is asked, so the pane shows the task and the reply rather than an empty

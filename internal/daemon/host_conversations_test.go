@@ -141,7 +141,7 @@ func daemonWithConversation(t *testing.T, intent store.LaunchIntent) *Daemon {
 	d.store.Add(&protocol.Session{
 		ID:             "sess-1",
 		Label:          "sess-1",
-		Agent:          protocol.SessionAgent("pi-host"),
+		Agent:          protocol.SessionAgent("nisse"),
 		Directory:      cwd,
 		WorkspaceID:    "workspace",
 		State:          protocol.SessionStateIdle,

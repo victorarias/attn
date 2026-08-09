@@ -42,7 +42,7 @@ type activePluginRun struct {
 type pluginDriverSpawnParams struct {
 	// Agent names which of the plugin's registered drivers this launch is for.
 	// A plugin may register more than one — attn-pi registers both a PTY-backed
-	// `pi` and a conversation `pi-host` — and without it the plugin cannot tell
+	// `pi` and a conversation `nisse` — and without it the plugin cannot tell
 	// which one attn is asking to launch.
 	Agent         string                    `json:"agent"`
 	SessionID     string                    `json:"session_id"`

@@ -83,7 +83,7 @@ func hostSessionStateDir(sessionID string) string {
 // already holds a pi session file.
 //
 // It answers the same question the host asks itself at startup, and the two
-// have to agree: the host consults `ATTN_PI_HOST_RESUME_FILE` only when its dir
+// have to agree: the host consults `ATTN_NISSE_RESUME_FILE` only when its dir
 // is empty, so this is what tells a first launch (which will fork) from a
 // relaunch (which continues its own history and ignores the resume file
 // entirely). Anything checking the resume file has to check this first, or a
@@ -150,16 +150,16 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 		"ATTN_DAEMON_MANAGED=1",
 		"ATTN_SESSION_ID=" + opts.ID,
 		"ATTN_AGENT=" + opts.Agent,
-		"ATTN_PI_HOST_SESSION_ID=" + opts.ID,
-		"ATTN_PI_HOST_SESSION_DIR=" + hostSessionStateDir(opts.ID),
-		"ATTN_PI_HOST_CWD=" + opts.CWD,
+		"ATTN_NISSE_SESSION_ID=" + opts.ID,
+		"ATTN_NISSE_SESSION_DIR=" + hostSessionStateDir(opts.ID),
+		"ATTN_NISSE_CWD=" + opts.CWD,
 	}
 	// A resume is a starting condition, not a mode: the host forks the named
 	// file into this session's own state dir the first time it starts, and every
 	// later start of the same session continues what is already there. Passing it
 	// on a revive too is what covers the host that died before writing anything.
 	if resume := strings.TrimSpace(opts.ResumeConversationFile); resume != "" {
-		hostEnv = append(hostEnv, "ATTN_PI_HOST_RESUME_FILE="+resume)
+		hostEnv = append(hostEnv, "ATTN_NISSE_RESUME_FILE="+resume)
 	}
 	env = pty.MergeEnvironment(env, hostEnv)
 	cwd := strings.TrimSpace(opts.ExternalCWD)

@@ -3,7 +3,10 @@ import type { AttnRPCClient } from "./attn-rpc";
 import type { DriverRegisterResult, DriverSpawnParams, DriverSpawnResult } from "./types";
 
 /**
- * The `pi-host` agent: pi run headless through its SDK instead of its TUI.
+ * The `nisse` agent: pi run headless through its SDK instead of its TUI. pi is
+ * the engine; the host process, the envelope stream, the verbs and the pane are
+ * attn's, which is why the agent carries a name of attn's own — see the nisse
+ * entry in `docs/glossary.md`.
  *
  * This driver is a launcher and nothing else. It hands attn the argv for the
  * host binary and the model to run; everything after that — the envelope
@@ -19,26 +22,26 @@ import type { DriverRegisterResult, DriverSpawnParams, DriverSpawnResult } from 
  * evidence resolver must not have an opinion about a session it can see no
  * evidence for.
  *
- * `initial_prompt` it declares too, and that is what makes a `pi-host` session
+ * `initial_prompt` it declares too, and that is what makes a `nisse` session
  * delegable: attn's delegation refuses any agent that cannot be launched with a
  * brief. The prompt travels in the environment rather than in argv — a brief is
  * multi-line prose, and argv is world-readable text that a sibling's `pkill -f`
  * can match on. The host decides when to deliver it; see
- * ATTN_PI_HOST_INITIAL_PROMPT in `host/index.ts`.
+ * ATTN_NISSE_INITIAL_PROMPT in `host/index.ts`.
  */
-export const hostAgentName = "pi-host";
+export const nisseAgentName = "nisse";
 
 /**
- * The model a `pi-host` session runs when the launch pins none.
+ * The model a `nisse` session runs when the launch pins none.
  *
  * Receipt: this is the provider/model pair the 2026-08-04 SDK spike and the
  * 2026-08-05 host measurements ran end to end on this machine. A user pin
- * (`--model`, or the `default_model_pi-host` setting) overrides it, and the
+ * (`--model`, or the `default_model_nisse` setting) overrides it, and the
  * host rejects an unknown pair by name rather than falling back.
  */
-export const defaultHostModel = "openai/gpt-5.6-luna";
+export const defaultNisseModel = "openai/gpt-5.6-luna";
 
-export class PiHostDriver {
+export class NisseDriver {
   private readonly rpc: AttnRPCClient;
   // The launch command, argv[0] first. Compiled it is one path; from source it
   // is bun plus the entrypoint, which is why this is a command and not a path.
@@ -51,7 +54,7 @@ export class PiHostDriver {
 
   async initialize(): Promise<void> {
     const result = await this.rpc.request<DriverRegisterResult>("driver.register", {
-      agent: hostAgentName,
+      agent: nisseAgentName,
       capabilities: {
         conversation: true,
         initial_prompt: true,
@@ -59,27 +62,27 @@ export class PiHostDriver {
         state_reporting: true,
       },
     });
-    if (!result.ok) throw new Error("attn rejected pi-host driver registration");
+    if (!result.ok) throw new Error("attn rejected nisse driver registration");
   }
 
   health(): { ok: boolean; message: string } {
     const entrypoint = this.hostCommand[this.hostCommand.length - 1] ?? "";
     return existsSync(entrypoint)
-      ? { ok: true, message: `pi host is ready at ${entrypoint}` }
-      : { ok: false, message: `pi host is missing at ${entrypoint}; this is a build/packaging bug` };
+      ? { ok: true, message: `nisse is ready at ${entrypoint}` }
+      : { ok: false, message: `nisse is missing at ${entrypoint}; this is a build/packaging bug` };
   }
 
   async spawn(params: DriverSpawnParams): Promise<DriverSpawnResult> {
     const health = this.health();
     if (!health.ok) throw new Error(health.message);
-    const model = params.model?.trim() || defaultHostModel;
+    const model = params.model?.trim() || defaultNisseModel;
     const initialPrompt = params.initial_prompt?.trim() ?? "";
     return {
       argv: [...this.hostCommand],
       cwd: params.cwd,
       env: {
-        ATTN_PI_HOST_MODEL: model,
-        ...(initialPrompt === "" ? {} : { ATTN_PI_HOST_INITIAL_PROMPT: initialPrompt }),
+        ATTN_NISSE_MODEL: model,
+        ...(initialPrompt === "" ? {} : { ATTN_NISSE_INITIAL_PROMPT: initialPrompt }),
       },
     };
   }

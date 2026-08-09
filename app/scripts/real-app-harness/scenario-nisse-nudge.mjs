@@ -4,7 +4,7 @@
  * Real-app scenario: nudging a conversation session, and the states it moves
  * through.
  *
- * A `pi-host` session has no PTY, so every way attn interrupts an agent —
+ * A `nisse` session has no PTY, so every way attn interrupts an agent —
  * the composer's Steer button, a ticket doorbell, a Present notice — becomes a
  * verb down the host's own pipe. This scenario proves the two that matter, in
  * the packaged app, against a real agent:
@@ -82,20 +82,20 @@ function hasReply(state, word) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-nudge.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-nudge.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host nudge scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse nudge scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-NUDGE',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-nudge',
-    metadata: { agent: 'pi-host', focus: 'steer mid-run, nudge an idle session, session state and turn' },
+    prefix: 'nisse-nudge',
+    metadata: { agent: 'nisse', focus: 'steer mid-run, nudge an idle session, session state and turn' },
   });
 
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -108,7 +108,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-nudge-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-nudge-repo');
       fs.mkdirSync(dir, { recursive: true });
       execFileSync('git', ['init', '-q'], { cwd: dir });
       execFileSync('git', ['commit', '-q', '--allow-empty', '-m', 'init'], {
@@ -131,8 +131,8 @@ async function main() {
     await runner.step('create_conversation_session', async () => {
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-nudge-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-nudge-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionId = created.sessionId;
       await observer.waitForSession({ id: sessionId, timeoutMs: 30_000 });

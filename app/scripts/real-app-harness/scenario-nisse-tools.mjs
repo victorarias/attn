@@ -4,7 +4,7 @@
  * Real-app scenario: what a conversation session shows about the tools its
  * agent runs, and the way out of a queue.
  *
- * A `pi-host` session has no terminal, so a tool call the agent makes is not
+ * A `nisse` session has no terminal, so a tool call the agent makes is not
  * something the user can watch happen — it exists only if the pane draws it.
  * This scenario proves the four things that make that drawing trustworthy, in
  * the packaged app, against a real agent:
@@ -125,20 +125,20 @@ function openedCard(client, sessionId, name, description) {
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-tools.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-tools.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host tools scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse tools scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
 
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-TOOLS',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-tools',
-    metadata: { agent: 'pi-host', focus: 'tool cards, on-demand detail, full output, patch as a diff, queue cancel' },
+    prefix: 'nisse-tools',
+    metadata: { agent: 'nisse', focus: 'tool cards, on-demand detail, full output, patch as a diff, queue cancel' },
   });
 
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -151,7 +151,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('create_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-tools-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-tools-repo');
       fs.mkdirSync(dir, { recursive: true });
       fs.writeFileSync(
         path.join(dir, 'notes.txt'),
@@ -180,8 +180,8 @@ async function main() {
     await runner.step('create_conversation_session', async () => {
       const created = await client.request('create_session', {
         cwd: repoDir,
-        label: `pi-host-tools-${runner.runId.slice(-6)}`,
-        agent: 'pi-host',
+        label: `nisse-tools-${runner.runId.slice(-6)}`,
+        agent: 'nisse',
       });
       sessionId = created.sessionId;
       await observer.waitForSession({ id: sessionId, timeoutMs: 30_000 });

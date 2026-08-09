@@ -520,7 +520,7 @@ describe("retention budget from the environment", () => {
   /** Reads a budget, keeping whatever it complained about. */
   function budget(raw: string, fallback = 50_000): { value: number; warnings: string[] } {
     const warnings: string[] = [];
-    const value = retentionBudget("ATTN_PI_HOST_RETENTION_ITEMS", raw, fallback, (message) =>
+    const value = retentionBudget("ATTN_NISSE_RETENTION_ITEMS", raw, fallback, (message) =>
       warnings.push(message));
     return { value, warnings };
   }
@@ -545,7 +545,7 @@ describe("retention budget from the environment", () => {
 
   test("a refused value says what it was and what is being used instead", () => {
     expect(budget("0").warnings).toEqual([
-      "ATTN_PI_HOST_RETENTION_ITEMS=0 is not a positive whole number; using 50000",
+      "ATTN_NISSE_RETENTION_ITEMS=0 is not a positive whole number; using 50000",
     ]);
   });
 

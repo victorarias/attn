@@ -69,13 +69,20 @@ vision: `docs/vision/pi-attn-plugins.md`. Full grounding evidence with citations
   without classifying. Never add screen-scraping state detectors for pi, and
   never fall back to PTY typing for message delivery.
 
-## The headless host (`pi-host`)
+## nisse, the headless agent
 
 This plugin registers two agents. `pi` launches the pi TUI in an attn PTY (the
-driver pattern above). `pi-host` is a **conversation session**: pi runs headless
+driver pattern above). `nisse` is a **conversation session**: pi runs headless
 through its SDK in `host/index.ts`, a process attn's daemon spawns and owns.
 See `docs/glossary.md` for the vocabulary and
 `docs/plans/2026-08-05-pi-headless-host.md` for the slices.
+
+The name is attn's, and the line it draws is worth keeping straight: **pi is the
+engine, nisse is the agent, and a host is the process any conversation agent
+runs in.** Everything under `internal/daemon` that says "host" is agent-agnostic
+machinery — it would run a second conversation agent unchanged. Everything in
+this plugin that says nisse is this agent in particular. Renaming one is not
+renaming the other.
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
   out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
@@ -141,7 +148,7 @@ See `docs/glossary.md` for the vocabulary and
   only when there is none — which is both the revive path and the zero-file
   early-crash fallback, and it takes pi's session-format migrations for free.
   An **empty** session dir is the only thing that consults
-  `ATTN_PI_HOST_RESUME_FILE`, and it FORKS (`SessionManager.forkFrom`) rather
+  `ATTN_NISSE_RESUME_FILE`, and it FORKS (`SessionManager.forkFrom`) rather
   than appending: the named conversation is copied into this session's own dir,
   so the session it was picked up from is never written to and a revive of the
   resuming session never rewinds to the source. Two sessions on one file is the
@@ -166,7 +173,7 @@ See `docs/glossary.md` for the vocabulary and
   refusing to send it all at once. Retention is a tripwire — a conversation that
   reaches it has been talking for weeks — and every settle logs what was held,
   which is where the next remeasurement comes from.
-  `ATTN_PI_HOST_RETENTION_ITEMS` and `ATTN_PI_HOST_RETENTION_BYTES` lower them
+  `ATTN_NISSE_RETENTION_ITEMS` and `ATTN_NISSE_RETENTION_BYTES` lower them
   (read from the daemon's environment at spawn, inherited by the host): the
   tripwire is set past the longest conversation anyone here has ever had, so
   lowering it is the only way to watch a host actually drop history. A value
@@ -278,7 +285,7 @@ See `docs/glossary.md` for the vocabulary and
   whichever session the daemon inherited its own environment from, and bare
   `attn` resolves to whichever install is on the login shell's PATH rather than
   to the profile that spawned the session. Both were observed, not theorized.
-- **`ATTN_PI_HOST_INITIAL_PROMPT`** carries the launch's own first user message
+- **`ATTN_NISSE_INITIAL_PROMPT`** carries the launch's own first user message
   when it had one — today that is a delegation brief. It is
   in the environment rather than argv because a brief is multi-line prose and
   argv is world-readable text a sibling's `pkill -f` can match on. The daemon

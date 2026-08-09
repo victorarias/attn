@@ -18,7 +18,7 @@ func addHostSession(t *testing.T, d *Daemon, id string) {
 	now := string(protocol.TimestampNow())
 	d.store.Add(&protocol.Session{
 		ID:             id,
-		Agent:          "pi-host",
+		Agent:          "nisse",
 		Label:          id,
 		Directory:      t.TempDir(),
 		State:          protocol.StateLaunching,
@@ -122,7 +122,7 @@ func TestHostDeclarationDuringLaunchIsAppliedAtCommit(t *testing.T) {
 	now := string(protocol.TimestampNow())
 	d.store.Add(&protocol.Session{
 		ID:             "conv-4",
-		Agent:          "pi-host",
+		Agent:          "nisse",
 		Label:          "conv-4",
 		Directory:      t.TempDir(),
 		State:          protocol.StateLaunching,

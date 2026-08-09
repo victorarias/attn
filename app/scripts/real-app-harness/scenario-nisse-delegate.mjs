@@ -4,12 +4,12 @@
  * Real-app scenario: delegating to a conversation agent.
  *
  * Delegation is agent-agnostic machinery — a ticket, a worktree, a brief, a
- * session bound to all three — and the only thing a `pi-host` session was
+ * session bound to all three — and the only thing a `nisse` session was
  * missing was the brief itself: its driver declared no `initial_prompt`, so the
  * spawn pipeline refused any launch carrying one. This scenario is what that
  * capability is FOR, proved end to end in the packaged app against a real agent:
  *
- *   1. an ordinary session delegates a real task to a `pi-host` agent, which
+ *   1. an ordinary session delegates a real task to a `nisse` agent, which
  *      gets its own ticket and its own worktree,
  *   2. the brief arrives as the conversation's first user message — the agent is
  *      looking at the task, not at an empty composer,
@@ -137,7 +137,7 @@ function processTable() {
     .filter(Boolean);
 }
 
-const hostProcesses = () => processTable().filter((entry) => entry.command.includes('attn-pi-host'));
+const hostProcesses = () => processTable().filter((entry) => entry.command.includes('attn-nisse'));
 
 function waitForHost(known, description, timeoutMs = 90_000) {
   return pollFor(async () => hostProcesses().find((entry) => !known.includes(entry.pid)) ?? null, description, timeoutMs);
@@ -176,13 +176,13 @@ const textOf = (entry) => entry?.comment ?? '';
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
-    printCommonHelp('scripts/real-app-harness/scenario-pi-host-delegate.mjs');
+    printCommonHelp('scripts/real-app-harness/scenario-nisse-delegate.mjs');
     return;
   }
 
   const profile = currentHarnessProfile();
   if (!profile) {
-    throw new Error('the pi-host delegation scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
+    throw new Error('the nisse delegation scenario does not run against production; set ATTN_PROFILE / ATTN_HARNESS_PROFILE to a named profile');
   }
   const dataDir = dataDirForProfile(profile);
   const runAttn = makeAttnRunner(resolveAttnBin(), profile);
@@ -190,9 +190,9 @@ async function main() {
   const runner = createScenarioRunner(options, {
     scenarioId: 'PI-HOST-DELEGATE',
     tier: 'tier2-local-real-agent',
-    prefix: 'pi-host-delegate',
+    prefix: 'nisse-delegate',
     metadata: {
-      agent: 'pi-host',
+      agent: 'nisse',
       focus: 'delegation to a conversation agent: brief as the first message, ticket report attributed to the delegated session, repository guidance in the worktree, brief replayed after a zero-file crash',
     },
   });
@@ -208,7 +208,7 @@ async function main() {
 
   try {
     const { repoDir } = await runner.step('seed_repo_fixture', async () => {
-      const dir = path.join(runner.sessionDir, 'pi-host-delegate-repo');
+      const dir = path.join(runner.sessionDir, 'nisse-delegate-repo');
       fs.mkdirSync(dir, { recursive: true });
       const gitEnv = {
         ...process.env,
@@ -254,7 +254,7 @@ async function main() {
       const delegate = runAttn([
         'delegate',
         '--source-session', delegatorId,
-        '--agent', 'pi-host',
+        '--agent', 'nisse',
         '--brief', briefFor(runToken),
         '--name', `pid-${runner.runId.slice(-6)}`,
       ]);
@@ -344,7 +344,7 @@ async function main() {
       const delegate = runAttn([
         'delegate',
         '--source-session', delegatorId,
-        '--agent', 'pi-host',
+        '--agent', 'nisse',
         // The retry is not padding. A crash puts activity on the ticket — the
         // reconciliation note and the revival — and `attn ticket status` spends
         // an agent's first call showing unread activity instead of applying the
@@ -407,7 +407,7 @@ async function main() {
     });
 
     const summary = runner.finishSuccess({ profile, delegatorId, workerId, earlyWorkerId, ticketId });
-    console.log('[RealAppHarness] pi-host delegation scenario passed.');
+    console.log('[RealAppHarness] nisse delegation scenario passed.');
     console.log(JSON.stringify(summary, null, 2));
   } catch (error) {
     const summary = runner.finishFailure(error, { delegatorId, workerId, earlyWorkerId });

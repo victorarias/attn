@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PiHostDriver, defaultHostModel, hostAgentName } from "../src/host-driver";
+import { NisseDriver, defaultNisseModel, nisseAgentName } from "../src/nisse-driver";
 import type { DriverSpawnParams } from "../src/types";
 
 /**
- * The `pi-host` launcher. What it decides is small — the model, and whether the
+ * The `nisse` launcher. What it decides is small — the model, and whether the
  * launch carries a first message — but both are the whole of what a delegated
  * conversation session is: an agent handed a brief instead of an empty pane.
  */
@@ -22,26 +22,26 @@ class FakeRPC {
   handle(_method: string, _handler: unknown): void {}
 }
 
-const tmpRoot = mkdtempSync(join(tmpdir(), "attn-pi-host-"));
-const hostBinary = join(tmpRoot, "attn-pi-host");
+const tmpRoot = mkdtempSync(join(tmpdir(), "attn-nisse-"));
+const hostBinary = join(tmpRoot, "attn-nisse");
 writeFileSync(hostBinary, "// fake compiled host\n");
 
-function newDriver(rpc: FakeRPC = new FakeRPC()): PiHostDriver {
-  return new PiHostDriver({ rpc, hostCommand: [hostBinary] });
+function newDriver(rpc: FakeRPC = new FakeRPC()): NisseDriver {
+  return new NisseDriver({ rpc, hostCommand: [hostBinary] });
 }
 
 function params(overrides?: Partial<DriverSpawnParams>): DriverSpawnParams {
   return { session_id: "session-1", run_id: "run-1", cwd: "/tmp/work", ...overrides };
 }
 
-describe("PiHostDriver", () => {
-  test("registers pi-host with the capabilities a delegable conversation agent needs", async () => {
+describe("NisseDriver", () => {
+  test("registers nisse with the capabilities a delegable conversation agent needs", async () => {
     const rpc = new FakeRPC();
     await newDriver(rpc).initialize();
 
     const register = rpc.requests.find((call) => call.method === "driver.register");
     expect(register?.params).toEqual({
-      agent: hostAgentName,
+      agent: nisseAgentName,
       capabilities: {
         conversation: true,
         initial_prompt: true,
@@ -57,8 +57,8 @@ describe("PiHostDriver", () => {
 
     expect(result.argv).toEqual([hostBinary]);
     expect(result.env).toEqual({
-      ATTN_PI_HOST_MODEL: defaultHostModel,
-      ATTN_PI_HOST_INITIAL_PROMPT: brief,
+      ATTN_NISSE_MODEL: defaultNisseModel,
+      ATTN_NISSE_INITIAL_PROMPT: brief,
     });
   });
 
@@ -68,20 +68,20 @@ describe("PiHostDriver", () => {
     // delegation whose brief went missing.
     for (const prompt of [undefined, "", "   "]) {
       const result = await newDriver().spawn(params({ initial_prompt: prompt }));
-      expect(result.env).toEqual({ ATTN_PI_HOST_MODEL: defaultHostModel });
+      expect(result.env).toEqual({ ATTN_NISSE_MODEL: defaultNisseModel });
     }
   });
 
   test("a pinned model wins over the default and travels beside the prompt", async () => {
     const result = await newDriver().spawn(params({ model: " anthropic/claude-x ", initial_prompt: "go" }));
     expect(result.env).toEqual({
-      ATTN_PI_HOST_MODEL: "anthropic/claude-x",
-      ATTN_PI_HOST_INITIAL_PROMPT: "go",
+      ATTN_NISSE_MODEL: "anthropic/claude-x",
+      ATTN_NISSE_INITIAL_PROMPT: "go",
     });
   });
 
   test("spawn refuses when the host binary is missing, naming it", async () => {
-    const driver = new PiHostDriver({ rpc: new FakeRPC(), hostCommand: [join(tmpRoot, "not-here")] });
+    const driver = new NisseDriver({ rpc: new FakeRPC(), hostCommand: [join(tmpRoot, "not-here")] });
     expect(driver.health().ok).toBe(false);
     await expect(driver.spawn(params())).rejects.toThrow(/not-here/);
   });

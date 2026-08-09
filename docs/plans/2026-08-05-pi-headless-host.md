@@ -1,4 +1,15 @@
-# Plan: pi headless host and rendered conversation — vertical slices
+# Plan: nisse, attn's headless conversation agent — vertical slices
+
+## The name
+
+The agent this plan builds is **nisse** (2026-08-09). It was called `pi-host`
+while it was being built, which described the mechanism rather than the thing:
+pi is the engine, and the host process, the envelopes, the delegation and the
+pane are attn's. The rename landed before the epic merged to main, so `pi-host`
+never reached anyone's machine and nothing carries it forward. Older sections
+below are written in the vocabulary they were written in; where they say "the
+host" they mean the process any conversation agent runs in, which is still what
+that word means. `docs/glossary.md` holds both definitions.
 
 ## Alignment
 
@@ -128,8 +139,8 @@ Acceptance:
 - [x] Nudging an idle session starts a run.
 - [x] Dashboard/turn behavior matches other harnesses.
 
-All three are the packaged-app scenario `pi-host-nudge`
-(`app/scripts/real-app-harness/scenario-pi-host-nudge.mjs`). It holds a real
+All three are the packaged-app scenario `nisse-nudge`
+(`app/scripts/real-app-harness/scenario-nisse-nudge.mjs`). It holds a real
 agent inside a `sleep 25` so the steer is provably queued rather than racing the
 reply, then asserts the strip, the delivered message, the reply that obeyed the
 steer instead of the original instruction, and `working` → `idle` with a turn
@@ -170,8 +181,8 @@ Acceptance:
 - [x] A patch renders as a diff.
 - [x] A queued steer can be cancelled and the queue strip reflects it.
 
-All four are the packaged-app scenario `pi-host-tools`
-(`app/scripts/real-app-harness/scenario-pi-host-tools.mjs`), run against a real
+All four are the packaged-app scenario `nisse-tools`
+(`app/scripts/real-app-harness/scenario-nisse-tools.mjs`), run against a real
 agent on a throwaway profile. It also asserts the negative that makes the cards
 worth having: after 5,000 lines of tool output, no message in the transcript
 carries it. The measured transcript for a session that read, printed 5,000
@@ -193,12 +204,12 @@ Ships:
 - [x] The zero-file early-crash case falls back to a fresh session — the same
       `continueRecent` call, which is why it needed no code of its own.
       **Deviation, since closed:** the "+ LaunchIntent prompt" half was moot
-      when this slice landed — the `pi-host` driver registered no
-      `initial_prompt` capability, so the spawn pipeline refused a pi-host
+      when this slice landed — the `nisse` driver registered no
+      `initial_prompt` capability, so the spawn pipeline refused a nisse
       launch that carried one and there was no stored prompt to re-send. It was
       deferred to the work that needed it, delegation to a conversation agent,
       and shipped there: the driver declares the capability, the prompt travels
-      to the host in `ATTN_PI_HOST_INITIAL_PROMPT`, and the host says it exactly
+      to the host in `ATTN_NISSE_INITIAL_PROMPT`, and the host says it exactly
       when its reopened history is empty (`launchPromptIsUndelivered`). The
       daemon stores it in `LaunchIntent.InitialPrompt` for conversation agents
       only, so this fallback now relaunches the same task rather than an agent
@@ -241,8 +252,8 @@ Acceptance:
 - [x] Early-kill case relaunches cleanly.
 - [x] Reattaching a second client shows identical state.
 
-All three are the packaged-app scenario `pi-host-revive`
-(`app/scripts/real-app-harness/scenario-pi-host-revive.mjs`), run against a real
+All three are the packaged-app scenario `nisse-revive`
+(`app/scripts/real-app-harness/scenario-nisse-revive.mjs`), run against a real
 agent on a throwaway profile. The load-bearing assertion is not that the pane
 redraws — it is that the revived *agent* answers a question only the reopened
 session file can answer: the pre-crash exchange plants a word, and the revived
@@ -265,12 +276,12 @@ Left for slice 5, deliberately:
 
 ### Slice 4b — delegation to a conversation agent
 
-Goal: `attn delegate --agent pi-host` works, which is the first time a
+Goal: `attn delegate --agent nisse` works, which is the first time a
 conversation session is asked to do a job rather than hold a chat.
 
 Ships:
 
-- [x] The `initial_prompt` capability on the `pi-host` driver — delegation
+- [x] The `initial_prompt` capability on the `nisse` driver — delegation
       refuses any agent that cannot be launched with a brief — and the closing
       of slice 4's deviation above. The brief travels in the environment, not
       argv: a brief is multi-line prose, and argv is world-readable text a
@@ -285,7 +296,7 @@ Two findings this slice made, both observed rather than reasoned:
 - **A host was carrying no session identity, and worse, someone else's.** The
   environment chain daemon → host → pi → tool subprocess was assumed to carry
   it, since environment inherits by default. It does — but nothing was putting
-  it there. `spawnHostSession` set the `ATTN_PI_HOST_*` block and stopped; the
+  it there. `spawnHostSession` set the `ATTN_NISSE_*` block and stopped; the
   PTY path's identity block (`buildSpawnEnv`) had no counterpart. Live, the
   agent's bash tool printed an empty `ATTN_SESSION_ID`. Under test, where the
   daemon itself was launched from inside an attn session, the host inherited
@@ -305,8 +316,8 @@ exactly where attn already installs its own skill. Noted as a dependency rather
 than a design: that install happens on the codex path, so the attn skill is
 present for pi as a side effect of codex being configured.
 
-Acceptance is the packaged-app scenario `pi-host-delegate`
-(`app/scripts/real-app-harness/scenario-pi-host-delegate.mjs`).
+Acceptance is the packaged-app scenario `nisse-delegate`
+(`app/scripts/real-app-harness/scenario-nisse-delegate.mjs`).
 
 ### Slice 5 — history and depth
 
@@ -366,8 +377,8 @@ Acceptance:
       `openai/gpt-5.6-luna` -> `openai/gpt-4.1-mini` out of 62 offered, and the
       next prompt ran on it.
 
-All three are the packaged-app scenario `pi-host-history`
-(`app/scripts/real-app-harness/scenario-pi-host-history.mjs`), run against a real
+All three are the packaged-app scenario `nisse-history`
+(`app/scripts/real-app-harness/scenario-nisse-history.mjs`), run against a real
 agent on a throwaway profile. The long transcript is a synthesized pi session
 file read through pi's own `SessionManager` rather than a thousand live turns —
 proving the window needs more items than the window holds, and the cost of that

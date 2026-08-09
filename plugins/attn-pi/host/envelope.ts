@@ -1,4 +1,4 @@
-// The wire between the pi host process and attn's daemon.
+// The wire between nisse and attn's daemon.
 //
 // One envelope shape carries both streams the vision names: SEMANTIC kinds in
 // attn's own vocabulary, which the daemon understands and integrates on, and

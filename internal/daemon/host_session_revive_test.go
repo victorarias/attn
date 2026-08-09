@@ -84,7 +84,7 @@ func TestHostExitForAClosedSessionMovesNothing(t *testing.T) {
 // exactly the case the old rules dropped.
 func TestConversationSessionSurvivesADaemonRestart(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	registerConversationDriver(t, d, "pi-host")
+	registerConversationDriver(t, d, "nisse")
 	addHostSession(t, d, "conv-r3")
 	// The exit path already closed the driver run, which is what made this
 	// session look like an ordinary agent with nothing behind it.
@@ -126,7 +126,7 @@ func TestNonConversationPluginSessionIsStillReaped(t *testing.T) {
 // kept going beats one that was killed and could not be brought back.
 func TestConversationReloadWithoutALaunchIntentKeepsTheHost(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	registerConversationDriver(t, d, "pi-host")
+	registerConversationDriver(t, d, "nisse")
 	addHostSession(t, d, "conv-r4")
 	manager := spawnStubHost(t, d, "conv-r4")
 
@@ -147,7 +147,7 @@ func TestConversationReloadWithoutALaunchIntentKeepsTheHost(t *testing.T) {
 // recoverable, with the way back still in front of them.
 func TestConversationReloadThatCannotRespawnParksTheSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	registerConversationDriver(t, d, "pi-host")
+	registerConversationDriver(t, d, "nisse")
 	addHostSession(t, d, "conv-r5")
 	declare(d, "conv-r5", 1, "session_ready", protocol.StateIdle)
 	manager := spawnStubHost(t, d, "conv-r5")
