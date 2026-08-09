@@ -1,0 +1,11 @@
+kind: internal
+area: testing
+change: >
+  The paced-test triage from the previous sweep now ends at zero unverified
+  candidates: 87 more tests run inside a `testing/synctest` bubble on their
+  shipped intervals, and every test still paced carries a recorded reason —
+  a child process, a real socket, fsnotify, real file mtimes, a goroutine
+  parked on a mutex, or an assertion on real elapsed wall-clock. The daemon's
+  converted subset drops from 94.6s to 6.0s. The job runner's periodic
+  retention pass, which had never executed in any test because its hourly
+  ticker ran on real time, gets one of its own.

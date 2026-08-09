@@ -11,55 +11,34 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// The daemon gives up on a client it cannot keep fed in two places: the hub,
-// when a client misses maxSlowCount consecutive broadcasts, and the write pump,
-// when a single hand-off runs past wsWriteTimeout. Either way two things have to
-// happen, and they need different mechanisms:
-//
-//   - The client has to notice, fast. It cannot be told over the connection it
-//     is being evicted from: the WebSocket close frame travels the same TCP
-//     stream as the backlog that caused the eviction, behind everything already
-//     handed to the kernel. Measured through a 10 KB/s link, the daemon hung up
-//     after ~1s and the client read nothing for ~45s — its own timeout, not the
-//     daemon's answer. So the close frame is attempted, briefly, and then the
-//     transport is aborted. (Only the hub needs this: a write that runs out of
-//     time leaves the library tearing the transport down on its own.)
-//   - The client has to learn why, eventually. That reason arrives on the next
-//     connection instead (client_eviction_notice), keyed on the client_id the
-//     client repeats across reconnects.
+// Eviction happens in the hub (maxSlowCount missed broadcasts) and the write
+// pump (one hand-off past wsWriteTimeout). The close frame travels the same TCP
+// stream as the backlog, so a wedged client never reads it — Measured: through a
+// 10 KB/s link the daemon hung up after ~1s and the client read nothing for
+// ~45s. So: attempt the close briefly, abort the transport, and deliver the
+// reason on the next connection (client_eviction_notice), keyed on client_id.
 const (
-	// evictionCloseGrace bounds how long a hopeless connection is given to
-	// accept a close frame before the transport is aborted underneath it. It is
-	// a tripwire, not a budget: a client whose socket is writable takes
-	// microseconds, and one that needs a full second is by definition the case
-	// this exists for.
+	// evictionCloseGrace bounds the close-frame attempt before the transport is
+	// aborted. Tripwire: a writable socket takes microseconds.
 	evictionCloseGrace = 1 * time.Second
-	// evictionMemoryTTL is how long the hub remembers an eviction for a client
-	// that has not come back. The app reconnects on a backoff that caps at 5s
-	// and a circuit breaker that resets after 30s, so ten minutes is two orders
-	// of magnitude past the slowest return that is still the same visit.
+	// evictionMemoryTTL: reconnect backoff caps at 5s and the circuit breaker
+	// resets at 30s, so this is two orders of magnitude past a same-visit return.
 	evictionMemoryTTL = 10 * time.Minute
-	// maxRememberedEvictions bounds the map. One user, a handful of clients: a
-	// number this far past the real fleet is only ever reached by a client that
-	// evicts, reconnects with a fresh id, and evicts again — and dropping the
-	// oldest of those is the right answer anyway.
+	// maxRememberedEvictions bounds the map; only a client cycling fresh ids
+	// reaches it, and dropping the oldest of those is right anyway.
 	maxRememberedEvictions = 16
 )
 
-// evictionRecord is what the hub remembers about a client it hung up on, held
-// until that client comes back or the memory ages out.
+// evictionRecord is what the hub remembers about a client it hung up on.
 type evictionRecord struct {
 	at     time.Time
 	reason string
-	// undelivered counts the messages the client never got: the ones the hub
-	// could not enqueue, or the one the write pump could not hand over plus
-	// whatever was still queued behind it.
+	// undelivered counts messages the client never got.
 	undelivered int
 }
 
 // rememberEviction files an eviction under the client's id so the next hello
-// from that id can be answered with it. A client that never sent an id cannot
-// be told anything on its return, so the log line is all there is.
+// from that id can be answered with it; an id-less client only gets the log line.
 func (h *wsHub) rememberEviction(clientID string, record evictionRecord) {
 	if clientID == "" {
 		return
@@ -86,9 +65,8 @@ func (h *wsHub) rememberEviction(clientID string, record evictionRecord) {
 	h.evictions[clientID] = record
 }
 
-// takeEviction returns and forgets the eviction filed for this client id, if
-// there is one. Delivered once: a client that has been told does not need
-// telling again on its next reconnect.
+// takeEviction returns and forgets the eviction filed for this client id;
+// delivered once.
 func (h *wsHub) takeEviction(clientID string) (evictionRecord, bool) {
 	if clientID == "" {
 		return evictionRecord{}, false
@@ -111,12 +89,9 @@ func (h *wsHub) pruneEvictionsLocked(now time.Time) {
 	}
 }
 
-// evict drops a client the hub has given up on: it files the reason for the
-// client's return, stops feeding a connection nobody is reading, and hangs up
-// without waiting for the backlog to drain.
-//
-// Callers hold h.mu, so the hanging up runs on its own goroutine — closing a
-// wedged socket must never stall the fan-out for every other client.
+// evict drops a client the hub has given up on and files the reason for its
+// return. Callers hold h.mu, so the hang-up runs on its own goroutine — closing
+// a wedged socket must never stall the fan-out.
 func (h *wsHub) evict(client *wsClient, reason string) {
 	record := evictionRecord{
 		at:          time.Now(),
@@ -128,15 +103,9 @@ func (h *wsHub) evict(client *wsClient, reason string) {
 	go client.hangUp(websocket.StatusPolicyViolation, reason, evictionCloseGrace)
 }
 
-// hangUp ends a connection the daemon has given up on, within grace.
-//
-// The close frame is attempted first and is pure courtesy: on a healthy socket
-// it lands immediately and the client gets a proper status, which is why it is
-// worth trying at all. On the socket this exists for it cannot land, because a
-// close frame is ordinary stream data queued behind the backlog. So the
-// transport is aborted afterwards: SO_LINGER 0 discards the daemon's unsent
-// bytes and sends a RST, which is the only thing that reaches the peer without
-// waiting in that queue.
+// hangUp attempts the close frame (lands only on a healthy socket), then aborts
+// the transport: SO_LINGER 0 discards unsent bytes and sends a RST — the only
+// thing that reaches the peer without queuing behind the backlog.
 func (c *wsClient) hangUp(code websocket.StatusCode, reason string, grace time.Duration) {
 	closed := make(chan struct{})
 	go func() {
@@ -152,11 +121,9 @@ func (c *wsClient) hangUp(code websocket.StatusCode, reason string, grace time.D
 	c.abortTransport()
 }
 
-// abortTransport tears the connection down at the socket. The raw conn is the
-// one the HTTP server accepted (stashed by withRawConn); without it — a test
-// server, or any listener that does not run through initHTTPServer — this
-// degrades to nhooyr's own immediate close, which still skips the close
-// handshake but leaves the kernel to flush what it has queued.
+// abortTransport tears the connection down at the socket. Without the raw conn
+// (test servers, listeners outside initHTTPServer) this degrades to nhooyr's
+// CloseNow, which skips the handshake but lets the kernel flush its queue.
 func (c *wsClient) abortTransport() {
 	if c.rawConn == nil {
 		_ = c.conn.CloseNow()
@@ -168,9 +135,8 @@ func (c *wsClient) abortTransport() {
 	_ = c.rawConn.Close()
 }
 
-// rawConnKey carries the accepted connection from the HTTP server down to the
-// handler, which is the only way to reach it: the WebSocket handshake hijacks
-// the connection and hands back a wrapper with no way out to the socket.
+// rawConnKey carries the accepted connection down to the handler — the only way
+// to it: the WebSocket handshake hijacks the conn behind a wrapper.
 type rawConnKey struct{}
 
 func withRawConn(ctx context.Context, conn net.Conn) context.Context {
@@ -183,9 +149,7 @@ func rawConnFrom(ctx context.Context) net.Conn {
 }
 
 // sendEvictionNotice tells a returning client what happened to its last
-// connection. Sent from the hello handler, which is where the client names
-// itself; a client that has nothing waiting for it hears nothing, so hello
-// stays fire-and-forget for everyone else.
+// connection; sent from the hello handler, where the client names itself.
 func (d *Daemon) sendEvictionNotice(client *wsClient, record evictionRecord) {
 	notice := &protocol.ClientEvictionNoticeMessage{
 		Event:               protocol.EventClientEvictionNotice,

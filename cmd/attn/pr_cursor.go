@@ -11,33 +11,14 @@ import (
 	"time"
 )
 
-// prWaitCursor is what a previous wait on this pull request already reported.
-//
-// Without it, every call baselines from the pull request's current state, so
-// anything that happened between one wait returning and the next one starting is
-// absorbed into the new baseline and never reported: the agent answers a comment,
-// waits again, and a remark that landed while it was working is now "already
-// there". The wait then blocks for its whole timeout as if the PR were quiet.
-// That is the failure this file exists to prevent, and it is worse than a wrong
-// exit code because a swallowed event is invisible.
-//
-// It therefore records the three different shapes an event comes in, because
-// "seen" means something different for each:
-//
-//   - comments are discrete, so their IDs are the record, and one already
-//     reported is never news again;
-//   - a verdict supersedes itself, so the record is when it was submitted. It is
-//     the baseline a later wait measures a re-review against, not a suppression:
-//     an approval or changes-requested that still stands is the pull request's
-//     current answer and every wait should say so;
-//   - a failing check is a condition that stays true, so the record is which
-//     checks failed on which commit — the same failure on the same commit is not
-//     news twice, while a different one, or the same one after a push, is.
-//
-// The cursor advances to what a wait reported, plus the state a first-ever wait
-// deliberately treats as pre-existing context — in other words, exactly what the
-// caller need not be told again. Advancing it to everything a poll saw would lose
-// events permanently, silently.
+// prWaitCursor is what a previous wait on this pull request already reported,
+// so an event landing between two waits is never absorbed into the next
+// baseline and silently swallowed. "Seen" differs per event shape: comments
+// are discrete (IDs); a verdict supersedes itself (record its submit time — a
+// standing verdict is still reported, a re-review is measured against it); a
+// failing check is a condition (which checks on which commit — same failure on
+// the same commit is not news twice). The cursor advances only to what a wait
+// reported; advancing to everything a poll saw would lose events permanently.
 type prWaitCursor struct {
 	CommentIDs    []string  `json:"comment_ids,omitempty"`
 	VerdictAt     time.Time `json:"verdict_at,omitempty"`
@@ -46,10 +27,8 @@ type prWaitCursor struct {
 	UpdatedAt     time.Time `json:"updated_at,omitempty"`
 }
 
-// MarshalJSON keeps zero timestamps out of the encoded cursor. `omitempty` does
-// not apply to time.Time, and a cursor echoed to a caller with
-// "verdict_at":"0001-01-01T00:00:00Z" reads as a bug rather than as "no verdict
-// has been reported".
+// MarshalJSON keeps zero timestamps out of the encoded cursor — `omitempty`
+// does not apply to time.Time, and an encoded zero verdict_at reads as a bug.
 func (c prWaitCursor) MarshalJSON() ([]byte, error) {
 	type payload struct {
 		CommentIDs    []string   `json:"comment_ids,omitempty"`
@@ -93,19 +72,16 @@ func (c prWaitCursor) sameFailure(head string, checks []prCheck) bool {
 	return strings.Join(names, "\n") == strings.Join(previous, "\n")
 }
 
-// prCursorFileLimit caps how many comment IDs a cursor carries. A PR's comment
-// surfaces are queried newest-100 anyway, so an ID older than that window can
-// never come back as unseen and keeping it would grow the file forever.
+// prCursorFileLimit caps stored comment IDs. Comment surfaces are queried
+// newest-100, so an ID older than that window can never come back as unseen.
 const prCursorFileLimit = 500
 
-// prCursorMaxAge is how long a cursor outlives its last use. Each file is a few
-// hundred bytes, but one per pull request ever waited on is unbounded, and
-// nothing else would ever clean the directory.
+// prCursorMaxAge is how long a cursor outlives its last use; nothing else
+// cleans the directory.
 const prCursorMaxAge = 30 * 24 * time.Hour
 
 // cursorPath locates one pull request's cursor. Every segment is a legal
-// filename without escaping: a GitHub owner or repository name cannot contain a
-// slash and the host is a domain, which also keeps the tree readable by hand.
+// filename without escaping: owner/repo cannot contain a slash, host is a domain.
 func cursorPath(dir string, opts prWaitOptions) string {
 	host := opts.Host
 	if host == "" {
@@ -114,10 +90,8 @@ func cursorPath(dir string, opts prWaitOptions) string {
 	return filepath.Join(dir, host, opts.Owner, opts.Name, fmt.Sprintf("%d.json", opts.Number))
 }
 
-// loadPRWaitCursor reads the cursor for this pull request. A missing file is the
-// normal first call, not an error. A file that cannot be parsed is treated the
-// same way: the cursor is an optimization over re-baselining, and refusing to
-// wait because of a corrupt one would be worse than losing its history.
+// loadPRWaitCursor reads the cursor for this pull request. A missing file is
+// the normal first call, not an error.
 func loadPRWaitCursor(dir string, opts prWaitOptions) (prWaitCursor, error) {
 	if dir == "" {
 		return prWaitCursor{}, nil
@@ -136,10 +110,8 @@ func loadPRWaitCursor(dir string, opts prWaitOptions) (prWaitCursor, error) {
 	return cursor, nil
 }
 
-// savePRWaitCursor writes the cursor atomically — temp file in the same
-// directory, then rename — so a wait killed mid-write leaves either the old
-// cursor or the new one. A half-written file would be unparseable and would drop
-// the whole history for that pull request.
+// savePRWaitCursor writes the cursor atomically (temp file, then rename) so a
+// wait killed mid-write leaves either the old cursor or the new one.
 func savePRWaitCursor(dir string, opts prWaitOptions, cursor prWaitCursor, now time.Time) error {
 	if dir == "" {
 		return nil

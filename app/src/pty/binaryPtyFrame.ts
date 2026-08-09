@@ -1,6 +1,5 @@
 // Decoder for the daemon's binary websocket frames, sent only to clients that
-// advertised the `binary_pty_output` capability in client_hello. Byte 0 is the
-// frame type; everything else is per-type. Must stay in sync with
+// advertised the `binary_pty_output` capability. Must stay in sync with
 // internal/protocol/binaryframe.go:
 //
 //   0x01 pty_output
@@ -21,10 +20,7 @@
 //     offset 22+L   pixel format (1 byte)
 //     offset 23+L   raw pixels (rest of frame)
 //
-// The point of this path is allocation discipline: no JSON envelope string, no
-// base64 string, no atob — just one id string and a zero-copy view of the
-// payload bytes. It matters more for an image than for PTY output, where the
-// payload is megabytes of decoded pixels rather than a few KB of terminal bytes.
+// Allocation discipline: no envelope, no base64, one id string and a view.
 
 import { kittyPixelFormatFromCode, type KittyPixelFormat } from '../utils/kittyImageFormat';
 
@@ -58,12 +54,8 @@ export type BinaryFrame = BinaryPtyOutputFrame | BinaryKittyImageFrame;
 
 const utf8Decoder = new TextDecoder();
 
-/**
- * Decode one binary websocket frame, or null when it is malformed or of a type
- * this client does not know. Every null is announced: a frame the daemon sent
- * and the app silently dropped is a placement that never draws with nothing on
- * screen or in the console to say why.
- */
+/** Decode one binary websocket frame, or null (always announced) when it is
+ * malformed or of an unknown type. */
 export function decodeBinaryFrame(buffer: ArrayBuffer): BinaryFrame | null {
   if (buffer.byteLength < 2) return null;
   const view = new DataView(buffer);
@@ -99,8 +91,8 @@ function decodeKittyImage(buffer: ArrayBuffer, view: DataView): BinaryKittyImage
   const formatCode = view.getUint8(offset + 20);
   const format = kittyPixelFormatFromCode(formatCode);
   if (!format) {
-    // Pixels read with the wrong stride render as plausible garbage rather than
-    // failing, so an unnamed layout is dropped instead of guessed at.
+    // The wrong stride renders plausible garbage rather than failing, so an
+    // unnamed layout is dropped instead of guessed at.
     console.warn(`[Daemon] Dropping kitty image frame with unknown pixel format ${formatCode}`);
     return null;
   }

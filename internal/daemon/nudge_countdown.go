@@ -7,23 +7,17 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// defaultNudgeCountdownWindow is how long an armed ticket nudge waits — visible to
-// the user as a countdown — before the daemon doorbells an eligible session. The user
-// can switch to the session and trigger it early, or let it elapse so attn delivers
-// it. It gates every ticket doorbell so a nudge is never a silent surprise.
+// defaultNudgeCountdownWindow is how long an armed ticket nudge waits, visible
+// as a countdown, before the daemon doorbells an eligible session.
 const defaultNudgeCountdownWindow = 30 * time.Second
 
-// userInputGuardWindow is the anti-splice guarantee. At fire time the daemon refuses
-// to doorbell a session that received a genuine user keystroke within this window,
-// because the doorbell prompt + Enter would splice onto the user's half-typed line
-// and submit the garbled combination — the original bug. This is per-session and so
-// is immune to which tile is "selected"; selection only drives the paused-while-
-// active UX, this drives correctness.
+// userInputGuardWindow is the anti-splice guarantee: a session with a genuine
+// keystroke this recent is never doorbelled, or the prompt + Enter would splice
+// onto a half-typed line.
 const userInputGuardWindow = 3 * time.Second
 
-// nudgeCountdown is a per-session armed countdown. firesAt is stored alongside the
-// timer because time.Timer exposes no deadline accessor and the absolute deadline is
-// what rides the wire (nudge_fires_at) for the client to animate against.
+// nudgeCountdown is a per-session armed countdown. firesAt is stored beside the
+// timer because time.Timer has no deadline accessor.
 type nudgeCountdown struct {
 	timer   *time.Timer
 	firesAt time.Time
@@ -37,20 +31,15 @@ func (d *Daemon) nudgeWindow() time.Duration {
 	return defaultNudgeCountdownWindow
 }
 
-// armNudgeCountdown is the single entry every ticket doorbell now routes through.
-// Instead of injecting immediately it marks the session's ticket activity unread and
-// starts a visible countdown; the timer fire (nudgeCountdownFire) is the only place a
-// real doorbell happens. The currently-selected session never auto-fires: its
-// countdown is paused (no timer, no nudge_fires_at) and the UI offers click-to-
-// trigger; switching away resumes it via setSelectedSession.
+// armNudgeCountdown is the single entry every ticket doorbell routes through:
+// mark unread, start a visible countdown. The selected session never auto-fires
+// — its countdown is paused and switching away resumes it.
 func (d *Daemon) armNudgeCountdown(sessionID string) {
 	d.armNudgeCountdownAt(sessionID, time.Now().Add(d.nudgeWindow()))
 }
 
-// armNudgeCountdownAt marks ticket activity unread and asks the existing
-// countdown to fire no later than deadline. A burst never pushes an already
-// armed countdown later; an immediate assignee update can pull a buffered
-// observer's deadline forward.
+// armNudgeCountdownAt fires no later than deadline: a burst never pushes an
+// armed countdown later, an assignee update can pull it forward.
 func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	if sessionID == "" {
 		return
@@ -60,13 +49,10 @@ func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	}
 	active := d.currentlySelectedSession() == sessionID
 
-	// A standing user cancel is checked before the lock because clearing it needs
-	// a store read, and nudgeMu must never be held across one.
+	// Checked before the lock: nudgeMu must never be held across a store read.
 	if d.nudgeSuppressedFor(sessionID) {
 		if d.nudgeSuppressionStillStands(sessionID) {
-			// The user said "not now" to everything pending, and nothing newer has
-			// arrived. Keep the unread marker — the activity is still there, and
-			// the indicator is how they get back to it — but arm nothing.
+			// "Not now" still stands: keep the unread marker, arm nothing.
 			d.nudgeMu.Lock()
 			changed := d.setUnreadLocked(sessionID, true)
 			changed = d.stopCountdownLocked(sessionID) || changed
@@ -82,11 +68,10 @@ func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	d.nudgeMu.Lock()
 	changed := d.setUnreadLocked(sessionID, true)
 	if active {
-		// Paused while active: ensure no running timer and no deadline on the wire.
+		// Paused while active: no running timer, no deadline on the wire.
 		changed = d.stopCountdownLocked(sessionID) || changed
 	} else if existing, running := d.nudgeCountdowns[sessionID]; !running || deadline.Before(existing.firesAt) {
-		// Keep the earliest deadline. This is both the existing non-sliding burst
-		// debounce and the assignee-over-buffered precedence rule.
+		// Keep the earliest deadline: the debounce never slides.
 		d.startCountdownAtLocked(sessionID, deadline)
 		changed = true
 	}
@@ -97,11 +82,9 @@ func (d *Daemon) armNudgeCountdownAt(sessionID string, deadline time.Time) {
 	}
 }
 
-// startCountdownLocked creates the AfterFunc and records {timer, firesAt}. Caller
-// holds nudgeMu. The ready channel is the synchronization edge: the closure blocks
-// until we publish `timer`, so the identity check in nudgeCountdownFire reads a fully
-// written value even if a tiny (test) window fires the timer immediately — the same
-// handshake scheduleTicketBackstop uses.
+// startCountdownLocked creates the AfterFunc; caller holds nudgeMu. The ready
+// channel blocks the closure until `timer` is published, so the identity check
+// in nudgeCountdownFire never reads a half-written value.
 func (d *Daemon) startCountdownLocked(sessionID string, window time.Duration) {
 	d.startCountdownAtLocked(sessionID, time.Now().Add(window))
 }
@@ -127,10 +110,8 @@ func (d *Daemon) startCountdownAtLocked(sessionID string, firesAt time.Time) {
 	close(ready)
 }
 
-// stopCountdownLocked cancels and forgets a session's running countdown. Caller holds
-// nudgeMu. Returns whether there was one (so the caller knows to rebroadcast the now-
-// absent nudge_fires_at). It does NOT touch unread — a paused/working session keeps
-// its indicator until the agent actually reads its inbox.
+// stopCountdownLocked cancels a session's running countdown (caller holds
+// nudgeMu). It does NOT touch unread — that survives until the inbox is read.
 func (d *Daemon) stopCountdownLocked(sessionID string) bool {
 	c, ok := d.nudgeCountdowns[sessionID]
 	if !ok {
@@ -158,16 +139,14 @@ func (d *Daemon) setUnreadLocked(sessionID string, unread bool) bool {
 	return true
 }
 
-// markTicketUnread sets the session's unread indicator and broadcasts on change.
-// Clearing it (unread=false) also cancels any running countdown — there is nothing
-// left to nudge.
+// markTicketUnread sets the session's unread indicator and broadcasts on change;
+// clearing also cancels any running countdown.
 func (d *Daemon) markTicketUnread(sessionID string, unread bool) {
 	d.nudgeMu.Lock()
 	changed := d.setUnreadLocked(sessionID, unread)
 	if !unread {
 		changed = d.stopCountdownLocked(sessionID) || changed
-		// The queue this cancel was an answer about is drained, so the answer has
-		// nothing left to apply to. Anything arriving now is new and gets to ask.
+		// The queue the cancel answered is drained; anything new gets to ask.
 		delete(d.nudgeSuppressedThrough, sessionID)
 	}
 	d.nudgeMu.Unlock()
@@ -176,8 +155,7 @@ func (d *Daemon) markTicketUnread(sessionID string, unread bool) {
 	}
 }
 
-// cancelNudgeCountdown stops a running countdown (e.g. the session left idle) without
-// touching unread, so the indicator survives as the static working+unread marker.
+// cancelNudgeCountdown stops a running countdown without touching unread.
 func (d *Daemon) cancelNudgeCountdown(sessionID, reason string) {
 	d.nudgeMu.Lock()
 	changed := d.stopCountdownLocked(sessionID)
@@ -190,27 +168,14 @@ func (d *Daemon) cancelNudgeCountdown(sessionID, reason string) {
 	}
 }
 
-// cancelNudgeCountdownByUser is the user calling off an incoming ticket nudge.
-//
-// It differs from cancelNudgeCountdown in one way that matters: it also records a
-// standing cancel, so the countdown does not simply come back. Without that it
-// would, and quickly — merely selecting another session runs the resume in
-// updateNudgeSelection, and the nudge the user just called off would re-arm a
-// beat later.
-//
-// The cancel is recorded as the newest unread ticket event seq at cancel time,
-// which is what makes it expire on its own. "Not now" is an answer about the
-// activity that is pending; a later event is new information and gets to ask
-// again. Nothing is marked read, so the unread indicator survives and clicking it
-// still delivers the doorbell on demand — the cancel removes the automatic
-// interruption, not the user's way in.
+// cancelNudgeCountdownByUser also records a standing cancel, stamped with the
+// newest unread seq so it expires on its own: a later event gets to ask again.
 func (d *Daemon) cancelNudgeCountdownByUser(sessionID string) bool {
 	// Read before taking nudgeMu: a store read must never happen under it.
 	newest, err := d.newestUnreadTicketSeq(sessionID)
 	if err != nil {
 		d.logf("nudge cancel unread scan %s: %v", sessionID, err)
-		// Fall back to suppressing everything currently pending. Failing open
-		// here would re-arm the countdown the user just cancelled.
+		// Fail closed rather than re-arm what the user just cancelled.
 		newest = nudgeSuppressAllSeq
 	}
 
@@ -219,7 +184,7 @@ func (d *Daemon) cancelNudgeCountdownByUser(sessionID string) bool {
 	if d.nudgeSuppressedThrough == nil {
 		d.nudgeSuppressedThrough = make(map[string]int64)
 	}
-	// Only ever widen. Two cancels in a row must not narrow the standing answer.
+	// Only ever widen: two cancels in a row must not narrow the standing answer.
 	if existing, ok := d.nudgeSuppressedThrough[sessionID]; !ok || newest > existing {
 		d.nudgeSuppressedThrough[sessionID] = newest
 	}
@@ -231,9 +196,8 @@ func (d *Daemon) cancelNudgeCountdownByUser(sessionID string) bool {
 	return stopped
 }
 
-// nudgeSuppressAllSeq stands in for "every event that could be pending", used
-// when the unread scan fails and the safe reading is that the cancel covers
-// everything already queued.
+// nudgeSuppressAllSeq stands in for "every event that could be pending" when
+// the unread scan fails.
 const nudgeSuppressAllSeq = int64(1<<63 - 1)
 
 // nudgeSuppressedFor reports whether a user cancel is still on record.
@@ -245,8 +209,7 @@ func (d *Daemon) nudgeSuppressedFor(sessionID string) bool {
 }
 
 // nudgeSuppressionStillStands reports whether everything currently unread was
-// already pending when the user cancelled. A scan error keeps the cancel — the
-// same fail-closed reading as recording it.
+// already pending at cancel time; a scan error keeps the cancel (fail closed).
 func (d *Daemon) nudgeSuppressionStillStands(sessionID string) bool {
 	newest, err := d.newestUnreadTicketSeq(sessionID)
 	if err != nil {
@@ -266,10 +229,8 @@ func (d *Daemon) clearNudgeSuppression(sessionID string) {
 	d.nudgeMu.Unlock()
 }
 
-// newestUnreadTicketSeq is the highest seq among the ticket events this session's
-// observers have not read. Zero when nothing is unread — which makes an empty
-// queue suppress nothing, so a cancel recorded against no activity expires the
-// moment any event arrives.
+// newestUnreadTicketSeq is the highest unread ticket-event seq for this session's
+// observers. Zero when nothing is unread, so a cancel against it expires at once.
 func (d *Daemon) newestUnreadTicketSeq(sessionID string) (int64, error) {
 	if d.store == nil {
 		return 0, nil
@@ -289,8 +250,8 @@ func (d *Daemon) newestUnreadTicketSeq(sessionID string) (int64, error) {
 	return newest, nil
 }
 
-// clearNudgeState drops all per-session nudge bookkeeping when a session is removed.
-// No broadcast: a sessions-updated for the removal follows on its own.
+// clearNudgeState drops all per-session nudge bookkeeping on session removal;
+// no broadcast, the removal's own follows.
 func (d *Daemon) clearNudgeState(sessionID string) {
 	d.nudgeMu.Lock()
 	d.stopCountdownLocked(sessionID)
@@ -306,7 +267,7 @@ func (d *Daemon) clearNudgeState(sessionID string) {
 	d.deliveryMu.Unlock()
 }
 
-// stopNudgeCountdowns cancels every armed countdown. Daemon.Stop() calls it so no
+// stopNudgeCountdowns cancels every armed countdown at Daemon.Stop() so no
 // AfterFunc goroutine outlives teardown.
 func (d *Daemon) stopNudgeCountdowns() {
 	d.nudgeMu.Lock()
@@ -318,9 +279,7 @@ func (d *Daemon) stopNudgeCountdowns() {
 }
 
 // nudgeCountdownFire is the deferred delivery. The identity check against the map
-// entry keeps a countdown that lost a reschedule/cancel race from delivering twice:
-// finds a different (or absent) timer and bails, keeping delivery to a single
-// doorbell. The entry is consumed here; deliverNudgeOrReArm decides what to do.
+// entry keeps a countdown that lost a reschedule/cancel race from firing twice.
 func (d *Daemon) nudgeCountdownFire(sessionID string, self *time.Timer) {
 	d.nudgeMu.Lock()
 	entry, ok := d.nudgeCountdowns[sessionID]
@@ -335,9 +294,8 @@ func (d *Daemon) nudgeCountdownFire(sessionID string, self *time.Timer) {
 	d.deliverNudgeOrReArm(sessionID)
 }
 
-// deliverNudgeOrReArm runs the fire-time re-check and acts on it, then notifies the
-// test hook and rebroadcasts (the countdown's nudge_fires_at is now gone, or a fresh
-// one was armed on re-arm).
+// deliverNudgeOrReArm runs the fire-time re-check, notifies the test hook, and
+// rebroadcasts.
 func (d *Daemon) deliverNudgeOrReArm(sessionID string) {
 	action := d.runNudgeDelivery(sessionID)
 	if d.debugLogging {
@@ -349,13 +307,9 @@ func (d *Daemon) deliverNudgeOrReArm(sessionID string) {
 	d.broadcastSessionStateChanged(sessionID)
 }
 
-// runNudgeDelivery is the fire-time decision, separated so its outcome is a single
-// string the test hook can assert. It doorbells only when the session is not waiting
-// for approval, is not the active session, still has unread ticket activity, and —
-// the splice guard —
-// has not received a genuine user keystroke within userInputGuardWindow. A keystroke
-// re-arms a fresh countdown rather than dropping the nudge: the user is mid-keystroke,
-// not gone.
+// runNudgeDelivery doorbells only when not pending approval, not the active
+// session, still unread, and past the splice guard — a recent keystroke re-arms
+// rather than drops.
 func (d *Daemon) runNudgeDelivery(sessionID string) string {
 	if d.ptyBackend == nil || d.store == nil {
 		return "noop"
@@ -365,14 +319,11 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 		return "blocked"
 	}
 	if d.currentlySelectedSession() == sessionID {
-		// Became the active session during the window; switching away re-arms it.
 		return "active"
 	}
 	d.deliveryMu.Lock()
 	defer d.deliveryMu.Unlock()
 	if until := d.watchLeaseUntil[sessionID]; until.After(time.Now()) {
-		// A live watch gets the next polling opportunity first. If it disappears,
-		// the short lease expires and this rearmed countdown becomes the backstop.
 		d.nudgeMu.Lock()
 		d.startCountdownAtLocked(sessionID, until)
 		d.nudgeMu.Unlock()
@@ -403,10 +354,8 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 	return "doorbell"
 }
 
-// updateNudgeSelection pauses the newly selected session's countdown and resumes the
-// previously selected one. Selection drives only this UX; the splice guard above is
-// what protects a second visible tile the user types into. The store read for the
-// approval check is done before taking nudgeMu to keep the lock ordering one-way.
+// updateNudgeSelection pauses the newly selected session's countdown and resumes
+// the previous one. The approval store read precedes nudgeMu: lock order is one-way.
 func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 	resumeOld := false
 	if oldID != "" && oldID != newID && d.store != nil {
@@ -427,17 +376,14 @@ func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 		d.broadcastSessionStateChanged(id)
 	}
 	if resumeUnread {
-		// The paused timer intentionally carries no deadline. Re-derive the
-		// assignee/buffered deadline from durable unread events and attention so
-		// switching away cannot collapse a long observer buffer to 30 seconds.
+		// Re-derive the deadline from durable unread events so switching away
+		// cannot collapse a long observer buffer to 30 seconds.
 		go d.notifyUnreadTicketSession(oldID, time.Now())
 	}
 }
 
 // refreshTicketUnread recomputes a session's unread ticket count and updates the
-// indicator. Called after an inbox consume (handleTicketInbox) and on each notify so
-// the indicator reflects reality for every agent — including self-monitoring Claude,
-// whose optional watch can drain the queue before the countdown doorbells.
+// indicator; an agent's own watch can drain the queue before the doorbell.
 func (d *Daemon) refreshTicketUnread(sessionID string) {
 	if d.store == nil {
 		return
@@ -450,19 +396,15 @@ func (d *Daemon) refreshTicketUnread(sessionID string) {
 	d.markTicketUnread(sessionID, unread > 0)
 }
 
-// isNudgeDeliveryAllowed is the sole session-state gate for every doorbell. A
-// pending approval is the only unsafe target because a trailing Enter could answer
-// it. Active, launching, unknown, idle, waiting-input, and scheduled sessions all
-// remain eligible; selection and recent-keypress checks are separate user-safety
-// mechanisms, not state policy.
+// isNudgeDeliveryAllowed is the sole session-state gate for every doorbell:
+// pending approval is the only unsafe target, because a trailing Enter could
+// answer it.
 func isNudgeDeliveryAllowed(state string) bool {
 	return state != protocol.StatePendingApproval
 }
 
-// handleTriggerNudge is the user clicking the incoming-nudge indicator: deliver the
-// pending doorbell now, on demand, in any nudge-eligible state. It is exempt
-// from the keystroke guard — an explicit click is unambiguous intent — and respects
-// only unread (a click on a stale, already-drained indicator is a harmless no-op).
+// handleTriggerNudge is the user clicking the indicator: deliver now, exempt from
+// the keystroke guard, respecting only unread.
 func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
@@ -480,7 +422,7 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	defer d.deliveryMu.Unlock()
 	unread, err := d.ticketUnreadForSession(sessionID)
 	if err != nil || unread == 0 {
-		// Nothing to deliver; clear a stale indicator rather than doorbell into nothing.
+		// Clear a stale indicator rather than doorbell into nothing.
 		d.markTicketUnread(sessionID, false)
 		return
 	}
@@ -492,15 +434,9 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	d.broadcastSessionStateChanged(sessionID)
 }
 
-// noteUserInput records a genuine user keystroke, and is the only place the
-// source filter is applied — automation and attach-replay writes are not the
-// user typing, so they do not count. It reports whether it recorded one, so a
-// caller can hang further reactions off the same verdict instead of re-deriving
-// who typed.
-//
-// It also records the same instant as auto-settle activity. Pointer movement
-// records only that second stamp: it means the user is engaged with the agent,
-// but cannot splice a doorbell onto a half-typed line.
+// noteUserInput records a genuine user keystroke — the only place the source
+// filter is applied — and stamps auto-settle activity. Pointer movement records
+// only the second stamp, since it cannot splice a doorbell.
 func (d *Daemon) noteUserInput(sessionID, source string) bool {
 	if sessionID == "" || !isUserKeystrokeSource(source) {
 		return false
@@ -519,10 +455,8 @@ func (d *Daemon) noteUserInput(sessionID, source string) bool {
 	return true
 }
 
-// noteAutoSettleActivity records user engagement that should freeze a pending
-// settle without claiming that the user typed into the PTY. It shares
-// lastInputMu with settleIfAutoSettleQuiet so activity arriving before the turn
-// closes always wins the race.
+// noteAutoSettleActivity freezes a pending settle without claiming a PTY
+// keystroke. Shares lastInputMu with settleIfAutoSettleQuiet so activity wins.
 func (d *Daemon) noteAutoSettleActivity(sessionID string) bool {
 	if sessionID == "" {
 		return false
@@ -542,10 +476,8 @@ func (d *Daemon) recentUserInput(sessionID string, within time.Duration) bool {
 	return d.userInputQuietRemaining(sessionID, within) > 0
 }
 
-// userInputQuietRemaining reports how much of `within` is left to run before this
-// session counts as quiet — zero once the window has elapsed, or when the user
-// has never typed here. It is what lets a waiting timer reschedule exactly to the
-// end of the window instead of re-polling it.
+// userInputQuietRemaining reports how much of `within` is left before this
+// session counts as quiet, so a waiting timer reschedules instead of polling.
 func (d *Daemon) userInputQuietRemaining(sessionID string, within time.Duration) time.Duration {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
@@ -584,26 +516,10 @@ func (d *Daemon) autoSettleActivityQuietRemainingLocked(sessionID string, within
 	return remaining
 }
 
-// settleIfAutoSettleQuiet is auto-settle's commit: the only place a timer closes
-// a turn, and the reason the activity hold is airtight rather than merely likely.
-//
-// The quiet check and the store write happen in one critical section, under the
-// same lock keyboard and pointer activity use. That is what makes the two
-// indivisible. Checking first and settling afterwards — however few instructions
-// apart — leaves a gap a real interaction can land in: it would be stamped after
-// the guard had already looked, and the hold that follows it finds the timer
-// gone from the map and does nothing, so the turn closes with the user's hands
-// on the session. Serialized, activity before the settle commits is always seen
-// by the check that guards it, and activity that loses happened after the turn
-// had already closed — which is honest, and unavoidable in any design.
-//
-// The lock spans a store write, so the scope is worth stating plainly: the only
-// way to contend for it is to interact in the instant a settle commits, and a
-// settle only commits after `within` of silence. The single activity report that
-// could ever wait on one primary-key update is the one this exists to protect.
-//
-// Reports the remaining quiet time when it refuses, so the caller can reschedule
-// exactly to the end of the window, and whether the turn was actually settled.
+// settleIfAutoSettleQuiet is the only place a timer closes a turn. The quiet
+// check and the store write must share one critical section under the lock
+// activity stamps use, or a real interaction lands in the gap and the turn closes
+// with the user's hands on the session. Returns remaining quiet time on refusal.
 func (d *Daemon) settleIfAutoSettleQuiet(sessionID string, within time.Duration) (quiet time.Duration, settled bool) {
 	d.lastInputMu.Lock()
 	defer d.lastInputMu.Unlock()
@@ -613,10 +529,8 @@ func (d *Daemon) settleIfAutoSettleQuiet(sessionID string, within time.Duration)
 	return 0, d.store.SettleTurn(sessionID, time.Now())
 }
 
-// isUserKeystrokeSource reports whether a pty_input source tag represents the user
-// typing. Genuine keystrokes arrive untagged (empty source); automation and replay
-// are explicitly tagged and excluded. The lone "user" tag (insert-reference) is the
-// user composing, so it counts.
+// isUserKeystrokeSource: genuine keystrokes arrive untagged, automation and
+// replay are tagged and excluded, and "user" (insert-reference) counts.
 func isUserKeystrokeSource(source string) bool {
 	switch source {
 	case "automation", "attach_replay":
@@ -626,9 +540,8 @@ func isUserKeystrokeSource(source string) bool {
 	}
 }
 
-// decorateSessionWithNudge stamps the broadcast clone with the live nudge state so
-// every session broadcast (state change, sessions-updated, reconnect rehydration)
-// carries the current indicator. Read under nudgeMu; callers must not already hold it.
+// decorateSessionWithNudge stamps the broadcast clone with the live nudge state.
+// Takes nudgeMu; callers must not already hold it.
 func (d *Daemon) decorateSessionWithNudge(clone *protocol.Session) {
 	if clone == nil {
 		return

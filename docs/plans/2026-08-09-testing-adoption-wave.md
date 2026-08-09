@@ -147,7 +147,8 @@ Named per the boil-the-ocean rule; each needs an explicit go.
       fallback to fix 1 alone); extended toxiproxy test; live verification
 - [ ] Track B1: three rapid property files (pty scanners, docstore,
       workspacelayout)
-- [ ] Track B2: triage map, then bubble-able conversions
+- [x] Track B2: triage map, then bubble-able conversions (two passes; candidate
+      column at zero)
 - [ ] Track C: AGENTS.md testing-tools note
 - [ ] Track D: none until explicitly picked
 - [ ] Changelog fragments per PR
@@ -172,12 +173,18 @@ Named per the boil-the-ocean rule; each needs an explicit go.
 
 ## Track B2 triage map (2026-08-09)
 
-Measured on `test/synctest-sweep`. A test counts as **paced** when its body
-sleeps, waits on `time.After`, or spins a deadline-bounded poll loop. Tags are
-resolved through the fixtures a test calls, two levels deep, so a test inherits
-the boundary its helper crosses.
+A test counts as **paced** when its body sleeps, waits on `time.After`, or spins
+a deadline-bounded poll loop.
 
-| package | paced | converted here | boundary-bound | candidate, not converted |
+The sweep ran in two passes. The first pass converted what was already known to
+be safe and left a remainder of unverified candidates; the second pass took that
+remainder to zero, either by converting a candidate or by giving it a reason.
+
+**First pass** (the triage itself), measured on `test/synctest-sweep` against
+its merge base. Tags are resolved through the fixtures a test calls, two levels
+deep, so a test inherits the boundary its helper crosses.
+
+| package | paced | converted | boundary-bound | candidate, not converted |
 |---|---|---|---|---|
 | `internal/daemon` | 199 | 20 | 59 | 120 |
 | `internal/jobs` | 21 | 17 | 0 | 2 |
@@ -188,10 +195,31 @@ the boundary its helper crosses.
 | `internal/workflow` | 4 | 3 | 1 | 0 |
 | **total** | **264** | **47** | **85** | **130** |
 
-"Paced" and "boundary-bound" are measured against this branch's merge base;
-"converted here" counts the `synctest.Test` call sites this PR adds. The two
-`internal/jobs` tests the spike had already bubbled are not counted as
-converted here.
+**Closing state**, counted on the tree itself rather than against a merge base,
+so it can be re-derived at any time: a test is *bubbled* if its body contains a
+`synctest.Test` call, and *still paced* if it does not and its body sleeps,
+waits on `time.After`, or spins a poll loop.
+
+| package | bubbled | still paced | of those, with a recorded reason | candidate |
+|---|---|---|---|---|
+| `internal/daemon` | 106 | 98 | 98 | 0 |
+| `internal/jobs` | 21 | 0 | — | 0 |
+| `internal/pty` | 0 | 14 | 14 | 0 |
+| `internal/ptybackend` | 1 | 10 | 10 | 0 |
+| `internal/ptyworker` | 7 | 2 | 2 | 0 |
+| `internal/daemonctl` | 0 | 6 | 6 | 0 |
+| `internal/workflow` | 3 | 1 | 1 | 0 |
+| **total** | **138** | **131** | **131** | **0** |
+
+The two scans differ by a handful per package — the first pass resolved a test's
+tags through the helpers it calls, two levels deep, and this one reads bodies
+only. Neither is wrong; they answer slightly different questions, and the
+column that matters is the last one either way.
+
+The population is the tree at `39c3c8c4`. Paced tests that landed on main after
+that — `activity_test.go` (7, from the activity line) and `ws_eviction_test.go`
+(4, Track A's own) — are not in it. A scan run later will find them; that is new
+work arriving, not the sweep leaving something behind.
 
 (The brief's raw `grep` counts — daemon 194, ptybackend 22, pty 21, ptyworker
 12, jobs 10, daemonctl 7, workflow 6 — count *lines*, including sleeps inside
@@ -222,7 +250,26 @@ What actually pins a bubble to real time:
 5. **A CPU-bound goroutine.** `internal/workflow`'s `while(true){}` watchdog
    test spins in goja; a spinning goroutine is never durably blocked.
 
-Three house rules make a daemon fit inside a bubble; all three are written up
+The second pass added three more, all found by converting a test and watching it
+hang:
+
+6. **A claim about a goroutine parked on a lock.** `go doc testing/synctest` is
+   explicit that locking a `sync.Mutex` is *not* durable blocking. A test whose
+   subject is "this writer is stuck behind that lock" — `doorbellMu`,
+   `autoSettleFireMu`, the spawn lock, the evidence and trace tables — has no
+   state a bubble can settle into, so `synctest.Wait()` hangs instead of
+   returning. This is the largest single class in the remainder.
+7. **An assertion on real elapsed wall-clock.** `delegation_operation_test.go`
+   asserts a slow preparation took *more* than 100ms of real time. Under a fake
+   clock that reads zero and the assertion is vacuous — converting it would
+   quietly delete the test's only claim.
+8. **A goroutine with no exit path.** `go d.wsHub.run()` loops forever over its
+   channels. A bubble ends only when its last goroutine exits, so a test that
+   starts the hub inside one never finishes (measured: hangs to the binary's own
+   timeout). Giving the hub a quit channel is a production change, and this
+   sweep is test-only.
+
+Four house rules make a daemon fit inside a bubble; all four are written up
 where they are used, in `internal/daemon/synctest_test.go`:
 
 1. Build the daemon **outside** the bubble (`database/sql`'s `connectionOpener`
@@ -234,12 +281,62 @@ where they are used, in `internal/daemon/synctest_test.go`:
    ahead: a turn opened outside and settled inside settles *before* it opened
    and still reads as owed. This cost an hour of debugging on
    `TestAutoSettle_RealTimersSettleTheTurn`.
+4. Let every goroutine the body started **finish** before the body returns —
+   including one the code under test spawned and left sleeping. `handleStop`
+   starts a classifier that retries the transcript read for 2s; a test that only
+   cares about `handleStop`'s synchronous effects still has to run that window
+   out (`settleStopClassification`) or the bubble reports blocked goroutines.
+   The same shape appears wherever production polls: `handleDelegateWS` checks
+   its operation every 100ms, and the spawn probe waits out its own 250ms read
+   deadline. On a fake clock those windows are free — sleep past them.
 
 One more, from D1 and worth repeating: `synctest.Wait()` is a happens-before
 edge for the race detector, `time.Sleep` is **not**. State a timer writes still
 needs its own lock.
 
-### Converted in this PR
+### Converted in the second pass
+
+87 more: 86 in `internal/daemon`, 1 in `internal/ptybackend`.
+
+- `notebook_narration_test.go` (18), `notebook_daily_narrate_test.go` (10),
+  `notebook_tasks_enabled_test.go` (6) — the cluster the first pass named as the
+  biggest remaining win, and it was: the executor stub never execs, so every
+  poll over job-queue state collapses to a `synctest.Wait()`.
+- `plugin_rpc_test.go` (9), `plugin_supervisor_test.go` (7) — the open question
+  was whether the plugin runtime spawns a real interpreter. It does not: these
+  drive the RPC over `net.Pipe`, which is channel-backed and bubble-safe, read
+  deadlines included. The supervisor tests now run the shipped restart backoff
+  rather than a turned-down copy of it.
+- `transcript_watcher_abort_test.go` (5) — the first pass filed these under
+  fsnotify. They do not use fsnotify; the watcher polls the transcript on a
+  ticker, which is exactly what a bubble is for.
+- `workspace_keeper_test.go` (5) — context-compaction debounce and timeouts.
+- `browser_test.go` (3), `reload_test.go` (3), `daemon_test.go` (3),
+  `spawn_characterization_test.go` (2), `stop_terminality_test.go` (2),
+  `ticket_buffer_test.go` (2), `tilecontent_test.go` (2), `ws_tasks_test.go` (2),
+  and one each in `automations_test.go`, `bus_test.go`, `delegate_test.go`,
+  `plugin_driver_test.go`, `session_state_characterization_test.go`,
+  `workspace_test.go`, `ws_plugins_test.go`.
+- `internal/ptybackend` — `TestWorkerStream_PublishOverflowWaitsForBufferSpace`,
+  pure channels and a timer.
+
+Two corrections to the first pass's classification came out of this:
+`reload_test.go` drives a `fakeReloadBackend`, not `ptybackend` worker
+processes — 3 of its 6 convert cleanly, and the other 3 are blocked by an
+fsnotify watcher the *notebook root setting* starts, not by workers.
+`tilecontent_test.go` is not wholly mtime-bound either; only one of its tests
+needs the real clock to move.
+
+New shared helpers, in `internal/daemon/synctest_test.go`: `requireOutbound` and
+`requireNoOutbound`, which replace `select { case <-client.send: ... case
+<-time.After(2s): }` with a settled read. The negative is the one that changes
+meaning — outside a bubble "nothing was sent" is only ever "nothing yet".
+
+`waitForNudgeDeadline`, `waitForNudgeDeadlineBefore` and `waitForBus` are gone.
+`bus_test.go` in particular no longer turns `PollInterval` down to 5ms: it runs
+the shipped `bus.DefaultPollInterval` and sleeps two periods of fake time.
+
+### Converted in the first pass
 
 - `internal/jobs` — all remaining paced tests (`runner_test.go` ×14 beyond the
   spike's two pre-existing call sites, `cron_test.go` ×3). `waitFor` deleted.
@@ -275,44 +372,89 @@ intervals no longer need turning down, so nothing needs to outrun them.
 
 ### Boundary-bound, with reasons
 
+Every paced test that is not converted is here. Where the reason is not obvious
+from the file's imports it is also written above the test itself.
+
+Child processes and real fds:
+
 - `internal/daemonctl` (6/6) — every `stop_test.go` case forks a helper
-  process to hold or release the pid lock. Child process.
-- `internal/pty` (10/14) — real PTYs and read loops over real fds.
-- `internal/ptybackend` (9/11) — worker child processes and the control socket.
-- `internal/daemon/daemon_test.go` (25 of 35 paced) and `testharness_test.go`
-  (5/5) — a started daemon: listener, WebSocket hub, spawned sessions.
+  process to hold or release the pid lock.
+- `internal/pty` (14/14) — real PTYs and read loops over real fds. The first
+  pass listed 5 of these as candidates; all 5 go through `manager.Spawn` or an
+  `os/exec` helper, so the correct count is 14.
+- `internal/ptybackend` (10/11) — worker child processes and the control
+  socket. `embedded_test.go`'s concurrent-close probe belongs here for a
+  different reason: it needs 16 goroutines *actually running* while `Close`
+  lands, and a bubble only advances once they are all parked.
 - `internal/daemon/plugin_worktree_test.go` (14) — `exec.Command` per case.
-- `internal/daemon/fs_watch_test.go`, `transcript_watcher_abort_test.go`,
-  `notebook_test.go` — fsnotify.
-- `internal/daemon/tilecontent_test.go` — real mtime granularity (see rule 4).
-- `internal/daemon/reload_test.go` — `ptybackend` worker processes.
+- `internal/daemon/plugin_runtime_test.go` (3),
+  `plugin_driver_e2e_test.go` (2), `codex_resume_e2e_test.go` (1),
+  `real_agent_harness_test.go` (1) — real plugin and agent processes.
+- `internal/ptyworker` (2/9) — `reap_test.go` waits on a real child dying,
+  `runtime_test.go`'s theme RPC spawns a real PTY.
+
+A started daemon (listener, WebSocket hub, or both):
+
+- `internal/daemon/daemon_test.go` (31) and `testharness_test.go` (5).
+- `internal/daemon/documents_socket_test.go` (1),
+  `toxiproxy_slow_client_test.go` (1) — a real socket is the subject.
+- `internal/daemon/stop_terminality_test.go` (2), `ws_tasks_test.go` (1),
+  `workspace_context_test.go` (1), `fs_test.go` (7) — `go d.wsHub.run()`
+  (rule 8). `fs_test.go` also carries fsnotify.
+
+fsnotify:
+
+- `internal/daemon/fs_watch_test.go` (5), `notebook_test.go` (6).
+- `internal/daemon/reload_test.go` (3) — not worker processes, as the first pass
+  had it: setting the notebook root starts a watcher.
+
+Lock-parking claims (rule 6):
+
+- `internal/daemon/spawn_lock_test.go` (2), `ws_automations_test.go` (2),
+  `auto_settle_test.go` (1), `session_evidence_test.go` (1),
+  `state_trace_test.go` (1), `ticket_buffer_test.go` (1),
+  `nudge_countdown_test.go` (1).
+
+One-offs:
+
+- `internal/daemon/tilecontent_test.go` (1) — real mtime granularity (rule 4).
+- `internal/daemon/automations_test.go` (1) — `httptest` server, a real socket.
+- `internal/daemon/gitstatus_test.go` (1) — git child process.
+- `internal/daemon/delegation_operation_test.go` (1) — asserts real elapsed
+  wall-clock (rule 7).
 - `internal/workflow/loop_test.go::TestContextCancelInterrupts` — CPU-bound
   goja loop by design.
 - `internal/daemon/ticket_notify_test.go::TestChiefTicketContinuityAcrossRoleTransfer`
-  — mechanically bubble-able, deliberately left alone. Its final assertion
-  ("the retired chief received no role nudge") holds only while the nudge
-  window is parked; run the window out for real and the retired chief *is*
-  doorbelled, because the fixture leaves it a personal participant on the
-  ticket and `nudgeCount` cannot tell a personal nudge from a role one. Fixing
-  that needs either a narrower probe or a product answer, both outside a
-  test-only sweep. The reason is recorded above the test.
+  — bubble-able, parked on purpose; see below.
 
-### Candidates not converted (the honest remainder)
+### Where the 130 candidates went
 
-120 paced daemon tests carry no boundary signal and were not converted here.
-They are not a backlog of known-good conversions — they are unverified
-candidates, and the classification is static analysis, not a passing bubble.
-The largest clusters, in the order worth taking them:
+The first pass left 130 tests classified by static analysis and nothing else.
+Every one now has a verdict from running it:
 
-- `notebook_narration_test.go` (16) and `notebook_daily_narrate_test.go` (6) —
-  poll the job queue for executor task state against a stubbed executable. If
-  the stub really never execs, these are `synctest.Wait()` one-liners and the
-  single biggest remaining win.
-- `plugin_rpc_test.go` (9), `plugin_supervisor_test.go` (7) — need a check for
-  whether the plugin runtime spawns a real interpreter.
-- `fs_test.go` (7) — separate the fsnotify cases from the pure-logic ones.
-- `workspace_keeper_test.go` (5), `ticket_buffer_test.go` (3),
-  `ws_tasks_test.go` (3) — store+queue polling, same shape as the jobs work.
+| outcome | count |
+|---|---|
+| converted and green under `-race -count=20` | 76 |
+| reclassified boundary-bound, reason recorded | 52 |
+| not paced after all (`internal/jobs` scanner artifact) | 2 |
+
+The 87 conversions in this pass are 76 of those candidates plus 11 tests the
+first pass had filed as boundary-bound for a reason that did not hold —
+`transcript_watcher_abort_test.go` (5), `reload_test.go` (3),
+`tilecontent_test.go` (2), `internal/ptybackend` (1).
+
+Of the 52 reclassifications, 9 are the lock-parking class the first pass had no
+name for, and the rest resolve to signals it already knew: a started hub, a real
+socket, fsnotify, a child process.
+
+One test stays parked on purpose, unchanged:
+`ticket_notify_test.go::TestChiefTicketContinuityAcrossRoleTransfer`. It is
+mechanically bubble-able. Its final assertion ("the retired chief received no
+role nudge") holds only while the nudge window is parked; run the window out for
+real and the retired chief *is* doorbelled, because the fixture leaves it a
+personal participant on the ticket and `nudgeCount` cannot tell a personal nudge
+from a role one. That needs a narrower probe or a product answer, both outside a
+test-only sweep. The reason is recorded above the test.
 
 ### Timings
 
@@ -342,6 +484,25 @@ means something is the converted subset alone:
 That is the honest summary of the whole sweep: it buys determinism and
 fidelity (production intervals actually execute), not wall-clock.
 
+#### Second pass
+
+Same machine, `go test -count=3`, this branch against `39c3c8c4`.
+
+| subset | before | after |
+|---|---|---|
+| the 86 converted daemon tests | 94.6s | 6.0s |
+| `internal/jobs` whole package | 0.68s | 0.91s |
+| `internal/ptybackend` whole package | 6.46s | 5.48s |
+| `internal/daemon` whole package | 403.6s | 327.0s |
+
+The subset number is the one to read: 94.6s of it was tolerance windows and poll
+loops, and 88.6s of that is gone. The whole-package figure moves this time —
+86 tests is enough to show through — but a 6-minute package still has minutes of
+run-to-run spread, so treat the 77s as directionally right and not as a receipt.
+
+`internal/jobs` grows slightly because it gained a test rather than converting
+one: the retention pass below now runs 25 hours of fake time.
+
 ### Finding: the retention pass had never run in a test
 
 `TestRetentionTrimsCompletedJobsAndKeepsDeadOnes` went red on conversion. The
@@ -351,3 +512,16 @@ across the test's 48-hour window — and trimmed the record before the manual
 time and never fired at all. The conversion parks it (`TrimInterval` 30 days)
 to keep the subject singular, but the discovery stands: the periodic retention
 pass has no test of its own. Worth one.
+
+**Written in the second pass.**
+`TestThePeriodicRetentionPassTrimsOnItsOwnInterval` (`internal/jobs`) is that
+test. It leaves `TrimInterval` at the shipped `DefaultTrimInterval` — one hour,
+the value that had never executed — and a 24-hour retention policy, then runs
+the bubble clock forward and asserts three things the ticker owes: through 23
+ticks it trims nothing, the tick after the policy window trims exactly the aged
+completed job, and it leaves the young completed job and the dead one alone. The
+runner's own log line is the receipt that the pass ran once, not zero times and
+not twice: `jobs: trimmed 1 completed job(s) older than 24h0m0s`.
+
+Mutation-checked by setting `DefaultTrimInterval` to 24h in production code:
+three assertions fail. The production change was reverted.

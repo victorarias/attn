@@ -33,12 +33,10 @@ interface RendererTheme {
   cursor: string;
 }
 
-// A rectangular range overlay in viewport coordinates. Rows are inclusive of
-// endRow; columns are exclusive of endCol. Spans follow selection semantics:
-// rows strictly between startRow and endRow cover the full grid width.
-// - background: solid fill drawn under glyphs (selection, find matches)
-// - underline: bar at the text baseline drawn over glyphs (hovered links)
-// - outline: thin border around the bounding rectangle (selected block)
+// A rectangular range overlay in viewport coordinates: rows include endRow,
+// columns exclude endCol, and rows strictly between them span the full width.
+// background fills under glyphs, underline sits on the baseline over them, and
+// outline is a thin border around the bounding rectangle.
 export interface WebGlOverlay {
   startRow: number;
   startCol: number;
@@ -57,12 +55,9 @@ interface OverlaySpan {
   kind: 'background' | 'underline';
 }
 
-// Which horizontal edges of an outline are real boundaries given the viewport.
-// An edge that falls outside [0, rows) is not the region's true top/bottom — it
-// only landed there because the region (e.g. a command block) extends past the
-// visible area. Drawing it would clamp the border to the viewport edge and make
-// the outline look like a box wrapping the whole terminal. Omitting it leaves
-// side rails that read as "continues above/below".
+// Which horizontal edges of an outline are real boundaries: one outside [0, rows)
+// only landed there because the region extends past the visible area, and drawing
+// it clamped makes the outline look like a box around the terminal.
 export function visibleOutlineEdges(
   startRow: number,
   endRow: number,
@@ -74,9 +69,8 @@ export function visibleOutlineEdges(
   };
 }
 
-// One kitty image's pixels, as the blob cache holds them. Identity is
-// (imageId, generation): a retransmission of the same id mints a new
-// generation, so a texture is never stale content under a live key.
+// One kitty image's pixels, keyed (imageId, generation): a retransmission mints a
+// new generation, so a texture is never stale content under a live key.
 export interface WebGlImageSource {
   imageId: number;
   generation: number;
@@ -86,9 +80,8 @@ export interface WebGlImageSource {
   pixels: Uint8Array;
 }
 
-// One image to draw this frame, already clipped to the grid by the caller.
-// Destination is CSS pixels relative to the grid's top-left; the source rect is
-// texels of the image.
+// One image to draw this frame, already clipped by the caller. Destination is CSS
+// pixels relative to the grid's top-left; source is texels.
 export interface WebGlImageQuad {
   source: WebGlImageSource;
   x: number;
@@ -99,57 +92,37 @@ export interface WebGlImageQuad {
   sourceY: number;
   sourceWidth: number;
   sourceHeight: number;
-  // The placement's kitty z-index, which picks the pass this quad draws in:
-  // over the text at z >= 0, under it below that, and under the cell
-  // backgrounds too past KITTY_Z_UNDER_BACKGROUND.
+  // Picks the pass this quad draws in: over the text at z >= 0, under it below
+  // that, under the cell backgrounds too past KITTY_Z_UNDER_BACKGROUND.
   z: number;
 }
 
-// Kitty's deepest layer: "Negative z-index values below INT32_MIN/2
-// (-1,073,741,824) will be drawn under cells with non-default background
-// colors." Below is strict — a placement AT this value draws over the cell
-// backgrounds and under the text, like any other negative z.
+// Kitty's deepest layer: below INT32_MIN/2 a placement draws under cells with
+// non-default backgrounds. Below is strict — AT this value it draws over them.
 export const KITTY_Z_UNDER_BACKGROUND = -1_073_741_824;
 
-// Live GPU textures per renderer. Receipt: a stored image measured 1.9-6.5MB of
-// decoded pixels, so 16 textures is ~100MB of VRAM worst case and holds every
-// image a real session has on screen several times over — a tripwire, not a
-// budget. Textures die with the pane's GL context; the app-level blob cache is
-// what survives a pane being virtualized away, and rebuilding one from it is a
-// single upload.
+// Live GPU textures per renderer. Measured: a stored image is 1.9-6.5MB, so 16 is
+// ~100MB of VRAM worst case — a tripwire. Textures die with the pane's GL context;
+// the app-level blob cache is what survives.
 export const IMAGE_TEXTURE_LIMIT = 16;
 
-// Below this grid size, copying the cached rows into the complete staging
-// buffer costs more than rebuilding the small viewport. Packaged A/Bs put the
-// crossover below a 1,785-printable-cell split pane. Keep a wider safety margin
-// around ordinary interaction-sized panes and enable it only above 2,048 cells;
-// the packaged 3,212-cell case remains a measured win.
+// Below this grid size, copying cached rows costs more than rebuilding the
+// viewport. Measured: the crossover is below a 1,785-cell split pane, so the gate
+// sits at 2,048; the 3,212-cell case is a measured win.
 const ROW_VERTEX_CACHE_MIN_CELLS = 2_048;
-// Ceiling on what the row cache itself retains. This governs the cache's
-// marginal cost only: the frame buffer the rows concatenate into is a second
-// full-frame copy, but a frame has to be staged somewhere whether or not the
-// cache exists, so folding it in here would trip the gate on memory the direct
-// path spends anyway. Both numbers are reported on every sample
-// (retainedRowVertexBytes and retainedStagingBytes) so the receipt stays whole.
-//
-// Styled content emits several quads per cell, so the real cost is
-// content-dependent and only knowable after a frame is built; a grid that
-// crosses the ceiling releases its rows and stays on the direct path until it
-// resizes.
+// Ceiling on the row cache's MARGINAL cost. The frame buffer the rows concatenate
+// into is staged either way, so folding it in would gate on memory the direct path
+// spends anyway; both are reported (retainedRowVertexBytes, retainedStagingBytes).
+// A grid that crosses the ceiling releases its rows and stays on the direct path.
 const ROW_VERTEX_CACHE_MAX_BYTES = 2 * 1024 * 1024;
 
-// Starting capacity per row, in quads per column, for each cell pass. Every
-// printable cell contributes a foreground quad, so a full row is the honest
-// start for that pass. How many cells carry a non-default background is a
-// property of the content, not something to guess at: the background pass
-// starts at the buffer minimum and grows into whatever the pane turns out to
-// need, which costs a reallocation on a styled row and nothing on a plain one.
+// Starting capacity per row, per cell pass. Every printable cell adds a foreground
+// quad; backgrounds are content-dependent, so that pass starts minimal and grows.
 const ROW_FG_QUADS_PER_CELL = 1;
 const ROW_BG_QUADS_PER_CELL = 0;
 
-// ghostty-web does not export DirtyState, but its update() contract defines
-// these values. PARTIAL is the only one the row cache can serve; anything else
-// rebuilds the whole grid.
+// ghostty-web does not export DirtyState; PARTIAL is the only value the row cache
+// can serve.
 const DIRTY_NONE = 0;
 const DIRTY_PARTIAL = 1;
 
@@ -160,9 +133,8 @@ interface AtlasGlyph {
   v1: number;
   width: number;
   height: number;
-  // True when the rasterized bitmap carries its own colors (a color font such
-  // as Apple Color Emoji). Such glyphs are drawn directly from the atlas
-  // instead of being tinted with the cell's foreground color.
+  // True when the bitmap carries its own colors (a color font): drawn straight from
+  // the atlas rather than tinted.
   colored: boolean;
 }
 
@@ -181,15 +153,14 @@ export interface WebGlRenderSample {
   fullPaint: boolean;
   submittedQuads: number;
   retainedRowVertexBytes: number;
-  // Rows plus the frame buffer they concatenate into: everything this renderer
-  // holds between paints, including the staging a pane pays on the direct path.
+  // Rows plus the frame buffer they concatenate into — everything held between
+  // paints, including the staging the direct path pays anyway.
   retainedStagingBytes: number;
   modelPrintable: number;
   quads: number;
   glyphUploads: number;
-  // TEMP (blank-on-split): diagnostics to explain why drawn quads can fall
-  // below the model's printable-cell count after a resize. Remove with the
-  // render-trace instrumentation once the root cause is fixed.
+  // TEMP (blank-on-split): diagnostics for drawn quads falling below the printable-
+  // cell count after a resize. Remove with the render-trace instrumentation.
   cellsArrayLen: number;
   printableSkippedNull: number;
   printableSkippedZeroWidth: number;
@@ -208,25 +179,15 @@ export function graphemeAtViewportCell(
     : terminal.getGraphemeString(bufferRow - history, col);
 }
 
-// The glyph atlas is allocated eagerly and in full (a backing 2D canvas plus a
-// GPU texture of the same dimensions), so its size is a fixed per-renderer
-// memory cost paid up front regardless of how many glyphs a session actually
-// uses. A terminal renders a small, mostly-fixed glyph set (ASCII + styles +
-// box-drawing + the occasional Unicode/emoji), so most panes fit comfortably in
-// 1024². We therefore start small and grow on demand up to the previous fixed
-// size only when a glyph-heavy session (e.g. CJK/emoji) actually overflows the
-// atlas — keeping the common case cheap (≈8 MB/renderer vs ≈32 MB at 2048²)
-// without risking glyph-atlas thrash on heavy content. See growAtlas/resetAtlas.
+// The atlas is allocated eagerly and in full, a fixed per-renderer cost. Most panes
+// fit their glyph set in 1024² (≈8 MB vs ≈32 MB at 2048²), so start there and grow
+// only on overflow. See growAtlas/resetAtlas.
 export const INITIAL_ATLAS_SIZE = 1024;
 export const MAX_ATLAS_SIZE = 2048;
-// position(2) + texcoord(2) + color(4) + mode(1). The mode flag selects the
-// fragment path: 0 = tinted coverage (text/box/overlays sample the atlas alpha
-// and paint it in the quad's color), 1 = color glyph (emoji: sample the atlas
-// RGBA directly so the glyph keeps its own colors).
+// position(2) + texcoord(2) + color(4) + mode(1). Mode selects the fragment path:
+// 0 = tinted atlas coverage, 1 = color glyph (atlas RGBA passed through).
 
-// Next atlas size when the current one fills: double it, but never exceed the
-// cap. Idempotent at the cap, so repeated growth always converges to
-// MAX_ATLAS_SIZE and can never grow unbounded.
+// Next atlas size: double, capped. Idempotent at the cap, so growth converges.
 export function nextAtlasSize(current: number, max: number = MAX_ATLAS_SIZE): number {
   return Math.min(current * 2, max);
 }
@@ -280,11 +241,9 @@ const BLOCK_ELEMENT_RECTS: Readonly<Record<number, readonly BlockRect[]>> = {
   ],
 };
 
-// The WebGL format and byte view one stored image uploads with. RGB and RGBA go
-// up untouched (the common real layouts); the two grayscale layouts are widened
-// to RGBA on the CPU rather than leaning on WebGL2's legacy LUMINANCE formats —
-// ghostty only produces them from a grayscale PNG, so the copy is on a path no
-// measured emitter takes.
+// The format and byte view one stored image uploads with. RGB/RGBA go up untouched;
+// grayscale is widened on the CPU rather than using WebGL2's legacy LUMINANCE —
+// ghostty only produces it from a grayscale PNG, a path no measured emitter takes.
 function imageUpload(
   gl: WebGL2RenderingContext,
   source: WebGlImageSource,
@@ -340,11 +299,8 @@ function createProgram(gl: WebGL2RenderingContext): WebGLProgram {
 }
 
 export class WebGlTerminalRenderer {
-  // CSS pixels, not device pixels: the canvas is sized `cols * cellWidth` in
-  // style and `cols * cellWidth * dpr` in backing store, and every draw scales
-  // by dpr on its way to the GPU. Anything talking to the outside world in
-  // device pixels — the PTY's ws_xpixel, a kitty placement's rendered size —
-  // has to cross that boundary explicitly.
+  // CSS pixels, not device pixels: the backing store is `* dpr`. Anything speaking
+  // device pixels — ws_xpixel, a placement's rendered size — crosses explicitly.
   cellWidth: number;
   cellHeight: number;
 
@@ -357,25 +313,19 @@ export class WebGlTerminalRenderer {
   private readonly atlas: HTMLCanvasElement;
   private readonly atlasContext: CanvasRenderingContext2D;
   private readonly glyphs = new Map<string, AtlasGlyph>();
-  // Single-codepoint cells are overwhelmingly common. Their numeric key avoids
-  // rebuilding a character string plus style-prefixed cache key for every cell
-  // on every paint. It is bounded by the atlas's existing glyph set and clears
-  // whenever that atlas is reseeded.
+  // Single-codepoint cells dominate; their numeric key avoids rebuilding a
+  // style-prefixed string per cell per paint. Cleared when the atlas is reseeded.
   private readonly codepointGlyphs = new Map<number, AtlasGlyph>();
-  // One buffer per cell pass. They are separate because an image can draw
-  // between them, and staying separate is also what lets each keep its own
-  // grown capacity: backgrounds are one quad per non-default cell, foregrounds
-  // several per styled cell, so a shared buffer would size to their sum.
+  // One buffer per cell pass: an image draws between them, and each keeps its own
+  // grown capacity rather than sizing to their sum.
   private readonly cellBgVertices = new TerminalVertexBuffer();
   private readonly cellFgVertices = new TerminalVertexBuffer();
   private readonly outlineVertices = new TerminalVertexBuffer(256);
   private readonly imageVertices = new TerminalVertexBuffer(64);
   // Insertion order is LRU order; a texture is re-inserted when it is drawn.
   private readonly imageTextures = new Map<string, WebGLTexture>();
-  // Device pixels per CSS pixel, captured once at construction. Read by
-  // everything that has to cross the CSS/device boundary this renderer sits on:
-  // the backing store, the pixel geometry reported to the PTY, and the CSS size
-  // a kitty placement's device-pixel box draws at.
+  // Device pixels per CSS pixel, captured once. Read by everything crossing the
+  // CSS/device boundary this renderer sits on.
   readonly dpr: number;
   private baseline: number;
   private fontSize: number;
@@ -388,44 +338,32 @@ export class WebGlTerminalRenderer {
   private atlasY = 1;
   private atlasRowHeight = 0;
   private atlasGeneration = 0;
-  // Ghostty reports dirty rows until markClean(). Cache each rendered row in
-  // the same CPU-side vertex format the complete frame already uses: partial
-  // model updates only rebuild changed rows, then concatenate the row buffers
-  // and still clear/draw a complete frame. That last part is deliberate — a
-  // WebGL drawing buffer is not retained across composites by default, so
-  // scissoring dirty pixels would trade correctness for speed unless we kept a
-  // much larger Retina-sized framebuffer. This cache is visible-grid and
-  // content proportional, with a hard retained-memory ceiling.
+  // Ghostty reports dirty rows until markClean(), so a partial update rebuilds only
+  // changed rows and concatenates. The frame is still drawn whole: a WebGL drawing
+  // buffer is not retained across composites, so scissoring would cost correctness.
   private dirtyRowMask = new Uint8Array(0);
-  // One entry per row per cell pass. Two arrays rather than one of pairs: the
-  // frame concatenates every row's backgrounds, then every row's foregrounds,
-  // so each is walked whole.
+  // One entry per row per cell pass; two arrays, since the frame concatenates every
+  // row's backgrounds and then every row's foregrounds.
   private rowBgVertices: Array<TerminalVertexBuffer | null> = [];
   private rowFgVertices: Array<TerminalVertexBuffer | null> = [];
   private printableByRow = new Uint32Array(0);
   private rowCacheValid = false;
   private rowCacheOverBudget = false;
   private modelPrintable = 0;
-  // Cursor position as the last frame drew it, so a partial paint can repaint
-  // the row it left behind. null row means the cursor was hidden.
+  // Cursor position as the last frame drew it, so a partial paint can repaint the
+  // row it left. A null row means it was hidden.
   private lastCursorRow: number | null = null;
   private lastCursorCol = -1;
 
-  // UV of the center of the 1×1 solid white texel at atlas pixel (0,0). Depends
-  // on the current atlas size, so it is recomputed rather than precomputed.
+  // UV of the 1×1 white texel at atlas pixel (0,0); depends on the atlas size.
   private get solidTexelCenter(): number {
     return 0.5 / this.atlasSize;
   }
   private retryingAtlasFrame = false;
   private cols = 0;
   private rows = 0;
-  // Set by setFontSize() so the next resize() call re-sizes the canvas even
-  // when cols/rows are unchanged. Cell metrics can change independently of
-  // grid dimensions (a font-size change with no container resize), and
-  // resize()'s cols/rows guard alone would otherwise skip it, leaving the
-  // canvas sized for the old font — invisible on the active pane (fit()
-  // recomputes cols/rows too, so it rarely hits this path) but permanent on
-  // hidden panes, which never fit() until revealed.
+  // Set by setFontSize() so the next resize() re-sizes the canvas even when cols/rows
+  // are unchanged — otherwise a hidden pane keeps the old font's canvas until fit().
   private metricsDirty = false;
 
   constructor(canvas: HTMLCanvasElement, fontSize: number, fontFamily: string, theme: RendererTheme) {
@@ -464,12 +402,8 @@ export class WebGlTerminalRenderer {
     this.atlasContext.fillStyle = '#ffffff';
     this.atlasContext.fillRect(0, 0, 1, 1);
 
-    // Premultiply alpha on upload so color-glyph (emoji) bitmaps filter cleanly:
-    // straight-alpha color sampled with LINEAR bleeds the transparent border's
-    // black into glyph edges, leaving dark fringes. Premultiplied source plus a
-    // premultiplied blend (set below) interpolates correctly. Coverage-only
-    // glyphs are unaffected — only their RGB is scaled, and the tinted path
-    // reads just the alpha channel.
+    // Premultiply alpha on upload so color-glyph bitmaps filter cleanly: straight alpha
+    // under LINEAR bleeds the transparent border's black into glyph edges.
     gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
@@ -489,8 +423,7 @@ export class WebGlTerminalRenderer {
     this.uResolution = gl.getUniformLocation(this.program, 'u_resolution');
     gl.enable(gl.BLEND);
     // Premultiplied-alpha blending: the shader emits color already multiplied by
-    // coverage, so source factor is ONE. This keeps tinted text identical to the
-    // old SRC_ALPHA blend while letting color glyphs composite without fringing.
+    // coverage, so the source factor is ONE.
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
   }
 
@@ -531,32 +464,24 @@ export class WebGlTerminalRenderer {
       ? cursorRowInViewport(cursor.y, viewportOffset, terminal.rows)
       : null;
 
-    // The cursor is drawn as an inverted cell, so where it sits is part of the
-    // frame even when no cell content changed. A same-row move and a visibility
-    // toggle both report DIRTY_NONE, and comparing the cursor against the last
-    // frame here is the only thing standing between those and a cursor left
-    // painted at its old column until unrelated output arrives.
-    //
-    // Only the drawn cursor counts. A hidden one paints nothing, so its column
-    // cannot go stale, and a TUI moving a hidden cursor mid-redraw — which they
-    // do constantly — would otherwise pass this check, find no row to mark, and
-    // be escalated to a full-grid paint by the zero-row guard below.
+    // The cursor is an inverted cell, so where it sits is part of the frame even when
+    // no cell changed: a same-row move and a visibility toggle both report DIRTY_NONE.
+    // Only the DRAWN cursor counts — a hidden one moved mid-redraw would pass here,
+    // find no row to mark, and escalate to a full-grid paint below.
     const cursorMoved = cursorRow !== this.lastCursorRow
       || (cursorRow !== null && cursor.x !== this.lastCursorCol);
     if (!force && dirty === DIRTY_NONE && !cursorMoved) {
       return null;
     }
-    // A frame that exists only because the cursor moved has no dirty cells, but
-    // it is still a two-row repaint rather than a whole-grid one. Without this
-    // it would fall to `dirty !== DIRTY_PARTIAL` below and full-paint the grid
-    // on every arrow key — the exact cost the row cache is here to avoid.
+    // A cursor-only frame has no dirty cells but is still a two-row repaint; without
+    // this it would full-paint the grid on every arrow key.
     const cursorOnlyPaint = dirty === DIRTY_NONE && cursorMoved;
 
     if (this.dirtyRowMask.length !== terminal.rows) {
       this.resetRowCache(terminal.rows);
     }
-    // Scrolled viewports, overlays, and images are derived surfaces rather than
-    // the model's active grid, so they bypass and invalidate the row cache.
+    // Scrolled viewports, overlays and images are derived surfaces, so they bypass and
+    // invalidate the row cache.
     const gridCells = terminal.cols * terminal.rows;
     const canCacheRows = gridCells >= ROW_VERTEX_CACHE_MIN_CELLS
       && !this.rowCacheOverBudget
@@ -575,8 +500,8 @@ export class WebGlTerminalRenderer {
       let dirtyRows = 0;
       const markRow = (row: number) => {
         if (row < 0 || row >= terminal.rows) return;
-        // Match ghostty-web's own canvas renderer: include neighboring rows so
-        // a grapheme whose pixels cross a row boundary is cleared and rebuilt.
+        // Include neighboring rows, as ghostty-web's canvas renderer does, so a grapheme
+        // crossing a row boundary is cleared and rebuilt.
         rowsToPaint[row] = 1;
         if (row > 0) rowsToPaint[row - 1] = 1;
         if (row + 1 < terminal.rows) rowsToPaint[row + 1] = 1;
@@ -586,26 +511,15 @@ export class WebGlTerminalRenderer {
         markRow(row);
         dirtyRows += 1;
       }
-      // The model's dirty set covers the cursor only when it changes row.
-      // Measured with scripts/bench-terminal-dirty-rows.mjs against the
-      // vendored WASM: a cross-row CUP reports both the vacated and the
-      // arrived row, but a move within one row ("\x1b[2;9H", "\x1b[D") and a
-      // visibility toggle ("\x1b[?25l") report DIRTY_NONE — no rows at all.
-      //
-      // A bare move (DIRTY_NONE, no other dirty rows) would leave the old
-      // inverted cursor on screen until unrelated output triggers a paint. When
-      // riding along with an unrelated dirty row in a PARTIAL frame, the
-      // cursor's row is not in the set and the cursor stays baked into the
-      // cached row at the old column. Repainting both the vacated and arrived
-      // rows costs at most six rows and covers both cases. ghostty-web's own
-      // canvas renderer compensates the same way.
+      // The model's dirty set covers the cursor only on a row change. Measured with
+      // scripts/bench-terminal-dirty-rows.mjs: a within-row move and a visibility toggle
+      // report DIRTY_NONE, so repaint both the vacated and arrived rows, at most six.
       if (cursorMoved && (cursorRow !== null || this.lastCursorRow !== null)) {
         if (cursorRow !== null) markRow(cursorRow);
         if (this.lastCursorRow !== null) markRow(this.lastCursorRow);
         dirtyRows += 1;
       }
-      // PARTIAL with no rows would leave an unknowable stale surface. It should
-      // not occur, but a full paint is the safe failure mode if the ABI drifts.
+      // PARTIAL with no rows should not occur; a full paint is the safe failure mode.
       if (dirtyRows === 0) {
         fullPaint = true;
         rowsToPaint.fill(1);
@@ -623,20 +537,15 @@ export class WebGlTerminalRenderer {
     const cursorBg = this.cursorBgPacked;
     const cursorFg = this.defaultBgPacked;
     const cells = viewportCells ?? terminal.getViewport();
-    // Two cell passes, so an image can be drawn between them. bgVertices holds
-    // ONLY the per-cell non-default background fills; everything else a cell
-    // paints — selection/search tints, the cursor block, glyphs, underlines —
-    // is foreground, and draws after the under-text images so neither the
-    // cursor nor a selection can vanish behind one.
+    // Two cell passes, so an image can draw between them. bgVertices holds ONLY
+    // non-default background fills; everything else a cell paints is foreground.
     const bgVertices = this.cellBgVertices;
     const fgVertices = this.cellFgVertices;
     bgVertices.reset();
     fgVertices.reset();
     const glyphCountBefore = this.glyphs.size;
     const atlasGenerationBefore = this.atlasGeneration;
-    // Resolve overlays into per-row column spans once per frame so the cell
-    // loop only checks the (typically 0-2) spans on its own row. Outlines are
-    // geometric borders and render in a dedicated pass after the cells.
+    // Resolve overlays into per-row spans once per frame; outlines get their own pass.
     const spansByRow: Array<OverlaySpan[] | undefined> = new Array(terminal.rows);
     const outlines: Array<{ startRow: number; startCol: number; endRow: number; endCol: number; rgb: PackedRgb; alpha: number }> = [];
     for (const overlay of overlays ?? []) {
@@ -655,8 +564,7 @@ export class WebGlTerminalRenderer {
         (spansByRow[row] ??= []).push({ startCol, endCol, rgb, alpha, kind: overlay.kind });
       }
     }
-    // TEMP (blank-on-split): count printable cells dropped by the width/null
-    // skip below, to distinguish "cells array too short" from "width===0".
+    // TEMP (blank-on-split): distinguishes "cells array too short" from "width===0".
     let printableSkippedNull = 0;
     let printableSkippedZeroWidth = 0;
 
@@ -669,8 +577,8 @@ export class WebGlTerminalRenderer {
       if (rowsToPaint[row] === 0) continue;
       paintedRows += 1;
       const rowSpans = spansByRow[row];
-      // A row caches its two passes separately, because the frame concatenates
-      // every row's backgrounds before any row's foregrounds.
+      // A row caches its two passes separately: the frame concatenates every row's
+      // backgrounds before any row's foregrounds.
       const rowBgTarget = canCacheRows
         ? this.rowVertexBuffer(this.rowBgVertices, row, terminal.cols, ROW_BG_QUADS_PER_CELL)
         : bgVertices;
@@ -689,8 +597,7 @@ export class WebGlTerminalRenderer {
           if (cell && cell.codepoint > 32) {
             printableSkippedZeroWidth += 1;
           } else if (!cell) {
-            // Only count as a "printable" miss if this index is in-bounds for
-            // the model grid but absent from the cells array.
+            // A miss only counts when the index is in-bounds for the model grid.
             if (row * terminal.cols + col < terminal.cols * terminal.rows) {
               printableSkippedNull += 1;
             }
@@ -748,16 +655,14 @@ export class WebGlTerminalRenderer {
       }
     }
 
-    // Settle the printable count before the budget check below can release the
-    // per-row totals it is derived from.
+    // Settle the printable count before the budget check releases its inputs.
     const sampleModelPrintable = canCacheRows ? this.modelPrintable : frameModelPrintable;
 
     let retainedRowVertexBytes = 0;
     let retainedStagingBytes = this.cellBgVertices.capacityBytes + this.cellFgVertices.capacityBytes;
     if (canCacheRows) {
-      // Concatenate in pass order, not row order: every row's backgrounds form
-      // the first draw, every row's foregrounds the second, so an image tier can
-      // be drawn between them exactly as it is on the direct path.
+      // Concatenate in pass order, not row order, so an image tier can be drawn between
+      // the two draws exactly as on the direct path.
       bgVertices.reset();
       fgVertices.reset();
       for (const row of this.rowBgVertices) {
@@ -768,13 +673,9 @@ export class WebGlTerminalRenderer {
       }
       retainedRowVertexBytes = this.retainedRowVertexBytes();
       retainedStagingBytes = this.retainedStagingBytes();
-      // A styled cell can emit several quads. If real content grows the cache
-      // past the guardrail, release the rows and keep this grid on the direct
-      // renderer until its next resize. The frame already built above is
-      // unaffected: it was concatenated into the two cell buffers the draw
-      // reads from. Releasing here rather than after the draw is what makes it
-      // happen exactly once — canCacheRows requires !rowCacheOverBudget, so
-      // this branch is unreachable on every later frame of the episode.
+      // Content crossing the guardrail releases the rows and keeps this grid on the
+      // direct renderer until its next resize; the frame built above is unaffected.
+      // Releasing here happens exactly once — canCacheRows requires !rowCacheOverBudget.
       if (retainedRowVertexBytes > ROW_VERTEX_CACHE_MAX_BYTES) {
         this.rowCacheOverBudget = true;
         this.releaseRowCache(terminal.rows);
@@ -783,8 +684,8 @@ export class WebGlTerminalRenderer {
       }
     }
 
-    // Outlines are the last thing on the frame, after every image pass, so a
-    // selected block's border stays legible over an image drawn above the text.
+    // Outlines are last, after every image pass, so a selected block's border stays
+    // legible over an image drawn above the text.
     const outlineVertices = this.outlineVertices;
     outlineVertices.reset();
 
@@ -795,10 +696,8 @@ export class WebGlTerminalRenderer {
       const right = Math.min(terminal.cols, outline.endCol) * this.cellWidth * scale;
       if (right <= left || bottom <= top) continue;
       const thickness = scale;
-      // Only draw an edge that is a real boundary of the outlined region (see
-      // visibleOutlineEdges): a block taller than the screen has its top/bottom
-      // off-screen, and drawing them clamped to the viewport makes the outline
-      // look like a box wrapping the whole terminal.
+      // Only real boundaries of the region (see visibleOutlineEdges): a block taller
+      // than the screen would otherwise draw a box around the terminal.
       const { drawTop, drawBottom } = visibleOutlineEdges(outline.startRow, outline.endRow, terminal.rows);
       if (drawTop) {
         this.pushSolidQuad(outlineVertices, left, top, right - left, thickness, outline.rgb, outline.alpha);
@@ -819,9 +718,8 @@ export class WebGlTerminalRenderer {
       }
     }
 
-    // Kitty's three z tiers, in draw order. The set is tiny (0 to a handful),
-    // so it is filtered rather than assumed sorted; within a tier the caller's
-    // order is kept, which is the placement store's z-then-id order.
+    // Kitty's three z tiers, in draw order; filtered rather than assumed sorted, and
+    // the caller's z-then-id order is kept within a tier.
     const imageQuads = images ?? [];
     const underBackground = imageQuads.filter((q) => q.z < KITTY_Z_UNDER_BACKGROUND);
     const underText = imageQuads.filter((q) => q.z >= KITTY_Z_UNDER_BACKGROUND && q.z < 0);
@@ -875,16 +773,9 @@ export class WebGlTerminalRenderer {
     this.glyphs.clear();
   }
 
-  // One textured quad per image, each with its own texture. Called once per z
-  // tier, so it must leave the GL state exactly as it found it — the cell and
-  // outline passes run between the calls. Placements are rare (0 to a handful),
-  // so a few extra tiny draw calls cost less than threading a second sampler
-  // through the shader the grid renderer shares. Returns how many actually drew.
-  //
-  // The image pass composites with STRAIGHT alpha: the glyph pipeline is
-  // premultiplied, but UNPACK_PREMULTIPLY_ALPHA_WEBGL only applies to uploads
-  // from DOM elements, and these pixels arrive as a raw byte view. The blend and
-  // the bound atlas are both restored before returning.
+  // One textured quad per image, once per z tier, so it must leave the GL state
+  // exactly as it found it. Composites with STRAIGHT alpha, since the premultiply
+  // flag only applies to DOM-element uploads. Returns how many drew.
   private drawImages(quads: readonly WebGlImageQuad[], scale: number): number {
     if (quads.length === 0) return 0;
     const gl = this.gl;
@@ -907,8 +798,7 @@ export class WebGlTerminalRenderer {
         quad.sourceY / height,
         (quad.sourceX + quad.sourceWidth) / width,
         (quad.sourceY + quad.sourceHeight) / height,
-        // The color-glyph path passes the texel through, scaled by quad alpha:
-        // exactly "draw this texture" once the alpha is 1.
+        // The color-glyph path passes the texel through, scaled by quad alpha.
         PACKED_WHITE,
         1,
         GLYPH_MODE_COLOR,
@@ -919,15 +809,13 @@ export class WebGlTerminalRenderer {
       drawn += 1;
     }
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    // The cell and outline passes sample the glyph atlas, so hand the unit back
-    // before returning.
+    // The cell and outline passes sample the glyph atlas; hand the unit back.
     gl.bindTexture(gl.TEXTURE_2D, this.texture);
     return drawn;
   }
 
-  // The GPU texture for one image, uploaded on first use. Null when the blob
-  // cannot be drawn — it says why rather than uploading a texture whose stride
-  // is wrong, which renders as plausible garbage instead of failing.
+  // The GPU texture for one image, uploaded on first use. Null when the blob cannot
+  // be drawn: a wrong stride renders plausible garbage instead of failing.
   private imageTexture(source: WebGlImageSource): WebGLTexture | null {
     const key = `${source.imageId}:${source.generation}`;
     const existing = this.imageTextures.get(key);
@@ -955,8 +843,8 @@ export class WebGlTerminalRenderer {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    // Rows of an RGB image are 3 bytes per pixel and land on any byte boundary;
-    // the default 4-byte unpack alignment would shear every odd-width image.
+    // RGB rows are 3 bytes per pixel; the default 4-byte unpack alignment would shear
+    // every odd-width image.
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(
       gl.TEXTURE_2D,
@@ -984,22 +872,14 @@ export class WebGlTerminalRenderer {
   }
 
   // Drop every cached glyph so the next render re-rasterizes against the current
-  // document fonts. Used when a web font (e.g. the bundled Nerd Font) finishes
-  // loading after the first glyphs were already rasterized with a fallback face:
-  // those stale bitmaps would otherwise be served from the cache forever. The
-  // caller is responsible for forcing a redraw afterwards.
+  // document fonts; a late web font would otherwise serve fallbacks forever.
   invalidateGlyphCache(): void {
     this.reseedAtlas();
   }
 
-  // Re-metric this renderer for a new font size in place, instead of tearing
-  // down and reconstructing the WASM model + WebGL context on every font-size
-  // change. WKWebView has a small pool of live WebGL contexts; rebuilding every
-  // mounted pane (active + warm hidden) on a font change pressures that pool
-  // and can permanently break panes with a lost/failed context. This does not
-  // touch canvas sizing — the caller re-asserts cols/rows via resize() so
-  // hidden panes' canvases stay consistent with the model without needing a
-  // container measurement.
+  // Re-metric in place rather than reconstructing the WASM model + WebGL context:
+  // WKWebView's small context pool can permanently break a rebuilt pane. The caller
+  // re-asserts cols/rows via resize().
   setFontSize(fontSize: number): void {
     this.fontSize = fontSize;
     const metricsCanvas = document.createElement('canvas');
@@ -1012,10 +892,8 @@ export class WebGlTerminalRenderer {
     this.cellHeight = Math.max(1, Math.ceil(fontSize * 1.45));
     this.baseline = Math.ceil(fontSize * 1.1);
     this.metricsDirty = true;
-    // Cached row vertices carry pixel geometry built from the old cell metrics.
-    // invalidateGlyphCache() happens to drop them too (a reseeded atlas moves
-    // every UV), but geometry is its own reason and has to survive someone
-    // making the atlas survivable.
+    // Cached row vertices carry geometry from the old cell metrics; a reseeded atlas
+    // drops them too, but geometry is its own reason.
     this.rowCacheValid = false;
     this.invalidateGlyphCache();
   }
@@ -1026,13 +904,10 @@ export class WebGlTerminalRenderer {
     this.gl.vertexAttribPointer(location, size, this.gl.FLOAT, false, stride, offset);
   }
 
-  // `quadsPerCell` is how many quads a cell is expected to contribute to this
-  // pass, and only sets the starting capacity — the buffer grows on demand, so
-  // an underestimate costs one reallocation rather than a wrong frame. The two
-  // passes are estimated differently on purpose: a foreground cell draws a glyph
-  // and can add a tint, an underline, or a strikethrough, while a background
-  // draws at most one quad and only for a non-default color, which most rows
-  // have none of. Sizing both at a full row is what doubled retained bytes.
+  // `quadsPerCell` only sets the starting capacity, so an underestimate costs one
+  // reallocation. The passes differ on purpose: a foreground cell may add a tint,
+  // underline or strikethrough; a background draws at most one quad. Sizing both at
+  // a full row is what doubled retained bytes.
   private rowVertexBuffer(
     rows: Array<TerminalVertexBuffer | null>,
     row: number,
@@ -1049,8 +924,8 @@ export class WebGlTerminalRenderer {
     return created;
   }
 
-  // What the row cache itself retains: zero on the direct path, so this stays
-  // the legible "is the cache allocated" signal.
+  // What the row cache retains: zero on the direct path, so it stays the legible
+  // "is the cache allocated" signal.
   private retainedRowVertexBytes(): number {
     let bytes = 0;
     for (const row of this.rowBgVertices) bytes += row?.capacityBytes ?? 0;
@@ -1058,11 +933,8 @@ export class WebGlTerminalRenderer {
     return bytes;
   }
 
-  // Everything this renderer keeps alive between paints: the retained rows plus
-  // the frame buffers they concatenate into, which hold a second full-frame
-  // copy of the same content. Reported, not gated — see
-  // ROW_VERTEX_CACHE_MAX_BYTES — so a memory receipt covers both halves instead
-  // of the rows alone.
+  // Everything kept alive between paints: retained rows plus the frame buffers they
+  // concatenate into. Reported, not gated — see ROW_VERTEX_CACHE_MAX_BYTES.
   private retainedStagingBytes(): number {
     return this.cellBgVertices.capacityBytes
       + this.cellFgVertices.capacityBytes
@@ -1075,8 +947,8 @@ export class WebGlTerminalRenderer {
     this.releaseRowCache(rows);
   }
 
-  // Drop the retained rows but keep the over-budget verdict, so a grid that
-  // crossed the ceiling stays on the direct path until it resizes.
+  // Drop the retained rows but keep the over-budget verdict, so the grid stays on
+  // the direct path until it resizes.
   private releaseRowCache(rows: number): void {
     this.rowBgVertices = Array.from({ length: rows }, () => null);
     this.rowFgVertices = Array.from({ length: rows }, () => null);
@@ -1119,8 +991,8 @@ export class WebGlTerminalRenderer {
 
     const context = this.atlasContext;
     const scale = this.dpr;
-    // Emoji clusters (ZWJ/flag/skin-tone/keycap) must be shaped Apple-Color-Emoji
-    // -first or WKWebView's canvas fallback decomposes them; see terminalGlyphFont.
+    // Emoji clusters must be shaped Apple-Color-Emoji-first or WKWebView's canvas
+    // fallback decomposes them; see terminalGlyphFont.
     const font = terminalGlyphFont(style, this.fontSize * scale, this.fontFamily, text);
     context.font = font;
     const width = Math.max(Math.ceil(context.measureText(text).width) + 4, this.cellWidth * scale);
@@ -1131,19 +1003,14 @@ export class WebGlTerminalRenderer {
       this.atlasRowHeight = 0;
     }
     if (this.atlasY + height >= this.atlasSize) {
-      // Atlas is full: grow it (doubling, up to the cap) so glyph-heavy sessions
-      // get more room instead of thrashing; only clear-and-reuse once at the cap.
+      // Atlas full: grow (doubling, capped); only clear-and-reuse once at the cap.
       if (this.atlasSize < MAX_ATLAS_SIZE) {
         this.growAtlas();
       } else {
         this.resetAtlas();
       }
-      // growAtlas/resetAtlas resize the backing canvas, and resizing a canvas
-      // resets ALL 2D context state (font included) to defaults. Re-apply the
-      // font so THIS glyph -- the one that triggered the grow -- is rasterized
-      // with the intended font instead of the browser default. Without this the
-      // wrong bitmap is cached, and the render() retry reuses the cache so it
-      // never self-corrects.
+      // Resizing a canvas resets ALL 2D context state, font included. Re-apply it, or
+      // the wrong bitmap is cached and the render() retry reuses it forever.
       context.font = font;
     }
 
@@ -1172,32 +1039,25 @@ export class WebGlTerminalRenderer {
     return glyph;
   }
 
-  // Double the atlas (up to the cap) when a glyph-heavy session fills it, then
-  // re-seed at the new size. Glyph-light sessions never call this and stay at
-  // INITIAL_ATLAS_SIZE.
+  // Double the atlas (capped) and re-seed; glyph-light sessions never call this.
   private growAtlas(): void {
     this.atlasSize = nextAtlasSize(this.atlasSize, MAX_ATLAS_SIZE);
     this.reseedAtlas();
   }
 
-  // Clear the glyph cache and reuse the atlas at its current size. Only reached
-  // once the atlas has already grown to the cap.
+  // Clear the glyph cache and reuse the atlas; only reached once it is at the cap.
   private resetAtlas(): void {
     this.reseedAtlas();
   }
 
-  // Clear the glyph cache and (re)initialize the backing canvas + GPU texture at
-  // the current atlas size, re-seeding the solid white texel at (0,0). Setting
-  // the canvas dimensions also clears its bitmap, so this covers both same-size
-  // resets and post-grow reallocations. Bumps the generation so an in-flight
-  // frame re-rasterizes against the fresh atlas (see render()'s retry). Resetting
-  // the 2D context state here is recovered by getGlyph, which re-applies the font
-  // both before measuring and again after a grow, before drawing.
+  // Clear the glyph cache and (re)initialize the backing canvas + GPU texture at the
+  // current size, re-seeding the white texel at (0,0) and bumping the generation so
+  // an in-flight frame re-rasterizes (see render()'s retry).
   private reseedAtlas(): void {
     this.glyphs.clear();
     this.codepointGlyphs.clear();
-    // Cached vertices carry UVs into this atlas. Once it moves, every row has
-    // to be rebuilt before it can be concatenated into another frame.
+    // Cached vertices carry UVs into this atlas: once it moves, every row must be
+    // rebuilt before it can join another frame.
     this.rowCacheValid = false;
     this.atlasX = 2;
     this.atlasY = 1;
@@ -1222,9 +1082,8 @@ export class WebGlTerminalRenderer {
   }
 
   private pushSolidQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, color: PackedRgb, alpha: number): void {
-    // Keep all samples within the white texel. Sampling its edges with LINEAR
-    // filtering blends into transparent atlas neighbours and leaves seams. Mode
-    // 0: tint the (fully-opaque) texel coverage with the quad color.
+    // Keep samples inside the white texel: LINEAR on its edges blends into
+    // transparent neighbours and leaves seams. Mode 0 tints its coverage.
     this.pushQuad(vertices, x, y, width, height, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, this.solidTexelCenter, color, alpha, GLYPH_MODE_TINT);
   }
 
@@ -1248,8 +1107,7 @@ export class WebGlTerminalRenderer {
   }
 
   private pushTexturedQuad(vertices: TerminalVertexBuffer, x: number, y: number, width: number, height: number, glyph: AtlasGlyph, color: PackedRgb, alpha: number): void {
-    // Color glyphs (emoji) carry their own colors and use mode 1 so the shader
-    // passes the atlas RGBA through; monochrome glyphs use mode 0 and are tinted.
+    // Color glyphs use mode 1 (atlas RGBA passed through); monochrome use mode 0.
     this.pushQuad(vertices, x, y, width, height, glyph.u0, glyph.v0, glyph.u1, glyph.v1, color, alpha, glyph.colored ? GLYPH_MODE_COLOR : GLYPH_MODE_TINT);
   }
 

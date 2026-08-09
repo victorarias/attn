@@ -14,25 +14,13 @@ type sessionStateCause interface {
 	isSessionStateCause()
 }
 
-// liveSignal is the worker poll reporting the state a worker was spawned into.
-// It is what takes a session out of `launching`, and the only claim from outside
-// the resolver about what an agent is doing that still commits — see
-// pty.Source.AppliesState.
-//
-// It used to be the vocabulary of every hook and PTY observation. Those are
-// evidence now: they record what they saw, and the resolver decides what it
-// means. The causes that went with them (a synchronous daemon observation, a
-// timestamped classifier verdict, a process exit) went with them.
+// liveSignal is the worker poll reporting the state a worker was spawned into —
+// what takes a session out of `launching`, and the only claim from outside the
+// resolver that still commits; see pty.Source.AppliesState.
 type liveSignal struct{}
 
-// resolverObservation is the evidence resolver's verdict on its tick. Unlike
-// every other cause it is not an edge reported by a source: it is a re-reading
-// of all the evidence at once, which is what lets it move a session no source
-// spoke about.
-//
-// It carries no timestamp. A resolution is a statement about now, computed from
-// evidence whose own ages the resolver has already weighed, so there is nothing
-// for the store to compare it against.
+// resolverObservation is the resolver's verdict on its tick: all evidence re-read
+// at once, so it can move a session no source spoke about. No timestamp.
 type resolverObservation struct{}
 
 // pluginReport carries the active driver run cursor used for ordered state CAS.
@@ -45,26 +33,32 @@ type pluginReport struct {
 // barrier. It deliberately produces no per-session effects or broadcasts.
 type startupRecovery struct{}
 
+// hostExitRecovery is a conversation session whose headless host is gone while
+// the daemon is still running. It moves the session to `recoverable`, which the
+// resolver does not own, so the exit evidence the same death recorded cannot
+// then settle it to something that reads as finished.
+//
+// It broadcasts, unlike startupRecovery: a client is watching this session right
+// now and its whole picture of "can I type here?" comes off the state.
+type hostExitRecovery struct{}
+
 func (liveSignal) isSessionStateCause()          {}
 func (resolverObservation) isSessionStateCause() {}
 func (pluginReport) isSessionStateCause()        {}
 func (startupRecovery) isSessionStateCause()     {}
+func (hostExitRecovery) isSessionStateCause()    {}
 
 type sessionStateChange struct {
 	sessionID string
 	state     string
 	cause     sessionStateCause
-	// origin describes the evidence behind the change for the diagnostic trace.
-	// It is optional: a caller that leaves it zero is traced under its cause
-	// name, which is all a daemon-internal transition has to say about itself.
-	// It never affects whether the change commits.
+	// origin describes the evidence behind the change for the diagnostic trace;
+	// optional (zero traces under the cause name) and never affects the commit.
 	origin stateOrigin
 }
 
-// stateOrigin is where a state claim came from, as distinct from the commit rule
-// it travels under. Several sources share one cause — every trusted PTY
-// observation is a liveSignal — so the cause alone cannot tell a screen scrape
-// from an approval edge when a color turns out wrong.
+// stateOrigin is where a state claim came from, as distinct from the commit
+// rule it travels under; several sources share one cause.
 type stateOrigin struct {
 	source     string
 	detail     string
@@ -89,6 +83,8 @@ func stateEffectProfileFor(cause sessionStateCause) (stateEffectProfile, bool) {
 		return stateEffectProfile{touch: true, syncNudge: true, broadcast: true}, true
 	case startupRecovery:
 		return stateEffectProfile{}, true
+	case hostExitRecovery:
+		return stateEffectProfile{syncNudge: true, broadcast: true}, true
 	default:
 		return stateEffectProfile{}, false
 	}
@@ -104,6 +100,8 @@ func sessionStateCauseName(cause sessionStateCause) string {
 		return "plugin_report"
 	case startupRecovery:
 		return "startup_recovery"
+	case hostExitRecovery:
+		return "host_exit_recovery"
 	default:
 		return "unknown"
 	}
@@ -126,9 +124,8 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.doorbellMu.Lock()
 	}
-	// Unconditional, unlike the nudge lock above: syncAutoSettle runs for every
-	// cause, so every state write has to be ordered against a timer that may be
-	// deciding to settle right now. See autoSettleFireMu.
+	// Unconditional: every state write must be ordered against a timer that may
+	// be deciding to settle right now. See autoSettleFireMu.
 	d.autoSettleFireMu.Lock()
 	applied := d.commitSessionState(change)
 	d.autoSettleFireMu.Unlock()
@@ -147,16 +144,9 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	}
 	d.traceStateChange(change, statetrace.OutcomeApplied, "")
 
-	// A turn opens on a state and closes only when the user settles it, so this
-	// is the one place a turn ever opens. It runs for every cause, including
-	// startup recovery: a session that comes back in a state that wants the user
-	// wants the user regardless of what moved it there. Opening is guarded in the
-	// store, so a state re-reported while a turn is already open changes nothing.
-	//
-	// A snooze suppresses that, which is the whole of the deferral: the state is
-	// still committed and still broadcast, it simply does not put the agent back
-	// on the user's plate. A state that breaks through clears the snooze inside
-	// the check and falls through to open the turn it would have opened anyway.
+	// The one place a turn ever opens; runs for every cause and the store guards
+	// re-opens. A snooze suppresses only this — the state is still committed and
+	// broadcast — and a state that breaks through clears the snooze in the check.
 	if attention.OpensTurn(protocol.SessionState(change.state)) &&
 		!d.snoozeSuppressesTurn(change.sessionID, protocol.SessionState(change.state)) {
 		d.store.OpenTurnIfClosed(change.sessionID, time.Now())
@@ -174,10 +164,8 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.syncNudge {
 		d.syncNudgeForState(change.sessionID, change.state)
 	}
-	// After the turn is opened above, so a state that both opens a turn and is
-	// `working` is impossible to see half-applied. It runs for every cause,
-	// including startup recovery: a session restored into `working` with a turn
-	// still owed is exactly the case auto-settle exists for.
+	// After the turn open above, so a state that both opens a turn and is
+	// `working` is never seen half-applied; runs for every cause.
 	d.syncAutoSettle(change.sessionID, change.state)
 	if profile.broadcast {
 		d.broadcastSessionStateChanged(change.sessionID)
@@ -187,7 +175,7 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 
 func (d *Daemon) commitSessionState(change sessionStateChange) bool {
 	switch cause := change.cause.(type) {
-	case liveSignal, startupRecovery, resolverObservation:
+	case liveSignal, startupRecovery, resolverObservation, hostExitRecovery:
 		return d.store.UpdateState(change.sessionID, change.state)
 	case pluginReport:
 		return d.store.ApplyAgentDriverState(change.sessionID, cause.runID, cause.seq, change.state)

@@ -1,16 +1,10 @@
-// Package hostsession owns the headless agent hosts the daemon runs beside its
-// PTY sessions.
+// Package hostsession owns the daemon's headless agent hosts: one child
+// process per attn session, envelopes out on fd 3, verbs in on stdin, its own
+// stdout/stderr to a log file.
 //
-// A host is one child process per attn session that speaks a conversation
-// rather than a terminal: envelopes out on fd 3, verbs in on stdin, its own
-// stdout and stderr to a log file. The daemon never parses a host's render
-// bodies; it stamps them with the session and forwards them.
-//
-// The lifecycle rule this package exists to enforce: a host is spawned as a
-// PROCESS-GROUP LEADER and the group is killed, not the process. Hard-killing
-// the host alone orphans the tool subprocesses it started — reproduced three
-// times against pi 0.83.0 on 2026-08-04 — so every teardown path here ends in a
-// group sweep, including the paths where the host exits on its own.
+// Invariant: a host is spawned as a process-group leader and every teardown
+// path ends in a group sweep — hard-killing the host alone orphans its tool
+// subprocesses (reproduced 3x against pi 0.83.0, 2026-08-04).
 package hostsession
 
 import (
@@ -24,15 +18,20 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/victorarias/attn/internal/procreap"
 )
 
-// Event is one envelope a host emitted, already split into the parts the
-// daemon acts on (session, seq, kind) and the part it only forwards (body).
+// Event is one host envelope: the daemon acts on session/seq/kind, forwards Body.
 type Event struct {
 	SessionID string
 	Seq       int
 	Kind      string
 	Body      map[string]interface{}
+	// LifecycleID matches the run this host was spawned for, for the same
+	// reason ExitInfo carries one: a superseded host that is still draining
+	// must not be able to describe the session that replaced it.
+	LifecycleID string
 }
 
 // ExitInfo reports a host that is gone, after its group has been swept.
@@ -40,69 +39,57 @@ type ExitInfo struct {
 	SessionID string
 	ExitCode  int
 	Signal    string
-	// LifecycleID matches the run this host was spawned for, so a late exit
-	// from a superseded host cannot retire the session that replaced it.
+	// LifecycleID matches the spawning run, so a late exit from a superseded
+	// host cannot retire the session that replaced it.
 	LifecycleID string
 }
 
+// SpawnOptions configures Spawn.
 type SpawnOptions struct {
 	SessionID   string
 	LifecycleID string
 	Command     []string
 	Env         []string
 	CWD         string
-	// LogPath collects the host's own stdout and stderr. pi loads the user's
-	// extensions, and any of them may print; keeping that away from the
-	// envelope fd is why the envelopes have their own.
+	// LogPath collects the host's own stdout/stderr, kept off the envelope fd.
 	LogPath string
+	// RegistryPath is where the host's durable record lives (see registry.go).
+	// Written right after spawn, removed once the host is fully gone, and read
+	// by `attn profile clean` to reap hosts a dead daemon left behind. Empty
+	// means no record is kept.
+	RegistryPath string
 }
 
-// terminationGrace is how long a host gets to tear down cooperatively after
-// SIGTERM before the group is killed outright.
-//
-// Receipt (2026-08-05, this machine, compiled host, pi 0.83.0): SIGTERM to
-// process exit measured 3 ms across four idle hosts, and 3 ms for a host
-// mid-run with a live `sleep 47` bash tool — whose subprocess was gone by the
-// time the host had exited, because pi's own dispose tears its tools down.
-// 3 s is a tripwire a thousand times past that: a host that reaches it is
-// wedged, not busy, and the log says so.
+// terminationGrace bounds cooperative teardown after SIGTERM before the group
+// is killed outright. Measured: 3 ms SIGTERM-to-exit (pi 0.83.0, idle and
+// mid-run, 2026-08-05); 3 s is a tripwire — reaching it means wedged, not busy.
 const terminationGrace = 3 * time.Second
 
-// envelopeDrainGrace bounds how long a dead host's exit waits for its envelope
-// stream to finish.
-//
-// The exit must not be announced before the last envelope is delivered: the
-// daemon turns it into `session_exited`, and a client that sees the session end
-// before the run that was closing it would draw a run stuck open on a dead
-// session. Draining costs only the time to consume what the pipe already holds
-// — a pipe buffer is 64 KB — so this is microseconds of work.
-//
-// It is bounded because EOF is not guaranteed. pi spawns tool subprocesses that
-// inherit the host's fds and lead their own process groups, so one that outlives
-// the host and escapes the group sweep would hold the write end open forever and
-// the exit would never be announced. 2 s is many orders of magnitude past the
-// real drain; reaching it means something still holds the fd, which the log
-// names before the read end is closed out from under it.
+// envelopeDrainGrace bounds waiting out a dead host's envelope stream: the exit
+// must not be announced before the last envelope, but a tool child that
+// inherited fd 3 can hold the pipe open forever; 2 s means something holds it.
 const envelopeDrainGrace = 2 * time.Second
 
 type host struct {
-	sessionID   string
-	lifecycleID string
-	cmd         *exec.Cmd
-	pgid        int
-	stdin       *os.File
-	envelopes   *os.File
-	logFile     *os.File
-	// reaped closes as soon as the process is gone; exited closes once the
-	// host is fully finished — drained, deregistered, and about to be
-	// announced. Kill escalates on the first and returns on the second, so a
-	// caller that gets a nil error can spawn the same session id again.
+	sessionID    string
+	lifecycleID  string
+	cmd          *exec.Cmd
+	pgid         int
+	registryPath string
+	stdin        *os.File
+	envelopes    *os.File
+	logFile      *os.File
+	// reaped closes when the process is gone; exited once teardown is complete —
+	// drained and deregistered, so a caller that gets a nil error from Kill can
+	// spawn the same session id again. Kill escalates on the first, returns on
+	// the second.
 	reaped   chan struct{}
 	exited   chan struct{}
 	drained  chan struct{}
 	killOnce sync.Once
 }
 
+// Manager spawns and tears down the daemon's host processes.
 type Manager struct {
 	logf    func(format string, args ...interface{})
 	onEvent func(Event)
@@ -112,6 +99,7 @@ type Manager struct {
 	hosts map[string]*host
 }
 
+// New builds a Manager; nil callbacks are replaced with no-ops.
 func New(logf func(format string, args ...interface{}), onEvent func(Event), onExit func(ExitInfo)) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
@@ -125,8 +113,10 @@ func New(logf func(format string, args ...interface{}), onEvent func(Event), onE
 	return &Manager{logf: logf, onEvent: onEvent, onExit: onExit, hosts: make(map[string]*host)}
 }
 
+// ErrNotFound reports a session id with no live host.
 var ErrNotFound = errors.New("host session not found")
 
+// Spawn starts a host for the session as a process-group leader.
 func (m *Manager) Spawn(opts SpawnOptions) error {
 	if opts.SessionID == "" {
 		return errors.New("host spawn needs a session id")
@@ -167,8 +157,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	cmd.Stderr = logFile
 	// ExtraFiles[0] is the child's fd 3 — the envelope stream.
 	cmd.ExtraFiles = []*os.File{envelopeW}
-	// The whole point: the child leads its own process group, so its tool
-	// subprocesses are reachable as one unit no matter how it dies.
+	// The child leads its own process group so teardown can sweep it as a unit.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -179,22 +168,32 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		stdinW.Close()
 		return fmt.Errorf("start host %v: %w", opts.Command, err)
 	}
-	// The child owns its copies now; holding ours open would keep the envelope
-	// reader from ever seeing EOF.
+	// Close our copies or the envelope reader never sees EOF.
 	envelopeW.Close()
 	stdinR.Close()
 
 	h := &host{
-		sessionID:   opts.SessionID,
-		lifecycleID: opts.LifecycleID,
-		cmd:         cmd,
-		pgid:        cmd.Process.Pid,
-		stdin:       stdinW,
-		envelopes:   envelopeR,
-		logFile:     logFile,
-		reaped:      make(chan struct{}),
-		exited:      make(chan struct{}),
-		drained:     make(chan struct{}),
+		sessionID:    opts.SessionID,
+		lifecycleID:  opts.LifecycleID,
+		cmd:          cmd,
+		pgid:         cmd.Process.Pid,
+		registryPath: opts.RegistryPath,
+		stdin:        stdinW,
+		envelopes:    envelopeR,
+		logFile:      logFile,
+		reaped:       make(chan struct{}),
+		exited:       make(chan struct{}),
+		drained:      make(chan struct{}),
+	}
+	// The durable record must exist before anything can observe the host: a
+	// daemon that dies right after this line has already left the trace `attn
+	// profile clean` reaps by. A failed write is logged, not fatal — the host
+	// is healthy, only the crash-recovery net has a hole the log names.
+	if opts.RegistryPath != "" {
+		entry := procreap.NewEntry(opts.SessionID, cmd.Process.Pid, cmd.Process.Pid, opts.Command)
+		if err := procreap.WriteEntry(opts.RegistryPath, entry); err != nil {
+			m.logf("host session %s: recording host registry entry failed: %v", opts.SessionID, err)
+		}
 	}
 	m.mu.Lock()
 	m.hosts[opts.SessionID] = h
@@ -220,18 +219,10 @@ func openLog(path string) (*os.File, error) {
 	return file, nil
 }
 
-// maxEnvelopeBytes bounds one line off the envelope fd.
-//
-// Receipt: the largest body this protocol version produces is a `message_end`
-// carrying one whole assistant message, so the bound is the model's per-response
-// output cap. The largest `maxTokens` in pi 0.83.0's model catalog is 2,000,000
-// (vercel-ai-gateway, xai/grok-4.20-multi-agent); at 4 bytes per token — the
-// worst case for UTF-8 — that is 8 MB of text. 64 MB is 8x past the largest
-// message any model in the catalog can emit, and the scanner starts at 64 KB
-// and grows only on demand, so the ceiling costs nothing until something
-// abnormal reaches for it. A line that exceeds it is a protocol violation, and
-// the host is torn down naming the limit rather than silently truncating the
-// conversation.
+// maxEnvelopeBytes bounds one line off the envelope fd. Receipt: the largest
+// body is one assistant message; pi 0.83.0's largest catalog maxTokens is
+// 2,000,000 ≈ 8 MB at 4 bytes/token, so 64 MB is 8x past it. Exceeding it is a
+// protocol violation — the host is torn down naming the limit, never truncated.
 const maxEnvelopeBytes = 64 << 20
 
 func (m *Manager) readEnvelopes(h *host, r *os.File) {
@@ -261,12 +252,17 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 		if envelope.Body == nil {
 			envelope.Body = map[string]interface{}{}
 		}
-		// The host stamps its own session id; the daemon trusts the process it
-		// spawned, not the field, so a mismatch is a bug worth naming.
+		// The daemon trusts the process it spawned, not the stamped session id.
 		if envelope.SessionID != "" && envelope.SessionID != h.sessionID {
 			m.logf("host session %s: envelope claims session %s; using the spawned one", h.sessionID, envelope.SessionID)
 		}
-		m.onEvent(Event{SessionID: h.sessionID, Seq: envelope.Seq, Kind: envelope.Kind, Body: envelope.Body})
+		m.onEvent(Event{
+			SessionID:   h.sessionID,
+			Seq:         envelope.Seq,
+			Kind:        envelope.Kind,
+			Body:        envelope.Body,
+			LifecycleID: h.lifecycleID,
+		})
 	}
 	if err := scanner.Err(); err != nil {
 		if errors.Is(err, bufio.ErrTooLong) {
@@ -278,16 +274,9 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 	}
 }
 
-// monitor waits for the host to die and then sweeps its process group, on
-// EVERY exit path — cooperative shutdown, crash, kill. This is the sweep that
-// catches the receipted bug: pi orphans its running tool subprocesses when the
-// host goes away without cleaning up.
-//
-// Sweeping after the reap is safe where it matters. A process group's id is
-// held until its LAST member leaves, and a pid cannot be reallocated while a
-// group carries it — so whenever there is actually an orphan to kill, this
-// pgid is still unambiguously ours. When the group is already empty the signal
-// is a harmless ESRCH.
+// monitor reaps the host and sweeps its process group on EVERY exit path — the
+// sweep that catches pi orphaning its tool subprocesses. Post-reap is safe: a
+// pgid is held until its last member leaves; an empty group is a harmless ESRCH.
 func (m *Manager) monitor(h *host) {
 	waitErr := h.cmd.Wait()
 	if err := syscall.Kill(-h.pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
@@ -297,8 +286,7 @@ func (m *Manager) monitor(h *host) {
 	h.stdin.Close()
 	h.logFile.Close()
 
-	// Everything the host said before it died reaches the daemon before the
-	// death does. See envelopeDrainGrace for why this is bounded.
+	// Drain before announcing the exit; see envelopeDrainGrace for the bound.
 	select {
 	case <-h.drained:
 	case <-time.After(envelopeDrainGrace):
@@ -313,6 +301,14 @@ func (m *Manager) monitor(h *host) {
 		delete(m.hosts, h.sessionID)
 	}
 	m.mu.Unlock()
+
+	// The process and its group are gone; retire the durable record so the
+	// registry only ever names hosts that may still be running.
+	if h.registryPath != "" {
+		if err := procreap.RemoveEntry(h.registryPath); err != nil {
+			m.logf("host session %s: removing host registry entry failed: %v", h.sessionID, err)
+		}
+	}
 
 	close(h.exited)
 
@@ -334,9 +330,95 @@ func exitStatus(cmd *exec.Cmd, waitErr error) (int, string) {
 	return state.ExitCode(), ""
 }
 
-// Prompt sends one prompt verb to a live host.
-func (m *Manager) Prompt(sessionID, text string) error {
-	return m.send(sessionID, map[string]interface{}{"verb": "prompt", "text": text})
+// Delivery is when a host should let its agent read a message.
+type Delivery string
+
+const (
+	// DeliveryPrompt is the first word of a run. A host refuses it mid-run.
+	DeliveryPrompt Delivery = "prompt"
+	// DeliverySteer lands at the agent's next turn boundary, interrupting the
+	// run in progress. This is what a doorbell uses.
+	DeliverySteer Delivery = "steer"
+	// DeliveryFollowUp lands only when the run would otherwise settle, so it
+	// queues behind the work instead of cutting into it.
+	DeliveryFollowUp Delivery = "follow_up"
+)
+
+// Deliver sends one message to a live host, to be read at `how`.
+//
+// The host, not this manager, decides what a steer means on a session with no
+// run open: it starts one. So a caller never has to know what the agent is
+// doing to reach it.
+func (m *Manager) Deliver(sessionID string, how Delivery, text string) error {
+	switch how {
+	case DeliveryPrompt, DeliverySteer, DeliveryFollowUp:
+	default:
+		return fmt.Errorf("unsupported host delivery %q", how)
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": string(how), "text": text})
+}
+
+// ToolDetail asks a host for what an expanded tool card shows.
+//
+// The answer does not come back here: it arrives as another envelope on the
+// host's own stream, addressed by the same call id, and reaches every client
+// through the ordinary forwarding path. Two clients with the same card open
+// therefore cost one fetch, and neither has a request to time out.
+//
+// `full` asks for pi's untruncated output file rather than the clipped result
+// it handed the model; it means nothing for a call that produced no such file,
+// and the host answers with what it has.
+func (m *Manager) ToolDetail(sessionID, callID string, full bool) error {
+	if callID == "" {
+		return errors.New("tool detail needs a call id")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "tool_detail", "call_id": callID, "full": full})
+}
+
+// Snapshot asks a host for the whole conversation as it stands.
+//
+// The answer comes back the same way a tool detail's does: as an envelope on the
+// host's own stream, reaching every client. That is deliberate — a snapshot is
+// the conversation's version of the terminal's restore dump, and the point of
+// broadcasting it is that two clients attaching to one session are provably
+// looking at the same transcript rather than two independently assembled ones.
+func (m *Manager) Snapshot(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "snapshot"})
+}
+
+// History asks a host for the page of transcript items older than `before`.
+//
+// The answer travels the same broadcast path a snapshot does, addressed by the
+// anchor rather than by a request — so a second window sitting at the same place
+// in the conversation is served by one read, and a client holding a different
+// anchor drops the page. A host that holds nothing before the anchor answers an
+// empty page rather than nothing at all, which is how a client learns it has
+// reached the start of what this host can serve.
+func (m *Manager) History(sessionID, before string) error {
+	if before == "" {
+		return errors.New("history needs a before cursor")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "history", "before": before})
+}
+
+// SetModel switches the model a host's agent runs on, from its next run.
+//
+// The host answers with a `model_changed` envelope carrying the model actually
+// in force — including when the switch was refused — so nothing here has to
+// guess whether it landed, and every client sees the same answer.
+func (m *Manager) SetModel(sessionID, model string) error {
+	if model == "" {
+		return errors.New("set model needs a model")
+	}
+	return m.send(sessionID, map[string]interface{}{"verb": "set_model", "model": model})
+}
+
+// ClearQueue drops everything the agent has been sent and not yet read.
+//
+// The host answers with the agent's own queue state, so the strip a client is
+// drawing empties on the agent's word rather than on this call returning.
+func (m *Manager) ClearQueue(sessionID string) error {
+	return m.send(sessionID, map[string]interface{}{"verb": "clear_queue"})
 }
 
 func (m *Manager) send(sessionID string, verb map[string]interface{}) error {
@@ -356,6 +438,7 @@ func (m *Manager) send(sessionID string, verb map[string]interface{}) error {
 	return nil
 }
 
+// Has reports whether a live host exists for the session.
 func (m *Manager) Has(sessionID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -363,6 +446,7 @@ func (m *Manager) Has(sessionID string) bool {
 	return ok
 }
 
+// SessionIDs lists the sessions with live hosts.
 func (m *Manager) SessionIDs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -373,17 +457,11 @@ func (m *Manager) SessionIDs() []string {
 	return ids
 }
 
-// Kill tears a host down and returns once its process group is gone and the
-// host is deregistered — a caller that gets a nil error can spawn the same
-// session id again.
-//
-// The cooperative SIGTERM is the load-bearing half, not a courtesy: pi spawns
-// each tool subprocess into its OWN process group (measured 2026-08-05: a bash
-// `sleep 60` runs as the host's child but leads its own group), so the group
-// kill below cannot reach them. What reaches them is pi's dispose, which the
-// host runs on SIGTERM. The group kill is the backstop for the host itself and
-// whatever stayed in its group; a host wedged past the grace window can still
-// strand a detached tool child, and that is the residual this design accepts.
+// Kill tears a host down; nil error means the group is gone and the session id
+// can be respawned. The SIGTERM is load-bearing: pi's tool subprocesses lead
+// their OWN process groups (measured 2026-08-05), so only pi's dispose on
+// SIGTERM reaches them — the group kill is the backstop, and a host wedged past
+// the grace can still strand a detached tool child (accepted residual).
 func (m *Manager) Kill(sessionID string) error {
 	m.mu.Lock()
 	h, ok := m.hosts[sessionID]
@@ -398,9 +476,8 @@ func (m *Manager) Kill(sessionID string) error {
 		}
 	})
 
-	// The grace window is about the process, so it watches reaped; the return is
-	// about the teardown, so it waits out exited. Escalating on exited instead
-	// would count the envelope drain against the host's time to shut down.
+	// Escalate on reaped, return on exited — escalating on exited would count
+	// the envelope drain against the host's grace.
 	select {
 	case <-h.reaped:
 		<-h.exited
@@ -416,8 +493,7 @@ func (m *Manager) Kill(sessionID string) error {
 	return nil
 }
 
-// Shutdown tears down every live host. Used when the daemon itself is going
-// away, so no host outlives the daemon that owns it.
+// Shutdown tears down every live host so none outlives the daemon.
 func (m *Manager) Shutdown() {
 	for _, id := range m.SessionIDs() {
 		if err := m.Kill(id); err != nil && !errors.Is(err, ErrNotFound) {

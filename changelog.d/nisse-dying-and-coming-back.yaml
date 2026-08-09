@@ -1,0 +1,15 @@
+kind: added
+area: sessions
+change: >
+  A conversation session now survives the thing that runs it. If its agent
+  process crashes, is killed, or goes down with the daemon, the session is
+  marked recoverable and the pane offers Reload — which picks the same
+  conversation back up with its history intact rather than starting a new one. A
+  session whose last exchange never finished comes back waiting for you instead
+  of pretending it had nothing left to say. Opening a conversation in a second
+  window now draws the whole of it: both windows show the same transcript, the
+  same running agent, and the same unread queue.
+symptom: >
+  A conversation agent that died took the conversation with it — the pane sat
+  there with a dead composer and no way back — and a window that had not been
+  watching from the start drew an empty conversation and called that the truth.

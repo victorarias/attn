@@ -71,11 +71,25 @@ type LaunchIntent struct {
 	Model         string                       `json:"model,omitempty"`
 	Effort        string                       `json:"effort,omitempty"`
 	ChiefOfStaff  bool                         `json:"chief_of_staff,omitempty"`
+	// ResumeConversationFile is the conversation file a conversation session was
+	// started from. Kept because a revive is a fresh host: one that died before
+	// writing its own session file has to be told again where to fork from, or
+	// it comes back as an empty conversation.
+	ResumeConversationFile string `json:"resume_conversation_file,omitempty"`
 	// UnattendedLaunch is the complete launch contract for sessions launched
 	// unattended (delegation/automations). Persisting the whole contract makes
 	// the store a sufficient authority to relaunch such a session when the
 	// worker registry is gone (machine restart); zero value = attended.
 	UnattendedLaunch launchcontract.UnattendedLaunchSpec `json:"unattended_launch,omitzero"`
+	// InitialPrompt is the launch's first message to the agent, kept only for
+	// runtimes that can tell whether they already received it — conversation
+	// sessions, whose host reopens its own history and delivers this exactly
+	// when that history is empty. A PTY agent has no such test: its relaunch
+	// resumes a transcript, and replaying the prompt there would re-run a
+	// delegation brief the agent already worked through. So this stays empty
+	// for every PTY session; the spawn pipeline fills it only for an agent
+	// whose driver declares the `conversation` capability.
+	InitialPrompt string `json:"initial_prompt,omitempty"`
 }
 
 // New creates a new in-memory store (backed by SQLite :memory:)

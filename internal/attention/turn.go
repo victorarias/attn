@@ -1,13 +1,8 @@
-// Package attention decides whose turn it is.
-//
-// A turn opens on a state and closes only when the user settles it. Nothing the
-// agent does afterwards removes it: an agent you prompt goes back to work still
-// on your list, because it went back to work at your instruction. That makes
-// membership a comparison between two stamps rather than a reading of the
-// current state — state matters only at the instant a turn opens.
-//
-// The package is pure. It derives over protocol values, resolver reasons, and
-// timestamps, and imports neither the store nor the daemon.
+// Package attention decides whose turn it is. A turn opens on a state and
+// closes only when the user settles it — nothing the agent does afterwards
+// removes it, so membership is a comparison of two stamps, not a reading of
+// current state. The package is pure: it derives over protocol values,
+// resolver reasons, and timestamps, importing neither store nor daemon.
 package attention
 
 import (
@@ -18,26 +13,16 @@ import (
 )
 
 // OpensTurn reports whether reaching this state starts a turn the user owes.
+// Opening is guarded on the turn being closed, so re-opening changes nothing.
 //
-// It is the state vocabulary and nothing else: a state that opens a turn while
-// one is already open changes nothing, because opening is guarded on the turn
-// being closed.
-//
-//   - waiting_input, pending_approval, unknown open a turn. The first two are
-//     the agent asking; unknown is the daemon admitting it cannot tell, which is
-//     equally the user's problem.
-//   - idle opens one too, and it covers two cases that are indistinguishable
-//     here on purpose. A run you asked for finished and nobody has read the
-//     result; that it ended without a question makes it no less yours. And a
-//     session you launched and have not yet spoken to sits at its prompt in the
-//     same state — the purest turn there is, since nothing will ever happen in
-//     it until you type.
-//   - launching, working, scheduled never open one: the agent is busy or waiting
-//     on a clock. A session parked on a cron is not among them — see
-//     sessionstate.settled — so a loop you want left alone is silenced by pinning
-//     its workspace, which is filtered below.
-//   - recoverable never opens one either. The daemon revives it unattended, so
-//     surfacing it would hand the user work the daemon is already doing.
+//   - waiting_input, pending_approval, unknown open one (unknown is the daemon
+//     admitting it cannot tell — equally the user's problem).
+//   - idle opens one too, covering both a finished unread run and a
+//     never-spoken-to session at its prompt, indistinguishable on purpose.
+//   - launching, working, scheduled never do (see sessionstate.settled for
+//     cron-parked sessions); recoverable never does — a PTY session is revived
+//     unattended, and a conversation session's own pane offers Reload where the
+//     user is already looking.
 func OpensTurn(state protocol.SessionState) bool {
 	switch state {
 	case protocol.SessionStateWaitingInput,
@@ -51,25 +36,12 @@ func OpensTurn(state protocol.SessionState) bool {
 }
 
 // BreaksSnooze reports whether reaching this state cuts a snooze short.
-//
-// Snoozing says *not now*, and business as usual does not undo it: the agent
-// stopping, asking a question, wanting an approval, or finishing its run are all
-// things the user was deferring when they pressed it. What breaks through is what
-// they could not have anticipated.
-//
-//   - unknown is the daemon admitting it cannot explain the session (reasons
-//     "stuck" and "no_evidence"). A deferral is a judgement about an agent the
-//     user understood; this is the daemon saying that judgement no longer has
-//     anything behind it.
-//   - idle with reason "process_exited" is the agent's process actually gone.
-//     A run that merely ended resolves idle through "prompt_idle" or
-//     "classifier_verdict", so ordinary finishing stays deferred and only dying
-//     rings.
-//
-// The reason arrives as a plain string because that is how it rides the wire and
-// sits in the store, but it is compared against the resolver's own constant: the
-// set is defined by what the resolver means, and a renamed reason must not
-// silently stop breaking through.
+// Business as usual stays deferred; only what the user could not have
+// anticipated breaks through: unknown (the daemon can no longer explain the
+// session), and idle with reason "process_exited" (the process actually died —
+// ordinary finishing resolves idle via other reasons). The reason rides the
+// wire as a string but is compared against the resolver's own constant, so a
+// renamed reason cannot silently stop breaking through.
 func BreaksSnooze(state protocol.SessionState, reason string) bool {
 	switch state {
 	case protocol.SessionStateUnknown:
@@ -86,23 +58,19 @@ type Input struct {
 	OpenedAt  time.Time
 	SettledAt time.Time
 
-	// IsShell excludes terminal panes. A shell is a real store session
-	// registered idle at birth and left there forever, so without this it would
-	// sit in the queue permanently with nothing able to settle it.
+	// IsShell excludes terminal panes: a shell is registered idle at birth and
+	// left there forever, so it would sit in the queue with nothing to settle it.
 	IsShell bool
 
-	// ChiefOfStaff excludes the chief, which has its own anchored slot above the
-	// queue rather than a place in it.
+	// ChiefOfStaff excludes the chief, which has its own anchored slot.
 	ChiefOfStaff bool
 
-	// SessionPinned excludes one individually pinned session, leaving its
-	// workspace and its siblings in the queue. It is the finer-grained half of
-	// WorkspacePinned and filters the same way, for the same reason.
+	// SessionPinned excludes one pinned session, leaving its workspace and
+	// siblings in the queue; the finer-grained half of WorkspacePinned.
 	SessionPinned bool
 
-	// WorkspacePinned and WorkspaceMuted filter at read, not at open: a pinned or
-	// muted session still accumulates OpenedAt, so un-pinning surfaces whatever
-	// was outstanding at its true age instead of starting it from nothing.
+	// WorkspacePinned and WorkspaceMuted filter at read, not at open: OpenedAt
+	// still accumulates, so un-pinning surfaces the turn at its true age.
 	WorkspacePinned bool
 	WorkspaceMuted  bool
 }

@@ -10,24 +10,16 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// The board read side of the work tracker (slice 4a). The app never speaks the
-// agent's ticket verbs; it observes the board the way it observes dispatches —
-// a snapshot in initial_state plus a tickets_updated broadcast on every mutation
-// (the push), and a get_ticket request/result for the full detail of one row it
-// clicked (the pull). The push carries bare rows (no activity/artifacts) so a
-// busy board stays cheap to broadcast; the detail fetch loads the full record.
+// The board read side of the work tracker: a snapshot in initial_state plus a
+// tickets_updated broadcast per mutation, and a get_ticket request/result for one
+// row's detail. Pushes carry bare rows so a busy board stays cheap.
 
-// ticketsForBroadcast is the live board feed: every non-archived ticket as a bare
-// wire row (activity/artifacts empty), newest first. It is the payload of both
-// the initial_state snapshot and each tickets_updated broadcast, so a client
-// renders the board identically from either.
+// ticketsForBroadcast is the payload of both initial_state and tickets_updated.
 func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
 	return d.ticketRows(store.TicketListFilter{})
 }
 
-// ticketRows lists the board through a filter and maps each store row to its bare
-// wire shape (activity/artifacts empty), newest first. Shared by the app's
-// broadcast feed (empty filter) and the agent's `ticket_list` read (caller filter).
+// ticketRows lists the board through a filter as bare wire rows, newest first.
 func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 	if d.store == nil {
 		return nil
@@ -46,12 +38,8 @@ func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 	return out
 }
 
-// handleTicketList is the agent's board read — the foundation the write verbs
-// (comment/take/subscribe) stand on, since an agent needs a ticket-id before it
-// can act. Unlike those verbs it is NOT identity-scoped: it returns the whole
-// board (optionally filtered by status / including archived), so source_session_id
-// is accepted but unused. Rows carry the description (the brief) but not the
-// activity thread, matching the broadcast feed.
+// handleTicketList is the agent's board read. NOT identity-scoped: it returns
+// the whole board, so source_session_id is accepted but unused.
 func (d *Daemon) handleTicketList(conn net.Conn, msg *protocol.TicketListMessage) {
 	filter := store.TicketListFilter{}
 	if msg.Status != nil {
@@ -66,12 +54,8 @@ func (d *Daemon) handleTicketList(conn net.Conn, msg *protocol.TicketListMessage
 	})
 }
 
-// handleTicketShow is the agent's non-consuming full-record read: one ticket's
-// metadata, description, and complete activity thread (full bodies) plus
-// current artifacts, the same shape sendGetTicketWSResult serves the app. Unlike
-// ticket_inbox, it never advances the calling session's unread cursor, so an
-// agent can re-read it at will. Like ticket_list it is NOT identity-scoped, so
-// source_session_id is accepted but unused.
+// handleTicketShow is the agent's non-consuming full-record read: unlike
+// ticket_inbox it never advances the unread cursor, and it is not identity-scoped.
 func (d *Daemon) handleTicketShow(conn net.Conn, msg *protocol.TicketShowMessage) {
 	ticketID := strings.TrimSpace(msg.TicketID)
 	if ticketID == "" {
@@ -98,20 +82,12 @@ func (d *Daemon) handleTicketShow(conn net.Conn, msg *protocol.TicketShowMessage
 	})
 }
 
-// publishTicketFact is the producer half of the ticket migration: a mutator
-// publishes the fact it just caused, naming the ticket. It replaced
-// broadcastTicketsUpdated at every call site.
-//
-// The board push that used to happen here is now projectTicketsUpdated, driven by
-// the hub's projection of any `ticket.*` fact — so the wire still sees exactly one
-// board push per mutation, while a consumer sees what actually happened.
-// Publishing a subject-less "the board changed" fact would have been the snapshot
-// invalidation this design rejects, which is why the ticket id is required.
+// publishTicketFact publishes the fact a mutator caused; projectTicketsUpdated
+// does the board push. The ticket id is required: a subject-less fact would be a
+// snapshot invalidation.
 func (d *Daemon) publishTicketFact(name, ticketID string) {
 	if strings.TrimSpace(ticketID) == "" {
-		// A ticket fact with no ticket IS the invalidation shape. Keep the board
-		// correct, but make the producer's lost id visible rather than quietly
-		// degrading the log.
+		// Keep the board correct, but make the producer's lost id visible.
 		d.logf("bus: %s published without a ticket id", name)
 	}
 	d.publishFact(name, ticketID, nil)
@@ -123,10 +99,8 @@ func (d *Daemon) projectTicketsUpdated() {
 		return
 	}
 	tickets := d.ticketsForBroadcast()
-	// An optional in-process hook lets tests observe the board push deterministically
-	// without a live socket — TicketsUpdatedMessage is its own top-level event, so the
-	// wsHub's WebSocketEvent-only broadcastListener cannot see it (same pattern as
-	// broadcastWorkflowRunUpdated).
+	// TicketsUpdatedMessage is its own top-level event, so the wsHub's
+	// WebSocketEvent-only broadcastListener cannot see it; tests use this hook.
 	if d.ticketsBroadcastHook != nil {
 		d.ticketsBroadcastHook(tickets)
 	}
@@ -139,10 +113,8 @@ func (d *Daemon) projectTicketsUpdated() {
 	})
 }
 
-// sendGetTicketWSResult replies to a get_ticket request with the ticket's full
-// record (row + activity thread + artifacts), correlated by requestID. An
-// unknown id is a failed result (error set, ticket omitted), not a panic — the
-// app may ask for a ticket the TTL sweep removed between board push and click.
+// sendGetTicketWSResult replies to get_ticket, correlated by requestID. An
+// unknown id is a failed result: the TTL sweep can remove a ticket mid-click.
 func (d *Daemon) sendGetTicketWSResult(client *wsClient, requestID, ticketID string) {
 	msg := protocol.TicketResultMessage{
 		Event:     protocol.EventTicketResult,
@@ -166,9 +138,8 @@ func (d *Daemon) sendGetTicketWSResult(client *wsClient, requestID, ticketID str
 	d.sendToClient(client, msg)
 }
 
-// ticketToProtocol maps a store ticket to its wire shape. Activity is mapped when
-// present and becomes an empty slice on a ListTickets bare row. Artifacts are
-// hydrated separately from the filesystem for full reads.
+// ticketToProtocol maps a store ticket to its wire shape; artifacts are hydrated
+// separately for full reads.
 func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 	pt := protocol.Ticket{
 		ID:             t.ID,

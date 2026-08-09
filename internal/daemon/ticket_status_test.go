@@ -124,8 +124,8 @@ func TestSetTicketStatusCatchesUpBeforeMutating(t *testing.T) {
 	}
 
 	first := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "should not land")
-	if !first.Ok || first.TicketStatusResult == nil || first.TicketStatusResult.CatchUp == nil {
-		t.Fatalf("first response = %+v, want catch-up", first)
+	if !first.Ok || first.TicketStatusResult == nil || first.TicketStatusResult.CatchUp == nil || first.TicketStatusResult.Applied {
+		t.Fatalf("first response = %+v, want catch-up without the move", first)
 	}
 	ticket, _ := d.store.GetTicket(ticketID)
 	if ticket.Status != store.TicketStatusWorking {
@@ -133,7 +133,8 @@ func TestSetTicketStatusCatchesUpBeforeMutating(t *testing.T) {
 	}
 
 	retry := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "now reviewed")
-	if !retry.Ok || retry.TicketStatusResult == nil || retry.TicketStatusResult.CatchUp != nil || retry.TicketStatusResult.Status != protocol.TicketStatusInReview {
+	if !retry.Ok || retry.TicketStatusResult == nil || retry.TicketStatusResult.CatchUp != nil ||
+		!retry.TicketStatusResult.Applied || retry.TicketStatusResult.Status != protocol.TicketStatusInReview {
 		t.Fatalf("retry response = %+v", retry)
 	}
 }

@@ -44,10 +44,9 @@ func (c *Codex) ResolveExecutable(configured string) string {
 }
 
 func (c *Codex) Capabilities() Capabilities {
-	// Transcripts remain needed for Stop-hook classification; live state is
-	// hook-owned. The watcher is on for the one fact the hooks never report — a
-	// turn the user halted, which codex records as `turn_aborted` — and its
-	// behavior deliberately does nothing else.
+	// Transcripts back Stop-hook classification; live state is hook-owned. The
+	// watcher exists only for a turn the user halted (codex's `turn_aborted`),
+	// which the hooks never report.
 	return Capabilities{
 		HasHooks:             true,
 		HasTranscript:        true,
@@ -58,8 +57,7 @@ func (c *Codex) Capabilities() Capabilities {
 		HasYolo:              true,
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
-		// HasSelfMonitor: false — Codex has no live ticket Monitor. It still uses
-		// the shared daemon nudge for unread ticket activity.
+		// HasSelfMonitor: false — the shared daemon nudge covers unread tickets.
 		HasModelPin:  true,
 		HasEffortPin: true,
 	}
@@ -84,25 +82,17 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
 	}
-	// Cap the effective context window (model_auto_compact_token_limit is
-	// codex's compaction-trigger knob, the analogue of Claude's
-	// CLAUDE_CODE_AUTO_COMPACT_WINDOW). The daemon owns the policy of who gets
-	// a cap (chief setting vs default_context_window_cap_<agent>); this only
-	// applies what it resolved.
+	// The daemon owns who gets a cap; this only applies what it resolved.
 	args = append(args, codexContextWindowCapArgs(opts.AutoCompactWindow)...)
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
-		// Codex has no dedicated effort flag; model_reasoning_effort is its
-		// native config knob (the -c value is parsed as TOML, hence the quotes).
+		// No dedicated effort flag; -c values are parsed as TOML, hence the quotes.
 		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
 	if opts.YoloMode {
 		args = append(args, "--dangerously-bypass-approvals-and-sandbox")
 	} else if opts.AutoApprove {
-		// Native auto-approve: route approval requests to codex's guardian LLM
-		// reviewer (auto_review) instead of the user, so the agent runs unattended.
-		// on-request is codex's recommended interactive policy — the model escalates
-		// when it needs to, and auto_review approves/denies in the user's place
-		// (the codex analog of Claude's --permission-mode auto). Yolo bypasses both.
+		// Approvals route to codex's guardian LLM reviewer, not the user; yolo
+		// bypasses both.
 		args = append(args, "-c", `approval_policy="on-request"`, "-c", `approvals_reviewer="auto_review"`)
 	}
 	if strings.TrimSpace(opts.InitialPrompt) != "" {
@@ -121,8 +111,7 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 		env = append(env, "ATTN_WRAPPER_PATH="+wrapper)
 	}
 	if strings.TrimSpace(opts.NotebookRoot) != "" {
-		// A chief launch injected chief guidance at launch; mark it so the
-		// SessionStart hook does not also emit workspace-context guidance.
+		// Keeps the SessionStart hook from also emitting workspace-context guidance.
 		env = append(env, "ATTN_CHIEF_GUIDANCE=developer_instructions")
 	} else if strings.TrimSpace(opts.WorkspaceContextPath) != "" {
 		env = append(env, "ATTN_WORKSPACE_CONTEXT_GUIDANCE=developer_instructions")
@@ -137,15 +126,12 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 }
 
 func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
-	return ensureAttnCodexSkillInstalled()
+	return ensureAttnAgentsSkillInstalled()
 }
 
 func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {
-	// Dispatch: the keeper/notebook tasks wire NO MCP server and run in
-	// native-tools mode; the workflow engine sets a writable CWD+Sandbox (and an
-	// MCP result sink when schema-validated) and runs the MCP-config path.
-	// The process-global headless cap governs every headless run uniformly; read
-	// it once here and pass it into the pure arg builders as an explicit input.
+	// Keeper/notebook tasks run native-tools; the workflow engine takes the
+	// MCP-config path with a writable CWD+Sandbox.
 	window := HeadlessContextWindowCap()
 	if request.usesNativeToolsPath() {
 		args := codexHeadlessArgs(request, window)
@@ -160,11 +146,8 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 		return result, nil
 	}
 
-	// Capture the child's final message to a file. This is the parser-free,
-	// robust no-schema text path (codex -o, --output-last-message <FILE>). We
-	// create the file ourselves so cleanup is deterministic; codex overwrites it.
-	// It is rooted at WorkDir (NOT CWD) so the working tree stays clean even on
-	// the writable path.
+	// The parser-free no-schema text path, rooted at WorkDir (NOT CWD) so the
+	// working tree stays clean and cleanup is deterministic.
 	lastMsgPath := ""
 	if f, err := os.CreateTemp(headlessTempDir(request.WorkDir), "codex-last-msg-*.txt"); err == nil {
 		lastMsgPath = f.Name()
@@ -174,9 +157,7 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 
 	args := buildCodexHeadlessArgs(request, lastMsgPath, window)
 
-	// The process working directory is CWD when set (the writable engine path
-	// points it at the run's working tree), else WorkDir (back-compat: the
-	// keeper's throwaway temp dir).
+	// CWD when set (the writable engine path), else the keeper's throwaway WorkDir.
 	runDir := strings.TrimSpace(request.CWD)
 	if runDir == "" {
 		runDir = request.WorkDir
@@ -191,23 +172,10 @@ func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest
 }
 
 // buildCodexHeadlessArgs builds the `codex exec` argv for the MCP-config
-// (workflow-engine) headless run. It is pure (no process spawn, no filesystem
-// access beyond the caller-provided lastMsgPath string) so a table test can
-// assert the sandbox/feature flags and MCP-server wiring without running codex.
-//
-// Sandbox posture:
-//   - request.Sandbox == "workspace-write" => `--sandbox workspace-write` and
-//     `features.shell_tool=true`. SECURITY BOUNDARY: on macOS this confines
-//     writes to the process cwd + TMPDIR with network disabled by default via
-//     the OS seatbelt. `approval_policy="never"` stays because the sandbox — NOT
-//     an interactive approval prompt — is the enforcement boundary; with no human
-//     in the loop a prompt would only deadlock. We NEVER emit
-//     `--dangerously-bypass-approvals-and-sandbox` and NEVER use
-//     `danger-full-access`; every non-essential feature stays disabled exactly as
-//     on the read-only path. The ONLY things re-enabled are the OS sandbox mode
-//     and the shell tool.
-//   - any other value (including "") => read-only, byte-identical to the janitor:
-//     `--sandbox read-only` + `features.shell_tool=false`.
+// headless run. SECURITY BOUNDARY: the OS sandbox, not an approval prompt,
+// confines a headless run — `approval_policy="never"` stays because no human is
+// in the loop. "workspace-write" re-enables ONLY the sandbox mode and the shell
+// tool; nothing here ever emits bypass-approvals or danger-full-access.
 func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, window int) []string {
 	serverName := strings.TrimSpace(request.MCPServerName)
 	if serverName == "" {
@@ -233,10 +201,7 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, win
 		"--skip-git-repo-check",
 		"--sandbox", sandboxMode,
 	}
-	// Only pin the model when one is requested. An empty "-m" makes codex reject
-	// the run as "model is invalid or unavailable"; omitting the flag lets codex
-	// fall back to its own default model (the faithful "harness decides" default
-	// for a workflow agent() with no per-call/run model override).
+	// An empty "-m" makes codex reject the run; omitting it uses codex's default.
 	if model := strings.TrimSpace(request.Model); model != "" {
 		args = append(args, "-m", model)
 	}
@@ -249,15 +214,11 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, win
 	args = append(args,
 		"-c", `approval_policy="never"`,
 		"-c", shellTool,
-		// Every other feature stays OFF on BOTH paths. Writable re-enables only the
-		// shell tool above; nothing else here changes between read-only and writable.
+		// Every other feature stays OFF on BOTH paths.
 		"-c", "features.unified_exec=false",
 	)
-	// Shared non-file feature locks (identical to the native-tools path).
 	args = append(args, codexFeatureLocks()...)
 	args = append(args, codexMCPServerArgs(serverName, request.MCPServerCommand, request.MCPServerArgs, toolNames)...)
-	// Attach any additional MCP servers IN ADDITION to the primary one, mirroring
-	// its emission exactly (command/args/required/enabled_tools/approval-mode).
 	for _, spec := range request.ExtraMCPServers {
 		name := strings.TrimSpace(spec.Name)
 		if name == "" {
@@ -270,9 +231,8 @@ func buildCodexHeadlessArgs(request HeadlessTaskRequest, lastMsgPath string, win
 	return args
 }
 
-// codexFeatureLocks are the non-file feature locks. They keep the agent surface
-// minimal (no apps/hooks/plugins/browser/etc.) and are independent of the
-// file/exec tooling enabled by the workspace-write sandbox.
+// codexFeatureLocks are the non-file feature locks, independent of the file/exec
+// tooling the workspace-write sandbox enables.
 func codexFeatureLocks() []string {
 	return []string{
 		"-c", "features.apps=false",
@@ -292,11 +252,8 @@ func codexFeatureLocks() []string {
 	}
 }
 
-// codexContextWindowCapArgs returns the `-c model_auto_compact_token_limit=<n>`
-// override that caps codex's effective context window (auto-compaction fires at
-// this token threshold instead of near the model's full window), or nil when
-// window <= 0. The value is a TOML integer, so it is unquoted. This is codex's
-// analogue of Claude's CLAUDE_CODE_AUTO_COMPACT_WINDOW.
+// codexContextWindowCapArgs caps the effective context window by moving codex's
+// auto-compaction threshold; the value is a TOML integer, so it is unquoted.
 func codexContextWindowCapArgs(window int) []string {
 	if window <= 0 {
 		return nil
@@ -305,8 +262,7 @@ func codexContextWindowCapArgs(window int) []string {
 }
 
 // codexMCPServerArgs emits the `-c mcp_servers.<name>.*` argv pairs for one MCP
-// server. Both the primary server and each ExtraMCPServers entry go through here
-// so their wiring is identical by construction.
+// server; primary and extra servers share it so their wiring cannot drift.
 func codexMCPServerArgs(name, command string, cmdArgs, enabledTools []string) []string {
 	return []string{
 		"-c", fmt.Sprintf("mcp_servers.%s.command=%s", name, strconv.Quote(command)),
@@ -317,8 +273,8 @@ func codexMCPServerArgs(name, command string, cmdArgs, enabledTools []string) []
 	}
 }
 
-// tomlStringArray renders a Go string slice as a TOML inline array literal with
-// each element double-quoted, for `codex -c key=[...]` overrides.
+// tomlStringArray renders a string slice as a TOML inline array, each element
+// double-quoted, for `codex -c key=[...]` overrides.
 func tomlStringArray(values []string) string {
 	quoted := make([]string, 0, len(values))
 	for _, value := range values {
@@ -327,11 +283,9 @@ func tomlStringArray(values []string) string {
 	return "[" + strings.Join(quoted, ",") + "]"
 }
 
-// codexFinalText returns the child's final assistant message. It prefers the
-// --output-last-message file (parser-free, robust) and falls back to scanning
-// the live --json stdout for the last agent_message item. NOTE: the live
-// `codex exec --json` stream is NOT the on-disk transcript envelope, so we do
-// not route this through internal/transcript.
+// codexFinalText returns the child's final assistant message, preferring the
+// --output-last-message file over stdout. The live `codex exec --json` stream is
+// NOT the on-disk transcript envelope, so internal/transcript does not apply.
 func codexFinalText(lastMsgPath string, stdout []byte) string {
 	if lastMsgPath != "" {
 		if b, err := os.ReadFile(lastMsgPath); err == nil {
@@ -373,10 +327,8 @@ func parseCodexFinalText(stdout []byte) string {
 	return last
 }
 
-// codexHeadlessArgs builds the native-tools arg set: a workspace-write sandbox
-// makes cwd (the scratch WorkDir via cmd.Dir) writable, and Codex's default
-// file/exec tooling is active. approval_policy="never" keeps writes autonomous
-// and the run non-interactive.
+// codexHeadlessArgs builds the native-tools arg set: workspace-write makes the
+// scratch WorkDir writable, and approval_policy="never" keeps it non-interactive.
 func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	args := []string{
 		"exec",
@@ -393,13 +345,7 @@ func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	if effort := strings.TrimSpace(request.ReasoningEffort); effort != "" {
 		args = append(args, "-c", `model_reasoning_effort="`+effort+`"`)
 	}
-	// Widen the workspace-write sandbox's writable set beyond the scratch WorkDir
-	// for tasks that must write outside cwd (e.g. the notebook narrate pass writing the
-	// curated journal under the notebook root). `--add-dir` is the codex exec flag
-	// for "additional directories that should be writable alongside the primary
-	// workspace"; reads stay unrestricted under workspace-write, so this is
-	// write-only widening. Empty (the keeper's compaction duty) appends nothing,
-	// preserving the scratch-tempdir-only behavior.
+	// Write-only widening for tasks that write outside cwd; reads are unrestricted.
 	for _, root := range request.ExtraWritableRoots {
 		root = strings.TrimSpace(root)
 		if root == "" {
@@ -413,15 +359,8 @@ func codexHeadlessArgs(request HeadlessTaskRequest, window int) []string {
 	return args
 }
 
-// codexToolFreeHeadlessArgs builds a pure completion invocation. The prompt is
-// the complete model-visible evidence boundary: Codex receives neither native
-// shell/file tools nor user-configured MCP, plugins, apps, or web search.
-// codexPrompt folds SystemPrompt into the prompt. `codex exec` has no
-// system/developer-prompt flag — instructions arrive as the positional argument
-// or on stdin — so a caller that split its prompt in two for Claude's
-// --system-prompt would otherwise have the whole invariant half (the role, the
-// rules, the output contract) silently dropped on Codex. Folding keeps one
-// caller-side shape working on both drivers.
+// codexPrompt folds SystemPrompt into the prompt: `codex exec` has no
+// system-prompt flag, so a split prompt would otherwise lose its invariant half.
 func codexPrompt(request HeadlessTaskRequest) string {
 	system := strings.TrimSpace(request.SystemPrompt)
 	if system == "" {
@@ -482,9 +421,8 @@ func (c *Codex) FindTranscriptForResume(resumeID string) string {
 	return transcript.FindCodexTranscriptForResume(resumeID)
 }
 
-// ResumeAvailable reports whether Codex still has the exact rollout recorded
-// for a stopped session. Unattended continuation must fail closed when Codex
-// has pruned or moved that rollout.
+// ResumeAvailable reports whether Codex still has the recorded rollout;
+// unattended continuation must fail closed when it was pruned or moved.
 func (c *Codex) ResumeAvailable(resumeID string) bool {
 	return transcript.FindCodexTranscriptForResume(resumeID) != ""
 }
@@ -497,9 +435,8 @@ func (c *Codex) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
 	return &codexTranscriptWatcherBehavior{}
 }
 
-// RecoveredRunningState is always no-opinion: codex announces its approvals in
-// its title, which is a level the resolver reads as evidence, so nothing inside a
-// codex worker ever caches a protocol state to recover.
+// RecoveredRunningState is always no-opinion: codex announces approvals in its
+// title, so no codex worker ever caches a protocol state to recover.
 func (c *Codex) RecoveredRunningState(ptyState string) (protocol.SessionState, bool) {
 	return "", false
 }

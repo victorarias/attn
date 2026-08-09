@@ -73,7 +73,7 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 	defer d.pluginSupervisorMu.Unlock()
 	if d.pluginSupervisor == nil {
 		d.pluginSupervisor = newPluginSupervisor(
-			execPluginProcessLauncher{},
+			execPluginProcessLauncher{registryDir: plugins.RuntimeRegistryDir(filepath.Dir(d.socketPath))},
 			nil,
 			func(manifest pluginManifest, generation uint64) []string {
 				overrides := []string{

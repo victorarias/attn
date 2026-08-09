@@ -69,7 +69,7 @@ interface UseUiAutomationBridgeArgs {
   daemonReady?: boolean;
   connectionError?: string | null;
   getActivePaneIdForSession: (session: Session | undefined | null) => string;
-  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { chiefOfStaff?: boolean }) => Promise<string>;
+  createSession: (label: string, cwd: string, id?: string, agent?: SessionAgent, endpointId?: string, yoloMode?: boolean, options?: { chiefOfStaff?: boolean; resumeConversationFile?: string }) => Promise<string>;
   selectSession: (sessionId: string) => void;
   selectWorkspace: (workspaceId: string) => void;
   moveWorkspaceLeafToWorkspace: (
@@ -2070,8 +2070,9 @@ export function useUiAutomationBridge({
         if (!(element instanceof HTMLSelectElement)) {
           throw new Error(`dom_select target is not a select: ${selector}`);
         }
-        if (![...element.options].some((option) => option.value === value)) {
-          throw new Error(`dom_select has no option ${value} in ${selector}`);
+        const offered = Array.from(element.options).map((option) => option.value);
+        if (!offered.includes(value)) {
+          throw new Error(`dom_select value ${value} is not offered by ${selector}; options: ${offered.join(', ')}`);
         }
         setControlValue(element, value);
         await settleUi(2);
@@ -2322,10 +2323,19 @@ export function useUiAutomationBridge({
           ? payload.endpoint_id
           : undefined;
         const chiefOfStaff = payload.chief_of_staff === true;
+        // An existing conversation this session picks up from — the automation
+        // half of the picker's resume bar. Only a conversation agent reads it.
+        const resumeConversationFile = typeof payload.resume_conversation_file === 'string'
+          && payload.resume_conversation_file.length > 0
+          ? payload.resume_conversation_file
+          : undefined;
         if (!cwd) {
           throw new Error('create_session requires cwd');
         }
-        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId, undefined, { chiefOfStaff });
+        const sessionId = await createSession(label, cwd, providedSessionId, agent, endpointId, undefined, {
+          chiefOfStaff,
+          resumeConversationFile,
+        });
         await settleUi();
         window.setTimeout(() => {
           fitSessionActivePane(sessionId);
@@ -3082,12 +3092,87 @@ export function useUiAutomationBridge({
             text: element.querySelector('.conversation-message-text')?.textContent || '',
           };
         });
+        // What the agent has been sent and has not read yet, in the order the
+        // pane shows it. A nudge scenario asserts the whole arc on this: the
+        // entry appears here, then leaves as the message it delivered appears
+        // in `messages`.
+        const queued = Array.from(root.querySelectorAll('[data-testid="conversation-queued"]')).map((node) => ({
+          kind: node.querySelector('.conversation-queued-label')?.textContent || '',
+          text: node.querySelector('.conversation-queued-text')?.textContent || '',
+        }));
+        // Every tool card in the transcript, and what an opened one is showing.
+        // A card's collapsed state is part of the contract — a scenario asserts
+        // that output is absent until the card is opened — so `expanded` and
+        // `output` are reported separately rather than folded together.
+        const tools = Array.from(root.querySelectorAll('.conversation-tool')).map((node) => {
+          const element = node as HTMLElement;
+          const body = element.querySelector('[data-testid="conversation-tool-body"]');
+          return {
+            callId: (element.dataset.testid || '').replace('conversation-tool-', ''),
+            name: element.dataset.toolName || '',
+            status: element.dataset.toolStatus || '',
+            summary: element.querySelector('.conversation-tool-summary')?.textContent || '',
+            error: element.querySelector('[data-testid="conversation-tool-error"]')?.textContent || '',
+            expanded: element.dataset.expanded === 'true',
+            waiting: Boolean(body?.querySelector('[data-testid="conversation-tool-waiting"]')),
+            output: body?.querySelector('[data-testid="conversation-tool-output"]')?.textContent || '',
+            hasPatch: Boolean(body?.querySelector('[data-testid="conversation-tool-patch"]')),
+            // The card is offering the whole of an output pi clipped.
+            fullOutputAvailable: Boolean(body?.querySelector('[data-testid="conversation-tool-full"]')),
+            detailError: body?.querySelector('[data-testid="conversation-tool-detail-error"]')?.textContent || '',
+          };
+        });
+        // The rows that explain a silence: a compaction, a retry, a model
+        // switch. `done` is what separates one still happening from one that
+        // settled, which is the whole point of drawing them.
+        const notices = Array.from(root.querySelectorAll('.conversation-notice')).map((node) => {
+          const element = node as HTMLElement;
+          return {
+            id: (element.dataset.testid || '').replace('conversation-notice-', ''),
+            level: element.dataset.level || '',
+            done: element.dataset.done === 'true',
+            text: element.textContent || '',
+          };
+        });
+        const modelPicker = root.querySelector('[data-testid="conversation-model"]');
+        const model = modelPicker instanceof HTMLSelectElement ? modelPicker : null;
+        const send = root.querySelector('[data-testid="conversation-send"]');
+        const earlier = root.querySelector('[data-testid="conversation-load-earlier"]');
         return {
           sessionId,
           messages,
+          tools,
+          notices,
+          queued,
+          // The host holds conversation older than what is drawn. Present only
+          // then; a scenario clicks it and asserts the transcript grew upwards.
+          loadEarlierAvailable: Boolean(earlier),
+          loadingHistory: Boolean(earlier instanceof HTMLButtonElement && earlier.disabled),
+          // How much of the conversation the host's retention budget dropped for
+          // good. 0 when nothing is gone, which is every ordinary session — the
+          // row it reads from appears only once there is also nothing left to
+          // page, so this is the whole of "the transcript starts above here".
+          historyDropped: Number(
+            root.querySelector('[data-testid="conversation-history-dropped"]')?.getAttribute('data-dropped') || 0,
+          ),
+          // What the agent runs on now, and what this machine could switch it
+          // to. Empty when the host said nothing about models.
+          model: model?.value || '',
+          models: model ? Array.from(model.options).flatMap((option) => (option.value ? [option.value] : [])) : [],
+          // Present only while something is queued: the way out of the queue.
+          queueClearAvailable: Boolean(root.querySelector('[data-testid="conversation-queue-clear"]')),
           inputDisabled: Boolean(textarea?.disabled),
           placeholder: textarea?.placeholder || '',
           draft: textarea?.value || '',
+          // "Send" or "Steer": which of the two a plain Enter would do.
+          sendLabel: send?.textContent || '',
+          followUpAvailable: Boolean(root.querySelector('[data-testid="conversation-follow-up"]')),
+          // The host is gone and the conversation is waiting in its session
+          // file. Present only then, and it carries its own way back — a
+          // revive scenario asserts the banner, clicks it, and asserts the
+          // transcript that comes back.
+          recoverable: Boolean(root.querySelector('[data-testid="conversation-recoverable"]')),
+          reloadAvailable: Boolean(root.querySelector('[data-testid="conversation-reload"]')),
         };
       }
       // --- Ticket detail panel (work-tracker) ------------------------------

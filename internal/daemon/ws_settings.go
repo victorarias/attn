@@ -21,9 +21,8 @@ import (
 const (
 	SettingProjectsDirectory = "projects_directory"
 	SettingUIScale           = "uiScale"
-	// SettingTicketBoardScale scales fonts on the ticket board and ticket
-	// detail surfaces independently of the app-wide uiScale. Empty/unset =>
-	// the board follows uiScale.
+	// SettingTicketBoardScale scales ticket-board fonts independently of
+	// uiScale; empty => follows uiScale.
 	SettingTicketBoardScale  = "ticketBoardScale"
 	SettingClaudeExecutable  = "claude_executable"
 	SettingCodexExecutable   = "codex_executable"
@@ -39,163 +38,107 @@ const (
 	SettingKeeperCompact     = "workspace_keeper_compact"
 	SettingTailscaleEnabled  = "tailscale_enabled"
 	SettingWorkflowsEnabled  = "workflows_enabled"
-	// Model capture is an explicit, local-only opt-in because visible terminal
-	// text can contain source code, conversations, and secrets.
+	// Model capture is an explicit, local-only opt-in: visible terminal text
+	// can contain secrets.
 	SettingModelCaptureEnabled         = "model_capture.enabled"
 	SettingModelCaptureIntervalSeconds = "model_capture.interval_seconds"
 	SettingModelCaptureMaxGB           = "model_capture.max_gb"
 	// Read-only effective status surfaced to Settings.
 	SettingModelCapturePath  = "model_capture.path"
 	SettingModelCaptureBytes = "model_capture.bytes"
-	// SettingQueueModeEnabled selects the sidebar arrangement: off (the default)
-	// is the workspace tree alone; on adds the anchored chief slot and the "Your
-	// turn" band above it. It is daemon-owned because which arrangement is in
-	// effect is policy, not a rendering preference — later it changes what a turn
-	// is, not just how one is drawn. The daemon stamps turns and broadcasts
-	// turn_owed either way; only the app's rendering reads this.
+	// SettingQueueModeEnabled selects the sidebar arrangement (workspace tree
+	// alone vs chief slot + "Your turn" band). The daemon stamps turns either way.
 	SettingQueueModeEnabled = "queue_mode_enabled"
-	// SettingAutoApproveEnabled, when true, launches interactive agents in their
-	// native auto-approve mode (Claude `--permission-mode auto`, Codex
-	// `approvals_reviewer=auto_review`) so they can run unattended without
-	// stalling on permission gates. Off by default. Yolo overrides it.
+	// SettingAutoApproveEnabled launches interactive agents in their native
+	// auto-approve mode. Off by default; yolo overrides it.
 	SettingAutoApproveEnabled = "auto_approve_enabled"
-	// SettingAutoSettleEnabled turns on closing a turn for the user once they
-	// have steered the agent and it has gone back to work. Off by default: it
-	// mutates state nobody asked it to, so it ships opt-in like the queue itself.
+	// SettingAutoSettleEnabled closes a turn for the user once they have steered
+	// the agent back to work. Off by default — it mutates state unasked.
 	SettingAutoSettleEnabled = "auto_settle_enabled"
-	// SettingAutoSettleArmSeconds is how long a session must hold `working`
-	// before the visible countdown starts — the delay that proves the steering
-	// took. Empty/unset => defaultAutoSettleArmSeconds.
+	// SettingAutoSettleArmSeconds: how long a session holds `working` before the
+	// countdown starts. Empty => defaultAutoSettleArmSeconds.
 	SettingAutoSettleArmSeconds = "auto_settle_arm_seconds"
-	// SettingAutoSettleCountdownSeconds is how long the countdown on the terminal
-	// tile runs before the turn is settled — the window the user has to cancel.
-	// Empty/unset => defaultAutoSettleCountdownSeconds.
+	// SettingAutoSettleCountdownSeconds: the visible cancel window before the
+	// turn settles. Empty => defaultAutoSettleCountdownSeconds.
 	SettingAutoSettleCountdownSeconds = "auto_settle_countdown_seconds"
 	SettingKeybindingsConfig          = "keybindings_config"
 	SettingNewSessionYoloPrefix       = "new_session_yolo_"
-	// SettingNewSessionDestinationPrefix + a scope naming one repository on one
-	// target (e.g. "new_session_destination_local_/Users/v/projects/attn")
-	// remembers where that repository's last new session went: a fresh worktree
-	// or the main checkout. The picker opens on the remembered one, because a
-	// repository is habitually one or the other. Empty/unset => new worktree,
-	// which is what the picker has always defaulted to. Values are
-	// DestinationNewWorktree / DestinationMainRepo; opening an existing worktree
-	// is a one-off and writes nothing.
+	// SettingNewSessionDestinationPrefix + repo scope remembers where that repo's
+	// last new session went (DestinationNewWorktree / DestinationMainRepo).
+	// Empty => new worktree; opening an existing worktree writes nothing.
 	SettingNewSessionDestinationPrefix = "new_session_destination_"
 	DestinationNewWorktree             = "new_worktree"
 	DestinationMainRepo                = "main_repo"
-	// SettingChiefModelPrefix + agent (e.g. "chief_model_claude") pins the model a
-	// chief-of-staff launch uses, passed through as --model. Empty/unset => the
-	// agent's own default model. Only consulted for chief launches.
+	// SettingChiefModelPrefix + agent pins the model a chief-of-staff launch
+	// uses (--model). Empty => agent default; chief launches only.
 	SettingChiefModelPrefix = "chief_model_"
-	// SettingChiefEffortPrefix + agent (e.g. "chief_effort_claude") pins the
-	// reasoning effort a chief-of-staff launch uses, passed through as the
-	// agent's native effort mechanism (Claude --effort, Codex
-	// model_reasoning_effort). Empty/unset => the agent's own default. Only
-	// consulted for chief launches.
+	// SettingChiefEffortPrefix + agent pins a chief launch's reasoning effort
+	// via the agent's native mechanism. Empty => agent default.
 	SettingChiefEffortPrefix = "chief_effort_"
-	// SettingDefaultModelPrefix + agent (e.g. "default_model_claude") pins the
-	// model EVERY interactive launch of that agent uses (chief or not), passed
-	// through as --model. Empty/unset => the agent's own default. A per-spawn
-	// pin (delegation) or a chief_model_<agent> override still takes priority
-	// over this; see resolveLaunchModel.
+	// SettingDefaultModelPrefix + agent pins the model EVERY interactive launch
+	// uses; per-spawn pins and chief_model_<agent> outrank it (resolveLaunchModel).
 	SettingDefaultModelPrefix = "default_model_"
-	// SettingDefaultEffortPrefix + agent (e.g. "default_effort_claude") pins
-	// the reasoning effort EVERY interactive launch of that agent uses (chief
-	// or not), passed through as the agent's native effort mechanism (Claude
-	// --effort, Codex model_reasoning_effort). Empty/unset => the agent's own
-	// default. A per-spawn pin (delegation) or a chief_effort_<agent> override
-	// still takes priority over this; see resolveLaunchEffort.
+	// SettingDefaultEffortPrefix + agent: same, for reasoning effort
+	// (resolveLaunchEffort).
 	SettingDefaultEffortPrefix = "default_effort_"
 	// SettingNotebookRoot overrides the notebook's filesystem root. Empty =>
 	// the profile-derived default (~/attn-notebook[-profile]).
 	SettingNotebookRoot = "notebook.root"
-	// SettingNotebookRootEffective is a READ-ONLY, daemon-computed key surfaced in
-	// the settings payload (never stored, never accepted by set_setting): the
-	// absolute folder the notebook currently resolves to, so the UI can show where
-	// the notebook lives even when SettingNotebookRoot is blank (the default).
+	// SettingNotebookRootEffective is READ-ONLY and daemon-computed (never
+	// stored, never accepted by set_setting): the folder the notebook resolves to.
 	SettingNotebookRootEffective = "notebook.root.effective"
-	// SettingNotebookCronFrequency is the 5-field cron expression for the
-	// notebook's nightly maintenance slot (currently the daily-narrate backstop).
-	// Empty => the default ("0 3 * * *").
+	// SettingNotebookCronFrequency: cron expression for the notebook's nightly
+	// maintenance slot. Empty => "0 3 * * *".
 	SettingNotebookCronFrequency = "notebook.cron.frequency"
-	// SettingNotebookCronTimezone is the IANA timezone the frequency is
-	// evaluated in. Empty => the machine's local time.
+	// SettingNotebookCronTimezone: IANA timezone the frequency is evaluated in.
+	// Empty => local time.
 	SettingNotebookCronTimezone = "notebook.cron.timezone"
 	// SettingNotebookSummarizeSession configures the per-session summarize pass
-	// (the CHEAP tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty =>
-	// the built-in cheap default (Claude Haiku). See parseNotebookNarrationConfig.
+	// (CHEAP tier). JSON {"agent","model"}; empty => Claude Haiku default.
 	SettingNotebookSummarizeSession = "notebook.summarize_session"
-	// SettingNotebookSummarizeSessionEnabled independently gates the per-session
-	// summarize pass. Default ON preserves existing installs; only an explicit
-	// "false" stops new summaries and retires queued summaries without launching
-	// their agent. The keeper master switch still takes precedence over every duty.
+	// SettingNotebookSummarizeSessionEnabled gates the summarize pass. Default
+	// ON; only an explicit "false" disables. The keeper master switch outranks it.
 	SettingNotebookSummarizeSessionEnabled = "notebook.summarize_session.enabled"
-	// SettingNotebookNarrateWorkspace configures the curated-journal narrate pass (the
-	// STRONG tier). JSON {"agent":"claude"|"codex","model":"<id>"}; empty => the
-	// built-in strong default (Claude Sonnet). Claude is the default narrate agent
-	// because its native Write/Edit enforce read-before-write CAS on the shared
-	// journal; see parseNotebookNarrationConfig.
+	// SettingNotebookNarrateWorkspace configures the curated-journal narrate pass
+	// (STRONG tier). JSON {"agent","model"}; empty => Claude Sonnet, whose native
+	// Write/Edit enforce read-before-write CAS on the journal.
 	SettingNotebookNarrateWorkspace = "notebook.narrate_workspace"
-	// SettingNotebookNarrateWorkspaceEnabled independently gates every curated-
-	// journal narrate path. Default ON preserves existing installs; only an explicit
-	// "false" stops new narrations and retires queued narrations without launching
-	// their agent. Raw session summaries and context compaction remain independent.
+	// SettingNotebookNarrateWorkspaceEnabled gates every narrate path. Default
+	// ON; only an explicit "false" disables.
 	SettingNotebookNarrateWorkspaceEnabled = "notebook.narrate_workspace.enabled"
-	// SettingActivityEnabled gates session activity: one short present-tense line
-	// per session saying what its agent is doing right now, generated from the
-	// transcript. Off by default — it spends money per session per refresh and
-	// sends transcript excerpts to a model, so it is an explicit opt-in.
+	// SettingActivityEnabled gates session activity (one present-tense line per
+	// session from its transcript). Off by default: it spends money per session
+	// per refresh and sends transcript excerpts to a model.
 	SettingActivityEnabled = "activity.enabled"
 	// SettingActivityConfig selects the generator. JSON
 	// {"agent":"claude"|"codex","model":"<id>","effort":"<effort>"}; empty means
-	// UNCONFIGURED, and there is deliberately no default agent — see
-	// parseActivityConfig. Model and effort fall back per agent once one is
-	// chosen.
+	// UNCONFIGURED — deliberately no default agent (see parseActivityConfig).
 	SettingActivityConfig = "activity.config"
 	// SettingActivityIntervals is the per-presence-tier cadence, JSON
-	// {"watching":120,"present":300} in seconds. One setting rather than two
-	// because they are a single policy; the `away` tier is absent by design,
-	// since stop is not a rate.
+	// {"watching":120,"present":300} in seconds. No `away` tier by design:
+	// stop is not a rate.
 	SettingActivityIntervals = "activity.intervals"
-	// SettingActivityPresenceIdleSeconds is how long after the last input in the
-	// app the `present` tier survives. Default 90 and UNMEASURED; safe because
-	// `away` is self-healing.
+	// SettingActivityPresenceIdleSeconds is how long after the last app input
+	// the `present` tier survives. Default 90, UNMEASURED; safe because `away`
+	// is self-healing.
 	SettingActivityPresenceIdleSeconds = "activity.presence_idle_seconds"
-	// SettingChiefContextWindowCap caps the chief-of-staff session's effective
-	// context window (in tokens): auto-compaction triggers at this threshold
-	// instead of at the model's full window, so each cache-cold chief wake
-	// re-reads less context. Empty/unset => DefaultContextWindowCap. Applied only
-	// to chief launches; delegated interactive agents are never capped.
+	// SettingChiefContextWindowCap caps the chief session's effective context
+	// window (tokens) so each cache-cold wake re-reads less. Empty =>
+	// DefaultContextWindowCap; chief launches only.
 	SettingChiefContextWindowCap = "chief_context_window_cap"
-	// SettingHeadlessContextWindowCap caps every headless run (keeper narration,
-	// ticket reconciliation, workflow subagents) the same way. Headless runs are
-	// one-shot and cache-cold by construction; one that grows past this is treated
-	// as a bug, not accommodated. Empty/unset => DefaultContextWindowCap.
+	// SettingHeadlessContextWindowCap caps every headless run the same way; a
+	// run that grows past it is a bug, not accommodated. Empty =>
+	// DefaultContextWindowCap.
 	SettingHeadlessContextWindowCap = "headless_context_window_cap"
-	// SettingDefaultContextWindowCapPrefix + agent (e.g.
-	// "default_context_window_cap_claude") caps the effective context window of
-	// EVERY interactive launch of that agent (Claude:
-	// CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex: model_auto_compact_token_limit),
-	// so long-lived sessions compact at a chosen threshold instead of the
-	// agent's own default. Unlike the chief cap there is no built-in fallback:
-	// empty/unset => uncapped, preserving the agent's native behavior. A chief
-	// launch still takes chief_context_window_cap over this; see
-	// launchContextWindowCap.
+	// SettingDefaultContextWindowCapPrefix + agent caps EVERY interactive launch of
+	// that agent. Empty => uncapped; chief_context_window_cap outranks it.
 	SettingDefaultContextWindowCapPrefix = "default_context_window_cap_"
-	// SettingNotebookTasksEnabled is the master switch for ALL keeper async
-	// background duties (per-session summarize, workspace narrate, context
-	// compaction). Default ON: a blank/unset value means enabled, so existing
-	// installs keep running the keeper without an opt-in. Only an explicit "false"
-	// disables the whole group; the per-duty agent/model settings stay configurable
-	// but produce no background work while off. See notebookTasksEnabled and the
-	// enqueue/executor gates that honor it.
+	// SettingNotebookTasksEnabled is the master switch for ALL keeper background
+	// duties. Default ON (blank means enabled); only an explicit "false"
+	// disables the group.
 	SettingNotebookTasksEnabled = "notebook.tasks_enabled"
-	// SettingDBLastBackupAt is a READ-ONLY, daemon-computed key surfaced in the
-	// settings payload (never stored, never accepted by set_setting): the UTC
-	// RFC3339 timestamp of the most recently successful rotating database
-	// backup (see performDatabaseBackup). Absent/empty before the first
-	// successful backup this process lifetime.
+	// SettingDBLastBackupAt is READ-ONLY and daemon-computed: UTC RFC3339 stamp
+	// of the last successful rotating backup this process lifetime.
 	SettingDBLastBackupAt = "db.last_backup_at"
 )
 
@@ -229,10 +172,8 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	if msg.Key == SettingHeadlessContextWindowCap {
 		d.applyHeadlessContextWindowCap()
 	}
-	// Turning auto-settle off must stop a countdown already on screen rather than
-	// let it run out; turning it on has to reach the sessions already working,
-	// since there is no state transition coming to arm them. Both windows are
-	// re-read per arm, so a duration change needs neither.
+	// Off must stop a countdown already on screen; on must reach sessions
+	// already working. Durations are re-read per arm and need neither.
 	if msg.Key == SettingAutoSettleEnabled {
 		if parseBooleanSetting(msg.Value) {
 			d.armAutoSettleForRunningSessions()
@@ -250,17 +191,15 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	d.publishSettingsFact(FactSettingChanged, msg.Key)
 }
 
-// publishSettingsFact re-derives the tailscale serve state, which the settings
-// payload carries, and then publishes the caller's fact. Every fact that
-// re-pushes settings goes through here so none of them can forget the refresh.
+// publishSettingsFact refreshes the tailscale serve state, then publishes.
+// Every settings-re-pushing fact goes through here so none forgets the refresh.
 func (d *Daemon) publishSettingsFact(name, subject string) {
 	d.refreshTailscaleServeState()
 	d.publishFact(name, subject, nil)
 }
 
-// projectSettingsUpdated pushes the settings snapshot. changedKey is empty when
-// what moved was not a setting the user set — a plugin leaving, a backup
-// landing — and the wire message then carries no changed_key, as before.
+// projectSettingsUpdated pushes the settings snapshot; changedKey is empty when
+// what moved was not a user-set setting.
 func (d *Daemon) projectSettingsUpdated(changedKey string) {
 	d.projectSnapshot(snapshotSettings, func() {
 		event := &protocol.SettingsUpdatedMessage{
@@ -331,8 +270,8 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 					d.logf("failed to ensure Claude attn skill: %v", err)
 				}
 			case string(protocol.SessionAgentCodex):
-				if err := agentdriver.EnsureCodexSkillInstalled(); err != nil {
-					d.logf("failed to ensure Codex attn skill: %v", err)
+				if err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
+					d.logf("failed to ensure ~/.agents attn skill: %v", err)
 				}
 			case string(protocol.SessionAgentCopilot):
 				if err := agentdriver.EnsureCopilotSkillInstalled(); err != nil {
@@ -392,24 +331,16 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	}
 	settings[SettingQueueModeEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingQueueModeEnabled]))
 	settings[SettingAutoApproveEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoApproveEnabled]))
-	// Surface the EFFECTIVE auto-settle policy so the UI shows the concrete
-	// defaults (off, 30s, 15s) rather than absent keys it would have to guess at.
+	// Surface EFFECTIVE auto-settle policy, not absent keys.
 	settings[SettingAutoSettleEnabled] = strconv.FormatBool(parseBooleanSetting(stored[SettingAutoSettleEnabled]))
 	settings[SettingAutoSettleArmSeconds] = strconv.Itoa(int(resolveAutoSettleSeconds(stored[SettingAutoSettleArmSeconds], defaultAutoSettleArmSeconds) / time.Second))
 	settings[SettingAutoSettleCountdownSeconds] = strconv.Itoa(int(resolveAutoSettleSeconds(stored[SettingAutoSettleCountdownSeconds], defaultAutoSettleCountdownSeconds) / time.Second))
-	// Normalize the keeper master switch to its EFFECTIVE value so the UI toggle
-	// reflects the default-ON semantics (blank/unset => "true") rather than an
-	// absent key the frontend would read as off.
+	// These are default-ON: send EFFECTIVE values so the app never mistakes an
+	// absent key for off.
 	settings[SettingNotebookTasksEnabled] = strconv.FormatBool(d.notebookTasksEnabled())
-	// The summary duty is independently opt-out while remaining default-on for
-	// existing profiles. Surface its effective value for the same reason as the
-	// keeper master switch: the app should never mistake an absent key for off.
 	settings[SettingNotebookSummarizeSessionEnabled] = strconv.FormatBool(d.notebookSummariesEnabled())
-	// The narration duty follows the same default-on, independently opt-out
-	// contract as summaries. Always send its effective value to the app.
 	settings[SettingNotebookNarrateWorkspaceEnabled] = strconv.FormatBool(d.notebookWorkspaceNarrationEnabled())
-	// Surface the EFFECTIVE token caps so the UI shows the concrete default
-	// (128000) rather than an absent key when the operator has not set one.
+	// EFFECTIVE token caps too, so the UI shows the concrete default.
 	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
 	settings[SettingHeadlessContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingHeadlessContextWindowCap]))
 	// Session activity. The toggle and the intervals are surfaced EFFECTIVE, so
@@ -466,9 +397,8 @@ func isAgentExecutableAvailable(configuredExecutable, defaultExecutable string) 
 	return err == nil
 }
 
-// chiefLaunchModel returns the configured model for a chief-of-staff launch of
-// the given agent (from chief_model_<agent>), or "" — the agent's own default —
-// when this is not a chief launch or no model is configured.
+// chiefLaunchModel returns chief_model_<agent>, or "" when not a chief launch
+// or unconfigured.
 func (d *Daemon) chiefLaunchModel(agent string, chief bool) string {
 	if !chief {
 		return ""
@@ -476,10 +406,8 @@ func (d *Daemon) chiefLaunchModel(agent string, chief bool) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingChiefModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
-// chiefLaunchEffort returns the configured reasoning effort for a
-// chief-of-staff launch of the given agent (from chief_effort_<agent>), or
-// "" — the agent's own default — when this is not a chief launch or no
-// effort is configured.
+// chiefLaunchEffort returns chief_effort_<agent>, or "" when not a chief launch
+// or unconfigured.
 func (d *Daemon) chiefLaunchEffort(agent string, chief bool) string {
 	if !chief {
 		return ""
@@ -487,26 +415,18 @@ func (d *Daemon) chiefLaunchEffort(agent string, chief bool) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingChiefEffortPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
-// defaultLaunchModel returns the configured default model for EVERY
-// interactive launch of the given agent (from default_model_<agent>), chief
-// or not, or "" — the agent's own default — when none is configured.
+// defaultLaunchModel returns default_model_<agent>, or "" when unconfigured.
 func (d *Daemon) defaultLaunchModel(agent string) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingDefaultModelPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
-// defaultLaunchEffort returns the configured default reasoning effort for
-// EVERY interactive launch of the given agent (from default_effort_<agent>),
-// chief or not, or "" — the agent's own default — when none is configured.
+// defaultLaunchEffort returns default_effort_<agent>, or "" when unconfigured.
 func (d *Daemon) defaultLaunchEffort(agent string) string {
 	return strings.TrimSpace(d.store.GetSetting(SettingDefaultEffortPrefix + strings.ToLower(strings.TrimSpace(agent))))
 }
 
-// resolveLaunchModel picks the model an interactive launch of the given agent
-// should use, honoring precedence: an explicit per-spawn pin (requested,
-// e.g. a delegation's --model) wins outright; otherwise a chief-of-staff
-// launch takes chief_model_<agent>; otherwise every launch (chief or not)
-// falls back to the operator-configured default_model_<agent>; otherwise the
-// agent's own built-in default (an empty string, meaning no --model flag).
+// resolveLaunchModel: per-spawn pin, then chief_model_<agent> for chief
+// launches, then default_model_<agent>, then "" (the agent's own default).
 func (d *Daemon) resolveLaunchModel(agent string, chief bool, requested string) string {
 	if requested != "" {
 		return requested
@@ -517,10 +437,7 @@ func (d *Daemon) resolveLaunchModel(agent string, chief bool, requested string) 
 	return d.defaultLaunchModel(agent)
 }
 
-// resolveLaunchEffort mirrors resolveLaunchModel for reasoning effort:
-// explicit per-spawn pin, then chief_effort_<agent> for chief launches, then
-// the operator-configured default_effort_<agent> for any launch, then the
-// agent's own default.
+// resolveLaunchEffort mirrors resolveLaunchModel for reasoning effort.
 func (d *Daemon) resolveLaunchEffort(agent string, chief bool, requested string) string {
 	if requested != "" {
 		return requested
@@ -531,15 +448,9 @@ func (d *Daemon) resolveLaunchEffort(agent string, chief bool, requested string)
 	return d.defaultLaunchEffort(agent)
 }
 
-// launchContextWindowCap returns the effective context-window token cap for an
-// interactive launch of sessionID's agent, or 0 (no cap). Mirrors
-// resolveLaunchModel: the policy lives here, the driver only applies it. A
-// per-session pin (set_session_context_window_cap) wins outright — it is the
-// user's explicit act on this one session, so it outranks even the chief cap.
-// Otherwise a chief launch takes chief_context_window_cap (which defaults to
-// DefaultContextWindowCap, so the chief is always capped); every other launch
-// takes default_context_window_cap_<agent>, whose unset state means uncapped —
-// the agent's own compaction behavior.
+// launchContextWindowCap returns the effective token cap for an interactive
+// launch, or 0. Precedence: per-session pin, then chief_context_window_cap for
+// chief launches, then default_context_window_cap_<agent> (unset => uncapped).
 func (d *Daemon) launchContextWindowCap(sessionID, agent string, chief bool) int {
 	if session := d.store.Get(strings.TrimSpace(sessionID)); session != nil {
 		if cap := protocol.Deref(session.ContextWindowCap); cap > 0 {
@@ -558,9 +469,8 @@ func (d *Daemon) launchContextWindowCap(sessionID, agent string, chief bool) int
 	return 0
 }
 
-// applyHeadlessContextWindowCap pushes the headless_context_window_cap setting
-// into the process-global that the headless spawn seam reads. Called at startup
-// and on every settings change so headless runs always use the current value.
+// applyHeadlessContextWindowCap pushes headless_context_window_cap into the
+// process-global the headless spawn seam reads; called at startup and on change.
 func (d *Daemon) applyHeadlessContextWindowCap() {
 	if d.store == nil {
 		return
@@ -634,28 +544,22 @@ func (d *Daemon) validateSetting(key, value string) error {
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionDestinationPrefix) {
 			return validateNewSessionDestination(value)
 		}
+		// Model names and effort levels are free-form / agent-native: accept
+		// anything and let the agent reject bad ones.
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefModelPrefix) {
-			// Model names/aliases are free-form (like the reviewer_model
-			// setting); accept any value and let the agent reject bad ones.
 			return nil
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingChiefEffortPrefix) {
-			// Effort levels are agent-native (claude: low/medium/high/xhigh/max,
-			// codex: minimal/low/medium/high/xhigh); accept any value and let
-			// the agent reject bad ones. The UI constrains input.
 			return nil
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultModelPrefix) {
-			// Model names/aliases are free-form, same as chief_model_<agent>.
 			return nil
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultEffortPrefix) {
-			// Effort levels are agent-native, same as chief_effort_<agent>.
 			return nil
 		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingDefaultContextWindowCapPrefix) {
-			// Same bounds as the chief/headless caps; blank here means uncapped
-			// rather than DefaultContextWindowCap (see launchContextWindowCap).
+			// Same bounds as the chief/headless caps; blank means uncapped here.
 			return validateContextWindowCap(value)
 		}
 		if _, ok := isAgentExecutableSettingKey(key); ok {
@@ -665,9 +569,8 @@ func (d *Daemon) validateSetting(key, value string) error {
 	}
 }
 
-// validateAutoSettleSeconds accepts an empty value (meaning the built-in default)
-// or a whole number of seconds inside the bounds. label names which of the two
-// windows failed, since the two settings sit side by side in the UI.
+// validateAutoSettleSeconds accepts empty (the built-in default) or whole
+// seconds inside the bounds; label names which of the two windows failed.
 func validateAutoSettleSeconds(label, value string, minSeconds, maxSeconds int) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -683,9 +586,8 @@ func validateAutoSettleSeconds(label, value string, minSeconds, maxSeconds int) 
 	return nil
 }
 
-// validateNewSessionDestination accepts an empty value (no remembered choice,
-// so the picker keeps its new-worktree default) or one of the two destinations
-// the picker can record.
+// validateNewSessionDestination accepts empty (no remembered choice) or one of
+// the two destinations the picker can record.
 func validateNewSessionDestination(value string) error {
 	switch strings.TrimSpace(value) {
 	case "", DestinationNewWorktree, DestinationMainRepo:
@@ -724,17 +626,14 @@ func validateUIScale(value string) error {
 	return nil
 }
 
-// contextWindowCap bounds. The knob can only REDUCE the effective window (a value
-// above the model's real limit is clamped/ignored by the agent), so the ceiling
-// is a fat-finger guard rather than a hard limit; the floor keeps compaction from
-// thrashing on a pathologically small window.
+// contextWindowCap bounds. The knob can only REDUCE the window, so the ceiling
+// is a fat-finger guard; the floor keeps compaction from thrashing.
 const (
 	contextWindowCapMin = 10000
 	contextWindowCapMax = 2000000
 )
 
-// validateContextWindowCap accepts an empty value (meaning DefaultContextWindowCap)
-// or a whole number of tokens within [contextWindowCapMin, contextWindowCapMax].
+// validateContextWindowCap accepts empty or whole tokens inside the bounds.
 func validateContextWindowCap(value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -750,8 +649,8 @@ func validateContextWindowCap(value string) error {
 	return nil
 }
 
-// resolveContextWindowCap turns a stored setting value into an effective token
-// cap, applying DefaultContextWindowCap when unset/blank/unparseable.
+// resolveContextWindowCap turns a stored value into an effective token cap,
+// defaulting when unset/blank/unparseable.
 func resolveContextWindowCap(stored string) int {
 	if trimmed := strings.TrimSpace(stored); trimmed != "" {
 		if n, err := strconv.Atoi(trimmed); err == nil && n > 0 {
@@ -761,11 +660,8 @@ func resolveContextWindowCap(stored string) int {
 	return agentdriver.DefaultContextWindowCap
 }
 
-// validateNotebookRoot accepts an empty value (meaning the profile-derived
-// default) or an absolute path (a leading ~/ is expanded). It refuses a path
-// inside the attn data dir: the notebook must live OUTSIDE ~/.attn[-profile] so
-// it stays a plain, externally-syncable directory a dotfile-skipping scanner
-// won't miss.
+// validateNotebookRoot accepts empty (the profile-derived default) or an
+// absolute path outside the attn data dir; see normalizeExternalRoot.
 func validateNotebookRoot(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -777,15 +673,9 @@ func validateNotebookRoot(value string) error {
 	return nil
 }
 
-// normalizeExternalRoot expands a leading "~/" against the user's home
-// directory, requires the result to be an absolute path, cleans it, and
-// rejects a path that is (or is inside) the attn data dir — an external root
-// must live OUTSIDE ~/.attn[-profile] so it stays a plain, externally-syncable
-// directory a dotfile-skipping scanner won't miss. Empty input is the
-// caller's concern: it returns ("", nil) unchanged.
-//
-// Errors are unprefixed (e.g. "must be an absolute path") so each caller can
-// prefix them with its own vocabulary (notebook.root vs fs root).
+// normalizeExternalRoot expands ~/, requires an absolute path, and rejects a path
+// at or inside the attn data dir. Empty returns ("", nil); errors are unprefixed
+// so each caller adds its own vocabulary.
 func normalizeExternalRoot(value string) (string, error) {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -807,12 +697,9 @@ func normalizeExternalRoot(value string) (string, error) {
 	if clean == dataDir || strings.HasPrefix(clean, dataDir+string(filepath.Separator)) {
 		return "", fmt.Errorf("must be outside the attn data dir (%s)", dataDir)
 	}
-	// fsdoc.Store deliberately permits symlinked roots, so a purely lexical
-	// comparison above can be defeated by a symlink into the data dir (e.g. a
-	// root under /tmp whose target is ~/.attn). Re-check on canonicalized
-	// forms; the canonical value is used ONLY for this comparison — we still
-	// return the original cleaned (non-canonical) path below so legitimate
-	// symlinked roots keep their own spelling.
+	// Symlinked roots are permitted, so a symlink can defeat the lexical check
+	// above. The canonical form is used ONLY for comparison — the cleaned path is
+	// returned, so legitimate symlinked roots keep their spelling.
 	canonRoot := canonicalizeForComparison(clean)
 	canonData := canonicalizeForComparison(dataDir)
 	if canonRoot == canonData || strings.HasPrefix(canonRoot, canonData+string(filepath.Separator)) {
@@ -821,12 +708,9 @@ func normalizeExternalRoot(value string) (string, error) {
 	return clean, nil
 }
 
-// canonicalizeForComparison resolves path to its canonical form for
-// containment checks: symlinks in the deepest existing ancestor are resolved
-// and any not-yet-existing remainder is re-joined lexically. Used ONLY for
-// comparison against the (equally canonicalized) attn data dir — the returned
-// value is never handed to callers as the root, so legitimate symlinked roots
-// keep their original spelling.
+// canonicalizeForComparison resolves symlinks in the deepest existing ancestor
+// and re-joins the rest lexically. Used ONLY for containment comparison; never
+// returned to callers as the root.
 func canonicalizeForComparison(path string) string {
 	clean := filepath.Clean(path)
 	ancestor := clean
@@ -837,8 +721,6 @@ func canonicalizeForComparison(path string) string {
 		}
 		parent := filepath.Dir(ancestor)
 		if parent == ancestor {
-			// Reached the root without finding an existing ancestor; fall back
-			// to the lexically cleaned input.
 			return clean
 		}
 		remainder = append([]string{filepath.Base(ancestor)}, remainder...)
@@ -851,13 +733,9 @@ func canonicalizeForComparison(path string) string {
 	return filepath.Join(append([]string{resolved}, remainder...)...)
 }
 
-// validateNotebookCronFrequency accepts an empty value (use the default) or a
-// cron expression the scheduler can fire. It rejects two parseable-but-wrong
-// forms: an embedded CRON_TZ=/TZ= prefix (a second timezone source that would
-// silently compete with notebook.cron.timezone) and a schedule whose date can
-// never occur (e.g. "0 0 30 2 *", Feb 30) — robfig cron returns the zero time for
-// those, which the scheduler would treat as perpetually due and re-fire in a
-// tight loop.
+// validateNotebookCronFrequency rejects an embedded CRON_TZ=/TZ= prefix (competes
+// with notebook.cron.timezone) and a never-occurring date like Feb 30 — robfig
+// returns the zero time for those, which the scheduler re-fires in a loop.
 func validateNotebookCronFrequency(value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {
@@ -876,14 +754,13 @@ func validateNotebookCronFrequency(value string) error {
 	return nil
 }
 
-// hasCronTZPrefix reports whether a cron string carries a leading TZ=/CRON_TZ=
-// timezone prefix (the form robfig/cron's ParseStandard honors).
+// hasCronTZPrefix reports a leading TZ=/CRON_TZ= prefix (the form
+// robfig/cron's ParseStandard honors).
 func hasCronTZPrefix(expr string) bool {
 	return strings.HasPrefix(expr, "TZ=") || strings.HasPrefix(expr, "CRON_TZ=")
 }
 
-// validateNotebookCronTimezone accepts an empty value (local time) or an IANA
-// timezone name loadable on this machine.
+// validateNotebookCronTimezone accepts empty (local time) or a loadable IANA name.
 func validateNotebookCronTimezone(value string) error {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -990,9 +867,8 @@ func (d *Daemon) validateNewSessionAgent(value string) error {
 	return nil
 }
 
-// validateKeybindingsConfig keeps daemon validation light: the frontend owns the
-// shortcut schema and tolerates anything unrecognized, so the daemon only
-// guarantees the stored blob is parseable JSON (or empty).
+// validateKeybindingsConfig only guarantees parseable JSON (or empty); the
+// frontend owns the shortcut schema.
 func validateKeybindingsConfig(value string) error {
 	trimmed := strings.TrimSpace(value)
 	if trimmed == "" {

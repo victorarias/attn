@@ -1,0 +1,6 @@
+kind: internal
+area: testing
+change: >
+  The conversation scenarios now find the host process by its executable path
+  rather than by the substring "attn-nisse", which under a profile whose name
+  starts with "nisse" also matches every sibling process in the same app bundle.

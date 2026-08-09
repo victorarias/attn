@@ -5,8 +5,10 @@ import (
 	"io"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/procreap"
 	"github.com/victorarias/attn/internal/supervise"
 )
 
@@ -46,9 +48,14 @@ type pluginProcessLauncher interface {
 	Start(manifest pluginManifest, env []string, log io.Writer) (pluginProcessHandle, error)
 }
 
-type execPluginProcessLauncher struct{}
+type execPluginProcessLauncher struct {
+	// registryDir, when set, receives a procreap record per spawned process so
+	// `attn profile clean` can reap drivers a crashed daemon left behind (see
+	// plugins.RuntimeRegistryDir).
+	registryDir string
+}
 
-func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string, log io.Writer) (pluginProcessHandle, error) {
+func (l execPluginProcessLauncher) Start(manifest pluginManifest, env []string, log io.Writer) (pluginProcessHandle, error) {
 	var cmd *exec.Cmd
 	switch manifest.Plugin.Kind {
 	case plugins.EntrypointExecutable:
@@ -60,11 +67,39 @@ func (execPluginProcessLauncher) Start(manifest pluginManifest, env []string, lo
 	}
 	cmd.Dir = manifest.Dir
 	cmd.Env = env
+	// Group leadership is what lets the reaper sweep whatever the driver
+	// spawned once the driver itself is gone, without touching the daemon's
+	// other children.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	process, err := supervise.StartCommand(cmd, log)
 	if err != nil {
 		return nil, fmt.Errorf("start %s plugin process: %w", manifest.Plugin.Kind, err)
 	}
+	if l.registryDir != "" {
+		pid := cmd.Process.Pid
+		// The path carries the pid so a restart's fresh record and the old
+		// process's removal (in Wait, which can straddle the respawn) never
+		// touch the same file.
+		path := filepath.Join(l.registryDir, fmt.Sprintf("%s-%d.json", manifest.Name, pid))
+		if err := procreap.WriteEntry(path, procreap.NewEntry(manifest.Name, pid, pid, cmd.Args)); err == nil {
+			return &reapRegisteredProcess{Process: process, pid: pid, registryPath: path}, nil
+		}
+	}
 	return process, nil
+}
+
+// reapRegisteredProcess removes the procreap registry entry once the process
+// is gone, so profile clean never chases a pid that already exited.
+type reapRegisteredProcess struct {
+	supervise.Process
+	pid          int
+	registryPath string
+}
+
+func (p *reapRegisteredProcess) Wait() pluginExit {
+	exit := p.Process.Wait()
+	_ = procreap.RemoveEntry(p.registryPath)
+	return exit
 }
 
 // pluginSupervisor adapts the shared supervisor to plugin manifests.

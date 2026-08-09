@@ -1,22 +1,11 @@
 package daemon
 
-// The client-facing half of the kitty image feed. The worker observes and
-// stores; this translates its observations into the protocol clients speak, and
-// answers their pulls for the pixels behind a placement.
-//
-// Two capabilities answer two different questions, and keeping them apart is
-// what makes the remote relay work. CapabilityKittyImages is "describe images
-// to me": it gates the kitty_placements fan-out, because a client that draws no
-// images has nothing to do with the description. CapabilityBinaryPtyOutput is
-// "I take binary frames", the same bit that already picks PTY output's
-// transport, and it decides only how a blob travels — frame 0x02 or base64 in
-// JSON. A client can want one without the other: the hub relays kitty traffic
-// between daemons over a text pipe, so it asks for the descriptions and takes
-// its blobs as JSON.
-//
-// And nothing is correlated by request id: an answer names (session, image id,
-// generation), which is the key a client's blob cache uses, so a duplicate is an
-// idempotent refill rather than an orphan.
+// Client-facing half of the kitty image feed; the worker observes and stores.
+// Two capabilities, kept apart for the relay: CapabilityKittyImages gates the
+// kitty_placements fan-out, CapabilityBinaryPtyOutput decides only how a blob
+// travels (frame 0x02 vs base64 JSON) — the hub relay wants the first without
+// the second. Nothing is correlated by request id: answers name (session,
+// image id, generation), so a duplicate is an idempotent refill, not an orphan.
 
 import (
 	"context"
@@ -31,16 +20,9 @@ import (
 )
 
 // placementsToProtocol converts an observed placement set to its wire form.
-//
-// The result is never nil, unlike attachBlocksToProtocol's: kitty_placements
-// declares the array required precisely so the empty set survives the trip, and
-// a nil slice would marshal to null and hand the client something its type says
-// cannot happen. The empty set is the only message that says "stop drawing".
-//
-// attach_result.snapshot uses the same converter and reaches the opposite
-// result, correctly: that field is optional, so its omitempty drops the empty
-// slice. A restore has no prior placements to clear — the client is resetting
-// its model — so there absence and emptiness really are the same thing.
+// Never nil: the empty set is the only message that says "stop drawing", and a
+// nil slice would marshal to null. (attach_result.snapshot's omitempty dropping
+// it is fine — a restore has no prior placements to clear.)
 func placementsToProtocol(placements []pty.KittyPlacement) []protocol.KittyPlacement {
 	out := make([]protocol.KittyPlacement, len(placements))
 	for i, p := range placements {
@@ -80,10 +62,9 @@ func encodeKittyPlacementsMessage(sessionID string, event ptybackend.OutputEvent
 	return outboundMessage{kind: messageKindText, payload: payload}, nil
 }
 
-// kittyImageFormatCode translates ghostty's pixel layout to the protocol's own
-// code. Explicit rather than a cast: ghostty's values are a declaration order,
-// and a pin that reorders them would otherwise silently re-label every client's
-// pixels as a different layout.
+// kittyImageFormatCode translates ghostty's pixel layout to the protocol code.
+// Explicit, not a cast: a pin that reorders ghostty's values would otherwise
+// silently re-label every client's pixels.
 func kittyImageFormatCode(format ghosttyvt.KittyImageFormat) (byte, bool) {
 	switch format {
 	case ghosttyvt.KittyImageRGB:
@@ -98,18 +79,10 @@ func kittyImageFormatCode(format ghosttyvt.KittyImageFormat) (byte, bool) {
 	return 0, false
 }
 
-// handleGetKittyImage answers a client's pull for the pixels behind a
-// placement. It answers whatever the client advertised — asking is enough, and
-// an automation client that never opted into the description feed still needs
-// to be able to assert on an image. Only the transport is a capability
-// decision: CapabilityBinaryPtyOutput gets binary frame 0x02, everyone else
-// gets the same image base64'd into kitty_image_result.
-//
-// Every failure is an ordinary answer with success=false — an evicted or
-// unknown id, a backend that cannot serve images at all — because none of them
-// mean the session is broken, and the client's move in all cases is the same:
-// drop that placement's render until something re-describes it. A failure has
-// no pixels and so no frame, so it goes as JSON to both kinds of client.
+// handleGetKittyImage answers a client's pull for the pixels behind a placement.
+// Asking is enough — only the transport is a capability decision. Every failure
+// is an ordinary success=false answer (the session is not broken; the client
+// drops that placement's render), sent as JSON to both kinds of client.
 func (d *Daemon) handleGetKittyImage(client *wsClient, msg *protocol.GetKittyImageMessage) {
 	provider, ok := d.ptyBackend.(ptybackend.KittyImageProvider)
 	if !ok {
@@ -141,9 +114,8 @@ func (d *Daemon) handleGetKittyImage(client *wsClient, msg *protocol.GetKittyIma
 			d.sendKittyImageFailure(client, msg.ID, msg.ImageID, err.Error())
 			return
 		}
-		// Blocking, like PTY output: a blob is megabytes and one message, so a
-		// slow client is better made to wait than handed a placement whose
-		// pixels never arrive.
+		// Blocking, like PTY output: better a slow client waits than a placement
+		// whose pixels never arrive.
 		if !d.sendOutboundBlocking(client, outboundMessage{kind: messageKindBinary, payload: frame}, ptyOutputSendWait) {
 			d.logf("kitty image send failed: id=%s image=%d bytes=%d", msg.ID, image.ID, len(frame))
 		}
@@ -164,9 +136,8 @@ func (d *Daemon) handleGetKittyImage(client *wsClient, msg *protocol.GetKittyIma
 	})
 }
 
-// sendKittyImageFailure answers a pull that produced no pixels. The message
-// always names the image id: the client asked by id and correlates by id, and
-// an error that omits it cannot be matched to the placement it kills.
+// sendKittyImageFailure answers a pull that produced no pixels; it always names
+// the image id, which is what the client correlates by.
 func (d *Daemon) sendKittyImageFailure(client *wsClient, sessionID string, imageID int, reason string) {
 	d.sendToClient(client, protocol.KittyImageResultMessage{
 		Event:   protocol.EventKittyImageResult,

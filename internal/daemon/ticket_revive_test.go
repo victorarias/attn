@@ -121,6 +121,72 @@ func TestRespawnLeavesNonCrashedTicketAlone(t *testing.T) {
 	}
 }
 
+// The observed bug (2026-08-09): a revived agent's FIRST report was always
+// refused. Dying and coming back writes two attn-authored events on its ticket —
+// the crash stamp and the crashed→working flip — and the mutation gate refused
+// any write while unread activity existed, so the first report died on activity
+// describing the agent's own death. The delegated agent that hit it did not
+// retry; it told its user "done" and its report never landed. The report must go
+// through on the first attempt, with the records it missed delivered beside it.
+func TestRevivedSessionReportsOnFirstAttempt(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := delegateBoundSession(t, d)
+	ticketID := boundTicketID(t, d, sessionID)
+
+	d.store.UpdateState(sessionID, protocol.StateWorking)
+	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
+	respawnDelegatedSession(t, d, sessionID)
+
+	resp := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "PR is up")
+	result := resp.TicketStatusResult
+	if !resp.Ok || result == nil || !result.Applied {
+		t.Fatalf("first report after revive = %+v, want applied", resp)
+	}
+	if result.Status != protocol.TicketStatusInReview {
+		t.Fatalf("reported status = %q, want in_review", result.Status)
+	}
+	if result.CatchUp == nil || len(result.CatchUp.Events) != 2 {
+		t.Fatalf("catch-up = %+v, want the crash and revive records delivered beside the report", result.CatchUp)
+	}
+	ticket, err := d.store.GetTicket(ticketID)
+	if err != nil || ticket == nil || ticket.Status != store.TicketStatusInReview {
+		t.Fatalf("ticket after report = %+v (err %v)", ticket, err)
+	}
+}
+
+// A peer's word that landed while the agent was down still gates its first
+// report: the crash records ride along in the same catch-up, but the comment
+// must be read before the agent may write over it.
+func TestRevivedSessionStillGatedByPeerActivity(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	sessionID := delegateBoundSession(t, d)
+	ticketID := boundTicketID(t, d, sessionID)
+
+	d.store.UpdateState(sessionID, protocol.StateWorking)
+	d.handlePTYExit(ptybackend.ExitInfo{ID: sessionID, ExitCode: 1})
+	if _, err := d.store.AddTicketComment(ticketID, "chief-peer", "scope changed while you were down", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	respawnDelegatedSession(t, d, sessionID)
+
+	first := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "should not land")
+	result := first.TicketStatusResult
+	if !first.Ok || result == nil || result.Applied {
+		t.Fatalf("first report = %+v, want refused", first)
+	}
+	if result.CatchUp == nil || len(result.CatchUp.Events) != 3 {
+		t.Fatalf("catch-up = %+v, want crash, peer comment and revive shown", result.CatchUp)
+	}
+
+	// Reading cost the write, not the ability to write: the same command retried
+	// goes through, which is what the refusal tells the agent to do.
+	retry := callSetTicketStatus(t, d, sessionID, string(protocol.DispatchWorkStateReadyForReview), "now reviewed")
+	if !retry.Ok || retry.TicketStatusResult == nil || !retry.TicketStatusResult.Applied ||
+		retry.TicketStatusResult.Status != protocol.TicketStatusInReview {
+		t.Fatalf("retry = %+v", retry)
+	}
+}
+
 // Daemon-restart safety: startup recovery adopting a still-live worker for a
 // crash-stamped ticket's session (a reap on an earlier boot stamped it, the
 // worker survived) moves the ticket back to Working — the same durable-vs-

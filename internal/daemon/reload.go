@@ -182,6 +182,13 @@ func (d *Daemon) reloadSessionForClient(sessionID string, cols, rows int) error 
 	lock.Lock()
 	defer lock.Unlock()
 
+	// A conversation session's runtime is a host, not a worker: sessionHasLiveWorker
+	// would report false for a live one and the dead-session branch below would then
+	// no-op against the still-running host. Fork before either.
+	if d.isConversationAgent(string(session.Agent)) {
+		return d.reloadConversationSession(session)
+	}
+
 	if d.sessionHasLiveWorker(sessionID) {
 		opts, err := d.buildReloadSpawnOptions(session)
 		if err != nil {
@@ -203,7 +210,7 @@ func (d *Daemon) reloadSessionForClient(sessionID string, cols, rows int) error 
 	}
 	spawnMsg, policy := buildStoredIntentSpawn(session, intent, cols, rows)
 	if rejection := d.runSpawnPipeline(spawnMsg, policy); rejection != nil {
-		return rejection.err
+		return rejection.reason()
 	}
 	d.publishFact(FactSessionRespawned, sessionID, nil)
 	return nil

@@ -1,11 +1,6 @@
-// app/src/shortcuts/resolver.ts
-// Layers user overrides on top of the built-in SHORTCUTS defaults.
-//
-// Defaults always live in code, so a corrupt or stale config can never orphan
-// an action id — each id falls back to its default. Overrides are pure data
-// persisted as one JSON settings blob (`keybindings_config`). This module is
-// the ONLY place dispatch, formatting, and the editor read bindings from, so
-// rebinds take effect everywhere at once.
+// Layers user overrides (one JSON settings blob) on the built-in SHORTCUTS
+// defaults. Defaults live in code, so a corrupt config can never orphan an id.
+// The only place dispatch, formatting, and the editor read bindings from.
 
 import {
   SHORTCUTS,
@@ -20,9 +15,7 @@ import {
 import { isMacLikePlatform } from './platform';
 
 export interface DockConfig {
-  /** When true the sidebar dock chips are hidden behind a "show dock" affordance. */
   collapsed: boolean;
-  /** Ordered membership; each id renders one dock chip. */
   items: ShortcutId[];
 }
 
@@ -35,9 +28,7 @@ export interface KeybindingsConfig {
   dock: DockConfig;
 }
 
-// Default dock membership, in render order. Mirrors the chips the sidebar showed
-// before the dock became config-driven (panel toggles, the common terminal
-// actions, then the sidebar toggle). Every entry must be a real ShortcutId.
+// Default dock membership, in render order.
 export const DEFAULT_DOCK_ITEMS: ShortcutId[] = [
   'dock.attention',
   'terminal.splitVertical',
@@ -57,11 +48,8 @@ export const EMPTY_KEYBINDINGS_CONFIG: KeybindingsConfig = {
 
 export const KEYBINDINGS_SETTING_KEY = 'keybindings_config';
 
-// --- Module-level resolved state (read by the global dispatch + formatting) ---
-
 let overrides: Partial<Record<ShortcutId, Binding | null>> = {};
 
-/** Replace the active override set (called when settings load or the user edits). */
 export function setShortcutOverrides(next: Partial<Record<ShortcutId, Binding | null>>): void {
   overrides = { ...next };
 }
@@ -97,18 +85,12 @@ export function resolvedShortcutEntries(): Array<[ShortcutId, Binding]> {
   return entries;
 }
 
-/**
- * Find an already-bound shortcut that conflicts with `binding`, excluding
- * `excludeId` and any context-gated allowed-conflict partner. Returns the
- * conflicting id or null. Used by the editor for VSCode-style reassign.
- */
+/** The already-bound shortcut conflicting with `binding`, or null. */
 export function findConflict(binding: Binding, excludeId: ShortcutId): ShortcutId | null {
   for (const [id, d] of resolvedShortcutEntries()) {
     if (id === excludeId) continue;
-    // The allowed-conflict exemption (e.g. session.close vs terminal.close on
-    // ⌘W) only holds for two plain combos that dispatch disambiguates by target.
-    // A chord leader arms globally and is NOT context-gated, so a chord on
-    // either side must still surface the conflict.
+    // The allowed-conflict exemption holds only for two plain combos dispatch
+    // disambiguates by target; a chord leader arms globally, so it still conflicts.
     if (!isChord(binding) && !isChord(d) && isAllowedConflict(excludeId, id)) continue;
     if (bindingsConflict(binding, d)) return id;
   }
@@ -128,8 +110,8 @@ export type CaptureResult =
 
 /**
  * Translate a keydown into a ShortcutDef for the editor's key-capture input.
- * Rejects Control on macOS because the matcher treats Control as the
- * accelerator only on non-Mac platforms — a Ctrl-only binding would never fire.
+ * Control is rejected on macOS: the matcher treats it as the accelerator only
+ * off-Mac, so a Ctrl-only binding would never fire.
  */
 export function eventToBinding(e: KeyboardEvent): CaptureResult {
   if (!e.key || MODIFIER_KEYS.has(e.key)) return { kind: 'ignored' };
@@ -152,17 +134,13 @@ export function eventToBinding(e: KeyboardEvent): CaptureResult {
 }
 
 /**
- * A binding with no accelerator (no ⌘/⌃/⌥) collides with ordinary typing in the
- * terminal and text inputs. The editor surfaces this as a soft warning. For a
- * chord the leader is what must claim a keystroke up front, so the leader is
- * what's evaluated.
+ * A binding with no accelerator collides with ordinary typing; the editor warns
+ * softly. A chord is judged by its leader, the step that claims a keystroke.
  */
 export function isRiskyBinding(binding: Binding): boolean {
   const combo = isChord(binding) ? binding.leader : binding;
   return !combo.meta && !combo.ctrl && !combo.alt;
 }
-
-// --- Config (de)serialization with tolerant sanitization ---
 
 function sanitizeCombo(value: unknown): Combo | null {
   if (!value || typeof value !== 'object') return null;
@@ -178,11 +156,8 @@ function sanitizeCombo(value: unknown): Combo | null {
   return def;
 }
 
-/**
- * Sanitize a persisted binding: a `{leader, then}` shape becomes a Chord (both
- * steps must sanitize, else the whole chord is dropped so the id falls back to
- * its default), otherwise a single Combo.
- */
+// Both steps of a chord must sanitize; otherwise the whole binding is dropped
+// and the id falls back to its default.
 function sanitizeBinding(value: unknown): Binding | null {
   if (value && typeof value === 'object' && ('leader' in value || 'then' in value)) {
     const v = value as Record<string, unknown>;
@@ -194,7 +169,7 @@ function sanitizeBinding(value: unknown): Binding | null {
   return sanitizeCombo(value);
 }
 
-/** A fresh empty config (own copy of the default dock so callers can't mutate it). */
+/** A fresh empty config, with its own dock copy callers cannot mutate. */
 function emptyConfig(): KeybindingsConfig {
   return { version: 1, overrides: {}, dock: defaultDock() };
 }
@@ -203,11 +178,8 @@ function defaultDock(): DockConfig {
   return { collapsed: false, items: [...DEFAULT_DOCK_ITEMS] };
 }
 
-/**
- * Sanitize a persisted dock blob: keep only real, deduped ShortcutIds in order,
- * coerce `collapsed` to a boolean. A missing/malformed dock falls back to the
- * default so the sidebar always has a usable dock.
- */
+// A missing or malformed dock falls back to the default, so the sidebar always
+// has a usable one.
 function sanitizeDock(value: unknown): DockConfig {
   if (!value || typeof value !== 'object') return defaultDock();
   const v = value as Record<string, unknown>;
@@ -224,10 +196,7 @@ function sanitizeDock(value: unknown): DockConfig {
   return { collapsed: v.collapsed === true, items };
 }
 
-/**
- * Parse a persisted blob into a config, dropping anything unrecognized so a bad
- * value can never crash dispatch (the affected id just keeps its default).
- */
+/** Parse a persisted blob, dropping anything unrecognized so dispatch cannot crash. */
 export function parseKeybindingsConfig(raw: string | undefined | null): KeybindingsConfig {
   if (!raw) return emptyConfig();
   let parsed: unknown;

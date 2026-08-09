@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/supervise"
@@ -134,10 +135,17 @@ func TestParkedPluginRaisesADurableNotification(t *testing.T) {
 	}
 }
 
-func newTestPluginSupervisor(clock *fakePluginClock, launcher *fakePluginLauncher) *pluginSupervisor {
-	return newPluginSupervisor(launcher, clock, func(manifest pluginManifest, generation uint64) []string {
+// newTestPluginSupervisor builds a supervisor over the fake clock and launcher, and
+// shuts it down on cleanup. The shutdown is load-bearing inside a bubble: every
+// supervised plugin owns a goroutine parked on its process handle's exit channel,
+// and one still parked when the test body returns is a blocked bubble goroutine.
+func newTestPluginSupervisor(t *testing.T, clock *fakePluginClock, launcher *fakePluginLauncher) *pluginSupervisor {
+	t.Helper()
+	supervisor := newPluginSupervisor(launcher, clock, func(manifest pluginManifest, generation uint64) []string {
 		return []string{fmt.Sprintf("ATTN_PLUGIN_NAME=%s", manifest.Name), fmt.Sprintf("ATTN_PLUGIN_GENERATION=%d", generation)}
 	}, supervise.Options{})
+	t.Cleanup(supervisor.Shutdown)
+	return supervisor
 }
 
 type fakePluginLauncher struct {
@@ -274,6 +282,21 @@ func (t *fakePluginTimer) Stop() bool {
 	return true
 }
 
+// requireSupervisor asserts a supervisor condition holds once the bubble has
+// settled. The supervisor reacts to a process exit and to a fired backoff timer on
+// its own goroutine; synctest.Wait() returns after those have run, so the condition
+// is read against a settled supervisor rather than polled at it.
+func requireSupervisor(t *testing.T, condition func() bool, what string) {
+	t.Helper()
+	synctest.Wait()
+	if !condition() {
+		t.Fatal(what)
+	}
+}
+
+// waitForSupervisor polls for a condition driven by a real child process, where
+// there is no bubble to settle — the log-capture and ws plugin tests run actual
+// executables on the wall clock.
 func waitForSupervisor(t *testing.T, condition func() bool) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

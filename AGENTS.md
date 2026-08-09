@@ -118,8 +118,9 @@ permissions.
   `attn profile resolve --json`; remove with `attn profile clean <name>`.
 - **Clean up the profile you created.** Nothing reaps it for you: its daemon
   (~40MB) and every pty-worker (~15MB) keep running until someone notices them
-  days later. `attn profile clean <name>` reaps the workers, stops the daemon,
-  quits the app, and removes the bundle and data dir. `make install
+  days later. `attn profile clean <name>` reaps the workers, conversation
+  hosts, and plugin runtime processes, stops the daemon, quits the app, and
+  removes the bundle and data dir. `make install
   PROFILE=<name>` records the worktree it ran from, so `attn profile list` tells
   you which profiles are yours, and a PostToolUse hook reminds you after you
   create or merge a PR.
@@ -336,8 +337,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - No continuously repainting animations. attn renders GPU terminals, often on
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
-- Comments describe how a thing is used, and move when the code moves. Mostly on
-  functions and seams, not annotating every line.
+- Comments state what the code cannot show — a constraint, an invariant, a
+  measured receipt — in one or two lines, and move when the code moves. Godoc
+  on an exported symbol is one line. A package header is a few lines plus a
+  link to the design doc, never a retelling of it. Never narrate the next line
+  or argue that the change is correct: that talk belongs in the PR, and a
+  comment addressed to the reviewer is a defect.
 - Conventional commit titles with a scope, in plain language:
   `fix(queue): hand over the next agent however a turn closes`.
 

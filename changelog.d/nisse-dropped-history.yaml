@@ -1,0 +1,15 @@
+kind: fixed
+area: sessions
+change: >
+  A conversation long enough to outgrow what attn keeps now says so. Once there
+  is nothing older left to load, the transcript is headed by a row naming how
+  many earlier items are no longer kept, instead of appearing to begin
+  mid-thought. Reloading a session that reads its whole history back clears the
+  row. A message the agent is still writing is also no longer dropped while it
+  is being written, which could split a paragraph in two and file the first half
+  under the tool that ran beneath it.
+symptom: >
+  In a very long conversation, the oldest messages were dropped silently: the
+  transcript simply started partway through with no way to tell whether it had
+  always been that short. In the same conversations, a reply still streaming
+  could lose its opening and reappear truncated, out of order, below a tool call.

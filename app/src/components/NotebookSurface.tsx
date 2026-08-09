@@ -15,99 +15,64 @@ import { registerPaletteClaim } from './palette/paletteClaim';
 import { parseOutline } from './notebook/outline';
 import './NotebookBrowser.css';
 
-// NotebookSurface is the full Notebook body — file tree, live editor, context rail,
-// fold handles, tasks panel, and all the load/save/send-to-chief logic. It renders
-// in two shapes:
-//   - `modal`: wrapped in the dialog shell (overlay + focus trap + header/Close),
-//     the fullscreen Notebook (NotebookBrowser owns this wrapper).
-//   - `tile`: bare, to live inside a workspace tile beside terminals.
-// The variants share every behavior; only the outer frame (and the modal-only
-// header chrome) differ. The surface stays MOUNTED while a modal is closed
-// (state/refs survive a close→reopen), so it gates its work on `active` rather
-// than unmounting.
+// The full Notebook body — file tree, live editor, context rail, fold handles,
+// tasks panel, and the load/save/send-to-chief logic. Rendered either as a
+// `modal` (dialog shell, owned by NotebookBrowser) or as a bare `tile`; the two
+// share every behavior. A closed modal stays MOUNTED, so the surface gates its
+// work on `active` rather than unmounting.
 export interface NotebookSurfaceProps {
-  // Which frame to render (see above). 'modal' draws the dialog shell + header;
-  // 'tile' draws a bare surface for a workspace tile.
+  // Which frame to render: 'modal' draws the dialog shell + header, 'tile' bare.
   variant: 'modal' | 'tile';
-  // Whether the surface is live. The modal passes its isOpen (the surface stays
-  // mounted but idle while closed); a tile is always active once mounted. Gates the
-  // on-open file selection, the live-refresh reload, and the tasks fetch.
+  // Live or idle-but-mounted. Gates on-open selection, live refresh, tasks fetch.
   active: boolean;
-  // The file to open first. Tiles persist it; the modal uses it when another
-  // surface opens a specific Notebook file.
+  // The file to open first; tiles persist it.
   initialPath?: string | null;
   // Modal close (persist-then-close). A tile has no Close button, so it omits this.
   onClose?: () => void;
-  // Called when a tile opens a file (a real path — never the cleared/no-selection
-  // state), so the parent can persist the path to the tile's params. Modal ignores
-  // it (its selection isn't persisted).
+  // A tile reports the opened path (never the cleared state) so the parent can
+  // persist it; the modal's selection isn't persisted.
   onOpenFile?: (path: string) => void;
-  // List one directory's immediate children over the daemon's generic filesystem
-  // surface. '' = the notebook root. Drives the lazy folder tree in the sidebar.
+  // One directory's immediate children; '' = the notebook root.
   listDir: (path: string) => Promise<FsEntry[]>;
   // Read one file's full bytes + content hash (for hash-CAS edits).
   readFile: (path: string) => Promise<FsReadResult>;
-  // Save an edited file (hash-CAS). Omit baseHash to create-only; pass the file's
-  // loaded hash to edit. Resolves with the outcome, including a conflict to reconcile.
+  // Save via hash-CAS: omit baseHash to create-only, pass the loaded hash to edit.
   writeFile: (path: string, content: string, baseHash?: string) => Promise<FsWriteResult>;
-  // Check whether an in-notebook link target exists (no read), to flag broken links
-  // in the editor. Only consulted for markdown notes.
+  // Existence check (no read) behind the editor's broken-link flags; markdown only.
   existsFile: (path: string) => Promise<FsExistsResult>;
-  // Read an image asset's bytes (base64) for the live editor's inline image widget.
-  // Only consulted for a non-direct src (not http(s)/data:/protocol-relative).
+  // Image bytes for the inline image widget; only for non-direct srcs.
   readAsset: (path: string) => Promise<FsReadAssetResult>;
-  // Backlinks ("Linked from") for a markdown note. Notebook-specific (walks .md link
-  // graphs), so it is only consulted for .md files. Optional: a caller that omits it
-  // (an off-root tile — see NotebookTile) gets no backlinks rail at all; the surface
-  // stays root-unaware and simply renders the affordances it's handed.
+  // Backlinks for a markdown note. Optional: an off-root tile omits it and gets no
+  // backlinks rail, keeping this surface root-unaware.
   backlinksNotebook?: (path: string) => Promise<NotebookEntry[]>;
-  // Hand a highlighted selection to the daemon to deliver to the chief of staff
-  // (appends to the chief inbox note + best-effort live PTY nudge). The UI never
-  // messages the chief directly. sourcePath is the note the selection came from.
-  // Optional: a caller that omits it (an off-root tile) gets no floating "Send to
-  // chief" button at all.
+  // Hand a selection to the daemon for the chief of staff; the UI never messages
+  // the chief directly. Optional — omitting it removes the floating send button.
   sendToChief?: (selection: string, sourcePath?: string) => Promise<NotebookSendToChiefResult>;
-  // Increments whenever an fs_changed event arrives, so an open browser re-lists the
-  // tree (handled by FileTree) and reloads the open file (covering agent and external
-  // writes).
+  // Increments on every fs_changed, re-listing the tree and reloading the open file.
   changeSignal?: number;
-  // Walk the whole vault (flat list of notes, with titles) for the in-tile fuzzy
-  // finder. Tile-only: when provided, a tile gains its Cmd+P finder; the modal
-  // omits it (it navigates via the tree), so it's optional.
+  // Whole-vault walk behind Cmd+P. Optional: omitting it disables the finder.
   listFiles?: () => Promise<NotebookEntry[]>;
-  // The chief-pulse state for the modal top-bar indicator: true = a chief-of-staff
-  // session is working, false = a chief exists but is idle, undefined = no chief
-  // session at all (the indicator is hidden). Modal-only chrome; tiles omit it.
+  // Chief pulse: working / idle / undefined = no chief (indicator hidden).
   chiefActive?: boolean;
 }
 
-// The file shown first when the browser opens with nothing selected, in order of
-// preference. knowledge/index.md is the distilled map an agent is told to read. We
-// probe these directly (a cheap read) rather than walking the whole tree, since the
-// sidebar lists lazily and has no flat catalogue to scan.
+// Entry points probed in order when nothing is selected. Probed by direct read:
+// the sidebar lists lazily and has no flat catalogue to scan.
 const PREFERRED_FIRST = ['knowledge/index.md', 'index.md'];
 
-// How long the buffer must be idle before an autosave fires. Short enough that
-// edits persist promptly, long enough to coalesce a burst of keystrokes into one
-// write (and one origin=ui broadcast).
+// Idle time before an autosave fires; coalesces a keystroke burst into one write.
 const AUTOSAVE_DELAY_MS = 700;
 
-// Outcome of persisting the buffer. On-demand callers (navigate/close) MUST react
-// to 'conflict'/'error' — a CAS conflict cannot be silently dropped, or the user's
-// edits vanish behind a navigation/close without the banner ever showing.
+// Outcome of persisting the buffer. Callers MUST react to 'conflict'/'error':
+// dropping one loses the user's edits behind a navigation with no banner shown.
 export type PersistOutcome = 'saved' | 'conflict' | 'error' | 'noop';
 
-// Imperative escape hatch for callers that need to flush the dirty buffer AHEAD
-// of a state transition they own (e.g. NotebookTile's root switcher, which must
-// persist the outgoing root's edit before swapping tileParams — see
-// WorkspaceDockTile.tsx). Everything else about persistence stays internal;
-// this is the one seam.
+// Escape hatch for callers that must flush the dirty buffer ahead of a state
+// transition they own (NotebookTile's root switcher). The only persistence seam.
 export interface NotebookSurfaceHandle {
-  // Persists the dirty buffer (if any) against its synced base, via the same
-  // persist path the navigate/close flush already uses. Resolves 'noop' when
-  // there's nothing dirty (already in sync). On 'conflict' or 'error' the
-  // surface's own banner is already showing — the caller must abort whatever
-  // transition prompted the flush rather than proceeding past the failure.
+  // Persists the dirty buffer against its synced base ('noop' when in sync). On
+  // 'conflict'/'error' the banner is already up and the caller must abort its
+  // transition rather than proceed past the failure.
   flushPendingSave: () => Promise<PersistOutcome>;
 }
 
@@ -133,88 +98,58 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
   const [noteError, setNoteError] = useState<string | null>(null);
   const [noteLoading, setNoteLoading] = useState(false);
   const [backlinks, setBacklinks] = useState<NotebookEntry[]>([]);
-  // Backlinks load INDEPENDENTLY from (and far slower than) the note content, so the
-  // panel needs its own loading flag: without it, a newly selected note would keep
-  // showing the PREVIOUS note's "Linked from" list — or worse, falsely assert "No
-  // other note links here." — until the slow walk resolves. While true, the panel
-  // renders a neutral loading line instead of stale or misleading metadata.
+  // Backlinks load independently of, and far slower than, the content: without
+  // this flag the panel asserts the PREVIOUS note's links until the walk resolves.
   const [backlinksLoading, setBacklinksLoading] = useState(false);
-  // selectedPath drives loads; this ref lets the change-signal effect reload the
-  // current file without depending on (and re-running for) selectedPath itself.
+  // Lets the change-signal effect reload without depending on selectedPath.
   const selectedPathRef = useRef<string | null>(null);
   selectedPathRef.current = selectedPath;
-  // Monotonic load token, bumped synchronously at the start of every loadFile so
-  // a slow response from a superseded navigation is dropped. (A render-synced ref
-  // can't do this — it only updates on commit, after the await may have resolved.)
+  // Bumped synchronously, so a superseded navigation's slow response is dropped.
   const loadSeqRef = useRef(0);
-  // Persists the outgoing file's unsaved buffer before a navigation/close replaces or
-  // hides it — surfacing a CAS conflict rather than dropping it. Assigned below (after
-  // the editing state/refs exist) and invoked via a ref so loadFile — declared above
-  // the editing block — doesn't depend on declaration order. A no-op until assigned.
+  // Persists the outgoing buffer before a navigation/close hides it, surfacing a
+  // CAS conflict. Via a ref so loadFile need not depend on declaration order.
   const persistRef = useRef<() => Promise<PersistOutcome>>(async () => 'noop');
-  // The dialog container is the deliberate initial focus target so keyboard/AT
-  // users land inside the modal (engaging the focus trap) without auto-selecting
-  // the Close button. Tab from here moves to the first interactive control.
+  // Initial focus target: inside the trap, without preselecting Close.
   const dialogRef = useRef<HTMLDivElement>(null);
-  // The body container, observed by the tile's responsive auto-fold. Its width is
-  // independent of how the inner panes fold, so folding can't shrink the observed
-  // box and oscillate.
+  // Observed by the tile's auto-fold; fold-independent, so it cannot oscillate.
   const bodyRef = useRef<HTMLDivElement>(null);
-  // Imperative handle to the live editor, so the context rail's outline can scroll
-  // the editor to a heading (navigation that originates outside the editor).
+  // Lets the outline scroll the editor to a heading from outside the editor.
   const editorRef = useRef<LiveMarkdownEditorHandle>(null);
-  // The right context rail's two sections fold independently; both open by default so
-  // the outline and backlinks are visible without a click. Local UI state only.
+  // The rail's two sections fold independently, both open by default.
   const [outlineOpen, setOutlineOpen] = useState(true);
   const [backlinksOpen, setBacklinksOpen] = useState(true);
-  // Whether the live editor's in-CodeMirror search panel (⌘F) is currently open.
-  // Drives a dedicated escape-stack entry so the first Esc closes just the panel.
+  // Drives a dedicated escape-stack entry so the first Esc closes just ⌘F.
   const [searchOpen, setSearchOpen] = useState(false);
-  // Whole-pane edge-rail folds (manual). Tri-state per side: null = follow the auto
-  // default, true/false = an explicit user override. The auto default is a hardcoded
-  // `false` here — stage 7 PR3 (tile auto-fold) swaps it for a width-driven value, so
-  // the fold derivation changes but the toggle handlers never do. Folded panes drop
-  // to 0 width but stay mounted (CodeMirror/scroll state survives).
+  // Tri-state per side: null follows the auto default, true/false is an explicit
+  // override. A folded pane drops to 0 width but stays mounted, so CodeMirror and
+  // scroll state survive.
   const [treeOverride, setTreeOverride] = useState<boolean | null>(null);
   const [railOverride, setRailOverride] = useState<boolean | null>(null);
-  // The auto side of the fold seam. A modal folds nothing automatically (manual
-  // only, unchanged); a tile folds its rail then its tree as it narrows. A manual
-  // override still wins (`override ?? auto`), so this only changes what auto means.
+  // Auto fold: a tile folds rail then tree as it narrows; a manual override wins.
   const { treeAutoFold, railAutoFold } = useTileAutoFold(bodyRef, variant === 'tile');
   const treeFolded = treeOverride === null ? treeAutoFold : treeOverride;
   const railFolded = railOverride === null ? railAutoFold : railOverride;
   // --- Fuzzy finder (Cmd+P) ---
-  // The finder lists the whole vault. Both surfaces get one as long as listFiles is
-  // provided (a tile reads it from context; the fullscreen modal is handed it
-  // explicitly) — omitting listFiles disables the finder entirely. The index walks on
-  // mount and refreshes on fs changes, but only while the surface is actually showing:
-  // a tile is always live, a modal only when open, so a closed-but-mounted modal never
-  // walks the vault.
+  // Present whenever listFiles is; the index only walks while the surface shows.
   const finderEnabled = !!listFiles;
   const finderActive = variant === 'tile' || active;
   const [finderOpen, setFinderOpen] = useState(false);
   const { files: finderFiles, loading: finderLoading } = useNotebookFileIndex(listFiles, changeSignal, finderEnabled && finderActive);
-  // Where to return focus when the finder closes. Captured on open so closing the
-  // finder lands focus back where it was (the editor, usually) rather than letting
-  // it fall to <body> — which would strand Cmd+P, since the re-summon keydown is
-  // scoped to the surface container and only fires when focus is inside it.
+  // Captured on open: focus falling to <body> would strand Cmd+P, whose keydown
+  // is scoped to the surface container.
   const finderReturnFocusRef = useRef<HTMLElement | null>(null);
   const openFinder = useCallback(() => {
     finderReturnFocusRef.current = document.activeElement as HTMLElement | null;
     setFinderOpen(true);
   }, []);
-  // Claim ⌘P while focus is inside this surface, so the global markdown opener
-  // hands the keystroke back to THIS tile's finder (two tiles never fight over
-  // one binding, and the app-wide opener stays out of a focused notebook).
+  // Claim ⌘P while focus is inside, so two tiles never fight over one binding.
   useEffect(() => {
     if (!finderEnabled) return;
     return registerPaletteClaim({ container: () => dialogRef.current, open: openFinder });
   }, [finderEnabled, openFinder]);
-  // The same summon from this container's own keydown. In the app the global
-  // dispatcher (capture phase) gets there first and routes through the claim
-  // above; this path is what makes the surface work standalone, outside an App
-  // that registers the shortcut. preventDefault stops the WebView's print
-  // dialog. Shift is excluded — Cmd+Shift+P is the global attention dock.
+  // The same summon from the container's own keydown, which is what makes the
+  // surface work standalone. preventDefault stops the WebView print dialog, and
+  // Shift is excluded because Cmd+Shift+P is the global attention dock.
   const handleSurfaceKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.metaKey && !event.shiftKey && !event.altKey && event.key.toLowerCase() === 'p') {
       event.preventDefault();
@@ -222,9 +157,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       if (finderEnabled) openFinder();
     }
   }, [finderEnabled, openFinder]);
-  // On close, restore focus inside the surface so Cmd+P keeps working: back to the
-  // element the finder opened over if it's still in this surface, else the surface
-  // container itself. (Runs only on a true→false transition, never on mount.)
+  // Restore focus inside the surface on close, or Cmd+P stops working.
   const finderWasOpenRef = useRef(false);
   useEffect(() => {
     if (finderWasOpenRef.current && !finderOpen) {
@@ -239,10 +172,8 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
     finderWasOpenRef.current = finderOpen;
   }, [finderOpen]);
-  // The kind/type pill in the note header: a markdown note's frontmatter `type`
-  // (defaulting to "note"), or "text" for a plain-text file. Parsed off the loaded
-  // content (not the live draft) so it doesn't churn on every keystroke. Self-
-  // contained (calls fileKind itself) so it can sit above the !active early return.
+  // Parsed off the loaded content, not the live draft, so it doesn't churn per
+  // keystroke; self-contained so it can sit above the !active early return.
   const noteType = useMemo(() => {
     if (!note || !selectedPath) return null;
     const kind = fileKind(selectedPath);
@@ -254,10 +185,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     return null;
   }, [note, selectedPath]);
 
-  // Closing with unsaved edits persists them first; if that write conflicts (or
-  // errors) we keep the modal open so the conflict banner can be reconciled, rather
-  // than losing the buffer behind the close. dirtyRef short-circuits the clean case
-  // to an immediate close (no write, no await).
+  // Unsaved edits persist first; a conflict keeps the modal open to reconcile.
   const requestClose = useCallback(async () => {
     if (dirtyRef.current) {
       const outcome = await persistRef.current();
@@ -267,51 +195,35 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
   }, [onClose]);
   const handleEscape = useCallback(() => void requestClose(), [requestClose]);
 
-  // Esc closes the modal. The finder, when open over the modal, needs a higher-
-  // priority Esc that closes the finder FIRST: the escape stack is a capture-phase
-  // window listener, so it beats the finder input's own onKeyDown and would otherwise
-  // collapse the whole modal. A second entry (pushed after, so LIFO puts it on top)
-  // closes just the finder while it's open. (A tile isn't modal — its finder's Esc is
-  // handled by the finder input's onKeyDown directly, no stack involved.)
+  // Esc closes the modal. The stack is a capture-phase window listener, so it
+  // beats the finder input's own onKeyDown; a second entry pushed while the finder
+  // is open sits on top (LIFO) and closes just the finder.
   useEscapeStack(handleEscape, variant === 'modal' && active);
   useEscapeStack(() => setFinderOpen(false), variant === 'modal' && active && finderOpen);
-  // The in-editor search panel (⌘F) gets its own higher-priority Esc entry, pushed
-  // only while it's open — LIFO puts it above the modal-close entry, so the first
-  // Esc closes just the search panel. Not gated on variant: a tile's search panel
-  // also closes via the centralized stack (a tile has no modal-close entry to race).
+  // ⌘F pushes its own entry while open, so the first Esc closes just the panel.
   useEscapeStack(() => { editorRef.current?.closeSearchPanel(); }, active && searchOpen);
 
-  // Load `path` into the document pane. `prefetched` lets a caller that already read
-  // the file (the on-open existence probe) seed the editor without a second read.
+  // Load `path`; `prefetched` seeds the editor without a second read.
   const loadFile = useCallback(async (path: string, prefetched?: FsReadResult) => {
-    // Persist any unsaved buffer on the file we're leaving before we replace it
-    // (covers an edit made in the <debounce window of the autosave timer). If that
-    // write conflicts (the file changed on disk) we ABORT the navigation and stay
-    // put so the conflict banner can be reconciled — navigating away would discard
-    // the buffer and the user's edits would vanish silently.
+    // Persist the outgoing buffer first, covering an edit inside the debounce
+    // window. A conflicting write ABORTS the navigation so the banner can be
+    // reconciled; navigating away would discard the edits silently.
     if (dirtyRef.current && selectedPathRef.current && selectedPathRef.current !== path) {
       const outcome = await persistRef.current();
       if (outcome === 'conflict' || outcome === 'error') return;
     }
     const seq = ++loadSeqRef.current;
     setSelectedPath(path);
-    // Let the parent persist the opened path (a tile writes it to its params); the
-    // modal passes no handler, so its selection isn't persisted.
+    // A tile persists the opened path; the modal passes no handler.
     onOpenFile?.(path);
-    // Loading replaces the rendered content (navigation or a same-file live reload),
-    // so any floating "Send to chief" button is now mispositioned — drop it.
+    // Loading replaces the content, so a floating send button is now misplaced.
     setChiefSel(null);
-    // Drop the outgoing file's backlinks the moment a new load starts (not when the
-    // new walk resolves), so the panel never shows the previous selection's "Linked
-    // from" list — the same stale-context bug the content decouple fixed, one panel
-    // over.
+    // Drop backlinks when the load STARTS, not when the new walk resolves, or the
+    // panel shows the previous selection's links meanwhile.
     setBacklinks([]);
     setBacklinksLoading(false);
 
-    // Binary files have no text editor: don't even read them (fs_read returns a
-    // string, meaningless for binary bytes). Show the unsupported placeholder, which
-    // the render derives from the selected path's kind. Clear note/draft so a prior
-    // file's content doesn't linger behind the placeholder.
+    // Never read a binary file: fs_read returns a string, meaningless for bytes.
     if (isBinaryPath(path)) {
       setNote(null);
       setDraft('');
@@ -322,23 +234,18 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
 
     setNoteError(null);
     if (prefetched) {
-      // Already read by the caller; seed the buffer directly. A fresh load is never
-      // dirty.
+      // Already read by the caller; a fresh load is never dirty.
       setNote(prefetched);
       setDraft(prefetched.content);
       setNoteLoading(false);
     } else {
       setNoteLoading(true);
-      // Content and backlinks load INDEPENDENTLY — never gated together. The file
-      // content is a single fast read; backlinks walks every note in the notebook
-      // (reading each body to find links) and is far slower. Apply the content the
-      // moment its read resolves; let backlinks fill in whenever it lands. Each guards
-      // on the load token so a superseded navigation is dropped.
+      // Content and backlinks load INDEPENDENTLY: one fast read versus a walk of
+      // every note. Each guards on the load token so a superseded navigation drops.
       void readFile(path)
         .then((value) => {
           if (loadSeqRef.current !== seq) return;
           setNote(value);
-          // Seed the live editor buffer from disk; a fresh load is never dirty.
           setDraft(value.content);
           setNoteLoading(false);
         })
@@ -350,9 +257,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
           setNoteLoading(false);
         });
     }
-    // Backlinks are a markdown-note concept; only walk the link graph for .md files.
-    // A backlinks failure must not blank the file — it just yields no backlinks.
-    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    // Markdown only; a failure yields no backlinks and must not blank the file.
     if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
@@ -369,9 +274,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [readFile, backlinksNotebook, onOpenFile]);
 
-  // Drop the current selection and return the document pane to its empty state.
-  // Bumping loadSeqRef invalidates any in-flight loadFile so a response that
-  // resolves after this clear cannot resurrect the just-cleared file's content.
+  // Bumping loadSeqRef stops a late load resurrecting the just-cleared file.
   const clearSelection = useCallback(() => {
     loadSeqRef.current += 1;
     setSelectedPath(null);
@@ -384,48 +287,40 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
   }, []);
 
   // --- Editing (single live surface; no view/edit toggle) ---
-  // `draft` is the live editor buffer; `note` holds the value last synced from disk
-  // (its content + hash). The file is "dirty" when draft diverges from note.content;
-  // dirty edits autosave (debounced) via hash-CAS against note.hash.
+  // `draft` is the live buffer, `note` the value last synced from disk. Dirty =
+  // they diverge, and dirty autosaves debounced via hash-CAS against note.hash.
   const [draft, setDraft] = useState('');
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
-  // Set when an autosave's hash-CAS rejected because the file changed on disk since
-  // it was loaded; carries the current on-disk hash so the user can overwrite it.
+  // Set when a CAS rejected; carries the on-disk hash so the user can overwrite.
   const [conflict, setConflict] = useState<{ currentHash?: string } | null>(null);
   const [justSaved, setJustSaved] = useState(false);
-  // Refs let the navigation/close persist and the live-refresh guard read the latest
-  // draft / synced note / dirty state without re-subscribing every effect to them.
+  // Refs so the persist and live-refresh paths read latest state without deps.
   const draftRef = useRef('');
   draftRef.current = draft;
   const noteRef = useRef<FsReadResult | null>(null);
   noteRef.current = note;
-  // Dirty = the buffer diverges from the last synced content. Gates autosave and the
-  // live-refresh reload (an unsaved buffer must not be clobbered by a disk reload).
+  // Gates autosave and the live reload: a disk reload must not clobber a buffer.
   const dirty = note ? draft !== note.content : false;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
 
   // --- Send to chief ---
-  // The current editor selection and where to float its action button (viewport
-  // coords from the selection start). Cleared on navigation/scroll/collapse.
+  // Selection plus frozen viewport coords for its floating action button.
   const [chiefSel, setChiefSel] = useState<LiveSelection | null>(null);
   const [sendingToChief, setSendingToChief] = useState(false);
   // A transient outcome line ("Added to chief's inbox" / an error), auto-dismissed.
   const [chiefStatus, setChiefStatus] = useState<{ text: string; error: boolean } | null>(null);
 
-  // Core write: persist `content` against `baseHash` (hash-CAS) and reconcile the
-  // result. Returns the outcome so on-demand callers (navigate/close) can react —
-  // a 'conflict'/'error' must NOT be silently dropped. An empty baseHash is a
-  // create-only write, used to recreate a file deleted on disk while it was edited.
+  // Core write: hash-CAS `content` against `baseHash` and reconcile. The outcome
+  // returns so callers can react — 'conflict'/'error' must NOT be dropped. An
+  // empty baseHash is create-only, recreating a file deleted while edited.
   const writeBuffer = useCallback(async (baseHash: string, content: string): Promise<PersistOutcome> => {
     const path = selectedPathRef.current;
     if (!path) return 'noop';
-    // Freeze the load token so a navigation that lands while this write is in flight
-    // is detected on resolve (mirrors loadFile's staleness guard; loadFile/
-    // clearSelection bump loadSeqRef, writeBuffer does not). The bytes still reach
-    // disk either way — we just don't stamp this file's result onto whatever file is
-    // now shown. The OUTCOME still returns so the caller can react.
+    // Freeze (never bump) the load token, so a navigation landing mid-write is
+    // detected on resolve. The bytes still reach disk and the outcome still
+    // returns; we just don't stamp the result onto whatever file is now shown.
     const seq = loadSeqRef.current;
     setSaving(true);
     setSaveError(null);
@@ -433,15 +328,13 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       const res = await writeFile(path, content, baseHash || undefined);
       const superseded = loadSeqRef.current !== seq || selectedPathRef.current !== path;
       if (res.conflict) {
-        // The file diverged on disk; let the user reconcile rather than clobber.
-        // (Only surface it if this file is still shown — see `superseded`.)
+        // Diverged on disk: reconcile rather than clobber, if still shown.
         if (!superseded) setConflict({ currentHash: res.currentHash });
         return 'conflict';
       }
       if (!superseded) {
-        // Saved: advance the synced base to the bytes just written. If the user kept
-        // typing during the save, draft is now ahead of `content` → still dirty → the
-        // autosave effect fires again. The origin=ui broadcast also refreshes.
+        // Advance the synced base to the bytes written; typing during the save
+        // leaves draft ahead, still dirty, so the autosave effect fires again.
         setConflict(null);
         setNote({ path, content, hash: res.hash ?? '' });
         setJustSaved(true);
@@ -457,10 +350,8 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [writeFile]);
 
-  // Persist the current dirty buffer against its synced base. Drives the debounced
-  // autosave and — crucially — the navigate/close flush, so an outgoing edit that
-  // conflicts surfaces the banner (and blocks the navigation/close) instead of being
-  // dropped. A no-op when the buffer is in sync. Reads refs, so it stays stable.
+  // Drives both the debounced autosave and the navigate/close flush, so a
+  // conflicting outgoing edit raises the banner instead of being dropped.
   const persist = useCallback(async (): Promise<PersistOutcome> => {
     const current = noteRef.current;
     if (!current) return 'noop';
@@ -468,22 +359,18 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     if (content === current.content) return 'noop'; // in sync — nothing to persist
     return writeBuffer(current.hash, content);
   }, [writeBuffer]);
-  // Indirection so loadFile/requestClose (declared above the editing block) can invoke
-  // the latest persist without a forward declaration.
+  // Indirection so callers declared above the editing block reach latest persist.
   persistRef.current = persist;
 
   useImperativeHandle(ref, () => ({
     flushPendingSave: () => persistRef.current?.() ?? Promise.resolve('noop'),
   }), []);
 
-  // Discard the local buffer and reload the current on-disk version (the conflict
-  // reconcile "reload from disk" path).
+  // The conflict banner's "reload from disk" path.
   const reloadFromDisk = useCallback(async () => {
     const path = selectedPathRef.current;
     if (!path) return;
-    // Freeze the load token so a navigation that lands while this read is in flight
-    // is detected on resolve (mirrors loadFile/writeBuffer). Without it, a slow reload
-    // of file A could stamp A's content/hash onto file B after the user moved on.
+    // Freeze the load token, or a slow reload of A stamps its content onto B.
     const seq = loadSeqRef.current;
     setConflict(null);
     setSaveError(null);
@@ -492,8 +379,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
       setNote(fresh);
       setDraft(fresh.content);
-      // The banner's "Reload from disk" button still has focus at this point; pull it
-      // back to the editor so typing works immediately, with no extra click.
+      // Pull focus off the banner button so typing works with no extra click.
       editorRef.current?.focus();
     } catch (err) {
       if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
@@ -501,23 +387,16 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [readFile]);
 
-  // Live refresh of the OPEN file after an fs_changed event. Unlike loadFile (a
-  // navigation: full reset, fresh editor, scroll to top), this keeps the reader in
-  // place. Two properties matter:
-  //   - It bails WITHOUT touching any state when the file is byte-identical on disk.
-  //     fs_changed fires for ANY file under the notebook root, so the open note is
-  //     re-read on every unrelated write only to check it — skipping all the setState
-  //     when nothing changed is what stops an unrelated edit from disturbing (and
-  //     re-scrolling) the note you're reading, and flashing its backlinks.
-  //   - On a GENUINE change it applies the new bytes as a minimal edit through the
-  //     editor handle, so CodeMirror keeps its scroll/selection anchored instead of
-  //     snapping to the top, and re-walks backlinks (the links may have moved).
+  // Live refresh of the OPEN file, keeping the reader in place where loadFile
+  // resets. Two properties matter: it touches NO state when the bytes are
+  // identical (fs_changed fires for any file under the root, so an unrelated write
+  // must not re-scroll the note you are reading), and a genuine change is applied
+  // as a minimal edit through the editor handle so CodeMirror stays anchored.
   const refreshOpenFile = useCallback(async () => {
     const path = selectedPathRef.current;
     // A binary selection shows a placeholder we never read; nothing to reload.
     if (!path || isBinaryPath(path)) return;
-    // Freeze (do NOT bump) the load token: a navigation that lands mid-read bumps it,
-    // and we then drop this stale refresh rather than stamp it over the new selection.
+    // Freeze (do NOT bump) the token, so a navigation mid-read drops this refresh.
     const seq = loadSeqRef.current;
     let fresh: FsReadResult;
     try {
@@ -531,20 +410,16 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       return;
     }
     if (loadSeqRef.current !== seq || selectedPathRef.current !== path) return;
-    // Unchanged on disk → nothing to apply. Skipping every setState here is the whole
-    // point: the editor's scroll position and selection are never touched.
+    // Unchanged: skipping every setState is the point — scroll and selection hold.
     if (noteRef.current && fresh.hash === noteRef.current.hash) return;
-    // Genuine change: apply it preserving the reader's viewport. A markdown note takes a
-    // minimal edit via the editor handle (CM keeps its scroll anchored); a plain-text
-    // file — or a not-yet-mounted editor — falls through to the direct value set below.
+    // Preserve the viewport: markdown takes a minimal edit through the handle.
     if (isMarkdownPath(path)) {
       editorRef.current?.applyExternalContent(fresh.content);
     }
     setNote(fresh);
     setDraft(fresh.content);
     setNoteError(null);
-    // Content moved, so links may have too — re-walk backlinks for a markdown note.
-    // Absent (an off-root tile) is a no-op: no fetch, backlinks stay empty.
+    // Content moved, so links may have; absent (off-root tile) is a no-op.
     if (isMarkdownPath(path) && backlinksNotebook) {
       setBacklinksLoading(true);
       void backlinksNotebook(path)
@@ -561,14 +436,11 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [readFile, backlinksNotebook]);
 
-  // Hand the captured selection to the daemon for the chief of staff. The daemon
-  // appends it to the chief inbox note and best-effort nudges a live chief; the
-  // UI only surfaces the outcome and never messages the chief directly.
+  // The daemon appends to the chief inbox; the UI never messages the chief.
   const sendSelectionToChief = useCallback(async () => {
     if (!chiefSel || !sendToChief) return;
     const path = selectedPathRef.current ?? undefined;
-    // Freeze the load token (as writeBuffer does) so an outcome that resolves after
-    // the user navigated away doesn't flash on the now-selected file.
+    // Freeze the load token so a late outcome doesn't flash on another file.
     const seq = loadSeqRef.current;
     setSendingToChief(true);
     try {
@@ -584,23 +456,19 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [chiefSel, sendToChief]);
 
-  // On open (modal) / mount (tile), select a sensible first file. The modal keeps the
-  // prior selection if it still reads, else probes the preferred entry points, else
-  // the first file at the root. A tile seeds from its persisted open-file path. The
-  // lazy sidebar lists itself; this only chooses what to show.
+  // First file: the modal keeps a prior selection that still reads, else probes
+  // the entry points, else the root's first file; a tile seeds from its path.
   useEffect(() => {
     if (!active) return;
-    // Start clean: a transient outcome/selection from a prior session must not
-    // reappear on reopen. The [selectedPath] reset can't cover a reopen on the
-    // same file (selectedPath doesn't change), so clear it here.
+    // A reopen on the SAME file doesn't change selectedPath, so that reset can't
+    // clear a stale transient outcome; do it here.
     setChiefStatus(null);
     setChiefSel(null);
     setJustSaved(false);
     let cancelled = false;
     void (async () => {
       if (variant === 'tile') {
-        // A tile reopens to its persisted file (if any). A fresh tile (no seed) opens
-        // straight into the finder so you can pick a note without hunting the tree.
+        // A fresh tile (no seed) opens straight into the finder.
         const seed = initialPath ?? null;
         if (!seed) {
           if (!cancelled) {
@@ -633,16 +501,12 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       // Keep the current selection if it still exists (a reopen on the same file).
       const current = selectedPathRef.current;
       if (current) {
-        // A binary selection is preserved WITHOUT reading it — fs_read is never called
-        // for binary files (it returns a string, meaningless for bytes). loadFile
-        // re-renders the placeholder. (Probing it with a read here would leak the very
-        // fs_read the binary gate exists to prevent.)
+        // Preserved WITHOUT reading: a probe leaks the fs_read the gate prevents.
         if (isBinaryPath(current)) {
           if (!cancelled) void loadFile(current);
           return;
         }
-        // Otherwise probe by reading; the read is reused to seed the editor (no second
-        // read), and a rejection means the file fell away while closed.
+        // Probe by reading, reusing the read to seed the editor.
         try {
           const res = await readFile(current);
           if (!cancelled) void loadFile(current, res);
@@ -651,9 +515,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
           // Fell away while closed; fall through to pick a fresh entry point.
         }
       }
-      // Probe the preferred entry points in order; the first that reads wins, and its
-      // read seeds the editor. (A cheap 1–2 reads, vs. walking the whole tree the lazy
-      // sidebar never materializes.)
+      // First entry point that reads wins, and its read seeds the editor.
       for (const candidate of PREFERRED_FIRST) {
         if (cancelled) return;
         try {
@@ -680,43 +542,30 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // Live refresh: an fs_changed event refreshes the open file so agent/external writes
-  // show up without reopening. The sidebar tree re-lists itself via its own
-  // changeSignal prop; here we only refresh the open document — and only when its bytes
-  // actually changed (refreshOpenFile no-ops on an unrelated write), keeping the reader
-  // anchored where they were.
+  // fs_changed refreshes the open document only, and only when its bytes changed.
   useEffect(() => {
     if (!active || changeSignal === 0) return;
-    // With unsaved edits, never reload — that would clobber the buffer. On-disk
-    // divergence surfaces as a save-time conflict instead.
+    // Never reload over unsaved edits; divergence surfaces as a save conflict.
     if (dirtyRef.current) return;
     void refreshOpenFile();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [changeSignal]);
 
-  // Navigating to another file clears the previous file's edit status. Keyed on
-  // selectedPath, so it fires on navigation but not on a same-file live reload
-  // (which keeps selectedPath unchanged).
+  // Keyed on selectedPath, so it fires on navigation but not on a live reload.
   useEffect(() => {
     setConflict(null);
     setSaveError(null);
     setJustSaved(false);
     setChiefSel(null);
     setChiefStatus(null);
-    // Navigating away can keep the same CodeMirror view alive (the editor is
-    // un-keyed), so an open search panel would survive the switch with no
-    // escape-stack entry. Close the panel itself; the open-change callback
-    // resets searchOpen when the view is still mounted, and the direct reset
-    // covers the unmounted case.
+    // The editor is un-keyed, so an open search panel survives the switch.
     editorRef.current?.closeSearchPanel();
     setSearchOpen(false);
   }, [selectedPath]);
 
-  // Debounced autosave: once the buffer diverges from the synced file, persist it
-  // via hash-CAS against note.hash after a short idle. Gated off while a file is
-  // loading (the buffer is being re-seeded), while a save is already in flight, and
-  // while a conflict is unresolved (the user must reconcile first). Every dep change
-  // clears the pending timer, so navigation can't leave a stale write scheduled.
+  // Debounced autosave, gated off while loading (the buffer is being re-seeded),
+  // while a save is in flight, and while a conflict is unresolved. Every dep change
+  // clears the timer, so navigation cannot leave a stale write scheduled.
   useEffect(() => {
     if (!note || noteLoading || saving || conflict) return;
     if (draft === note.content) return; // in sync — nothing to save
@@ -726,19 +575,16 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     return () => window.clearTimeout(timer);
   }, [draft, note, noteLoading, saving, conflict, persist]);
 
-  // The "Send to chief" outcome line is a transient confirmation; auto-dismiss it
-  // (errors linger a little longer than the success acknowledgement).
+  // Transient confirmation; errors linger a little longer than successes.
   useEffect(() => {
     if (!chiefStatus) return;
     const timer = window.setTimeout(() => setChiefStatus(null), chiefStatus.error ? 6000 : 3000);
     return () => window.clearTimeout(timer);
   }, [chiefStatus]);
 
-  // The floating "Send to chief" button is fixed at viewport coords frozen from
-  // the selection rect, so any geometry change invalidates its position. While it
-  // is shown, clear it on window resize and on scroll anywhere — capture phase,
-  // because scroll doesn't bubble, so a nested code-block scroller would otherwise
-  // slip past and leave the button stranded over the wrong text.
+  // The button sits at frozen viewport coords, so any geometry change invalidates
+  // it. Scroll is captured, not bubbled, or a nested code-block scroller slips
+  // past and strands the button over the wrong text.
   useEffect(() => {
     if (!chiefSel) return;
     const clear = () => setChiefSel(null);
@@ -750,19 +596,15 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     };
   }, [chiefSel]);
 
-  // The "Saved" badge is a transient confirmation, not a persistent status. Clear
-  // it on a timer so it doesn't linger while the user keeps reading the same file
-  // (the navigation-reset effect above only fires on a path change, not on a
-  // same-file live reload, so without this the badge would stick indefinitely).
+  // The navigation reset fires only on a path change, so without this timer the
+  // "Saved" badge sticks while the user keeps reading the same file.
   useEffect(() => {
     if (!justSaved) return;
     const timer = window.setTimeout(() => setJustSaved(false), 2500);
     return () => window.clearTimeout(timer);
   }, [justSaved]);
 
-  // Scroll to the current note's heading whose GitHub-style slug matches `anchor`
-  // (also accepting an exact raw-text case-insensitive match, for a heading that
-  // pre-dates or otherwise doesn't slug-match its own link). No match is a no-op.
+  // Match by slug, or by raw text for a heading that doesn't slug-match its link.
   const scrollToAnchor = useCallback((anchor: string) => {
     const wanted = headingSlug(anchor);
     const heading = parseOutline(draftRef.current).find(
@@ -771,12 +613,9 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     if (heading) editorRef.current?.scrollToPos(heading.pos);
   }, []);
 
-  // Mod-click on a rendered link: an in-notebook target navigates (resolved against
-  // the current note's directory); a same-note anchor scrolls to the matching
-  // heading; an external target opens in the browser. Cross-note anchors (a link
-  // like `other.md#heading`) are not yet handled — loadFile is a fire-and-forget
-  // navigation with no way to learn when the new note's content has landed without
-  // reshaping it, so a jump there is deferred to a follow-up.
+  // Mod-click routes: in-notebook target navigates, same-note anchor scrolls,
+  // external opens in the browser. Cross-note anchors (`other.md#heading`) are
+  // NOT handled: loadFile is fire-and-forget with no signal that content landed.
   const handleFollowLink = useCallback((href: string) => {
     const resolved = resolveNotebookLink(href, noteDir(selectedPathRef.current ?? ''));
     if (resolved.kind === 'note') {
@@ -792,19 +631,15 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [loadFile]);
 
-  // The editor reports its current selection (or null when collapsed); float the
-  // "Send to chief" action over it. Inert when sendToChief is absent (an off-root
-  // tile) — never tracks a selection, so the floating button can never render.
+  // Inert without sendToChief: no selection tracked, so no floating button.
   const handleSelectionChange = useCallback((selection: LiveSelection | null) => {
     if (!sendToChief) return;
     setChiefSel(selection);
   }, [sendToChief]);
 
-  // Resolve an inline image's src for the live editor's image widget: strip any
-  // #fragment/?query tail (notebookLinkPath — same rule brokenLinks uses), then read
-  // the asset's bytes and hand back a data: URI. A non-notebook path (already
-  // rejected by notebookLinkPath) or a failed read both resolve to null, which the
-  // widget renders as its broken placeholder.
+  // Strip the #fragment/?query tail (notebookLinkPath, as brokenLinks does), read
+  // the bytes, hand back a data: URI. A non-notebook path or a failed read both
+  // resolve to null, which the widget renders as its broken placeholder.
   const resolveImageSrc = useCallback(async (src: string) => {
     const path = notebookLinkPath(src, noteDir(selectedPathRef.current ?? ''));
     if (!path) return null;
@@ -816,10 +651,8 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     }
   }, [readAsset]);
 
-  // The outline is a markdown affordance only, derived from the LIVE buffer so it
-  // tracks edits as you type. Indexing into `draft` keeps heading positions aligned
-  // with what the editor holds, so a jump lands on the right line. (Hook: must run
-  // before the !active early return, so it is gated by the path kind, not by render.)
+  // Derived from the LIVE buffer so heading positions match what the editor holds.
+  // Must run before the !active early return, so it is gated by path kind.
   const selectedIsMarkdown = selectedPath ? isMarkdownPath(selectedPath) : false;
   const outline = useMemo(
     () => (selectedIsMarkdown ? parseOutline(draft) : []),
@@ -831,11 +664,8 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
 
   const selectedKind = selectedPath ? fileKind(selectedPath) : null;
   const showBinaryPlaceholder = selectedPath !== null && selectedKind === 'binary';
-  // The context rail (outline + backlinks) is a markdown-document affordance; a text
-  // or binary file shows neither, so it keeps the two-pane layout (no empty rail).
-  // Also gated on backlinksNotebook being provided: an off-root tile (NotebookTile)
-  // omits it, and the rail's Backlinks section has no other source, so the whole
-  // rail (Outline included) is withheld rather than showing a half-capable rail.
+  // Markdown-only, and also gated on backlinksNotebook: an off-root tile omits it,
+  // and the whole rail is withheld rather than shown half-capable.
   const showRail = selectedKind === 'markdown' && !!note && !!backlinksNotebook;
   // A single live save indicator (the error itself is surfaced by its own banner).
   const saveStatus = saveError
@@ -934,8 +764,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
                       onClick={() => {
                         void (async () => {
                           await writeBuffer(conflict.currentHash ?? '', draft);
-                          // The button still has focus at this point; pull it back to the
-                          // editor so typing works immediately, with no extra click.
+                          // Pull focus back to the editor so typing needs no click.
                           editorRef.current?.focus();
                         })();
                       }}
@@ -1071,10 +900,8 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
                           className="notebook-browser-backlink"
                           onClick={() => void loadFile(entry.path)}
                           title={entry.path}
-                          // The visible card shows title over a mono path; the
-                          // accessible name is just the title (the path is visual
-                          // detail), so AT announces which note links here, not a
-                          // path read out character by character.
+                          // Accessible name is the title alone: AT would spell
+                          // the path out character by character.
                           aria-label={entry.title || basename(entry.path)}
                         >
                           <span className="notebook-browser-backlink-title">{entry.title || basename(entry.path)}</span>
@@ -1116,9 +943,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
     </div>
   );
 
-  // One finder instance shared by both variants below: the tile and the modal
-  // mount identical overlays, and the tile-vs-modal difference is the shell
-  // around it, not the finder.
+  // One finder shared by both variants: they differ in shell, not in finder.
   const finderOverlay = finderOpen ? (
     <NotebookFinder
       files={finderFiles}
@@ -1133,8 +958,7 @@ export const NotebookSurface = forwardRef<NotebookSurfaceHandle, NotebookSurface
       type="button"
       className="notebook-browser-send-chief"
       style={{ top: chiefSel.top, left: chiefSel.left }}
-      // Keep the text selection (and focus) intact through the click so the
-      // captured selection isn't collapsed before onClick reads it.
+      // Keep the selection intact so onClick reads it uncollapsed.
       onMouseDown={(event) => event.preventDefault()}
       onClick={() => void sendSelectionToChief()}
       disabled={sendingToChief}

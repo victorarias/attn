@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/hub"
@@ -58,7 +59,14 @@ func TestReadMarkdownFile(t *testing.T) {
 // the daemon, a test client, the workspace id, and the session/pane ids.
 func setupMarkdownWorkspace(t *testing.T) (*Daemon, *wsClient, string) {
 	t.Helper()
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	return setupMarkdownWorkspaceOn(t, NewForTesting(filepath.Join(t.TempDir(), "test.sock")))
+}
+
+// setupMarkdownWorkspaceOn is setupMarkdownWorkspace against a daemon the caller
+// already built — the shape a synctest bubble needs, where the daemon is
+// constructed outside and everything it touches happens inside.
+func setupMarkdownWorkspaceOn(t *testing.T, d *Daemon) (*Daemon, *wsClient, string) {
+	t.Helper()
 	client := newWorkspaceProtocolTestClient()
 	workspaceID := "workspace-md"
 	d.handleRegisterWorkspace(client, &protocol.RegisterWorkspaceMessage{
@@ -159,62 +167,62 @@ func TestWorkspaceTileContentGetRejectsUnsupportedTileKind(t *testing.T) {
 }
 
 func TestWorkspaceTileContentReloadOnlyReachesSubscribedClients(t *testing.T) {
-	d, subscribed, workspaceID := setupMarkdownWorkspace(t)
-	unrelated := newWorkspaceProtocolTestClient()
-	file := filepath.Join(t.TempDir(), "private.md")
-	if err := os.WriteFile(file, []byte("# Private"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if err := d.dockTile(workspaceID, "pane-1", markdownTileIDForPath(file), string(workspacelayout.TileKindMarkdown), file, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
-		t.Fatalf("dockTile: %v", err)
-	}
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, subscribed, workspaceID := setupMarkdownWorkspaceOn(t, base)
+		stopDaemonBackground(t, d)
+		unrelated := newWorkspaceProtocolTestClient()
+		file := filepath.Join(t.TempDir(), "private.md")
+		if err := os.WriteFile(file, []byte("# Private"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := d.dockTile(workspaceID, "pane-1", markdownTileIDForPath(file), string(workspacelayout.TileKindMarkdown), file, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+			t.Fatalf("dockTile: %v", err)
+		}
 
-	d.wsHub.clients[subscribed] = true
-	d.wsHub.clients[unrelated] = true
-	d.handleWorkspaceTileContentGet(subscribed, &protocol.WorkspaceTileContentGetMessage{
-		Cmd:         protocol.CmdWorkspaceTileContentGet,
-		WorkspaceID: workspaceID,
-		TileID:      markdownTileIDForPath(file),
+		d.wsHub.clients[subscribed] = true
+		d.wsHub.clients[unrelated] = true
+		d.handleWorkspaceTileContentGet(subscribed, &protocol.WorkspaceTileContentGetMessage{
+			Cmd:         protocol.CmdWorkspaceTileContentGet,
+			WorkspaceID: workspaceID,
+			TileID:      markdownTileIDForPath(file),
+		})
+		_ = expectTileContent(t, subscribed, markdownTileIDForPath(file))
+
+		d.broadcastTileContentNow(workspaceID, markdownTileIDForPath(file))
+		got := expectTileContent(t, subscribed, markdownTileIDForPath(file))
+		if got.Content != "# Private" {
+			t.Fatalf("content = %q, want the file body", got.Content)
+		}
+		requireNoOutbound(t, unrelated, "unrelated client received private tile content")
 	})
-	_ = expectTileContent(t, subscribed, markdownTileIDForPath(file))
-
-	d.broadcastTileContentNow(workspaceID, markdownTileIDForPath(file))
-	got := expectTileContent(t, subscribed, markdownTileIDForPath(file))
-	if got.Content != "# Private" {
-		t.Fatalf("content = %q, want the file body", got.Content)
-	}
-	select {
-	case outbound := <-unrelated.send:
-		t.Fatalf("unrelated client received private tile content: %s", string(outbound.payload))
-	case <-time.After(20 * time.Millisecond):
-	}
 }
 
 func TestBroadcastTileContentDropsStaleRetargetedRead(t *testing.T) {
-	d, client, workspaceID := setupMarkdownWorkspace(t)
-	oldFile := filepath.Join(t.TempDir(), "old.md")
-	newFile := filepath.Join(t.TempDir(), "new.md")
-	tileID := markdownTileIDForPath(oldFile)
-	if err := d.dockTile(workspaceID, "pane-1", tileID, string(workspacelayout.TileKindMarkdown), oldFile, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
-		t.Fatalf("dock old tile: %v", err)
-	}
-	d.wsHub.clients[client] = true
-	client.subscribeTileContent(workspaceID, tileID)
-	if err := d.dockTile(workspaceID, "pane-1", tileID, string(workspacelayout.TileKindMarkdown), newFile, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
-		t.Fatalf("retarget tile: %v", err)
-	}
+	base := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		d, client, workspaceID := setupMarkdownWorkspaceOn(t, base)
+		stopDaemonBackground(t, d)
+		oldFile := filepath.Join(t.TempDir(), "old.md")
+		newFile := filepath.Join(t.TempDir(), "new.md")
+		tileID := markdownTileIDForPath(oldFile)
+		if err := d.dockTile(workspaceID, "pane-1", tileID, string(workspacelayout.TileKindMarkdown), oldFile, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+			t.Fatalf("dock old tile: %v", err)
+		}
+		d.wsHub.clients[client] = true
+		client.subscribeTileContent(workspaceID, tileID)
+		if err := d.dockTile(workspaceID, "pane-1", tileID, string(workspacelayout.TileKindMarkdown), newFile, "", protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+			t.Fatalf("retarget tile: %v", err)
+		}
 
-	d.broadcastTileContent(workspaceID, tileID, string(workspacelayout.TileKindMarkdown), oldFile, "# Old", nil)
-	select {
-	case outbound := <-client.send:
-		t.Fatalf("client received stale tile content: %s", string(outbound.payload))
-	case <-time.After(20 * time.Millisecond):
-	}
+		d.broadcastTileContent(workspaceID, tileID, string(workspacelayout.TileKindMarkdown), oldFile, "# Old", nil)
+		requireNoOutbound(t, client, "client received stale tile content")
 
-	d.broadcastTileContent(workspaceID, tileID, string(workspacelayout.TileKindMarkdown), newFile, "# New", nil)
-	if got := expectTileContent(t, client, tileID); got.Content != "# New" || got.Path != newFile {
-		t.Fatalf("tile content = %+v, want current retargeted file", got)
-	}
+		d.broadcastTileContent(workspaceID, tileID, string(workspacelayout.TileKindMarkdown), newFile, "# New", nil)
+		if got := expectTileContent(t, client, tileID); got.Content != "# New" || got.Path != newFile {
+			t.Fatalf("tile content = %+v, want current retargeted file", got)
+		}
+	})
 }
 
 func TestDockTileMovePreservesExistingFraction(t *testing.T) {
@@ -711,6 +719,10 @@ func TestOpenMarkdownWSUnknownSessionFails(t *testing.T) {
 	}
 }
 
+// Boundary-bound: the sleep buys a real filesystem nanosecond, not a schedule.
+// The change detector compares the file's mtime, and a bubble's clock does not
+// reach the filesystem — fake time would advance while the second write landed
+// inside the same mtime tick as the first.
 func TestCollectChangedMarkdownTilesTracksMultipleTiles(t *testing.T) {
 	d, client, workspaceID := setupMarkdownWorkspace(t)
 	d.wsHub.clients[client] = true

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "221"
+const ProtocolVersion = "222"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -255,6 +255,12 @@ const (
 	CmdPtyInput                              = "pty_input"
 	CmdTerminalPointerActivity               = "terminal_pointer_activity"
 	CmdAgentPrompt                           = "agent_prompt"
+	CmdAgentToolDetail                       = "agent_tool_detail"
+	CmdAgentClearQueue                       = "agent_clear_queue"
+	CmdAgentAttach                           = "agent_attach"
+	CmdAgentHistory                          = "agent_history"
+	CmdAgentSetModel                         = "agent_set_model"
+	CmdListPastConversations                 = "list_past_conversations"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -423,6 +429,7 @@ const (
 	EventWorkspaceTileContent            = "workspace_tile_content"
 	EventOpenMarkdownResult              = "open_markdown_result"
 	EventSessionMessagesGetResult        = "session_messages_get_result"
+	EventPastConversationsResult         = "past_conversations_result"
 	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
 	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
 	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
@@ -1654,6 +1661,48 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg AgentPromptMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal agent_prompt: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentToolDetail:
+		var msg AgentToolDetailMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_tool_detail: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentClearQueue:
+		var msg AgentClearQueueMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_clear_queue: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentAttach:
+		var msg AgentAttachMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_attach: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentHistory:
+		var msg AgentHistoryMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_history: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentSetModel:
+		var msg AgentSetModelMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal agent_set_model: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdListPastConversations:
+		var msg ListPastConversationsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal list_past_conversations: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

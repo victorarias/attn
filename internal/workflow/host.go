@@ -9,17 +9,14 @@ import (
 	"github.com/dop251/goja"
 )
 
-// nowRFC3339Nano stamps a display-only wall-clock time for a call's StartedAt/
-// CompletedAt. It matches the protocol's RFC3339Nano format so the CLI and UI can
-// parse it. These timestamps are NEVER part of the resume cache identity.
+// nowRFC3339Nano stamps a display-only time, NEVER part of the cache identity.
 func nowRFC3339Nano() string {
 	return time.Now().UTC().Format(time.RFC3339Nano)
 }
 
-// runState holds everything mutated during a single Run/Resume. It lives on the
-// loop goroutine; only the agent worker goroutines touch the parts explicitly
-// documented as concurrent (the semaphore + the counters, which are mutated
-// back on the loop goroutine inside posted closures).
+// runState holds everything mutated during a Run/Resume. It lives on the loop
+// goroutine; workers touch only the semaphore and mutate counters back on the
+// loop goroutine inside posted closures.
 type runState struct {
 	vm    *goja.Runtime
 	el    *eventLoop
@@ -27,8 +24,7 @@ type runState struct {
 	jour  Journal
 	stack *pathStack
 
-	// ctx is the run's cancellation context, passed to every live agent() dispatch
-	// so canceling the run (attn workflow cancel / watchdog) tears the subagent down.
+	// ctx reaches every live agent() dispatch, so cancel tears the subagent down.
 	ctx context.Context
 
 	agentLifetimeCap int
@@ -39,41 +35,34 @@ type runState struct {
 	cachedCalls    int
 	liveCalls      int
 
-	// diverged latches true the moment any agent() misses the cache. Once set,
-	// every structurally-later agent() (i.e. every subsequent invocation in the
-	// deterministic control flow) runs live too — enforcing the R-spec's
-	// prefix-and-suffix invalidation: no cached call may have a live-run ancestor,
-	// even if its own prompt/schema happens to still match.
+	// diverged latches on the first cache miss; every structurally-later agent()
+	// then runs live too, so no cached call ever has a live-run ancestor.
 	diverged bool
 
-	// Concurrency cap for live agent dispatch (correctness, not throughput).
+	// Concurrency cap for live agent dispatch: correctness, not throughput.
 	sem chan struct{}
 
-	// thenCatchNull and stageWrap are cached JS helpers (compiled once) used to
-	// give parallel/pipeline their never-reject / null-on-throw semantics in JS,
-	// where promise semantics are exact.
+	// Cached JS helpers giving parallel/pipeline their never-reject semantics in
+	// JS, where promise semantics are exact.
 	resolveThen goja.Callable // (p, onFulfilled, onRejected) => p.then(onFulfilled, onRejected)
 	promiseAll  goja.Callable // (arr) => Promise.all(arr)
 
-	// nullValue is goja null, cached.
 	nullValue goja.Value
 }
 
-// callsiteKey returns a stable lexical id for the agent() call site = the
-// immediate user frame's source Position. Captured synchronously while the host
-// fn runs on the VM goroutine (the call stack is intact).
+// callsiteKey is a stable lexical id for the agent() call site. Must be called
+// synchronously on the VM goroutine, while the call stack is intact.
 func (rs *runState) callsiteKey() string {
 	var frames [4]goja.StackFrame
 	captured := rs.vm.CaptureCallStack(4, frames[:0])
-	// frames[0] is the host fn's own frame (agent); the first frame whose Position
-	// has a filename is the user call site.
+	// frames[0] is the host fn's own frame; the first with a filename is the caller.
 	for _, f := range captured {
 		pos := f.Position()
 		if pos.Filename != "" && pos.Line > 0 {
 			return fmt.Sprintf("%s:%d:%d", pos.Filename, pos.Line, pos.Column)
 		}
 	}
-	// Fallback: a single bucket. Loop counter still disambiguates repeats.
+	// A single bucket; the loop counter still disambiguates repeats.
 	return "<unknown>"
 }
 
@@ -82,7 +71,6 @@ func installHostFns(rs *runState, args any) error {
 	vm := rs.vm
 	rs.nullValue = goja.Null()
 
-	// Cache JS helpers for promise composition.
 	thenV, err := vm.RunString(`(function(p, onF, onR){ return Promise.resolve(p).then(onF, onR); })`)
 	if err != nil {
 		return err
@@ -135,10 +123,8 @@ func installHostFns(rs *runState, args any) error {
 	return nil
 }
 
-// makeAgentFn returns the agent(prompt, opts?) host function. It reads the
-// structural ordinal SYNCHRONOUSLY (before any async boundary), checks the
-// journal (cache hit -> resolve immediately), or dispatches the fake stub on a
-// worker goroutine and resolves when it posts the result back.
+// makeAgentFn returns the agent(prompt, opts?) host function. It must read the
+// structural ordinal SYNCHRONOUSLY, before any async boundary.
 func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 	vm := rs.vm
 	return func(call goja.FunctionCall) goja.Value {
@@ -146,39 +132,28 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 		if len(call.Arguments) > 0 {
 			prompt = call.Arguments[0].String()
 		}
-		// opts (call.Argument(1)) may carry a schema (and label/phase). The schema
-		// is part of the cache identity (hashSchema) AND is threaded to the stub so
-		// the real driver can advertise it through the return_result sink. E1
-		// callers pass no opts => schema nil => schemaHash "none" => behavior
-		// unchanged.
+		// The schema is part of the cache identity (hashSchema).
 		schema := extractAgentSchema(call.Argument(1))
-		// isolation/model/agentType select the live call's execution context. They
-		// are threaded to the stub but NOT folded into the cache identity: the
-		// predicate stays ordinal+prompt_hash+schema_hash (§6). isolation is
-		// validated to "" | "worktree" (unknown => "") so a typo can't silently run
-		// in an unexpected mode.
+		// Threaded to the stub but NOT part of the cache identity, which stays
+		// ordinal+prompt_hash+schema_hash.
 		isolation := validateIsolation(extractAgentString(call.Argument(1), "isolation"))
 		model := extractAgentString(call.Argument(1), "model")
 		agentType := extractAgentString(call.Argument(1), "agentType")
-		// label is DISPLAY metadata (shown in `workflow show` and the UI). Like
-		// model it is NOT part of the cache identity.
+		// label is display metadata, not part of the cache identity.
 		label := extractAgentString(call.Argument(1), "label")
 
-		// --- fix the ordinal synchronously, before anything async ---
+		// Fix the ordinal synchronously, before anything async.
 		site := rs.callsiteKey()
 		ordinal := rs.stack.ordinalFor(site)
 		ordKey := ordinal.String()
 		promptHash := hashPrompt(prompt)
 		schemaHash := hashSchema(schema)
-		// Capture the current phase title synchronously, on the loop goroutine, so
-		// it reflects THIS call's structural position (display only, not identity).
+		// Captured here so it reflects THIS call's position. Display only.
 		phaseTitle := rs.stack.currentPhase()
 
 		p, resolve, _ := vm.NewPromise()
 
-		// Cache check: a hit resolves immediately on the loop goroutine — but ONLY
-		// while we are still in the unchanged prefix. Once any earlier call has
-		// diverged, this and every later call run live (prefix-and-suffix rule).
+		// A hit resolves immediately, but only inside the unchanged prefix.
 		if !rs.diverged {
 			if entry, ok := rs.jour.Lookup(ordKey); ok && IsCacheHit(entry, ordKey, promptHash, schemaHash) {
 				rs.cachedCalls++
@@ -186,22 +161,17 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 				mustResolve(resolve, val)
 				return vm.ToValue(p)
 			}
-			// First miss/mismatch: latch divergence so everything after runs live.
+			// Latch divergence so everything after runs live.
 			rs.diverged = true
 		}
 
-		// Live call. Enforce the lifetime cap before spawning.
 		rs.liveAgentCount++
 		if rs.liveAgentCount > rs.agentLifetimeCap {
 			panic(vm.ToValue((&ErrAgentCap{Cap: rs.agentLifetimeCap}).Error()))
 		}
 
-		// Emit an in-flight "running" record at DISPATCH (on the loop goroutine,
-		// before the worker spawns) so `workflow show` and the UI can see the call
-		// that is currently executing — without this the run looks frozen while a
-		// multi-minute call is in flight. IsCacheHit rejects non-terminal entries,
-		// so this row reaches the daemon store but never serves a resume cache hit;
-		// the terminal Upsert below overwrites it in place at the same ordinal.
+		// An in-flight record, so a multi-minute call is visible. IsCacheHit rejects
+		// non-terminal entries, and the terminal Upsert overwrites this in place.
 		startedAt := nowRFC3339Nano()
 		rs.jour.Upsert(JournalEntry{
 			Ordinal: ordKey, PromptHash: promptHash, SchemaHash: schemaHash,
@@ -211,7 +181,6 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 
 		ordSnapshot := ordinal.clone()
 		go func() {
-			// Concurrency cap (correctness semaphore).
 			rs.sem <- struct{}{}
 			res, runErr := rs.stub.Run(rs.ctx, AgentCall{
 				Ordinal:   ordSnapshot,
@@ -223,15 +192,12 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 			})
 			<-rs.sem
 
-			// Hop back to the loop goroutine to journal + resolve. This is the ONLY
-			// place a worker's value re-enters the runtime — proving cross-goroutine
-			// results marshal safely onto the single runtime goroutine.
+			// The ONLY place a worker's value re-enters the runtime.
 			rs.el.post(func() {
 				rs.liveCalls++
 				if runErr != nil {
-					// Terminal failure: resolve null (never reject), journal errored.
-					// Carry the same display fields + StartedAt so the terminal row
-					// keeps them after overwriting the "running" record at this ordinal.
+					// Resolves null, never rejects; the display fields are carried so
+					// overwriting the "running" row keeps them.
 					rs.jour.Upsert(JournalEntry{
 						Ordinal: ordKey, PromptHash: promptHash, SchemaHash: schemaHash,
 						Result: nil, Status: "errored", Err: runErr.Error(),
@@ -255,11 +221,8 @@ func (rs *runState) makeAgentFn() func(goja.FunctionCall) goja.Value {
 	}
 }
 
-// extractAgentSchema pulls the `schema` property off the agent() opts object (the
-// second argument) and marshals it to canonical JSON. Returns nil when opts is
-// absent, not an object, or carries no schema — keeping the no-schema path
-// (schemaHash "none") exact. The schema is canonicalized via Go's json.Marshal
-// so the same logical schema hashes identically across runs.
+// extractAgentSchema pulls `schema` off the agent() opts object as canonical
+// JSON, so the same logical schema hashes identically across runs.
 func extractAgentSchema(optsVal goja.Value) json.RawMessage {
 	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
 		return nil
@@ -283,11 +246,8 @@ func extractAgentSchema(optsVal goja.Value) json.RawMessage {
 	return json.RawMessage(raw)
 }
 
-// extractAgentString pulls a string-valued property (e.g. "isolation", "model",
-// "agentType") off the agent() opts object. It mirrors extractAgentSchema: an
-// absent opts object, a missing key, or a non-string value yields "". Numbers and
-// other non-strings are deliberately ignored rather than coerced, so a malformed
-// opt never silently becomes a meaningful value.
+// extractAgentString pulls a string property off the agent() opts object;
+// non-strings are ignored rather than coerced.
 func extractAgentString(optsVal goja.Value, key string) string {
 	if optsVal == nil || goja.IsUndefined(optsVal) || goja.IsNull(optsVal) {
 		return ""
@@ -307,9 +267,8 @@ func extractAgentString(optsVal goja.Value, key string) string {
 	return s
 }
 
-// validateIsolation normalizes the isolation opt to the supported set: "" (none,
-// share the writable working tree) or "worktree". Any unknown value falls back to
-// "" so a typo can't silently change WHERE the call runs.
+// validateIsolation normalizes the isolation opt to "" (share the working tree)
+// or "worktree". Unknown falls back to "" so a typo can't change where a call runs.
 func validateIsolation(s string) string {
 	if s == "worktree" {
 		return "worktree"
@@ -317,10 +276,8 @@ func validateIsolation(s string) string {
 	return ""
 }
 
-// mustResolve calls a NewPromise resolve func and propagates an uncatchable error
-// (e.g. an *InterruptedError from a watchdog fire during the await continuation).
-// goja returns such errors rather than panicking; we must re-panic so the loop's
-// recover surfaces it as RunStatus interrupted instead of silently stalling.
+// mustResolve re-panics on goja's uncatchable errors (a watchdog
+// *InterruptedError), which it returns; without that the loop silently stalls.
 func mustResolve(resolve func(interface{}) error, v goja.Value) {
 	if err := resolve(v); err != nil {
 		panic(err)
@@ -334,16 +291,13 @@ func (rs *runState) resultToValue(raw json.RawMessage) goja.Value {
 	}
 	var v interface{}
 	if err := json.Unmarshal(raw, &v); err != nil {
-		// Fall back to the raw string if it is not valid JSON.
 		return rs.vm.ToValue(string(raw))
 	}
 	return rs.vm.ToValue(v)
 }
 
-// makeParallelFn returns parallel(thunks): a barrier that never rejects. Each
-// thunk i is invoked under a parallelSlot(i) marker (synchronously, during the
-// structural descent), and a throwing thunk yields a null slot. Returns a Promise
-// of [results].
+// makeParallelFn returns parallel(thunks): a barrier that never rejects; a
+// throwing thunk yields a null slot.
 func (rs *runState) makeParallelFn() func(goja.FunctionCall) goja.Value {
 	vm := rs.vm
 	return func(call goja.FunctionCall) goja.Value {
@@ -360,8 +314,7 @@ func (rs *runState) makeParallelFn() func(goja.FunctionCall) goja.Value {
 				childPromises[i] = rs.settledNull()
 				continue
 			}
-			// Capture this slot's path snapshot so any agent() inside reads the
-			// positional ordinal, independent of resolution timing.
+			// So agent() inside reads the positional ordinal, whatever the timing.
 			pop := rs.stack.push(segParallelSlot, i)
 			slotPath := rs.stack.snapshot()
 			childPromises[i] = rs.invokeNullable(thunk, slotPath)
@@ -377,10 +330,8 @@ func (rs *runState) makeParallelFn() func(goja.FunctionCall) goja.Value {
 	}
 }
 
-// makePipelineFn returns pipeline(items, ...stages): no barrier; each item flows
-// through all stages independently. Stage cb signature is (prevResult,
-// originalItem, index). A throwing stage drops that item to null for the rest of
-// its stages. Returns a Promise of [perItemFinalResult].
+// makePipelineFn returns pipeline(items, ...stages): no barrier, each item flows
+// through all stages independently; a throwing stage drops that item to null.
 func (rs *runState) makePipelineFn() func(goja.FunctionCall) goja.Value {
 	vm := rs.vm
 	return func(call goja.FunctionCall) goja.Value {
@@ -411,17 +362,14 @@ func (rs *runState) makePipelineFn() func(goja.FunctionCall) goja.Value {
 	}
 }
 
-// buildPipelineItem constructs the .then chain for one item across all stages.
-// The chain is CONSTRUCTED synchronously (markers pushed/popped during descent),
-// but each stage's agent() calls fire at RESOLUTION time. We defeat the resulting
-// timing nondeterminism by capturing each stage's path snapshot into the closure
-// and re-establishing it before the callback runs (§3.5 of the design).
+// buildPipelineItem constructs one item's .then chain synchronously, but each
+// stage's agent() fires at resolution time — hence the captured path snapshot
+// re-established before each callback.
 func (rs *runState) buildPipelineItem(j int, item goja.Value, stages []goja.Callable) goja.Value {
 	vm := rs.vm
 	popItem := rs.stack.push(segPipelineItem, j)
 	defer popItem()
 
-	// prev starts as the original item, already-resolved.
 	prev := rs.settledValue(item)
 	for s, stage := range stages {
 		popStage := rs.stack.push(segStage, s)
@@ -438,9 +386,7 @@ func (rs *runState) buildPipelineItem(j int, item goja.Value, stages []goja.Call
 		idxVal := vm.ToValue(j)
 		origItem := item
 
-		// onFulfilled(prevResult): re-establish the captured path, then run the
-		// stage cb with (prevResult, originalItem, index). If prevResult is null
-		// (a prior stage failed/dropped), short-circuit to null per native.
+		// A null prevResult (a prior stage dropped the item) short-circuits.
 		onFulfilled := func(fcall goja.FunctionCall) goja.Value {
 			prevResult := fcall.Argument(0)
 			if goja.IsNull(prevResult) || goja.IsUndefined(prevResult) {
@@ -455,7 +401,6 @@ func (rs *runState) buildPipelineItem(j int, item goja.Value, stages []goja.Call
 			}
 			return v
 		}
-		// onRejected: a rejected upstream promise also drops the item to null.
 		onRejected := func(goja.FunctionCall) goja.Value { return rs.nullValue }
 
 		next, err := rs.resolveThen(goja.Undefined(), prev, vm.ToValue(onFulfilled), vm.ToValue(onRejected))
@@ -468,14 +413,11 @@ func (rs *runState) buildPipelineItem(j int, item goja.Value, stages []goja.Call
 	return prev
 }
 
-// invokeNullable invokes a thunk under the given captured path, wrapping the
-// result so a throw/rejection becomes a null slot (parallel never rejects). The
-// parallel thunk takes no args.
+// invokeNullable runs a thunk under a captured path, wrapping the result so a
+// throw or rejection becomes a null slot.
 func (rs *runState) invokeNullable(fn goja.Callable, capturedPath []segment) goja.Value {
 	vm := rs.vm
-	// Re-establish the captured path so any synchronous agent() inside the thunk
-	// reads the positional ordinal. (Synchronous calls already see it via the live
-	// push; the capture matters for agent() issued after an await inside the thunk.)
+	// Matters for agent() issued after an await; synchronous calls see the push.
 	restore := rs.stack.replace(capturedPath)
 	var result goja.Value
 	var thrown bool
@@ -496,11 +438,9 @@ func (rs *runState) invokeNullable(fn goja.Callable, capturedPath []segment) goj
 	if thrown {
 		return rs.settledNull()
 	}
-	// Wrap the (possibly pending) result so a later rejection becomes null and so
-	// any agent() the continuation issues re-establishes the captured path.
+	// So a later rejection becomes null and continuations keep the captured path.
 	onRejected := func(goja.FunctionCall) goja.Value { return rs.nullValue }
 	onFulfilled := func(fcall goja.FunctionCall) goja.Value {
-		// Re-establish the captured path for any continuation work.
 		restore := rs.stack.replace(capturedPath)
 		defer restore()
 		return fcall.Argument(0)

@@ -1,0 +1,18 @@
+kind: added
+area: sessions
+change: >
+  Long conversations and old ones are now first-class. A conversation longer
+  than one window keeps its history: the pane draws the newest part and pulls
+  older messages in as you scroll back, holding your place while they arrive,
+  and another window opening the same conversation no longer shortens what you
+  are reading. Starting a session now offers the conversations you have already
+  had — pick one and the new session carries on from it, without touching the
+  session it came from. The model a conversation runs on can be changed from the
+  pane while it is open, and the next thing you send uses it. Compactions and
+  retries, which used to look like the agent going quiet, are drawn in the
+  transcript as they happen and settle in place when they finish.
+symptom: >
+  A conversation that outgrew the window silently lost its oldest messages, and
+  a second window attaching truncated everyone else's view of it. There was no
+  way to pick up an earlier conversation, no way to change the model without
+  starting over, and a compaction or a retry looked like nothing at all.

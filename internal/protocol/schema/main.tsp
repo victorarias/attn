@@ -779,6 +779,7 @@ model TicketStatusResult {
   ticket_id: string;
   status: TicketStatus;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and the move did not run
 }
 
 // TicketCreateMessage mints a standalone backlog ticket — unbound (no assignee, no
@@ -821,6 +822,7 @@ model TicketCommentMessage {
 model TicketCommentResult {
   ticket_id: string;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and the comment did not post
 }
 
 // PresentOpenMessage opens a new presentation (or a new round on an existing
@@ -1006,6 +1008,7 @@ model TicketAttachResult {
   state: TicketStatus;
   deduplicated: boolean;
   catch_up?: TicketEventBundle;
+  applied: boolean; // false when catch_up had to be read first and nothing was attached
 }
 
 model TicketAttachResultMessage {
@@ -1857,6 +1860,13 @@ model SpawnSessionMessage {
   copilot_executable?: string; // Backward compatibility
   `model`?: string;            // Pin the launched agent's model; empty = agent default (chief launches fall back to chief_model_<agent>)
   effort?: string;             // Pin the launched agent's reasoning effort; empty = agent default
+  // A recorded conversation to pick up (see list_past_conversations). Only
+  // meaningful for a conversation agent: the host copies that history into this
+  // session's own storage on its first launch and continues from it, so the
+  // conversation being resumed is never written to by two sessions. Ignored
+  // once this session has a history of its own, which is what keeps a revive
+  // from rewinding a resumed conversation to the day it was picked up.
+  resume_conversation_file?: string;
 }
 
 model AttachSessionMessage {
@@ -1911,17 +1921,154 @@ model TerminalPointerActivityMessage {
   id: string;
 }
 
-// Sends a prompt to a conversation session — one whose agent runs in a headless
+// Sends a message to a conversation session — one whose agent runs in a headless
 // host process rather than a PTY, so there is no keystroke to type. `id` is the
 // attn session id, exactly as pty_input uses it.
 //
-// The host takes one prompt at a time in this protocol version: mid-run
-// steering is its own verb and does not exist yet, so a prompt sent while a run
-// is open is refused and logged rather than queued.
+// `mode` is WHEN the agent reads it, and it exists because a running agent has
+// two queues:
+//
+//   prompt     (default, and what an absent mode means) the first word of a
+//              run. Refused while a run is open.
+//   steer      read at the agent's next turn boundary, interrupting the run in
+//              progress.
+//   follow_up  read only when the run would otherwise settle, so it queues
+//              behind the work rather than cutting into it.
+//
+// steer and follow_up are valid on an idle session too: the host opens a run
+// for the text rather than queueing it against a run that will never come.
 model AgentPromptMessage {
   cmd: "agent_prompt";
   id: string;
   text: string;
+  mode?: string;
+}
+
+// Asks a conversation session's host for what an expanded tool card shows.
+//
+// A tool declaration carries a name, a one-line summary and the files it named
+// — never the output, which is how a transcript balloons. The output is fetched
+// when a card is opened, and the answer arrives as an `agent_event` of kind
+// `tool_detail` addressed by the same `call_id`, so every client with that card
+// open draws it.
+//
+// `full` asks for pi's untruncated output file instead of the clipped result it
+// gave the model. It only means anything for a call whose declaration said
+// `full_output`.
+model AgentToolDetailMessage {
+  cmd: "agent_tool_detail";
+  id: string;
+  call_id: string;
+  full?: boolean;
+}
+
+// Drops everything a conversation session's agent has been sent and not yet
+// read. The way out for the queue strip: a steer that has not landed yet, or a
+// follow-up queued behind work the user no longer wants done.
+//
+// It clears both queues at once because that is the only shape pi offers — no
+// per-entry removal exists — and the host answers with pi's own queue state, so
+// the strip empties on the agent's word rather than optimistically.
+model AgentClearQueueMessage {
+  cmd: "agent_clear_queue";
+  id: string;
+}
+
+// Asks a conversation session's host for the whole conversation as it stands.
+//
+// This is the conversation's half of the terminal restore contract. A terminal
+// client attaches and gets the worker's VT dump, then dedups the live byte
+// stream against `last_seq`; a conversation client sends this and gets a
+// `conversation_snapshot` agent_event, then dedups the live envelope stream
+// against the same `seq` spine. There is no result event and nothing to time
+// out: the answer travels the ordinary envelope path, so every client watching
+// the session lands on the same transcript.
+//
+// Sent by a client that has no picture of the session — a second window, a
+// reloaded app, a pane mounted long after the host started. A client that is
+// already following the stream has nothing to ask for.
+model AgentAttachMessage {
+  cmd: "agent_attach";
+  id: string;
+}
+
+// Asks a conversation session's host for the page of transcript items older
+// than the one the client is showing at the top — scroll-back.
+//
+// `before` is that item's key, in the host's own addressing ("message:<id>",
+// "tool:<call_id>", "notice:<id>"), and the answer is a `conversation_page`
+// agent_event echoing it. Like the snapshot and the tool detail, it is
+// broadcast and addressed by the anchor rather than by a request id: a second
+// window sitting at the same place in the conversation fills in for free, a
+// window sitting somewhere else ignores it, and nothing can time out.
+//
+// A page the host cannot serve — an anchor it has never held, or history past
+// its retention — answers empty with `has_more` false, which is how a client
+// learns it has reached the start rather than being left waiting.
+model AgentHistoryMessage {
+  cmd: "agent_history";
+  id: string;
+  before: string;
+}
+
+// Switches the model a conversation session's agent runs on, from its next run.
+//
+// `model` is the "provider/model-id" pair attn pins launches with. The host
+// applies it to the live agent and answers with a `model_changed` agent_event
+// carrying the model actually in force — the one asked for, or the one still
+// running plus the reason the switch was refused. The daemon reads that answer
+// and rewrites the session's stored launch intent, so a later revive does not
+// put the conversation back on the model the user switched away from.
+model AgentSetModelMessage {
+  cmd: "agent_set_model";
+  id: string;
+  `model`: string;
+}
+
+// Lists the conversations this machine has recorded, newest first, so one can be
+// picked up in a new session.
+//
+// A conversation session's history is a pi session file under attn's data dir,
+// and it outlives the attn session that wrote it — closing a session does not
+// destroy what was said in it. This is how the user finds one again.
+model ListPastConversationsMessage {
+  cmd: "list_past_conversations";
+  request_id: string;
+}
+
+// One recorded conversation, in the shape a picker draws.
+//
+// `preview` and `cwd` are read from the session file itself and are display
+// only: resuming goes through pi's own reader, so a file this daemon could not
+// summarize is still perfectly resumable and is listed with whatever it could
+// read.
+model PastConversation {
+  // The attn session that recorded it. Still a live session when `live` is set.
+  session_id: string;
+  // pi's session file — what a spawn's `resume_conversation_file` names.
+  file: string;
+  // The directory the conversation ran in, from the session file's own header.
+  cwd: string;
+  // The first thing the user said in it, clipped. Empty when unreadable.
+  preview: string;
+  // Last write, epoch ms (int64 would codegen as string).
+  modified: safeint;
+  bytes: safeint;
+  // An attn session is running on this conversation right now. Resuming is
+  // still allowed — it copies the history rather than writing to this file —
+  // but it means the copy is taken from a conversation still in motion.
+  live: boolean;
+}
+
+// Result of list_past_conversations.
+model PastConversationsResultMessage {
+  event: "past_conversations_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  conversations: PastConversation[];
+  // More conversations exist than are listed; the newest ones are here.
+  truncated: boolean;
 }
 
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
@@ -3431,11 +3578,17 @@ model PtyOutputMessage {
 // `kind` is either SEMANTIC — attn's own vocabulary, which the daemon reads and
 // features integrate on (`session_ready`, `run_started`, `run_settled`) — or
 // RENDER, which exists only so the app can paint (`message_start`,
-// `message_delta`, `message_end`). The daemon forwards render bodies without
-// reading them: their shape is agreed between the host and the app and is
-// versioned by the plugin, not by ProtocolVersion. Do not add daemon behavior
-// keyed on a render kind; if the daemon needs to know something, it needs a
-// semantic kind.
+// `message_delta`, `message_end`, `queue_update`). The daemon forwards render
+// bodies without reading them: their shape is agreed between the host and the
+// app and is versioned by the plugin, not by ProtocolVersion. Do not add daemon
+// behavior keyed on a render kind; if the daemon needs to know something, it
+// needs a semantic kind.
+//
+// Every semantic body carries a `state` in attn's session vocabulary — the
+// state that declaration puts the session in. The host is attn code inside the
+// agent's own loop, so a conversation session's state is declared rather than
+// classified or scraped, and the envelope's `seq` is the ordering cursor the
+// daemon applies it under.
 //
 // `body` is therefore untyped here on purpose. A client that meets an unknown
 // kind ignores it — the host's kind set grows with the plugin.
@@ -4938,4 +5091,5 @@ alias DaemonEvent =
   | MarkdownAnnotationsGetResultMessage
   | MarkdownAnnotationsSaveResultMessage
   | MarkdownAnnotationsClearResultMessage
-  | MarkdownAnnotationsSubmitResultMessage;
+  | MarkdownAnnotationsSubmitResultMessage
+  | PastConversationsResultMessage;

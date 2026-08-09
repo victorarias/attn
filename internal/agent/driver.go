@@ -1,30 +1,7 @@
-// Package agent defines the Driver interface and optional capability interfaces
-// for coding agents managed by attn. Adding a new agent (e.g. pi, gemini-cli)
-// requires implementing Driver and whichever optional interfaces the agent supports.
-//
-// Core interface (required):
-//
-//	Driver — name, executable resolution, command building, env vars
-//
-// Optional capability interfaces (implement only what the agent supports):
-//
-//	HookProvider                    — generates hook/settings configs (e.g. Claude Code hooks)
-//	TranscriptFinder                — locates transcript files on disk
-//	TranscriptWatcherBehaviorProvider — custom real-time transcript state policy
-//	ClassifierProvider              — custom classification backend
-//	LaunchPreparer                  — best-effort setup before launch (e.g. resume copy)
-//	SessionRecoveryPolicyProvider   — startup missing-PTY recovery policy
-//	RecoveredStatePolicyProvider    — recovered-state mapping at startup
-//	PTYStateFilterProvider          — live PTY state filtering
-//	ResumePolicyProvider            — resume ID lifecycle policy
-//	TranscriptClassificationExtractor — stop-time transcript extraction policy
-//	ExecutableClassifierProvider    — classifier hook with explicit executable path
-//	HeadlessTaskProvider            — scoped non-interactive agent execution
-//
-// Agents that don't implement an optional interface get sensible defaults:
-//   - No hooks: no hook-driven state updates
-//   - No transcript finder: classifier skipped on stop
-//   - No classifier: session falls back to idle after stop
+// Package agent defines the Driver interface and optional capability
+// interfaces for coding agents managed by attn. A new agent implements Driver
+// plus whichever optional interfaces it supports; missing ones get defaults
+// (no hook-driven state, classifier skipped on stop, idle after stop).
 package agent
 
 import (
@@ -40,96 +17,72 @@ import (
 )
 
 // Driver is the core interface every agent must implement.
-// It provides the minimum needed to spawn and manage an agent process.
 type Driver interface {
-	// Name returns the canonical agent identifier (e.g. "claude", "pi", "gemini-cli").
-	// Must match the SessionAgent enum value in the protocol.
+	// Name returns the canonical agent id; must match the protocol's SessionAgent enum.
 	Name() string
 
-	// DisplayName returns a human-friendly name for UI display (e.g. "Claude Code", "Pi").
+	// DisplayName returns a human-friendly name for UI display.
 	DisplayName() string
 
-	// DefaultExecutable returns the default binary name (e.g. "claude", "pi").
+	// DefaultExecutable returns the default binary name.
 	DefaultExecutable() string
 
-	// ExecutableEnvVar returns the env var name that overrides the executable
-	// (e.g. "ATTN_CLAUDE_EXECUTABLE"). Return "" if no override is supported.
+	// ExecutableEnvVar returns the executable-override env var, or "" when unsupported.
 	ExecutableEnvVar() string
 
-	// ResolveExecutable returns the executable path, checking env var override,
-	// configured value, and falling back to DefaultExecutable.
+	// ResolveExecutable returns the path: env override, configured, then DefaultExecutable.
 	ResolveExecutable(configured string) string
 
-	// BuildCommand builds the exec.Cmd to launch the agent.
-	// The command should NOT be started — the caller handles that.
+	// BuildCommand builds the exec.Cmd to launch the agent, not started.
 	BuildCommand(opts SpawnOpts) *exec.Cmd
 
-	// BuildEnv returns agent-specific environment variables to merge into
-	// the spawned process environment. The caller handles ATTN_INSIDE_APP,
-	// ATTN_SESSION_ID, etc. — this method only returns agent-specific extras
-	// (e.g. executable overrides).
+	// BuildEnv returns agent-specific env extras only; the caller handles ATTN_* basics.
 	BuildEnv(opts SpawnOpts) []string
 
 	// Capabilities returns which optional features this agent supports.
-	// Used by the daemon to decide which code paths to activate.
 	Capabilities() Capabilities
 }
 
 // Capabilities declares which optional features an agent supports.
-// This allows the daemon to skip code paths that don't apply to an agent
-// without requiring stub implementations.
 type Capabilities struct {
-	// HasHooks indicates the agent supports a hook/settings system
-	// (e.g. Claude Code hooks that report state changes via IPC).
-	// If true, the driver should implement HookProvider or ConfigOverrideProvider.
+	// HasHooks: hook/settings system; implement HookProvider or ConfigOverrideProvider.
 	HasHooks bool
 
-	// HasTranscript indicates the agent writes transcript files that attn
-	// can discover and parse. If true, implement TranscriptFinder.
+	// HasTranscript: discoverable transcript files; implement TranscriptFinder.
 	HasTranscript bool
 
-	// HasTranscriptWatcher indicates the daemon should run real-time transcript
-	// watching for state updates. Requires HasTranscript.
+	// HasTranscriptWatcher: real-time transcript watching. Requires HasTranscript.
 	HasTranscriptWatcher bool
 
-	// HasClassifier indicates the agent provides its own classification
-	// backend via ClassifierProvider.
+	// HasClassifier: the agent provides its own ClassifierProvider backend.
 	HasClassifier bool
 
-	// HarnessSignals names which harness-owned PTY signals this agent emits (the
-	// OSC 0 title heartbeat, OSC 777 notifications), or HarnessSignalsNone. They
-	// come from the agent itself rather than from reading its rendered TUI, which
-	// is why they are the only PTY state signals left: the scrapers they replaced
-	// broke on every redraw change and, for copilot, were confirmed silent
-	// through a whole live turn before being deleted.
+	// HarnessSignals names the harness-owned PTY signals this agent emits (OSC
+	// 0 title heartbeat, OSC 777), or HarnessSignalsNone. They come from the
+	// agent itself, not from scraping its rendered TUI.
 	HarnessSignals HarnessSignalKind
 
-	// HasResume indicates the agent supports resuming previous sessions.
+	// HasResume: the agent supports resuming previous sessions.
 	HasResume bool
 
-	// HasYolo indicates the agent supports launching with approvals bypassed.
+	// HasYolo: the agent supports launching with approvals bypassed.
 	HasYolo bool
 
-	// HasInitialPrompt indicates the agent can start an interactive session and
-	// immediately submit a prompt supplied by attn.
+	// HasInitialPrompt: can start interactive and immediately submit a prompt.
 	HasInitialPrompt bool
 
-	// HasWorkspaceContext indicates attn can give the agent hidden launch
-	// instructions for using a workspace context checkout.
+	// HasWorkspaceContext: accepts hidden launch instructions for a workspace
+	// context checkout.
 	HasWorkspaceContext bool
 
-	// HasSelfMonitor indicates the agent can optionally watch its own ticket/event
-	// stream via a live Monitor. It selects chief guidance only; daemon nudge
-	// eligibility is shared across runtimes. Only Claude supports this today.
+	// HasSelfMonitor: the agent can watch its own ticket/event stream via a
+	// live Monitor. Selects chief guidance only; nudge eligibility is shared.
 	HasSelfMonitor bool
 
-	// HasModelPin indicates the agent's launch command accepts a per-session
-	// model pin (SpawnOpts.Model). Delegation rejects --model for agents without it.
+	// HasModelPin: launch accepts SpawnOpts.Model; delegation rejects --model without it.
 	HasModelPin bool
 
-	// HasEffortPin indicates the agent's launch command accepts a per-session
-	// reasoning-effort pin (SpawnOpts.Effort). Delegation rejects --effort for
-	// agents without it.
+	// HasEffortPin: launch accepts SpawnOpts.Effort; delegation rejects --effort without it.
 	HasEffortPin bool
 }
 
@@ -150,24 +103,9 @@ const (
 
 var capabilityEnvNameSanitizer = regexp.MustCompile(`[^A-Za-z0-9]+`)
 
-// EffectiveCapabilities returns driver capabilities after applying env overrides.
-//
-// Env format (per agent, optional):
-//   - ATTN_AGENT_<AGENT>_HOOKS=0|1
-//   - ATTN_AGENT_<AGENT>_TRANSCRIPT=0|1
-//   - ATTN_AGENT_<AGENT>_TRANSCRIPT_WATCHER=0|1
-//   - ATTN_AGENT_<AGENT>_CLASSIFIER=0|1
-//   - ATTN_AGENT_<AGENT>_HARNESS_SIGNALS=0|1
-//   - ATTN_AGENT_<AGENT>_RESUME=0|1
-//   - ATTN_AGENT_<AGENT>_YOLO=0|1
-//   - ATTN_AGENT_<AGENT>_INITIAL_PROMPT=0|1
-//   - ATTN_AGENT_<AGENT>_WORKSPACE_CONTEXT=0|1
-//   - ATTN_AGENT_<AGENT>_SELF_MONITOR=0|1
-//   - ATTN_AGENT_<AGENT>_MODEL_PIN=0|1
-//   - ATTN_AGENT_<AGENT>_EFFORT_PIN=0|1
-//
-// <AGENT> is uppercased with non-alphanumeric chars replaced by underscores
-// (e.g. "gemini-cli" -> "GEMINI_CLI").
+// EffectiveCapabilities returns driver capabilities after applying optional
+// env overrides ATTN_AGENT_<AGENT>_<CAP>=0|1 (suffixes below); <AGENT> is the
+// uppercased name with non-alphanumerics as underscores ("gemini-cli" -> "GEMINI_CLI").
 func EffectiveCapabilities(d Driver) Capabilities {
 	if d == nil {
 		return Capabilities{}
@@ -187,8 +125,8 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	if v, ok := boolEnv(prefix + "CLASSIFIER"); ok {
 		caps.HasClassifier = v
 	}
-	// HARNESS_SIGNALS=0 disables them; =1 keeps the driver's kind: there is no
-	// dialect for =1 to invent for an agent whose driver declares none.
+	// HARNESS_SIGNALS=0 disables; =1 keeps the driver's kind (there is no
+	// dialect for =1 to invent).
 	if v, ok := boolEnv(prefix + "HARNESS_SIGNALS"); ok && !v {
 		caps.HarnessSignals = HarnessSignalsNone
 	}
@@ -214,7 +152,7 @@ func EffectiveCapabilities(d Driver) Capabilities {
 		caps.HasEffortPin = v
 	}
 
-	// Consistency: transcript watcher requires transcript support.
+	// Transcript watcher requires transcript support.
 	if !caps.HasTranscript {
 		caps.HasTranscriptWatcher = false
 	}
@@ -261,36 +199,20 @@ type SpawnOpts struct {
 	ResumePicker    bool
 	YoloMode        bool
 
-	// AutoApprove, when true (and not YoloMode), launches the agent in its native
-	// auto-approve mode (Claude --permission-mode auto, Codex
-	// approvals_reviewer=auto_review) so it runs unattended without stalling on
-	// permission gates. Gated by the daemon's auto_approve_enabled setting and
-	// threaded into the worker via ATTN_AUTO_APPROVE. Yolo takes precedence.
+	// AutoApprove launches the agent in its native auto-approve mode (Claude
+	// --permission-mode auto, Codex approvals_reviewer=auto_review). Yolo wins.
 	AutoApprove bool
 
-	// Model, when set, pins the interactive agent's model via --model (an alias
-	// like "opus"/"sonnet" or a full model id). Empty means the agent's own
-	// default. Sourced from a delegation's --model flag, or else the daemon's
-	// chief_model_<agent> setting (chief launches only) or default_model_<agent>
-	// setting (every launch), and threaded into the worker via ATTN_MODEL.
+	// Model, when set, pins the agent's model via --model; empty means default.
 	Model string
 
-	// Effort, when set, pins the interactive agent's reasoning effort using the
-	// agent's native mechanism (Claude --effort, Codex model_reasoning_effort).
-	// Empty means the agent's own default. Sourced from a delegation's --effort
-	// flag, or else the daemon's chief_effort_<agent> setting (chief launches
-	// only) or default_effort_<agent> setting (every launch), and threaded into
-	// the worker via ATTN_EFFORT. Only meaningful for drivers with HasEffortPin.
+	// Effort, when set, pins reasoning effort via the agent's native mechanism;
+	// only meaningful for drivers with HasEffortPin.
 	Effort string
 
-	// AutoCompactWindow, when > 0, caps this launch's effective context window so
-	// auto-compaction triggers at that token threshold instead of the model's full
-	// window (Claude: CLAUDE_CODE_AUTO_COMPACT_WINDOW env var; Codex:
-	// model_auto_compact_token_limit config override). The daemon resolves the
-	// policy (chief_context_window_cap on chief launches,
-	// default_context_window_cap_<agent> on every other launch — see
-	// launchContextWindowCap) and it rides ATTN_AUTO_COMPACT_WINDOW into the
-	// worker; 0 means no cap, and the drivers apply it on every launch shape.
+	// AutoCompactWindow, when > 0, triggers auto-compaction at that token
+	// threshold (Claude: CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex:
+	// model_auto_compact_token_limit); applied on every launch shape.
 	AutoCompactWindow int
 
 	// Executable is the resolved executable path (from ResolveExecutable).
@@ -302,41 +224,35 @@ type SpawnOpts struct {
 	// WrapperPath is the resolved path to the attn binary.
 	WrapperPath string
 
-	// SettingsPath is a generated settings/hooks file path for agents that
-	// support it (e.g. Claude's --settings <path>).
+	// SettingsPath is a generated settings/hooks file path (Claude --settings).
 	SettingsPath string
 
 	// WorkspaceContextPath is this session's local checkout of the workspace's
-	// shared context. It may become stale after launch.
+	// shared context; may become stale after launch.
 	WorkspaceContextPath string
 
-	// InjectWorkflowGuidance, when true, appends the workflow-trigger guidance to
-	// this session's launch instructions (system prompt / developer instructions).
-	// It is gated by the daemon's workflows_enabled setting and is never set for
-	// workflow subagents, which spawn through the headless path instead.
+	// InjectWorkflowGuidance appends the workflow-trigger guidance to the
+	// launch instructions. Never set for workflow subagents.
 	InjectWorkflowGuidance bool
 
-	// NotebookRoot, when set, makes this a chief-of-staff launch: the agent
-	// receives Notebook guidance (its profile-wide durable home) instead of the
-	// workspace-context checkout guidance. In practice the launch path sets at
-	// most one of NotebookRoot and WorkspaceContextPath.
+	// NotebookRoot, when set, makes this a chief-of-staff launch (Notebook
+	// guidance); at most one of NotebookRoot and WorkspaceContextPath is set.
 	NotebookRoot string
 
 	// ConfigOverrides are agent CLI config overrides generated for this launch.
 	ConfigOverrides []string
 
-	// TrustWorkingDirectory allows an unattended, daemon-owned launch to pass
-	// the driver's repository trust gate. Interactive launches leave this false.
+	// TrustWorkingDirectory lets an unattended daemon-owned launch pass the
+	// driver's repository trust gate; interactive launches leave it false.
 	TrustWorkingDirectory bool
 }
 
 // --- Optional capability interfaces ---
 
 // HookProvider generates hook/settings configurations for agents that support them.
-// Some agents consume these through a generated settings file.
 type HookProvider interface {
-	// GenerateHooksConfig returns the content of a settings/hooks config file.
-	// The caller writes it to a temp file and passes --settings to the agent.
+	// GenerateHooksConfig returns settings/hooks config file content; the
+	// caller writes it to a temp file and passes --settings to the agent.
 	GenerateHooksConfig(sessionID, socketPath, wrapperPath string) string
 }
 
@@ -345,16 +261,13 @@ type ConfigOverrideProvider interface {
 	GenerateConfigOverrides(opts SpawnOpts) []string
 }
 
-// HeadlessTaskRequest describes a daemon-owned non-interactive task. The task
-// must not create an interactive attn session. The agent runs in native-tools
-// mode: it gets its OWN file tools and a writable working dir (WorkDir). The
-// daemon writes inputs into WorkDir and reads the agent's output file back;
-// validation + commit stay daemon-owned.
+// HeadlessTaskRequest describes a daemon-owned non-interactive task; it must
+// not create an interactive attn session. Validation + commit stay daemon-owned.
 type HeadlessTaskRequest struct {
 	Executable string
 	Model      string
-	// ReasoningEffort selects the provider's reasoning setting for this one
-	// bounded headless request. Empty preserves the provider default.
+	// ReasoningEffort selects the provider's reasoning setting; empty preserves
+	// the provider default.
 	ReasoningEffort  string
 	Prompt           string
 	WorkDir          string
@@ -362,101 +275,52 @@ type HeadlessTaskRequest struct {
 	MCPServerCommand string
 	MCPServerArgs    []string
 
-	// --- E2 additive (all optional; the janitor sets none of these) ---
-
-	// ToolName overrides the single MCP tool name threaded through the driver
-	// argv. Empty => the janitor default tool set {read_context, replace_context}
-	// (back-compat). Non-empty => exactly that one tool is enabled.
+	// ToolName overrides the single MCP tool name in the driver argv; empty =>
+	// the janitor default set {read_context, replace_context}.
 	ToolName string
-	// Schema, when non-empty, is the per-call JSON Schema the result sink
-	// advertises as the tool inputSchema. It is NOT consumed by the driver; it
-	// travels to the sink via MCPServerArgs (the caller builds those argv).
-	// Stored on the request for documentation/threading symmetry; drivers ignore it.
+	// Schema is the per-call JSON Schema the result sink advertises as the tool
+	// inputSchema. NOT consumed by the driver; it travels via MCPServerArgs.
 	Schema json.RawMessage
 	// ResultPath is the per-call file the sink writes the validated payload to.
-	// Like Schema, the caller bakes it into MCPServerArgs; drivers ignore it.
+	// Like Schema, baked into MCPServerArgs by the caller; drivers ignore it.
 	ResultPath string
 
-	// --- E3 additive (all optional; the janitor sets none of these) ---
-
-	// Sandbox selects the OS sandbox posture of the headless run. Accepted values:
-	//   - ""               => read-only (DEFAULT, byte-identical to the janitor):
-	//                         Codex `--sandbox read-only` + every feature stripped;
-	//                         Claude locked to the MCP tool allowlist only.
-	//   - "workspace-write" => writable: the agent may edit files and run shell,
-	//                          confined by the macOS seatbelt to cwd + TMPDIR with
-	//                          network disabled by default. NO other features are
-	//                          re-enabled, and no approval bypass is used.
-	// Any UNRECOGNIZED value is treated as read-only (fail closed).
+	// Sandbox selects the OS sandbox posture: "" => read-only; "workspace-write"
+	// => edits + shell, seatbelt-confined to cwd + TMPDIR, network off, no
+	// approval bypass. Any unrecognized value is read-only (fail closed).
 	Sandbox string
-	// CWD is the process working directory for the run. Empty => fall back to
-	// WorkDir (back-compat). The writable engine path sets this to the run's
-	// working tree so edits land where the workflow expects them; scratch files
-	// (last-message, schema, result) stay rooted at WorkDir to keep the tree clean.
+	// CWD is the process working directory; empty falls back to WorkDir.
+	// Scratch files stay rooted at WorkDir to keep the tree clean.
 	CWD string
-	// ExtraMCPServers are attached IN ADDITION to the primary MCPServer* triple
-	// (not instead of it), so a workflow session's MCP tools reach the subagent
-	// alongside return_result. The janitor sets none.
+	// ExtraMCPServers are attached IN ADDITION to the primary MCPServer*
+	// triple, not instead of it.
 	ExtraMCPServers []MCPServerSpec
 
-	// AllowedTools optionally overrides the default native tool set
-	// (Claude: Read,Write,Edit,Grep,Glob). Empty => provider default. (Codex
-	// ignores this field; its native tooling comes from the workspace-write
-	// sandbox defaults, not a CLI list.) Used by the native-tools headless path
-	// (the keeper/notebook tasks), which wires no MCP server.
+	// AllowedTools overrides the default native tool set; empty => provider
+	// default. Codex ignores it.
 	AllowedTools []string
 
-	// DisableTools, when true, runs the native-tools headless path with NO
-	// tools at all — a pure single-shot completion. This overrides
-	// AllowedTools entirely: an empty AllowedTools alone still falls back to
-	// the provider's native default tool set, so DisableTools is the explicit
-	// way to get a truly tool-less run. Empty/false is byte-for-byte identical
-	// to today's behavior. Used by the ticket reconciliation classifier, which
-	// judges a pre-extracted transcript slice with no need to touch disk.
-	//
-	// It makes the tools uncallable, not free: their definitions still ship in
-	// the billed prefix. See claudeHeadlessArgs for why they are not also
-	// stripped.
+	// DisableTools runs with NO tools at all — the explicit tool-less switch,
+	// since empty AllowedTools still falls back to the provider default set.
+	// Uncallable but not free: the definitions still ship in the billed
+	// prefix (see claudeHeadlessArgs).
 	DisableTools bool
 
-	// ExtraWritableRoots optionally widens the set of directories the agent may
-	// WRITE to, beyond the scratch WorkDir. The notebook narration tasks use this
-	// so a headless agent can write the curated journal / raw tier under the
-	// notebook root (which lives outside the scratch tempdir).
-	//
-	// Provider behavior:
-	//   - Claude: IGNORED. Claude headless runs with --permission-mode dontAsk,
-	//     which is NOT filesystem-sandboxed — it can already write anywhere the OS
-	//     user can, given absolute paths. No widening is needed or applied.
-	//   - Codex: each root is passed as `--add-dir <root>` so the
-	//     workspace-write sandbox (which otherwise confines writes to the cwd
-	//     WorkDir) also permits writes under these roots. Reads are unrestricted
-	//     under workspace-write, so transcript dirs need no widening.
-	//
-	// Empty (the keeper's compaction case) leaves both providers' existing
-	// scratch-only behavior unchanged.
+	// ExtraWritableRoots widens WRITE access beyond the scratch WorkDir.
+	// Claude: IGNORED (dontAsk is not fs-sandboxed, writes anywhere already).
+	// Codex: each root becomes `--add-dir <root>`.
 	ExtraWritableRoots []string
 
-	// --- reconciliation additive (all optional; the keeper/workflow set none) ---
-	// Runaway caps + structured output for judgment-style runs (the ticket
-	// reconciliation classifier). Claude-only: Claude Code is the one agent CLI
-	// with enforceable turn/dollar caps and schema-validated output, which is why
-	// reconciliation always runs `claude -p` regardless of the judged agent (see
-	// docs/plans/2026-07-01-orphaned-ticket-reconciliation.md). Codex ignores all
-	// three, like AllowedTools — `codex exec` has no equivalent flag to translate
-	// them into, so a caller that must be bounded on both drivers has to get its
-	// ceiling from something the caller owns: the run's context deadline, and
-	// DisableTools, which leaves a run with nothing to loop over.
+	// MaxTurns/MaxBudgetUSD/OutputSchema are Claude-only runaway caps +
+	// structured output; Codex ignores all three. See
+	// docs/plans/2026-07-01-orphaned-ticket-reconciliation.md.
 
 	// MaxTurns caps agentic turns (claude: --max-turns). 0 => uncapped.
 	MaxTurns int
-	// MaxBudgetUSD caps API spend, as a decimal string (claude: --max-budget-usd).
-	// Empty => uncapped.
+	// MaxBudgetUSD caps API spend, decimal string (claude: --max-budget-usd).
 	MaxBudgetUSD string
-	// OutputSchema, when non-empty, is passed inline as a JSON Schema the final
-	// answer must validate against (claude: --json-schema). Unlike Schema (the
-	// MCP result-sink path), this IS consumed by the driver argv; the validated
-	// object comes back in HeadlessTaskResult.StructuredOutput.
+	// OutputSchema is an inline JSON Schema the final answer must validate
+	// against (claude: --json-schema); returns HeadlessTaskResult.StructuredOutput.
 	OutputSchema json.RawMessage
 
 	// SystemPrompt REPLACES the agent CLI's own system prompt (claude:
@@ -477,13 +341,9 @@ type HeadlessTaskRequest struct {
 	SystemPrompt string
 }
 
-// usesNativeToolsPath reports whether this request runs through the native-tools
-// headless path (the keeper / notebook narration tasks) rather than the
-// MCP-config / writable-tree path (the workflow engine). The keeper sets none of
-// the MCP-server fields and neither CWD nor Sandbox; the workflow engine always
-// sets at least a writable CWD+Sandbox, and additionally an MCP result sink when
-// a call needs a schema-validated return. Any one of those markers selects the
-// MCP-config path.
+// usesNativeToolsPath reports whether this request runs the native-tools
+// headless path (keeper/notebook tasks) rather than the MCP-config path; any
+// MCP-server, CWD, or Sandbox marker selects the latter.
 func (r HeadlessTaskRequest) usesNativeToolsPath() bool {
 	return strings.TrimSpace(r.MCPServerName) == "" &&
 		strings.TrimSpace(r.MCPServerCommand) == "" &&
@@ -492,40 +352,33 @@ func (r HeadlessTaskRequest) usesNativeToolsPath() bool {
 		strings.TrimSpace(r.Sandbox) == ""
 }
 
-// MCPServerSpec describes one MCP server to attach to a headless run. It mirrors
-// the primary MCPServer* triple as a value so a list of additional servers can
-// be threaded through HeadlessTaskRequest.ExtraMCPServers.
+// MCPServerSpec describes one MCP server to attach to a headless run
+// (HeadlessTaskRequest.ExtraMCPServers).
 type MCPServerSpec struct {
 	// Name is the server identifier; tool names are prefixed with it for Claude
 	// (mcp__<Name>__<tool>) and keyed under mcp_servers.<Name> for Codex.
 	Name string
-	// Command is the executable that hosts the MCP server (stdio transport).
+	// Command is the executable hosting the MCP server (stdio transport).
 	Command string
 	// Args are the command arguments.
 	Args []string
-	// EnabledTools is the explicit tool allowlist exposed by this server. Each is
-	// added to the driver's enabled_tools / --allowedTools (prefixed for Claude).
+	// EnabledTools is the explicit tool allowlist added to the driver's
+	// enabled_tools / --allowedTools (prefixed for Claude).
 	EnabledTools []string
 }
 
 type HeadlessTaskResult struct {
 	Diagnostics string
-	// FailureOutput is the bounded raw tail of the failed child's stderr and
-	// stdout — the ground truth behind the Diagnostics keyword bucket. Set only
-	// on a failed run. It can echo prompt/workspace text, so callers choose
-	// whether their surface may show it (the reconcile failure comment does;
-	// keeper journal surfaces stick to Diagnostics).
+	// FailureOutput is the bounded raw tail of a failed child's stderr/stdout.
+	// It can echo prompt/workspace text, so callers choose whether their
+	// surface may show it.
 	FailureOutput string
-	// Text is the child's captured final assistant text (the no-schema path).
-	// Drivers populate this on a successful run.
+	// Text is the child's final assistant text (no-schema path), set on success.
 	Text string
-	// StructuredOutput is the schema-validated result object when the request
-	// set OutputSchema (claude: the result envelope's structured_output field).
-	// Empty when no schema was requested or the run ended before producing one
-	// (cap-hit, error) — callers must treat empty as "no verdict".
+	// StructuredOutput is the schema-validated result object when OutputSchema
+	// was set; empty means "no verdict" (no schema, cap-hit, or error).
 	StructuredOutput json.RawMessage
-	// TotalCostUSD / NumTurns are spend telemetry from the result envelope
-	// (claude --output-format json). Zero when the provider doesn't report them.
+	// TotalCostUSD / NumTurns are spend telemetry; zero when unreported.
 	TotalCostUSD float64
 	NumTurns     int
 }
@@ -556,29 +409,27 @@ func HeadlessTaskAvailability(driver Driver) (bool, string) {
 
 // TranscriptFinder locates transcript files written by the agent.
 type TranscriptFinder interface {
-	// FindTranscript returns the path to the transcript file for a session.
-	// Returns "" if not found. For agents without a session ID in the filename
-	// (e.g. Codex, Copilot), cwd and startedAt help narrow the search.
+	// FindTranscript returns the session's transcript path, "" if not found;
+	// cwd/startedAt narrow the search for agents without session-ID filenames.
 	FindTranscript(sessionID, cwd string, startedAt time.Time) string
 
-	// FindTranscriptForResume returns the transcript for a resumed session.
-	// Returns "" if not applicable or not found.
+	// FindTranscriptForResume returns the transcript for a resumed session,
+	// "" if not applicable or not found.
 	FindTranscriptForResume(resumeID string) string
 
-	// BootstrapBytes returns how many bytes to read from the end of a transcript
-	// when starting to watch mid-session (to catch recent context).
+	// BootstrapBytes is how many bytes to read from a transcript's end when
+	// starting to watch mid-session.
 	BootstrapBytes() int64
 }
 
 // ClassifierProvider provides a custom classification backend.
 type ClassifierProvider interface {
-	// Classify determines whether the agent is waiting for input or done.
-	// Returns "waiting_input", "idle", or "unknown".
+	// Classify returns "waiting_input", "idle", or "unknown".
 	Classify(text string, timeout time.Duration) (string, error)
 }
 
 // LaunchPreparer performs best-effort agent-specific setup before launch
-// (e.g. Claude resume transcript copy for session handoff).
+// (e.g. Claude resume transcript copy).
 type LaunchPreparer interface {
 	PrepareLaunch(opts SpawnOpts) error
 }
@@ -590,8 +441,7 @@ var (
 	registry   = make(map[string]Driver)
 )
 
-// Register adds a driver to the global registry.
-// Panics if a driver with the same name is already registered.
+// Register adds a driver to the global registry; panics on a duplicate name.
 func Register(d Driver) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
@@ -667,9 +517,8 @@ func GetClassifier(d Driver) (ClassifierProvider, bool) {
 	return cp, ok
 }
 
-// GetTranscriptWatcherBehavior returns a transcript watcher behavior for drivers
-// that support transcript watching. Drivers may provide a custom behavior via
-// TranscriptWatcherBehaviorProvider; otherwise a default behavior is used.
+// GetTranscriptWatcherBehavior returns a transcript watcher behavior — custom
+// via TranscriptWatcherBehaviorProvider, else the default.
 func GetTranscriptWatcherBehavior(d Driver) (TranscriptWatcherBehavior, bool) {
 	if d == nil {
 		return nil, false

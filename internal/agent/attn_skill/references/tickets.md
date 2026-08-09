@@ -81,6 +81,21 @@ overwritten.
 After attaching, edit only the canonical source. Report meaningful changes on the
 ticket so participants know to re-read it.
 
+## Read before you write
+
+`ticket status`, `ticket comment`, and `ticket attach` all deliver ticket activity you
+had not read yet, printed above their own output.
+
+- When the activity came from **another participant** — the user, the chief, a sibling
+  agent — the command prints it, marks it read, and **does not run**, exiting 1. That is
+  deliberate: their word may change what you were about to write. Read it, then **run the
+  same command again** — the second attempt goes through. Never treat the refusal as the
+  end of the road; an agent that stops there leaves its report unwritten.
+- When it is only **attn's own bookkeeping** — the crash stamp, the "session was reloaded"
+  flip, a reconciliation verdict — the command prints it and still runs. Those records
+  describe what happened to your session while it was down; they are news to you, but
+  nothing to answer.
+
 ## Creating a ticket
 
 - **Delegation** mints a `working`, **bound** ticket — its description is the brief handed

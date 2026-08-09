@@ -7,38 +7,21 @@ import (
 	"time"
 )
 
-// Annotation drafts — the user's in-progress marks on a document or on a
-// session's terminal output — share one persistence shape, and the interesting
-// part of that shape is not the storage but the ordering rule.
-//
-// A draft is saved as a whole list under a monotonically increasing
-// generation. A save is accepted only if its generation is strictly greater
-// than both the stored generation (so an out-of-order reply cannot resurrect an
-// older list) and the tombstone generation (so a save already in flight when
-// the draft was cleared cannot bring the cleared marks back). Clearing is a
-// tombstone rather than a delete for exactly that reason: the row is what
-// remembers that the clear happened.
-//
-// Both callers get the same implementation because the failure this rule
-// prevents — a stale write silently winning — is invisible until it costs
-// someone their work, which is far too late to discover that only one of two
-// copies had the check.
+// Annotation drafts (markdown and terminal) share one ordering rule: a save is
+// accepted only if its generation is strictly greater than both the stored
+// generation and the tombstone, so no out-of-order or in-flight save resurrects
+// cleared marks. Clearing is a tombstone, not a delete, for that reason.
 
-// ErrStaleAnnotationSave marks a save whose generation did not clear the
-// stored generation and tombstone floor. It is a benign protocol outcome, not
-// an operational failure: the client drops its pending list and re-hydrates.
+// ErrStaleAnnotationSave marks a save below the generation floor; the client
+// drops its pending list and re-hydrates.
 var ErrStaleAnnotationSave = errors.New("stale annotation save")
 
-// annotationDraftTable names one draft table and its key column. Every draft
-// table has the same columns beyond that key, except the note.
+// annotationDraftTable names one draft table and its key column.
 type annotationDraftTable struct {
 	table string
 	key   string
-	// Whether the draft carries a note beside its list. Markdown drafts do
-	// not: a document-wide comment is already one of their annotations, of
-	// type "global". Terminal annotations have no such type, so the note is a
-	// column — and a table without it reads and writes the empty string, which
-	// keeps one query shape for both.
+	// Markdown drafts have no note column (a "global" annotation covers it) and
+	// read/write the empty string, keeping one query shape for both.
 	note bool
 }
 
@@ -47,8 +30,7 @@ var (
 	sessionDraftTable  = annotationDraftTable{table: "session_annotation_drafts", key: "session_id", note: true}
 )
 
-// annotationDraft is one stored draft: the raw list, the note that goes with
-// it, plus the generation floor a client must exceed to write.
+// annotationDraft is one stored draft plus the floor a client must exceed.
 type annotationDraft struct {
 	Annotations string // raw JSON array
 	Note        string // always empty for a table without the column
@@ -56,8 +38,7 @@ type annotationDraft struct {
 	UpdatedAt   string
 }
 
-// noteColumn is what a SELECT reads for the note: the column on a table that
-// has one, the empty string on a table that does not.
+// noteColumn is the note column, or a literal empty string on a table without one.
 func (t annotationDraftTable) noteColumn() string {
 	if t.note {
 		return "note"
@@ -65,10 +46,8 @@ func (t annotationDraftTable) noteColumn() string {
 	return "''"
 }
 
-// get returns the draft for key. A missing row is an empty draft at generation
-// 0, not an error — nothing has been written there yet. The generation returned
-// is the floor including any tombstone, so a re-mounting client seeds its
-// counter past a clear even when the list is empty.
+// get returns the draft for key, missing rows included. The generation includes
+// any tombstone, so a re-mounting client seeds past a clear.
 func (t annotationDraftTable) get(s *Store, key string) (annotationDraft, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -94,8 +73,7 @@ func (t annotationDraftTable) get(s *Store, key string) (annotationDraft, error)
 	}, nil
 }
 
-// save upserts the full list for key, rejecting anything that does not clear
-// the floor with ErrStaleAnnotationSave.
+// save upserts the full list, rejecting below the floor with ErrStaleAnnotationSave.
 func (t annotationDraftTable) save(s *Store, key, annotationsJSON, note string, generation int, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -141,9 +119,8 @@ func (t annotationDraftTable) save(s *Store, key, annotationsJSON, note string, 
 	return nil
 }
 
-// clear empties the list and raises the tombstone to the highest generation
-// anyone has claimed, so every save already in flight is refused. Idempotent,
-// and works on a missing row — the tombstone IS the row.
+// clear empties the list and raises the tombstone past every save in flight.
+// Idempotent, and works on a missing row — the tombstone IS the row.
 func (t annotationDraftTable) clear(s *Store, key string, generation int, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -160,9 +137,7 @@ func (t annotationDraftTable) clear(s *Store, key string, generation int, now ti
 	}
 	newTombstone := max(generation, max(storedGeneration, tombstone))
 
-	// The note goes with the marks: it was composed to be sent with them, and
-	// leaving it behind after a send would put it in front of the next turn's
-	// annotations as if the user had written it there.
+	// Left behind, the note would front the next turn's annotations.
 	noteColumns, noteValues, noteUpdates := "", "", ""
 	if t.note {
 		noteColumns, noteValues, noteUpdates = ", note", ", ''", "note = '',\n\t\t\t"
@@ -184,8 +159,7 @@ func (t annotationDraftTable) clear(s *Store, key string, generation int, now ti
 	return nil
 }
 
-// delete removes the row outright. Used when the thing the draft belongs to is
-// gone for good, where a tombstone would only be a row nobody can ever reach.
+// delete removes the row outright, for an owner that is gone for good.
 func (t annotationDraftTable) delete(s *Store, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

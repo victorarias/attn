@@ -927,14 +927,16 @@ func runTicketStatus(args []string) {
 		os.Exit(1)
 	}
 	if result.CatchUp != nil {
-		printTicketMutationCatchUp("ticket status", result.CatchUp, parsed.JSON, result)
-		os.Exit(1)
+		printTicketMutationCatchUp("ticket status", result.CatchUp, result.Applied, parsed.JSON)
 	}
 	if parsed.JSON {
 		printJSON(result)
-		return
+	} else if result.Applied {
+		fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
 	}
-	fmt.Printf("ticket %s → %s\n", result.TicketID, result.Status)
+	if !result.Applied {
+		os.Exit(1)
+	}
 }
 
 type stringListFlag []string
@@ -1025,16 +1027,18 @@ func runTicketAttach(args []string) {
 		os.Exit(1)
 	}
 	if result.CatchUp != nil {
-		printTicketMutationCatchUp("ticket attach", result.CatchUp, parsed.JSON, result)
-		os.Exit(1)
+		printTicketMutationCatchUp("ticket attach", result.CatchUp, result.Applied, parsed.JSON)
 	}
 	if parsed.JSON {
 		printJSON(result)
-		return
+	} else if result.Applied {
+		fmt.Printf("attached %d artifact(s) to ticket %s → %s\n", len(result.Artifacts), result.TicketID, result.State)
+		for _, artifact := range result.Artifacts {
+			fmt.Printf("  %s\n", artifact.Path)
+		}
 	}
-	fmt.Printf("attached %d artifact(s) to ticket %s → %s\n", len(result.Artifacts), result.TicketID, result.State)
-	for _, artifact := range result.Artifacts {
-		fmt.Printf("  %s\n", artifact.Path)
+	if !result.Applied {
+		os.Exit(1)
 	}
 }
 
@@ -1314,23 +1318,37 @@ func runTicketComment(args []string) {
 		os.Exit(1)
 	}
 	if result.CatchUp != nil {
-		printTicketMutationCatchUp("ticket comment", result.CatchUp, parsed.JSON, result)
-		os.Exit(1)
+		printTicketMutationCatchUp("ticket comment", result.CatchUp, result.Applied, parsed.JSON)
 	}
 	if parsed.JSON {
 		printJSON(result)
-		return
+	} else if result.Applied {
+		fmt.Printf("commented on ticket %s\n", result.TicketID)
 	}
-	fmt.Printf("commented on ticket %s\n", result.TicketID)
+	if !result.Applied {
+		os.Exit(1)
+	}
 }
 
-func printTicketMutationCatchUp(command string, bundle *protocol.TicketEventBundle, jsonOutput bool, result any) {
+// printTicketMutationCatchUp renders ticket activity the caller had not read, which
+// the daemon consumed on its behalf, and says whether the write still ran. Both
+// notices go to stderr so --json keeps stdout parseable. The retry sentence is
+// load-bearing: the events are marked read now, so the same command a second time
+// goes through, and an agent told only "did not run" stops there.
+func printTicketMutationCatchUp(command string, bundle *protocol.TicketEventBundle, applied, jsonOutput bool) {
+	// --json leaves the events in catch_up rather than rendering them, so the
+	// notice must not point at output that is not there.
+	where := "shown above"
 	if jsonOutput {
-		printJSON(result)
+		where = "in this result's catch_up"
 	} else {
 		fprintTicketInbox(os.Stdout, &protocol.TicketInboxResult{Bundles: []protocol.TicketEventBundle{*bundle}})
 	}
-	fmt.Fprintf(os.Stderr, "%s: unread ticket activity was shown above; the requested update did not run — review it and retry\n", command)
+	if applied {
+		fmt.Fprintf(os.Stderr, "%s: attn's own updates on this ticket are %s and are now marked read; your update ran.\n", command, where)
+		return
+	}
+	fmt.Fprintf(os.Stderr, "%s: unread ticket activity is %s and is now marked read; the requested update did NOT run — retry the same command to apply it.\n", command, where)
 }
 
 // ticketIDArgs is a single ticket-id positional plus the common session/json flags —

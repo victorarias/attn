@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/classifier"
@@ -128,6 +129,9 @@ func TestStopIsNonTerminal_LegacyHookClassifies(t *testing.T) {
 // through to the end-of-turn path — classification on a yield reads a
 // not-yet-flushed transcript and is what used to mis-detect these sessions as
 // idle/unknown.
+// Boundary-bound: this and the cron test below run a started daemon — a real
+// unix listener, a real client dialing it. Their yielded-stop siblings bubble
+// because they drive handleStop directly.
 func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 	useFreeWSPort(t)
 
@@ -162,6 +166,7 @@ func TestDaemon_StopCommand_BackgroundWork_StaysWorking(t *testing.T) {
 // TestDaemon_StopCommand_PendingCron_Settles pins that a cron-parked stop runs
 // the end-of-turn path like any other: the classifier gets its say, and the
 // session settles into the user's queue instead of being excused from it.
+// Boundary-bound: started daemon and a real socket, as above.
 func TestDaemon_StopCommand_PendingCron_Settles(t *testing.T) {
 	useFreeWSPort(t)
 
@@ -214,9 +219,8 @@ func (c *recordingClassifier) Texts() []string {
 // claude session whose turn ran, settled its heartbeat, and then yielded on a
 // Stop reporting one running background task, with the judge's answer faked.
 // It replays the 2026-08-01 incident's timeline up to the verdict.
-func yieldedStopDaemon(t *testing.T, verdict string) (*Daemon, *recordingClassifier) {
+func yieldedStopDaemon(t *testing.T, d *Daemon, verdict string) (*Daemon, *recordingClassifier) {
 	t.Helper()
-	d := NewForTesting(filepath.Join(shortTempDir(t), "test.sock"))
 	judge := &recordingClassifier{state: verdict}
 	d.classifier = judge
 	d.classificationTranscriptExtractor = func(*protocol.Session, string, int, time.Time) (string, string, error) {
@@ -249,16 +253,11 @@ func yieldedStopDaemon(t *testing.T, verdict string) (*Daemon, *recordingClassif
 		BackgroundTaskStatuses: []string{"running"},
 	})
 
-	// The judgment is dispatched async; wait for its verdict to land as evidence.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		if e, ok := d.evidenceTable().snapshot("yielded"); ok && e.LastClassifier != nil {
-			break
-		}
-		if !time.Now().Before(deadline) {
-			t.Fatalf("yield verdict never landed as evidence (classifier calls: %d)", len(judge.Texts()))
-		}
-		time.Sleep(10 * time.Millisecond)
+	// The judgment is dispatched async, on the retry loop handleStop owns; run it
+	// out and the verdict is either filed or never coming.
+	settleStopClassification(t)
+	if e, ok := d.evidenceTable().snapshot("yielded"); !ok || e.LastClassifier == nil {
+		t.Fatalf("yield verdict never landed as evidence (classifier calls: %d)", len(judge.Texts()))
 	}
 	return d, judge
 }
@@ -268,26 +267,30 @@ func yieldedStopDaemon(t *testing.T, verdict string) (*Daemon, *recordingClassif
 // 60s idle_prompt notification — which used to settle the session idle and ring
 // the user mid-build — no longer outranks the verdict.
 func TestDaemon_YieldedStop_ParkedVerdictHoldsWorkingPastPromptIdle(t *testing.T) {
-	d, judge := yieldedStopDaemon(t, classifier.VerdictParked)
+	base := NewForTesting(filepath.Join(shortTempDir(t), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, base)
+		d, judge := yieldedStopDaemon(t, base, classifier.VerdictParked)
 
-	// The judge must have seen the yield: the harness-facts line is the
-	// precondition of the parked verdict.
-	texts := judge.Texts()
-	if len(texts) != 1 || !strings.Contains(texts[0], "[harness facts]") {
-		t.Fatalf("judge input missing the harness-facts line: %q", texts)
-	}
+		// The judge must have seen the yield: the harness-facts line is the
+		// precondition of the parked verdict.
+		texts := judge.Texts()
+		if len(texts) != 1 || !strings.Contains(texts[0], "[harness facts]") {
+			t.Fatalf("judge input missing the harness-facts line: %q", texts)
+		}
 
-	// The notification that broke the incident open, a minute into the wait.
-	d.recordNotificationEvidence("yielded", notifyIdlePrompt, "Claude is waiting for your input")
-	d.resolveAllSessions(time.Now())
+		// The notification that broke the incident open, a minute into the wait.
+		d.recordNotificationEvidence("yielded", notifyIdlePrompt, "Claude is waiting for your input")
+		d.resolveAllSessions(time.Now())
 
-	sess := d.store.Get("yielded")
-	if sess == nil {
-		t.Fatal("session missing after resolve")
-	}
-	if sess.State != protocol.StateWorking {
-		t.Fatalf("state = %s, want %s: a parked verdict outranks the prompt-idle confirmation", sess.State, protocol.StateWorking)
-	}
+		sess := d.store.Get("yielded")
+		if sess == nil {
+			t.Fatal("session missing after resolve")
+		}
+		if sess.State != protocol.StateWorking {
+			t.Fatalf("state = %s, want %s: a parked verdict outranks the prompt-idle confirmation", sess.State, protocol.StateWorking)
+		}
+	})
 }
 
 // TestDaemon_YieldedStop_DoneVerdictSettles pins the inverse failure the parked
@@ -295,17 +298,21 @@ func TestDaemon_YieldedStop_ParkedVerdictHoldsWorkingPastPromptIdle(t *testing.T
 // (a dev server, a watcher) settles into the user's queue on its verdict instead
 // of sitting green forever behind a task that will never exit.
 func TestDaemon_YieldedStop_DoneVerdictSettles(t *testing.T) {
-	d, _ := yieldedStopDaemon(t, protocol.StateIdle)
+	base := NewForTesting(filepath.Join(shortTempDir(t), "test.sock"))
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, base)
+		d, _ := yieldedStopDaemon(t, base, protocol.StateIdle)
 
-	d.resolveAllSessions(time.Now())
+		d.resolveAllSessions(time.Now())
 
-	sess := d.store.Get("yielded")
-	if sess == nil {
-		t.Fatal("session missing after resolve")
-	}
-	if sess.State != protocol.StateIdle {
-		t.Fatalf("state = %s, want %s: an idle verdict on a yield means the running process is a leftover", sess.State, protocol.StateIdle)
-	}
+		sess := d.store.Get("yielded")
+		if sess == nil {
+			t.Fatal("session missing after resolve")
+		}
+		if sess.State != protocol.StateIdle {
+			t.Fatalf("state = %s, want %s: an idle verdict on a yield means the running process is a leftover", sess.State, protocol.StateIdle)
+		}
+	})
 }
 
 // waitForResolvedState waits out the resolve tick. Nothing applies a state at the

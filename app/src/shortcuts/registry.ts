@@ -1,5 +1,3 @@
-// app/src/shortcuts/registry.ts
-
 import { isMacLikePlatform } from './platform';
 
 export interface ShortcutDef {
@@ -15,11 +13,7 @@ export interface ShortcutDef {
 /** A single key combo. Alias of ShortcutDef so chord code reads naturally. */
 export type Combo = ShortcutDef;
 
-/**
- * A leader-key chord: press `leader`, then `then` within the timeout. Depth is
- * fixed at two — one leader plus one follow key — which covers the useful space
- * without a parser or nested timeout bookkeeping.
- */
+/** A leader-key chord: press `leader`, then `then` within the timeout. Depth is fixed at two. */
 export interface Chord {
   leader: Combo;
   then: Combo;
@@ -34,10 +28,8 @@ export function isChord(b: Binding | null | undefined): b is Chord {
 
 const ALLOWED_CONFLICT_PAIRS = new Set([
   'session.close|terminal.close',
-  // One verb — send the annotations you just made to the session — on one key,
-  // reached from two surfaces. Both registrations are gated on their own
-  // surface having focus, and a focused markdown tile and a focused terminal
-  // pane are mutually exclusive, so only one handler is ever registered.
+  // One verb on one key from two surfaces; a focused markdown tile and a
+  // focused terminal pane are mutually exclusive, so only one handler registers.
   'markdown.sendAnnotations|terminal.sendAnnotations',
 ]);
 
@@ -58,9 +50,7 @@ export const SHORTCUTS = {
   'terminal.focusUp': { key: 'ArrowUp', meta: true, alt: true },
   'terminal.focusDown': { key: 'ArrowDown', meta: true, alt: true },
 
-  // Find in terminal scrollback. In editable targets ⌘F belongs to the focused
-  // editor (the notebook editor's CodeMirror search); terminal find only makes
-  // sense when focus isn't in a text field.
+  // In editable targets ⌘F belongs to the focused editor (CodeMirror search).
   'terminal.find': { key: 'f', meta: true, editableTarget: 'native' },
 
   // Session management
@@ -70,39 +60,22 @@ export const SHORTCUTS = {
   'session.close': { key: 'w', meta: true },
   'session.prev': { key: 'ArrowUp', meta: true, editableTarget: 'native' },
   'session.next': { key: 'ArrowDown', meta: true, editableTarget: 'native' },
-  // Grid view moved Home (go-to-dashboard) off ⌘G to ⌘⇧H so ⌘G can toggle the grid.
   'session.goToDashboard': { key: 'h', meta: true, shift: true },
   'view.toggleGrid': { key: 'g', meta: true },
   'session.jumpToWaiting': { key: 'j', meta: true },
-  // Close the turn on the selected session. Only bound while the queue
-  // arrangement is on: with the band hidden the keystroke has nothing visible
-  // to act on, and an invisible verb that silently stamps state is worse than
-  // no verb at all.
-  // ⌘⇧E rather than ⌘E: plain ⌘E toggles inline code in the Notebook editor,
-  // and the shortcut editor's chord tests lean on ⌘E being free to record as an
-  // exclusive leader.
+  // Bound only while the queue arrangement is on — an invisible verb that
+  // stamps state is worse than none. ⌘E stays free: Notebook inline code uses
+  // it, and the shortcut editor's chord tests record it as an exclusive leader.
   'session.settle': { key: 'e', meta: true, shift: true },
-  // Open the snooze duration menu for the selected session. Like session.settle
-  // it is bound only while the queue arrangement is on. ⌘⇧S carries no
-  // Menu::default accelerator (the default menu claims no S at all) and, being a
-  // Cmd chord, never reaches the PTY.
+  // Bound only while the queue arrangement is on. ⌘⇧S carries no Menu::default
+  // accelerator and, being a Cmd chord, never reaches the PTY.
   'session.snooze': { key: 's', meta: true, shift: true },
-  // Call off whatever countdown is on screen — the auto-settle about to close a
-  // turn, an incoming ticket nudge, or both at once.
-  //
-  // ⌘. is the macOS cancel idiom, and it is the one key in this table the WebView
-  // never sees: AppKit claims Command-period as `cancelOperation:` and consumes
-  // it before any DOM keydown is dispatched. Verified against the packaged app —
-  // an always-enabled action rebound to ⌘. does not fire, while the same action
-  // on its default key does. So this entry is NOT what delivers the keystroke; a
-  // native menu item carrying the ⌘. accelerator does (see `app_menu` in
-  // src-tauri/src/lib.rs), and it re-dispatches this id into the page through the
-  // same `attn:native-shortcut` path ⌘W uses.
-  //
-  // The entry stays here because it is what the cheatsheet, the shortcut editor,
-  // and the countdown indicators render from — the key a user is told to press
-  // must come from one table. It is marked `nativeDelivery` in metadata.ts, which
-  // is what stops the editor from offering a rebind it could not honor.
+  // The one key here the WebView never sees: AppKit consumes ⌘. as
+  // `cancelOperation:` before any DOM keydown (verified in the packaged app), so
+  // a native menu item in `app_menu` (src-tauri/src/lib.rs) delivers it via
+  // `attn:native-shortcut`. The entry stays because the cheatsheet, editor, and
+  // indicators render from this table; `nativeDelivery` in metadata.ts blocks a
+  // rebind that could not be honored.
   'session.cancelCountdown': { key: '.', meta: true },
   'session.toggleSidebar': { key: 'b', meta: true, shift: true },
   'session.refreshPRs': { key: 'r', meta: true },
@@ -135,38 +108,27 @@ export const SHORTCUTS = {
   'ui.decreaseFontSize': { key: '-', meta: true },
   'ui.resetFontSize': { key: '0', meta: true },
 
-  // Notebook (meta+alt+N is free — the only meta+alt combos are the pane-focus arrows)
-  // Option-modified letters need a `code` fallback: with ⌥ held, macOS/WebKit
-  // reports the dead-key character ('˜'/'Dead') as e.key, never 'n', so a
-  // key-only match can never fire on a real (or CGEvent) keystroke — the key
-  // falls through into the terminal PTY. matchesShortcut's e.code branch
-  // matches the physical key regardless of that translation. Browser e2e
-  // can't catch the broken state: Playwright synthesizes key:'n' directly.
+  // Option-modified letters need the `code` fallback: with ⌥ held macOS/WebKit
+  // reports a dead-key character as e.key, never 'n', so a key-only match never
+  // fires on a real keystroke. Playwright synthesizes key:'n', so e2e can't see it.
   'notebook.openTile': { key: 'n', code: 'KeyN', meta: true, alt: true },
   'notebook.openFullscreen': { key: 'n', code: 'KeyN', meta: true, alt: true, shift: true },
 
-  // Markdown file opener: a ⌘P-style palette listing recently opened markdown
-  // files, then fuzzy-filtering the selected session's tree as you type. A
-  // focused notebook tile keeps its own in-tile ⌘P (see paletteClaim.ts); this
-  // is what ⌘P does everywhere else.
+  // A focused notebook tile keeps its own in-tile ⌘P (see paletteClaim.ts);
+  // this is what ⌘P does everywhere else.
   'file.open': { key: 'p', meta: true },
 
-  // Tickets board (fullscreen surface). meta+shift+T parallels meta+T = new workspace.
+  // Tickets board; meta+shift+T parallels meta+T = new workspace.
   'board.open': { key: 't', meta: true, shift: true },
 
-  // Markdown annotations: send the current tile's draft to its bound session.
-  // Plain ⌘Enter is otherwise unbound (terminal.toggleMaximize is ⌘⇧Enter) and
-  // macOS's default menu carries no Enter accelerator. `editableTarget:
-  // 'native'` keeps the capture-phase dispatcher out of inputs/textareas — the
-  // annotation popover's own ⌘Enter (submit comment) must win there. The
-  // handler is additionally registration-gated on tile focus-within so ⌘Enter
-  // still reaches the PTY when a terminal pane is focused.
+  // `editableTarget: 'native'` keeps the capture-phase dispatcher out of
+  // inputs — the annotation popover's own ⌘Enter must win there — and the
+  // handler is registration-gated on tile focus-within so ⌘Enter still reaches
+  // the PTY from a terminal pane.
   'markdown.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
 
-  // The same ⌘Enter for the annotations made on an agent's message in the
-  // terminal. Registered only while the annotated pane is the focused leaf and
-  // the panel is holding at least one mark, so ⌘Enter still reaches the PTY
-  // everywhere else — including in a pane with nothing to send.
+  // Registered only while the annotated pane is the focused leaf and holds at
+  // least one mark, so ⌘Enter still reaches the PTY everywhere else.
   'terminal.sendAnnotations': { key: 'Enter', meta: true, editableTarget: 'native' },
 } as const;
 
@@ -180,11 +142,8 @@ function modifiersEqual(a: Combo, b: Combo): boolean {
 }
 
 /**
- * Whether two single combos could be triggered by the same keystroke — equal
- * modifiers AND an overlapping key OR code. This mirrors matchesShortcut's
- * key-OR-code equivalence so conflict detection matches dispatch semantics: a
- * localized digit capture (e.g. `key:'&'`, `code:'Digit1'`) collides with ⌘1
- * even though the printed key differs.
+ * Whether two combos share a keystroke: equal modifiers AND an overlapping key
+ * OR code, mirroring matchesShortcut so conflicts match dispatch semantics.
  */
 export function combosConflict(a: Combo, b: Combo): boolean {
   if (!modifiersEqual(a, b)) return false;
@@ -193,16 +152,10 @@ export function combosConflict(a: Combo, b: Combo): boolean {
 }
 
 /**
- * Whether two bindings collide. Shared by the load-time validator and the
- * runtime resolver so there is one definition of "conflict".
- *
- * - combo × combo: same keystroke (the original rule).
- * - chord × chord: same leader AND same follow key. Sharing only a leader is
- *   fine — that is how several chords hang off one leader (⌘K D, ⌘K G).
- * - chord × combo: collide iff the combo equals the chord's leader. Dispatch
- *   matches single combos first and fires them immediately, so a chord sharing
- *   that leader keystroke could never arm — they genuinely collide and the
- *   editor must force a reassign.
+ * Whether two bindings collide; the single definition shared by the load-time
+ * validator and the runtime resolver. Two chords need both leader and follow to
+ * match (several chords may share a leader), while a combo equal to a chord's
+ * leader collides: dispatch fires the combo first, so the chord could never arm.
  */
 export function bindingsConflict(a: Binding, b: Binding): boolean {
   const aChord = isChord(a);
@@ -215,19 +168,13 @@ export function bindingsConflict(a: Binding, b: Binding): boolean {
   return combosConflict(a as Combo, b as Combo);
 }
 
-/**
- * Two ids are an allowed conflict when they intentionally share a combo but are
- * context-gated at dispatch (e.g. session.close vs terminal.close on ⌘W).
- */
+/** Ids that intentionally share a combo but are context-gated at dispatch. */
 export function isAllowedConflict(idA: ShortcutId, idB: ShortcutId): boolean {
   const pair = [idA, idB].sort().join('|');
   return ALLOWED_CONFLICT_PAIRS.has(pair);
 }
 
-/**
- * Validate that no two shortcuts have the same key combination.
- * Throws an error at startup if conflicts are found.
- */
+/** Throws at module load when two shortcuts share a key combination. */
 export function validateNoConflicts(): void {
   const entries = Object.entries(SHORTCUTS) as Array<[ShortcutId, ShortcutDef]>;
   for (let i = 0; i < entries.length; i++) {
@@ -241,17 +188,14 @@ export function validateNoConflicts(): void {
   }
 }
 
-/**
- * Check if a keyboard event matches a shortcut definition
- */
 export function matchesShortcut(e: KeyboardEvent, def: ShortcutDef): boolean {
   const keyMatches = e.key.toLowerCase() === def.key.toLowerCase()
     || (!!def.code && e.code === def.code);
   const wantsMeta = !!def.meta;
   const isMac = isMacLikePlatform();
   const accelPressed = isMac ? e.metaKey : (e.metaKey || e.ctrlKey);
-  // When a shortcut does not want the accelerator, disallow both Cmd and Ctrl so
-  // Ctrl-modified keys don't accidentally trigger non-meta shortcuts on macOS.
+  // Without the accelerator, disallow both Cmd and Ctrl so Ctrl-modified keys
+  // don't trigger non-meta shortcuts on macOS.
   const metaMatches = wantsMeta
     ? accelPressed
     : !(e.metaKey || e.ctrlKey);
@@ -261,5 +205,4 @@ export function matchesShortcut(e: KeyboardEvent, def: ShortcutDef): boolean {
   return keyMatches && metaMatches && shiftMatches && altMatches;
 }
 
-// Validate on module load
 validateNoConflicts();

@@ -5,40 +5,16 @@ import './SessionLabel.css';
 /**
  * A session name that unfurls out of the sidebar while its row is hovered.
  *
- * Session names are generated from the conversation and run up to 48 characters,
- * which no sidebar width fits, so the resting row ellipsizes. Hovering the row
- * slides the full name out past the rail's edge on its own line, sharing the
- * row's baseline so it reads as that row continuing into the space beside it.
- * There is no dwell delay and nothing in the list moves.
- *
- * The panel begins at the rail's right edge and never re-enters it. That is the
- * load-bearing constraint, not a stylistic one: a row's `•••` actions live at
- * its right end and are themselves hover-revealed, so anything drawn over the
- * row's own width would black out the actions at precisely the moment they
- * appear. Anchoring to the rail — rather than to each row's right edge, which
- * varies with nesting — also keeps the panel's left edge on one vertical line as
- * the pointer sweeps down the list.
- *
- * Two more details make it hold together:
- *
- * - The panel is a `document.body` portal. The sidebar's scroll container clips
- *   overflow, so an in-flow element could not cross the rail's edge at all.
- * - It copies the label's own computed typography and colour. Portaling escapes
- *   inheritance, and anything but an exact copy would set the revealed name in a
- *   different face from the row it belongs to.
- *
- * Hover binds to the enclosing `.session-item` row, not to this span. The span
- * only covers the row's text line, so binding it here would drop the reveal
- * whenever the pointer crossed in through the row's vertical padding.
- * `.session-item` is the shared row class behind every call site (workspace tree
- * rows, muted rows, and agent-queue band rows).
+ * Constraints, all load-bearing: the panel starts at the rail's right edge and
+ * never re-enters it, or it blacks out the row's hover-revealed `•••` actions;
+ * it is a `document.body` portal, since the sidebar's scroller clips overflow;
+ * it copies the label's computed typography, which portaling loses; and hover
+ * binds to the enclosing `.session-item` row, not this span, which covers only
+ * the text line and would drop the reveal on entry through the row's padding.
  */
 
-/** Vertical padding, mirrored as a negative offset so the text keeps the row's baseline. */
 const PAD_Y = 6;
-/** Past this the panel stops being a name and starts being a paragraph. */
 const MAX_PANEL_WIDTH = 460;
-/** Breathing room kept between the panel and the viewport edges. */
 const VIEWPORT_MARGIN = 12;
 
 type RevealStyle = {
@@ -66,8 +42,7 @@ export function SessionLabel({ label }: { label: string }) {
     if (!span) {
       return;
     }
-    // Only worth revealing what the row actually cut off. The extra pixel
-    // absorbs sub-pixel rounding on fractional layout widths.
+    // Only reveal what the row cut off; the extra pixel absorbs sub-pixel rounding.
     if (span.scrollWidth <= span.clientWidth + 1) {
       return;
     }
@@ -98,8 +73,8 @@ export function SessionLabel({ label }: { label: string }) {
     const row = span.closest('.session-item') ?? span;
     row.addEventListener('pointerenter', show);
     row.addEventListener('pointerleave', hide);
-    // A click can reorder or replace the list under a pointer that never moves,
-    // which would leave the panel painted over a row it no longer describes.
+    // A click can reorder the list under a motionless pointer, leaving the panel
+    // over a row it no longer describes.
     row.addEventListener('pointerdown', hide);
     return () => {
       row.removeEventListener('pointerenter', show);
@@ -112,8 +87,8 @@ export function SessionLabel({ label }: { label: string }) {
     if (!reveal) {
       return;
     }
-    // Fixed positioning is measured once, so any viewport change invalidates it.
-    // Capture the scroll so the sidebar's own scroller counts, not just window.
+    // Fixed positioning is measured once; capture the scroll so the sidebar's own
+    // scroller invalidates it too.
     window.addEventListener('scroll', hide, true);
     window.addEventListener('resize', hide);
     return () => {
@@ -127,9 +102,8 @@ export function SessionLabel({ label }: { label: string }) {
     if (!panel || !reveal) {
       return;
     }
-    // A wrapped name on one of the last rows would run off the bottom; lift it
-    // just enough to fit rather than flipping it above the row, which would
-    // break the "it is this row, continued" premise.
+    // Lift just enough to fit rather than flipping above the row, which would
+    // break the "this row, continued" premise.
     const rect = panel.getBoundingClientRect();
     const overflow = rect.bottom - (window.innerHeight - VIEWPORT_MARGIN);
     if (overflow > 0) {
@@ -146,9 +120,8 @@ export function SessionLabel({ label }: { label: string }) {
               ref={panelRef}
               className="session-label-reveal"
               data-testid="session-label-reveal"
-              // The clipped span still carries the full name in the accessibility
-              // tree, so this is decoration. It is also pointer-transparent: the
-              // content beside the rail must stay clickable through it.
+              // Decoration: the clipped span already carries the full name in the
+              // accessibility tree.
               aria-hidden="true"
               style={{
                 top: reveal.top,
@@ -163,8 +136,7 @@ export function SessionLabel({ label }: { label: string }) {
                 color: reveal.color,
               }}
             >
-              {/* Its own element so the name can arrive a beat after the surface
-                  it lands on; the panel cannot stagger against itself. */}
+              {/* Its own element so the name can arrive a beat after its surface. */}
               <span className="session-label-reveal-text">{label}</span>
             </div>,
             document.body,

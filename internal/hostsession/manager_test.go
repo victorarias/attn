@@ -154,37 +154,57 @@ echo '{"session_id":"s1","seq":1,"kind":"run_settled","body":{}}' >&3
 	}
 }
 
-func TestPromptReachesTheHostAsAVerb(t *testing.T) {
-	manager, rec := newManager(t)
-	script := writeScript(t, `
+// Every delivery reaches the host as the verb it was asked for, with its text
+// intact. The verb name is the whole of what steer, follow-up and prompt differ
+// by on this side of the pipe: the host is what decides what each one means.
+func TestDeliveryReachesTheHostAsItsOwnVerb(t *testing.T) {
+	for _, how := range []Delivery{DeliveryPrompt, DeliverySteer, DeliveryFollowUp} {
+		t.Run(string(how), func(t *testing.T) {
+			manager, rec := newManager(t)
+			script := writeScript(t, `
 echo '{"session_id":"s1","seq":1,"kind":"session_ready","body":{}}' >&3
 while read -r line; do
-  printf '{"session_id":"s1","seq":2,"kind":"message_end","body":{"text":%s}}\n' "$(printf '%s' "$line" | sed 's/.*"text":"\([^"]*\)".*/"\1"/')" >&3
+  printf '{"session_id":"s1","seq":2,"kind":"message_end","body":{"echo":%s}}\n' "$(printf '%s' "$line" | sed 's/"/\\"/g; s/^/"/; s/$/"/')" >&3
   break
 done
 `)
 
-	if err := manager.Spawn(SpawnOptions{SessionID: "s1", Command: []string{script}}); err != nil {
-		t.Fatalf("spawn: %v", err)
-	}
-	// The host answers the verb, so waiting on its exit is waiting on delivery.
-	if err := manager.Prompt("s1", "hello host"); err != nil {
-		t.Fatalf("prompt: %v", err)
-	}
-	waitForExit(t, rec)
+			if err := manager.Spawn(SpawnOptions{SessionID: "s1", Command: []string{script}}); err != nil {
+				t.Fatalf("spawn: %v", err)
+			}
+			// The host answers the verb, so waiting on its exit is waiting on delivery.
+			if err := manager.Deliver("s1", how, "hello host"); err != nil {
+				t.Fatalf("deliver: %v", err)
+			}
+			waitForExit(t, rec)
 
-	events, _ := rec.snapshot()
-	if len(events) != 2 {
-		t.Fatalf("expected the ready envelope and the echo, got %+v", events)
-	}
-	if events[1].Body["text"] != "hello host" {
-		t.Fatalf("host did not receive the prompt text: %+v", events[1])
+			events, _ := rec.snapshot()
+			if len(events) != 2 {
+				t.Fatalf("expected the ready envelope and the echo, got %+v", events)
+			}
+			echoed, _ := events[1].Body["echo"].(string)
+			if !strings.Contains(echoed, `"verb":"`+string(how)+`"`) {
+				t.Fatalf("host did not receive the %s verb: %q", how, echoed)
+			}
+			if !strings.Contains(echoed, `hello host`) {
+				t.Fatalf("host did not receive the text: %q", echoed)
+			}
+		})
 	}
 }
 
-func TestPromptRejectsAnUnknownSession(t *testing.T) {
+func TestDeliveryRejectsAnUnknownVerb(t *testing.T) {
 	manager, _ := newManager(t)
-	if err := manager.Prompt("nope", "hi"); err == nil {
+	if err := manager.Deliver("s1", Delivery("shout"), "hi"); err == nil {
+		t.Fatal("expected an error naming the unsupported delivery")
+	} else if !strings.Contains(err.Error(), "shout") {
+		t.Fatalf("error does not name the delivery: %v", err)
+	}
+}
+
+func TestDeliveryRejectsAnUnknownSession(t *testing.T) {
+	manager, _ := newManager(t)
+	if err := manager.Deliver("nope", DeliveryPrompt, "hi"); err == nil {
 		t.Fatal("expected an error naming the missing session")
 	} else if !strings.Contains(err.Error(), "nope") {
 		t.Fatalf("error does not name the session: %v", err)

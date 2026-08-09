@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/launchcontract"
@@ -1007,44 +1008,52 @@ func TestWorkerBackend_GetSession_PrunesDeadRegistryEntry(t *testing.T) {
 }
 
 func TestWorkerStream_PublishOverflowWaitsForBufferSpace(t *testing.T) {
-	stream := &workerStream{
-		events: make(chan OutputEvent, 1),
-		done:   make(chan struct{}),
-	}
-	if ok := stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("a"), Seq: 1}); !ok {
-		t.Fatal("first publish should succeed")
-	}
-
-	resultCh := make(chan bool, 1)
-	start := time.Now()
-	go func() {
-		resultCh <- stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("b"), Seq: 2})
-	}()
-
-	select {
-	case ok := <-resultCh:
-		t.Fatalf("publish returned early with ok=%v", ok)
-	case <-time.After(streamPublishWait + 50*time.Millisecond):
-	}
-
-	select {
-	case <-stream.events:
-	case <-time.After(time.Second):
-		t.Fatal("timed out draining first buffered event")
-	}
-
-	select {
-	case ok := <-resultCh:
-		if !ok {
-			t.Fatal("second publish should succeed after buffer space is available")
+	synctest.Test(t, func(t *testing.T) {
+		stream := &workerStream{
+			events: make(chan OutputEvent, 1),
+			done:   make(chan struct{}),
 		}
-	case <-time.After(time.Second):
-		t.Fatal("second publish did not resume after draining buffer")
-	}
+		if ok := stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("a"), Seq: 1}); !ok {
+			t.Fatal("first publish should succeed")
+		}
 
-	if elapsed := time.Since(start); elapsed < streamPublishWait {
-		t.Fatalf("publish on full buffer resumed too quickly: %v", elapsed)
-	}
+		resultCh := make(chan bool, 1)
+		start := time.Now()
+		go func() {
+			resultCh <- stream.publish(OutputEvent{Kind: OutputEventKindOutput, Data: []byte("b"), Seq: 2})
+		}()
+
+		// publish() re-arms its backpressure timer forever rather than giving
+		// up, so run past one full period and let the bubble settle: the
+		// publisher is still parked, and nothing but the drain below frees it.
+		time.Sleep(streamPublishWait + 50*time.Millisecond)
+		synctest.Wait()
+		select {
+		case ok := <-resultCh:
+			t.Fatalf("publish returned early with ok=%v", ok)
+		default:
+		}
+
+		select {
+		case <-stream.events:
+		default:
+			t.Fatal("timed out draining first buffered event")
+		}
+
+		synctest.Wait()
+		select {
+		case ok := <-resultCh:
+			if !ok {
+				t.Fatal("second publish should succeed after buffer space is available")
+			}
+		default:
+			t.Fatal("second publish did not resume after draining buffer")
+		}
+
+		if elapsed := time.Since(start); elapsed < streamPublishWait {
+			t.Fatalf("publish on full buffer resumed too quickly: %v", elapsed)
+		}
+	})
 }
 
 func TestValidateSessionID(t *testing.T) {

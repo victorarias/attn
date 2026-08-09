@@ -1033,6 +1033,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 <ConversationPane
                   sessionId={agentPane.sessionId}
                   paneActive={isActiveSession && sessionVisible && activeLeafId === agentPane.id}
+                  sessionState={paneSession?.state}
+                  resolvedTheme={resolvedTheme}
                 />
               ) : !terminalsLive ? (
                 // Virtualized: terminal unmounted to free WASM model + WebGL
