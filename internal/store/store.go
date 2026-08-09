@@ -110,6 +110,9 @@ func cloneSession(session *protocol.Session) *protocol.Session {
 	if session.PinnedAt != nil {
 		cloned.PinnedAt = protocol.Ptr(protocol.Deref(session.PinnedAt))
 	}
+	if session.ContextWindowCap != nil {
+		cloned.ContextWindowCap = protocol.Ptr(protocol.Deref(session.ContextWindowCap))
+	}
 	if session.ParentSessionID != nil {
 		cloned.ParentSessionID = protocol.Ptr(protocol.Deref(session.ParentSessionID))
 	}
@@ -181,8 +184,15 @@ func (s *Store) AddChecked(session *protocol.Session) error {
 		// disturbs it there. Carrying the stored value forward here is what makes
 		// the memory branch say the same thing: the pin is owned by
 		// SetSessionPinned alone, and a respawn cannot silently clear it.
-		if existing := s.sessions[session.ID]; existing != nil && existing.PinnedAt != nil {
-			stored.PinnedAt = protocol.Ptr(protocol.Deref(existing.PinnedAt))
+		if existing := s.sessions[session.ID]; existing != nil {
+			if existing.PinnedAt != nil {
+				stored.PinnedAt = protocol.Ptr(protocol.Deref(existing.PinnedAt))
+			}
+			// Same ownership rule as the pin: the cap belongs to
+			// SetSessionContextWindowCap, so a re-add carries it forward.
+			if existing.ContextWindowCap != nil {
+				stored.ContextWindowCap = protocol.Ptr(protocol.Deref(existing.ContextWindowCap))
+			}
 		}
 		s.sessions[session.ID] = stored
 		return nil
@@ -254,10 +264,11 @@ func (s *Store) Get(id string) *protocol.Session {
 	var todosJSON string
 	var stateSince, stateUpdatedAt, lastSeen string
 	var isWorktree int
+	var contextWindowCap int
 	var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
 
 	err := s.db.QueryRow(`
-		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
+		SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
 		FROM sessions WHERE id = ?`, id).Scan(
 		&session.ID,
 		&session.Label,
@@ -272,6 +283,7 @@ func (s *Store) Get(id string) *protocol.Session {
 		&stateSince,
 		&stateUpdatedAt,
 		&pinnedAt,
+		&contextWindowCap,
 		&parentSessionID,
 		&todosJSON,
 		&lastSeen,
@@ -282,6 +294,9 @@ func (s *Store) Get(id string) *protocol.Session {
 
 	if pinnedAt.Valid && pinnedAt.String != "" {
 		session.PinnedAt = protocol.Ptr(pinnedAt.String)
+	}
+	if contextWindowCap > 0 {
+		session.ContextWindowCap = protocol.Ptr(contextWindowCap)
 	}
 	if parentSessionID.Valid && parentSessionID.String != "" {
 		session.ParentSessionID = protocol.Ptr(parentSessionID.String)
@@ -394,11 +409,11 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 	if stateFilter == "" {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
 			FROM sessions ORDER BY label, id`)
 	} else {
 		rows, err = s.db.Query(`
-			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, parent_session_id, todos, last_seen
+			SELECT id, label, agent, directory, endpoint_id, workspace_id, branch, is_worktree, main_repo, state, state_since, state_updated_at, pinned_at, context_window_cap, parent_session_id, todos, last_seen
 			FROM sessions WHERE state = ? ORDER BY label, id`, stateFilter)
 	}
 	if err != nil {
@@ -412,6 +427,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 		var todosJSON string
 		var stateSince, stateUpdatedAt, lastSeen string
 		var isWorktree int
+		var contextWindowCap int
 		var endpointID, workspaceID, branch, mainRepo, pinnedAt, parentSessionID sql.NullString
 
 		err := rows.Scan(
@@ -428,6 +444,7 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 			&stateSince,
 			&stateUpdatedAt,
 			&pinnedAt,
+			&contextWindowCap,
 			&parentSessionID,
 			&todosJSON,
 			&lastSeen,
@@ -438,6 +455,9 @@ func (s *Store) List(stateFilter string) []*protocol.Session {
 
 		if pinnedAt.Valid && pinnedAt.String != "" {
 			session.PinnedAt = protocol.Ptr(pinnedAt.String)
+		}
+		if contextWindowCap > 0 {
+			session.ContextWindowCap = protocol.Ptr(contextWindowCap)
 		}
 		if parentSessionID.Valid && parentSessionID.String != "" {
 			session.ParentSessionID = protocol.Ptr(parentSessionID.String)

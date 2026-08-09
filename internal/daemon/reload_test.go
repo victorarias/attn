@@ -409,6 +409,22 @@ func TestBuildReloadSpawnOptionsCarriesContextWindowCap(t *testing.T) {
 			t.Fatalf("ContextWindowCap = %d, want 800000 (reloaded session must stay capped)", opts.ContextWindowCap)
 		}
 	})
+
+	t.Run("reloaded session keeps its own pin over every setting", func(t *testing.T) {
+		d := newDaemonWithSession(t, "worker")
+		d.store.SetSetting(SettingDefaultContextWindowCapPrefix+"claude", "800000")
+		if !d.store.SetSessionContextWindowCap("worker", 300000) {
+			t.Fatalf("SetSessionContextWindowCap failed")
+		}
+
+		opts, err := d.buildReloadSpawnOptions(d.store.Get("worker"))
+		if err != nil {
+			t.Fatalf("buildReloadSpawnOptions: %v", err)
+		}
+		if opts.ContextWindowCap != 300000 {
+			t.Fatalf("ContextWindowCap = %d, want the 300000 pin (a reload is how the pin takes effect)", opts.ContextWindowCap)
+		}
+	})
 }
 
 func TestBuildReloadSpawnOptionsPreservesUnattendedContractAsUnit(t *testing.T) {

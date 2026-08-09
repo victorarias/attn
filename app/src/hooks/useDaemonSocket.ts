@@ -201,7 +201,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '216';
+export const PROTOCOL_VERSION = '217';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // AutomationActionTimeoutError distinguishes "the daemon never sent a
@@ -1563,6 +1563,22 @@ export function useDaemonSocket({
                   pending.resolve(undefined);
                 } else {
                   pending.reject(new Error(data.error || 'Chief of staff update failed'));
+                }
+              }
+            }
+            break;
+          }
+
+          case 'session_context_window_cap_result': {
+            if (typeof data.session_id === 'string') {
+              const key = `session_context_cap:${data.session_id}`;
+              const pending = pendingActionsRef.current.get(key);
+              if (pending) {
+                pendingActionsRef.current.delete(key);
+                if (data.success) {
+                  pending.resolve(undefined);
+                } else {
+                  pending.reject(new Error(data.error || 'Setting the context window cap failed'));
                 }
               }
             }
@@ -3901,6 +3917,25 @@ export function useDaemonSocket({
     });
   }, []);
 
+  // Pin (cap > 0) or clear (cap 0) a per-session context-window cap. The daemon
+  // stores the pin and reloads a live agent in place so it applies immediately.
+  // Last-writer-wins per session: a second cap for the same session supersedes
+  // the first rather than queueing behind it, so the key is the session id.
+  const sendSetSessionContextWindowCap = useCallback((sessionId: string, cap: number): Promise<void> => {
+    if (!sessionId) {
+      return Promise.reject(new Error('Session is required'));
+    }
+    if (!hasReceivedInitialStateRef.current) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    return sendKeyedRequest<void>(
+      `session_context_cap:${sessionId}`,
+      { cmd: 'set_session_context_window_cap', session_id: sessionId, cap },
+      `Context window cap update timed out for session ${sessionId}`,
+      10_000,
+    );
+  }, [sendKeyedRequest]);
+
   // Unregister a single session from daemon
   const sendUnregisterSession = useCallback((sessionId: string): Promise<void> => {
     return new Promise((resolve, reject) => {
@@ -5090,6 +5125,7 @@ export function useDaemonSocket({
     sendRenameSession,
     sendRenameWorkspace,
     sendSetChiefOfStaff,
+    sendSetSessionContextWindowCap,
     sendPRVisited,
     sendListWorktrees,
     sendCreateWorktree,

@@ -267,10 +267,10 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 	} else {
 		plan.spawnOpts.ApprovalRoute = launchcontract.ResolveApprovalRoute(plan.spawnOpts.YoloMode, plan.spawnOpts.AutoApprove, plan.spawnOpts.UnattendedLaunch)
 	}
-	// A chief launch caps its context window (chief_context_window_cap); every
-	// other launch takes default_context_window_cap_<agent>, unset meaning
-	// uncapped.
-	plan.spawnOpts.ContextWindowCap = d.launchContextWindowCap(req.agent, plan.isChief)
+	// A per-session pin wins; otherwise a chief launch caps its context window
+	// (chief_context_window_cap) and every other launch takes
+	// default_context_window_cap_<agent>, unset meaning uncapped.
+	plan.spawnOpts.ContextWindowCap = d.launchContextWindowCap(msg.ID, req.agent, plan.isChief)
 
 	return plan, nil
 }

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "216"
+const ProtocolVersion = "217"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -281,6 +281,7 @@ const (
 	CmdRenameWorkspace                       = "rename_workspace"
 	CmdSetWorkspaceRank                      = "set_workspace_rank"
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
+	CmdSetSessionContextWindowCap            = "set_session_context_window_cap"
 )
 
 // Per-action automations result events (socket + WS share one command set;
@@ -316,6 +317,7 @@ const (
 	EventSessionsUpdated                 = "sessions_updated"
 	EventRenameResult                    = "rename_result"
 	EventChiefOfStaffResult              = "chief_of_staff_result"
+	EventSessionContextWindowCapResult   = "session_context_window_cap_result"
 	EventTicketsUpdated                  = "tickets_updated"
 	EventTicketResult                    = "ticket_result"
 	EventTicketActionResult              = "ticket_action_result"
@@ -1820,6 +1822,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg SetChiefOfStaffMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal set_chief_of_staff: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSetSessionContextWindowCap:
+		var msg SetSessionContextWindowCapMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal set_session_context_window_cap: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
