@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 )
 
@@ -12,38 +13,54 @@ const cronKind = "heartbeat"
 
 // A cron entry is armed by Start one interval out, fires when that interval
 // elapses, and is immediately re-armed for the next one.
+//
+// Converted to synctest (spike leg 1). Recurrence is the one thing worth
+// testing against a clock that really moves: sleeping the entry's own interval
+// in the bubble exercises the arm/fire/re-arm cycle at its real cadence, and
+// costs no wall-clock time.
 func TestACronEntryFiresOnItsIntervalAndRearms(t *testing.T) {
-	r, _, clock := newTestRunner(t, nil)
-	var fires atomic.Int64
-	if err := r.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
-		fires.Add(1)
-		return nil, nil
-	}, HandlerConfig{}); err != nil {
-		t.Fatalf("register cron: %v", err)
-	}
-	mustStart(t, r)
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := newBubbleRunner(t, nil)
+		var fires atomic.Int64
+		if err := r.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
+			fires.Add(1)
+			return nil, nil
+		}, HandlerConfig{}); err != nil {
+			t.Fatalf("register cron: %v", err)
+		}
+		mustStart(t, r)
 
-	entry, err := r.CronEntry(cronKind)
-	if err != nil || entry == nil {
-		t.Fatalf("cron entry after start: %v (%+v)", err, entry)
-	}
-	armedFor := entry.ScheduledAt
-	if want := clock.now().Add(time.Hour); !armedFor.Equal(want) {
-		t.Fatalf("first fire armed for %s, want %s", armedFor, want)
-	}
-	if fires.Load() != 0 {
-		t.Fatalf("cron fired %d times before its interval elapsed", fires.Load())
-	}
+		entry, err := r.CronEntry(cronKind)
+		if err != nil || entry == nil {
+			t.Fatalf("cron entry after start: %v (%+v)", err, entry)
+		}
+		armedFor := entry.ScheduledAt
+		if want := time.Now().UTC().Add(time.Hour); !armedFor.Equal(want) {
+			t.Fatalf("first fire armed for %s, want %s", armedFor, want)
+		}
+		if fires.Load() != 0 {
+			t.Fatalf("cron fired %d times before its interval elapsed", fires.Load())
+		}
 
-	clock.advance(time.Hour)
-	waitFor(t, "the cron entry to fire", func() bool { return fires.Load() == 1 })
-	waitFor(t, "the cron entry to re-arm", func() bool {
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := fires.Load(); got != 1 {
+			t.Fatalf("cron fired %d times after one interval, want 1", got)
+		}
 		next, err := r.CronEntry(cronKind)
-		return err == nil && next != nil && next.State == StateQueued && next.ScheduledAt.After(armedFor)
-	})
+		if err != nil || next == nil {
+			t.Fatalf("cron entry after the fire: %v (%+v)", err, next)
+		}
+		if next.State != StateQueued || !next.ScheduledAt.After(armedFor) {
+			t.Fatalf("cron entry did not re-arm: state %s scheduled %s (was %s)", next.State, next.ScheduledAt, armedFor)
+		}
 
-	clock.advance(time.Hour)
-	waitFor(t, "the cron entry to fire again", func() bool { return fires.Load() == 2 })
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := fires.Load(); got != 2 {
+			t.Fatalf("cron fired %d times after two intervals, want 2", got)
+		}
+	})
 }
 
 // A failing fire never retires the entry: it records the error and stays armed,
