@@ -339,7 +339,7 @@ func TestReloadSessionAgentAbortsWhenLaunchParamsNotRecorded(t *testing.T) {
 // the wrapper's NotebookGuide RPC uses to decide chief-ness — so the reloaded cap
 // and the reloaded guidance stay consistent. Ordinary/delegated sessions stay
 // uncapped through reload even when a cap is configured.
-func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
+func TestBuildReloadSpawnOptionsCarriesContextWindowCap(t *testing.T) {
 	// No transcript on disk → deterministic resume resolution (fresh-spawn), which
 	// keeps buildReloadSpawnOptions from depending on a resumable transcript.
 	t.Setenv(toolhome.EnvVar, t.TempDir())
@@ -363,8 +363,8 @@ func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildReloadSpawnOptions: %v", err)
 		}
-		if opts.ChiefContextWindowCap != 160000 {
-			t.Fatalf("ChiefContextWindowCap = %d, want 160000 (reloaded chief must stay capped)", opts.ChiefContextWindowCap)
+		if opts.ContextWindowCap != 160000 {
+			t.Fatalf("ContextWindowCap = %d, want 160000 (reloaded chief must stay capped)", opts.ContextWindowCap)
 		}
 	})
 
@@ -378,12 +378,12 @@ func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildReloadSpawnOptions: %v", err)
 		}
-		if opts.ChiefContextWindowCap != agentdriver.DefaultContextWindowCap {
-			t.Fatalf("ChiefContextWindowCap = %d, want default %d", opts.ChiefContextWindowCap, agentdriver.DefaultContextWindowCap)
+		if opts.ContextWindowCap != agentdriver.DefaultContextWindowCap {
+			t.Fatalf("ContextWindowCap = %d, want default %d", opts.ContextWindowCap, agentdriver.DefaultContextWindowCap)
 		}
 	})
 
-	t.Run("reloaded non-chief session stays uncapped even with a cap configured", func(t *testing.T) {
+	t.Run("reloaded non-chief session stays uncapped even with a chief cap configured", func(t *testing.T) {
 		d := newDaemonWithSession(t, "worker")
 		// A configured chief cap must not leak onto a delegated/ordinary reload.
 		d.store.SetSetting(SettingChiefContextWindowCap, "160000")
@@ -392,8 +392,21 @@ func TestBuildReloadSpawnOptionsCarriesChiefContextWindowCap(t *testing.T) {
 		if err != nil {
 			t.Fatalf("buildReloadSpawnOptions: %v", err)
 		}
-		if opts.ChiefContextWindowCap != 0 {
-			t.Fatalf("ChiefContextWindowCap = %d, want 0 (non-chief reload must stay uncapped)", opts.ChiefContextWindowCap)
+		if opts.ContextWindowCap != 0 {
+			t.Fatalf("ContextWindowCap = %d, want 0 (non-chief reload must stay uncapped)", opts.ContextWindowCap)
+		}
+	})
+
+	t.Run("reloaded non-chief session keeps its agent's default cap", func(t *testing.T) {
+		d := newDaemonWithSession(t, "worker")
+		d.store.SetSetting(SettingDefaultContextWindowCapPrefix+"claude", "800000")
+
+		opts, err := d.buildReloadSpawnOptions(d.store.Get("worker"))
+		if err != nil {
+			t.Fatalf("buildReloadSpawnOptions: %v", err)
+		}
+		if opts.ContextWindowCap != 800000 {
+			t.Fatalf("ContextWindowCap = %d, want 800000 (reloaded session must stay capped)", opts.ContextWindowCap)
 		}
 	})
 }

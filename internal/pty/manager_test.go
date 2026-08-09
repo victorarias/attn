@@ -157,7 +157,7 @@ func TestBuildSpawnEnv_UnattendedContractOverridesInheritedWorkerAndLoginValues(
 	for key, value := range map[string]string{
 		"ATTN_AUTO_APPROVE": "parent", "ATTN_TRUST_WORKING_DIRECTORY": "parent",
 		"ATTN_MODEL": "parent-model", "ATTN_EFFORT": "medium",
-		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_CHIEF_AUTO_COMPACT_WINDOW": "12345",
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_AUTO_COMPACT_WINDOW": "12345",
 	} {
 		t.Setenv(key, value)
 	}
@@ -173,7 +173,7 @@ func TestBuildSpawnEnv_UnattendedContractOverridesInheritedWorkerAndLoginValues(
 	for key, want := range map[string]string{
 		"ATTN_AUTO_APPROVE": "1", "ATTN_TRUST_WORKING_DIRECTORY": "1",
 		"ATTN_MODEL": "exact-model", "ATTN_EFFORT": "high",
-		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_CHIEF_AUTO_COMPACT_WINDOW": "12345",
+		"ATTN_WORKFLOW_GUIDANCE_ENABLED": "1", "ATTN_AUTO_COMPACT_WINDOW": "12345",
 	} {
 		if got, _ := lookupEnv(env, key); got != want {
 			t.Fatalf("%s = %q, want %q", key, got, want)

@@ -1,0 +1,10 @@
+kind: added
+area: sessions
+change: >
+  Settings gains per-agent context-window caps
+  (default_context_window_cap_<agent>): every session of that agent
+  auto-compacts at the configured token threshold (Claude:
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW; Codex: model_auto_compact_token_limit)
+  instead of the agent's own default — raise it to make long-lived
+  sessions compact later. Blank means uncapped; chief launches still take
+  the chief cap.

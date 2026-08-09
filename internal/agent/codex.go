@@ -84,13 +84,12 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
 	}
-	if strings.TrimSpace(opts.NotebookRoot) != "" {
-		// Cap the chief's effective context window (model_auto_compact_token_limit
-		// is codex's compaction-trigger knob, the analogue of Claude's
-		// CLAUDE_CODE_AUTO_COMPACT_WINDOW). Gated on the chief branch so delegated
-		// interactive agents are never capped.
-		args = append(args, codexContextWindowCapArgs(opts.AutoCompactWindow)...)
-	}
+	// Cap the effective context window (model_auto_compact_token_limit is
+	// codex's compaction-trigger knob, the analogue of Claude's
+	// CLAUDE_CODE_AUTO_COMPACT_WINDOW). The daemon owns the policy of who gets
+	// a cap (chief setting vs default_context_window_cap_<agent>); this only
+	// applies what it resolved.
+	args = append(args, codexContextWindowCapArgs(opts.AutoCompactWindow)...)
 	if effort := strings.TrimSpace(opts.Effort); effort != "" {
 		// Codex has no dedicated effort flag; model_reasoning_effort is its
 		// native config knob (the -c value is parsed as TOML, hence the quotes).
