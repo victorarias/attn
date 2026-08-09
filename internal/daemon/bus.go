@@ -93,6 +93,11 @@ const (
 	// FactSessionCapChanged: this session's context-window cap pin was set or
 	// cleared.
 	FactSessionCapChanged = "session.cap.changed"
+	// FactSessionActivityChanged: the generator wrote a new activity line for
+	// this session. Subject-only — the projection re-reads the session, which is
+	// correct because the store was written before the publish and the bus fans
+	// out inline.
+	FactSessionActivityChanged = "session.activity.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -297,6 +302,15 @@ func buildWireProjections() []projection {
 			// so it re-pushes the one session rather than recomputing the group
 			// around it.
 			filter: bus.Filter{FactSessionPinChanged, FactSessionCapChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+		},
+		{
+			// A new activity line changes one field on one session and nothing about
+			// its workspace, so it re-pushes that session alone. It reaches clients
+			// as a state change because there is no separate activity event: the
+			// line rides on the session snapshot, which is what a client renders
+			// anyway.
+			filter: bus.Filter{FactSessionActivityChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{

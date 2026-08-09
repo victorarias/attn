@@ -110,20 +110,8 @@ func Read(path, agent, cursor string) (Window, error) {
 // than the last few moments. Seed instead, and let the next real movement
 // produce the first line. It is also the recovery path for ErrCursorMismatch,
 // which is normal rather than exceptional — Claude compaction rewrites the file.
-func SeedCursor(path, agent string) (string, error) {
-	cursor := ""
-	for {
-		page, err := transcript.ReadEventPage(path, agent, cursor, MaxEvents)
-		if err != nil {
-			return "", err
-		}
-		if page.NextCursor != "" {
-			cursor = page.NextCursor
-		}
-		if page.AtEnd || page.NextCursor == "" {
-			return cursor, nil
-		}
-	}
+func SeedCursor(path string) (string, error) {
+	return transcript.HeadCursor(path)
 }
 
 // cap trims the window to the tripwires, keeping the newest events. The cursor

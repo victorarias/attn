@@ -482,6 +482,16 @@ type Daemon struct {
 	) (agentdriver.HeadlessTaskResult, error)
 	narrationNowOverride func() time.Time
 
+	// sessionActivityExecution is the same seam for the activity generator: set
+	// it and a test drives the whole executor — cursor handling, window read,
+	// prompt assembly, sanitizing, store write and fact publish — against a fake
+	// answer, with no subprocess and no spend.
+	sessionActivityExecution func(
+		ctx context.Context,
+		provider agentdriver.HeadlessTaskProvider,
+		request agentdriver.HeadlessTaskRequest,
+	) (agentdriver.HeadlessTaskResult, error)
+
 	// Daily-narrate activity gate. notebookNarrateActivity is the in-memory set of
 	// workspace ids that saw real activity (a session end or a content-changing
 	// context write) since the last daily-narrate cron fire. It is best-effort and

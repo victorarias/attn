@@ -52,7 +52,7 @@ type Result struct {
 func runMatrix(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	dir := fs.String("dir", defaultDir, "corpus directory")
-	promptDir := fs.String("prompts", filepath.Join("prompts", "activity"), "prompt variant directory")
+	promptDir := fs.String("prompts", filepath.Join("internal", "activity", "prompts"), "prompt variant directory")
 	prompts := fs.String("prompt", "", "comma-separated prompt names (default: all in --prompts)")
 	agents := fs.String("agent", "claude", "comma-separated agents")
 	models := fs.String("model", "claude-haiku-4-5", "comma-separated models")

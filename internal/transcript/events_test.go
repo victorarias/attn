@@ -340,3 +340,75 @@ func TestReadEventPageExtractsCodexAgentReasoning(t *testing.T) {
 		t.Errorf("reasoning text lost: %q", page.Events[0].Text)
 	}
 }
+
+// A cold-start consumer wants the transcript's future, not its past. Reading
+// from byte 0 and discarding costs a full scan of a file that reaches tens of
+// megabytes and produces nothing the caller asked for.
+func TestHeadCursorSkipsEverythingAlreadyWritten(t *testing.T) {
+	path := writeEventTranscript(t,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"second"}]}}`,
+	)
+
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	page, err := ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage: %v", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("head cursor returned %d events, want none", len(page.Events))
+	}
+
+	appendEventTranscript(t, path, `{"type":"assistant","message":{"content":[{"type":"text","text":"third"}]}}`)
+	page, err = ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage after append: %v", err)
+	}
+	if len(page.Events) != 1 || page.Events[0].Text != "third" {
+		t.Fatalf("after append got %d events (%+v), want only the appended one", len(page.Events), page.Events)
+	}
+}
+
+// A partially written final record must stay unread until its writer appends
+// the newline — the same rule ReadEventPage follows.
+func TestHeadCursorLeavesAPartialRecordUnread(t *testing.T) {
+	path := writeEventTranscript(t, `{"type":"assistant","message":{"content":[{"type":"text","text":"first"}]}}`)
+	partial := `{"type":"assistant","message":{"content":[{"type":"text","text":"half`
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0o600)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	if _, err := f.WriteString(partial); err != nil {
+		t.Fatalf("write partial: %v", err)
+	}
+	f.Close()
+
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	page, err := ReadEventPage(path, "claude", cursor, 10)
+	if err != nil {
+		t.Fatalf("ReadEventPage: %v", err)
+	}
+	if len(page.Events) != 0 {
+		t.Fatalf("got %d events, want none until the partial record completes", len(page.Events))
+	}
+}
+
+func TestHeadCursorOnATranscriptWithNoCompleteRecord(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "events.jsonl")
+	if err := os.WriteFile(path, []byte(`{"type":"assistant"`), 0o600); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	cursor, err := HeadCursor(path)
+	if err != nil {
+		t.Fatalf("HeadCursor: %v", err)
+	}
+	if cursor != "" {
+		t.Errorf("cursor = %q, want empty so the reader starts from the beginning", cursor)
+	}
+}

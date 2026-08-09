@@ -94,7 +94,7 @@ func runCorpus(args []string) error {
 			// input this feature ever sees in production — the daemon seeds at
 			// head too and waits for real movement. Rare states accumulate by
 			// running `corpus` repeatedly, which is the intended workflow.
-			head, err := activity.SeedCursor(path, string(session.Agent))
+			head, err := activity.SeedCursor(path)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "skip %s: %v\n", session.ID, err)
 				continue
@@ -108,7 +108,7 @@ func runCorpus(args []string) error {
 			// A mismatched cursor means the transcript was rewritten (Claude
 			// compaction does this). Re-seed at head and skip this pass, exactly
 			// as the daemon will.
-			head, seedErr := activity.SeedCursor(path, string(session.Agent))
+			head, seedErr := activity.SeedCursor(path)
 			if seedErr != nil {
 				fmt.Fprintf(os.Stderr, "skip %s: %v\n", session.ID, err)
 				continue

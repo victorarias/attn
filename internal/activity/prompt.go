@@ -1,6 +1,7 @@
 package activity
 
 import (
+	_ "embed"
 	"os"
 	"strings"
 )
@@ -99,3 +100,14 @@ func (t Template) Render(in Input) Rendered {
 	}
 	return Rendered{System: strings.TrimSpace(system), User: strings.TrimSpace(user)}
 }
+
+// Baseline is the prompt the daemon ships with, embedded so a generator run
+// never depends on a file being where someone left it. The harness reads the
+// same file from disk (prompts/) so iterating it needs no rebuild — one copy,
+// two readers.
+//
+//go:embed prompts/baseline.md
+var baselineBody string
+
+// Baseline returns the shipped template.
+func Baseline() Template { return Template{Name: "baseline", Body: baselineBody} }

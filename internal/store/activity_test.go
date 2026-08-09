@@ -113,6 +113,56 @@ func TestClearingActivityAlsoDropsTheCursor(t *testing.T) {
 	}
 }
 
+// The cold start seeds a cursor before any line exists. Routing that through
+// UpdateSessionActivity would hit the clear rule above and wipe the seed, so the
+// two writers stay separate.
+func TestSettingTheCursorAloneSurvivesAnEmptyLine(t *testing.T) {
+	s := newTurnStore(t)
+	addTurnSession(t, s, "s1", protocol.SessionStateWorking)
+
+	if !s.SetSessionActivityCursor("s1", "v1:abc:512:0") {
+		t.Fatal("seeding a cursor reported no change")
+	}
+	got := s.GetSessionActivity("s1")
+	if got.Cursor != "v1:abc:512:0" {
+		t.Errorf("cursor = %q, want the seed to survive", got.Cursor)
+	}
+	if got.Line != "" || !got.At.IsZero() {
+		t.Errorf("seeding invented a line: %+v", got)
+	}
+	if session := s.Get("s1"); session.Activity != nil {
+		t.Errorf("activity = %v on the wire after a seed, want absent", session.Activity)
+	}
+}
+
+func TestSettingTheCursorKeepsAnExistingLine(t *testing.T) {
+	s := newTurnStore(t)
+	addTurnSession(t, s, "s1", protocol.SessionStateWorking)
+	at := time.Now()
+	s.UpdateSessionActivity("s1", "running the frontend test suite", at, "v1:abc:512:0")
+
+	if !s.SetSessionActivityCursor("s1", "v1:abc:2048:0") {
+		t.Fatal("advancing the cursor reported no change")
+	}
+	got := s.GetSessionActivity("s1")
+	if got.Line != "running the frontend test suite" {
+		t.Errorf("line = %q, want it kept across a cursor advance", got.Line)
+	}
+	if got.Cursor != "v1:abc:2048:0" {
+		t.Errorf("cursor = %q, want the advance", got.Cursor)
+	}
+	if got.At.IsZero() {
+		t.Error("the stamp was dropped, so the line would age as if never generated")
+	}
+}
+
+func TestSetSessionActivityCursorReportsAMissingSession(t *testing.T) {
+	s := newTurnStore(t)
+	if s.SetSessionActivityCursor("nobody", "v1:abc:1:0") {
+		t.Error("seeding a cursor for a session that does not exist reported a change")
+	}
+}
+
 func TestUpdateSessionActivityReportsAMissingSession(t *testing.T) {
 	s := newTurnStore(t)
 	if s.UpdateSessionActivity("nobody", "doing something", time.Now(), "1") {

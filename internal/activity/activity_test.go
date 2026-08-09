@@ -161,13 +161,13 @@ func TestTemplateRenderSplitsOnTheSystemMarker(t *testing.T) {
 
 	// The shipped baseline must actually carry the marker — losing it is a silent
 	// 10x cost regression, not a test failure anywhere else.
-	baseline, err := LoadTemplate("baseline", filepath.Join("..", "..", "prompts", "activity", "baseline.md"))
+	baseline, err := LoadTemplate("baseline", filepath.Join("prompts", "baseline.md"))
 	if err != nil {
 		t.Fatalf("load baseline: %v", err)
 	}
 	rendered := baseline.Render(Input{State: "working", Window: "assistant: hi"})
 	if rendered.System == "" {
-		t.Fatal("prompts/activity/baseline.md lost its {{USER}} marker: the whole prompt would ship as the user turn and pay the CLI's full system prefix")
+		t.Fatal("internal/activity/prompts/baseline.md lost its {{USER}} marker: the whole prompt would ship as the user turn and pay the CLI's full system prefix")
 	}
 	if !strings.Contains(rendered.User, "assistant: hi") {
 		t.Errorf("baseline must put the window in the user turn; got %q", rendered.User)

@@ -106,6 +106,41 @@ func (s *Store) UpdateSessionActivity(id, line string, at time.Time, cursor stri
 	return err == nil && updated == 1
 }
 
+// SetSessionActivityCursor moves the read position without touching the line.
+//
+// It is a separate door from UpdateSessionActivity because the two mean opposite
+// things when the line is empty: there, an empty line means "forget this line",
+// while here it means "nothing has been generated yet" — the cold start, whose
+// whole point is to record how far we have read so the first real line is about
+// the present rather than the session's whole history.
+func (s *Store) SetSessionActivityCursor(id, cursor string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		if _, ok := s.sessions[id]; !ok {
+			return false
+		}
+		if s.activityCursors == nil {
+			s.activityCursors = make(map[string]string)
+		}
+		if cursor == "" {
+			delete(s.activityCursors, id)
+		} else {
+			s.activityCursors[id] = cursor
+		}
+		return true
+	}
+
+	result, err := s.db.Exec(`UPDATE sessions SET activity_cursor = ? WHERE id = ?`, cursor, id)
+	if err != nil {
+		log.Printf("[store] SetSessionActivityCursor: failed for session %s: %v", id, err)
+		return false
+	}
+	updated, err := result.RowsAffected()
+	return err == nil && updated == 1
+}
+
 // applyActivity puts the pair on a session as the wire carries it: both present
 // or both absent, never a line without the stamp that lets a client age it out.
 func applyActivity(session *protocol.Session, line, stamp string) {

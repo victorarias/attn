@@ -68,6 +68,63 @@ type EventPage struct {
 	AtEnd      bool
 }
 
+// HeadCursor returns a cursor positioned after the last complete record, so a
+// later ReadEventPage returns only what was appended afterwards.
+//
+// It exists for consumers that want the transcript's future and not its past.
+// The alternative — reading from byte 0 and discarding — costs a full scan of a
+// file that reaches tens of megabytes, and produces nothing the caller wanted.
+//
+// A transcript with no complete record yet has nothing to seek past, and comes
+// back with the empty cursor, which reads from the beginning.
+func HeadCursor(path string) (string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+
+	fingerprint, hasCompleteRecord, err := transcriptFingerprint(f)
+	if err != nil {
+		return "", err
+	}
+	if !hasCompleteRecord {
+		return "", nil
+	}
+	// Seek past the last complete record rather than to the file's end: a
+	// half-written final line must stay unread until its writer appends the
+	// newline, exactly as ReadEventPage treats it. The byte after the file's
+	// last newline is both — the end of the file when it ends cleanly, and the
+	// start of the partial line when it does not.
+	info, err := f.Stat()
+	if err != nil {
+		return "", err
+	}
+	offset, err := offsetAfterLastNewline(f, info.Size())
+	if err != nil || offset <= 0 {
+		return "", err
+	}
+	return encodeEventCursor(fingerprint, offset, 0), nil
+}
+
+// offsetAfterLastNewline returns one past the file's last newline, or 0 when it
+// holds none.
+func offsetAfterLastNewline(f *os.File, size int64) (int64, error) {
+	const chunkSize int64 = 4096
+	for searchEnd := size; searchEnd > 0; {
+		searchStart := max(int64(0), searchEnd-chunkSize)
+		chunk := make([]byte, searchEnd-searchStart)
+		if _, err := f.ReadAt(chunk, searchStart); err != nil {
+			return 0, err
+		}
+		if newline := bytes.LastIndexByte(chunk, '\n'); newline >= 0 {
+			return searchStart + int64(newline) + 1, nil
+		}
+		searchEnd = searchStart
+	}
+	return 0, nil
+}
+
 // ReadEventPage reads complete JSONL records strictly after cursor. It never
 // consumes a partially written final record, so a later call can decode it
 // exactly once after the writer appends its newline.
