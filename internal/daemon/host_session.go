@@ -79,6 +79,29 @@ func hostSessionStateDir(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "state", sessionID)
 }
 
+// hostSessionStateDirHoldsConversation reports whether this session's own dir
+// already holds a pi session file.
+//
+// It answers the same question the host asks itself at startup, and the two
+// have to agree: the host consults `ATTN_PI_HOST_RESUME_FILE` only when its dir
+// is empty, so this is what tells a first launch (which will fork) from a
+// relaunch (which continues its own history and ignores the resume file
+// entirely). Anything checking the resume file has to check this first, or a
+// revive of a long-established conversation starts depending on a file it will
+// never open.
+func hostSessionStateDirHoldsConversation(sessionID string) bool {
+	entries, err := os.ReadDir(hostSessionStateDir(sessionID))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+			return true
+		}
+	}
+	return false
+}
+
 // loginShellEnvForSpawn is the user's login shell environment, captured now if
 // the daemon's pre-warm has not landed yet. The PTY path makes the same
 // fallback, for the same reason: the first session of a daemon's life must not
@@ -122,7 +145,7 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 	// (see buildSpawnEnv in internal/pty/manager.go) — the two runtimes owe the
 	// agent the same environment.
 	env = launchenv.WithActiveAttnFirst(env, launchenv.ActiveAttnExecutable())
-	env = pty.MergeEnvironment(env, []string{
+	hostEnv := []string{
 		"ATTN_INSIDE_APP=1",
 		"ATTN_DAEMON_MANAGED=1",
 		"ATTN_SESSION_ID=" + opts.ID,
@@ -130,7 +153,15 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 		"ATTN_PI_HOST_SESSION_ID=" + opts.ID,
 		"ATTN_PI_HOST_SESSION_DIR=" + hostSessionStateDir(opts.ID),
 		"ATTN_PI_HOST_CWD=" + opts.CWD,
-	})
+	}
+	// A resume is a starting condition, not a mode: the host forks the named
+	// file into this session's own state dir the first time it starts, and every
+	// later start of the same session continues what is already there. Passing it
+	// on a revive too is what covers the host that died before writing anything.
+	if resume := strings.TrimSpace(opts.ResumeConversationFile); resume != "" {
+		hostEnv = append(hostEnv, "ATTN_PI_HOST_RESUME_FILE="+resume)
+	}
+	env = pty.MergeEnvironment(env, hostEnv)
 	cwd := strings.TrimSpace(opts.ExternalCWD)
 	if cwd == "" {
 		cwd = opts.CWD
@@ -222,6 +253,37 @@ func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	if hostStateDeclarationKinds[event.Kind] && event.Seq > 0 {
 		d.applyHostDeclaredState(event)
 	}
+	if event.Kind == "model_changed" && event.Seq > 0 {
+		d.handleHostModelChanged(event)
+	}
+}
+
+// handleHostModelChanged records a mid-session model switch where a relaunch
+// will read it.
+//
+// A conversation session can come back — a crash, a reload, a machine restart —
+// and it comes back through the stored launch intent, which carries the model
+// the spawn pinned. Without this, a session switched to a different model at
+// 10am silently reverts to the pinned one the first time it is revived, and the
+// conversation continues on a model the user stopped using hours ago.
+//
+// This is deliberately not a state declaration. `applyState` restamps
+// `state_since` on every apply, so routing a model switch through it would reset
+// "working for 4m" for something that did not move the session at all.
+func (d *Daemon) handleHostModelChanged(event hostsession.Event) {
+	model, _ := event.Body["model"].(string)
+	model = strings.TrimSpace(model)
+	if model == "" {
+		// A refusal: pi kept the model it had. Nothing to record — the envelope's
+		// job there is to correct the client that snapped its picker early.
+		return
+	}
+	intent, ok := d.store.LaunchIntent(event.SessionID)
+	if !ok || intent.Model == model {
+		return
+	}
+	intent.Model = model
+	d.store.SetLaunchIntent(event.SessionID, intent)
 }
 
 // applyHostDeclaredState routes one declaration's state through the daemon's
@@ -449,6 +511,49 @@ func (d *Daemon) handleAgentAttach(client *wsClient, msg *protocol.AgentAttachMe
 	if err := d.ensureHostSessions().Snapshot(sessionID); err != nil {
 		d.logf("agent_attach for session %s failed: %v", sessionID, err)
 		d.sendCommandError(client, protocol.CmdAgentAttach, "no live conversation host for session "+sessionID)
+	}
+}
+
+// handleAgentHistory answers the agent_history command: a client scrolled to the
+// top of what it holds and asks for the conversation behind it.
+//
+// The page comes back on the envelope stream, broadcast like the snapshot,
+// addressed by the anchor item it pages before rather than by a request id. Two
+// windows sitting at the same place in a long conversation therefore cost one
+// read, and a window standing somewhere else recognises the anchor as not its
+// own and ignores the page. A host that died mid-scroll answers nothing; the
+// command error is what stops the spinner.
+func (d *Daemon) handleAgentHistory(client *wsClient, msg *protocol.AgentHistoryMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	before := strings.TrimSpace(msg.Before)
+	if sessionID == "" || before == "" {
+		d.sendCommandError(client, protocol.CmdAgentHistory, "agent_history needs a session id and a before cursor")
+		return
+	}
+	if err := d.ensureHostSessions().History(sessionID, before); err != nil {
+		d.logf("agent_history for session %s before %s failed: %v", sessionID, before, err)
+		d.sendCommandError(client, protocol.CmdAgentHistory, "no live conversation host for session "+sessionID)
+	}
+}
+
+// handleAgentSetModel answers the agent_set_model command.
+//
+// Nothing is decided here: the host asks pi to switch and reports the model
+// actually in force in a `model_changed` envelope, which is also what rewrites
+// the launch intent (see handleHostModelChanged). A refusal — a model this
+// machine has no credentials for — comes back the same way, so a picker that
+// snapped to the new value corrects itself from the host's answer rather than
+// from a guess made here.
+func (d *Daemon) handleAgentSetModel(client *wsClient, msg *protocol.AgentSetModelMessage) {
+	sessionID := strings.TrimSpace(msg.ID)
+	model := strings.TrimSpace(msg.Model)
+	if sessionID == "" || model == "" {
+		d.sendCommandError(client, protocol.CmdAgentSetModel, "agent_set_model needs a session id and a model")
+		return
+	}
+	if err := d.ensureHostSessions().SetModel(sessionID, model); err != nil {
+		d.logf("agent_set_model for session %s to %s failed: %v", sessionID, model, err)
+		d.sendCommandError(client, protocol.CmdAgentSetModel, "no live conversation host for session "+sessionID)
 	}
 }
 

@@ -17,6 +17,7 @@ export const SEMANTIC_KINDS = [
   "run_settled",
   "tool_started",
   "tool_finished",
+  "model_changed",
 ] as const;
 
 /** Render kinds. Opaque to the daemon; host and app agree on the bodies. */
@@ -27,6 +28,8 @@ export const RENDER_KINDS = [
   "queue_update",
   "tool_detail",
   "conversation_snapshot",
+  "conversation_page",
+  "notice",
 ] as const;
 
 /**
@@ -86,7 +89,49 @@ export interface SessionReadyBody extends DeclarationBody {
   model: string;
   cwd: string;
   pi_version: string;
+  /**
+   * Every model this machine can actually reach, "provider/model-id".
+   *
+   * pi's catalog has hundreds of entries and the user is authenticated for a
+   * handful; `getAvailable()` is pi's own answer to which is which, so the
+   * picker offers only models a switch will not be refused for.
+   */
+  models: string[];
 }
+
+/**
+ * The model this session runs from its next run on, or why it still does not.
+ *
+ * Semantic rather than a rendering: attn stores a session's model in its launch
+ * intent, so a mid-session switch has to reach the daemon or a revive would
+ * quietly put the conversation back on the old one. It is NOT a state
+ * declaration — switching a model does not move the session, and applying one
+ * would restamp `state_since`.
+ */
+export interface ModelChangedBody {
+  model: string;
+  /** pi refused the switch — no auth for the provider, no such model — and why. */
+  error?: string;
+}
+
+/**
+ * Something that happened TO the conversation rather than in it: a compaction,
+ * a retry after a provider error.
+ *
+ * It is a transcript item because that is where it belongs — "the agent
+ * summarized everything above this line" is only meaningful in place. A notice
+ * is minted pending when the thing starts and settled by id when it ends, so
+ * one row moves from "Compacting…" to "Compacted" instead of two rows arguing.
+ */
+export interface NoticeBody {
+  id: string;
+  level: NoticeLevel;
+  text: string;
+  /** The thing this notice is about is over; until then it draws as busy. */
+  done: boolean;
+}
+
+export type NoticeLevel = "info" | "warn" | "error";
 
 export interface RunStartedBody extends DeclarationBody {}
 
@@ -432,6 +477,43 @@ export class DeltaCoalescer {
 }
 
 /** Pulls display text out of whatever shape a pi message carries. */
+/**
+ * Why a turn failed, in words worth showing, or "" if it did not.
+ *
+ * pi does not raise on a provider error: it persists the assistant message with
+ * `stopReason: "error"` and the provider's response in `errorMessage`. That
+ * response is routinely a JSON envelope wrapping another JSON envelope wrapping
+ * the sentence a person would want to read (measured against Google's 404 for a
+ * retired model, 2026-08-09), so this digs for the innermost `error.message`
+ * and falls back to whatever it was handed. It never returns the raw wall of
+ * JSON when a sentence is available, because the row it feeds is one line.
+ */
+export function messageFailure(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  if ((message as { stopReason?: unknown }).stopReason !== "error") return "";
+  const raw = readString(message, "errorMessage");
+  if (raw === "") return "The provider reported an error with no message.";
+  let best = raw;
+  let current: unknown = raw;
+  // Each unwrap peels one `{"error":{"message": ...}}`; the message is itself
+  // JSON often enough that this loops rather than checking once.
+  for (let depth = 0; depth < 8; depth += 1) {
+    if (typeof current !== "string") break;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(current);
+    } catch {
+      break;
+    }
+    const error = parsed && typeof parsed === "object" ? (parsed as { error?: unknown }).error : undefined;
+    const inner = readString(error, "message");
+    if (inner === "") break;
+    best = inner;
+    current = inner;
+  }
+  return best.replace(/\s+/g, " ").trim();
+}
+
 export function messageText(message: unknown): string {
   if (typeof message === "string") return message;
   if (message === null || typeof message !== "object") return "";
@@ -453,11 +535,20 @@ function stringList(value: unknown): string[] {
   return Array.isArray(value) ? value.filter((entry): entry is string => typeof entry === "string") : [];
 }
 
+/** One number field off a pi event, or the fallback when it is not one. */
+function numberOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
 /** One string field off a pi details object, or "" when it is not there. */
 function readString(source: unknown, key: string): string {
   if (!source || typeof source !== "object") return "";
   const value = (source as Record<string, unknown>)[key];
   return typeof value === "string" ? value : "";
+}
+
+function noticeLevel(value: string): NoticeLevel {
+  return value === "warn" || value === "error" ? value : "info";
 }
 
 /**
@@ -504,6 +595,17 @@ export class PiEventMapper {
   private readonly openCalls = new Map<string, { name: string; summary: string; files: string[] }>();
   /** The role of the message pi currently has open, for the id it will mint. */
   private currentRole = "assistant";
+  private noticeCounter = 0;
+  /**
+   * The open notice per concern, by the id it was minted with.
+   *
+   * A concern (compaction, a provider retry, a summarization retry) can have at
+   * most one thing in flight at a time, but a session has many over its life —
+   * so the id is minted per occurrence and only the OPEN one is remembered.
+   * That is what lets a second compaction draw its own row instead of
+   * overwriting the record of the first.
+   */
+  private readonly openNotices = new Map<string, string>();
 
   constructor(
     private readonly stream: EnvelopeStream,
@@ -616,6 +718,67 @@ export class PiEventMapper {
         return;
       }
 
+      // Compaction and retry: the two things that happen TO a conversation
+      // rather than in it, and the two a user is most likely to be confused by
+      // — an agent that has gone quiet for thirty seconds is either summarizing
+      // its own history or waiting out a provider error, and both used to look
+      // identical to a stall. Each start opens a pending notice and each end
+      // settles the same row.
+      case "compaction_start": {
+        this.openNotice("compaction", "info", `Compacting the conversation (${readString(event, "reason") || "threshold"})...`);
+        return;
+      }
+
+      case "compaction_end": {
+        const failure = readString(event, "errorMessage");
+        const aborted = event.aborted === true;
+        const result = event.result as { tokensBefore?: unknown } | undefined;
+        const before = typeof result?.tokensBefore === "number" ? result.tokensBefore : 0;
+        if (aborted) this.closeNotice("compaction", "warn", "Compaction was cancelled");
+        else if (failure !== "") this.closeNotice("compaction", "error", `Compaction failed: ${clipSummary(failure)}`);
+        else if (before > 0) this.closeNotice("compaction", "info", `Compacted the conversation (${before.toLocaleString("en-US")} tokens summarized)`);
+        else this.closeNotice("compaction", "info", "Compacted the conversation");
+        return;
+      }
+
+      case "auto_retry_start": {
+        const attempt = numberOr(event.attempt, 1);
+        const max = numberOr(event.maxAttempts, 0);
+        const delay = numberOr(event.delayMs, 0);
+        const of = max > 0 ? ` ${attempt}/${max}` : ` ${attempt}`;
+        const wait = delay > 0 ? ` in ${Math.round(delay / 1000)}s` : "";
+        this.openNotice("retry", "warn", `Retrying${of}${wait}: ${clipSummary(readString(event, "errorMessage"))}`);
+        return;
+      }
+
+      case "auto_retry_end": {
+        if (event.success === true) {
+          this.closeNotice("retry", "info", `Recovered after ${numberOr(event.attempt, 1)} retry attempt(s)`);
+          return;
+        }
+        const failure = readString(event, "finalError");
+        this.closeNotice("retry", "error", `Gave up after ${numberOr(event.attempt, 1)} retry attempt(s)${failure === "" ? "" : `: ${clipSummary(failure)}`}`);
+        return;
+      }
+
+      case "summarization_retry_scheduled": {
+        const attempt = numberOr(event.attempt, 1);
+        const max = numberOr(event.maxAttempts, 0);
+        const of = max > 0 ? ` ${attempt}/${max}` : ` ${attempt}`;
+        this.openNotice("summarization", "warn", `Summarization failed; retrying${of}: ${clipSummary(readString(event, "errorMessage"))}`);
+        return;
+      }
+
+      case "summarization_retry_attempt_start":
+        // pi announces the attempt it already scheduled. The scheduled notice
+        // is the row; re-announcing would only redraw it.
+        return;
+
+      case "summarization_retry_finished": {
+        this.closeNotice("summarization", "info", "Summarization retry finished");
+        return;
+      }
+
       case "message_start": {
         // Nothing is emitted here. pi opens a message before anyone knows
         // whether it will have anything to say: an assistant turn that only
@@ -651,6 +814,13 @@ export class PiEventMapper {
         const open = this.currentMessageID;
         this.currentMessageID = null;
         this.currentRole = "assistant";
+        // A turn that failed. pi does not raise — it persists the message with
+        // `stopReason: "error"` and the provider's words — so without this the
+        // run just settles and the user watches an agent answer with silence.
+        // Measured 2026-08-09: a model the provider had retired came back 404
+        // and nothing whatsoever reached the pane.
+        const failure = messageFailure(event.message);
+        if (failure !== "") this.closeNotice("run", "error", `The agent could not answer: ${clipSummary(failure)}`);
         // A tool's output belongs to its card, which fetches it on demand. A
         // message that never said anything is not a message.
         if (UNRENDERED_ROLES.has(role) || (open === null && text === "")) return;
@@ -679,6 +849,34 @@ export class PiEventMapper {
   private requireMessageID(): string {
     if (this.currentMessageID === null) this.currentMessageID = this.mintMessage(this.currentRole);
     return this.currentMessageID;
+  }
+
+  /** Mints a pending notice for a concern and remembers the row it drew. */
+  private openNotice(concern: string, level: NoticeLevel, text: string): void {
+    this.deltas.flush();
+    this.noticeCounter += 1;
+    const id = `n${this.noticeCounter}`;
+    this.openNotices.set(concern, id);
+    this.stream.emit("notice", { id, level, text, done: false } satisfies NoticeBody);
+  }
+
+  /**
+   * Settles the concern's open row.
+   *
+   * An end with no start is still drawn, as its own settled row: pi can finish
+   * something this host was not listening for when it began (a compaction pi
+   * started before the SDK subscriber attached), and the record of it having
+   * happened is worth more than the pairing.
+   */
+  private closeNotice(concern: string, level: NoticeLevel, text: string): void {
+    this.deltas.flush();
+    let id = this.openNotices.get(concern);
+    if (id === undefined) {
+      this.noticeCounter += 1;
+      id = `n${this.noticeCounter}`;
+    }
+    this.openNotices.delete(concern);
+    this.stream.emit("notice", { id, level, text, done: true } satisfies NoticeBody);
   }
 
   /** Opens a message on the wire and returns its id. */
@@ -721,7 +919,28 @@ export interface SnapshotToolItem {
   full_output: boolean;
 }
 
-export type SnapshotItem = SnapshotMessageItem | SnapshotToolItem;
+export interface SnapshotNoticeItem {
+  kind: "notice";
+  id: string;
+  level: NoticeLevel;
+  text: string;
+  done: boolean;
+}
+
+export type SnapshotItem = SnapshotMessageItem | SnapshotToolItem | SnapshotNoticeItem;
+
+/**
+ * How one transcript item is addressed across the wire.
+ *
+ * Paging needs a cursor, and the cursor has to survive the item being replaced
+ * in place (a tool card finishing, a message ending) — so it is the item's own
+ * identity, not its position. The kind prefix is what keeps a message id and a
+ * tool call id from ever colliding. The app derives the same key from the same
+ * fields; the two derivations are the contract.
+ */
+export function snapshotItemKey(item: SnapshotItem): string {
+  return item.kind === "tool" ? `tool:${item.call_id}` : `${item.kind}:${item.id}`;
+}
 
 /**
  * The whole of what a client needs to draw a conversation it has not been
@@ -734,18 +953,46 @@ export type SnapshotItem = SnapshotMessageItem | SnapshotToolItem;
  * snapshot REPLACES what the client had, for the same reason the VT dump does:
  * one authority, no merge, and two clients that attach see the same thing.
  *
- * `truncated` says older items exist than `items` carries — the window is
- * bounded (see SNAPSHOT_ITEM_LIMIT) and paging past it is slice 5's.
+ * A snapshot is the NEWEST window of a conversation that may be much longer.
+ * `truncated` says so; `has_more` says the host can still serve what came
+ * before, one page at a time (see `page`). The two differ only once the
+ * retention tripwire has fired: then the conversation is longer than anything
+ * this host can produce, and `has_more` is the honest half.
+ *
+ * `epoch` names the host process that built it. A replacement host rebuilds the
+ * transcript from disk and mints its own item ids, so a client must not splice a
+ * new host's window into the dead one's items — same-epoch answers merge, a new
+ * epoch replaces. It is the transcript's version of the seq spine reset.
  */
 export interface ConversationSnapshotBody {
+  epoch: string;
   items: SnapshotItem[];
   /** Items in the whole conversation, including the ones clipped from `items`. */
   total: number;
   truncated: boolean;
+  /** Older items than `items[0]` are held and can be paged in. */
+  has_more: boolean;
   /** A run is open right now, so the composer sends a steer rather than a prompt. */
   running: boolean;
   /** pi's queues as of now, so an attaching client draws what is still unread. */
   queue: QueueUpdateBody;
+}
+
+/**
+ * One page of scroll-back: the items immediately older than `before`.
+ *
+ * Broadcast like every other rendering, and addressed by the anchor rather than
+ * by a request id — so a second window whose oldest item is the same one fills
+ * in for free, and a client holding a different anchor ignores it. Nothing here
+ * can time out: a page that never comes leaves the transcript exactly as it was.
+ */
+export interface ConversationPageBody {
+  epoch: string;
+  /** The item key this page ends at, echoed from the `history` verb. */
+  before: string;
+  items: SnapshotItem[];
+  /** Older items still exist behind this page. */
+  has_more: boolean;
 }
 
 /**
@@ -772,8 +1019,41 @@ export const SNAPSHOT_ITEM_LIMIT = 500;
  */
 export const SNAPSHOT_BYTES_LIMIT = 1 << 20;
 
+/**
+ * How many items this host holds so scroll-back has something to serve.
+ *
+ * The window above is a wire and render budget; this is the archive behind it,
+ * and the two are different numbers for a reason — a client asking for the page
+ * before the one it is showing must not be told the history is gone when the
+ * host is only refusing to send it all at once.
+ *
+ * Receipt (2026-08-09, this machine, 585 real agent conversations off disk —
+ * every claude session under ~/.claude/projects, counting user and assistant
+ * messages, which is what this store holds): p50 5 items, p99 5,442, and the
+ * longest conversation anyone here has ever had was 11,305. 50,000 is 4.4x
+ * that longest one. The acceptance run's own numbers are far smaller (8 items
+ * for a four-turn conversation; 1,200 for the synthesized one it resumed), and
+ * every settle logs what was held, which is where the next remeasurement comes
+ * from.
+ */
+export const TRANSCRIPT_RETENTION_ITEMS = 50_000;
+
+/**
+ * How many bytes of transcript text this host holds.
+ *
+ * Same corpus, measuring the message TEXT those conversations carry — which is
+ * what this store's bytes are: p50 1.3 KB, p99 1.0 MB, and the largest single
+ * conversation 1.7 MB. 32 MB is ~19x that largest one, and a quarter of the
+ * host's own 130 MB idle RSS. It is a tripwire rather than a working limit: a
+ * conversation that reaches it is well past anything anyone here has had, and
+ * the log says so before the oldest items go. Tool OUTPUT is not in here at
+ * all; that is `ToolDetailStore`'s separate budget.
+ */
+export const TRANSCRIPT_RETENTION_BYTES = 32 << 20;
+
 function itemBytes(item: SnapshotItem): number {
   if (item.kind === "message") return item.text.length + item.role.length + item.id.length;
+  if (item.kind === "notice") return item.text.length + item.id.length;
   return item.summary.length + item.name.length + (item.error?.length ?? 0)
     + item.files.reduce((total, file) => total + file.length, 0);
 }
@@ -782,6 +1062,8 @@ const isSnapshotTool = (callID: string) => (item: SnapshotItem): item is Snapsho
   item.kind === "tool" && item.call_id === callID;
 const isSnapshotMessage = (id: string) => (item: SnapshotItem): item is SnapshotMessageItem =>
   item.kind === "message" && item.id === id;
+const isSnapshotNotice = (id: string) => (item: SnapshotItem): item is SnapshotNoticeItem =>
+  item.kind === "notice" && item.id === id;
 
 /**
  * The host's own copy of the transcript the app is drawing.
@@ -798,8 +1080,11 @@ const isSnapshotMessage = (id: string) => (item: SnapshotItem): item is Snapshot
  * stops one paragraph short of the truth, and a broadcast replace would take
  * that paragraph away from everyone else too.
  *
- * Bounded by both limits above; `dropped` is what makes a clipped snapshot say
- * so instead of looking complete.
+ * It holds the whole conversation up to a retention tripwire and hands out a
+ * WINDOW of it — the newest items — because the wire and the pane are the
+ * bounded things, not the memory. Everything older is one `page` call away, and
+ * `dropped` is what makes even a paged-out conversation say what it lost rather
+ * than look complete.
  */
 export class TranscriptStore {
   private items: SnapshotItem[] = [];
@@ -809,8 +1094,12 @@ export class TranscriptStore {
   private queue: QueueUpdateBody = { steering: [], followUp: [] };
 
   constructor(
-    private readonly itemLimit: number = SNAPSHOT_ITEM_LIMIT,
-    private readonly bytesLimit: number = SNAPSHOT_BYTES_LIMIT,
+    /** The identity of this host process; see ConversationSnapshotBody.epoch. */
+    private readonly epoch: string = "",
+    private readonly windowItems: number = SNAPSHOT_ITEM_LIMIT,
+    private readonly windowBytes: number = SNAPSHOT_BYTES_LIMIT,
+    private readonly retentionItems: number = TRANSCRIPT_RETENTION_ITEMS,
+    private readonly retentionBytes: number = TRANSCRIPT_RETENTION_BYTES,
   ) {}
 
   /** Replaces the transcript with reconstructed history. Used once, at revive. */
@@ -838,7 +1127,7 @@ export class TranscriptStore {
         // settle, so a message still open here ended under the run.
         for (const item of this.items) {
           if (item.kind === "message") item.streaming = false;
-          else if (item.status === "running") {
+          else if (item.kind === "tool" && item.status === "running") {
             item.status = "error";
             item.error = "the run ended before this tool reported";
           }
@@ -898,6 +1187,19 @@ export class TranscriptStore {
         });
         return;
       }
+      case "notice": {
+        const id = readString(fields, "id");
+        if (id === "") return;
+        const notice: SnapshotNoticeItem = {
+          kind: "notice",
+          id,
+          level: noticeLevel(readString(fields, "level")),
+          text: readString(fields, "text"),
+          done: fields.done === true,
+        };
+        this.replaceOrPush(isSnapshotNotice(id), notice);
+        return;
+      }
       case "tool_finished": {
         const callID = readString(fields, "call_id");
         if (callID === "") return;
@@ -925,13 +1227,50 @@ export class TranscriptStore {
   }
 
   snapshot(): ConversationSnapshotBody {
+    const window = this.window(this.items.length);
     return {
-      items: this.items.map((item) => ({ ...item })),
+      epoch: this.epoch,
+      items: window,
       total: this.items.length + this.dropped,
-      truncated: this.dropped > 0,
+      truncated: window.length < this.items.length + this.dropped,
+      has_more: window.length < this.items.length,
       running: this.running,
       queue: { steering: [...this.queue.steering], followUp: [...this.queue.followUp] },
     };
+  }
+
+  /**
+   * The page of items immediately older than `before`.
+   *
+   * An anchor this transcript does not hold answers with nothing and says so —
+   * that is not an error but the ordinary outcome of a broadcast page whose
+   * anchor belongs to another client, and of a client asking for history that
+   * retention has since dropped.
+   */
+  page(before: string): ConversationPageBody {
+    const end = this.items.findIndex((item) => snapshotItemKey(item) === before);
+    const items = end <= 0 ? [] : this.window(end);
+    return {
+      epoch: this.epoch,
+      before,
+      items,
+      has_more: end > items.length,
+    };
+  }
+
+  /** The newest window of items ending just before `end`, under both budgets. */
+  private window(end: number): SnapshotItem[] {
+    const window: SnapshotItem[] = [];
+    let bytes = 0;
+    for (let index = end - 1; index >= 0; index -= 1) {
+      const item = this.items[index]!;
+      // The newest item always travels, whatever it costs: a window that
+      // refused it would hide the sentence the agent just wrote.
+      if (window.length > 0 && (window.length >= this.windowItems || bytes + itemBytes(item) > this.windowBytes)) break;
+      window.unshift({ ...item });
+      bytes += itemBytes(item);
+    }
+    return window;
   }
 
   /** For the log line that says how close a real session gets to the window. */
@@ -961,13 +1300,25 @@ export class TranscriptStore {
     this.trim();
   }
 
-  /** Drops the oldest items until both budgets hold. Never drops the newest. */
+  /**
+   * Drops the oldest items until the RETENTION budget holds. Never drops the
+   * newest.
+   *
+   * This is the tripwire, not the window: what it drops is gone from this host
+   * for good, and paging past it answers with nothing. The window is applied
+   * separately, on the way out.
+   */
   private trim(): void {
-    while (this.items.length > 1 && (this.items.length > this.itemLimit || this.bytes > this.bytesLimit)) {
+    while (this.items.length > 1 && (this.items.length > this.retentionItems || this.bytes > this.retentionBytes)) {
       const dropped = this.items.shift()!;
       this.bytes -= itemBytes(dropped);
       this.dropped += 1;
     }
+  }
+
+  /** How many items retention has dropped for good, for the log line. */
+  get droppedItems(): number {
+    return this.dropped;
   }
 }
 
@@ -976,6 +1327,11 @@ export interface SessionEntryLike {
   type: string;
   id: string;
   message?: unknown;
+  /** `compaction`: how much context the summary above replaced. */
+  tokensBefore?: unknown;
+  /** `model_change`: the model the conversation switched to at this point. */
+  provider?: unknown;
+  modelId?: unknown;
 }
 
 /** What reconstructing a session file produced. */
@@ -1011,6 +1367,37 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
   const toolsByCallID = new Map<string, SnapshotToolItem>();
 
   for (const entry of entries) {
+    // pi's compaction-aware context begins at the compaction entry itself, so
+    // this row is the honest top of a revived transcript: everything above it
+    // is a summary, and a user scrolling to the start deserves to be told that
+    // rather than to find the conversation apparently beginning mid-thought.
+    if (entry.type === "compaction") {
+      const before = typeof entry.tokensBefore === "number" ? entry.tokensBefore : 0;
+      items.push({
+        kind: "notice",
+        id: `h:${entry.id}`,
+        level: "info",
+        text: before > 0
+          ? `Compacted the conversation (${before.toLocaleString("en-US")} tokens summarized)`
+          : "Compacted the conversation",
+        done: true,
+      });
+      continue;
+    }
+    if (entry.type === "model_change") {
+      // pi writes a model_change (and a thinking_level_change) into every
+      // session before anything is said — that is the session recording what it
+      // opened on, not a switch. Measured on a fresh conversation, 2026-08-09,
+      // pi 0.83.0. A switch is only a switch once there is a conversation to
+      // switch mid-way through, so this waits for the first thing said.
+      if (!items.some((item) => item.kind === "message")) continue;
+      const provider = typeof entry.provider === "string" ? entry.provider : "";
+      const modelID = typeof entry.modelId === "string" ? entry.modelId : "";
+      if (provider !== "" && modelID !== "") {
+        items.push({ kind: "notice", id: `h:${entry.id}`, level: "info", text: `Model switched to ${provider}/${modelID}`, done: true });
+      }
+      continue;
+    }
     if (entry.type !== "message") continue;
     const message = entry.message;
     const role = messageRole(message);
@@ -1047,6 +1434,19 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
     const text = messageText(message);
     if (text !== "") {
       items.push({ kind: "message", id: `h:${entry.id}`, role, text, streaming: false });
+    }
+    // The same row the live stream draws for a failed turn. Without it, a
+    // conversation reopened after a provider error shows the prompt and then
+    // nothing, which reads as the agent having ignored it.
+    const failure = messageFailure(message);
+    if (failure !== "") {
+      items.push({
+        kind: "notice",
+        id: `h:${entry.id}:error`,
+        level: "error",
+        text: `The agent could not answer: ${clipSummary(failure)}`,
+        done: true,
+      });
     }
     for (const block of contentBlocks(message)) {
       if (!block || typeof block !== "object" || (block as { type?: unknown }).type !== "toolCall") continue;
@@ -1090,7 +1490,13 @@ export function reconstructTranscript(entries: SessionEntryLike[]): Reconstructe
  * session, which is idle.
  */
 export function conversationInterrupted(items: SnapshotItem[]): boolean {
-  const last = items[items.length - 1];
+  // Notices are things that happened TO the conversation — a compaction, a
+  // model switch — not things the agent or the user said, so they are
+  // transparent to who had the last word. A conversation that ended with the
+  // agent speaking and was then switched to another model is not interrupted.
+  let index = items.length - 1;
+  while (index >= 0 && items[index]!.kind === "notice") index -= 1;
+  const last = items[index];
   if (!last) return false;
   return last.kind !== "message" || last.role !== "assistant";
 }
@@ -1112,9 +1518,27 @@ export function conversationInterrupted(items: SnapshotItem[]): boolean {
  * case, where the prompt is there and the answer is not. Asking again there
  * would make the agent do the task twice; `waiting_input` and a nudge are the
  * way out of that one, and they are the user's to spend.
+ *
+ * Emptiness means nobody has SPOKEN, which is not the same as "no items".
+ * Reconstruction mints notices for things that happened to a conversation
+ * rather than in it — a compaction, a refused turn — and pi writes one into
+ * every session file before the first word is said. Counting those as delivery
+ * is how a delegation launches with its brief silently swallowed, so only
+ * messages are evidence.
+ *
+ * A history that was FORKED in is not evidence either: it was earned by the
+ * conversation this session was picked up from, and this session has still
+ * never been told what it is for. Delivering there is the same rule read
+ * honestly, not an exception to it.
  */
-export function launchPromptIsUndelivered(prompt: string, reopened: SnapshotItem[]): boolean {
-  return prompt.trim() !== "" && reopened.length === 0;
+export function launchPromptIsUndelivered(
+  prompt: string,
+  reopened: SnapshotItem[],
+  forked: boolean,
+): boolean {
+  if (prompt.trim() === "") return false;
+  if (forked) return true;
+  return !reopened.some((item) => item.kind === "message");
 }
 
 /**
@@ -1147,6 +1571,15 @@ export function launchPromptIsUndelivered(prompt: string, reopened: SnapshotItem
  *                been watching the stream. Answered as a `conversation_snapshot`
  *                envelope, which is the conversation's version of the terminal's
  *                restore dump.
+ *   history      the page of items older than the one a client is showing at the
+ *                top. Answered as a `conversation_page` envelope. Addressed by
+ *                the anchor rather than by a request, for the same reason
+ *                `tool_detail` is: the answer is broadcast and a second window
+ *                sitting at the same place gets it for free.
+ *   set_model    which model the agent runs from its next run on. pi applies it
+ *                to the live session and persists it; the answer is a
+ *                `model_changed` envelope, which the daemon also reads so a
+ *                later revive does not put the conversation back on the old one.
  */
 export type HostVerbWithText = { verb: "prompt" | "steer" | "follow_up"; text: string };
 export type HostVerb =
@@ -1154,6 +1587,8 @@ export type HostVerb =
   | { verb: "shutdown" }
   | { verb: "clear_queue" }
   | { verb: "snapshot" }
+  | { verb: "history"; before: string }
+  | { verb: "set_model"; model: string }
   | { verb: "tool_detail"; callID: string; full: boolean };
 
 const TEXT_VERBS = new Set(["prompt", "steer", "follow_up"]);
@@ -1172,6 +1607,16 @@ export function parseVerb(line: string): HostVerb {
   if (verb === "shutdown") return { verb: "shutdown" };
   if (verb === "clear_queue") return { verb: "clear_queue" };
   if (verb === "snapshot") return { verb: "snapshot" };
+  if (verb === "history") {
+    const before = (value as { before?: unknown }).before;
+    if (typeof before !== "string" || before.trim() === "") throw new Error("history verb needs a before cursor");
+    return { verb: "history", before };
+  }
+  if (verb === "set_model") {
+    const model = (value as { model?: unknown }).model;
+    if (typeof model !== "string" || model.trim() === "") throw new Error("set_model verb needs a model");
+    return { verb: "set_model", model: model.trim() };
+  }
   if (verb === "tool_detail") {
     const callID = (value as { call_id?: unknown }).call_id;
     if (typeof callID !== "string" || callID.trim() === "") throw new Error("tool_detail verb needs a call_id");

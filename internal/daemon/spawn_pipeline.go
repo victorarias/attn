@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -220,6 +221,24 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 	if configuredExecutable == "" {
 		configuredExecutable = legacyExecutableFromSpawnMessage(msg, req.agent)
 	}
+	// A conversation to pick up has to still be there. The picker lists files
+	// that exist, but a spawn can arrive after a cleanup or a profile reset has
+	// taken one away, and the launch intent re-offers the same path to every
+	// replacement host. Without this the fork throws, the host exits, the revive
+	// re-forks the same missing path, and the user watches a session flap with
+	// nothing said. Refusing here says which file and stops.
+	//
+	// Only when the host would actually open it: a dir that already holds this
+	// conversation's own history continues that and never looks at the resume
+	// file, so an established session stays revivable long after the file it was
+	// picked up from is gone.
+	if resume := strings.TrimSpace(protocol.Deref(msg.ResumeConversationFile)); resume != "" && !hostSessionStateDirHoldsConversation(msg.ID) {
+		if info, err := os.Stat(resume); err != nil {
+			return nil, &spawnRejection{err: fmt.Errorf("cannot pick up the conversation at %s: %w", resume, err)}
+		} else if info.IsDir() {
+			return nil, &spawnRejection{err: fmt.Errorf("cannot pick up the conversation at %s: it is a directory, not a conversation file", resume)}
+		}
+	}
 	plan := &spawnPlan{cleanupInitialPrompt: func() {}, instructionsRollback: func() {}}
 	if !req.hasPluginDriver {
 		initialPromptFile, cleanup, err := d.writeInitialPromptFile(msg.ID, req.initialPrompt)
@@ -230,7 +249,7 @@ func (d *Daemon) resolveSpawnIntent(req *spawnRequest) (*spawnPlan, *spawnReject
 		plan.cleanupInitialPromptOnReturn = initialPromptFile != ""
 		plan.spawnOpts.InitialPromptFile = initialPromptFile
 	}
-	plan.spawnOpts = ptybackend.SpawnOptions{ID: msg.ID, CWD: req.cwd, Agent: req.agent, Label: req.label, Cols: uint16(msg.Cols), Rows: uint16(msg.Rows), ResumeSessionID: req.resumeSessionID, ResumePicker: protocol.Deref(msg.ResumePicker), YoloMode: protocol.Deref(msg.YoloMode), InitialPromptFile: plan.spawnOpts.InitialPromptFile, Theme: d.currentTerminalTheme(), Executable: strings.TrimSpace(configuredExecutable), ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable), CodexExecutable: protocol.Deref(msg.CodexExecutable), CopilotExecutable: protocol.Deref(msg.CopilotExecutable), LoginShellEnv: d.cachedLoginShellEnv(), WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)), AutoApprove: parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)), Model: strings.TrimSpace(protocol.Deref(msg.Model)), Effort: strings.TrimSpace(protocol.Deref(msg.Effort))}
+	plan.spawnOpts = ptybackend.SpawnOptions{ID: msg.ID, CWD: req.cwd, Agent: req.agent, Label: req.label, Cols: uint16(msg.Cols), Rows: uint16(msg.Rows), ResumeSessionID: req.resumeSessionID, ResumePicker: protocol.Deref(msg.ResumePicker), YoloMode: protocol.Deref(msg.YoloMode), InitialPromptFile: plan.spawnOpts.InitialPromptFile, Theme: d.currentTerminalTheme(), Executable: strings.TrimSpace(configuredExecutable), ClaudeExecutable: protocol.Deref(msg.ClaudeExecutable), CodexExecutable: protocol.Deref(msg.CodexExecutable), CopilotExecutable: protocol.Deref(msg.CopilotExecutable), LoginShellEnv: d.cachedLoginShellEnv(), WorkflowGuidanceEnabled: parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)), AutoApprove: parseBooleanSetting(d.store.GetSetting(SettingAutoApproveEnabled)), Model: strings.TrimSpace(protocol.Deref(msg.Model)), Effort: strings.TrimSpace(protocol.Deref(msg.Effort)), ResumeConversationFile: strings.TrimSpace(protocol.Deref(msg.ResumeConversationFile))}
 	// The frontend sets chief_of_staff only on initial creation, not on
 	// reconnect/resume spawns after a daemon restart. Fall back to the
 	// persisted profile-roles table so chief settings survive respawns.

@@ -267,8 +267,10 @@ lets an agent's own vocabulary grow without the daemon changing:
   `run_started`, `run_settled`, `tool_started`, `tool_finished`. These are the
   host telling attn something true about the session.
 - **Renderings** are what the app draws — `message_start`, `message_delta`,
-  `message_end`, `queue_update`, `tool_detail`. The daemon forwards them opaquely
-  and holds no opinion about them.
+  `message_end`, `queue_update`, `tool_detail`, `conversation_page`, `notice`,
+  `model_changed`. The daemon forwards them opaquely and holds no opinion about
+  them, with one exception: it reads `model_changed` to remember which model the
+  session should relaunch on.
 
 A **state declaration** is the subset of declarations that carries the attn state
 it puts the session in — the run boundaries — so the daemon reads state off the
@@ -306,14 +308,42 @@ arrived at the wrong time. What has been sent and not yet read is the session's
 queue can be cleared, which drops everything in it at once; what the strip shows
 is always the host's last word about it, never a local guess.
 
-A **conversation snapshot** is the whole of what a client needs to draw a
-conversation it has not been watching: the transcript, whether a run is open, and
-the queue. It is the conversation's answer to the terminal's restore — one
-authority, no merge — so a client that asks for one replaces what it had, and two
-windows on the same conversation show the same thing by construction. The host
-holds the transcript it snapshots, not the session file: a message pi has not
-finished is not on disk yet, and a snapshot rebuilt from disk would stop one
-paragraph short of the truth.
+A **conversation snapshot** is what a client needs to draw a conversation it has
+not been watching: the newest stretch of the transcript, whether a run is open,
+and the queue. It is the conversation's answer to the terminal's restore — one
+authority — so what it carries is what the client draws, and two windows on the
+same conversation show the same thing by construction. The host holds the
+transcript it snapshots, not the session file: a message pi has not finished is
+not on disk yet, and a snapshot rebuilt from disk would stop one paragraph short
+of the truth.
+
+A snapshot is only a **window** onto a long conversation, and everything older is
+**scroll-back** the host still holds and serves a **page** at a time, on request,
+as the reader scrolls up. A snapshot also names its **epoch** — the host process
+that built it — which is what lets a client tell "the same conversation, redrawn"
+from "a different host rebuilt this": the first is spliced onto the scroll-back
+the client has already paged in, the second replaces it. Without that
+distinction, one window opening a long conversation would shorten what every
+other window is showing.
+
+Scroll-back a client is holding can outlive what the host still keeps. The host
+bounds its own transcript, and a conversation that talks long enough for the
+host to drop its oldest items leaves a window that paged those items in still
+drawing them — quietly showing more than a window opened fresh would, until the
+next page request comes back empty. It is bounded and it is inherent to paging
+something that is broadcast: the client's copy is the client's, and the host
+never reaches back into it.
+
+A conversation can be **resumed**: a new session picks up an existing
+conversation instead of starting empty. The old conversation is copied into the
+new session's own storage rather than continued in place, so the session it came
+from is untouched and two sessions never write to one history. That is distinct
+from reloading a `recoverable` session, which returns to its own conversation.
+
+A **notice** is a row in the transcript that explains a silence the agent is not
+responsible for — a compaction, a retry. It settles in place rather than
+stacking: the row that says a thing is happening becomes the row that says it
+finished.
 
 A conversation session is **recoverable** when its host is gone but the
 conversation is not: the history is a session file under attn's data dir, and

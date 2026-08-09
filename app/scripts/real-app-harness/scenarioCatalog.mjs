@@ -300,6 +300,15 @@ export const scenarioCatalog = [
     timeoutMs: 900_000,
   },
   {
+    id: 'pi-host-history',
+    label: 'Conversation session: resume an existing conversation file, page a long transcript, switch model mid-session',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-host-history'],
+    // Same prereqs as pi-host-conversation. Three sessions and four prompts
+    // through a real agent; the long transcript is a synthesized session file
+    // rather than a thousand live turns, so its cost is one resume.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

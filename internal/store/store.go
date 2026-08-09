@@ -66,6 +66,11 @@ type LaunchIntent struct {
 	Model         string                       `json:"model,omitempty"`
 	Effort        string                       `json:"effort,omitempty"`
 	ChiefOfStaff  bool                         `json:"chief_of_staff,omitempty"`
+	// ResumeConversationFile is the conversation file a conversation session was
+	// started from. Kept because a revive is a fresh host: one that died before
+	// writing its own session file has to be told again where to fork from, or
+	// it comes back as an empty conversation.
+	ResumeConversationFile string `json:"resume_conversation_file,omitempty"`
 	// UnattendedLaunch is the complete launch contract for sessions launched
 	// unattended (delegation/automations). Persisting the whole contract makes
 	// the store a sufficient authority to relaunch such a session when the

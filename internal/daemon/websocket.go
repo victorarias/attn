@@ -1145,6 +1145,12 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleAgentClearQueue(client, msg.(*protocol.AgentClearQueueMessage))
 	case protocol.CmdAgentAttach: // wire: agent_attach
 		d.handleAgentAttach(client, msg.(*protocol.AgentAttachMessage))
+	case protocol.CmdAgentHistory: // wire: agent_history
+		d.handleAgentHistory(client, msg.(*protocol.AgentHistoryMessage))
+	case protocol.CmdAgentSetModel: // wire: agent_set_model
+		d.handleAgentSetModel(client, msg.(*protocol.AgentSetModelMessage))
+	case protocol.CmdListPastConversations: // wire: list_past_conversations
+		d.handleListPastConversations(client, msg.(*protocol.ListPastConversationsMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession: // wire: kill_session
@@ -1576,6 +1582,14 @@ func remoteCommandPTYTargetID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdAgentAttach: // wire: agent_attach
 		if typed, ok := msg.(*protocol.AgentAttachMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdAgentHistory: // wire: agent_history
+		if typed, ok := msg.(*protocol.AgentHistoryMessage); ok {
+			return typed.ID
+		}
+	case protocol.CmdAgentSetModel: // wire: agent_set_model
+		if typed, ok := msg.(*protocol.AgentSetModelMessage); ok {
 			return typed.ID
 		}
 	case protocol.CmdPtyResize: // wire: pty_resize

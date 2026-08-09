@@ -1,5 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { useConversationsStore, selectConversation, type AgentPromptMode } from '../../store/conversations';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import {
+  useConversationsStore,
+  selectConversation,
+  conversationItemKey,
+  type AgentPromptMode,
+  type ConversationItem,
+} from '../../store/conversations';
 import { useSessionStore } from '../../store/sessions';
 import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import type { ResolvedTheme } from '../../hooks/useTheme';
@@ -19,6 +25,13 @@ interface ConversationPaneProps {
   resolvedTheme?: ResolvedTheme;
 }
 
+/** How much text an item contributes, for the follow-the-stream check. */
+function itemLength(item: ConversationItem): number {
+  if (item.kind === 'message') return item.text.length;
+  if (item.kind === 'tool') return item.summary.length;
+  return item.text.length;
+}
+
 /**
  * The surface a conversation session is drawn on, in place of a terminal.
  *
@@ -29,8 +42,9 @@ interface ConversationPaneProps {
 export function ConversationPane({ sessionId, paneActive, sessionState, resolvedTheme }: ConversationPaneProps) {
   const conversation = useConversationsStore(selectConversation(sessionId));
   const promptSent = useConversationsStore((state) => state.promptSent);
+  const historyRequested = useConversationsStore((state) => state.historyRequested);
   const reloadSession = useSessionStore((state) => state.reloadSession);
-  const { sendAgentPrompt, sendAgentClearQueue, sendAgentAttach } = useDaemonApi();
+  const { sendAgentPrompt, sendAgentClearQueue, sendAgentAttach, sendAgentHistory, sendAgentSetModel } = useDaemonApi();
   const [draft, setDraft] = useState('');
   const [reloading, setReloading] = useState(false);
   const [reloadError, setReloadError] = useState<string | null>(null);
@@ -38,7 +52,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
   const listRef = useRef<HTMLDivElement | null>(null);
   const attachedRef = useRef<string | null>(null);
 
-  const { running, awaitingRun, ready, items, queue, lastSeq } = conversation;
+  const { running, awaitingRun, ready, items, queue, lastSeq, hasMoreBefore, loadingHistory, model, models } = conversation;
   const recoverable = sessionState === 'recoverable';
 
   // Ask the host for a snapshot when this client has never seen its stream: a
@@ -69,10 +83,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
 
   // Follow the stream. Only when the reader is already at the bottom: scrolling
   // back to re-read something must not be yanked away by the next delta.
-  const lastLength = items.reduce(
-    (total, item) => total + (item.kind === 'message' ? item.text.length : item.summary.length),
-    0,
-  );
+  const lastLength = items.reduce((total, item) => total + itemLength(item), 0);
   useEffect(() => {
     const list = listRef.current;
     if (!list) return;
@@ -81,6 +92,44 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
       list.scrollTop = list.scrollHeight;
     }
   }, [lastLength, items.length]);
+
+  // Paging older history in puts content ABOVE what the reader is looking at,
+  // and the browser keeps scrollTop — so the page they were reading slides down
+  // the screen by however much arrived. Anchoring on the distance from the
+  // bottom, which the prepend does not change, is what keeps the view still.
+  //
+  // The measurement is taken on scroll rather than only here, because the reader
+  // goes on scrolling while a page is in flight.
+  const oldestKey = items.length > 0 ? conversationItemKey(items[0]) : '';
+  const anchorRef = useRef<{ key: string; fromBottom: number } | null>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const anchor = anchorRef.current;
+    if (anchor && anchor.key !== '' && anchor.key !== oldestKey) {
+      list.scrollTop = list.scrollHeight - anchor.fromBottom;
+    }
+    anchorRef.current = { key: oldestKey, fromBottom: list.scrollHeight - list.scrollTop };
+  }, [oldestKey]);
+
+  // Ask for the conversation behind what is drawn. Addressed by the oldest item
+  // held, which is also why only one can be in flight: a second request while
+  // one is out would ask for the same page again.
+  const loadEarlier = useCallback(() => {
+    if (!hasMoreBefore || loadingHistory || items.length === 0) return;
+    historyRequested(sessionId);
+    sendAgentHistory(sessionId, conversationItemKey(items[0]));
+  }, [hasMoreBefore, historyRequested, items, loadingHistory, sendAgentHistory, sessionId]);
+
+  const handleScroll = useCallback(() => {
+    const list = listRef.current;
+    if (!list) return;
+    anchorRef.current = { key: oldestKey, fromBottom: list.scrollHeight - list.scrollTop };
+    // Fetch before the reader arrives at the top. The threshold is a screen of
+    // reading, so on a fast host the page has landed by the time they get there
+    // and the conversation just keeps going up.
+    if (list.scrollTop < list.clientHeight) loadEarlier();
+  }, [loadEarlier, oldestKey]);
 
   // The composer opens the moment the run closes, with the caret already in it.
   useEffect(() => {
@@ -134,31 +183,89 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
 
   return (
     <div className="conversation-pane" data-testid={`conversation-pane-${sessionId}`}>
-      <div className="conversation-pane-messages" ref={listRef} data-testid="conversation-messages">
+      {models.length > 0 && (
+        <div className="conversation-pane-header" data-testid="conversation-header">
+          <label className="conversation-model-label" htmlFor={`conversation-model-${sessionId}`}>Model</label>
+          {/* The value is the host's word, not this select's: a switch pi
+              refuses comes back as the model still in force and the picker
+              snaps back to it. */}
+          <select
+            id={`conversation-model-${sessionId}`}
+            className="conversation-model"
+            data-testid="conversation-model"
+            value={models.includes(model) ? model : ''}
+            disabled={!ready}
+            onChange={(event) => {
+              if (event.target.value !== '') sendAgentSetModel(sessionId, event.target.value);
+            }}
+          >
+            {!models.includes(model) && <option value="">{model || 'Unknown'}</option>}
+            {models.map((name) => <option key={name} value={name}>{name}</option>)}
+          </select>
+        </div>
+      )}
+      <div
+        className="conversation-pane-messages"
+        ref={listRef}
+        onScroll={handleScroll}
+        data-testid="conversation-messages"
+      >
+        {hasMoreBefore && (
+          // Auto-loading covers the reader who scrolls; this covers the one
+          // whose transcript is shorter than the pane, where there is no room
+          // to scroll and therefore no scroll event to fire.
+          <button
+            type="button"
+            className="conversation-pane-earlier"
+            data-testid="conversation-load-earlier"
+            disabled={loadingHistory}
+            onClick={loadEarlier}
+          >
+            {loadingHistory ? 'Loading earlier messages...' : 'Load earlier messages'}
+          </button>
+        )}
         {items.length === 0 ? (
           <div className="conversation-pane-empty">
             {ready ? 'Ask this agent something.' : recoverable ? '' : 'Starting the agent...'}
           </div>
         ) : (
-          items.map((item) => (item.kind === 'tool' ? (
-            <ToolCard
-              key={`tool:${item.callId}`}
-              sessionId={sessionId}
-              tool={item}
-              resolvedTheme={resolvedTheme}
-            />
-          ) : (
-            <div
-              key={`message:${item.id}`}
-              className={`conversation-message conversation-message--${item.role}`}
-              data-testid={`conversation-message-${item.id}`}
-              data-role={item.role}
-              data-streaming={item.streaming ? 'true' : 'false'}
-            >
-              <div className="conversation-message-role">{item.role}</div>
-              <div className="conversation-message-text">{item.text}</div>
-            </div>
-          )))
+          items.map((item) => {
+            if (item.kind === 'tool') {
+              return (
+                <ToolCard
+                  key={`tool:${item.callId}`}
+                  sessionId={sessionId}
+                  tool={item}
+                  resolvedTheme={resolvedTheme}
+                />
+              );
+            }
+            if (item.kind === 'notice') {
+              return (
+                <div
+                  key={`notice:${item.id}`}
+                  className={`conversation-notice conversation-notice--${item.level}`}
+                  data-testid={`conversation-notice-${item.id}`}
+                  data-level={item.level}
+                  data-done={item.done ? 'true' : 'false'}
+                >
+                  {item.text}
+                </div>
+              );
+            }
+            return (
+              <div
+                key={`message:${item.id}`}
+                className={`conversation-message conversation-message--${item.role}`}
+                data-testid={`conversation-message-${item.id}`}
+                data-role={item.role}
+                data-streaming={item.streaming ? 'true' : 'false'}
+              >
+                <div className="conversation-message-role">{item.role}</div>
+                <div className="conversation-message-text">{item.text}</div>
+              </div>
+            );
+          })
         )}
       </div>
       {recoverable && (

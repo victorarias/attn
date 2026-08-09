@@ -79,7 +79,8 @@ See `docs/glossary.md` for the vocabulary and
 
 - Three channels, and they must stay separate. **fd 3** is the envelope stream
   out (NDJSON), **stdin** is verbs in (`prompt`, `steer`, `follow_up`,
-  `tool_detail`, `clear_queue`, `snapshot`, `shutdown`), **stdout/stderr** are pi's and the
+  `tool_detail`, `clear_queue`, `snapshot`, `history`, `set_model`,
+  `shutdown`), **stdout/stderr** are pi's and the
   host's own output, captured to `<data-dir>/hosts/log/<session>.log`. Envelopes
   never go on stdout: pi loads the user's own extensions and any one of them
   printing a line would corrupt a shared stream.
@@ -87,8 +88,10 @@ See `docs/glossary.md` for the vocabulary and
   `run_settled`, `tool_started`, `tool_finished`) are attn's vocabulary and the
   daemon may read them. **Renderings** (`message_start`, `message_delta`,
   `message_end`, `queue_update`, `tool_detail`, `conversation_snapshot`) are drawn
-  by the app and forwarded opaquely. Adding a rendering is a host + app change; a
-  new semantic kind is a protocol conversation.
+  by the app and forwarded opaquely — as are `conversation_page`, `notice` and
+  `model_changed`. Adding a rendering is a host + app change; a new semantic kind
+  is a protocol conversation. `model_changed` is the one rendering the daemon
+  also reads, and only to rewrite the launch intent.
 - **A state declaration is the subset of semantic kinds that carries a `state`**
   (`STATE_DECLARATION_KINDS`: `session_ready`, `run_started`, `run_settled`) —
   the attn state the session is in once that declaration is true (`idle`,
@@ -137,6 +140,12 @@ See `docs/glossary.md` for the vocabulary and
   continues the most recent session file under the session dir and creates one
   only when there is none — which is both the revive path and the zero-file
   early-crash fallback, and it takes pi's session-format migrations for free.
+  An **empty** session dir is the only thing that consults
+  `ATTN_PI_HOST_RESUME_FILE`, and it FORKS (`SessionManager.forkFrom`) rather
+  than appending: the named conversation is copied into this session's own dir,
+  so the session it was picked up from is never written to and a revive of the
+  resuming session never rewinds to the source. Two sessions on one file is the
+  failure this ordering exists to make impossible.
   `buildContextEntries()` (compaction-aware) is what the transcript is rebuilt
   from. A relaunch is a NEW host, so its `seq` starts at 1 again: `session_ready`
   is the only envelope that resets a client's spine, and the app must exempt it
@@ -149,8 +158,56 @@ See `docs/glossary.md` for the vocabulary and
   `conversation_snapshot` is the rendering that carries it, in answer to the
   `snapshot` verb, and it is BROADCAST and REPLACES — the host is the authority,
   the same bargain the terminal's VT dump makes. It is windowed
-  (`SNAPSHOT_ITEM_LIMIT`, `SNAPSHOT_BYTES_LIMIT`); paging past the window is
-  slice 5's.
+  (`SNAPSHOT_ITEM_LIMIT`, `SNAPSHOT_BYTES_LIMIT`).
+- **Two budgets, and confusing them is the bug.** `SNAPSHOT_*_LIMIT` bounds what
+  one message CARRIES; `TRANSCRIPT_RETENTION_*` bounds what the host HOLDS. They
+  are different numbers on purpose: a client asking for the page before the one
+  it is showing must not be told the history is gone when the host is only
+  refusing to send it all at once. Retention is a tripwire — a conversation that
+  reaches it has been talking for weeks — and every settle logs what was held,
+  which is where the next remeasurement comes from.
+- **`epoch` is the transcript's seq spine.** A snapshot names the host process
+  that built it. A replacement host rebuilds the transcript from pi's file and
+  mints its own item ids, so nothing it sends can be spliced onto the dead
+  host's items — same epoch merges, a new epoch replaces. Without it, the
+  broadcast-replace bargain means one client attaching to a long conversation
+  shortens what every other client is showing.
+- **Scroll-back is asked for by item, not by offset.** The `history` verb names
+  the oldest item a client is holding; `conversation_page` answers with what
+  precedes it, and is BROADCAST like everything else. A client takes a page only
+  when the epoch matches AND the anchor is its own oldest item — a window
+  scrolled somewhere else would otherwise splice a page into the middle of its
+  transcript and leave a hole.
+- **A notice is a row that explains a silence.** Compaction and retry reach the
+  app as `notice` (`id`, `level`, `text`, `done`), keyed so the row that says
+  "compacting" becomes the row that says "compacted" in place rather than
+  stacking. `done` is what separates one still happening from one that settled.
+  Reconstruction mints them too: pi's compaction entry becomes the honest top of
+  a revived transcript, because everything above it is a summary.
+- **A refused turn is a notice, because pi does not raise.** A provider error
+  arrives as an assistant message with `stopReason: "error"` and the provider's
+  response in `errorMessage` — empty content, run settles, composer reopens.
+  Without a row the agent looks like it chose not to answer. `messageFailure`
+  digs the sentence out of the nested JSON envelopes providers wrap it in, and
+  reconstruction mints the same row so a reopened conversation still explains
+  itself. Measured 2026-08-09: a model pi's catalog offered had been retired by
+  its provider, and the 404 reached nothing.
+- **The model a session opened on is not a switch.** pi writes a `model_change`
+  and a `thinking_level_change` into every session file before anything is said.
+  Reconstruction ignores a `model_change` that precedes the first message —
+  otherwise every new conversation claims to have switched models, and (since
+  the row is not an assistant message) declares `waiting_input` on arrival.
+  Notices are transparent to `conversationInterrupted` for the same reason: a
+  switch is something that happened TO the conversation, not the agent losing
+  its turn.
+- **A model switch is not a state declaration.** `set_model` asks, `model_changed`
+  answers with the model actually in force — a refusal comes back as the model
+  that is still running, which is why the picker moves on the host's answer and
+  never on the click. The daemon rewrites `LaunchIntent.Model` from it, so a
+  revive relaunches on the model the user chose rather than the one the spawn
+  pinned; it is deliberately kept out of `STATE_DECLARATION_KINDS` because
+  `applyState` restamps `state_since` and a picker change must not reset "working
+  for 4m".
 - **`session_ready` says why the session went quiet.** A reopened conversation
   whose last item is not an assistant message declares `waiting_input`;
   everything else declares `idle`. Both open a turn and both take a nudge, so
@@ -203,9 +260,20 @@ See `docs/glossary.md` for the vocabulary and
   in the environment rather than argv because a brief is multi-line prose and
   argv is world-readable text a sibling's `pkill -f` can match on. The daemon
   hands the same prompt to every replacement host, so delivery is the host's
-  decision, not the daemon's: it says it exactly when its reopened history is
-  empty (`launchPromptIsUndelivered`), which is true only for a first launch or
-  for a relaunch after a crash so early that pi wrote no session file.
+  decision, not the daemon's: it says it exactly when nothing in the reopened
+  conversation was SPOKEN (`launchPromptIsUndelivered`) — true for a first
+  launch, and for a relaunch after a crash so early that pi wrote no session
+  file. Only messages count. Notices do not, because pi writes one into every
+  session file before the first word is said and a brief swallowed by a row
+  nobody spoke is a delegation that sits there with nothing to do. A history
+  that was FORKED in does not count either: it belongs to the conversation this
+  session was picked up from, and this session has still never been told what it
+  is for. The gap that remains is a session that forks AND carries a brief and
+  then dies inside its first turn — the fork already wrote the file, so the
+  relaunch cannot tell delivered from inherited and stays silent. Closing it
+  needs a delivered-marker in the session dir; no product path reaches the
+  combination today, because resume comes from the picker and briefs come from
+  delegation.
 
 `spike-harness/` drives pi's SDK without attn and is the gate a pi version bump
 has to pass; see its README.

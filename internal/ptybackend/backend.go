@@ -51,6 +51,14 @@ type SpawnOptions struct {
 	ExternalCWD       string
 	LifecycleID       string
 
+	// ResumeConversationFile is an existing conversation file this session
+	// picks up from, chosen by the user in the new-session flow. Only a
+	// conversation session reads it; a PTY-backed agent resumes through
+	// ResumeSessionID instead. The host forks the file rather than appending to
+	// it, so the source conversation is never written to and two sessions can
+	// start from the same one.
+	ResumeConversationFile string
+
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
 	// from the daemon's cache. Skips the ~130ms readLoginShellEnv in workers.
 	LoginShellEnv []string

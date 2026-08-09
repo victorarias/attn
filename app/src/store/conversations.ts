@@ -79,7 +79,35 @@ export interface ConversationToolCall {
  */
 export type ConversationItem =
   | ({ kind: 'message' } & ConversationMessage)
-  | ({ kind: 'tool' } & ConversationToolCall);
+  | ({ kind: 'tool' } & ConversationToolCall)
+  | ({ kind: 'notice' } & ConversationNotice);
+
+/**
+ * The key an item is addressed by, across snapshots, pages and this build's own
+ * lists. It is the host's `snapshotItemKey`, and the two have to agree: a page is
+ * asked for by the key of the oldest item a client holds, and the host answers by
+ * finding that key in its own transcript.
+ */
+export function conversationItemKey(item: ConversationItem): string {
+  return item.kind === 'tool' ? `tool:${item.callId}` : `${item.kind}:${item.id}`;
+}
+
+/**
+ * Something that happened to the conversation rather than in it: a compaction,
+ * an automatic retry, a model switch.
+ *
+ * These exist because the alternative is silence. A compaction on a long
+ * conversation is thirty seconds during which the agent says nothing and does
+ * nothing visible, and a user watching that has no way to tell it apart from a
+ * hang. `done` is false while it is still happening, which is what draws the row
+ * as in-progress and then settles it in place.
+ */
+export interface ConversationNotice {
+  id: string;
+  level: 'info' | 'warn' | 'error';
+  text: string;
+  done: boolean;
+}
 
 /**
  * When the agent reads a message the user sends.
@@ -109,6 +137,23 @@ export interface ConversationQueue {
 
 export interface ConversationState {
   items: ConversationItem[];
+  // Which host built this transcript. A host mints one at startup, carries it on
+  // every snapshot and page, and a new one means the conversation was rebuilt
+  // from disk rather than continued — see the snapshot case for why that is the
+  // difference between splicing and replacing.
+  epoch: string;
+  // The host holds conversation older than the oldest item here, and will serve
+  // it a page at a time. False both when the start has been reached and when
+  // nothing has ever said otherwise.
+  hasMoreBefore: boolean;
+  // A page has been asked for and not yet answered. Only ever one: a page is
+  // addressed by the oldest item held, so a second request while one is in
+  // flight would ask for the same page twice.
+  loadingHistory: boolean;
+  // The model this session's agent is running on, and everything this machine
+  // could switch it to. Both come from the host, which reads them out of pi.
+  model: string;
+  models: string[];
   // A run is open: the agent is working, and a message the user sends now is a
   // steer or a follow-up rather than a prompt.
   running: boolean;
@@ -131,6 +176,11 @@ const emptyQueue: ConversationQueue = { steering: [], followUp: [] };
 
 const emptyConversation: ConversationState = {
   items: [],
+  epoch: '',
+  hasMoreBefore: false,
+  loadingHistory: false,
+  model: '',
+  models: [],
   running: false,
   awaitingRun: false,
   ready: false,
@@ -141,6 +191,10 @@ const emptyConversation: ConversationState = {
 interface ConversationsStore {
   conversations: Record<string, ConversationState>;
   applyEnvelope: (sessionId: string, seq: number, kind: string, body: Record<string, unknown>) => void;
+  // A page of older history has been asked for. Kept separate from the envelope
+  // path because the request leaves the app and the answer comes back on the
+  // broadcast stream, so nothing correlates the two but the anchor.
+  historyRequested: (sessionId: string) => void;
   // Opens the run at send time, before the host has said anything about it.
   promptSent: (sessionId: string) => void;
   // The host is gone. The transcript stays — a dead conversation is still worth
@@ -182,11 +236,22 @@ function replaceItem(
 
 const isTool = (callId: string) => (item: ConversationItem) => item.kind === 'tool' && item.callId === callId;
 const isMessage = (id: string) => (item: ConversationItem) => item.kind === 'message' && item.id === id;
+const isNotice = (id: string) => (item: ConversationItem) => item.kind === 'notice' && item.id === id;
 
 function queueFrom(value: unknown): ConversationQueue {
   if (!value || typeof value !== 'object') return emptyQueue;
   const body = value as Record<string, unknown>;
   return { steering: stringList(body, 'steering'), followUp: stringList(body, 'followUp') };
+}
+
+function noticeLevel(value: string): ConversationNotice['level'] {
+  return value === 'warn' || value === 'error' ? value : 'info';
+}
+
+/** Reads a wire item list, dropping shapes this build does not draw. */
+function snapshotItems(value: unknown): ConversationItem[] | null {
+  if (!Array.isArray(value)) return null;
+  return value.map(snapshotItem).filter((item): item is ConversationItem => item !== null);
 }
 
 /**
@@ -207,6 +272,11 @@ function snapshotItem(value: unknown): ConversationItem | null {
       text: text(body, 'text'),
       streaming: flag(body, 'streaming'),
     };
+  }
+  if (body.kind === 'notice') {
+    const id = text(body, 'id');
+    if (!id) return null;
+    return { kind: 'notice', id, level: noticeLevel(text(body, 'level')), text: text(body, 'text'), done: flag(body, 'done') };
   }
   if (body.kind === 'tool') {
     const callId = text(body, 'call_id');
@@ -230,6 +300,38 @@ function snapshotItem(value: unknown): ConversationItem | null {
   return null;
 }
 
+/**
+ * Splices a snapshot's window onto what a client already holds, or replaces.
+ *
+ * The splice hinges on one question: does this client hold the window's oldest
+ * item? If it does, everything before it is scroll-back this client paged in and
+ * the host still has — keep it, and take the window as the tail. If it does not,
+ * this client is behind the window (or empty), and the window IS the newest
+ * truth: replace.
+ *
+ * `hasMoreBefore` follows the same split. After a splice the oldest item held is
+ * unchanged, so what the client already knew about the conversation behind it
+ * still holds; the snapshot's own answer is about the window's start, which is
+ * no longer the start of what is drawn.
+ */
+function mergeSnapshotWindow(
+  current: ConversationState,
+  epoch: string,
+  window: ConversationItem[],
+  hasMore: boolean,
+): Pick<ConversationState, 'items' | 'epoch' | 'hasMoreBefore'> {
+  const replace = { items: window, epoch, hasMoreBefore: hasMore };
+  if (epoch === '' || epoch !== current.epoch || window.length === 0) return replace;
+  const anchor = conversationItemKey(window[0]);
+  const index = current.items.findIndex((item) => conversationItemKey(item) === anchor);
+  if (index <= 0) return replace;
+  return {
+    items: [...current.items.slice(0, index), ...window],
+    epoch,
+    hasMoreBefore: current.hasMoreBefore,
+  };
+}
+
 function applyToConversation(
   current: ConversationState,
   seq: number,
@@ -237,27 +339,85 @@ function applyToConversation(
   body: Record<string, unknown>,
 ): ConversationState {
   switch (kind) {
-    case 'session_ready':
+    case 'session_ready': {
       // A host that has just come up has no run open, whatever the dead one was
       // doing when it went. The transcript is left alone: the snapshot that
       // follows replaces it, and a host too old to send one leaves the user with
       // the history they were already reading rather than an empty pane.
-      return { ...current, ready: true, running: false, awaitingRun: false, queue: emptyQueue };
-    case 'conversation_snapshot': {
-      const raw = body.items;
-      if (!Array.isArray(raw)) return current;
-      // Replace, never merge. The host's transcript is the authority — the same
-      // contract the terminal's VT dump has — so two clients that attach at
-      // different moments end up drawing the same conversation.
-      const items = raw.map(snapshotItem).filter((item): item is ConversationItem => item !== null);
+      const models = stringList(body, 'models');
       return {
         ...current,
-        items,
+        ready: true,
+        running: false,
+        awaitingRun: false,
+        loadingHistory: false,
+        queue: emptyQueue,
+        model: text(body, 'model') || current.model,
+        models: models.length > 0 ? models : current.models,
+      };
+    }
+    case 'conversation_snapshot': {
+      const window = snapshotItems(body.items);
+      if (!window) return current;
+      // A snapshot carries the NEWEST window of the host's transcript, not all
+      // of it, and it is broadcast — so a client that has paged back through a
+      // long conversation would lose its scroll-back every time any other window
+      // attached. The epoch is what makes that avoidable: same epoch means the
+      // same host built both, so the window can be spliced onto the older items
+      // this client already holds. A different epoch means the transcript was
+      // rebuilt (a revived host reading pi's session file), and then replacing
+      // is the only honest answer — the item ids came from somewhere else.
+      const merged = mergeSnapshotWindow(current, text(body, 'epoch'), window, flag(body, 'has_more'));
+      return {
+        ...current,
+        ...merged,
         ready: true,
         running: flag(body, 'running'),
         awaitingRun: false,
+        loadingHistory: false,
         queue: queueFrom(body.queue),
       };
+    }
+    case 'conversation_page': {
+      const items = snapshotItems(body.items);
+      // A page is addressed by the item it comes before, and it is broadcast, so
+      // every client sees every page anyone asked for. A client takes one only
+      // when the anchor is the oldest item it is holding — anything else is a
+      // page for a window scrolled somewhere else, and prepending it would put a
+      // gap in this transcript.
+      if (!items || current.items.length === 0) return current;
+      if (text(body, 'epoch') !== current.epoch) return current;
+      if (text(body, 'before') !== conversationItemKey(current.items[0])) return current;
+      const held = new Set(current.items.map(conversationItemKey));
+      const older = items.filter((item) => !held.has(conversationItemKey(item)));
+      return {
+        ...current,
+        items: older.length > 0 ? [...older, ...current.items] : current.items,
+        hasMoreBefore: flag(body, 'has_more'),
+        loadingHistory: false,
+      };
+    }
+    case 'model_changed': {
+      // The host's answer, whether the switch landed or was refused: the model
+      // named here is the one actually in force. A picker that moved early
+      // corrects itself from this.
+      const model = text(body, 'model');
+      return model === '' || model === current.model ? current : { ...current, model };
+    }
+    case 'notice': {
+      const id = text(body, 'id');
+      if (!id) return current;
+      const notice: ConversationItem = {
+        kind: 'notice',
+        id,
+        level: noticeLevel(text(body, 'level')),
+        text: text(body, 'text'),
+        done: flag(body, 'done'),
+      };
+      // One row per notice, settling in place: a compaction that opened a
+      // spinner is the same row that says it finished.
+      const replaced = replaceItem(current.items, isNotice(id), () => notice);
+      return { ...current, items: replaced ?? [...current.items, notice] };
     }
     case 'run_started':
       return { ...current, running: true, awaitingRun: false };
@@ -269,7 +429,10 @@ function applyToConversation(
       // starts, so one that never reported is one whose run ended under it.
       const items = current.items.map((item) => {
         if (item.kind === 'message') return item.streaming ? { ...item, streaming: false } : item;
-        if (item.status !== 'running') return item;
+        // A notice settles on its own event, or not at all: a compaction the
+        // host never reported the end of is a compaction nobody knows the
+        // outcome of, and claiming it failed would be inventing one.
+        if (item.kind !== 'tool' || item.status !== 'running') return item;
         return { ...item, status: 'error' as const, error: 'the run ended before this tool reported' };
       });
       // A run that ended badly says so in the transcript. Otherwise a prompt
@@ -442,6 +605,18 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
     };
   }),
 
+  // Asking for a page is a broadcast round trip with nothing correlating it but
+  // the anchor, so the only local state it owns is "one is in flight". Every way
+  // the answer can arrive — the page itself, a snapshot, a host that went away —
+  // clears it, which is what keeps a spinner from outliving the thing it waits on.
+  historyRequested: (sessionId) => set((state) => {
+    const current = state.conversations[sessionId];
+    if (!current || current.loadingHistory) return state;
+    return {
+      conversations: { ...state.conversations, [sessionId]: { ...current, loadingHistory: true } },
+    };
+  }),
+
   // A prompt's round trip to the host is long enough to press Enter twice in,
   // and the host answers a second prompt with a log line and nothing else — the
   // draft would be gone and the user would be told nothing. So the run opens
@@ -464,11 +639,11 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
   // host, and a revived one starts from `session_ready`.
   hostExited: (sessionId) => set((state) => {
     const current = state.conversations[sessionId];
-    if (!current || (!current.ready && !current.running && !current.awaitingRun)) return state;
+    if (!current || (!current.ready && !current.running && !current.awaitingRun && !current.loadingHistory)) return state;
     return {
       conversations: {
         ...state.conversations,
-        [sessionId]: { ...current, ready: false, running: false, awaitingRun: false, queue: emptyQueue },
+        [sessionId]: { ...current, ready: false, running: false, awaitingRun: false, loadingHistory: false, queue: emptyQueue },
       },
     };
   }),

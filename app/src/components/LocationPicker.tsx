@@ -3,7 +3,14 @@ import { useEscapeStack } from '../hooks/useEscapeStack';
 import { useFilesystemSuggestions } from '../hooks/useFilesystemSuggestions';
 import { PathInput } from './NewSessionDialog/PathInput';
 import { RepoOptions } from './NewSessionDialog/RepoOptions';
-import type { BrowseDirectoryResult, DaemonEndpoint, InspectPathResult, RecentLocation } from '../hooks/useDaemonSocket';
+import type {
+  BrowseDirectoryResult,
+  DaemonEndpoint,
+  InspectPathResult,
+  PastConversation,
+  PastConversationsResult,
+  RecentLocation,
+} from '../hooks/useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import { useSettings } from '../contexts/SettingsContext';
 import {
@@ -64,7 +71,14 @@ interface LocationPickerProps {
   isOpen: boolean;
   purpose?: 'workspace' | 'session';
   onClose: () => void;
-  onSelect: (path: string, agent: SessionAgent, endpointId?: string, yoloMode?: boolean, chiefOfStaff?: boolean) => void;
+  onSelect: (
+    path: string,
+    agent: SessionAgent,
+    endpointId?: string,
+    yoloMode?: boolean,
+    chiefOfStaff?: boolean,
+    resumeConversationFile?: string,
+  ) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
@@ -80,6 +94,33 @@ interface LocationPickerProps {
   // signal. The "create as chief" toggle is shown only when no chief exists yet
   // (the role is single-holder), so a second one is never created by accident.
   chiefExists?: boolean;
+  // Agents whose sessions run in a headless host rather than a PTY. Only those
+  // can pick a conversation up, so it is what gates the resume bar.
+  conversationAgents?: Set<string>;
+  // Lists the conversations this daemon has recorded. Absent in tests and in
+  // any host that does not offer them; the bar simply does not appear.
+  onListPastConversations?: () => Promise<PastConversationsResult>;
+}
+
+/**
+ * One row of the resume picker: what was said in the conversation, where it ran,
+ * and how long ago. A conversation with nothing readable in it still gets a row
+ * — the file is what resumes, not the label.
+ */
+function pastConversationLabel(conversation: PastConversation): string {
+  const folder = conversation.cwd.split('/').filter(Boolean).pop() || conversation.cwd;
+  const preview = conversation.preview.trim();
+  const age = relativeAge(conversation.modified);
+  const head = preview === '' ? '(no messages)' : preview.length > 70 ? `${preview.slice(0, 70)}...` : preview;
+  return `${head} — ${folder}${age === '' ? '' : `, ${age}`}${conversation.live ? ', running' : ''}`;
+}
+
+function relativeAge(epochMs: number): string {
+  const seconds = Math.floor((Date.now() - epochMs) / 1000);
+  if (!Number.isFinite(seconds) || seconds < 0) return '';
+  if (seconds < 3600) return `${Math.max(1, Math.floor(seconds / 60))}m ago`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86_400)}d ago`;
 }
 
 const MAX_RECENT_LOCATIONS = 10;
@@ -202,6 +243,8 @@ export function LocationPicker({
   agentAvailability,
   endpoints = [],
   chiefExists = false,
+  conversationAgents,
+  onListPastConversations,
 }: LocationPickerProps) {
   const { settings, setSetting } = useSettings();
   const localAgentAvailability = agentAvailability || DEFAULT_AGENT_AVAILABILITY;
@@ -228,6 +271,10 @@ export function LocationPicker({
   const [targetId, setTargetId] = useState(LOCAL_TARGET);
   const [yoloMode, setYoloMode] = useState(false);
   const [chiefOfStaff, setChiefOfStaff] = useState(false);
+  // The conversation this session will pick up from, '' for a fresh one.
+  const [resumeFile, setResumeFile] = useState('');
+  const [pastConversations, setPastConversations] = useState<PastConversation[]>([]);
+  const [pastConversationsError, setPastConversationsError] = useState('');
   const [repoRootPath, setRepoRootPath] = useState<string | null>(null);
   const [repoInfo, setRepoInfo] = useState<RepoInfo | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -378,6 +425,16 @@ export function LocationPicker({
   // the chief flag, so showing the toggle there would be a silent no-op.
   const chiefToggleEligible = !chiefExists && purpose !== 'session' && (agent === 'claude' || agent === 'codex');
 
+  // Picking a conversation up is offered only for an agent that HAS
+  // conversations, and only against this machine: the listing is a read of this
+  // daemon's own data dir, so a remote target would be offered files it cannot
+  // open. A split (purpose==='session') routes through createSplitSession, which
+  // carries no resume, so showing it there would be a silent no-op.
+  const resumeEligible = purpose !== 'session'
+    && selectedEndpointId === undefined
+    && onListPastConversations !== undefined
+    && (conversationAgents?.has(agent) ?? false);
+
   const invalidateRequestGeneration = useCallback(() => {
     requestGenerationRef.current += 1;
   }, []);
@@ -428,6 +485,32 @@ export function LocationPicker({
       setChiefOfStaff(false);
     }
   }, [chiefToggleEligible]);
+
+  // The listing is read once per opening of the bar, and dropped when the bar
+  // goes away — switching agent or target must not leave a resume selected that
+  // the launch would then silently ignore. `cancelled` is what keeps a slow read
+  // from landing on a picker that has moved on.
+  useEffect(() => {
+    if (!resumeEligible || !onListPastConversations) {
+      setResumeFile('');
+      setPastConversations([]);
+      setPastConversationsError('');
+      return;
+    }
+    let cancelled = false;
+    void onListPastConversations()
+      .then((result) => {
+        if (cancelled) return;
+        setPastConversations(result.conversations);
+        setPastConversationsError('');
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        setPastConversations([]);
+        setPastConversationsError(error instanceof Error ? error.message : String(error));
+      });
+    return () => { cancelled = true; };
+  }, [onListPastConversations, resumeEligible]);
 
   useEffect(() => {
     if (!isOpen) {
@@ -559,9 +642,28 @@ export function LocationPicker({
 
   const launchSelection = useCallback((path: string) => {
     const selectedAgent = resolvePickerAgent(agent, effectiveAgentAvailability, 'codex');
-    onSelect(path, selectedAgent, selectedEndpointId, yoloMode && yoloSupported, chiefOfStaff && chiefToggleEligible);
+    onSelect(
+      path,
+      selectedAgent,
+      selectedEndpointId,
+      yoloMode && yoloSupported,
+      chiefOfStaff && chiefToggleEligible,
+      resumeEligible && resumeFile !== '' ? resumeFile : undefined,
+    );
     onClose();
-  }, [agent, chiefOfStaff, chiefToggleEligible, effectiveAgentAvailability, onClose, onSelect, selectedEndpointId, yoloMode, yoloSupported]);
+  }, [
+    agent,
+    chiefOfStaff,
+    chiefToggleEligible,
+    effectiveAgentAvailability,
+    onClose,
+    onSelect,
+    resumeEligible,
+    resumeFile,
+    selectedEndpointId,
+    yoloMode,
+    yoloSupported,
+  ]);
 
   const updateInputValue = useCallback((nextPath: string) => {
     if (nextPath === inputValue) {
@@ -977,6 +1079,35 @@ export function LocationPicker({
                   <span className="agent-option-name">{chiefOfStaff ? 'On' : 'Off'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+        {resumeEligible && (
+          <div className="picker-resume-bar">
+            <div className="picker-agent-label">CONVERSATION</div>
+            <div className="picker-resume-controls">
+              {/* A fork, not an append: the chosen conversation is copied into
+                  the new session and never written to, so the same one can be
+                  picked up twice and the session it came from keeps running. */}
+              <select
+                className="picker-resume-select"
+                data-testid="location-picker-resume"
+                aria-label="Conversation to pick up from"
+                value={resumeFile}
+                onChange={(event) => setResumeFile(event.target.value)}
+              >
+                <option value="">Start a new conversation</option>
+                {pastConversations.map((conversation) => (
+                  <option key={conversation.file} value={conversation.file}>
+                    {pastConversationLabel(conversation)}
+                  </option>
+                ))}
+              </select>
+              {pastConversationsError !== '' && (
+                <span className="picker-resume-error" data-testid="location-picker-resume-error">
+                  {pastConversationsError}
+                </span>
+              )}
             </div>
           </div>
         )}

@@ -56,6 +56,9 @@ function toolResultEntry(id: string, callID: string, text: string, extra: Record
 const tools = (items: SnapshotItem[]): SnapshotToolItem[] =>
   items.filter((item): item is SnapshotToolItem => item.kind === "tool");
 
+const ids = (items: SnapshotItem[]): string[] =>
+  items.map((item) => (item.kind === "tool" ? item.call_id : item.id));
+
 describe("reconstructTranscript", () => {
   test("rebuilds messages and tool cards in the order they happened", () => {
     const { items } = reconstructTranscript([
@@ -172,12 +175,12 @@ describe("launchPromptIsUndelivered", () => {
   test("a host that reopened nothing still owes the launch its brief", () => {
     // The zero-file early crash: killed before pi's first assistant message, so
     // the replacement opens a session that never heard the brief.
-    expect(launchPromptIsUndelivered(brief, [])).toBe(true);
+    expect(launchPromptIsUndelivered(brief, [], false)).toBe(true);
   });
 
   test("a reopened conversation is never asked the same thing twice", () => {
     const { items } = reconstructTranscript([userEntry("e1", brief), assistantEntry("e2", "On it.")]);
-    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
   });
 
   test("an interrupted conversation already carries the brief, so it is not re-sent", () => {
@@ -185,12 +188,34 @@ describe("launchPromptIsUndelivered", () => {
     // agent do the work twice; this reopens as `waiting_input` instead.
     const { items } = reconstructTranscript([userEntry("e1", brief)]);
     expect(conversationInterrupted(items)).toBe(true);
-    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
+  });
+
+  test("a conversation holding only notices has still not been told anything", () => {
+    // Notices are minted for what happened TO a conversation, and pi writes one
+    // kind of them before the first word is said. Counting a row nobody spoke as
+    // delivery is how a delegation launches with its brief silently swallowed.
+    const { items } = reconstructTranscript([
+      { type: "compaction", id: "e1", tokensBefore: 120_000 } as unknown as SessionEntryLike,
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe("notice");
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(true);
+  });
+
+  test("a forked conversation is owed the brief however much history came with it", () => {
+    // The history was earned by the conversation this session was picked up
+    // from. This session has never been told what it is for, and skipping the
+    // brief would leave a delegation staring at somebody else's work.
+    const { items } = reconstructTranscript([userEntry("e1", "Something else entirely."), assistantEntry("e2", "Done.")]);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, true)).toBe(true);
   });
 
   test("a session launched without a brief is owed nothing", () => {
-    expect(launchPromptIsUndelivered("", [])).toBe(false);
-    expect(launchPromptIsUndelivered("   ", [])).toBe(false);
+    expect(launchPromptIsUndelivered("", [], false)).toBe(false);
+    expect(launchPromptIsUndelivered("   ", [], false)).toBe(false);
+    expect(launchPromptIsUndelivered("   ", [], true)).toBe(false);
   });
 });
 
@@ -255,26 +280,47 @@ describe("TranscriptStore", () => {
     expect(store.snapshot().queue).toEqual({ steering: ["stop"], followUp: ["then this"] });
   });
 
-  test("drops the oldest items past the window and says it did", () => {
-    const store = new TranscriptStore(3, 1 << 20);
+  test("windows the newest items and says older ones are still reachable", () => {
+    const store = new TranscriptStore("e1", 3, 1 << 20);
     for (const id of ["m1", "m2", "m3", "m4", "m5"]) {
       store.apply("message_end", { id, role: "assistant", text: id });
     }
     const snapshot = store.snapshot();
-    expect(snapshot.items.map((item) => (item.kind === "message" ? item.id : ""))).toEqual(["m3", "m4", "m5"]);
+    expect(ids(snapshot.items)).toEqual(["m3", "m4", "m5"]);
     expect(snapshot.total).toBe(5);
     expect(snapshot.truncated).toBe(true);
+    // The window clipped them; retention did not. The difference is what scroll
+    // -back exists to serve.
+    expect(snapshot.has_more).toBe(true);
+    expect(snapshot.epoch).toBe("e1");
   });
 
   test("the byte budget binds before the item budget when text is large", () => {
-    const store = new TranscriptStore(100, 64);
+    const store = new TranscriptStore("e1", 100, 64);
     store.apply("message_end", { id: "m1", role: "assistant", text: "x".repeat(80) });
     store.apply("message_end", { id: "m2", role: "assistant", text: "y".repeat(80) });
     const snapshot = store.snapshot();
-    // The newest item is never dropped, even alone over budget: a snapshot with
+    // The newest item always travels, even alone over budget: a snapshot with
     // nothing in it would be worse than one that names what it clipped.
     expect(snapshot.items).toHaveLength(1);
     expect(snapshot.truncated).toBe(true);
+    expect(snapshot.has_more).toBe(true);
+  });
+
+  test("history past the retention tripwire is gone, and the snapshot says so", () => {
+    const store = new TranscriptStore("e1", 3, 1 << 20, 4, 1 << 20);
+    for (const id of ["m1", "m2", "m3", "m4", "m5"]) {
+      store.apply("message_end", { id, role: "assistant", text: id });
+    }
+    const snapshot = store.snapshot();
+    expect(snapshot.total).toBe(5);
+    // Four retained, three windowed: one page of scroll-back is left and the
+    // fifth item is gone for good.
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.has_more).toBe(true);
+    expect(ids(store.page("message:m3").items)).toEqual(["m2"]);
+    expect(store.page("message:m2").items).toEqual([]);
+    expect(store.page("message:m2").has_more).toBe(false);
   });
 
   test("seeding replaces the transcript with reconstructed history", () => {

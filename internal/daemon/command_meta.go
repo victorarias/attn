@@ -116,7 +116,15 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAgentToolDetail: commandMetadata(ScopeSession, true, false),
 	protocol.CmdAgentClearQueue: commandMetadata(ScopeSession, true, false),
 	// Unlogged: a window opening is not an event, and every pane mount sends one.
-	protocol.CmdAgentAttach:                           commandMetadata(ScopeSession, true, false),
+	protocol.CmdAgentAttach: commandMetadata(ScopeSession, true, false),
+	// Unlogged: scrolling back through a conversation is reading, and a long
+	// scroll sends one of these per screenful.
+	protocol.CmdAgentHistory: commandMetadata(ScopeSession, true, false),
+	// Logged: which model a conversation runs on is a decision worth a record.
+	protocol.CmdAgentSetModel: commandMetadata(ScopeSession, true, true),
+	// Local: a conversation's history is a file in THIS daemon's data dir, so
+	// the answer is never merged from an endpoint.
+	protocol.CmdListPastConversations:                 commandMetadata(ScopeHubLocal, false, false),
 	protocol.CmdPtyResize:                             commandMetadata(ScopeSession, true, true),
 	protocol.CmdKillSession:                           commandMetadata(ScopeSession, true, true),
 	protocol.CmdReloadSession:                         commandMetadata(ScopeSession, true, true),

@@ -49,6 +49,17 @@ type AgentEventMessage struct {
 	Seq int `json:"seq"`
 }
 
+type AgentHistoryMessage struct {
+	// Before corresponds to the JSON schema field "before".
+	Before string `json:"before"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+}
+
 type AgentPromptMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -61,6 +72,17 @@ type AgentPromptMessage struct {
 
 	// Text corresponds to the JSON schema field "text".
 	Text string `json:"text"`
+}
+
+type AgentSetModelMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Model corresponds to the JSON schema field "model".
+	Model string `json:"model"`
 }
 
 type AgentToolDetailMessage struct {
@@ -2652,6 +2674,14 @@ type ListEndpointsMessage struct {
 	Cmd string `json:"cmd"`
 }
 
+type ListPastConversationsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
 type ListPluginsMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3447,6 +3477,49 @@ type PRsUpdatedMessage struct {
 
 	// Prs corresponds to the JSON schema field "prs".
 	Prs []PR `json:"prs,omitempty,omitzero"`
+}
+
+type PastConversation struct {
+	// Bytes corresponds to the JSON schema field "bytes".
+	Bytes int `json:"bytes"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd string `json:"cwd"`
+
+	// File corresponds to the JSON schema field "file".
+	File string `json:"file"`
+
+	// Live corresponds to the JSON schema field "live".
+	Live bool `json:"live"`
+
+	// Modified corresponds to the JSON schema field "modified".
+	Modified int `json:"modified"`
+
+	// Preview corresponds to the JSON schema field "preview".
+	Preview string `json:"preview"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type PastConversationsResultMessage struct {
+	// Conversations corresponds to the JSON schema field "conversations".
+	Conversations []PastConversation `json:"conversations"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated bool `json:"truncated"`
 }
 
 type PathInspection struct {
@@ -5080,6 +5153,10 @@ type SpawnSessionMessage struct {
 
 	// Model corresponds to the JSON schema field "model".
 	Model *string `json:"model,omitempty,omitzero"`
+
+	// ResumeConversationFile corresponds to the JSON schema field
+	// "resume_conversation_file".
+	ResumeConversationFile *string `json:"resume_conversation_file,omitempty,omitzero"`
 
 	// ResumePicker corresponds to the JSON schema field "resume_picker".
 	ResumePicker *bool `json:"resume_picker,omitempty,omitzero"`

@@ -322,6 +322,11 @@ func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent
 	if intent.InitialPrompt != "" {
 		spawnMsg.InitialPrompt = protocol.Ptr(intent.InitialPrompt)
 	}
+	// Same reason, for the conversation this session was started from: a host
+	// that died before pi wrote anything has to be told again where to fork.
+	if intent.ResumeConversationFile != "" {
+		spawnMsg.ResumeConversationFile = protocol.Ptr(intent.ResumeConversationFile)
+	}
 	launch := intent.UnattendedLaunch
 	if !launch.IsZero() {
 		launch = launch.WithLegacyDefaults()
