@@ -61,7 +61,7 @@ func TestWhereRejectsAnExpressionWithNoOperator(t *testing.T) {
 // the advance still carries to the next iteration — otherwise a flag's value
 // would be parsed again as if it were a flag.
 func TestQueryFlagsConsumeTheirValues(t *testing.T) {
-	query, opts := parseDocQueryFlags("query", "ext/approval-gate", "requests", []string{
+	query, opts := parseDocQueryFlags("query", "app/approval-gate", "requests", []string{
 		"--where", "status=pending",
 		"--sort", "created_at",
 		"--desc",
@@ -71,7 +71,7 @@ func TestQueryFlagsConsumeTheirValues(t *testing.T) {
 	if !opts.asJSON {
 		t.Fatal("--json not seen")
 	}
-	if query.Namespace != "ext/approval-gate" || query.Collection != "requests" {
+	if query.Namespace != "app/approval-gate" || query.Collection != "requests" {
 		t.Fatalf("target = %s/%s", query.Namespace, query.Collection)
 	}
 	if len(query.Filters) != 1 || query.Filters[0].Field != "status" || query.Filters[0].ValueJson != `"pending"` {
@@ -88,7 +88,7 @@ func TestQueryFlagsConsumeTheirValues(t *testing.T) {
 // --resume is a watch flag. A one-shot read that accepted it would silently
 // ignore it, and the caller would believe it had asked for something.
 func TestResumeBelongsToWatch(t *testing.T) {
-	_, opts := parseDocQueryFlags("watch", "ext/a", "c", []string{"--resume"})
+	_, opts := parseDocQueryFlags("watch", "app/a", "c", []string{"--resume"})
 	if !opts.resume {
 		t.Fatal("--resume not seen on watch")
 	}
@@ -96,7 +96,7 @@ func TestResumeBelongsToWatch(t *testing.T) {
 
 // --desc before --sort still applies to the sort that follows.
 func TestDescBeforeSortStillReversesIt(t *testing.T) {
-	query, _ := parseDocQueryFlags("query", "ext/a", "c", []string{"--desc", "--sort", "updated_at"})
+	query, _ := parseDocQueryFlags("query", "app/a", "c", []string{"--desc", "--sort", "updated_at"})
 	if query.Sort == nil || query.Sort.Field != "updated_at" || query.Sort.Desc == nil || !*query.Sort.Desc {
 		t.Fatalf("sort = %+v", query.Sort)
 	}
@@ -104,7 +104,7 @@ func TestDescBeforeSortStillReversesIt(t *testing.T) {
 
 // Repeating --where accumulates, which is how a range on the sort field pages.
 func TestWhereRepeatsToAccumulateFilters(t *testing.T) {
-	query, _ := parseDocQueryFlags("query", "ext/a", "c", []string{
+	query, _ := parseDocQueryFlags("query", "app/a", "c", []string{
 		"--where", "status=pending", "--where", "attempts>=2",
 	})
 	if len(query.Filters) != 2 {
@@ -118,7 +118,7 @@ func TestWhereRepeatsToAccumulateFilters(t *testing.T) {
 // --after carries the cursor, which is the only correct way to page: a --where
 // on the sort field skips or repeats documents that share a sort value.
 func TestAfterFlagCarriesTheCursor(t *testing.T) {
-	query, _ := parseDocQueryFlags("query", "ext/a", "c", []string{"--sort", "attempts", "--after", "b7"})
+	query, _ := parseDocQueryFlags("query", "app/a", "c", []string{"--sort", "attempts", "--after", "b7"})
 	if query.After == nil || *query.After != "b7" {
 		t.Fatalf("after = %v", query.After)
 	}

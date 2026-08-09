@@ -243,6 +243,24 @@ const (
 	// next arbitrary write. Like the other document facts it has no entry in
 	// wireProjections.
 	FactDocumentCollectionRedeclared = "document.collection.redeclared"
+
+	// App registry facts; subject is the app's name.
+	//
+	// Neither has an entry in wireProjections, and that is not an omission: the
+	// app registry has no UI surface, so these produce no WebSocket traffic. They
+	// exist because the runtime has to hear about a state change it did not make
+	// — an app disabled from the CLI, or by the auto-disable clock, has to reach
+	// the loop that dispatches its handlers, and the log is how one part of the
+	// daemon tells another something happened.
+	//
+	// FactAppEnabledChanged: the app's bus consumer bit was flipped. The payload
+	// carries which way, so a consumer of this fact does not have to read back a
+	// bit that may already have moved again.
+	FactAppEnabledChanged = "app.enabled.changed"
+	// FactAppRemoved: the app was uninstalled — consumer stopped and deleted,
+	// registry row gone. It carries a payload rather than only a subject because
+	// the entity it describes no longer exists to be read.
+	FactAppRemoved = "app.removed"
 )
 
 // CompactableFacts are the fact classes the retention pass may reduce to one

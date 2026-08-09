@@ -2428,6 +2428,14 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	// caller disconnects, rather than answering once.
 	case protocol.CmdDocSubscribe: // wire: doc_subscribe
 		d.handleDocSubscribe(conn, msg.(*protocol.DocSubscribeMessage))
+	case protocol.CmdAppList: // wire: app_list
+		d.handleAppList(conn, msg.(*protocol.AppListMessage))
+	case protocol.CmdAppStatus: // wire: app_status
+		d.handleAppStatus(conn, msg.(*protocol.AppStatusMessage))
+	case protocol.CmdAppSetEnabled: // wire: app_set_enabled
+		d.handleAppSetEnabled(conn, msg.(*protocol.AppSetEnabledMessage))
+	case protocol.CmdAppRemove: // wire: app_remove
+		d.handleAppRemove(conn, msg.(*protocol.AppRemoveMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

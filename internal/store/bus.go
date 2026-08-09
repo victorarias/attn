@@ -271,7 +271,7 @@ func (s *Store) ListBusConsumers() ([]BusConsumer, error) {
 // age window bounds growth, and the cursor floor keeps a live-but-lagging
 // consumer from losing events it has not read.
 //
-// Disabled consumers are excluded from the floor on purpose. A killed extension
+// Disabled consumers are excluded from the floor on purpose. A killed app
 // must not pin the log indefinitely; when it comes back below the floor,
 // internal/bus resumes it at head and logs the gap.
 func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {

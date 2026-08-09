@@ -44,6 +44,165 @@ type AgentPromptMessage struct {
 	Text string `json:"text"`
 }
 
+type AppConsumerInfo struct {
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor int `json:"cursor"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Filter corresponds to the JSON schema field "filter".
+	Filter string `json:"filter"`
+
+	// Lag corresponds to the JSON schema field "lag".
+	Lag int `json:"lag"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppInvocationInfo struct {
+	// DurationMs corresponds to the JSON schema field "duration_ms".
+	DurationMs int `json:"duration_ms"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// EventName corresponds to the JSON schema field "event_name".
+	EventName string `json:"event_name"`
+
+	// EventSeq corresponds to the JSON schema field "event_seq".
+	EventSeq int `json:"event_seq"`
+
+	// EventSubject corresponds to the JSON schema field "event_subject".
+	EventSubject string `json:"event_subject"`
+
+	// Handler corresponds to the JSON schema field "handler".
+	Handler string `json:"handler"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+
+	// StartedAt corresponds to the JSON schema field "started_at".
+	StartedAt string `json:"started_at"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+}
+
+type AppListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type AppListResult struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppSummary `json:"apps"`
+}
+
+type AppRemoveMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppRemoveResult struct {
+	// ConsumerRemoved corresponds to the JSON schema field "consumer_removed".
+	ConsumerRemoved bool `json:"consumer_removed"`
+
+	// InvocationsKept corresponds to the JSON schema field "invocations_kept".
+	InvocationsKept int `json:"invocations_kept"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// NamespaceKept corresponds to the JSON schema field "namespace_kept".
+	NamespaceKept string `json:"namespace_kept"`
+
+	// VersionsKept corresponds to the JSON schema field "versions_kept".
+	VersionsKept int `json:"versions_kept"`
+}
+
+type AppSetEnabledMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppSetEnabledResult struct {
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer string `json:"consumer"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppStatusResult struct {
+	// App corresponds to the JSON schema field "app".
+	App AppSummary `json:"app"`
+
+	// Invocations corresponds to the JSON schema field "invocations".
+	Invocations int `json:"invocations"`
+
+	// Recent corresponds to the JSON schema field "recent".
+	Recent []AppInvocationInfo `json:"recent,omitempty,omitzero"`
+
+	// Versions corresponds to the JSON schema field "versions".
+	Versions int `json:"versions"`
+}
+
+type AppSummary struct {
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer *AppConsumerInfo `json:"consumer,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// CurrentVersion corresponds to the JSON schema field "current_version".
+	CurrentVersion *AppVersionInfo `json:"current_version,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type AppVersionInfo struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+}
+
 type ApprovePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -4230,6 +4389,19 @@ type ReposUpdatedMessage struct {
 }
 
 type Response struct {
+	// AppListResult corresponds to the JSON schema field "app_list_result".
+	AppListResult *AppListResult `json:"app_list_result,omitempty,omitzero"`
+
+	// AppRemoveResult corresponds to the JSON schema field "app_remove_result".
+	AppRemoveResult *AppRemoveResult `json:"app_remove_result,omitempty,omitzero"`
+
+	// AppSetEnabledResult corresponds to the JSON schema field
+	// "app_set_enabled_result".
+	AppSetEnabledResult *AppSetEnabledResult `json:"app_set_enabled_result,omitempty,omitzero"`
+
+	// AppStatusResult corresponds to the JSON schema field "app_status_result".
+	AppStatusResult *AppStatusResult `json:"app_status_result,omitempty,omitzero"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
 

@@ -90,7 +90,7 @@ func TestATimestampBoundIsReEncodedBeforeItIsCompared(t *testing.T) {
 		"2026-08-05T12:00:00+02:00",
 	} {
 		c := mustCompile(t, Query{
-			Namespace:  "ext/approval-gate",
+			Namespace:  "app/approval-gate",
 			Collection: "requests",
 			Filters:    []Filter{{Field: FieldUpdatedAt, Op: OpGte, Value: form}},
 		})
@@ -108,12 +108,12 @@ func TestATimestampBoundIsReEncodedBeforeItIsCompared(t *testing.T) {
 func TestATimestampBoundEncodesTheSameFromAStringOrATime(t *testing.T) {
 	at := time.Date(2026, 8, 5, 10, 0, 0, 0, time.UTC)
 	fromTime := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: FieldCreatedAt, Op: OpGte, Value: at}},
 	})
 	fromString := mustCompile(t, Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: FieldCreatedAt, Op: OpGte, Value: at.Format(time.RFC3339)}},
 	})
@@ -127,7 +127,7 @@ func TestATimestampBoundEncodesTheSameFromAStringOrATime(t *testing.T) {
 // caller mistake, and the error has to be enough to fix it.
 func TestATimestampBoundThatIsNotATimestampIsRefused(t *testing.T) {
 	_, err := Query{
-		Namespace:  "ext/approval-gate",
+		Namespace:  "app/approval-gate",
 		Collection: "requests",
 		Filters:    []Filter{{Field: FieldUpdatedAt, Op: OpGt, Value: "yesterday"}},
 	}.Compile(requestsSchema(), nil)

@@ -16,7 +16,7 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// `attn doc` is the document store's operator surface, and until the extension
+// `attn doc` is the document store's operator surface, and until the app
 // runtime exists it is also its only consumer.
 //
 // Everything here goes through the daemon rather than opening the database
@@ -62,7 +62,7 @@ func writeDocHelp(w io.Writer) {
 	fmt.Fprintf(w, `usage: attn doc <command>
 
 Documents are JSON objects addressed by <namespace> <collection> <id>. A
-namespace is owner/name (for example ext/approval-gate).
+namespace is owner/name (for example app/approval-gate).
 
 A collection declares which fields may be filtered and sorted on; created_at and
 updated_at are always available and are never declared. Everything else in a

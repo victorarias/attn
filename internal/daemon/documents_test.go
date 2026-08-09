@@ -10,7 +10,7 @@ import (
 )
 
 const (
-	testDocNS   = "ext/approval-gate"
+	testDocNS   = "app/approval-gate"
 	testDocColl = "requests"
 )
 
@@ -302,7 +302,7 @@ func TestASubscriptionOnlyWakesForItsOwnCollection(t *testing.T) {
 		d.handleDocDefine(c, &protocol.DocDefineMessage{
 			Cmd: protocol.CmdDocDefine,
 			Schema: protocol.DocumentCollectionSchema{
-				Namespace: "ext/other", Collection: testDocColl,
+				Namespace: "app/other", Collection: testDocColl,
 				Fields: []protocol.DocumentFieldSpec{{Name: "status", Type: "string"}},
 			},
 		})
@@ -318,7 +318,7 @@ func TestASubscriptionOnlyWakesForItsOwnCollection(t *testing.T) {
 	// had woken us, this delivery would be revision 3.
 	if r := docCall(t, func(c net.Conn) {
 		d.handleDocPut(c, &protocol.DocPutMessage{
-			Cmd: protocol.CmdDocPut, Namespace: "ext/other", Collection: testDocColl,
+			Cmd: protocol.CmdDocPut, Namespace: "app/other", Collection: testDocColl,
 			ID: "theirs", Body: `{"status":"pending"}`,
 		})
 	}); !r.Ok {
