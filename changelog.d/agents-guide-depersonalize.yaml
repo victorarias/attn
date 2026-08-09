@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  The "How changes ship" section in AGENTS.md is reworded in neutral voice —
+  "the maintainer" instead of naming Victor, and "Victor's testing" becomes
+  "Experience testing". Every rule is unchanged.

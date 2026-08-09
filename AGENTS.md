@@ -235,7 +235,7 @@ Three adopted patterns; full receipts in
 ## How changes ship
 
 The flow is sized by judgment, not a rulebook. When in doubt about which shape
-applies, ask Victor once at kickoff, not mid-flight.
+applies, ask the maintainer once at kickoff, not mid-flight.
 
 - **Plan docs are the norm.** Non-trivial work gets a plan doc first — often
   written by the same agent that then implements it in the same session. Only a
@@ -247,16 +247,16 @@ applies, ask Victor once at kickoff, not mid-flight.
   That criterion — can this slice damage what already works? — decides the
   shape, not the size of the plan.
 - **A spike answers a question.** It usually does not merge, but that is not a
-  hard rule. The constant: Victor decides what happens after a spike — merging
-  it, discarding it, or building on its conclusion.
+  hard rule. The constant: the maintainer decides what happens after a spike —
+  merging it, discarding it, or building on its conclusion.
 
 ### Merging
 
 The standing gate for every PR: figgyster approved on the current head, CI
 green, zero unresolved threads. When it passes, merge — no per-PR authorization
-from Victor needed.
+needed.
 
-Hold for Victor's explicit go-ahead only for:
+Hold for the maintainer's explicit go-ahead only for:
 
 - merging an epic branch to main;
 - moving on from a spike;
@@ -264,17 +264,17 @@ Hold for Victor's explicit go-ahead only for:
 - one-way doors — a way in shipped without its way out;
 - production installs and releases (already covered above).
 
-### Victor's testing
+### Experience testing
 
-Victor validates **experience**; the harness and figgyster own correctness. His
-pass happens at two moments: very early on spikes (does the idea feel right?)
-and at the end of a substantial series (does the whole feel right?). It is
-never per-PR QA — do not queue an approved PR on his testing.
+The maintainer validates **experience**; the harness and figgyster own
+correctness. That pass happens at two moments: very early on spikes (does the
+idea feel right?) and at the end of a substantial series (does the whole feel
+right?). It is never per-PR QA — do not queue an approved PR on it.
 
-When a series reaches his checkpoint, stage it: a running profile installed
+When a series reaches that checkpoint, stage it: a running profile installed
 from the branch, realistic state, and a short what-to-try list keyed to what
 changed and what you could not judge yourself — feel, latency, keyboard flow.
-His session should be minutes of directed play, not setup.
+The session should be minutes of directed play, not setup.
 
 ### Routine mechanics
 
