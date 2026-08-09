@@ -220,9 +220,16 @@ Three adopted patterns; full receipts in
 
 - A test that asserts elapsed time (backoff, debounce, recurrence) or that
   something **never** happens runs under `synctest.Test` — no sleeps, no poll
-  loops. Open stores and DB handles outside the bubble; never bubble real
-  sockets, PTYs, or child processes — a goroutine blocked on a real fd is not
-  durably blocked, so fake time never advances.
+  loops. House rules, with receipts in `internal/daemon/synctest_test.go`:
+  build long-lived resources (daemon, store, DB handles) *outside* the bubble
+  and drive them *inside*; seed anything time-stamped inside the bubble (its
+  clock starts in 2000, so a fixture stamped with real `time.Now` is decades
+  in the future); tear down completely — any goroutine still alive at bubble
+  exit is a panic even when every assertion passed. A child process or
+  fsnotify watcher does not error — it silently pins the bubble clock to real
+  time; those tests stay outside. `synctest.Wait()` is a happens-before edge
+  for the race detector; `time.Sleep()` is not, so timer-written state still
+  needs its own lock.
 - A unit with a stated invariant and a large input space — especially when the
   interesting failures need a *sequence* of operations — gets a
   `pgregory.net/rapid` property beside its example tests. Rapid explores, it
