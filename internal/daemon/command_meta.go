@@ -164,6 +164,8 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAppStatus:     commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppSetEnabled: commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppRemove:     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppApply:      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRollback:   commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

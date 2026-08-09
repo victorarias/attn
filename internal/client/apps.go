@@ -44,3 +44,37 @@ func (c *Client) AppRemove(name string) (*protocol.AppRemoveResult, error) {
 	}
 	return resp.AppRemoveResult, nil
 }
+
+// AppApply records a version the caller has already built and points the app at
+// it. The build is the caller's — see internal/appbuild — and this is the one
+// step of an apply that changes anything.
+func (c *Client) AppApply(name, contentHash, declaration, sourcePath string) (*protocol.AppApplyResult, error) {
+	msg := protocol.AppApplyMessage{
+		Cmd:         protocol.CmdAppApply,
+		Name:        name,
+		ContentHash: contentHash,
+		Declaration: declaration,
+	}
+	if sourcePath != "" {
+		msg.SourcePath = protocol.Ptr(sourcePath)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.AppApplyResult, nil
+}
+
+// AppRollback moves an app onto a version it already has. A zero versionID means
+// the version applied before the current one.
+func (c *Client) AppRollback(name string, versionID int) (*protocol.AppRollbackResult, error) {
+	msg := protocol.AppRollbackMessage{Cmd: protocol.CmdAppRollback, Name: name}
+	if versionID > 0 {
+		msg.VersionID = protocol.Ptr(versionID)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	return resp.AppRollbackResult, nil
+}

@@ -318,6 +318,11 @@ type Daemon struct {
 	pluginExits         map[string]ptybackend.ExitInfo
 	pluginDir           string
 	bundledPluginDir    string
+	// appsDir is the app artifact store, `<data-dir>/apps`. It is derived from
+	// the data directory rather than the socket path because the CLI that builds
+	// an artifact derives it the same way: a socket relocated by
+	// ATTN_SOCKET_PATH would leave the two looking in different places.
+	appsDir             string
 	removePlugin        func(pluginDir, name string) error
 	pluginActionMu      sync.Mutex
 	bundledPluginMu     sync.Mutex
@@ -721,6 +726,7 @@ func New(socketPath string) *Daemon {
 		pluginHealthEnabled: true,
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		spawnLocks:          make(map[string]*spawnLock),
 	}
@@ -763,6 +769,7 @@ func NewForTesting(socketPath string) *Daemon {
 		plugins:            newPluginRegistry(),
 		pluginDir:          pluginDirForSocket(socketPath),
 		bundledPluginDir:   bundledPluginDirForExecutable(),
+		appsDir:            config.AppsDir(),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
@@ -809,6 +816,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		plugins:            newPluginRegistry(),
 		pluginDir:          pluginDirForSocket(socketPath),
 		bundledPluginDir:   bundledPluginDirForExecutable(),
+		appsDir:            config.AppsDir(),
 		workspaces:         newWorkspaceRegistry(),
 		workflowDirty:      make(map[string]bool),
 		workflowEngineConn: make(map[string]workflowEngineSink),
@@ -2436,6 +2444,10 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleAppSetEnabled(conn, msg.(*protocol.AppSetEnabledMessage))
 	case protocol.CmdAppRemove: // wire: app_remove
 		d.handleAppRemove(conn, msg.(*protocol.AppRemoveMessage))
+	case protocol.CmdAppApply: // wire: app_apply
+		d.handleAppApply(conn, msg.(*protocol.AppApplyMessage))
+	case protocol.CmdAppRollback: // wire: app_rollback
+		d.handleAppRollback(conn, msg.(*protocol.AppRollbackMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

@@ -11,7 +11,7 @@ import (
 func seedApps(t *testing.T, s *Store, now time.Time) (older, newer AppVersion) {
 	t.Helper()
 
-	older, err := s.CommitAppVersion(AppVersion{
+	older, created, err := s.CommitAppVersion(AppVersion{
 		AppName:      "approval-gate",
 		ContentHash:  "sha256:1111",
 		Declaration:  `{"name":"approval-gate","subscribe":[{"events":["delegation.*"]}]}`,
@@ -20,7 +20,10 @@ func seedApps(t *testing.T, s *Store, now time.Time) (older, newer AppVersion) {
 	if err != nil {
 		t.Fatalf("commit older version: %v", err)
 	}
-	newer, err = s.CommitAppVersion(AppVersion{
+	if !created {
+		t.Fatal("commit older version reported reuse, want a new row")
+	}
+	newer, created, err = s.CommitAppVersion(AppVersion{
 		AppName:      "approval-gate",
 		ContentHash:  "sha256:2222",
 		Declaration:  `{"name":"approval-gate","subscribe":[{"events":["delegation.*","session.state.changed"]}]}`,
@@ -29,7 +32,10 @@ func seedApps(t *testing.T, s *Store, now time.Time) (older, newer AppVersion) {
 	if err != nil {
 		t.Fatalf("commit newer version: %v", err)
 	}
-	if _, err := s.CommitAppVersion(AppVersion{
+	if !created {
+		t.Fatal("commit newer version reported reuse, want a new row")
+	}
+	if _, _, err := s.CommitAppVersion(AppVersion{
 		AppName:      "standup-digest",
 		ContentHash:  "sha256:3333",
 		Declaration:  `{"name":"standup-digest","subscribe":[{"events":["ticket.*"]}]}`,
@@ -75,7 +81,7 @@ func TestApps_IdenticalContentReusesTheVersionRow(t *testing.T) {
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	older, _ := seedApps(t, s, now)
 
-	again, err := s.CommitAppVersion(AppVersion{
+	again, created, err := s.CommitAppVersion(AppVersion{
 		AppName:      "approval-gate",
 		ContentHash:  older.ContentHash,
 		Declaration:  `{"declaration":"rewritten, and ignored"}`,
@@ -83,6 +89,9 @@ func TestApps_IdenticalContentReusesTheVersionRow(t *testing.T) {
 	}, now.Add(time.Hour))
 	if err != nil {
 		t.Fatalf("re-commit: %v", err)
+	}
+	if created {
+		t.Fatal("re-committing identical content reported a new row, want reuse")
 	}
 	if again.ID != older.ID {
 		t.Fatalf("re-apply minted version %d, want the existing %d", again.ID, older.ID)
@@ -265,10 +274,10 @@ func TestApps_ListAndSaveApp(t *testing.T) {
 func TestApps_CommitVersionRefusesAnIncompleteRow(t *testing.T) {
 	s := New()
 	now := time.Now().UTC()
-	if _, err := s.CommitAppVersion(AppVersion{ContentHash: "sha256:1"}, now); err == nil {
+	if _, _, err := s.CommitAppVersion(AppVersion{ContentHash: "sha256:1"}, now); err == nil {
 		t.Fatal("a version with no app name was accepted")
 	}
-	if _, err := s.CommitAppVersion(AppVersion{AppName: "x"}, now); err == nil {
+	if _, _, err := s.CommitAppVersion(AppVersion{AppName: "x"}, now); err == nil {
 		t.Fatal("a version with no content hash was accepted")
 	}
 	if apps, err := s.ListApps(); err != nil || len(apps) != 0 {

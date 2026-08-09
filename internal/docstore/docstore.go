@@ -89,6 +89,12 @@ const (
 
 var opSQL = map[Op]string{OpEq: "=", OpLt: "<", OpLte: "<=", OpGt: ">", OpGte: ">="}
 
+// FilterOps is the operator set, in a stable order, for surfaces that have to
+// render it — an error message listing what was accepted, or generated SDK
+// types. Callers get it from here rather than writing the list out, so an
+// operator added above cannot leave a stale copy behind.
+func FilterOps() []Op { return []Op{OpEq, OpLt, OpLte, OpGt, OpGte} }
+
 // FieldSpec declares one queryable field of a collection.
 type FieldSpec struct {
 	Name string    `json:"name"`

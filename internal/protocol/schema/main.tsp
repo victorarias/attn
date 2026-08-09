@@ -3786,8 +3786,11 @@ model DocSubscribeResult {
 // hash of its built artifact. A plugin is the other thing entirely — an
 // integration with its own process — and the two never share a surface.
 //
-// These commands are the half that reads and flips the registry. Applying,
-// rolling back and scaffolding an app arrive with the pipeline that builds one.
+// Scaffolding an app is a local act with no daemon in it — `attn app new` writes
+// a directory. Building is the caller's too: it runs the developer's bun and the
+// TypeScript attn keeps under its data dir, and only the finished result crosses
+// this surface. What the daemon owns is the part that must be atomic and
+// observed — recording the version, moving the pointer, publishing the fact.
 
 // One app as `attn app list` shows it: the registry row, plus the consumer that
 // carries its enabled state. There is no enabled field on the app itself —
@@ -3898,6 +3901,63 @@ model AppRemoveResult {
   "namespace_kept": string;
 }
 
+// Record a built version and point the app at it — the whole of what an apply
+// changes, in one transaction.
+//
+// The caller has already parsed the manifest, regenerated the derived types,
+// typechecked, bundled and placed the artifact in the content-addressed store;
+// everything that could be refused has been. The daemon does not take that on
+// trust: it re-derives the hash from the declaration and the bytes on disk
+// before recording anything, so a version row never names content that is not
+// what it says it is.
+model AppApplyMessage {
+  "cmd": "app_apply";
+  "name": string;
+  // The version's identity: the frozen declaration and the built bundle hashed
+  // together. The bundle alone would be wrong — generated types are erased at
+  // build time, so a manifest edit can leave the bundle byte-identical while
+  // changing what the app declares.
+  "content_hash": string;
+  // The manifest's snapshot as JSON, frozen onto the version row so what an old
+  // version declared survives editing the file.
+  "declaration": string;
+  // Where it was built from. Logged, never stored: attn does not remember where
+  // an app's source lives.
+  "source_path"?: string;
+}
+
+model AppApplyResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  // False when this exact content was already a version of this app. Applying
+  // byte-identical content mints no row — the hash is the version's identity —
+  // so the pointer simply lands back on the version that already was.
+  "version_created": boolean;
+  // What the app pointed at before this apply. Absent when it pointed at
+  // nothing, which is every app's first apply.
+  "previous_version_id"?: safeint;
+}
+
+// Move an app onto a version it already has. Rollback builds nothing: a version
+// is an immutable row and an artifact that is still on disk, so going back is a
+// pointer move and nothing else.
+model AppRollbackMessage {
+  "cmd": "app_rollback";
+  "name": string;
+  // Absent means the version applied before the current one.
+  "version_id"?: safeint;
+}
+
+model AppRollbackResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  "previous_version_id"?: safeint;
+}
+
 // ============================================================================
 // Response Types
 // ============================================================================
@@ -3961,6 +4021,8 @@ model Response {
   app_status_result?: AppStatusResult;
   app_set_enabled_result?: AppSetEnabledResult;
   app_remove_result?: AppRemoveResult;
+  app_apply_result?: AppApplyResult;
+  app_rollback_result?: AppRollbackResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an

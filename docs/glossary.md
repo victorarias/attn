@@ -224,6 +224,14 @@ is the same pointer move to an older row. Re-applying byte-identical content
 reuses the version that is already there, which is what keeps "which version
 actually ran" answerable in the invocation log after a long editing session.
 
+**Applying** is how a directory becomes a version: parse the manifest, generate
+the types the handlers are checked against, typecheck, bundle, hash, write the
+artifact, insert the row, move the pointer. Apply never evaluates the app's
+code — nothing is imported and nothing is run — so every way an apply can fail
+happens before the pointer moves, with the previous version still serving. That
+is what makes applying safe to do repeatedly while attn is running, and it is
+why `attn app dev` can re-apply on every save.
+
 ## Plugin
 
 A **plugin** integrates the outside world into attn: agent drivers, worktree

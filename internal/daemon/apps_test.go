@@ -23,7 +23,7 @@ import (
 func seedApp(t *testing.T, d *Daemon, name string, enabled bool) store.AppVersion {
 	t.Helper()
 	now := time.Now().UTC()
-	version, err := d.store.CommitAppVersion(store.AppVersion{
+	version, _, err := d.store.CommitAppVersion(store.AppVersion{
 		AppName:      name,
 		ContentHash:  "sha256:" + name,
 		Declaration:  `{"name":"` + name + `","subscribe":[{"events":["ticket.*"]}]}`,
