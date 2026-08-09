@@ -162,11 +162,6 @@ const (
 	// app the `present` tier survives. Default 90 and UNMEASURED; safe because
 	// `away` is self-healing.
 	SettingActivityPresenceIdleSeconds = "activity.presence_idle_seconds"
-	// SettingActivityPresenceTier is READ-ONLY and daemon-computed (never stored,
-	// never accepted by set_setting): the tier generation is currently running
-	// at. It exists because a feature that legitimately stops has to be
-	// distinguishable from one that is broken.
-	SettingActivityPresenceTier = "activity.presence_tier"
 	// SettingChiefContextWindowCap caps the chief-of-staff session's effective
 	// context window (in tokens): auto-compaction triggers at this threshold
 	// instead of at the model's full window, so each cache-cold chief wake
@@ -429,10 +424,10 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 			settings[SettingActivityIntervals] = string(encoded)
 		}
 	}
-	// Read-only: what the daemon currently believes about the user's attention.
-	// A feature whose whole design is "stop when nobody is looking" needs a way
-	// to tell "off" from "away", or an operator cannot diagnose silence.
-	settings[SettingActivityPresenceTier] = d.PresenceTier().String()
+	// The presence tier is deliberately NOT here. It is live state, and settings
+	// are only re-pushed when a setting changes, so a copy parked in this
+	// snapshot goes stale within seconds of the user moving. `attn activity`
+	// computes it per request, which is the only way to read it honestly.
 
 	tailscale := d.tailscaleStateSnapshot()
 	if tailscale.status != "" {

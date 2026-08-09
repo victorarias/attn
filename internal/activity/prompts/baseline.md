@@ -33,6 +33,10 @@ ONE line, under 90 characters, present tense. Name the concrete subject: the PR
 number, the file, the command, the error. No preamble, no quotes, no trailing
 period.
 
+Leave out anything the reader cannot use: step numbers from the agent's own plan,
+and ids, hashes or tool-call handles, which name something only the agent can
+see.
+
 Output only the line.
 
 {{USER}}

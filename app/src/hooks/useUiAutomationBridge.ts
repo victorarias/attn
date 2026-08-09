@@ -2051,6 +2051,25 @@ export function useUiAutomationBridge({
         await settleUi(2);
         return { typed: text };
       }
+      case 'dom_select': {
+        // Selects need their own verb: dom_type goes through the input value
+        // setter, which a <select> ignores, and a scenario that drives a settings
+        // pane has no other way to choose an option.
+        const selector = typeof payload.selector === 'string' ? payload.selector : null;
+        const value = typeof payload.value === 'string' ? payload.value : null;
+        if (!selector) throw new Error('dom_select requires selector');
+        if (value === null) throw new Error('dom_select requires value');
+        const element = document.querySelector(selector);
+        if (!(element instanceof HTMLSelectElement)) {
+          throw new Error(`dom_select target is not a select: ${selector}`);
+        }
+        if (![...element.options].some((option) => option.value === value)) {
+          throw new Error(`dom_select has no option ${value} in ${selector}`);
+        }
+        setControlValue(element, value);
+        await settleUi(2);
+        return { selected: value };
+      }
       case 'get_window_bounds': {
         if (!isTauri()) {
           return null;

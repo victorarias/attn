@@ -92,11 +92,12 @@ describe('SessionActivitySettings', () => {
     );
   });
 
-  // The tier is why nothing is appearing, and it is the one thing the user
-  // cannot infer from this pane.
-  it('says how attn currently reads the user', () => {
-    renderPane({ 'activity.presence_tier': 'watching' });
+  // The presence tier is live state and settings are only re-pushed when a
+  // setting changes, so a tier rendered from the settings snapshot would sit
+  // there claiming `away` at a user who is plainly reading the pane.
+  it('does not render a presence tier from the settings snapshot', () => {
+    renderPane({ 'activity.presence_tier': 'away' });
 
-    expect(screen.getByTestId('settings-activity-presence-tier')).toHaveTextContent('watching');
+    expect(screen.queryByText(/away/i)).toBeNull();
   });
 });

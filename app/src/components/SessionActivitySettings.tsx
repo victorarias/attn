@@ -15,7 +15,6 @@ import { agentLabel } from '../utils/agentAvailability';
 export const ACTIVITY_ENABLED_SETTING = 'activity.enabled';
 export const ACTIVITY_CONFIG_SETTING = 'activity.config';
 export const ACTIVITY_INTERVALS_SETTING = 'activity.intervals';
-export const ACTIVITY_PRESENCE_TIER_SETTING = 'activity.presence_tier';
 
 // The daemon clamps to this range; the inputs say so rather than silently
 // accepting a number that comes back different.
@@ -92,7 +91,6 @@ export function SessionActivitySettings({
     [settings],
   );
   const enabled = (settings[ACTIVITY_ENABLED_SETTING] || 'false') === 'true';
-  const presenceTier = settings[ACTIVITY_PRESENCE_TIER_SETTING] || 'away';
 
   const [agent, setAgent] = useState<SessionAgent | ''>(saved.agent);
   const [model, setModel] = useState(saved.model);
@@ -153,9 +151,8 @@ export function SessionActivitySettings({
           <div>
             <p className="settings-row-title">Generate activity lines</p>
             <p className="settings-row-copy">
-              Needs an agent selected below. attn currently reads you as{' '}
-              <strong data-testid="settings-activity-presence-tier">{presenceTier}</strong>
-              {presenceTier === 'away' ? ' — nothing is being generated.' : '.'}
+              Needs an agent selected below. Run <code>attn activity</code> in a terminal to see
+              the lines and why any are missing.
             </p>
           </div>
           <button
