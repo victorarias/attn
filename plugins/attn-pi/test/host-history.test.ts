@@ -7,6 +7,7 @@ import {
   conversationInterrupted,
   parseVerb,
   reconstructTranscript,
+  retentionBudget,
   snapshotItemKey,
   type Envelope,
   type SessionEntryLike,
@@ -512,5 +513,43 @@ describe("retention", () => {
     expect(items).toHaveLength(1);
     expect(ids(items)).toEqual(["m1"]);
     expect(items[0]!.kind === "message" && items[0]!.text).toBe("0123456789".repeat(40));
+  });
+});
+
+describe("retention budget from the environment", () => {
+  /** Reads a budget, keeping whatever it complained about. */
+  function budget(raw: string, fallback = 50_000): { value: number; warnings: string[] } {
+    const warnings: string[] = [];
+    const value = retentionBudget("ATTN_PI_HOST_RETENTION_ITEMS", raw, fallback, (message) =>
+      warnings.push(message));
+    return { value, warnings };
+  }
+
+  test("nobody asked, so the compiled-in default stands and nothing is said", () => {
+    expect(budget("")).toEqual({ value: 50_000, warnings: [] });
+  });
+
+  test("a lowered budget is taken, which is what makes the tripwire reachable", () => {
+    expect(budget("40")).toEqual({ value: 40, warnings: [] });
+  });
+
+  test("one item is a legitimate ask, not a typo", () => {
+    expect(budget("1").value).toBe(1);
+  });
+
+  test("a typo keeps the default rather than silently emptying the transcript", () => {
+    for (const raw of ["fourty", "0", "-1", "1.5", "40 items", "1e3px", "Infinity", "NaN"]) {
+      expect(budget(raw).value).toBe(50_000);
+    }
+  });
+
+  test("a refused value says what it was and what is being used instead", () => {
+    expect(budget("0").warnings).toEqual([
+      "ATTN_PI_HOST_RETENTION_ITEMS=0 is not a positive whole number; using 50000",
+    ]);
+  });
+
+  test("a whole number written in exponent form is still a whole number", () => {
+    expect(budget("1e3")).toEqual({ value: 1000, warnings: [] });
   });
 });

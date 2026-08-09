@@ -166,6 +166,13 @@ See `docs/glossary.md` for the vocabulary and
   refusing to send it all at once. Retention is a tripwire — a conversation that
   reaches it has been talking for weeks — and every settle logs what was held,
   which is where the next remeasurement comes from.
+  `ATTN_PI_HOST_RETENTION_ITEMS` and `ATTN_PI_HOST_RETENTION_BYTES` lower them
+  (read from the daemon's environment at spawn, inherited by the host): the
+  tripwire is set past the longest conversation anyone here has ever had, so
+  lowering it is the only way to watch a host actually drop history. A value
+  that is not a positive whole number is logged and treated as absent — meaning
+  the default, never zero, because a typo in a diagnostic variable must not
+  quietly reduce a conversation to one item.
 - **What retention drops, the snapshot admits to.** `dropped` counts the items
   gone for good, and it is a different question from `truncated` ("this message
   does not carry everything", which a client pages away) and from `has_more`

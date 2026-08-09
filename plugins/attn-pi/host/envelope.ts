@@ -1061,6 +1061,36 @@ export const TRANSCRIPT_RETENTION_ITEMS = 50_000;
  */
 export const TRANSCRIPT_RETENTION_BYTES = 32 << 20;
 
+/**
+ * A retention budget the environment asked for, or the compiled-in default.
+ *
+ * The override exists to make the tripwire reachable: 50,000 items and 32 MB
+ * are set past the longest conversation anyone here has ever had, so the only
+ * way to watch a host actually drop history — and the app say so — is to lower
+ * them. It is the escape hatch too, for a machine where a host's memory matters
+ * more than a month of scroll-back.
+ *
+ * A value that is not a positive count is reported through `warn` and treated
+ * as absent, meaning the DEFAULT rather than zero: a typo in a tuning variable
+ * must not silently reduce a conversation to one item, and refusing to launch
+ * over a diagnostic environment variable is worse than either. `raw` is the
+ * already-trimmed value, and empty means nobody asked.
+ */
+export function retentionBudget(
+  name: string,
+  raw: string,
+  fallback: number,
+  warn: (message: string) => void,
+): number {
+  if (raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    warn(`${name}=${raw} is not a positive whole number; using ${fallback}`);
+    return fallback;
+  }
+  return value;
+}
+
 function itemBytes(item: SnapshotItem): number {
   if (item.kind === "message") return item.text.length + item.role.length + item.id.length;
   if (item.kind === "notice") return item.text.length + item.id.length;

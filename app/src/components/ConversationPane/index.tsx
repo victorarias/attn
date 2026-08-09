@@ -216,7 +216,7 @@ export function ConversationPane({ sessionId, paneActive, sessionState, resolved
           // will answer for it. Saying so is the difference between a history
           // that begins mid-thought and one that explains why.
           <div
-            className="conversation-notice conversation-notice--info conversation-pane-dropped"
+            className="conversation-notice conversation-pane-dropped"
             data-testid="conversation-history-dropped"
             data-dropped={droppedBefore}
           >
