@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  Second comment sweep: the frontend (46 TS/TSX files) and the Go long tail
+  (13 files round one missed, including the new activity feature). Same
+  policy — invariants and measured receipts stay at a line or two, narration
+  and retellings go; every touched file verified token/AST-identical to its
+  previous version.

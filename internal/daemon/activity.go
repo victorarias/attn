@@ -18,12 +18,8 @@ import (
 	"github.com/victorarias/attn/internal/transcript"
 )
 
-// sessionActivityTimeout bounds one generation.
-//
-// A tripwire, not a schedule: measured end to end the seam answers in ~5s on
-// Codex and ~12s on Claude, worst observed ~19s. A run that reaches a minute has
-// stopped being a dashboard refresh and become a hung subprocess, and killing it
-// costs nothing — the next trigger produces a fresher line anyway.
+// sessionActivityTimeout bounds one generation. A tripwire: measured ~5s on
+// Codex, ~12s on Claude, worst observed ~19s.
 const sessionActivityTimeout = time.Minute
 
 // sessionActivityBudgetUSD caps one run. Set two orders of magnitude above the
@@ -31,49 +27,35 @@ const sessionActivityTimeout = time.Minute
 // touches it.
 const sessionActivityBudgetUSD = "0.50"
 
-// sessionActivityConcurrency bounds how many generations run at once.
-//
-// Three because that is roughly how many sessions are moving at any moment in a
-// working day (the plan's cost model uses the same number, from the same capture
-// data), so the common case never queues, and a pathological one — twenty
-// sessions all writing — degrades into a queue rather than twenty subprocesses.
+// sessionActivityConcurrency bounds concurrent generations. Three is roughly
+// how many sessions move at once in a working day, so the common case never
+// queues and a pathological one degrades into a queue.
 const sessionActivityConcurrency = 3
 
-// activityMaxTurns is 2, not 1. One turn is enough to answer, but a headless run
-// that exhausts its turn budget exits non-zero even when it already produced the
-// text, so a 1-turn cap turns a correct answer into a failed job.
+// activityMaxTurns is 2, not 1: a headless run that exhausts its turn budget
+// exits non-zero even when it already produced the text.
 const activityMaxTurns = 2
 
-// The scan tick. It is a cron entry on the same queue as everything else the
-// daemon does periodically, so there is one mechanism and one place to look when
-// a recurring thing stops happening.
-//
-// The tick fires faster than any tier interval on purpose: the tick decides
-// nothing, it only asks each session whether ITS interval has elapsed. Making
-// the tick itself the interval would tie every session to the same phase and
-// would have to be rescheduled whenever the tier changed.
+// The scan tick, a cron entry on the shared job queue. It fires faster than any
+// tier interval on purpose: it decides nothing, it only asks each session
+// whether ITS interval has elapsed.
 const (
 	sessionActivityScanKind     = "session_activity_scan"
 	sessionActivityScanInterval = 30 * time.Second
 	sessionActivityScanTimeout  = 30 * time.Second
 )
 
-// sessionActivityRun is what one session's last pass left behind.
-//
-// Two stamps because the two gates ask different questions. ObservedAt answers
-// "have we looked since the transcript last moved" and is written by every pass,
-// including the ones that spend nothing — a cold-start seed, an empty window —
-// so a quiet session stops being re-read. SpentAt answers "may we spend again"
-// and is written only when a run actually calls the agent, so a first line is
-// not delayed by a seed while a failing agent is still held to the interval.
+// sessionActivityRun is what one session's last pass left behind. Two stamps,
+// two gates: ObservedAt is written by every pass ("have we looked since the
+// transcript moved"), SpentAt only by a pass that called the agent ("may we
+// spend again").
 type sessionActivityRun struct {
 	ObservedAt time.Time
 	SpentAt    time.Time
-	// Err is why the last run that spent produced nothing, kept so the feature
-	// can say what is wrong instead of going quiet. Cleared by a run that works.
+	// Err is why the last spending run produced nothing; cleared by a run that works.
 	Err string
-	// Transcript is the last resolved transcript path, and ResumeID the resume id
-	// it was resolved under. See sessionActivityTranscript.
+	// Transcript is the last resolved path, ResumeID the resume id it was
+	// resolved under. See sessionActivityTranscript.
 	Transcript string
 	ResumeID   string
 }
@@ -119,19 +101,9 @@ func latest(a, b time.Time) time.Time {
 }
 
 // sessionActivityScanHandler enqueues a refresh for every session whose interval
-// has elapsed and whose transcript has actually moved.
-//
-// Both preconditions are what keep the count far below "sessions × rate". A
-// session that has not written since its last line has nothing new to say, and
-// its existing line is still true — so blocked and finished sessions cost
-// nothing even with the dashboard open.
-//
-// Both are measured against the last PASS rather than the last stored line.
-// Measuring against the line makes every outcome except success invisible: a
-// generation that fails, times out, or answers with nothing leaves the stamp
-// untouched, and the scan re-runs it every tick — at the 30s tick rate, not the
-// tier's, and with the queue resetting the job's attempt count each time so
-// backoff and the dead-job notification never arrive.
+// has elapsed and whose transcript has moved. Both are measured against the last
+// PASS, not the last stored line: measuring against the line makes a failing or
+// empty generation invisible and re-runs it every tick.
 func (d *Daemon) sessionActivityScanHandler(context.Context, *jobs.Job) (any, error) {
 	if !d.activityEnabled() {
 		return nil, nil
@@ -141,8 +113,7 @@ func (d *Daemon) sessionActivityScanHandler(context.Context, *jobs.Job) (any, er
 	if interval <= 0 {
 		return nil, nil
 	}
-	// A misconfiguration is worth one log line per tick rather than a silent
-	// nothing: the feature is on, the user expects lines, and none are coming.
+	// A misconfiguration is worth one log line per tick rather than silence.
 	if _, err := d.activityConfigured(); err != nil {
 		d.logf("session_activity: enabled but not runnable: %v", err)
 		return nil, nil
@@ -170,17 +141,10 @@ func (d *Daemon) sessionActivityScanHandler(context.Context, *jobs.Job) (any, er
 	return nil, nil
 }
 
-// transcriptMovedSince reports whether a session has written anything since its
-// line was generated.
-//
-// It asks the filesystem rather than the reader: a stat is O(1) where opening,
-// seeking and decoding is not, and this runs over every session on every tick.
-// The reader still has the last word — a window that comes back empty skips the
-// run — so a stat that says "maybe" costs one cheap read, and one that says "no"
-// costs nothing at all.
-//
-// A session that has never had a line generated always counts as moved: that is
-// the cold start, and the executor turns it into a cursor seed.
+// transcriptMovedSince reports whether a session wrote anything since its line
+// was generated, via stat rather than the reader because it runs over every
+// session on every tick. Never-generated counts as moved: the executor turns
+// that into a cursor seed.
 func (d *Daemon) transcriptMovedSince(session *protocol.Session, since time.Time) bool {
 	if since.IsZero() {
 		return true
@@ -196,22 +160,11 @@ func (d *Daemon) transcriptMovedSince(session *protocol.Session, since time.Time
 	return info.ModTime().After(since)
 }
 
-// sessionActivityTranscript resolves a session's transcript path and remembers
-// it across ticks.
-//
-// The scan asks every session where its transcript is on every tick, and on
-// Codex answering means walking ~/.codex/sessions and opening rollouts until one
-// carries the right id — 235–489ms with a working day of rollouts on disk, per
-// Codex session, every 30 seconds, whether or not anything is generated. The
-// answer barely ever changes: a session writes to one file for as long as it
-// runs.
-//
-// Two things do change it, and both are checked rather than assumed. The file
-// can go away (a pruned rollout, a compaction that rewrites elsewhere), which
-// the stat catches. And the session can resume under a new id, which starts a
-// new file while leaving the old one on disk to stat perfectly well — so the
-// resume id the path was found under is remembered beside it, and a different
-// one re-resolves.
+// sessionActivityTranscript resolves a session's transcript path and caches it
+// across ticks; resolving it on Codex measured 235–489ms per session. Two
+// things invalidate the cache and both are checked: the file going away, and a
+// resume under a new id (which writes a new file and leaves the old one
+// stat-able), hence the remembered resume id.
 func (d *Daemon) sessionActivityTranscript(session *protocol.Session) string {
 	if session == nil {
 		return ""
@@ -230,20 +183,15 @@ func (d *Daemon) sessionActivityTranscript(session *protocol.Session) string {
 	return path
 }
 
-// sessionActivityPayload carries the transcript path resolved at enqueue time.
-// The generator runs debounced, and resolving the path here means a run does not
-// depend on the finder still guessing the same file minutes later.
+// sessionActivityPayload carries the transcript path resolved at enqueue time,
+// so a debounced run does not depend on the finder agreeing minutes later.
 type sessionActivityPayload struct {
 	Transcript string `json:"transcript,omitempty"`
 }
 
 // enqueueSessionActivity queues a refresh for one session, coalesced by session
-// id so a burst of transcript movement collapses into a single run.
-//
-// Everything that decides whether to generate lives here rather than in the
-// executor, so a suppressed refresh costs a map lookup instead of a queued job:
-// the feature has to be off, the agent unconfigured, or the tier away, and any
-// of those means no work at all.
+// id. Every suppression check lives here rather than in the executor, so a
+// suppressed refresh costs a map lookup instead of a queued job.
 func (d *Daemon) enqueueSessionActivity(sessionID string) {
 	sessionID = strings.TrimSpace(sessionID)
 	if sessionID == "" {
@@ -252,8 +200,7 @@ func (d *Daemon) enqueueSessionActivity(sessionID string) {
 	if !d.activityEnabled() {
 		return
 	}
-	// away is a hard stop, and it is checked before anything else because it is
-	// the case that has to cost nothing.
+	// away is a hard stop, checked first because it must cost nothing.
 	if d.PresenceTier() == PresenceAway {
 		return
 	}
@@ -277,9 +224,8 @@ func (d *Daemon) enqueueSessionActivity(sessionID string) {
 	}
 }
 
-// sessionGeneratesActivity reports whether a session is the kind that has
-// something to say. A shell has no transcript and no agent, and a satellite is
-// a split of one — neither is an agent doing work, so neither gets a line.
+// sessionGeneratesActivity reports whether a session has something to say;
+// shells and satellites do not.
 func sessionGeneratesActivity(session *protocol.Session) bool {
 	if session == nil {
 		return false
@@ -287,9 +233,7 @@ func sessionGeneratesActivity(session *protocol.Session) bool {
 	if session.ParentSessionID != nil && strings.TrimSpace(*session.ParentSessionID) != "" {
 		return false
 	}
-	// Remote sessions are deferred: their transcript lives on the remote daemon
-	// and the presence signal originates at the hub. See the plan's
-	// "Deferred: remote sessions".
+	// Remote sessions are deferred: their transcript lives on the remote daemon.
 	if session.EndpointID != nil && strings.TrimSpace(*session.EndpointID) != "" {
 		return false
 	}
@@ -301,20 +245,12 @@ func sessionGeneratesActivity(session *protocol.Session) bool {
 	return isFinder
 }
 
-// sessionActivityHandler generates one session's line.
-//
-// The shape of a run is: read the delta since the stored cursor, render it with
-// the session's state and its previous line, ask a tool-less agent for one
-// sentence, and store the answer with the cursor it was generated through.
-//
-// Two cursor outcomes are normal rather than exceptional and both re-seed at
-// head instead of failing: a session with no stored cursor (cold start — a full
-// read of a 32MB transcript to produce a first line is not worth 1.4s and would
-// summarize the session's history rather than its present), and a cursor the
-// transcript no longer matches (Claude compaction rewrites the file).
+// sessionActivityHandler generates one session's line: read the delta since the
+// stored cursor, render it, ask a tool-less agent for one sentence, store it
+// with the cursor it was generated through. A missing cursor (cold start) and a
+// mismatched one (Claude compaction) both re-seed at head instead of failing.
 func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any, error) {
-	// A run queued before the toggle went off must not spend money after it. The
-	// same applies to the tier: the user can walk away between enqueue and claim.
+	// A run queued before the toggle or tier changed must not spend after it.
 	if !d.activityEnabled() || d.PresenceTier() == PresenceAway {
 		return nil, nil
 	}
@@ -333,9 +269,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 		// The session is gone; its line went with it. Nothing to retry.
 		return nil, nil
 	}
-	// Every pass past this point counts as having looked, whatever it goes on to
-	// do — seed a cursor, find an empty window, spend on the agent, or fail. The
-	// scan measures transcript movement from here.
+	// Every pass past here counts as having looked, whatever it goes on to do;
+	// the scan measures transcript movement from this stamp.
 	d.noteSessionActivityRun(sessionID, func(run *sessionActivityRun) {
 		run.ObservedAt = time.Now()
 	})
@@ -354,10 +289,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 
 	stored := d.store.GetSessionActivity(sessionID)
 	if stored.Cursor == "" {
-		// Cold start, checked before the read rather than after it: reading from
-		// byte 0 succeeds, which is exactly the problem — it would spend a full
-		// scan of a transcript that reaches tens of megabytes to summarize the
-		// session's whole history as if it were the present.
+		// Cold start, checked before the read: reading from byte 0 succeeds, which
+		// is the problem — a full scan summarizing history as if it were now.
 		return nil, d.reseedSessionActivity(sessionID, transcriptPath)
 	}
 	window, err := activity.Read(transcriptPath, string(session.Agent), stored.Cursor)
@@ -367,17 +300,15 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 		errors.Is(err, transcript.ErrCursorPastEnd) ||
 		errors.Is(err, transcript.ErrInvalidCursor) ||
 		errors.Is(err, activity.ErrDeltaTooLarge):
-		// Re-seed and skip this generation. The next real movement produces a
-		// line against a cursor that validates, which is cheaper and more honest
-		// than failing this job repeatedly against one that never will.
+		// Re-seed and skip: the next movement works against a cursor that validates.
 		return nil, d.reseedSessionActivity(sessionID, transcriptPath)
 	default:
 		return nil, fmt.Errorf("session_activity: read %s: %w", transcriptPath, err)
 	}
 
 	if window.Empty() {
-		// Nothing was appended: the existing line is still true. Advance the
-		// cursor anyway so the next trigger measures movement from here.
+		// Nothing appended: the line is still true. Advance the cursor anyway so
+		// the next trigger measures movement from here.
 		return nil, d.advanceSessionActivityCursor(sessionID, stored, window.NextCursor)
 	}
 
@@ -403,9 +334,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 			return p.RunHeadlessTask(ctx, r)
 		}
 	}
-	// Stamped before the call, not after: a run killed by the timeout has spent
-	// the same as one that answered, and stamping on the way out would let a
-	// generation that always hangs reschedule itself on every tick.
+	// Stamped before the call: a run killed by the timeout spent the same as one
+	// that answered, and stamping after would let a hanging run retry every tick.
 	d.noteSessionActivityRun(sessionID, func(record *sessionActivityRun) {
 		record.SpentAt = time.Now()
 	})
@@ -414,35 +344,22 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 		Model:           config.Model,
 		ReasoningEffort: config.Effort,
 		Prompt:          prompt.User,
-		// The invariant half replaces the CLI's own system prompt, which is
-		// written for interactive coding and is most of what a run this small
-		// pays for. Measured: the billed prefix drops from 46,745 tokens to
-		// 33,955, and the volatile sections that were invalidating the cache
-		// suffix every run go with it.
+		// Replaces the CLI's own interactive-coding system prompt. Measured: the
+		// billed prefix drops from 46,745 tokens to 33,955.
 		SystemPrompt: prompt.System,
 		WorkDir:      workDir,
-		// Tool-less and bounded. An activity line has no business touching the
-		// filesystem, and a run on a per-refresh schedule needs a ceiling.
-		//
-		// No OutputSchema on purpose: the answer IS the final text. Asking for it
-		// as a schema-validated object bought a second reasoning turn restating
-		// what the first already said, and Codex's tool-free path has no schema
-		// support at all — dropping it makes both agents answer the same way.
+		// No OutputSchema on purpose: the answer IS the final text, and Codex's
+		// tool-free path has no schema support at all.
 		DisableTools: true,
-		// MaxTurns and MaxBudgetUSD are Claude-only — `codex exec` has no flag to
-		// translate them into. What actually bounds BOTH agents is the pair above
-		// and below: DisableTools leaves the run nothing to loop over, and ctx
-		// carries sessionActivityTimeout, so the worst Codex case is one minute of
-		// a single tool-less completion. The two caps are the extra belt Claude
-		// happens to offer, not the only thing standing between us and a runaway.
+		// MaxTurns and MaxBudgetUSD are Claude-only; `codex exec` has no flag for
+		// them. What bounds both agents is DisableTools plus ctx's
+		// sessionActivityTimeout.
 		MaxTurns:     activityMaxTurns,
 		MaxBudgetUSD: sessionActivityBudgetUSD,
 	})
 	if err != nil {
-		// Kept, not just logged. A generation that fails every time is now rate
-		// limited like a successful one, which is right but silent — and a silent
-		// feature the user paid to turn on is indistinguishable from a broken
-		// one. `attn activity` reads this back.
+		// Kept, not just logged: a run that always fails is rate limited like a
+		// successful one, so nothing else would surface it. `attn activity` reads it.
 		d.noteSessionActivityRun(sessionID, func(record *sessionActivityRun) {
 			record.Err = err.Error()
 		})
@@ -451,9 +368,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 
 	line, ok := activity.Sanitize(result.Text)
 	if !ok {
-		// The run produced nothing usable. Keep whatever line is there — a stale
-		// true line beats a blank row — but advance the cursor so the next
-		// trigger works from fresh events rather than re-reading this window.
+		// Keep whatever line is there — a stale true line beats a blank row — but
+		// advance the cursor so the next trigger works from fresh events.
 		d.logf("session_activity: session=%s produced no usable line (%s)", sessionID, result.Diagnostics)
 		d.noteSessionActivityRun(sessionID, func(record *sessionActivityRun) {
 			record.Err = "the agent answered with nothing usable"
@@ -465,10 +381,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	if note := window.Report.String(); note != "" {
 		d.logf("session_activity: session=%s window truncated: %s", sessionID, note)
 	}
-	// Re-checked after the agent call, not only before it. The run takes seconds,
-	// and a user who switched the feature off during them has already had every
-	// line cleared — writing this one now would strand it on home with nothing
-	// left to clear it.
+	// Re-checked after the agent call: a user who switched the feature off during
+	// it has had every line cleared, and this one would be stranded on home.
 	if !d.activityEnabled() {
 		return nil, nil
 	}
@@ -481,9 +395,8 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	return nil, nil
 }
 
-// reseedSessionActivity moves the cursor to the transcript's head, keeping the
-// line that is already there. Used for a cold start and for a cursor the
-// transcript no longer matches.
+// reseedSessionActivity moves the cursor to the transcript head, keeping the
+// existing line. Used for a cold start and for a mismatched cursor.
 func (d *Daemon) reseedSessionActivity(sessionID, transcriptPath string) error {
 	head, err := activity.SeedCursor(transcriptPath)
 	if err != nil {
@@ -494,8 +407,7 @@ func (d *Daemon) reseedSessionActivity(sessionID, transcriptPath string) error {
 }
 
 // advanceSessionActivityCursor moves the cursor forward without changing the
-// line. Kept separate from a re-seed because they mean different things in a
-// log, and because passing an empty cursor here would silently clear the line.
+// line. An empty cursor here would silently clear the line.
 func (d *Daemon) advanceSessionActivityCursor(sessionID string, stored store.SessionActivity, next string) error {
 	if next == "" || next == stored.Cursor {
 		return nil
@@ -505,9 +417,8 @@ func (d *Daemon) advanceSessionActivityCursor(sessionID string, stored store.Ses
 }
 
 // clearAllSessionActivity forgets every line, one fact per session so each row
-// re-renders. Used when the feature is switched off: the lines are the feature's
-// only output, and leaving them behind would leave home asserting something attn
-// has stopped keeping true.
+// re-renders. Used when the feature is switched off, so home stops asserting
+// what attn no longer keeps true.
 func (d *Daemon) clearAllSessionActivity() {
 	for _, session := range d.store.List("") {
 		if d.store.GetSessionActivity(session.ID).Line == "" {
@@ -519,9 +430,7 @@ func (d *Daemon) clearAllSessionActivity() {
 }
 
 // handleActivityStatus answers what the daemon believes about session activity
-// right now. It exists because the feature's entire output otherwise lives on
-// the dashboard: from a terminal, or on a headless daemon, there is no other way
-// to see whether lines are being generated or why they are not.
+// right now — the only view of it from a terminal or a headless daemon.
 func (d *Daemon) handleActivityStatus(conn net.Conn, _ *protocol.ActivityStatusMessage) {
 	result := protocol.ActivityStatusResult{
 		PresenceTier: d.PresenceTier().String(),
@@ -550,9 +459,8 @@ func (d *Daemon) handleActivityStatus(conn net.Conn, _ *protocol.ActivityStatusM
 	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, ActivityStatusResult: &result})
 }
 
-// handleClearSessionActivity forgets one session's line, and the cursor with it
-// so the next line describes what happens next rather than a window that was
-// already summarized.
+// handleClearSessionActivity forgets one session's line and its cursor, so the
+// next line describes what happens next rather than an already-summarized window.
 func (d *Daemon) handleClearSessionActivity(conn net.Conn, msg *protocol.ClearSessionActivityMessage) {
 	sessionID := strings.TrimSpace(msg.ID)
 	if sessionID == "" {

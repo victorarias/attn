@@ -1,19 +1,11 @@
 /**
- * domRange — map a resolved anchor's (start, end) text offsets to a live DOM
- * Range inside the block element carrying the matching data-block-id.
+ * Map an anchor's (start, end) text offsets to a live DOM Range inside the
+ * element carrying the matching data-block-id.
  *
- * The walk mirrors the extractBlocks normalization rule exactly: concatenate
- * every text node in the block's subtree in tree order, skipping subtrees the
- * React layer marks as chrome (`data-md-chrome` — alert titles, copy-button
- * chrome, blocked-image fallbacks), whose text has no hast counterpart.
- * Offsets are UTF-16 code units, the same units DOM Range offsets use, so no
- * conversion happens anywhere.
- *
- * Split text nodes (shiki spans, other highlights, prior splitText calls) are
- * tolerated by construction: the walk never assumes one text node per block.
- * A boundary landing exactly between two nodes attaches the START to the
- * later node at offset 0 and the END to the earlier node's end — this keeps
- * ranges tight (no zero-width tails inside neighbouring elements).
+ * The walk mirrors extractBlocks' normalization exactly: every text node in
+ * tree order, skipping `data-md-chrome` subtrees, in UTF-16 units. Split text
+ * nodes are tolerated by construction, and a boundary landing on a seam
+ * attaches START to the later node and END to the earlier one.
  */
 
 const CHROME_ATTR = 'data-md-chrome';
@@ -25,8 +17,7 @@ function chromeSkippingTextWalker(root: Element): TreeWalker {
     {
       acceptNode(node) {
         if (node.nodeType === Node.ELEMENT_NODE) {
-          // REJECT skips the whole chrome subtree; SKIP descends into
-          // everything else without emitting the element itself.
+          // REJECT drops the whole chrome subtree; SKIP descends without emitting.
           return (node as Element).hasAttribute(CHROME_ATTR)
             ? NodeFilter.FILTER_REJECT
             : NodeFilter.FILTER_SKIP;
@@ -37,11 +28,7 @@ function chromeSkippingTextWalker(root: Element): TreeWalker {
   );
 }
 
-/**
- * The block's rendered text as the anchor text-space sees it: every non-chrome
- * text node concatenated in tree order. Must equal the extractBlockTexts text
- * for the same block (the pipeline-parity fixture pins this).
- */
+/** Non-chrome text in tree order; must equal extractBlockTexts' text (pinned). */
 export function blockDomText(blockEl: Element): string {
   const walker = chromeSkippingTextWalker(blockEl);
   let text = '';
@@ -52,17 +39,10 @@ export function blockDomText(blockEl: Element): string {
 }
 
 /**
- * Map a DOM point (node, offset) — the shape Selection/Range boundaries come
- * in — to a UTF-16 offset into the block's rendered text (the inverse of
- * `resolveDomRange`). Handles both boundary shapes:
- *
- * - Text-node boundary: offset is a character index inside that node.
- * - Element boundary: offset is a child index; the point sits before the
- *   `offset`-th child (or at the element's end when offset === childCount,
- *   e.g. triple-click paragraph selections).
- *
- * Returns null when the node is outside `blockEl` or inside a chrome subtree
- * (chrome text has no counterpart in anchor text-space).
+ * Inverse of `resolveDomRange`, over both Range boundary shapes: a text-node
+ * offset is a character index; an element offset is a child index, the point
+ * sitting before that child (end of element when it equals childCount). Null
+ * when the node is outside `blockEl` or inside chrome.
  */
 export function domPointToOffset(blockEl: Element, node: Node, offset: number): number | null {
   if (node !== blockEl && !blockEl.contains(node)) {
@@ -87,7 +67,6 @@ export function domPointToOffset(blockEl: Element, node: Node, offset: number): 
   if (el !== blockEl && el.closest(`[${CHROME_ATTR}]`)) {
     return null;
   }
-  // The point sits before `anchor` (or at el's end when anchor is null).
   const anchor = el.childNodes[offset] ?? null;
   const walker = chromeSkippingTextWalker(blockEl);
   let acc = 0;
@@ -106,11 +85,8 @@ export function domPointToOffset(blockEl: Element, node: Node, offset: number): 
 }
 
 /**
- * Resolve `[start, end)` (UTF-16 offsets into the block's rendered text) to a
- * DOM Range within `blockEl` (the element matching `[data-block-id="..."]`;
- * scoping the querySelector is the caller's job). Returns null when the range
- * is degenerate or the DOM's accumulated text is shorter than `end` (DOM /
- * text-model disagreement — unpaintable, never throws).
+ * Resolve `[start, end)` to a DOM Range within `blockEl`. Null — never a throw
+ * — when the range is degenerate or the DOM's text is shorter than `end`.
  */
 export function resolveDomRange(blockEl: Element, start: number, end: number): Range | null {
   if (start < 0 || end <= start) {
@@ -127,12 +103,12 @@ export function resolveDomRange(blockEl: Element, start: number, end: number): R
     if (len === 0) {
       continue;
     }
-    // Start attaches to the LATER node when landing on a seam (start === acc + len).
+    // Start attaches to the LATER node on a seam (start === acc + len).
     if (!startSet && start >= acc && start < acc + len) {
       range.setStart(node, start - acc);
       startSet = true;
     }
-    // End attaches to the EARLIER node when landing on a seam (end === acc + len).
+    // End attaches to the EARLIER node on a seam (end === acc + len).
     if (startSet && !endSet && end > acc && end <= acc + len) {
       range.setEnd(node, end - acc);
       endSet = true;

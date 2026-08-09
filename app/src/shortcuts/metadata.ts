@@ -1,13 +1,6 @@
-// app/src/shortcuts/metadata.ts
-// Editor-facing metadata for every shortcut: a human label, a grouping
-// category, and whether the binding is protected (rebindable, but never
-// allowed to be left unbound so the user can't strand themselves).
-//
-// Bindings live in registry.ts (the single source of truth for key combos).
-// This module is purely about how shortcuts are presented and governed in the
-// shortcut editor. The `Record<ShortcutId, ...>` shape forces this map to stay
-// exhaustive: adding a shortcut to the registry without metadata fails to
-// compile.
+// Editor-facing metadata for every shortcut: label, category, and governance.
+// Key combos live in registry.ts. The `Record<ShortcutId, ...>` shape keeps this
+// map exhaustive — a registry entry without metadata fails to compile.
 
 import { ShortcutId } from './registry';
 
@@ -18,31 +11,18 @@ export interface ShortcutMeta {
   category: ShortcutCategory;
   /** Cannot be unbound (still rebindable). Guards the escape hatches. */
   protected?: boolean;
-  /**
-   * Terse text for the sidebar dock chip. Falls back to `label` when absent, so
-   * any shortcut is dock-eligible while the default dock entries stay compact.
-   */
+  /** Terse dock-chip text; falls back to `label`, so any shortcut is dock-eligible. */
   dockLabel?: string;
   /**
-   * The handler is registered in `SessionTerminalWorkspace` gated by
-   * `sessionVisible`, so the shortcut does nothing unless a terminal workspace
-   * is on screen. This is an availability fact, NOT a focus claim — the key
-   * still fires from the global window listener. Set only on the ids actually
-   * gated this way; do not infer it from the `terminal.` id prefix (e.g.
-   * `terminal.collapse` has no handler at all).
+   * The handler only exists while a terminal workspace is on screen. An
+   * availability fact, not a focus claim; set only on ids actually gated that
+   * way, never inferred from the `terminal.` prefix.
    */
   requiresTerminal?: boolean;
   /**
-   * The keystroke is delivered by a native macOS menu item rather than by the
-   * page's keydown listener, because AppKit consumes the combo before the
-   * WebView sees it (⌘. — `cancelOperation:`). The accelerator lives in
-   * `app_menu` (src-tauri/src/lib.rs) and the menu re-dispatches this id into
-   * the page.
-   *
-   * The editor reads this to show the key as fixed instead of offering a rebind
-   * it cannot honor: a new combo would be recorded here and never reach the
-   * action, while ⌘. kept working from the menu. Better to say the key is not
-   * yours to move than to accept a rebind that silently does nothing.
+   * A native menu item in `app_menu` (src-tauri/src/lib.rs) delivers the
+   * keystroke because AppKit consumes it before the WebView. The editor shows
+   * the key as fixed: a rebind here would be recorded and never fire.
    */
   nativeDelivery?: boolean;
 }

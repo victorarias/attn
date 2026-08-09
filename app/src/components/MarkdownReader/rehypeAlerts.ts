@@ -1,21 +1,12 @@
 /**
- * rehypeAlerts — detects GitHub-style alert blockquotes and tags them for the
- * reader's blockquote renderer.
+ * Detects GitHub-style alert blockquotes and tags them for the reader's
+ * blockquote renderer. A blockquote whose first paragraph's FIRST LINE is
+ * exactly `[!NOTE|TIP|WARNING|CAUTION|IMPORTANT]` (case-insensitive, marker
+ * owning the whole line, as GitHub does) loses that line and gains
+ * `dataAlertKind`.
  *
- * A blockquote whose first paragraph's FIRST LINE is exactly `[!NOTE]`,
- * `[!TIP]`, `[!WARNING]`, `[!CAUTION]`, or `[!IMPORTANT]` (case-insensitive,
- * nothing else on the line) is an alert: the marker line is stripped from the
- * body and the blockquote element gets `dataAlertKind` (rendered as
- * `data-alert-kind`). The React layer (`readerComponents`'s `blockquote`)
- * renders tagged blockquotes as an AlertBlock with icon + title.
- *
- * Runs AFTER rehypeSourceAnchors so the blockquote keeps its stamped
- * `data-block-id`/`data-source-line*` attributes (the block id stays
- * `bN-blockquote`, and the line range correctly includes the marker line).
- *
- * `[!NOTE] trailing words` is NOT an alert (the marker must own the line) —
- * matching GitHub. remark-gfm keeps the whole `>` run together, so the
- * "alerts own their body" merge rule comes for free.
+ * Runs AFTER rehypeSourceAnchors, so the blockquote keeps its stamped
+ * `data-block-id`/`data-source-line*` and its range covers the marker line.
  */
 
 import type { Element, ElementContent, Root, RootContent } from "hast";
@@ -46,10 +37,7 @@ function leadingParagraph(blockquote: Element): Element | null {
   return null;
 }
 
-/**
- * If the blockquote is an alert: strip the marker line from its body and
- * return the kind. Otherwise return null and leave the tree untouched.
- */
+/** Strip the marker line and return the kind, or null leaving the tree alone. */
 function detectAndStripMarker(blockquote: Element): AlertKind | null {
   const paragraph = leadingParagraph(blockquote);
   const first = paragraph?.children[0];
@@ -65,8 +53,7 @@ function detectAndStripMarker(blockquote: Element): AlertKind | null {
   }
 
   if (newlineAt === -1) {
-    // Marker was the whole text node; drop it (and a hard-break `<br>` that
-    // `[!NOTE]␣␣` two-space syntax would leave behind).
+    // Marker owned the text node; drop it and any `<br>` two-space syntax left.
     paragraph.children.shift();
     const next = paragraph.children[0];
     if (next && isElement(next) && next.tagName === "br") {
@@ -90,11 +77,6 @@ function detectAndStripMarker(blockquote: Element): AlertKind | null {
   return match[1].toLowerCase() as AlertKind;
 }
 
-/**
- * Rehype plugin. Usable directly in react-markdown's `rehypePlugins`:
- *
- *   rehypePlugins={[rehypeAlerts]}
- */
 export default function rehypeAlerts() {
   return (tree: Root): void => {
     const walk = (node: Root | RootContent): void => {

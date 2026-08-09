@@ -1,8 +1,6 @@
-// A single read-and-type markdown surface: CodeMirror 6 with the live-preview
-// decorations from liveMarkdownPreview. There is no view/edit toggle — the document
-// always renders inline and is always editable, with raw markdown revealed on the
-// cursor's line. The parent owns persistence (hash-CAS autosave); this component only
-// emits value changes, link follows, and the current selection (for "send to chief").
+// A single read-and-type markdown surface: CodeMirror 6 plus liveMarkdownPreview's
+// decorations. No view/edit toggle — raw markdown is revealed on the cursor's line.
+// The parent owns persistence; this only emits changes, link follows, and selection.
 
 import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import CodeMirror, { type ReactCodeMirrorRef } from '@uiw/react-codemirror';
@@ -21,47 +19,30 @@ import { noteDir } from './linkResolver';
 import { markdownTables } from './tableWidget';
 import { computeMinimalEdit } from './minimalEdit';
 
-// searchKeymap binds its commands with CodeMirror's "Mod-" modifier, which CM
-// resolves to Meta only when it detects a Mac platform (navigator.platform) and
-// to Ctrl everywhere else. attn only ships on macOS (see AGENTS.md), so "Mod"
-// must always mean Cmd — but a Linux CI browser (e.g. headless Chromium on the
-// e2e runners) reports a non-Mac platform and silently rebinds Cmd+F to Ctrl+F,
-// leaving Cmd+F inert. Rewrite every "Mod-" prefix to an explicit "Cmd-" so the
-// binding is platform-independent instead of relying on CM's own detection.
+// CM resolves "Mod-" to Meta only when it detects a Mac platform, so a Linux CI
+// browser silently rebinds Cmd+F to Ctrl+F and leaves Cmd+F inert. attn is macOS
+// only, so rewrite every "Mod-" to an explicit "Cmd-".
 const macSearchKeymap: readonly KeyBinding[] = searchKeymap.map((binding) =>
   binding.key?.startsWith('Mod-') ? { ...binding, key: `Cmd-${binding.key.slice(4)}` } : binding,
 );
 
 export interface LiveSelection {
   text: string;
-  // Viewport coordinates for floating UI: top is the bottom edge of the selection's
-  // last char, left is that char's horizontal midpoint — so a pill anchored here hangs
-  // below the selection end and never covers the selected text or the line above it.
+  // Viewport coords for floating UI, below the selection's last char.
   top: number;
   left: number;
 }
 
-// Imperative surface the parent drives for navigation that originates OUTSIDE the
-// editor (the context rail's outline). The editor still owns its own scroll for
-// typing; this only lets the outline jump to a heading.
+// Imperative surface for navigation originating OUTSIDE the editor.
 export interface LiveMarkdownEditorHandle {
-  // Scroll the given character offset to the top of the viewport, place the cursor
-  // there, and take focus. A no-op until the view has mounted, or if the offset is
-  // out of range for the current document.
+  // Scroll an offset to the top, place the cursor, take focus.
   scrollToPos: (pos: number) => void;
-  // Replace the document with `next` as a MINIMAL edit (shared prefix/suffix trimmed)
-  // so the reader's scroll position and selection stay anchored. Used to push an
-  // on-disk change into an open note: the default controlled-value path swaps the whole
-  // document, which snaps the viewport to the top — exactly what we must avoid while
-  // someone is reading. No-op until the view mounts, or when `next` is already current.
-  // Does NOT focus or scroll into view (the reader may be elsewhere on the page).
+  // Replace as a MINIMAL edit so scroll and selection stay anchored: the
+  // controlled-value path swaps the whole document and snaps to the top.
   applyExternalContent: (next: string) => void;
   // Close the in-editor search panel. Returns true if a panel was open.
   closeSearchPanel: () => boolean;
-  // Restore keyboard focus to the editor without moving the cursor or scrolling
-  // (unlike scrollToPos). Used after a chrome control outside the editor — e.g. a
-  // conflict-banner button — steals focus, so typing works immediately again with no
-  // extra click back into the document.
+  // Restore focus without moving the cursor, after outside chrome stole it.
   focus: () => void;
 }
 
@@ -70,35 +51,24 @@ interface LiveMarkdownEditorProps {
   onChange: (value: string) => void;
   onFollowLink?: (href: string) => void;
   onSelectionChange?: (selection: LiveSelection | null) => void;
-  // Check whether an in-notebook link target exists, to flag broken links. Omit to
-  // disable the flagging (e.g. the test harness, which has no daemon).
+  // Existence check behind broken-link flags; omit to disable the flagging.
   existsFile?: (path: string) => Promise<ExistsCheck>;
-  // Resolve an in-notebook image src to a displayable src (typically a data: URI) for
-  // the inline image widget. Omit to disable resolution — non-direct image srcs (not
-  // http(s)/data:/protocol-relative) then always render the broken placeholder.
+  // Resolve an image src for the widget; omit and non-direct srcs render broken.
   resolveImageSrc?: (src: string) => Promise<string | null>;
-  // Bumped whenever the notebook changed on disk; clears the broken-link cache's
-  // "missing" verdicts so a link to a just-created note re-checks. (A change counter,
-  // not data — only its identity change matters.)
+  // Bumped on a disk change; clears cached "missing" verdicts so targets re-check.
   revalidateSignal?: number;
-  // Root-relative path of the note being edited, used to resolve bare-relative link
-  // targets against its directory. Defaults to '' (the notebook root).
+  // The edited note's root-relative path; bare-relative targets resolve against it.
   notePath?: string;
   ariaLabel?: string;
   autoFocus?: boolean;
-  // Called with the new open state whenever the in-editor search panel opens or
-  // closes, so the parent can register/unregister an escape-stack entry.
+  // Lets the parent register/unregister an escape-stack entry for the ⌘F panel.
   onSearchOpenChange?: (open: boolean) => void;
 }
 
-// Themed entirely through the app's CSS variables so it tracks the app's light/dark
-// mode automatically — no CodeMirror dark/light flag to keep in sync. The catch:
-// CodeMirror's *base* theme styles the cursor/selection/caret from `&light`/`&dark`
-// rules that only activate when a theme sets the `darkTheme` facet (which we don't,
-// on purpose — the CSS variables already track the mode). So a complete app theme
-// must OWN every surface CM would otherwise pick a light-biased default for:
-// background, foreground, the cursor, and the selection. Get this wrong and you get
-// a black caret / lavender selection on a dark pane.
+// Themed through the app's CSS variables, so no CodeMirror dark/light flag is set.
+// The catch: CM's base theme styles cursor/selection from `&light`/`&dark` rules
+// that only activate with the `darkTheme` facet, so this theme must OWN background,
+// foreground, cursor, and selection or a dark pane gets a black caret.
 const editorTheme = EditorView.theme({
   '&': {
     height: '100%',
@@ -115,23 +85,19 @@ const editorTheme = EditorView.theme({
   '.cm-scroller': { overflow: 'auto' },
   '&.cm-focused': { outline: 'none' },
   '.cm-line': { padding: '0 2px' },
-  // basicSetup's drawSelection hides the native caret (`caret-color: transparent`)
-  // and renders its OWN `.cm-cursor` element, so the caret color is that element's
-  // left border — NOT `.cm-content { caretColor }`. This selector is deep enough to
-  // outrank CM's base `&light/&dark .cm-cursor` rule (theme beats baseTheme on a
-  // specificity tie), so the app's text color wins in both themes.
+  // drawSelection hides the native caret and draws its own `.cm-cursor`, so the
+  // caret color is that element's left border, not `.cm-content { caretColor }`.
+  // Deep enough a selector to outrank CM's base `&light/&dark .cm-cursor`.
   '.cm-cursorLayer .cm-cursor, .cm-dropCursor': {
     borderLeftColor: 'var(--color-text-primary, #e8e8e8)',
     borderLeftWidth: '2px',
   },
-  // CM's base focused-selection rule is highly specific (`&dark.cm-focused > … >
-  // .cm-selectionLayer .cm-selectionBackground`), more than a theme can match, so
-  // !important is the clean way to assert the app accent over it in both themes.
+  // CM's base focused-selection rule is more specific than a theme can match, so
+  // !important is the clean way to assert the app accent.
   '.cm-selectionLayer .cm-selectionBackground': {
     backgroundColor: 'color-mix(in srgb, var(--accent, #ff6b35) 30%, transparent) !important',
   },
-  // Search panel (⌘F): themed to the app's tokens. CM's base theme paints its
-  // buttons with a background-image gradient, so that must be cleared explicitly.
+  // CM's base theme paints its ⌘F buttons with a gradient; clear it explicitly.
   '.cm-panels': {
     color: 'var(--color-text-primary, inherit)',
     backgroundColor: 'var(--color-bg-elevated, rgba(128, 128, 128, 0.08))',
@@ -183,16 +149,14 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
   onSearchOpenChange,
 }, ref) {
   const cmRef = useRef<ReactCodeMirrorRef>(null);
-  // Previous search-panel-open value, so handleUpdate only calls onSearchOpenChange
-  // on a genuine transition (not on every unrelated update while the panel is open).
+  // So onSearchOpenChange fires on a genuine transition, not on every update.
   const searchOpenRef = useRef(false);
 
   useImperativeHandle(ref, () => ({
     scrollToPos: (pos: number) => {
       const view = cmRef.current?.view;
       if (!view) return;
-      // Clamp into range: the outline is parsed from the same draft, but a click can
-      // race a keystroke that shortened the doc. Out-of-range dispatch would throw.
+      // Clamp: a click can race a keystroke that shortened the doc, which throws.
       const target = Math.max(0, Math.min(pos, view.state.doc.length));
       view.dispatch({
         selection: { anchor: target },
@@ -205,11 +169,9 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       if (!view) return;
       const edit = computeMinimalEdit(view.state.doc.toString(), next);
       if (!edit) return; // unchanged → no transaction, scroll/selection untouched
-      // Dispatch only the changed range. CodeMirror maps the scroll anchor and the
-      // selection through a minimal change, so the reader stays put; scrollIntoView is
-      // left off (we don't chase a cursor we didn't move) and we don't take focus. The
-      // resulting docChanged fires onChange, so the parent's `value` catches up and its
-      // next controlled-value pass is a no-op.
+      // Only the changed range: CM maps scroll anchor and selection through a
+      // minimal change, so the reader stays put. No scrollIntoView, no focus. The
+      // docChanged fires onChange, so the parent's next controlled pass is a no-op.
       view.dispatch({
         changes: { from: edit.from, to: edit.to, insert: edit.insert },
         scrollIntoView: false,
@@ -228,10 +190,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
 
   const extensions = useMemo(
     () => [
-      // `languages` from @codemirror/language-data describes each fenced-code
-      // language lazily — the parser itself only loads (and Vite only fetches its
-      // chunk) the first time a fence actually needs it, so importing the full list
-      // here is cheap.
+      // language-data describes fenced languages lazily: a parser (and its Vite
+      // chunk) loads only when a fence needs it, so the full list is cheap.
       markdown({ base: markdownLanguage, codeLanguages: languages }),
       syntaxHighlighting(classHighlighter),
       EditorView.lineWrapping,
@@ -248,9 +208,7 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
     [onFollowLink, existsFile, resolveImageSrc, notePath],
   );
 
-  // When the notebook changed on disk, ask the broken-link checker to re-verify any
-  // links it had flagged missing — a just-created target should clear its flag. The
-  // initial mount is skipped (nothing cached yet); only later bumps revalidate.
+  // Re-verify links flagged missing on a disk change; the initial mount is skipped.
   const didMountRef = useRef(false);
   useEffect(() => {
     if (!didMountRef.current) {
@@ -282,9 +240,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
           onSelectionChange(null);
           return;
         }
-        // Anchor at the selection's END, not its start: a pill placed above the start
-        // covers the line before the selection, and one placed above the end covers the
-        // selection itself. Below the end is the only spot that covers neither.
+        // Below the selection's END is the only anchor covering neither the
+        // selection nor the line above it.
         const coords = update.view.coordsAtPos(range.to);
         if (!coords) {
           onSelectionChange(null);
@@ -305,9 +262,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
       autoFocus={autoFocus}
       height="100%"
       aria-label={ariaLabel}
-      // Skip @uiw/react-codemirror's built-in theme (default "light" paints a white
-      // background). Our editorTheme keeps the surface transparent so it inherits the
-      // app's dark document pane and tracks light/dark via CSS variables.
+      // Skip @uiw/react-codemirror's built-in theme, whose "light" default paints a
+      // white background; editorTheme keeps the surface transparent.
       theme="none"
       basicSetup={{
         lineNumbers: false,
@@ -320,9 +276,8 @@ export const LiveMarkdownEditor = forwardRef<LiveMarkdownEditorHandle, LiveMarkd
         autocompletion: false,
         searchKeymap: false,
         lintKeymap: false,
-        // The default highlight style underlines headings and colors prose, fighting
-        // the live-preview decorations that own how rendered markdown looks. Disable
-        // it so this component's theme/decorations are the single source of styling.
+        // The default highlight style fights the live-preview decorations, which
+        // own how rendered markdown looks.
         syntaxHighlighting: false,
       }}
     />

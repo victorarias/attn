@@ -3,22 +3,17 @@ import { emit, listen } from '@tauri-apps/api/event';
 import { isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 
-// Mirrors the constants in useUiAutomationBridge.ts. The Rust side
-// (ui_automation.rs) broadcasts these same event names to EVERY webview
-// window, so both bridges must agree on the wire strings even though the two
-// hooks live in separate modules and are mounted in separate windows.
+// Wire strings shared with useUiAutomationBridge.ts by value: ui_automation.rs
+// broadcasts these to EVERY webview window, so both bridges must agree.
 const UI_AUTOMATION_REQUEST_EVENT = 'attn://ui-automation/request';
 const UI_AUTOMATION_RESPONSE_EVENT = 'attn://ui-automation/response';
 const UI_AUTOMATION_READY_EVENT = 'attn://ui-automation/ready';
 
 const PRESENT_WINDOW_ACTION_PREFIX = 'present_window_';
 
-// Routing predicate shared (by value, not import — see useUiAutomationBridge's
-// guard) across both bridge listeners. The Rust automation server broadcasts
-// every request to ALL webview windows and resolves on the FIRST response
-// with a matching request_id, so exactly one of the two listeners must answer
-// any given request. Routing is by action-name prefix; there is no
-// window/label field on the protocol request.
+// The request carries no window field, so action-name prefix is the only
+// routing there is: exactly one of the two bridge listeners may answer a
+// request, since Rust resolves on the first matching response.
 export function isPresentWindowAction(action: string): boolean {
   return action.startsWith(PRESENT_WINDOW_ACTION_PREFIX);
 }
@@ -40,10 +35,8 @@ function nextAnimationFrame(): Promise<void> {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
 }
 
-// The submit dialog mounts on a React state update triggered by the header
-// submit button's onClick, which is not synchronous with the click dispatch
-// in present_window_submit below — poll a few animation frames for it,
-// capped at ~1s.
+// The dialog mounts on a React state update, not synchronously with the click
+// that triggers it, so it has to be waited for.
 async function waitForSubmitDialog(timeoutMs = 1_000): Promise<HTMLElement> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -54,9 +47,8 @@ async function waitForSubmitDialog(timeoutMs = 1_000): Promise<HTMLElement> {
   throw new Error('present_window_submit: submit dialog did not appear');
 }
 
-// Maps the payload's optional `action` (default "feedback") to the submit
-// dialog button it should click, by class — never by position, since the
-// dialog's button order is not a contract this bridge should depend on.
+// Submit-dialog buttons are addressed by class, never by position: their order
+// is not a contract.
 const SUBMIT_DIALOG_ACTION_CLASS: Record<string, string> = {
   feedback: 'present-root-submit-feedback',
   approve: 'present-root-submit-approve',
@@ -69,11 +61,6 @@ async function handlePresentWindowAction(action: string, payload?: Record<string
       return { visible: await getCurrentWindow().isVisible() };
     }
     case 'present_window_submit': {
-      // Drive the real DOM submit flow end to end: click the round-header
-      // submit button, wait for the confirm dialog, then click the button
-      // for the requested verdict (default "feedback", matching this
-      // action's historical behavior). Zero draft comments is a valid
-      // submit; nothing here requires any drafts to exist.
       const dialogAction = typeof payload?.action === 'string' ? payload.action : 'feedback';
       const buttonClass = SUBMIT_DIALOG_ACTION_CLASS[dialogAction];
       if (!buttonClass) {
@@ -100,18 +87,9 @@ async function handlePresentWindowAction(action: string, payload?: Record<string
 }
 
 /**
- * The present window's half of the UI automation bridge. Mirrors the
- * transport half of useUiAutomationBridge (event names, the
- * `__ATTN_AUTOMATION_ENABLED` gate, the `isTauri()` check) but answers its
- * own small action set (`present_window_is_visible`, `present_window_submit`)
- * instead of the main window's giant handler.
- *
- * Routing: the Rust automation server (ui_automation.rs) broadcasts every
- * request to ALL webview windows and resolves on the first matching
- * response. This hook only answers `present_window_*` actions (see
- * isPresentWindowAction) and returns without emitting a response for
- * anything else, so the main window's bridge is free to answer everything
- * else without a race.
+ * The present window's half of the UI automation bridge: same transport as
+ * useUiAutomationBridge, but it answers only `present_window_*` actions and
+ * stays silent on the rest, leaving those to the main window's bridge.
  */
 export function usePresentAutomationBridge(): void {
   useEffect(() => {
