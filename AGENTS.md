@@ -235,7 +235,7 @@ Three adopted patterns; full receipts in
 ## How changes ship
 
 How much process a change gets is a judgment call, not a rulebook. When in
-doubt, ask the maintainer once before starting, not halfway through.
+doubt, ask the maintainer.
 
 - **Plan docs are the norm.** Non-trivial work gets a plan doc first — often
   written by the same agent that then implements it in the same session. Only a
