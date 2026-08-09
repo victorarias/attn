@@ -739,6 +739,8 @@ function AppContent({
   // threaded down as a hundred props.
   const {
     connectionError,
+    disconnectExplanation,
+    clearDisconnectExplanation,
     connectionGeneration,
     hasReceivedInitialState,
     rateLimit,
@@ -1902,6 +1904,17 @@ function AppContent({
     showError(settingError);
     clearSettingError();
   }, [clearSettingError, settingError, showError]);
+
+  // A disconnect the daemon chose is worth a word, and it can only reach us
+  // after we are back. Longer than the default: it explains something the user
+  // already lived through and may have been puzzled by.
+  useEffect(() => {
+    if (!disconnectExplanation) {
+      return;
+    }
+    showError(disconnectExplanation, { durationMs: 8000 });
+    clearDisconnectExplanation();
+  }, [clearDisconnectExplanation, disconnectExplanation, showError]);
 
   // Backfill the active session's workflow runs into the global slice. The
   // useDaemonSocket workflow_run_updated handler keeps it fresh after this; the

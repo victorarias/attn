@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "217"
+const ProtocolVersion = "218"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -421,6 +421,7 @@ const (
 	EventBrowserControlResponse          = "browser_control_response"
 	EventBrowserControlRequest           = "browser_control_request"
 	EventCommandError                    = "command_error"
+	EventClientEvictionNotice            = "client_eviction_notice"
 )
 
 // Session states (values for SessionState enum)

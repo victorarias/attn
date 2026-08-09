@@ -2012,6 +2012,10 @@ func (d *Daemon) initHTTPServer() {
 	d.httpServer = &http.Server{
 		Addr:    net.JoinHostPort(config.WSBindAddress(), config.WSPort()),
 		Handler: d.httpHandler,
+		// Keep the accepted socket reachable from the handler. A WebSocket
+		// client the hub evicts has to be cut off at the transport, and the
+		// handshake hands back a wrapper with no way down to it.
+		ConnContext: withRawConn,
 	}
 }
 
