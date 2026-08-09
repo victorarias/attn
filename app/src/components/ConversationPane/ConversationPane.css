@@ -94,6 +94,14 @@
   color: var(--color-error);
 }
 
+/* The top of a conversation whose start the host no longer keeps. It is not a
+   notice from the agent's side of the exchange, so it sits apart from the first
+   item rather than between two of them. */
+.conversation-pane-dropped {
+  flex: 0 0 auto;
+  margin-bottom: 8px;
+}
+
 .conversation-pane-empty {
   color: var(--color-text-secondary);
   font-size: var(--font-size-sm);

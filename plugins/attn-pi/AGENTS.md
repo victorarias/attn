@@ -166,6 +166,29 @@ See `docs/glossary.md` for the vocabulary and
   refusing to send it all at once. Retention is a tripwire — a conversation that
   reaches it has been talking for weeks — and every settle logs what was held,
   which is where the next remeasurement comes from.
+  `ATTN_PI_HOST_RETENTION_ITEMS` and `ATTN_PI_HOST_RETENTION_BYTES` lower them
+  (read from the daemon's environment at spawn, inherited by the host): the
+  tripwire is set past the longest conversation anyone here has ever had, so
+  lowering it is the only way to watch a host actually drop history. A value
+  that is not a positive whole number is logged and treated as absent — meaning
+  the default, never zero, because a typo in a diagnostic variable must not
+  quietly reduce a conversation to one item.
+- **What retention drops, the snapshot admits to.** `dropped` counts the items
+  gone for good, and it is a different question from `truncated` ("this message
+  does not carry everything", which a client pages away) and from `has_more`
+  ("ask me again"). Once nothing is left to page and `dropped` is non-zero, the
+  app draws a row saying so: a transcript that silently begins mid-thought is
+  the failure the compaction row already exists to prevent, and a budget nobody
+  can see is worse than no budget. A rebuilt host reports its own count under a
+  new epoch, so a revive that reads the whole session file back clears the row
+  rather than inheriting a loss it does not have.
+- **Retention never evicts a message that is still being written.** A streaming
+  message is normally the newest item and safe, but it stops being newest the
+  moment pi opens a tool beneath it. Evicting it there does not merely lose it:
+  the next delta finds no open message, mints a fresh one from the tail alone,
+  and the agent's paragraph reappears truncated and out of order, below the tool
+  it was written above. Holding it costs one item over budget until it ends,
+  which is the bargain the newest item already gets.
 - **`epoch` is the transcript's seq spine.** A snapshot names the host process
   that built it. A replacement host rebuilds the transcript from pi's file and
   mints its own item ids, so nothing it sends can be spliced onto the dead

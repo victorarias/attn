@@ -39,12 +39,17 @@ import {
   DeltaCoalescer,
   EnvelopeStream,
   PiEventMapper,
+  SNAPSHOT_BYTES_LIMIT,
+  SNAPSHOT_ITEM_LIMIT,
+  TRANSCRIPT_RETENTION_BYTES,
+  TRANSCRIPT_RETENTION_ITEMS,
   ToolDetailStore,
   TranscriptStore,
   conversationInterrupted,
   launchPromptIsUndelivered,
   parseVerb,
   reconstructTranscript,
+  retentionBudget,
   type Envelope,
   type HostSessionState,
   type HostVerb,
@@ -120,6 +125,12 @@ function requireEnv(name: string): string {
 
 function optionalEnv(name: string): string {
   return process.env[name]?.trim() ?? "";
+}
+
+/** `retentionBudget` reading the environment and reporting on the host's log. */
+function retentionFromEnv(name: string, fallback: number): number {
+  return retentionBudget(name, optionalEnv(name), fallback, (message) =>
+    console.error(`[attn-pi-host] ${message}`));
 }
 
 /**
@@ -233,7 +244,13 @@ async function main(): Promise<void> {
   // The host's own transcript is fed the same envelopes the daemon forwards, so
   // a snapshot it serves cannot disagree with what a client that watched the
   // stream ended up holding. See TranscriptStore.
-  const transcript = new TranscriptStore(epoch);
+  const transcript = new TranscriptStore(
+    epoch,
+    SNAPSHOT_ITEM_LIMIT,
+    SNAPSHOT_BYTES_LIMIT,
+    retentionFromEnv("ATTN_PI_HOST_RETENTION_ITEMS", TRANSCRIPT_RETENTION_ITEMS),
+    retentionFromEnv("ATTN_PI_HOST_RETENTION_BYTES", TRANSCRIPT_RETENTION_BYTES),
+  );
   const write = (envelope: Envelope) => {
     transcript.apply(envelope.kind, envelope.body);
     envelopeOut.write(`${JSON.stringify(envelope)}\n`);

@@ -972,6 +972,16 @@ export interface ConversationSnapshotBody {
   truncated: boolean;
   /** Older items than `items[0]` are held and can be paged in. */
   has_more: boolean;
+  /**
+   * Items retention has dropped for good, which no page will ever answer with.
+   *
+   * Distinct from `truncated`, which is only "this message does not carry
+   * everything" and goes false as a client pages back. This one never goes
+   * down, and it is what lets the app say the conversation starts above what
+   * anyone can still be shown instead of drawing a history that appears to
+   * begin mid-thought.
+   */
+  dropped: number;
   /** A run is open right now, so the composer sends a steer rather than a prompt. */
   running: boolean;
   /** pi's queues as of now, so an attaching client draws what is still unread. */
@@ -1050,6 +1060,36 @@ export const TRANSCRIPT_RETENTION_ITEMS = 50_000;
  * all; that is `ToolDetailStore`'s separate budget.
  */
 export const TRANSCRIPT_RETENTION_BYTES = 32 << 20;
+
+/**
+ * A retention budget the environment asked for, or the compiled-in default.
+ *
+ * The override exists to make the tripwire reachable: 50,000 items and 32 MB
+ * are set past the longest conversation anyone here has ever had, so the only
+ * way to watch a host actually drop history — and the app say so — is to lower
+ * them. It is the escape hatch too, for a machine where a host's memory matters
+ * more than a month of scroll-back.
+ *
+ * A value that is not a positive count is reported through `warn` and treated
+ * as absent, meaning the DEFAULT rather than zero: a typo in a tuning variable
+ * must not silently reduce a conversation to one item, and refusing to launch
+ * over a diagnostic environment variable is worse than either. `raw` is the
+ * already-trimmed value, and empty means nobody asked.
+ */
+export function retentionBudget(
+  name: string,
+  raw: string,
+  fallback: number,
+  warn: (message: string) => void,
+): number {
+  if (raw === "") return fallback;
+  const value = Number(raw);
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value < 1) {
+    warn(`${name}=${raw} is not a positive whole number; using ${fallback}`);
+    return fallback;
+  }
+  return value;
+}
 
 function itemBytes(item: SnapshotItem): number {
   if (item.kind === "message") return item.text.length + item.role.length + item.id.length;
@@ -1234,6 +1274,7 @@ export class TranscriptStore {
       total: this.items.length + this.dropped,
       truncated: window.length < this.items.length + this.dropped,
       has_more: window.length < this.items.length,
+      dropped: this.dropped,
       running: this.running,
       queue: { steering: [...this.queue.steering], followUp: [...this.queue.followUp] },
     };
@@ -1307,11 +1348,22 @@ export class TranscriptStore {
    * This is the tripwire, not the window: what it drops is gone from this host
    * for good, and paging past it answers with nothing. The window is applied
    * separately, on the way out.
+   *
+   * It also never drops a message that is still being written. A streaming
+   * message is normally the newest item and safe by the rule above, but it
+   * stops being newest the moment pi opens a tool beneath it — and evicting it
+   * then does not merely lose it: the next delta finds no open message, mints a
+   * fresh one from the tail alone, and the agent's paragraph reappears
+   * truncated and out of order, below the tool it was written above. Holding it
+   * costs one item over budget until it ends, which is the same bargain the
+   * newest item already gets.
    */
   private trim(): void {
     while (this.items.length > 1 && (this.items.length > this.retentionItems || this.bytes > this.retentionBytes)) {
-      const dropped = this.items.shift()!;
-      this.bytes -= itemBytes(dropped);
+      const oldest = this.items[0]!;
+      if (oldest.kind === "message" && oldest.streaming) return;
+      this.items.shift();
+      this.bytes -= itemBytes(oldest);
       this.dropped += 1;
     }
   }

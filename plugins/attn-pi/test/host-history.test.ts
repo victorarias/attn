@@ -7,6 +7,7 @@ import {
   conversationInterrupted,
   parseVerb,
   reconstructTranscript,
+  retentionBudget,
   snapshotItemKey,
   type Envelope,
   type SessionEntryLike,
@@ -329,5 +330,226 @@ describe("the slice-5 verbs", () => {
 
   test("set_model without a model is refused", () => {
     expect(() => parseVerb('{"verb":"set_model"}')).toThrow("set_model verb needs a model");
+  });
+});
+
+/**
+ * Retention: the tripwire, not the window.
+ *
+ * `TRANSCRIPT_RETENTION_*` bounds what the host HOLDS, and a conversation that
+ * reaches it has been talking for weeks — 50,000 items is 4.4x the longest
+ * conversation anyone on this machine has ever had. Nothing real has ever
+ * reached it, which is exactly why the path deserves to be driven here: what it
+ * drops is gone for good, and every question a client can still ask has to have
+ * an honest answer afterwards.
+ */
+describe("retention", () => {
+  /** A store whose retention tripwire is small enough to reach. */
+  function retained(count: number, items = 5, bytes = 1 << 20): TranscriptStore {
+    const store = new TranscriptStore("epoch-1", 3, 1 << 20, items, bytes);
+    for (let index = 1; index <= count; index += 1) {
+      store.apply("message_end", { id: `m${index}`, role: "assistant", text: `line ${index}` });
+    }
+    return store;
+  }
+
+  test("the oldest items go, the newest stay", () => {
+    const store = retained(12);
+    expect(store.size).toBe(5);
+    expect(store.droppedItems).toBe(7);
+    // The window is applied on the way out and is smaller still.
+    expect(ids(store.snapshot().items)).toEqual(["m10", "m11", "m12"]);
+  });
+
+  test("a snapshot still counts what it no longer holds", () => {
+    // `total` is the conversation's length, not the host's inventory. A client
+    // that is shown 3 of 12 deserves to know the other 9 existed, even for the
+    // ones nobody can serve any more.
+    const snapshot = retained(12).snapshot();
+    expect(snapshot.total).toBe(12);
+    expect(snapshot.truncated).toBe(true);
+    // Two different questions: `has_more` is "can I page for more", which is
+    // false once the window covers everything the host still holds.
+    expect(snapshot.has_more).toBe(true);
+  });
+
+  test("a window covering everything left still reports the conversation as truncated", () => {
+    // Retention has cut the transcript down to inside the window. Nothing can
+    // be paged, and the client is nonetheless showing a fragment.
+    const store = new TranscriptStore("epoch-1", 10, 1 << 20, 3, 1 << 20);
+    for (let index = 1; index <= 9; index += 1) {
+      store.apply("message_end", { id: `m${index}`, role: "assistant", text: `line ${index}` });
+    }
+    const snapshot = store.snapshot();
+    expect(ids(snapshot.items)).toEqual(["m7", "m8", "m9"]);
+    expect(snapshot.has_more).toBe(false);
+    expect(snapshot.truncated).toBe(true);
+    expect(snapshot.total).toBe(9);
+  });
+
+  test("paging past what retention dropped answers with nothing rather than an error", () => {
+    // The zombie edge: a client holding scroll-back the host has since evicted
+    // asks for the page before it. There is no page. The answer has to be an
+    // empty one addressed to that anchor, so the asking client can stop.
+    const store = retained(12);
+    const page = store.page("message:m2");
+    expect(page.before).toBe("message:m2");
+    expect(page.items).toEqual([]);
+    expect(page.has_more).toBe(false);
+    expect(page.epoch).toBe("epoch-1");
+  });
+
+  test("the oldest item the host still holds has nothing before it", () => {
+    const store = retained(12);
+    const page = store.page("message:m8");
+    expect(page.items).toEqual([]);
+    expect(page.has_more).toBe(false);
+  });
+
+  test("bytes are given back when an item is dropped", () => {
+    // The byte budget is a running total, so a drop that forgot to subtract
+    // would ratchet the store into evicting on every push forever.
+    const store = new TranscriptStore("epoch-1", 3, 1 << 20, 4, 1 << 20);
+    for (let index = 1; index <= 40; index += 1) {
+      store.apply("message_end", { id: `m${index}`, role: "assistant", text: `line ${index}` });
+    }
+    expect(store.size).toBe(4);
+    const held = store.snapshot().items;
+    expect(ids(held)).toEqual(["m38", "m39", "m40"]);
+    // Four items of "line NN" plus their ids: tens of bytes, not thousands.
+    expect(store.retainedBytes).toBeLessThan(200);
+    expect(store.retainedBytes).toBeGreaterThan(0);
+  });
+
+  test("the byte tripwire drops history the item count would have kept", () => {
+    const store = new TranscriptStore("epoch-1", 50, 1 << 20, 10_000, 200);
+    for (let index = 1; index <= 20; index += 1) {
+      store.apply("message_end", { id: `m${index}`, role: "assistant", text: "x".repeat(50) });
+    }
+    expect(store.size).toBeLessThan(20);
+    expect(store.droppedItems).toBeGreaterThan(0);
+    expect(store.retainedBytes).toBeLessThanOrEqual(200);
+  });
+
+  test("one item larger than the whole budget is kept rather than leaving nothing", () => {
+    // Same bargain the window makes for the newest item: a transcript that
+    // evicted its way to empty would show a live conversation as blank.
+    const store = new TranscriptStore("epoch-1", 3, 1 << 20, 10_000, 100);
+    store.apply("message_end", { id: "m1", role: "assistant", text: "x".repeat(5_000) });
+    expect(store.size).toBe(1);
+    expect(store.snapshot().items).toHaveLength(1);
+  });
+
+  test("a tool card evicted by retention takes its history with it", () => {
+    const store = new TranscriptStore("epoch-1", 10, 1 << 20, 2, 1 << 20);
+    store.apply("tool_started", { call_id: "c1", name: "bash", summary: "ls" });
+    store.apply("message_end", { id: "m1", role: "assistant", text: "one" });
+    store.apply("message_end", { id: "m2", role: "assistant", text: "two" });
+    expect(ids(store.snapshot().items)).toEqual(["m1", "m2"]);
+    expect(store.page("tool:c1").items).toEqual([]);
+  });
+
+  test("a message still streaming survives eviction even once it is not the newest", () => {
+    // The shape that makes this reachable: pi opens a tool while the message is
+    // still being written, so the open message is no longer last and the byte
+    // tripwire reaches it. Evicting it there does not just lose the paragraph —
+    // the next delta finds no open message, mints a fresh one from the tail
+    // alone, and the sentence reappears truncated BELOW the tool it was written
+    // above.
+    const store = new TranscriptStore("epoch-1", 10, 1 << 20, 10_000, 400);
+    store.apply("message_start", { id: "m1", role: "assistant" });
+    store.apply("tool_started", { call_id: "c1", name: "bash", summary: "ls" });
+    for (let index = 0; index < 40; index += 1) {
+      store.apply("message_delta", { id: "m1", text: "0123456789" });
+    }
+    const items = store.snapshot().items;
+    expect(ids(items)).toEqual(["m1", "c1"]);
+    expect(items[0]!.kind === "message" && items[0]!.text).toBe("0123456789".repeat(40));
+    expect(store.droppedItems).toBe(0);
+  });
+
+  test("what a still-streaming message held is dropped once it ends", () => {
+    // The reprieve is for the writing, not forever: the budget is enforced again
+    // as soon as the message settles.
+    const store = new TranscriptStore("epoch-1", 10, 1 << 20, 10_000, 400);
+    store.apply("message_start", { id: "m1", role: "assistant" });
+    store.apply("tool_started", { call_id: "c1", name: "bash", summary: "ls" });
+    for (let index = 0; index < 40; index += 1) {
+      store.apply("message_delta", { id: "m1", text: "0123456789" });
+    }
+    expect(store.droppedItems).toBe(0);
+    store.apply("message_end", { id: "m1", role: "assistant", text: "0123456789".repeat(40) });
+    store.apply("message_end", { id: "m2", role: "assistant", text: "after" });
+    expect(store.droppedItems).toBeGreaterThan(0);
+  });
+
+  test("a snapshot says how much is gone for good, and paging never lowers it", () => {
+    // `truncated` only means "this message does not carry everything" and goes
+    // false as a client pages back. `dropped` is the fact that outlives paging,
+    // and it is what tells the app the conversation starts above anything it can
+    // still be shown.
+    const store = retained(12);
+    expect(store.snapshot().dropped).toBe(7);
+    const fresh = new TranscriptStore("epoch-1", 3, 1 << 20);
+    for (let index = 1; index <= 12; index += 1) {
+      fresh.apply("message_end", { id: `m${index}`, role: "assistant", text: `line ${index}` });
+    }
+    // Same conversation, retention never reached: nothing is gone.
+    expect(fresh.snapshot().dropped).toBe(0);
+    expect(fresh.snapshot().truncated).toBe(true);
+  });
+
+  test("a message still streaming is not evicted out from under its own deltas", () => {
+    // message_delta finds the open message by id and appends. If retention drops
+    // that message mid-stream, the next delta has nothing to append to and mints
+    // a second message carrying only the tail — the agent's sentence arrives
+    // split in two, under two ids.
+    const store = new TranscriptStore("epoch-1", 10, 1 << 20, 10_000, 400);
+    store.apply("message_start", { id: "m1", role: "assistant" });
+    for (let index = 0; index < 40; index += 1) {
+      store.apply("message_delta", { id: "m1", text: "0123456789" });
+    }
+    const items = store.snapshot().items;
+    expect(items).toHaveLength(1);
+    expect(ids(items)).toEqual(["m1"]);
+    expect(items[0]!.kind === "message" && items[0]!.text).toBe("0123456789".repeat(40));
+  });
+});
+
+describe("retention budget from the environment", () => {
+  /** Reads a budget, keeping whatever it complained about. */
+  function budget(raw: string, fallback = 50_000): { value: number; warnings: string[] } {
+    const warnings: string[] = [];
+    const value = retentionBudget("ATTN_PI_HOST_RETENTION_ITEMS", raw, fallback, (message) =>
+      warnings.push(message));
+    return { value, warnings };
+  }
+
+  test("nobody asked, so the compiled-in default stands and nothing is said", () => {
+    expect(budget("")).toEqual({ value: 50_000, warnings: [] });
+  });
+
+  test("a lowered budget is taken, which is what makes the tripwire reachable", () => {
+    expect(budget("40")).toEqual({ value: 40, warnings: [] });
+  });
+
+  test("one item is a legitimate ask, not a typo", () => {
+    expect(budget("1").value).toBe(1);
+  });
+
+  test("a typo keeps the default rather than silently emptying the transcript", () => {
+    for (const raw of ["fourty", "0", "-1", "1.5", "40 items", "1e3px", "Infinity", "NaN"]) {
+      expect(budget(raw).value).toBe(50_000);
+    }
+  });
+
+  test("a refused value says what it was and what is being used instead", () => {
+    expect(budget("0").warnings).toEqual([
+      "ATTN_PI_HOST_RETENTION_ITEMS=0 is not a positive whole number; using 50000",
+    ]);
+  });
+
+  test("a whole number written in exponent form is still a whole number", () => {
+    expect(budget("1e3")).toEqual({ value: 1000, warnings: [] });
   });
 });

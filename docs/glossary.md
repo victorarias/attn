@@ -334,6 +334,12 @@ next page request comes back empty. It is bounded and it is inherent to paging
 something that is broadcast: the client's copy is the client's, and the host
 never reaches back into it.
 
+A conversation whose start the host has dropped says so. Once there is no page
+left to ask for and items are known to be gone, the transcript is headed by a
+row naming how many — the same honesty a compaction row gives, for the same
+reason: a history that appears to begin mid-thought is indistinguishable from
+one that did.
+
 A conversation can be **resumed**: a new session picks up an existing
 conversation instead of starting empty. The old conversation is copied into the
 new session's own storage rather than continued in place, so the session it came

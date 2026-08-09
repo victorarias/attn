@@ -3131,6 +3131,13 @@ export function useUiAutomationBridge({
           // then; a scenario clicks it and asserts the transcript grew upwards.
           loadEarlierAvailable: Boolean(earlier),
           loadingHistory: Boolean(earlier instanceof HTMLButtonElement && earlier.disabled),
+          // How much of the conversation the host's retention budget dropped for
+          // good. 0 when nothing is gone, which is every ordinary session — the
+          // row it reads from appears only once there is also nothing left to
+          // page, so this is the whole of "the transcript starts above here".
+          historyDropped: Number(
+            root.querySelector('[data-testid="conversation-history-dropped"]')?.getAttribute('data-dropped') || 0,
+          ),
           // What the agent runs on now, and what this machine could switch it
           // to. Empty when the host said nothing about models.
           model: model?.value || '',

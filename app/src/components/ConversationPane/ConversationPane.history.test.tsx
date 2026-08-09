@@ -185,3 +185,135 @@ describe('ConversationPane history', () => {
     expect(screen.getByTestId('conversation-model')).toHaveTextContent('local/experimental');
   });
 });
+
+/**
+ * Retention reached: the host's transcript budget dropped the start of the
+ * conversation for good. Nothing can page it back, so the only honest thing the
+ * pane can do is say so — a transcript that silently begins mid-thought is the
+ * failure this row exists to prevent.
+ */
+describe('ConversationPane dropped history', () => {
+  beforeEach(() => {
+    useConversationsStore.setState({ conversations: {} });
+  });
+
+  function dropped(count: number, hasMore: boolean, seq = 2) {
+    apply('conversation_snapshot', {
+      epoch: 'e1',
+      items: [{ kind: 'message', id: 'm900', role: 'assistant', text: 'nine hundred', streaming: false }],
+      has_more: hasMore,
+      dropped: count,
+      running: false,
+      queue: { steering: [], followUp: [] },
+    }, seq);
+  }
+
+  it('says how much of the conversation is gone once there is nothing left to page', () => {
+    renderPane();
+    apply('session_ready', { state: 'idle' }, 1);
+    dropped(1_240, false);
+
+    const row = screen.getByTestId('conversation-history-dropped');
+    expect(row).toHaveTextContent('1,240 earlier items are no longer kept');
+    expect(row.getAttribute('data-dropped')).toBe('1240');
+  });
+
+  it('stays quiet while the way back is still offered', () => {
+    // Retention has dropped items AND the host still holds pageable ones. The
+    // row would be premature: what the user can reach has not run out yet, and
+    // the button is the honest surface until it does.
+    renderPane();
+    apply('session_ready', { state: 'idle' }, 1);
+    dropped(1_240, true);
+
+    expect(screen.queryByTestId('conversation-history-dropped')).toBeNull();
+    expect(screen.getByTestId('conversation-load-earlier')).toBeInTheDocument();
+  });
+
+  it('draws nothing for a conversation that simply reached its start', () => {
+    // The ordinary short conversation: a window covering everything, nothing
+    // dropped. This is why the row is driven by the dropped count rather than by
+    // "the window did not carry it all".
+    renderPane();
+    apply('session_ready', { state: 'idle' }, 1);
+    dropped(0, false);
+
+    expect(screen.queryByTestId('conversation-history-dropped')).toBeNull();
+  });
+
+  it('does not double-count under StrictMode', () => {
+    // The bar this repo holds for any new surface: React replays state updaters,
+    // so a count folded in with anything other than an idempotent rule reads
+    // double here and never in a live window.
+    renderPane({ strict: true });
+    apply('session_ready', { state: 'idle' }, 1);
+    dropped(1_240, false);
+
+    expect(screen.getByTestId('conversation-history-dropped').getAttribute('data-dropped')).toBe('1240');
+  });
+
+  it('keeps the count when a later snapshot splices onto scroll-back', () => {
+    // The real splice: this client has paged an older item in, so the incoming
+    // window's oldest item sits in the MIDDLE of what it holds and the window is
+    // taken as the tail. A snapshot that arrives then describes the same host,
+    // and dropping its count would make the row flicker away every time the
+    // agent spoke.
+    renderPane();
+    apply('session_ready', { state: 'idle' }, 1);
+    apply('conversation_snapshot', {
+      epoch: 'e1',
+      items: [{ kind: 'message', id: 'm900', role: 'assistant', text: 'nine hundred', streaming: false }],
+      has_more: true,
+      dropped: 1_240,
+      running: false,
+      queue: { steering: [], followUp: [] },
+    }, 2);
+    apply('conversation_page', {
+      epoch: 'e1',
+      before: 'message:m900',
+      items: [{ kind: 'message', id: 'm899', role: 'assistant', text: 'eight ninety nine', streaming: false }],
+      has_more: false,
+    }, 3);
+    // Scrolled back, nothing left to page: the row is showing.
+    expect(screen.getByTestId('conversation-history-dropped')).toBeInTheDocument();
+
+    // The agent speaks. The snapshot's window starts at m900, which this client
+    // holds at index 1 — a splice, not a replace.
+    apply('conversation_snapshot', {
+      epoch: 'e1',
+      items: [
+        { kind: 'message', id: 'm900', role: 'assistant', text: 'nine hundred', streaming: false },
+        { kind: 'message', id: 'm901', role: 'assistant', text: 'nine oh one', streaming: false },
+      ],
+      has_more: true,
+      dropped: 1_250,
+      running: false,
+      queue: { steering: [], followUp: [] },
+    }, 4);
+
+    expect(screen.getByTestId('conversation-message-m899')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-message-m901')).toBeInTheDocument();
+    expect(screen.getByTestId('conversation-history-dropped').getAttribute('data-dropped')).toBe('1250');
+  });
+
+  it('forgets it when a rebuilt host reads the whole conversation back', () => {
+    // A new epoch is a replacement host that reopened pi's session file from the
+    // start. What the dead host had dropped is not missing from this one, so
+    // carrying the old count forward would claim a loss that did not happen.
+    renderPane();
+    apply('session_ready', { state: 'idle' }, 1);
+    dropped(1_240, false);
+    expect(screen.getByTestId('conversation-history-dropped')).toBeInTheDocument();
+
+    apply('conversation_snapshot', {
+      epoch: 'e2',
+      items: [{ kind: 'message', id: 'r1', role: 'assistant', text: 'rebuilt', streaming: false }],
+      has_more: false,
+      dropped: 0,
+      running: false,
+      queue: { steering: [], followUp: [] },
+    }, 3);
+
+    expect(screen.queryByTestId('conversation-history-dropped')).toBeNull();
+  });
+});
