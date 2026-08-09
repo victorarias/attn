@@ -76,8 +76,8 @@ export function SessionContextCapPrompt({
         </div>
         <div className="context-cap-message" id="context-cap-message">
           Cap <span>{sessionLabel}</span>&rsquo;s context window so it compacts at this
-          many tokens. Blank means no cap. Saving reloads the agent in place;
-          the conversation is resumed.
+          many tokens. Blank means no cap. Saving reloads the agent to apply it:
+          the conversation is resumed, but anything mid-turn is lost.
         </div>
         <input
           ref={inputRef}
