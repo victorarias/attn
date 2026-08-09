@@ -309,7 +309,34 @@ fully-CI'd, fully-reviewed merge at the end.
    plugin), `ext/` → `app/` namespace rename.
 4. **Apply pipeline + scaffold + codegen** — manifest parse, codegen, tsc,
    `Bun.build`, content-addressed versions, pointer flip,
-   `new`/`apply`/`rollback`/`dev`.
+   `new`/`apply`/`rollback`/`dev`. *Shipped:* the build runs **CLI-side**, in
+   `internal/appbuild`, and the daemon only records. bun lives on a developer
+   PATH (`~/.asdf/shims/bun` here) that `pathutil.EnsureGUIPath()` does not
+   reconstruct, so a daemon spawned by the app cannot reliably find it — and a
+   build is a foreground activity with output a person is waiting on, not
+   daemon work. The daemon keeps the atomicity it must own: `app_apply` carries
+   only `(name, content_hash, declaration)`, never a path. It re-derives the
+   artifact path from the name and the hash, re-hashes the bytes on disk, and
+   refuses the apply if they disagree — so a lying client cannot point the
+   registry at a file the pipeline did not produce. The content hash covers the
+   **declaration and the bundle**, not the bundle alone: a manifest-only edit
+   changes what the version means, and hashing only code would reuse a row
+   whose frozen declaration is stale. Typechecking uses a pinned TypeScript
+   (5.8.3) installed lazily on first apply under `<data-dir>/apps/toolchain`
+   and shared by every app, behind an `flock` so concurrent applies install it
+   once; invoking `tsc` directly rather than through `bun x` was measured at
+   0.77s against 2.1s. The SDK ships as an **ambient module declaration**
+   written into the app (`src/attn-app.d.ts`, declaring
+   `@victorarias/attn-app`), which gives handlers a typed surface with no
+   package published and no npm dependency in a scaffolded app — the eventual
+   published package can take over the same specifier without touching app
+   code. Staging lives inside the artifact store (`apps/.staging`) because a
+   rename out of `/tmp` crosses filesystems on Linux. Protocol 219 adds
+   `app_apply`/`app_rollback`; the flip publishes `app.version.changed`
+   (payload carries the previous id so the slice-5 runtime need not race the
+   pointer), and like the other app facts it has no projection. `attn app dev`
+   streams apply results and build errors only — invocation streaming needs
+   slice 5, and the command's banner says so.
 5. **Runtime sidecar** — dispatch, handler context, invocation log, per-app
    consumers wired to slice 1, auto-disable, `logs`.
 6. **Exit proof** — the roadmap's exit, run live: an agent writes a real app

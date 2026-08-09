@@ -165,19 +165,24 @@ func (s *Store) DeleteApp(name string) (bool, error) {
 // consequences worth naming: a dev loop that rebuilds identical output leaves
 // one row, and re-applying an old build is indistinguishable from rolling back
 // to it, which is correct — they are the same artifact.
-func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, error) {
+//
+// The second return value reports whether this call minted the row. Reuse is a
+// database property here — UNIQUE(app_name, content_hash) — and the caller has
+// no other way to tell an insert from a lookup, so apply can only say "same
+// version as before" honestly if this says so.
+func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
-		return AppVersion{}, nil
+		return AppVersion{}, false, nil
 	}
 	if v.AppName == "" || v.ContentHash == "" {
-		return AppVersion{}, fmt.Errorf("store: an app version needs both an app name and a content hash (got name %q, hash %q)", v.AppName, v.ContentHash)
+		return AppVersion{}, false, fmt.Errorf("store: an app version needs both an app name and a content hash (got name %q, hash %q)", v.AppName, v.ContentHash)
 	}
 	tx, err := s.db.Begin()
 	if err != nil {
-		return AppVersion{}, err
+		return AppVersion{}, false, err
 	}
 	defer func() { _ = tx.Rollback() }()
 
@@ -187,9 +192,10 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, error
 		VALUES (?, NULL, ?, ?)
 		ON CONFLICT(name) DO UPDATE SET updated_at = excluded.updated_at
 	`, v.AppName, stamp, stamp); err != nil {
-		return AppVersion{}, err
+		return AppVersion{}, false, err
 	}
 
+	created := false
 	existing, err := scanAppVersion(tx.QueryRow(`
 		SELECT id, app_name, content_hash, declaration, artifact_path, created_at
 		FROM app_versions WHERE app_name = ? AND content_hash = ?
@@ -204,24 +210,25 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, error
 			VALUES (?, ?, ?, ?, ?)
 		`, v.AppName, v.ContentHash, v.Declaration, v.ArtifactPath, stamp)
 		if err != nil {
-			return AppVersion{}, err
+			return AppVersion{}, false, err
 		}
 		if v.ID, err = res.LastInsertId(); err != nil {
-			return AppVersion{}, err
+			return AppVersion{}, false, err
 		}
+		created = true
 	default:
-		return AppVersion{}, err
+		return AppVersion{}, false, err
 	}
 
 	if _, err := tx.Exec(`
 		UPDATE apps SET current_version_id = ?, updated_at = ? WHERE name = ?
 	`, v.ID, stamp, v.AppName); err != nil {
-		return AppVersion{}, err
+		return AppVersion{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return AppVersion{}, err
+		return AppVersion{}, false, err
 	}
-	return v, nil
+	return v, created, nil
 }
 
 // SetAppCurrentVersion moves an app onto a version it already has — the pointer

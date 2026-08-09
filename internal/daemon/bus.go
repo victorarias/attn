@@ -264,6 +264,13 @@ const (
 	// registry row gone. It carries a payload rather than only a subject because
 	// the entity it describes no longer exists to be read.
 	FactAppRemoved = "app.removed"
+	// FactAppVersionChanged: the app now points at a different version. One fact
+	// for both ways of getting there — an apply and a rollback are the same
+	// pointer move, and a runtime that reloads on one must reload on the other.
+	// The payload names the version moved to and the one moved from, so a
+	// consumer that has to drain the outgoing version's handlers knows which one
+	// that is without racing the pointer it would otherwise read back.
+	FactAppVersionChanged = "app.version.changed"
 )
 
 // CompactableFacts are the fact classes the retention pass may reduce to one

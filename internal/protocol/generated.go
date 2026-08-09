@@ -44,6 +44,43 @@ type AgentPromptMessage struct {
 	Text string `json:"text"`
 }
 
+type AppApplyMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Declaration corresponds to the JSON schema field "declaration".
+	Declaration string `json:"declaration"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// SourcePath corresponds to the JSON schema field "source_path".
+	SourcePath *string `json:"source_path,omitempty,omitzero"`
+}
+
+type AppApplyResult struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// PreviousVersionID corresponds to the JSON schema field "previous_version_id".
+	PreviousVersionID *int `json:"previous_version_id,omitempty,omitzero"`
+
+	// VersionCreated corresponds to the JSON schema field "version_created".
+	VersionCreated bool `json:"version_created"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+}
+
 type AppConsumerInfo struct {
 	// Cursor corresponds to the JSON schema field "cursor".
 	Cursor int `json:"cursor"`
@@ -126,6 +163,34 @@ type AppRemoveResult struct {
 
 	// VersionsKept corresponds to the JSON schema field "versions_kept".
 	VersionsKept int `json:"versions_kept"`
+}
+
+type AppRollbackMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID *int `json:"version_id,omitempty,omitzero"`
+}
+
+type AppRollbackResult struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// PreviousVersionID corresponds to the JSON schema field "previous_version_id".
+	PreviousVersionID *int `json:"previous_version_id,omitempty,omitzero"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
 }
 
 type AppSetEnabledMessage struct {
@@ -4389,11 +4454,17 @@ type ReposUpdatedMessage struct {
 }
 
 type Response struct {
+	// AppApplyResult corresponds to the JSON schema field "app_apply_result".
+	AppApplyResult *AppApplyResult `json:"app_apply_result,omitempty,omitzero"`
+
 	// AppListResult corresponds to the JSON schema field "app_list_result".
 	AppListResult *AppListResult `json:"app_list_result,omitempty,omitzero"`
 
 	// AppRemoveResult corresponds to the JSON schema field "app_remove_result".
 	AppRemoveResult *AppRemoveResult `json:"app_remove_result,omitempty,omitzero"`
+
+	// AppRollbackResult corresponds to the JSON schema field "app_rollback_result".
+	AppRollbackResult *AppRollbackResult `json:"app_rollback_result,omitempty,omitzero"`
 
 	// AppSetEnabledResult corresponds to the JSON schema field
 	// "app_set_enabled_result".

@@ -37,6 +37,14 @@ func runApp() {
 	}
 	args := os.Args[3:]
 	switch os.Args[2] {
+	case "new":
+		runAppNew(args)
+	case "apply":
+		runAppApply(args)
+	case "rollback":
+		runAppRollback(args)
+	case "dev":
+		runAppDev(args)
 	case "list":
 		runAppList(args)
 	case "status":
@@ -61,6 +69,28 @@ An app is an automation attn runs for you: it reacts to facts from the event
 bus as the consumer app:<name>, and keeps its own documents under app/<name>.
 
 commands:
+  new <path> [--name <name>] [--description <text>]
+        scaffold an app in <path>: manifest, entrypoint, generated types and an
+        AGENTS.md (with a CLAUDE.md symlink) that is a complete brief on its own.
+        The name defaults to the directory's. The result applies as-is — nothing
+        has to be edited first. attn does not remember where the directory is.
+
+  apply <path> [--json]
+        build and install: parse the manifest, regenerate src/generated.ts and
+        src/attn-app.d.ts, typecheck, bundle, then record the version and point
+        the app at it. It stops at the first failure with nothing installed, and
+        it never runs your code — a module that throws at import still applies.
+
+        A version is identified by the content it was built from, so applying
+        byte-identical content again is the same version, not a new one.
+
+  rollback <name> [version]
+        point the app at a version it already has — the one before the current
+        one, or the one you name. Builds nothing: the artifact is still on disk.
+
+  dev <path>
+        apply on every change. Shows apply results and build errors.
+
   list [--json]
         every registered app: the version it runs, whether it is enabled, and
         how far behind the event log its consumer is.
