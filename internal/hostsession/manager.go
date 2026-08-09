@@ -1,16 +1,10 @@
-// Package hostsession owns the headless agent hosts the daemon runs beside its
-// PTY sessions.
+// Package hostsession owns the daemon's headless agent hosts: one child
+// process per attn session, envelopes out on fd 3, verbs in on stdin, its own
+// stdout/stderr to a log file.
 //
-// A host is one child process per attn session that speaks a conversation
-// rather than a terminal: envelopes out on fd 3, verbs in on stdin, its own
-// stdout and stderr to a log file. The daemon never parses a host's render
-// bodies; it stamps them with the session and forwards them.
-//
-// The lifecycle rule this package exists to enforce: a host is spawned as a
-// PROCESS-GROUP LEADER and the group is killed, not the process. Hard-killing
-// the host alone orphans the tool subprocesses it started — reproduced three
-// times against pi 0.83.0 on 2026-08-04 — so every teardown path here ends in a
-// group sweep, including the paths where the host exits on its own.
+// Invariant: a host is spawned as a process-group leader and every teardown
+// path ends in a group sweep — hard-killing the host alone orphans its tool
+// subprocesses (reproduced 3x against pi 0.83.0, 2026-08-04).
 package hostsession
 
 import (
@@ -26,8 +20,7 @@ import (
 	"time"
 )
 
-// Event is one envelope a host emitted, already split into the parts the
-// daemon acts on (session, seq, kind) and the part it only forwards (body).
+// Event is one host envelope: the daemon acts on session/seq/kind, forwards Body.
 type Event struct {
 	SessionID string
 	Seq       int
@@ -40,49 +33,30 @@ type ExitInfo struct {
 	SessionID string
 	ExitCode  int
 	Signal    string
-	// LifecycleID matches the run this host was spawned for, so a late exit
-	// from a superseded host cannot retire the session that replaced it.
+	// LifecycleID matches the spawning run, so a late exit from a superseded
+	// host cannot retire the session that replaced it.
 	LifecycleID string
 }
 
+// SpawnOptions configures Spawn.
 type SpawnOptions struct {
 	SessionID   string
 	LifecycleID string
 	Command     []string
 	Env         []string
 	CWD         string
-	// LogPath collects the host's own stdout and stderr. pi loads the user's
-	// extensions, and any of them may print; keeping that away from the
-	// envelope fd is why the envelopes have their own.
+	// LogPath collects the host's own stdout/stderr, kept off the envelope fd.
 	LogPath string
 }
 
-// terminationGrace is how long a host gets to tear down cooperatively after
-// SIGTERM before the group is killed outright.
-//
-// Receipt (2026-08-05, this machine, compiled host, pi 0.83.0): SIGTERM to
-// process exit measured 3 ms across four idle hosts, and 3 ms for a host
-// mid-run with a live `sleep 47` bash tool — whose subprocess was gone by the
-// time the host had exited, because pi's own dispose tears its tools down.
-// 3 s is a tripwire a thousand times past that: a host that reaches it is
-// wedged, not busy, and the log says so.
+// terminationGrace bounds cooperative teardown after SIGTERM before the group
+// is killed outright. Measured: 3 ms SIGTERM-to-exit (pi 0.83.0, idle and
+// mid-run, 2026-08-05); 3 s is a tripwire — reaching it means wedged, not busy.
 const terminationGrace = 3 * time.Second
 
-// envelopeDrainGrace bounds how long a dead host's exit waits for its envelope
-// stream to finish.
-//
-// The exit must not be announced before the last envelope is delivered: the
-// daemon turns it into `session_exited`, and a client that sees the session end
-// before the run that was closing it would draw a run stuck open on a dead
-// session. Draining costs only the time to consume what the pipe already holds
-// — a pipe buffer is 64 KB — so this is microseconds of work.
-//
-// It is bounded because EOF is not guaranteed. pi spawns tool subprocesses that
-// inherit the host's fds and lead their own process groups, so one that outlives
-// the host and escapes the group sweep would hold the write end open forever and
-// the exit would never be announced. 2 s is many orders of magnitude past the
-// real drain; reaching it means something still holds the fd, which the log
-// names before the read end is closed out from under it.
+// envelopeDrainGrace bounds waiting out a dead host's envelope stream: the exit
+// must not be announced before the last envelope, but a tool child that
+// inherited fd 3 can hold the pipe open forever; 2 s means something holds it.
 const envelopeDrainGrace = 2 * time.Second
 
 type host struct {
@@ -93,16 +67,15 @@ type host struct {
 	stdin       *os.File
 	envelopes   *os.File
 	logFile     *os.File
-	// reaped closes as soon as the process is gone; exited closes once the
-	// host is fully finished — drained, deregistered, and about to be
-	// announced. Kill escalates on the first and returns on the second, so a
-	// caller that gets a nil error can spawn the same session id again.
+	// reaped closes when the process is gone; exited once teardown is complete.
+	// Kill escalates on the first and returns on the second.
 	reaped   chan struct{}
 	exited   chan struct{}
 	drained  chan struct{}
 	killOnce sync.Once
 }
 
+// Manager spawns and tears down the daemon's host processes.
 type Manager struct {
 	logf    func(format string, args ...interface{})
 	onEvent func(Event)
@@ -112,6 +85,7 @@ type Manager struct {
 	hosts map[string]*host
 }
 
+// New builds a Manager; nil callbacks are replaced with no-ops.
 func New(logf func(format string, args ...interface{}), onEvent func(Event), onExit func(ExitInfo)) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
@@ -125,8 +99,10 @@ func New(logf func(format string, args ...interface{}), onEvent func(Event), onE
 	return &Manager{logf: logf, onEvent: onEvent, onExit: onExit, hosts: make(map[string]*host)}
 }
 
+// ErrNotFound reports a session id with no live host.
 var ErrNotFound = errors.New("host session not found")
 
+// Spawn starts a host for the session as a process-group leader.
 func (m *Manager) Spawn(opts SpawnOptions) error {
 	if opts.SessionID == "" {
 		return errors.New("host spawn needs a session id")
@@ -167,8 +143,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 	cmd.Stderr = logFile
 	// ExtraFiles[0] is the child's fd 3 — the envelope stream.
 	cmd.ExtraFiles = []*os.File{envelopeW}
-	// The whole point: the child leads its own process group, so its tool
-	// subprocesses are reachable as one unit no matter how it dies.
+	// The child leads its own process group so teardown can sweep it as a unit.
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	if err := cmd.Start(); err != nil {
@@ -179,8 +154,7 @@ func (m *Manager) Spawn(opts SpawnOptions) error {
 		stdinW.Close()
 		return fmt.Errorf("start host %v: %w", opts.Command, err)
 	}
-	// The child owns its copies now; holding ours open would keep the envelope
-	// reader from ever seeing EOF.
+	// Close our copies or the envelope reader never sees EOF.
 	envelopeW.Close()
 	stdinR.Close()
 
@@ -220,18 +194,10 @@ func openLog(path string) (*os.File, error) {
 	return file, nil
 }
 
-// maxEnvelopeBytes bounds one line off the envelope fd.
-//
-// Receipt: the largest body this protocol version produces is a `message_end`
-// carrying one whole assistant message, so the bound is the model's per-response
-// output cap. The largest `maxTokens` in pi 0.83.0's model catalog is 2,000,000
-// (vercel-ai-gateway, xai/grok-4.20-multi-agent); at 4 bytes per token — the
-// worst case for UTF-8 — that is 8 MB of text. 64 MB is 8x past the largest
-// message any model in the catalog can emit, and the scanner starts at 64 KB
-// and grows only on demand, so the ceiling costs nothing until something
-// abnormal reaches for it. A line that exceeds it is a protocol violation, and
-// the host is torn down naming the limit rather than silently truncating the
-// conversation.
+// maxEnvelopeBytes bounds one line off the envelope fd. Receipt: the largest
+// body is one assistant message; pi 0.83.0's largest catalog maxTokens is
+// 2,000,000 ≈ 8 MB at 4 bytes/token, so 64 MB is 8x past it. Exceeding it is a
+// protocol violation — the host is torn down naming the limit, never truncated.
 const maxEnvelopeBytes = 64 << 20
 
 func (m *Manager) readEnvelopes(h *host, r *os.File) {
@@ -261,8 +227,7 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 		if envelope.Body == nil {
 			envelope.Body = map[string]interface{}{}
 		}
-		// The host stamps its own session id; the daemon trusts the process it
-		// spawned, not the field, so a mismatch is a bug worth naming.
+		// The daemon trusts the process it spawned, not the stamped session id.
 		if envelope.SessionID != "" && envelope.SessionID != h.sessionID {
 			m.logf("host session %s: envelope claims session %s; using the spawned one", h.sessionID, envelope.SessionID)
 		}
@@ -278,16 +243,9 @@ func (m *Manager) readEnvelopes(h *host, r *os.File) {
 	}
 }
 
-// monitor waits for the host to die and then sweeps its process group, on
-// EVERY exit path — cooperative shutdown, crash, kill. This is the sweep that
-// catches the receipted bug: pi orphans its running tool subprocesses when the
-// host goes away without cleaning up.
-//
-// Sweeping after the reap is safe where it matters. A process group's id is
-// held until its LAST member leaves, and a pid cannot be reallocated while a
-// group carries it — so whenever there is actually an orphan to kill, this
-// pgid is still unambiguously ours. When the group is already empty the signal
-// is a harmless ESRCH.
+// monitor reaps the host and sweeps its process group on EVERY exit path — the
+// sweep that catches pi orphaning its tool subprocesses. Post-reap is safe: a
+// pgid is held until its last member leaves; an empty group is a harmless ESRCH.
 func (m *Manager) monitor(h *host) {
 	waitErr := h.cmd.Wait()
 	if err := syscall.Kill(-h.pgid, syscall.SIGKILL); err != nil && !errors.Is(err, syscall.ESRCH) {
@@ -297,8 +255,7 @@ func (m *Manager) monitor(h *host) {
 	h.stdin.Close()
 	h.logFile.Close()
 
-	// Everything the host said before it died reaches the daemon before the
-	// death does. See envelopeDrainGrace for why this is bounded.
+	// Drain before announcing the exit; see envelopeDrainGrace for the bound.
 	select {
 	case <-h.drained:
 	case <-time.After(envelopeDrainGrace):
@@ -356,6 +313,7 @@ func (m *Manager) send(sessionID string, verb map[string]interface{}) error {
 	return nil
 }
 
+// Has reports whether a live host exists for the session.
 func (m *Manager) Has(sessionID string) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -363,6 +321,7 @@ func (m *Manager) Has(sessionID string) bool {
 	return ok
 }
 
+// SessionIDs lists the sessions with live hosts.
 func (m *Manager) SessionIDs() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -373,17 +332,11 @@ func (m *Manager) SessionIDs() []string {
 	return ids
 }
 
-// Kill tears a host down and returns once its process group is gone and the
-// host is deregistered — a caller that gets a nil error can spawn the same
-// session id again.
-//
-// The cooperative SIGTERM is the load-bearing half, not a courtesy: pi spawns
-// each tool subprocess into its OWN process group (measured 2026-08-05: a bash
-// `sleep 60` runs as the host's child but leads its own group), so the group
-// kill below cannot reach them. What reaches them is pi's dispose, which the
-// host runs on SIGTERM. The group kill is the backstop for the host itself and
-// whatever stayed in its group; a host wedged past the grace window can still
-// strand a detached tool child, and that is the residual this design accepts.
+// Kill tears a host down; nil error means the group is gone and the session id
+// can be respawned. The SIGTERM is load-bearing: pi's tool subprocesses lead
+// their OWN process groups (measured 2026-08-05), so only pi's dispose on
+// SIGTERM reaches them — the group kill is the backstop, and a host wedged past
+// the grace can still strand a detached tool child (accepted residual).
 func (m *Manager) Kill(sessionID string) error {
 	m.mu.Lock()
 	h, ok := m.hosts[sessionID]
@@ -398,9 +351,8 @@ func (m *Manager) Kill(sessionID string) error {
 		}
 	})
 
-	// The grace window is about the process, so it watches reaped; the return is
-	// about the teardown, so it waits out exited. Escalating on exited instead
-	// would count the envelope drain against the host's time to shut down.
+	// Escalate on reaped, return on exited — escalating on exited would count
+	// the envelope drain against the host's grace.
 	select {
 	case <-h.reaped:
 		<-h.exited
@@ -416,8 +368,7 @@ func (m *Manager) Kill(sessionID string) error {
 	return nil
 }
 
-// Shutdown tears down every live host. Used when the daemon itself is going
-// away, so no host outlives the daemon that owns it.
+// Shutdown tears down every live host so none outlives the daemon.
 func (m *Manager) Shutdown() {
 	for _, id := range m.SessionIDs() {
 		if err := m.Kill(id); err != nil && !errors.Is(err, ErrNotFound) {

@@ -9,60 +9,27 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// The daemon's side of the event bus: the fact vocabulary, the lifecycle, and the
-// projection table that turns facts into what WebSocket clients see.
-//
-// The migration pattern for A2 is the two halves below.
-//
-// PRODUCER. A `broadcastXxx` method stops touching the hub and publishes a fact
-// instead. The fact must carry a subject — the entity it is about — because a
-// subject-less "the list changed" fact is the snapshot invalidation this design
-// exists to avoid. When the existing method already receives the entity id, it
-// becomes a one-line publish and no call site changes (see
-// broadcastSessionStateChanged). When it does not — broadcastTicketsUpdated took
-// no arguments because it re-pushed the whole board — the call sites are the ones
-// that know which fact occurred, and they are what changes.
-//
-// PROJECTION. The old broadcaster body moves into a `projectXxx` method and is
-// registered in wireProjections. The hub subscribes ephemerally to every fact and
-// runs the matching projections inline on the publishing goroutine, so a fact
-// still produces exactly the same wire traffic, in the same order, as the direct
-// call it replaced.
-//
-// A projection writes to the wire and does nothing else. It must not mutate
-// state and it must not publish: the bus holds its publish lock across the
-// inline fan-out, so a fact published from inside a projection deadlocks. When
-// the old broadcaster body did something beyond pushing bytes — recomputing a
-// workspace's rolled-up status, say — that part stays on the producer side,
-// where it is a fact of its own.
-//
-// WHAT DOES NOT MOVE. Every state change goes through the bus. The exceptions
-// are enumerated, and the list is enforced by TestWireTrafficComesFromProjections
-// (bus_wire_boundary_test.go), which fails on a new broadcaster that skips the
-// bus:
-//
-//   - Byte streams. PTY output, PTY desync, attach results, and workspace tile
-//     content are high volume and carry no entity worth subscribing to. Attach
-//     and tile traffic is also routed by a per-client predicate
-//     (SendRawTextToMatchingClients), which pub/sub cannot express.
-//   - Filesystem change bursts (broadcastFsChanged), coalesced per watcher
-//     rather than per file.
-//   - The remote relay (broadcastRawWSMessage). Those events were already
-//     published as facts on the remote daemon's own bus; re-publishing them
-//     here would duplicate them.
-//
+// The daemon's side of the event bus: the fact vocabulary and the projection
+// table that turns facts into what WebSocket clients see.
 // See docs/plans/2026-08-01-ext-a1-event-bus.md.
+//
+// Every fact carries a subject; a subject-less "the list changed" fact is the
+// snapshot invalidation this design exists to avoid. The hub runs matching
+// projections inline on the publishing goroutine.
+//
+// A projection writes to the wire and does nothing else: it must not mutate
+// state and must not publish — the bus holds its publish lock across the inline
+// fan-out, so a nested publish deadlocks.
+//
+// Byte streams (PTY output/desync, attach, tile content), fs bursts, and the
+// remote relay stay off the bus; TestWireTrafficComesFromProjections enforces
+// the enumerated exception list.
 
 // Fact names are dotted `domain.verb`. `ext.<extension>.*` is reserved for facts
 // published by extensions.
 const (
-	// Session facts; subject is the session id.
-	//
-	// Registered and reregistered are separate facts rather than one fact with a
-	// flag, because they are separate things: a session appearing for the first
-	// time and a live session being re-announced by a reconnecting client. They
-	// project to different wire events, which is how the daemon has always
-	// treated them.
+	// Session facts; subject is the session id. Registered (first appearance) and
+	// reregistered (re-announcement) produce different wire events.
 	FactSessionRegistered   = "session.registered"
 	FactSessionReregistered = "session.reregistered"
 	FactSessionStateChanged = "session.state.changed"
@@ -71,10 +38,8 @@ const (
 	FactSessionTodosChanged = "session.todos.changed"
 	FactSessionRespawned    = "session.respawned"
 	FactSessionPTYResized   = "session.pty.resized"
-	// FactSessionTerminated is a session going away as part of a bulk operation
-	// (clear-all, a worktree deletion taking its sessions with it). It is not
-	// FactSessionUnregistered: unregistering announces the individual session to
-	// clients, while these paths have only ever re-pushed the list.
+	// FactSessionTerminated: a session going away in a bulk operation. Not
+	// FactSessionUnregistered — these paths only ever re-push the list.
 	FactSessionTerminated = "session.terminated"
 	// FactSessionBranchChanged: the branch monitor saw this session's checkout move.
 	FactSessionBranchChanged = "session.branch.changed"
@@ -86,12 +51,10 @@ const (
 	FactSessionPTYExited = "session.pty.exited"
 	// FactSessionWorkspaceChanged: this session moved to another workspace.
 	FactSessionWorkspaceChanged = "session.workspace.changed"
-	// FactSessionPinChanged: this session was pinned out of the queue, or
-	// released back into it. Distinct from FactWorkspacePinChanged, which moves
-	// a whole workspace and its siblings.
+	// FactSessionPinChanged: pinned out of the queue or released back. Distinct
+	// from FactWorkspacePinChanged, which moves a whole workspace.
 	FactSessionPinChanged = "session.pin.changed"
-	// FactSessionCapChanged: this session's context-window cap pin was set or
-	// cleared.
+	// FactSessionCapChanged: context-window cap pin set or cleared.
 	FactSessionCapChanged = "session.cap.changed"
 	// FactSessionActivityChanged: the generator wrote a new activity line for
 	// this session. Subject-only — the projection re-reads the session, which is
@@ -103,18 +66,12 @@ const (
 	// it. Subject is the worktree path.
 	FactWorktreeSessionsRemoved = "worktree.sessions.removed"
 
-	// FactEndpointSessionsChanged: a remote endpoint's session set changed.
-	// Subject is the endpoint id — the entity the hub manager knows about, and
-	// the one an extension watching a remote fleet would filter on.
+	// FactEndpointSessionsChanged: a remote endpoint's session set changed;
+	// subject is the endpoint id.
 	FactEndpointSessionsChanged = "endpoint.sessions.changed"
 
-	// Workspace facts; subject is the workspace id.
-	//
-	// Eight of these project to the same wire event. They are still eight facts:
-	// "the workspace was muted" and "a session joined it" are different things to
-	// subscribe to, and only the producer knows which happened. Collapsing them
-	// into one workspace.changed would hand every consumer the diffing problem
-	// the bus exists to remove.
+	// Workspace facts; subject is the workspace id. Eight project to one wire event
+	// but stay separate facts — collapsing them re-creates the diffing problem.
 	FactWorkspaceRegistered         = "workspace.registered"
 	FactWorkspaceReregistered       = "workspace.reregistered"
 	FactWorkspaceRenamed            = "workspace.renamed"
@@ -129,12 +86,8 @@ const (
 	FactWorkspaceLayoutRepublished  = "workspace.layout.republished"
 	FactWorkspaceContextChanged     = "workspace.context.changed"
 
-	// PR facts; subject is the PR id.
-	//
-	// The three set facts come from diffing the PR list around a bulk refresh.
-	// The daemon replaces the whole set on every poll, so the diff is what
-	// recovers the facts: without it a poll could only say "the list changed",
-	// which is the invalidation this design removes.
+	// PR facts; subject is the PR id. The three set facts come from diffing the
+	// list around a bulk refresh, which replaces the whole set.
 	FactPRAppeared    = "pr.appeared"
 	FactPRUpdated     = "pr.updated"
 	FactPRDisappeared = "pr.disappeared"
@@ -145,8 +98,7 @@ const (
 	FactPRDetailsChanged = "pr.details.changed"
 
 	// Worktree facts. Subject is the worktree path, except the reconcile, whose
-	// subject is the main repo: reading git prunes worktrees that are gone and
-	// adopts ones created outside attn, and the resulting list is per repo.
+	// subject is the main repo (the resulting list is per repo).
 	FactWorktreeCreated        = "worktree.created"
 	FactWorktreeDeleted        = "worktree.deleted"
 	FactWorktreeListReconciled = "worktree.list.reconciled"
@@ -180,18 +132,17 @@ const (
 	FactPluginConnected       = "plugin.connected"
 	FactPluginDisconnected    = "plugin.disconnected"
 	FactPluginHealthChanged   = "plugin.health.changed"
-	// FactPluginDriverRegistered changes which agents are available, which is
-	// part of settings, so it is the one plugin fact that does not re-push the
-	// plugin list.
+	// FactPluginDriverRegistered changes which agents are available (settings),
+	// so it is the one plugin fact that does not re-push the plugin list.
 	FactPluginDriverRegistered = "plugin.driver.registered"
 
 	// FactSettingChanged: subject is the setting key.
 	FactSettingChanged = "setting.changed"
-	// FactBackupWritten: subject is the backup file path. Clients learn about it
-	// through settings, which carry db.last_backup_at.
+	// FactBackupWritten: subject is the backup file path; clients learn of it
+	// through settings (db.last_backup_at).
 	FactBackupWritten = "backup.written"
-	// FactTailscaleServeChanged: subject is the profile. There is one tailscale
-	// serve per daemon and one daemon per profile, so the profile is its id.
+	// FactTailscaleServeChanged: subject is the profile (one serve per daemon,
+	// one daemon per profile).
 	FactTailscaleServeChanged = "tailscale.serve.changed"
 
 	// Notification facts; subject is the notification id.
@@ -218,46 +169,27 @@ const (
 	FactTicketCommented     = "ticket.commented"
 	FactTicketAssigned      = "ticket.assigned"
 	FactTicketAttached      = "ticket.attached"
-	// FactTicketChanged is the fallback for a mutation whose call site cannot
-	// name a sharper fact. It is still about one ticket — that is the line
-	// between a fact and an invalidation — but a sharper name is preferred
-	// wherever the producer knows one.
+	// FactTicketChanged is the fallback when the call site cannot name a sharper
+	// fact; still about one ticket, never a list invalidation.
 	FactTicketChanged = "ticket.changed"
 
-	// FactDocumentChanged: a document store record was written or removed.
-	// Subject is the document's address (namespace/collection/id); the payload
-	// carries the address in parts plus whether it was a removal.
-	//
-	// It is appended by the store, inside the transaction that made the change,
-	// and announced afterwards — see CommitDocumentWrite. That is what makes the
-	// seq it lands at usable as the write's position.
-	//
-	// This fact has no entry in wireProjections, and that is not an omission: it
-	// produces no WebSocket traffic. Its consumer is the live-query fan-out in
-	// documents.go, an ephemeral subscriber beside the hub that delivers result
-	// sets to IPC callers over their own connections.
+	// FactDocumentChanged: subject is the address (namespace/collection/id).
+	// Appended inside the write's transaction (CommitDocumentWrite), so its seq is
+	// the write's position. No wireProjections entry: its consumer is the
+	// live-query fan-out in documents.go, not WebSocket clients.
 	FactDocumentChanged = "document.changed"
-	// FactDocumentCollectionRemoved: a document collection was undefined, taking
-	// every document under it. Subject is the collection (namespace/collection),
-	// because that is the entity that went — a removal has no document to name,
-	// and saying so with an empty document id would leave every future consumer
-	// special-casing an address that points at nothing.
+	// FactDocumentCollectionRemoved: a collection was undefined, taking every
+	// document under it. Subject is the collection — a removal has no document
+	// to name.
 	FactDocumentCollectionRemoved = "document.collection.removed"
-	// FactDocumentCollectionRedeclared: a collection's declaration was rewritten
-	// in place. Subject is the collection, like a removal, and for the same
-	// reason: the entity that moved is the declaration, not any document. Its
-	// consumer is the live-query fan-out — a redeclare that drops a queried
-	// field must end the subscriptions using it at redeclare time, not at the
-	// next arbitrary write. Like the other document facts it has no entry in
-	// wireProjections.
+	// FactDocumentCollectionRedeclared: subject is the collection. A redeclare that
+	// drops a queried field must end the subscriptions using it. No wire entry.
 	FactDocumentCollectionRedeclared = "document.collection.redeclared"
 )
 
-// CompactableFacts are the fact classes the retention pass may reduce to one
-// row per subject. Both document facts qualify for the same reason: they are
-// invalidations about a subject whose state lives in the store, so only the
-// newest carries information. Session and ticket facts are deliberately absent
-// — they keep the age window's behavior unchanged.
+// CompactableFacts are the fact classes retention may reduce to one row per
+// subject — store-backed invalidations where only the newest carries
+// information. Session and ticket facts are deliberately absent.
 var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared}
 
 // projection maps facts to the wire traffic they produce.
@@ -266,14 +198,9 @@ type projection struct {
 	apply  func(*Daemon, bus.Event)
 }
 
-// wireProjections is the whole fact -> WebSocket mapping. A2 grows this table as
-// each broadcaster migrates.
-//
-// Built once on first use rather than at package init: the table's closures call
-// projections, projections publish further facts (a session state change
-// recomputes its workspace), and publishing reads the table — a cycle the
-// compiler rejects in a package-level initializer even though it is fine at
-// runtime.
+// wireProjections is the whole fact -> WebSocket mapping. Built on first use,
+// not package init: projections publish further facts and publishing reads the
+// table — a cycle the compiler rejects in a package-level initializer.
 var (
 	wireProjectionsOnce  sync.Once
 	wireProjectionsTable []projection
@@ -297,26 +224,18 @@ func buildWireProjections() []projection {
 			},
 		},
 		{
-			// A pin changes what the session says about itself (turn_owed and
-			// pinned_at, or context_window_cap), and nothing about its workspace,
-			// so it re-pushes the one session rather than recomputing the group
-			// around it.
+			// A pin changes only what the session says about itself.
 			filter: bus.Filter{FactSessionPinChanged, FactSessionCapChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
-			// A new activity line changes one field on one session and nothing about
-			// its workspace, so it re-pushes that session alone. It reaches clients
-			// as a state change because there is no separate activity event: the
-			// line rides on the session snapshot, which is what a client renders
-			// anyway.
+			// An activity line has no event of its own: it rides on the session
+			// snapshot, so it re-pushes that session alone.
 			filter: bus.Filter{FactSessionActivityChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
-			// A re-announced session and a renamed one both reach clients as a state
-			// change carrying the session; neither recomputes the workspace, which is
-			// what separates them from FactSessionStateChanged.
+			// Neither recomputes the workspace, unlike FactSessionStateChanged.
 			filter: bus.Filter{FactSessionReregistered, FactSessionRenamed},
 			apply: func(d *Daemon, ev bus.Event) {
 				d.projectSessionEvent(protocol.EventSessionStateChanged, ev.Subject)
@@ -346,8 +265,7 @@ func buildWireProjections() []projection {
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionPTYResized(ev) },
 		},
 		{
-			// Everything whose only client-visible effect is "the session list moved".
-			// Each is a real fact about one session; the wire sees one list push.
+			// Facts whose only client-visible effect is one session-list push.
 			filter: bus.Filter{
 				FactSessionTerminated,
 				FactSessionBranchChanged,
@@ -365,8 +283,6 @@ func buildWireProjections() []projection {
 			},
 		},
 		{
-			// Eight distinct facts, one wire event: clients have always been told
-			// "this workspace changed, here it is" whatever the reason.
 			filter: bus.Filter{
 				FactWorkspaceReregistered,
 				FactWorkspaceRenamed,
@@ -398,9 +314,7 @@ func buildWireProjections() []projection {
 			apply:  func(d *Daemon, ev bus.Event) { d.projectWorkspaceContextChanged(ev) },
 		},
 		{
-			// Every ticket fact re-pushes the board. The board push is the wire
-			// shape clients already expect; the facts are what a consumer can
-			// actually reason about.
+			// Every ticket fact re-pushes the board — the wire shape clients expect.
 			filter: bus.Filter{"ticket.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
 		},
@@ -466,9 +380,8 @@ func buildWireProjections() []projection {
 			apply: func(d *Daemon, _ bus.Event) { d.projectPluginsUpdated() },
 		},
 		{
-			// A plugin going away and a driver registering both change which agents
-			// are available, so both re-push settings — without a changed key,
-			// because no setting was set.
+			// All change which agents are available, so re-push settings — with no
+			// changed key, because no setting was set.
 			filter: bus.Filter{FactPluginDisconnected, FactPluginDriverRegistered,
 				FactBackupWritten, FactTailscaleServeChanged},
 			apply: func(d *Daemon, _ bus.Event) { d.projectSettingsUpdated("") },
@@ -504,11 +417,9 @@ func buildWireProjections() []projection {
 	}
 }
 
-// ensureEventBus constructs the bus over the profile store and registers the hub
-// as an ephemeral consumer. It is idempotent and runs at construction rather than
-// at Start, because the hub subscription is what makes a published fact reach
-// clients: a daemon that publishes without having started (every test that
-// exercises a broadcaster directly) must still project.
+// ensureEventBus constructs the bus and registers the hub as an ephemeral
+// consumer. Idempotent, and run at construction: a daemon that publishes without
+// having started (tests) must still project.
 func (d *Daemon) ensureEventBus() {
 	if d.eventBus != nil {
 		return
@@ -522,7 +433,7 @@ func (d *Daemon) ensureEventBus() {
 	d.subscribeDocumentFacts()
 }
 
-// startEventBus begins durable delivery. It runs early in Start, before any
+// startEventBus begins durable delivery; runs early in Start, before any
 // subsystem that publishes.
 func (d *Daemon) startEventBus() error {
 	d.ensureEventBus()
@@ -549,14 +460,8 @@ func (d *Daemon) projectToClients(ev bus.Event) {
 	}
 }
 
-// publishFact is the producer half. It is nil-safe: a Daemon assembled in a test
-// without a bus still runs its projections directly, so migrating a broadcaster
-// does not silently disconnect the behavior every existing test asserts on.
-//
-// The bus-less path marshals the payload exactly as Publish would, because a
-// projection that reads its payload must behave the same either way — otherwise
-// a fact whose data lives in the payload rather than in the store would project
-// an empty message in every test that skips the bus.
+// publishFact is the producer half. Nil-safe: a bus-less test Daemon runs its
+// projections directly, marshalling the payload exactly as Publish would.
 func (d *Daemon) publishFact(name, subject string, payload any) {
 	if d == nil {
 		return
@@ -590,21 +495,10 @@ func decodeFact[T any](d *Daemon, ev bus.Event) (T, bool) {
 	return out, true
 }
 
-// Snapshot projections re-push a whole list — every session, every ticket. A
-// bulk operation publishes one fact per entity, because that is what makes the
-// log worth subscribing to, but the wire must not carry one full list per
-// entity: clearing twenty sessions was one message before the bus and has to
-// stay one message after it.
-//
-// coalesceSnapshots runs fn with snapshot projections deferred and de-duplicated
-// by key, then flushes each one once, in first-request order. Per-entity
-// projections (the ones that name the entity on the wire) are unaffected and
-// still fire inline, in publish order.
-//
-// The window is process-wide rather than goroutine-scoped, so a snapshot pushed
-// by an unrelated goroutine during a bulk operation is deferred to the flush
-// too. That is a few microseconds of delay for one message, and it is still
-// delivered exactly once, in order relative to the batch.
+// coalesceSnapshots runs fn with snapshot (whole-list) projections deferred and
+// de-duplicated by key, so a bulk operation does not put one full list per entity
+// on the wire. Per-entity projections still fire inline. The window is
+// process-wide: an unrelated goroutine's snapshot defers to the flush too.
 func (d *Daemon) coalesceSnapshots(fn func()) {
 	d.snapshotMu.Lock()
 	d.snapshotDepth++
@@ -631,9 +525,8 @@ func (d *Daemon) coalesceSnapshots(fn func()) {
 	fn()
 }
 
-// projectSnapshot runs a whole-list re-push, or records it for the end of the
-// enclosing coalesceSnapshots window. Every projection that re-pushes a list
-// goes through this rather than broadcasting directly.
+// projectSnapshot runs a whole-list re-push, or defers it to the end of the
+// enclosing coalesceSnapshots window. Every list re-push goes through this.
 func (d *Daemon) projectSnapshot(key string, push func()) {
 	d.snapshotMu.Lock()
 	if d.snapshotDepth == 0 {
@@ -667,9 +560,8 @@ const (
 	snapshotTasks       = "tasks_changed"
 )
 
-// wireEqual reports whether two values reach clients as the same JSON. It is the
-// equality a diff-driven producer wants: "changed" should mean the client would
-// see something different, not that some unexported or unserialized field moved.
+// wireEqual reports whether two values reach clients as the same JSON —
+// "changed" means the client would see something different.
 func wireEqual(a, b any) bool {
 	rawA, errA := json.Marshal(a)
 	rawB, errB := json.Marshal(b)

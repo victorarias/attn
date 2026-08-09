@@ -15,16 +15,9 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
-// Conversation sessions: attn sessions whose agent runs in a headless host
-// process instead of a PTY. The daemon owns the host's lifetime exactly as it
-// owns a PTY worker's; what changes is the surface. There are no bytes, no
-// grid, and no attach — there is an envelope stream the app draws from and a
-// prompt verb going the other way.
-//
-// A plugin driver opts its agent in by registering the "conversation"
-// capability. Everything else about the spawn — argv, env, cwd — comes back
-// from the same driver.spawn call a PTY-backed plugin agent uses, so a
-// conversation agent is configured, listed, and launched like any other.
+// Conversation sessions: the agent runs in a headless host process instead of a
+// PTY — no bytes, grid, or attach, just an envelope stream out and a prompt verb
+// in. A plugin driver opts in via the "conversation" capability.
 
 // pluginDriverConversationCapability is the driver capability that routes an
 // agent's sessions to the host runtime instead of the PTY backend.
@@ -50,11 +43,8 @@ func (d *Daemon) isHostSession(sessionID string) bool {
 	return d.ensureHostSessions().Has(sessionID)
 }
 
-// liveRuntimeSessionIDs is every session with a runtime behind it, PTY-backed
-// or host-backed. Anything that asks "is this session still alive?" — pruning
-// dead rows, reconciling workspace panes, tearing everything down — must ask
-// this and not the PTY backend alone, or a live conversation session reads as
-// abandoned.
+// liveRuntimeSessionIDs is every session with a runtime behind it, PTY- or
+// host-backed. Liveness checks must ask this, never the PTY backend alone.
 func (d *Daemon) liveRuntimeSessionIDs(ctx context.Context) []string {
 	var ids []string
 	if d.ptyBackend != nil {
@@ -63,24 +53,19 @@ func (d *Daemon) liveRuntimeSessionIDs(ctx context.Context) []string {
 	return append(ids, d.ensureHostSessions().SessionIDs()...)
 }
 
-// hostSessionLogPath keeps a host's own stdout/stderr beside the PTY worker
-// logs, one file per session, so a wedged host is diagnosable the same way a
-// wedged worker is.
+// hostSessionLogPath keeps a host's stdout/stderr beside the PTY worker logs,
+// one file per session.
 func hostSessionLogPath(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "log", sessionID+".log")
 }
 
-// hostSessionStateDir is where a host keeps whatever it persists for the
-// session — for pi, its own session file. Under attn's data dir, never the
-// agent's own home, so attn owns what it spawned.
+// hostSessionStateDir is under attn's data dir, never the agent's own home.
 func hostSessionStateDir(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "state", sessionID)
 }
 
 // loginShellEnvForSpawn is the user's login shell environment, captured now if
-// the daemon's pre-warm has not landed yet. The PTY path makes the same
-// fallback, for the same reason: the first session of a daemon's life must not
-// get a thinner environment than the second.
+// the pre-warm has not landed, so the first session matches the second.
 func (d *Daemon) loginShellEnvForSpawn() []string {
 	if cached := d.cachedLoginShellEnv(); len(cached) > 0 {
 		return cached
@@ -97,16 +82,10 @@ func (d *Daemon) loginShellEnvForSpawn() []string {
 	return env
 }
 
-// spawnHostSession starts the host for a conversation session. It takes the
-// same launch description the PTY path would have run.
+// spawnHostSession starts the host for a conversation session.
 func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
-	// A host gets the same environment a PTY agent gets, layered the same way:
-	// the daemon's own environment, then the user's login shell on top. Agents
-	// read credentials from there — an API key exported in a shell profile is
-	// the ordinary way pi is authenticated — and a host launched from the app
-	// (which the window server starts with almost no environment) would
-	// otherwise fail its first prompt with "no API key found" for a key the
-	// user has had set for years.
+	// Daemon env, then login shell on top: credentials live in shell profiles and
+	// an app-launched host would otherwise fail its first prompt with "no API key".
 	env := pty.MergeEnvironment(os.Environ(), d.loginShellEnvForSpawn())
 	env = pty.MergeEnvironment(env, opts.ExternalEnv)
 	env = pty.MergeEnvironment(env, []string{
@@ -129,9 +108,6 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 }
 
 // spawnSessionRuntime starts whichever runtime this session's agent asked for.
-// It is the one fork in the spawn pipeline: everything before it (validation,
-// launch intent, the driver's argv) and everything after it (the session row,
-// panes, facts) is identical for both kinds.
 func (d *Daemon) spawnSessionRuntime(req *spawnRequest, opts ptybackend.SpawnOptions) error {
 	if req.hasPluginDriver && req.pluginDriver.Capabilities[pluginDriverConversationCapability] {
 		return d.spawnHostSession(opts)
@@ -139,8 +115,7 @@ func (d *Daemon) spawnSessionRuntime(req *spawnRequest, opts ptybackend.SpawnOpt
 	return d.ptyBackend.Spawn(context.Background(), opts)
 }
 
-// killSessionRuntime stops a session's runtime, whichever kind it is. Used by
-// the spawn pipeline's rollbacks, where the session may be either.
+// killSessionRuntime stops a session's runtime, whichever kind it is.
 func (d *Daemon) killSessionRuntime(sessionID string) error {
 	if d.isHostSession(sessionID) {
 		if err := d.ensureHostSessions().Kill(sessionID); err != nil && !errors.Is(err, hostsession.ErrNotFound) {
@@ -160,12 +135,8 @@ func (d *Daemon) removeSessionRuntime(sessionID string) error {
 	return d.ptyBackend.Remove(context.Background(), sessionID)
 }
 
-// handleHostEvent forwards one envelope to every connected client.
-//
-// This is a stream, not a state change: it takes the same direct path
-// pty_output does rather than riding the event bus. The daemon's picture of a
-// session must be complete without reading one of these, which is why nothing
-// here writes to the store.
+// handleHostEvent forwards one envelope to every connected client. A stream, not
+// a state change: pty_output's direct path, not the bus, and no store writes.
 func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	d.wsHub.BroadcastValue(&protocol.AgentEventMessage{
 		Event: protocol.EventAgentEvent,
@@ -176,8 +147,7 @@ func (d *Daemon) handleHostEvent(event hostsession.Event) {
 	})
 }
 
-// handleHostExit routes a dead host into the same exit path a dead PTY worker
-// takes: the session's end is the session's end, whatever was running it.
+// handleHostExit routes a dead host into the same exit path a dead PTY worker takes.
 func (d *Daemon) handleHostExit(info hostsession.ExitInfo) {
 	d.handlePTYExit(ptybackend.ExitInfo{
 		ID:          info.SessionID,
@@ -202,10 +172,8 @@ func (d *Daemon) handleAgentPrompt(client *wsClient, msg *protocol.AgentPromptMe
 	if err := d.ensureHostSessions().Prompt(sessionID, text); err != nil {
 		d.logf("agent_prompt for session %s failed: %v", sessionID, err)
 		d.sendCommandError(client, protocol.CmdAgentPrompt, "no live conversation host for session "+sessionID)
-		// The app closes its composer the moment it sends, so a prompt that
-		// never reached a host has to come back as the run it will never open.
-		// seq 0 says this is the daemon's own envelope rather than a point on
-		// the host's spine, which is why it cannot collide with one.
+		// The app closed its composer on send, so a prompt that never reached a host
+		// comes back as the run it will never open; seq 0 marks a daemon envelope.
 		d.handleHostEvent(hostsession.Event{
 			SessionID: sessionID,
 			Kind:      "run_settled",
