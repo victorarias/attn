@@ -4,6 +4,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -43,6 +44,20 @@ func waitForNudgeDeadline(t *testing.T, d *Daemon, sessionID string) time.Time {
 	return time.Time{}
 }
 
+// settledNudgeDeadline is waitForNudgeDeadline for a synctest bubble: arming can
+// happen on another goroutine, so settle the bubble first and then read the
+// deadline once. A missing deadline here means nothing is going to arm one, not
+// that the poll was early.
+func settledNudgeDeadline(t *testing.T, d *Daemon, sessionID string) time.Time {
+	t.Helper()
+	synctest.Wait()
+	deadline := currentNudgeDeadline(d, sessionID)
+	if deadline.IsZero() {
+		t.Fatalf("no nudge deadline armed for %s once the daemon settled", sessionID)
+	}
+	return deadline
+}
+
 // fireNudgeNow simulates the countdown timer firing immediately, by invoking the fire
 // callback with the live timer handle — the faithful deterministic path. Tests that
 // use it set an hour-long window override so the real timer never races this
@@ -57,20 +72,6 @@ func fireNudgeNow(t *testing.T, d *Daemon, sessionID string) {
 	d.nudgeCountdownFire(sessionID, timer)
 }
 
-// waitForNudge polls until the session received a doorbell, failing on timeout. Used
-// only by the end-to-end real-timer test; the rest fire deterministically.
-func waitForNudge(t *testing.T, inputs func(string) []string, sessionID string) {
-	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if wasNudged(inputs(sessionID)) {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
-	}
-	t.Fatalf("session %s was never doorbelled", sessionID)
-}
-
 // armForTest gives an idle codex agent an unread chief steer, which arms its shared
 // nudge countdown. Returns the agent id and inputs accessor.
 func armForTest(t *testing.T, d *Daemon) (agentID string, inputs func(string) []string) {
@@ -83,14 +84,32 @@ func armForTest(t *testing.T, d *Daemon) (agentID string, inputs func(string) []
 }
 
 // The end-to-end real-timer path: an idle, inactive codex with unread activity arms a
-// countdown that, on its own, fires after the (tiny) window and doorbells.
+// countdown that, on its own, fires after the window and doorbells.
+//
+// Converted to synctest. This test used to shorten the countdown to 15ms and poll
+// for the doorbell over two seconds; it now runs the production 30s window and
+// sleeps exactly it, at no wall-clock cost. The negative half is what the bubble
+// really buys: one tick short of the deadline nothing has been doorbelled, on a
+// daemon with nothing left to do — a claim the polling version could not make at
+// all.
 func TestNudgeCountdownFiresWhenInactive(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = 15 * time.Millisecond
-	t.Cleanup(d.stopNudgeCountdowns)
-	agentID, inputs := armForTest(t, d)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		agentID, inputs := armForTest(t, d)
 
-	waitForNudge(t, inputs, agentID)
+		time.Sleep(defaultNudgeCountdownWindow - time.Second)
+		synctest.Wait()
+		if wasNudged(inputs(agentID)) {
+			t.Fatal("the doorbell rang before the countdown window elapsed")
+		}
+
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if !wasNudged(inputs(agentID)) {
+			t.Fatalf("session %s was never doorbelled", agentID)
+		}
+	})
 }
 
 // The active (currently-selected) session never auto-fires: its countdown is paused
@@ -125,68 +144,74 @@ func TestNudgeCountdownPausedWhileActive(t *testing.T) {
 // Switching away from the active session resumes its paused countdown so attn
 // delivers the nudge later.
 func TestNudgeCountdownResumesOnSwitchAway(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	d.store.UpdateState(agentID, protocol.StateIdle)
-	d.setSelectedSession(agentID)
-	commentOnTicket(t, d, ticketID, "take a look") // paused while active
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("countdown ran while the session was active")
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Hour
+		stopDaemonBackground(t, d)
+		chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		d.store.UpdateState(agentID, protocol.StateIdle)
+		d.setSelectedSession(agentID)
+		commentOnTicket(t, d, ticketID, "take a look") // paused while active
+		if currentNudgeTimer(d, agentID) != nil {
+			t.Fatal("countdown ran while the session was active")
+		}
 
-	d.setSelectedSession(chiefID) // switch away
+		d.setSelectedSession(chiefID) // switch away
 
-	waitForNudgeDeadline(t, d, agentID)
+		settledNudgeDeadline(t, d, agentID)
+	})
 }
 
 func TestBufferedNudgePreservesDeadlineAcrossSelectionPause(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Second
-	d.ticketBufferWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefID, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	if _, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(chiefID), time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	attentionAt := time.Now().Add(-10 * time.Minute)
-	if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), attentionAt); err != nil {
-		t.Fatal(err)
-	}
-	d.setSelectedSession(chiefID)
-	commentOnTicket(t, d, ticketID, "buffer this")
-	if deadline := currentNudgeDeadline(d, chiefID); !deadline.IsZero() {
-		t.Fatalf("selected chief armed deadline %s", deadline)
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Second
+		d.ticketBufferWindowOverride = time.Hour
+		stopDaemonBackground(t, d)
+		chiefID, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		if _, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(chiefID), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+		attentionAt := time.Now().Add(-10 * time.Minute)
+		if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), attentionAt); err != nil {
+			t.Fatal(err)
+		}
+		d.setSelectedSession(chiefID)
+		commentOnTicket(t, d, ticketID, "buffer this")
+		if deadline := currentNudgeDeadline(d, chiefID); !deadline.IsZero() {
+			t.Fatalf("selected chief armed deadline %s", deadline)
+		}
 
-	d.setSelectedSession(agentID)
-	deadline := waitForNudgeDeadline(t, d, chiefID)
-	want := attentionAt.Add(time.Hour)
-	// Store timestamps use RFC3339 second precision, so the durable round-trip
-	// may trim the sub-second component.
-	if delta := deadline.Sub(want); delta < -time.Second || delta > time.Second {
-		t.Fatalf("resumed deadline = %s, want %s", deadline, want)
-	}
+		d.setSelectedSession(agentID)
+		deadline := settledNudgeDeadline(t, d, chiefID)
+		want := attentionAt.Add(time.Hour)
+		// Store timestamps use RFC3339 second precision, so the durable round-trip
+		// may trim the sub-second component.
+		if delta := deadline.Sub(want); delta < -time.Second || delta > time.Second {
+			t.Fatalf("resumed deadline = %s, want %s", deadline, want)
+		}
+	})
 }
 
 func TestRebuildTicketDeliverySchedulesRearmsUnread(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	_, agentID, _ := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
-	d.store.UpdateState(agentID, protocol.StateIdle)
-	commentOnTicket(t, d, ticketID, "survive restart")
-	d.cancelNudgeCountdown(agentID, "simulate daemon restart")
-	if currentNudgeTimer(d, agentID) != nil {
-		t.Fatal("countdown still armed before rebuild")
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Hour
+		stopDaemonBackground(t, d)
+		_, agentID, _ := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
+		d.store.UpdateState(agentID, protocol.StateIdle)
+		commentOnTicket(t, d, ticketID, "survive restart")
+		d.cancelNudgeCountdown(agentID, "simulate daemon restart")
+		if currentNudgeTimer(d, agentID) != nil {
+			t.Fatal("countdown still armed before rebuild")
+		}
 
-	d.rebuildTicketDeliverySchedules()
-	waitForNudgeDeadline(t, d, agentID)
+		d.rebuildTicketDeliverySchedules()
+		settledNudgeDeadline(t, d, agentID)
+	})
 }
 
 // Switching TO a session with a running countdown pauses it (no auto-fire while the

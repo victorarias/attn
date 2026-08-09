@@ -3,6 +3,7 @@ package daemon
 import (
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -17,12 +18,23 @@ import (
 func newAutoSettleDaemon(t *testing.T) (*Daemon, string) {
 	t.Helper()
 	d := NewForTesting(filepath.Join(t.TempDir(), "auto-settle.sock"))
+	return d, seedAutoSettleSession(t, d, t.TempDir())
+}
+
+// seedAutoSettleSession installs the fixture's session and settings. It is split
+// out of newAutoSettleDaemon because the turn it opens is stamped with time.Now,
+// and a synctest bubble's clock starts at 2000-01-01: a turn opened outside the
+// bubble is stamped decades AHEAD of every settle made inside it, so the settle
+// lands before the open and the turn reads as still owed. A bubbled test builds
+// the daemon outside (see synctest_test.go) and calls this inside.
+func seedAutoSettleSession(t *testing.T, d *Daemon, dir string) string {
+	t.Helper()
 	id := "session"
 	d.store.Add(&protocol.Session{
 		ID:             id,
 		Label:          id,
 		Agent:          protocol.SessionAgentCodex,
-		Directory:      t.TempDir(),
+		Directory:      dir,
 		State:          protocol.SessionStateWaitingInput,
 		StateSince:     characterizationOldTimestamp,
 		StateUpdatedAt: characterizationOldTimestamp,
@@ -37,7 +49,7 @@ func newAutoSettleDaemon(t *testing.T) (*Daemon, string) {
 	if !d.store.OpenTurnIfClosed(id, time.Now()) {
 		t.Fatal("OpenTurnIfClosed() = false; the fixture owes no turn")
 	}
-	return d, id
+	return id
 }
 
 func autoSettlePending(d *Daemon, sessionID string) (*autoSettleTimer, bool) {
@@ -386,25 +398,44 @@ func TestAutoSettle_FireTimeRecheckRefusesHeldWorkingDuringClassification(t *tes
 	}
 }
 
-// End to end on real timers, with the windows turned down: the feature works
-// without the hand-fire the other tests use.
+// End to end on real timers: the feature works without the hand-fire the other
+// tests use.
+//
+// Converted to synctest. The windows no longer need turning down — this runs the
+// production 30s arm and 15s countdown and sleeps exactly them at no wall-clock
+// cost — and the two phases are now separately observable, so a policy that
+// settles too early fails here rather than passing a "within 5 seconds" poll.
 func TestAutoSettle_RealTimersSettleTheTurn(t *testing.T) {
-	d, id := newAutoSettleDaemon(t)
-	d.store.SetSetting(SettingAutoSettleArmSeconds, "1")
-	d.store.SetSetting(SettingAutoSettleCountdownSeconds, "1")
+	d := newBubbleDaemon(t)
+	dir := t.TempDir()
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		// Seeded inside the bubble so the turn is opened on the bubble's clock; see
+		// seedAutoSettleSession.
+		id := seedAutoSettleSession(t, d, dir)
+		// The fixture pins hour-long windows so hand-fired tests never race a real
+		// timer. This one is about the real timers, so it takes the defaults.
+		d.store.SetSetting(SettingAutoSettleArmSeconds, "")
+		d.store.SetSetting(SettingAutoSettleCountdownSeconds, "")
 
-	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
-		t.Fatal("applyState(working) = false")
-	}
-
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		if !turnIsOwed(d, id) {
-			return
+		if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+			t.Fatal("applyState(working) = false")
 		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatal("turn was never auto-settled within 5s of a 1s+1s policy")
+
+		// Through the invisible arm delay and into the countdown, with the turn still
+		// owed: settling here would bury the session while the countdown is on screen.
+		time.Sleep(defaultAutoSettleArmSeconds * time.Second)
+		synctest.Wait()
+		if !turnIsOwed(d, id) {
+			t.Fatal("the turn settled at the end of the arm delay, before its countdown ran")
+		}
+
+		time.Sleep(defaultAutoSettleCountdownSeconds * time.Second)
+		synctest.Wait()
+		if turnIsOwed(d, id) {
+			t.Fatal("the turn was never auto-settled although both windows elapsed")
+		}
+	})
 }
 
 func TestValidateAutoSettleSeconds(t *testing.T) {

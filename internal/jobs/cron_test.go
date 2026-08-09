@@ -66,39 +66,46 @@ func TestACronEntryFiresOnItsIntervalAndRearms(t *testing.T) {
 // A failing fire never retires the entry: it records the error and stays armed,
 // because a heartbeat that gives up is a silent outage.
 func TestAFailingCronEntryStaysArmed(t *testing.T) {
-	r, _, clock := newTestRunner(t, func(o *Options) { o.MaxAttempts = 1 })
-	var fires atomic.Int64
-	if err := r.RegisterCron(cronKind, time.Minute, func(context.Context, *Job) (any, error) {
-		fires.Add(1)
-		return nil, errors.New("tick failed")
-	}, HandlerConfig{}); err != nil {
-		t.Fatalf("register cron: %v", err)
-	}
-	mustStart(t, r)
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := newBubbleRunner(t, func(o *Options) { o.MaxAttempts = 1 })
+		var fires atomic.Int64
+		if err := r.RegisterCron(cronKind, time.Minute, func(context.Context, *Job) (any, error) {
+			fires.Add(1)
+			return nil, errors.New("tick failed")
+		}, HandlerConfig{}); err != nil {
+			t.Fatalf("register cron: %v", err)
+		}
+		mustStart(t, r)
 
-	// The handler counts its fire on entry, so counting to `want` says the fire
-	// started, not that it finished and re-armed. Wait for the re-arm before
-	// advancing again: the next fire is scheduled an interval past the moment the
-	// last one finished, so advancing first would push the schedule out from under
-	// the very clock move meant to trigger it.
-	for want := int64(1); want <= 3; want++ {
-		clock.advance(time.Minute)
-		waitFor(t, "the failing cron entry to fire", func() bool { return fires.Load() == want })
-		waitFor(t, "the failing cron entry to re-arm", func() bool {
+		// Three intervals at their real length. synctest.Wait settles each fire and
+		// its re-arm before the clock moves again, so the sequencing the fake-clock
+		// version had to reason about explicitly — never advance past a schedule the
+		// last fire has not written yet — is now a property of the bubble.
+		for want := int64(1); want <= 3; want++ {
+			time.Sleep(time.Minute)
+			synctest.Wait()
+			if got := fires.Load(); got != want {
+				t.Fatalf("cron fired %d times after %d intervals, want %d", got, want, want)
+			}
 			next, err := r.CronEntry(cronKind)
-			return err == nil && next != nil && next.State == StateQueued && next.ScheduledAt.After(clock.now())
-		})
-	}
-	entry, err := r.CronEntry(cronKind)
-	if err != nil || entry == nil {
-		t.Fatalf("cron entry: %v (%+v)", err, entry)
-	}
-	if entry.State != StateQueued {
-		t.Fatalf("failing cron entry state = %s, want queued (attempt cap must not retire it)", entry.State)
-	}
-	if entry.LastError != "tick failed" {
-		t.Fatalf("failing cron entry last_error = %q, want the fire's error", entry.LastError)
-	}
+			if err != nil || next == nil {
+				t.Fatalf("cron entry after fire %d: %v (%+v)", want, err, next)
+			}
+			if next.State != StateQueued || !next.ScheduledAt.After(time.Now()) {
+				t.Fatalf("cron entry did not re-arm after fire %d: state %s scheduled %s", want, next.State, next.ScheduledAt)
+			}
+		}
+		entry, err := r.CronEntry(cronKind)
+		if err != nil || entry == nil {
+			t.Fatalf("cron entry: %v (%+v)", err, entry)
+		}
+		if entry.State != StateQueued {
+			t.Fatalf("failing cron entry state = %s, want queued (attempt cap must not retire it)", entry.State)
+		}
+		if entry.LastError != "tick failed" {
+			t.Fatalf("failing cron entry last_error = %q, want the fire's error", entry.LastError)
+		}
+	})
 }
 
 // A restart re-registers the same cron kind against a store that already holds
@@ -149,60 +156,62 @@ func TestRestartKeepsAnExistingCronSchedule(t *testing.T) {
 // row and List hides cron entries, so unless arming revives it the heartbeat is
 // gone for good — silently — even after the kind comes back.
 func TestArmingRevivesACronEntryAPriorBuildKilled(t *testing.T) {
-	store := newMemStore()
-	clock := newFakeClock()
-	opts := func() Options {
-		return Options{Store: store, Now: clock.now, PollInterval: testPoll, Log: func(string, ...interface{}) {}}
-	}
-	noop := func(context.Context, *Job) (any, error) { return nil, nil }
+	synctest.Test(t, func(t *testing.T) {
+		store := newMemStore()
+		opts := func() Options {
+			return Options{Store: store, Log: func(string, ...any) {}}
+		}
+		noop := func(context.Context, *Job) (any, error) { return nil, nil }
 
-	armed := New(opts())
-	if err := armed.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
-		t.Fatalf("register cron: %v", err)
-	}
-	mustStart(t, armed)
-	armed.Stop()
+		armed := New(opts())
+		if err := armed.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
+			t.Fatalf("register cron: %v", err)
+		}
+		mustStart(t, armed)
+		armed.Stop()
 
-	// A build with no handler for the kind: the due entry is retired.
-	clock.advance(2 * time.Hour)
-	stranger := New(opts())
-	if err := stranger.Register("something-else", noop); err != nil {
-		t.Fatalf("register other kind: %v", err)
-	}
-	mustStart(t, stranger)
-	waitFor(t, "the unregistered cron entry to be retired", func() bool {
-		j, _ := store.LoadByKey(cronKind, CronKey)
-		return j != nil && j.State.Terminal()
+		// A build with no handler for the kind: the due entry is retired.
+		time.Sleep(2 * time.Hour)
+		stranger := New(opts())
+		if err := stranger.Register("something-else", noop); err != nil {
+			t.Fatalf("register other kind: %v", err)
+		}
+		mustStart(t, stranger)
+		synctest.Wait()
+		if j, _ := store.LoadByKey(cronKind, CronKey); j == nil || !j.State.Terminal() {
+			t.Fatalf("the unregistered cron entry was not retired (%+v)", j)
+		}
+		stranger.Stop()
+
+		// The kind is back. The heartbeat must be beating again.
+		time.Sleep(2 * time.Hour)
+		fired := make(chan struct{}, 4)
+		revived := New(opts())
+		if err := revived.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
+			fired <- struct{}{}
+			return nil, nil
+		}, HandlerConfig{}); err != nil {
+			t.Fatalf("re-register cron: %v", err)
+		}
+		mustStart(t, revived)
+		t.Cleanup(revived.Stop)
+
+		entry, err := revived.CronEntry(cronKind)
+		if err != nil || entry == nil {
+			t.Fatalf("cron entry after revive: %v (%+v)", err, entry)
+		}
+		if entry.State.Terminal() {
+			t.Fatalf("cron entry left in a terminal state (%s); the heartbeat is dead for good", entry.State)
+		}
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		select {
+		case <-fired:
+		default:
+			j, _ := store.LoadByKey(cronKind, CronKey)
+			t.Fatalf("the revived cron entry never fired; it sits at state=%q scheduled=%s", j.State, j.ScheduledAt)
+		}
 	})
-	stranger.Stop()
-
-	// The kind is back. The heartbeat must be beating again.
-	clock.advance(2 * time.Hour)
-	fired := make(chan struct{}, 4)
-	revived := New(opts())
-	if err := revived.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
-		fired <- struct{}{}
-		return nil, nil
-	}, HandlerConfig{}); err != nil {
-		t.Fatalf("re-register cron: %v", err)
-	}
-	mustStart(t, revived)
-	t.Cleanup(revived.Stop)
-
-	entry, err := revived.CronEntry(cronKind)
-	if err != nil || entry == nil {
-		t.Fatalf("cron entry after revive: %v (%+v)", err, entry)
-	}
-	if entry.State.Terminal() {
-		t.Fatalf("cron entry left in a terminal state (%s); the heartbeat is dead for good", entry.State)
-	}
-	clock.advance(time.Hour)
-	select {
-	case <-fired:
-	case <-time.After(2 * time.Second):
-		j, _ := store.LoadByKey(cronKind, CronKey)
-		t.Fatalf("the revived cron entry never fired; it sits at state=%q scheduled=%s", j.State, j.ScheduledAt)
-	}
 }
 
 // Enqueueing ordinary work onto a recurring kind would mint a second record that
@@ -284,24 +293,31 @@ func TestListExcludesCronEntries(t *testing.T) {
 // reporting: routing it through the change hook would publish a durable event and
 // re-push a snapshot every minute for as long as the daemon runs.
 func TestCronFiringDoesNotReportAChange(t *testing.T) {
-	r, _, clock := newTestRunner(t, nil)
-	var changes atomic.Int64
-	r.OnChange(func(string) { changes.Add(1) })
-	var fires atomic.Int64
-	if err := r.RegisterCron(cronKind, time.Minute, func(context.Context, *Job) (any, error) {
-		fires.Add(1)
-		return nil, nil
-	}, HandlerConfig{}); err != nil {
-		t.Fatalf("register cron: %v", err)
-	}
-	mustStart(t, r)
+	synctest.Test(t, func(t *testing.T) {
+		r, _ := newBubbleRunner(t, nil)
+		var changes atomic.Int64
+		r.OnChange(func(string) { changes.Add(1) })
+		var fires atomic.Int64
+		if err := r.RegisterCron(cronKind, time.Minute, func(context.Context, *Job) (any, error) {
+			fires.Add(1)
+			return nil, nil
+		}, HandlerConfig{}); err != nil {
+			t.Fatalf("register cron: %v", err)
+		}
+		mustStart(t, r)
 
-	clock.advance(time.Minute)
-	waitFor(t, "the cron entry to fire", func() bool { return fires.Load() == 1 })
-	clock.advance(time.Minute)
-	waitFor(t, "the cron entry to fire again", func() bool { return fires.Load() == 2 })
+		for want := int64(1); want <= 2; want++ {
+			time.Sleep(time.Minute)
+			synctest.Wait()
+			if got := fires.Load(); got != want {
+				t.Fatalf("cron fired %d times after %d intervals, want %d", got, want, want)
+			}
+		}
 
-	if got := changes.Load(); got != 0 {
-		t.Fatalf("cron firing reported %d change(s), want 0", got)
-	}
+		// The negative that matters: no change was reported, on a system that has
+		// nothing left to do rather than one that has merely not got round to it.
+		if got := changes.Load(); got != 0 {
+			t.Fatalf("cron firing reported %d change(s), want 0", got)
+		}
+	})
 }
