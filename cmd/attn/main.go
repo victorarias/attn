@@ -1332,14 +1332,19 @@ func runTicketComment(args []string) {
 // load-bearing: the events are marked read now, so the same command a second time
 // goes through, and an agent told only "did not run" stops there.
 func printTicketMutationCatchUp(command string, bundle *protocol.TicketEventBundle, applied, jsonOutput bool) {
-	if !jsonOutput {
+	// --json leaves the events in catch_up rather than rendering them, so the
+	// notice must not point at output that is not there.
+	where := "shown above"
+	if jsonOutput {
+		where = "in this result's catch_up"
+	} else {
 		fprintTicketInbox(os.Stdout, &protocol.TicketInboxResult{Bundles: []protocol.TicketEventBundle{*bundle}})
 	}
 	if applied {
-		fmt.Fprintf(os.Stderr, "%s: attn's own updates on this ticket are shown above and are now marked read; your update ran.\n", command)
+		fmt.Fprintf(os.Stderr, "%s: attn's own updates on this ticket are %s and are now marked read; your update ran.\n", command, where)
 		return
 	}
-	fmt.Fprintf(os.Stderr, "%s: unread ticket activity is shown above and is now marked read; the requested update did NOT run — retry the same command to apply it.\n", command)
+	fmt.Fprintf(os.Stderr, "%s: unread ticket activity is %s and is now marked read; the requested update did NOT run — retry the same command to apply it.\n", command, where)
 }
 
 // ticketIDArgs is a single ticket-id positional plus the common session/json flags —
