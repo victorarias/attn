@@ -77,6 +77,7 @@ type CollectionSchema struct {
 	Table      string      `json:"-"`
 }
 
+// Filter is one comparison against a declared or reserved field.
 type Filter struct {
 	Field string `json:"field"`
 	Op    Op     `json:"op"`

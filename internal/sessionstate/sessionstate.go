@@ -49,6 +49,7 @@ const (
 	ClaimTurnAborted Claim = "turn_aborted"
 )
 
+// Observation is one recorded piece of evidence.
 type Observation struct {
 	Source     Source
 	Claim      Claim
