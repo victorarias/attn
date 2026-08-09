@@ -326,6 +326,14 @@ the client has already paged in, the second replaces it. Without that
 distinction, one window opening a long conversation would shorten what every
 other window is showing.
 
+Scroll-back a client is holding can outlive what the host still keeps. The host
+bounds its own transcript, and a conversation that talks long enough for the
+host to drop its oldest items leaves a window that paged those items in still
+drawing them — quietly showing more than a window opened fresh would, until the
+next page request comes back empty. It is bounded and it is inherent to paging
+something that is broadcast: the client's copy is the client's, and the host
+never reaches back into it.
+
 A conversation can be **resumed**: a new session picks up an existing
 conversation instead of starting empty. The old conversation is copied into the
 new session's own storage rather than continued in place, so the session it came

@@ -79,6 +79,29 @@ func hostSessionStateDir(sessionID string) string {
 	return filepath.Join(config.DataDir(), "hosts", "state", sessionID)
 }
 
+// hostSessionStateDirHoldsConversation reports whether this session's own dir
+// already holds a pi session file.
+//
+// It answers the same question the host asks itself at startup, and the two
+// have to agree: the host consults `ATTN_PI_HOST_RESUME_FILE` only when its dir
+// is empty, so this is what tells a first launch (which will fork) from a
+// relaunch (which continues its own history and ignores the resume file
+// entirely). Anything checking the resume file has to check this first, or a
+// revive of a long-established conversation starts depending on a file it will
+// never open.
+func hostSessionStateDirHoldsConversation(sessionID string) bool {
+	entries, err := os.ReadDir(hostSessionStateDir(sessionID))
+	if err != nil {
+		return false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".jsonl") {
+			return true
+		}
+	}
+	return false
+}
+
 // loginShellEnvForSpawn is the user's login shell environment, captured now if
 // the daemon's pre-warm has not landed yet. The PTY path makes the same
 // fallback, for the same reason: the first session of a daemon's life must not
