@@ -579,12 +579,15 @@ func UpdateTileSessionID(node Node, tileID, sessionID string) (Node, bool) {
 		node.TileSessionID = strings.TrimSpace(sessionID)
 		return node, true
 	case "split":
-		for index, child := range node.Children {
+		children := make([]Node, len(node.Children))
+		copy(children, node.Children)
+		for index, child := range children {
 			updated, ok := UpdateTileSessionID(child, tileID, sessionID)
 			if !ok {
 				continue
 			}
-			node.Children[index] = updated
+			children[index] = updated
+			node.Children = children
 			return node, true
 		}
 	}
@@ -601,12 +604,15 @@ func UpdateTileParams(node Node, tileID, tileParams string) (Node, bool) {
 		node.TileParams = strings.TrimSpace(tileParams)
 		return node, true
 	case "split":
-		for index, child := range node.Children {
+		children := make([]Node, len(node.Children))
+		copy(children, node.Children)
+		for index, child := range children {
 			updated, ok := UpdateTileParams(child, tileID, tileParams)
 			if !ok {
 				continue
 			}
-			node.Children[index] = updated
+			children[index] = updated
+			node.Children = children
 			return node, true
 		}
 	}
