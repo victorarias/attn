@@ -37,9 +37,9 @@ type pluginFixturePeer struct {
 // the peer is the only place that knows which messages are responses it is
 // waiting for and which are requests to answer.
 func newPluginFixturePeer(t *testing.T, conn net.Conn) *pluginFixturePeer {
-	// Ids 1 and 2 belong to the hello and driver.register handshake the fixture
-	// sends before serving, so the first generated id starts after them.
-	return &pluginFixturePeer{t: t, conn: conn, decoder: json.NewDecoder(conn), nextID: 2}
+	// Id 1 is the hello the fixture writes before handing the socket over, so
+	// generated ids start after it.
+	return &pluginFixturePeer{t: t, conn: conn, decoder: json.NewDecoder(conn), nextID: 1}
 }
 
 // call sends a request and returns its response, answering every request attn
