@@ -3916,11 +3916,12 @@ function AppContent({
                         setActiveSession(paneSessionId);
                       }
                     }}
-                    onZoomModeChange={(zoomed) => {
+                    zoomActive={Boolean(zoomModeBySessionId[workspace.id])}
+                    onSetZoomActive={(active) => {
                       setZoomModeBySessionId((prev) => (
-                        prev[workspace.id] === zoomed
+                        prev[workspace.id] === active
                           ? prev
-                          : { ...prev, [workspace.id]: zoomed }
+                          : { ...prev, [workspace.id]: active }
                       ));
                     }}
                     onNavigateOutOfSession={handleNavigateOutOfSession}

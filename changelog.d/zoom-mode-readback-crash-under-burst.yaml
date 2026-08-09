@@ -1,0 +1,14 @@
+kind: fixed
+area: app
+change: >
+  A busy board no longer takes the window down. A workspace kept its own copy
+  of whether it was zoomed and reported that copy back to the app on every
+  render rather than only when the zoom actually changed, and the app
+  re-rendered on every report — a loop that stayed invisible while updates were
+  sparse and ran away once a few hundred session updates arrived at once, as a
+  busy multi-session board or a reconnect replay delivers. React gave up on the
+  whole tree and the window went blank. Zoom mode is now kept in one place, so
+  there is nothing to report back and nothing to loop on.
+symptom: >
+  The window went blank while many sessions were updating at once, or right
+  after the app reconnected to the daemon.
