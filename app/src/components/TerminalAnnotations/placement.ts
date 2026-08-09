@@ -1,17 +1,6 @@
-// Keeping the annotation surface inside the window.
-//
-// Both the popup and the panel are positioned in viewport coordinates, so
-// nothing in the layout stops them from being placed half off-screen: the popup
-// follows the pointer, which is often near an edge, and the panel follows a
-// drag. Placement is pure arithmetic over measured sizes, kept here so it can be
-// tested without a browser.
-//
-// Fitting inside the window is necessary and not sufficient. A popup anchored
-// near the left column of a pane fits the window perfectly while sitting on top
-// of the sidebar, and one anchored near the right column lands on the
-// annotation panel. So placement takes two more inputs than a viewport: the
-// region the popup belongs in (the pane whose text it describes) and a surface
-// it must not cover.
+// Keeping the annotation surface inside the window: pure arithmetic over
+// measured sizes. Fitting the viewport is not enough, so placement also takes
+// the region the popup belongs in and a surface it must not cover.
 
 export interface Size {
   width: number;
@@ -36,22 +25,16 @@ export interface Rect {
 }
 
 export interface PlaceOptions {
-  // Where the popup belongs: the rect of the terminal grid it is annotating.
-  // Preferred, not obeyed — a pane too narrow to hold the popup falls back to
-  // the window, because a popup that cannot fit its pane still has to be
-  // usable.
+  // The annotated grid's rect. Preferred, not obeyed: a pane too narrow for
+  // the popup falls back to the window.
   bounds?: Rect | null;
-  // A surface the popup must not cover, in viewport coordinates. The annotation
-  // panel: it lists the marks the popup is editing, and a popup that lands on
-  // it hides the thing being worked on.
+  // A surface the popup must not cover, in viewport coordinates.
   avoid?: Rect | null;
 }
 
 // Breathing room against the region edge.
 const MARGIN = 8;
-// Distance between the anchor point and the popup, so the popup never sits on
-// the words it is about to describe. Also the clearance kept from an avoided
-// surface, so "not covering it" reads as deliberate rather than as a near miss.
+// Clearance from the anchor point, and from an avoided surface.
 const GAP = 10;
 
 function clamp(value: number, min: number, max: number): number {
@@ -75,9 +58,8 @@ export function clampToViewport(at: Placement, size: Size, viewport: Size): Plac
   return clampToRect(at, size, sizeToRect(viewport));
 }
 
-// The region a box may occupy. The preferred rect when the box fits inside it
-// with its margins, the whole window otherwise — a pane narrower than the popup
-// is a reason to spill out of the pane, never a reason to be unreachable.
+// The region a box may occupy: the preferred rect when the box fits it with
+// margins, the whole window otherwise.
 function regionFor(size: Size, viewport: Size, preferred?: Rect | null): Rect {
   if (!preferred) return sizeToRect(viewport);
   const fits = preferred.width >= size.width + MARGIN * 2
@@ -100,11 +82,8 @@ function insideRect(at: Placement, size: Size, region: Rect): boolean {
 }
 
 // Steps a placement off a surface it lands on, to the nearest side that clears
-// it and still fits the region.
-//
-// When no side does, the requested placement stands: the popup is what the user
-// just opened and the panel is a list they can scroll to afterwards, so in the
-// one case where something has to be covered, it is the panel.
+// it and still fits the region. When no side does, the request stands — the
+// covered panel is the lesser loss.
 function stepOff(at: Placement, size: Size, region: Rect, avoid?: Rect | null): Placement {
   if (!avoid || !overlaps(at, size, avoid)) return at;
   const candidates: Placement[] = [
@@ -122,14 +101,9 @@ function stepOff(at: Placement, size: Size, region: Rect, avoid?: Rect | null): 
   return moved[0] ?? at;
 }
 
-// Where to draw a popup anchored to a point on the grid.
-//
-// Above the anchor and centred on it by default: the anchor is the text being
-// annotated, and covering it defeats the point. Flips below only when there is
-// no room above, and falls back to vertical centring when the popup is taller
-// than either side of the anchor. Horizontally it is always clamped, which is
-// what stops a highlight near the right edge from opening a popup that runs off
-// the region.
+// Where to draw a popup anchored to a point on the grid: above and centred by
+// default (covering the annotated text defeats the point), below when there is
+// no room above, vertically centred when neither side fits.
 export function placePopup(
   at: Point,
   size: Size,

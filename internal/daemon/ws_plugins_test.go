@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -77,43 +78,46 @@ func TestDaemon_HandleListPluginsWS_ReturnsInstalledPlugins(t *testing.T) {
 }
 
 func TestDaemon_PluginsUpdatedMessageIncludesSupervisorBackoff(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
-	d.pluginDir = filepath.Join(t.TempDir(), "plugins")
-	writeTestPluginManifest(t, d.pluginDir, "recovering-provider")
-	manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "recovering-provider", pluginManifestName))
-	if err != nil {
-		t.Fatalf("load manifest: %v", err)
-	}
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+		writeTestPluginManifest(t, d.pluginDir, "recovering-provider")
+		manifest, err := loadPluginManifest(filepath.Join(d.pluginDir, "recovering-provider", pluginManifestName))
+		if err != nil {
+			t.Fatalf("load manifest: %v", err)
+		}
 
-	clock := newFakePluginClock()
-	launcher := &fakePluginLauncher{}
-	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
-	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
-		t.Fatalf("Ensure: %v", err)
-	}
-	launcher.handle(0).exit(pluginExit{ExitCode: intPtr(17)})
-	waitForSupervisor(t, func() bool {
-		snapshot, _ := d.pluginSupervisor.Snapshot(manifest.Name)
-		return snapshot.Phase == pluginPhaseBackoff
+		clock := newFakePluginClock()
+		launcher := &fakePluginLauncher{}
+		d.pluginSupervisor = newTestPluginSupervisor(t, clock, launcher)
+		if err := d.pluginSupervisor.Ensure(manifest); err != nil {
+			t.Fatalf("Ensure: %v", err)
+		}
+		launcher.handle(0).exit(pluginExit{ExitCode: intPtr(17)})
+		requireSupervisor(t, func() bool {
+			snapshot, _ := d.pluginSupervisor.Snapshot(manifest.Name)
+			return snapshot.Phase == pluginPhaseBackoff
+		}, "the plugin exit did not land the supervisor in backoff")
+
+		plugins := d.pluginsUpdatedMessage().Plugins
+		if len(plugins) != 1 {
+			t.Fatalf("plugin count=%d, want 1", len(plugins))
+		}
+		plugin := plugins[0]
+		if got := protocol.Deref(plugin.RuntimePhase); got != string(pluginPhaseBackoff) {
+			t.Fatalf("runtime phase=%q, want backoff", got)
+		}
+		if got := protocol.Deref(plugin.RestartAttempt); got != 1 {
+			t.Fatalf("restart attempt=%d, want 1", got)
+		}
+		if plugin.NextRestartAt == nil || *plugin.NextRestartAt != clock.Now().Add(pluginRestartBackoff[0]).Format(time.RFC3339Nano) {
+			t.Fatalf("next restart=%v, want first backoff deadline", plugin.NextRestartAt)
+		}
+		if plugin.LastExit == nil || !strings.Contains(*plugin.LastExit, "exit code 17") {
+			t.Fatalf("last exit=%v, want exit code 17", plugin.LastExit)
+		}
 	})
-
-	plugins := d.pluginsUpdatedMessage().Plugins
-	if len(plugins) != 1 {
-		t.Fatalf("plugin count=%d, want 1", len(plugins))
-	}
-	plugin := plugins[0]
-	if got := protocol.Deref(plugin.RuntimePhase); got != string(pluginPhaseBackoff) {
-		t.Fatalf("runtime phase=%q, want backoff", got)
-	}
-	if got := protocol.Deref(plugin.RestartAttempt); got != 1 {
-		t.Fatalf("restart attempt=%d, want 1", got)
-	}
-	if plugin.NextRestartAt == nil || *plugin.NextRestartAt != clock.Now().Add(pluginRestartBackoff[0]).Format(time.RFC3339Nano) {
-		t.Fatalf("next restart=%v, want first backoff deadline", plugin.NextRestartAt)
-	}
-	if plugin.LastExit == nil || !strings.Contains(*plugin.LastExit, "exit code 17") {
-		t.Fatalf("last exit=%v, want exit code 17", plugin.LastExit)
-	}
 }
 
 func TestDaemon_HandleInstallPluginWS_InstallsGitSource(t *testing.T) {
@@ -174,7 +178,7 @@ func TestDaemon_HandleRemovePluginWSStopsSupervisorAfterDeletingFiles(t *testing
 	}
 	clock := newFakePluginClock()
 	launcher := &fakePluginLauncher{}
-	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	d.pluginSupervisor = newTestPluginSupervisor(t, clock, launcher)
 	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -208,7 +212,7 @@ func TestDaemon_HandleRemovePluginWSKeepsSupervisorRunningWhenDeletionFails(t *t
 	}
 	clock := newFakePluginClock()
 	launcher := &fakePluginLauncher{}
-	d.pluginSupervisor = newTestPluginSupervisor(clock, launcher)
+	d.pluginSupervisor = newTestPluginSupervisor(t, clock, launcher)
 	if err := d.pluginSupervisor.Ensure(manifest); err != nil {
 		t.Fatalf("Ensure: %v", err)
 	}
@@ -240,7 +244,7 @@ func TestDaemon_BundledPluginIsAvailableAndInertByDefault(t *testing.T) {
 	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
 	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
 	launcher := &fakePluginLauncher{}
-	d.pluginSupervisor = newTestPluginSupervisor(newFakePluginClock(), launcher)
+	d.pluginSupervisor = newTestPluginSupervisor(t, newFakePluginClock(), launcher)
 
 	d.startInstalledPlugins()
 	if got := launcher.count(); got != 0 {
@@ -262,7 +266,7 @@ func TestDaemon_InstallAndUninstallBundledPluginUpdatesProfileState(t *testing.T
 	d.bundledPluginDir = filepath.Join(t.TempDir(), "bundled-plugins")
 	writeTestPluginManifest(t, d.bundledPluginDir, "attn-opencode")
 	launcher := &fakePluginLauncher{}
-	d.pluginSupervisor = newTestPluginSupervisor(newFakePluginClock(), launcher)
+	d.pluginSupervisor = newTestPluginSupervisor(t, newFakePluginClock(), launcher)
 	client := &wsClient{send: make(chan outboundMessage, 2)}
 
 	d.handleInstallBundledPluginWS(client, &protocol.InstallBundledPluginMessage{Name: "attn-opencode"})

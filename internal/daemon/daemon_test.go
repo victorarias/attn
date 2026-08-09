@@ -17,6 +17,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -4104,45 +4105,49 @@ func TestDaemon_AdvertisesClaudeHeadlessTaskWithManagedAuthentication(t *testing
 }
 
 func TestDaemon_EnsureTailscaleServeFromSettingsAndBroadcast_BroadcastsUpdatedState(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "daemon.sock"))
-	d.store.SetSetting(SettingTailscaleEnabled, "true")
-	d.tailscale = newTailscaleRuntimeWithCLI(&fakeTailscaleCLI{
-		run: func(args []string) ([]byte, error) {
-			switch strings.Join(args, " ") {
-			case "status --json":
-				return []byte(`{"BackendState":"NeedsLogin","AuthURL":"https://login.tailscale.example/auth","Self":{"DNSName":"gpu-box.tail.ts.net."}}`), nil
-			case "serve status --json":
-				return []byte(`{}`), nil
-			default:
-				t.Fatalf("unexpected tailscale command: %q", strings.Join(args, " "))
-				return nil, nil
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		d.store.SetSetting(SettingTailscaleEnabled, "true")
+		d.tailscale = newTailscaleRuntimeWithCLI(&fakeTailscaleCLI{
+			run: func(args []string) ([]byte, error) {
+				switch strings.Join(args, " ") {
+				case "status --json":
+					return []byte(`{"BackendState":"NeedsLogin","AuthURL":"https://login.tailscale.example/auth","Self":{"DNSName":"gpu-box.tail.ts.net."}}`), nil
+				case "serve status --json":
+					return []byte(`{}`), nil
+				default:
+					t.Fatalf("unexpected tailscale command: %q", strings.Join(args, " "))
+					return nil, nil
+				}
+			},
+		})
+
+		d.ensureTailscaleServeFromSettingsAndBroadcast()
+
+		synctest.Wait()
+		select {
+		case outbound := <-d.wsHub.broadcast:
+			if outbound.kind != messageKindText {
+				t.Fatalf("broadcast kind = %v, want text", outbound.kind)
 			}
-		},
+			var msg protocol.SettingsUpdatedMessage
+			if err := json.Unmarshal(outbound.payload, &msg); err != nil {
+				t.Fatalf("unmarshal broadcast payload: %v", err)
+			}
+			if msg.Event != protocol.EventSettingsUpdated {
+				t.Fatalf("broadcast event = %q, want %q", msg.Event, protocol.EventSettingsUpdated)
+			}
+			if got := msg.Settings["tailscale_status"]; got != tailscaleStatusNeedsLogin {
+				t.Fatalf("broadcast tailscale_status = %v, want %s", got, tailscaleStatusNeedsLogin)
+			}
+			if got := msg.Settings["tailscale_auth_url"]; got != "https://login.tailscale.example/auth" {
+				t.Fatalf("broadcast tailscale_auth_url = %v, want auth url", got)
+			}
+		default:
+			t.Fatal("expected settings_updated broadcast")
+		}
 	})
-
-	d.ensureTailscaleServeFromSettingsAndBroadcast()
-
-	select {
-	case outbound := <-d.wsHub.broadcast:
-		if outbound.kind != messageKindText {
-			t.Fatalf("broadcast kind = %v, want text", outbound.kind)
-		}
-		var msg protocol.SettingsUpdatedMessage
-		if err := json.Unmarshal(outbound.payload, &msg); err != nil {
-			t.Fatalf("unmarshal broadcast payload: %v", err)
-		}
-		if msg.Event != protocol.EventSettingsUpdated {
-			t.Fatalf("broadcast event = %q, want %q", msg.Event, protocol.EventSettingsUpdated)
-		}
-		if got := msg.Settings["tailscale_status"]; got != tailscaleStatusNeedsLogin {
-			t.Fatalf("broadcast tailscale_status = %v, want %s", got, tailscaleStatusNeedsLogin)
-		}
-		if got := msg.Settings["tailscale_auth_url"]; got != "https://login.tailscale.example/auth" {
-			t.Fatalf("broadcast tailscale_auth_url = %v, want auth url", got)
-		}
-	case <-time.After(time.Second):
-		t.Fatal("expected settings_updated broadcast")
-	}
 }
 
 func TestDaemon_SettingsIncludePTYBackendMode(t *testing.T) {
@@ -5216,73 +5221,69 @@ func TestClassifySessionState_SkipsNoNewAssistantTurn(t *testing.T) {
 }
 
 func TestClassifySessionState_ClaudeConcurrentDuplicateTurnRunsOnce(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	mockClassifier := newBlockingClassifier(protocol.StateWaitingInput)
-	d.classifier = mockClassifier
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		mockClassifier := newBlockingClassifier(protocol.StateWaitingInput)
+		d.classifier = mockClassifier
 
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-2",
-		Agent:          protocol.SessionAgentClaude,
-		Label:          "test",
-		Directory:      "/tmp",
-		State:          protocol.StateWorking,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
+		now := time.Now()
+		nowStr := string(protocol.NewTimestamp(now))
+		d.store.Add(&protocol.Session{
+			ID:             "sess-2",
+			Agent:          protocol.SessionAgentClaude,
+			Label:          "test",
+			Directory:      "/tmp",
+			State:          protocol.StateWorking,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
+		})
 
-	transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
-	content := fmt.Sprintf(
-		`{"type":"user","uuid":"u2","timestamp":"%s","message":{"role":"user","content":"hello"}}
+		transcriptPath := filepath.Join(t.TempDir(), "transcript.jsonl")
+		content := fmt.Sprintf(
+			`{"type":"user","uuid":"u2","timestamp":"%s","message":{"role":"user","content":"hello"}}
 {"type":"assistant","uuid":"a2","timestamp":"%s","message":{"role":"assistant","content":[{"type":"text","text":"Hello! What can I help you with today?"}]}}
 `,
-		now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
-		now.UTC().Format(time.RFC3339Nano),
-	)
-	if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
-		t.Fatalf("write transcript: %v", err)
-	}
+			now.Add(-1*time.Second).UTC().Format(time.RFC3339Nano),
+			now.UTC().Format(time.RFC3339Nano),
+		)
+		if err := os.WriteFile(transcriptPath, []byte(content), 0644); err != nil {
+			t.Fatalf("write transcript: %v", err)
+		}
 
-	firstDone := make(chan struct{})
-	go func() {
-		d.classifySessionState("sess-2", transcriptPath)
-		close(firstDone)
-	}()
+		firstDone := make(chan struct{})
+		go func() {
+			d.classifySessionState("sess-2", transcriptPath)
+			close(firstDone)
+		}()
 
-	select {
-	case <-mockClassifier.started:
-	case <-time.After(2 * time.Second):
-		t.Fatal("classifier did not start for first classification")
-	}
+		synctest.Wait()
+		select {
+		case <-mockClassifier.started:
+		default:
+			t.Fatal("classifier did not start for first classification")
+		}
 
-	secondDone := make(chan struct{})
-	go func() {
-		d.classifySessionState("sess-2", transcriptPath)
-		close(secondDone)
-	}()
+		secondDone := make(chan struct{})
+		go func() {
+			d.classifySessionState("sess-2", transcriptPath)
+			close(secondDone)
+		}()
 
-	select {
-	case <-secondDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("second classification did not return promptly")
-	}
+		requireDone(t, secondDone, "second classification did not return promptly")
 
-	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("classifier calls=%d, want 1 while duplicate turn in flight", got)
-	}
+		if got := mockClassifier.CallCount(); got != 1 {
+			t.Fatalf("classifier calls=%d, want 1 while duplicate turn in flight", got)
+		}
 
-	close(mockClassifier.release)
-	select {
-	case <-firstDone:
-	case <-time.After(2 * time.Second):
-		t.Fatal("first classification did not complete")
-	}
+		close(mockClassifier.release)
+		requireDone(t, firstDone, "first classification did not complete")
 
-	if got := mockClassifier.CallCount(); got != 1 {
-		t.Fatalf("classifier calls=%d, want 1", got)
-	}
+		if got := mockClassifier.CallCount(); got != 1 {
+			t.Fatalf("classifier calls=%d, want 1", got)
+		}
+	})
 }
 
 // A finished run publishes its verdict as soon as it is classified, whatever
@@ -5332,56 +5333,57 @@ func TestClassifySessionState_PublishesImmediatelyAfterALongRun(t *testing.T) {
 }
 
 func TestHandleStop_SkipsClassificationForForcedStopSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
-	d.classifier = mockClassifier
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		mockClassifier := &countingClassifier{state: protocol.StateWaitingInput}
+		d.classifier = mockClassifier
 
-	now := time.Now()
-	nowStr := string(protocol.NewTimestamp(now))
-	d.store.Add(&protocol.Session{
-		ID:             "sess-forced-stop",
-		Agent:          protocol.SessionAgentCodex,
-		Label:          "forced-stop",
-		Directory:      "/tmp",
-		State:          protocol.StateIdle,
-		StateSince:     nowStr,
-		StateUpdatedAt: nowStr,
-		LastSeen:       nowStr,
-	})
-	d.markForcedStopClassification("sess-forced-stop")
-
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
-
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.handleStop(serverConn, &protocol.StopMessage{
+		now := time.Now()
+		nowStr := string(protocol.NewTimestamp(now))
+		d.store.Add(&protocol.Session{
 			ID:             "sess-forced-stop",
-			TranscriptPath: "",
+			Agent:          protocol.SessionAgentCodex,
+			Label:          "forced-stop",
+			Directory:      "/tmp",
+			State:          protocol.StateIdle,
+			StateSince:     nowStr,
+			StateUpdatedAt: nowStr,
+			LastSeen:       nowStr,
 		})
-		_ = serverConn.Close()
-	}()
+		d.markForcedStopClassification("sess-forced-stop")
 
-	var resp protocol.Response
-	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
-		t.Fatalf("decode stop response: %v", err)
-	}
-	if !resp.Ok {
-		t.Fatalf("stop response ok=%v, want true", resp.Ok)
-	}
+		serverConn, clientConn := net.Pipe()
+		defer clientConn.Close()
 
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("handleStop did not return")
-	}
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			d.handleStop(serverConn, &protocol.StopMessage{
+				ID:             "sess-forced-stop",
+				TranscriptPath: "",
+			})
+			_ = serverConn.Close()
+		}()
 
-	time.Sleep(50 * time.Millisecond)
-	if got := mockClassifier.CallCount(); got != 0 {
-		t.Fatalf("classifier calls=%d, want 0", got)
-	}
-	if d.consumeForcedStopClassification("sess-forced-stop") {
-		t.Fatal("forced-stop suppression token should be consumed by handleStop")
-	}
+		var resp protocol.Response
+		if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+			t.Fatalf("decode stop response: %v", err)
+		}
+		if !resp.Ok {
+			t.Fatalf("stop response ok=%v, want true", resp.Ok)
+		}
+
+		requireDone(t, done, "handleStop did not return")
+
+		// Nothing is left that could classify: the tolerance window this used to buy
+		// with 50ms is now the settled bubble itself.
+		settleStopClassification(t)
+		if got := mockClassifier.CallCount(); got != 0 {
+			t.Fatalf("classifier calls=%d, want 0", got)
+		}
+		if d.consumeForcedStopClassification("sess-forced-stop") {
+			t.Fatal("forced-stop suppression token should be consumed by handleStop")
+		}
+	})
 }

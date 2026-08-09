@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
-	"time"
+	"testing/synctest"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -324,55 +324,54 @@ func TestHandleRegisterWorkspace_BroadcastsRegisteredThenStateChanged(t *testing
 
 func TestHandleConnection_MuteWorkspaceDispatchesSocketCommand(t *testing.T) {
 	d := newDaemonForTest(t)
-	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
-		Cmd:       protocol.CmdRegisterWorkspace,
-		ID:        "ws1",
-		Title:     "Workspace 1",
-		Directory: "/repo",
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+			Cmd:       protocol.CmdRegisterWorkspace,
+			ID:        "ws1",
+			Title:     "Workspace 1",
+			Directory: "/repo",
+		})
+		cap := captureBroadcasts(d)
+
+		serverConn, clientConn := net.Pipe()
+		defer clientConn.Close()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			d.handleConnection(serverConn)
+		}()
+
+		if err := json.NewEncoder(clientConn).Encode(protocol.MuteWorkspaceMessage{
+			Cmd:         protocol.CmdMuteWorkspace,
+			WorkspaceID: "ws1",
+		}); err != nil {
+			t.Fatalf("send mute_workspace command: %v", err)
+		}
+		var resp protocol.Response
+		if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+			t.Fatalf("decode mute_workspace response: %v", err)
+		}
+		if !resp.Ok {
+			t.Fatalf("mute_workspace response ok=false error=%v", resp.Error)
+		}
+		requireDone(t, done, "mute_workspace connection did not finish")
+
+		workspace := d.store.GetWorkspace("ws1")
+		if workspace == nil {
+			t.Fatal("workspace missing from store after mute")
+		}
+		if !workspace.Muted {
+			t.Fatal("workspace not muted in store after socket command")
+		}
+		events := cap.snapshot()
+		if len(events) != 1 {
+			t.Fatalf("expected one workspace_state_changed broadcast, got %d: %+v", len(events), events)
+		}
+		if events[0].Event != protocol.EventWorkspaceStateChanged || events[0].Workspace == nil || !events[0].Workspace.Muted {
+			t.Fatalf("unexpected broadcast: %+v", events[0])
+		}
 	})
-	cap := captureBroadcasts(d)
-
-	serverConn, clientConn := net.Pipe()
-	defer clientConn.Close()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		d.handleConnection(serverConn)
-	}()
-
-	if err := json.NewEncoder(clientConn).Encode(protocol.MuteWorkspaceMessage{
-		Cmd:         protocol.CmdMuteWorkspace,
-		WorkspaceID: "ws1",
-	}); err != nil {
-		t.Fatalf("send mute_workspace command: %v", err)
-	}
-	var resp protocol.Response
-	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
-		t.Fatalf("decode mute_workspace response: %v", err)
-	}
-	if !resp.Ok {
-		t.Fatalf("mute_workspace response ok=false error=%v", resp.Error)
-	}
-	select {
-	case <-done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("mute_workspace connection did not finish")
-	}
-
-	workspace := d.store.GetWorkspace("ws1")
-	if workspace == nil {
-		t.Fatal("workspace missing from store after mute")
-	}
-	if !workspace.Muted {
-		t.Fatal("workspace not muted in store after socket command")
-	}
-	events := cap.snapshot()
-	if len(events) != 1 {
-		t.Fatalf("expected one workspace_state_changed broadcast, got %d: %+v", len(events), events)
-	}
-	if events[0].Event != protocol.EventWorkspaceStateChanged || events[0].Workspace == nil || !events[0].Workspace.Muted {
-		t.Fatalf("unexpected broadcast: %+v", events[0])
-	}
 }
 
 func TestHandleUnregisterWorkspace_BroadcastsOnlyForKnown(t *testing.T) {

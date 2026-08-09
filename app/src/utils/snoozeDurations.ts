@@ -1,32 +1,19 @@
 /**
- * Snooze durations, and the arithmetic that turns one into an instant.
- *
- * The client computes the instant, not the daemon. "Tomorrow" and "Monday" are
- * calendar questions that need the user's timezone and their idea of a working
- * day, and the daemon that owns a remote session shares neither — it may not
- * even be in the same country. The wire carries an absolute instant, which
- * crosses endpoints without reinterpretation.
+ * Snooze durations and the arithmetic turning one into an instant. The client
+ * computes it: "tomorrow" needs the user's timezone, which a remote daemon does
+ * not share. The wire carries an absolute instant.
  */
 
 export type SnoozeChoiceId = '30m' | '1h' | '8h' | 'tomorrow' | 'saturday' | 'monday';
 
 export interface SnoozeChoice {
   id: SnoozeChoiceId;
-  /** What the menu row says. */
   label: string;
-  /**
-   * The concrete time it resolves to, shown beside the label. A duration is
-   * obvious; "Monday" is not, and a menu that will not say when it means is a
-   * menu you have to test to trust.
-   */
+  /** The concrete time it resolves to, shown beside the label. */
   detail: (now: Date) => string;
 }
 
-/**
- * The hour a day-named snooze wakes at. Not configurable: the choice a user
- * makes is "the start of that day", and a setting for which hour that is would
- * be a preference nobody has ever asked to hold.
- */
+/** The hour a day-named snooze wakes at. Deliberately not configurable. */
 export const SNOOZE_WAKE_HOUR = 9;
 
 const MINUTE = 60 * 1000;
@@ -36,13 +23,8 @@ const HOUR = 60 * MINUTE;
 const SATURDAY = 6;
 const MONDAY = 1;
 
-/**
- * The next occurrence of `weekday` at the wake hour, strictly in the future.
- *
- * Strictly is what makes "Saturday" pressed on a Saturday morning mean *next*
- * Saturday rather than a snooze that has already lapsed — the deferral has to
- * defer something.
- */
+// Strictly in the future, so "Saturday" pressed on a Saturday morning means
+// next Saturday rather than an already-lapsed snooze.
 function nextWeekdayAt(now: Date, weekday: number): Date {
   const target = startOfWakeHour(now);
   let days = (weekday - now.getDay() + 7) % 7;
@@ -53,7 +35,6 @@ function nextWeekdayAt(now: Date, weekday: number): Date {
   return target;
 }
 
-/** Today at the wake hour, as a Date that setDate can be walked forward on. */
 function startOfWakeHour(now: Date): Date {
   const at = new Date(now.getTime());
   at.setHours(SNOOZE_WAKE_HOUR, 0, 0, 0);
@@ -67,11 +48,8 @@ function tomorrowAtWakeHour(now: Date): Date {
 }
 
 /**
- * When a choice wakes, as an absolute instant.
- *
- * Date arithmetic rather than millisecond addition for the day choices, so a
- * daylight-saving boundary still lands at 9am local — adding 24 hours across a
- * DST change lands at 8 or 10.
+ * When a choice wakes, as an absolute instant. Day choices use Date arithmetic,
+ * not millisecond addition: +24h across a DST boundary lands at 8am or 10am.
  */
 export function snoozeInstant(choice: SnoozeChoiceId, now: Date): Date {
   switch (choice) {
@@ -122,9 +100,8 @@ function dayAndTime(at: Date): string {
 }
 
 /**
- * Whether a broadcast deadline is still in the future. The daemon leaves a
- * lapsed deadline off the wire, so this is only the client's own guard against
- * a snapshot it is holding while the wake lands.
+ * Whether a broadcast deadline is still in the future — the client's guard for a
+ * snapshot held while the wake lands; the daemon never sends a lapsed deadline.
  */
 export function isSnoozed(until: string | undefined, now: number): boolean {
   if (!until) return false;

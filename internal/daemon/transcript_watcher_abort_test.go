@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -120,36 +121,39 @@ func TestTheWatcherSettlesATurnTheUserHalted(t *testing.T) {
 			home, _ := toolhome.Dir()
 
 			d := newTraceDaemon(t)
-			id := "sess-halted-" + tc.name
-			addCharacterizationSession(t, d, id, tc.agent, protocol.SessionStateWorking)
-			session := d.store.Get(id)
+			synctest.Test(t, func(t *testing.T) {
+				stopDaemonBackground(t, d)
+				id := "sess-halted-" + tc.name
+				addCharacterizationSession(t, d, id, tc.agent, protocol.SessionStateWorking)
+				session := d.store.Get(id)
 
-			// The turn the user is about to halt. Its closing hook is the one that
-			// never arrives.
-			d.recordBracketEvidence(id, protocol.StateWorking)
+				// The turn the user is about to halt. Its closing hook is the one that
+				// never arrives.
+				d.recordBracketEvidence(id, protocol.StateWorking)
 
-			startedAt := time.Now()
-			path := tc.seed(t, home, session.Directory, id)
-			d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
-			t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+				startedAt := time.Now()
+				path := tc.seed(t, home, session.Directory, id)
+				d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
+				t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 
-			// Let the watcher find the file before the abort lands, so the test
-			// exercises the tail rather than the bootstrap read.
-			waitForTranscriptDiscovery(t, d, id)
-			writeLine(t, path, tc.abort(time.Now()))
+				// Let the watcher find the file before the abort lands, so the test
+				// exercises the tail rather than the bootstrap read.
+				requireTranscriptDiscovery(t, d, id)
+				writeLine(t, path, tc.abort(time.Now()))
 
-			evidence := waitForAbortEvidence(t, d, id)
-			if evidence.TurnOpen || evidence.ToolOpen {
-				t.Fatalf("the halted turn left a bracket open: %+v", evidence)
-			}
+				evidence := requireAbortEvidence(t, d, id)
+				if evidence.TurnOpen || evidence.ToolOpen {
+					t.Fatalf("the halted turn left a bracket open: %+v", evidence)
+				}
 
-			d.resolveAllSessions(time.Now())
-			if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
-				t.Fatalf("state %q, want idle: a halted turn is over the moment it is halted", state)
-			}
-			if got := sessionstate.Resolve(evidence, sessionstate.PolicyFor(string(tc.agent)), time.Now()); got.Reason != sessionstate.ReasonTurnAborted {
-				t.Fatalf("reason %q, want turn_aborted: the diagnosis is half the point", got.Reason)
-			}
+				d.resolveAllSessions(time.Now())
+				if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
+					t.Fatalf("state %q, want idle: a halted turn is over the moment it is halted", state)
+				}
+				if got := sessionstate.Resolve(evidence, sessionstate.PolicyFor(string(tc.agent)), time.Now()); got.Reason != sessionstate.ReasonTurnAborted {
+					t.Fatalf("reason %q, want turn_aborted: the diagnosis is half the point", got.Reason)
+				}
+			})
 		})
 	}
 }
@@ -166,34 +170,37 @@ func TestAHaltFromBeforeTheSessionStartedIsIgnored(t *testing.T) {
 			home, _ := toolhome.Dir()
 
 			d := newTraceDaemon(t)
-			id := "sess-replayed-halt-" + tc.name
-			addCharacterizationSession(t, d, id, tc.agent, protocol.SessionStateWorking)
-			session := d.store.Get(id)
-			d.recordBracketEvidence(id, protocol.StateWorking)
+			synctest.Test(t, func(t *testing.T) {
+				stopDaemonBackground(t, d)
+				id := "sess-replayed-halt-" + tc.name
+				addCharacterizationSession(t, d, id, tc.agent, protocol.SessionStateWorking)
+				session := d.store.Get(id)
+				d.recordBracketEvidence(id, protocol.StateWorking)
 
-			// The transcript already holds a halt from an earlier life, and the
-			// watcher starts after it — exactly what a resume looks like.
-			startedAt := time.Now()
-			path := tc.seed(t, home, session.Directory, id)
-			writeLine(t, path, tc.abort(startedAt.Add(-2*time.Hour)))
+				// The transcript already holds a halt from an earlier life, and the
+				// watcher starts after it — exactly what a resume looks like.
+				startedAt := time.Now()
+				path := tc.seed(t, home, session.Directory, id)
+				writeLine(t, path, tc.abort(startedAt.Add(-2*time.Hour)))
 
-			d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
-			t.Cleanup(func() { d.stopTranscriptWatcher(id) })
-			waitForTranscriptDiscovery(t, d, id)
+				d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
+				t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+				requireTranscriptDiscovery(t, d, id)
 
-			// Long enough for several polls to have read the bootstrap window.
-			time.Sleep(4 * transcriptPollInterval)
+				// Long enough for several polls to have read the bootstrap window.
+				advancePolls(4)
 
-			got, ok := d.evidenceTable().snapshot(id)
-			if !ok {
-				t.Fatal("no evidence recorded")
-			}
-			if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
-				t.Fatal("a halt replayed out of history settled a session that is working")
-			}
-			if !got.TurnOpen {
-				t.Fatal("the open turn was closed by a halt from a previous session")
-			}
+				got, ok := d.evidenceTable().snapshot(id)
+				if !ok {
+					t.Fatal("no evidence recorded")
+				}
+				if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
+					t.Fatal("a halt replayed out of history settled a session that is working")
+				}
+				if !got.TurnOpen {
+					t.Fatal("the open turn was closed by a halt from a previous session")
+				}
+			})
 		})
 	}
 }
@@ -206,32 +213,35 @@ func TestAnUndatedHaltIsIgnored(t *testing.T) {
 	home, _ := toolhome.Dir()
 
 	d := newTraceDaemon(t)
-	id := "sess-undated-halt"
-	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	session := d.store.Get(id)
-	d.recordBracketEvidence(id, protocol.StateWorking)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		id := "sess-undated-halt"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		session := d.store.Get(id)
+		d.recordBracketEvidence(id, protocol.StateWorking)
 
-	projects := filepath.Join(home, ".claude", "projects", "a-project")
-	if err := os.MkdirAll(projects, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(projects, id+".jsonl")
-	writeLine(t, path, `{"type":"user","message":{"role":"user","content":"write an essay"}}`)
+		projects := filepath.Join(home, ".claude", "projects", "a-project")
+		if err := os.MkdirAll(projects, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		path := filepath.Join(projects, id+".jsonl")
+		writeLine(t, path, `{"type":"user","message":{"role":"user","content":"write an essay"}}`)
 
-	d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
-	t.Cleanup(func() { d.stopTranscriptWatcher(id) })
-	waitForTranscriptDiscovery(t, d, id)
+		d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
+		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+		requireTranscriptDiscovery(t, d, id)
 
-	writeLine(t, path, `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"interruptedMessageId":"msg_01"}`)
-	time.Sleep(4 * transcriptPollInterval)
+		writeLine(t, path, `{"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user]"}]},"interruptedMessageId":"msg_01"}`)
+		advancePolls(4)
 
-	got, ok := d.evidenceTable().snapshot(id)
-	if !ok {
-		t.Fatal("no evidence recorded")
-	}
-	if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
-		t.Fatal("an undated halt was filed as though it had just happened")
-	}
+		got, ok := d.evidenceTable().snapshot(id)
+		if !ok {
+			t.Fatal("no evidence recorded")
+		}
+		if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
+			t.Fatal("an undated halt was filed as though it had just happened")
+		}
+	})
 }
 
 // The halt is dated by the agent, not by the poll that read it. Half a second of
@@ -282,57 +292,57 @@ func TestACopilotAbortNobodyAskedForStillClosesTheTurn(t *testing.T) {
 	home, _ := toolhome.Dir()
 
 	d := newTraceDaemon(t)
-	id := "sess-copilot-tool-failure"
-	addCharacterizationSession(t, d, id, protocol.SessionAgentCopilot, protocol.SessionStateWorking)
-	session := d.store.Get(id)
-	d.recordBracketEvidence(id, protocol.StateWorking)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		id := "sess-copilot-tool-failure"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentCopilot, protocol.SessionStateWorking)
+		session := d.store.Get(id)
+		d.recordBracketEvidence(id, protocol.StateWorking)
 
-	var seed func(t *testing.T, home, dir, sessionID string) string
-	for _, tc := range haltedTurnCases() {
-		if tc.name == "copilot" {
-			seed = tc.seed
+		var seed func(t *testing.T, home, dir, sessionID string) string
+		for _, tc := range haltedTurnCases() {
+			if tc.name == "copilot" {
+				seed = tc.seed
+			}
 		}
-	}
-	path := seed(t, home, session.Directory, id)
+		path := seed(t, home, session.Directory, id)
 
-	d.startTranscriptWatcher(id, protocol.SessionAgentCopilot, session.Directory, time.Now())
-	t.Cleanup(func() { d.stopTranscriptWatcher(id) })
-	waitForTranscriptDiscovery(t, d, id)
+		d.startTranscriptWatcher(id, protocol.SessionAgentCopilot, session.Directory, time.Now())
+		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+		requireTranscriptDiscovery(t, d, id)
 
-	writeLine(t, path, fmt.Sprintf(
-		`{"type":"abort","timestamp":%q,"data":{"reason":"tool_failure"}}`,
-		time.Now().UTC().Format(time.RFC3339Nano),
-	))
+		writeLine(t, path, fmt.Sprintf(
+			`{"type":"abort","timestamp":%q,"data":{"reason":"tool_failure"}}`,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		))
 
-	got := waitForClosedTurnBracket(t, d, id)
-	if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
-		t.Fatal("copilot giving up on its own was filed as the user halting the turn")
-	}
+		got := requireClosedTurnBracket(t, d, id)
+		if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
+			t.Fatal("copilot giving up on its own was filed as the user halting the turn")
+		}
 
-	// The bracket is what pins the session, and for copilot it pins it from the
-	// moment the abort lands: with no heartbeat to go silent, the resolver's stale
-	// test cannot retire the bracket at all, so `bracket_open` holds until the
-	// stuck timer converts it to `unknown`. Settling the turn is the classifier's
-	// job — this only has to prove nothing is still claiming the turn is running.
-	policy := sessionstate.PolicyFor(string(protocol.SessionAgentCopilot))
-	if reason := sessionstate.Resolve(got, policy, time.Now()).Reason; reason == sessionstate.ReasonBracketOpen {
-		t.Fatalf("reason %q: the abandoned turn held the session open", reason)
-	}
+		// The bracket is what pins the session, and for copilot it pins it from the
+		// moment the abort lands: with no heartbeat to go silent, the resolver's stale
+		// test cannot retire the bracket at all, so `bracket_open` holds until the
+		// stuck timer converts it to `unknown`. Settling the turn is the classifier's
+		// job — this only has to prove nothing is still claiming the turn is running.
+		policy := sessionstate.PolicyFor(string(protocol.SessionAgentCopilot))
+		if reason := sessionstate.Resolve(got, policy, time.Now()).Reason; reason == sessionstate.ReasonBracketOpen {
+			t.Fatalf("reason %q: the abandoned turn held the session open", reason)
+		}
+	})
 }
 
-// waitForClosedTurnBracket blocks until the watcher has closed the evidence
-// brackets, which for copilot is the only thing that ends an abandoned turn.
-func waitForClosedTurnBracket(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
+// requireClosedTurnBracket asserts the watcher has closed the evidence brackets,
+// which for copilot is the only thing that ends an abandoned turn.
+func requireClosedTurnBracket(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if got, ok := d.evidenceTable().snapshot(sessionID); ok && !got.TurnOpen && !got.ToolOpen {
-			return got
-		}
-		time.Sleep(transcriptPollInterval / 2)
+	advancePolls(2)
+	got, ok := d.evidenceTable().snapshot(sessionID)
+	if !ok || got.TurnOpen || got.ToolOpen {
+		t.Fatal("the abandoned turn left its bracket open")
 	}
-	t.Fatal("the abandoned turn left its bracket open")
-	return sessionstate.Evidence{}
+	return got
 }
 
 // A user who quotes the marker back at claude — asking about it, pasting a log —
@@ -343,35 +353,38 @@ func TestATranscriptLineThatMerelyMentionsTheMarkerIsNotAHalt(t *testing.T) {
 	home, _ := toolhome.Dir()
 
 	d := newTraceDaemon(t)
-	id := "sess-marker-mention"
-	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
-	session := d.store.Get(id)
-	d.recordBracketEvidence(id, protocol.StateWorking)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		id := "sess-marker-mention"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+		session := d.store.Get(id)
+		d.recordBracketEvidence(id, protocol.StateWorking)
 
-	projects := filepath.Join(home, ".claude", "projects", "a-project")
-	if err := os.MkdirAll(projects, 0o755); err != nil {
-		t.Fatalf("mkdir: %v", err)
-	}
-	path := filepath.Join(projects, id+".jsonl")
-	writeLine(t, path, `{"type":"user","message":{"role":"user","content":"why do i see [Request interrupted by user] in my logs?"}}`)
+		projects := filepath.Join(home, ".claude", "projects", "a-project")
+		if err := os.MkdirAll(projects, 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		path := filepath.Join(projects, id+".jsonl")
+		writeLine(t, path, `{"type":"user","message":{"role":"user","content":"why do i see [Request interrupted by user] in my logs?"}}`)
 
-	d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
-	t.Cleanup(func() { d.stopTranscriptWatcher(id) })
-	waitForTranscriptDiscovery(t, d, id)
+		d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
+		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
+		requireTranscriptDiscovery(t, d, id)
 
-	// Long enough for several polls to have read the line and decided nothing.
-	time.Sleep(4 * transcriptPollInterval)
+		// Long enough for several polls to have read the line and decided nothing.
+		advancePolls(4)
 
-	got, ok := d.evidenceTable().snapshot(id)
-	if !ok {
-		t.Fatal("no evidence recorded")
-	}
-	if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
-		t.Fatal("a prompt that quotes the marker was read as the user halting the turn")
-	}
-	if !got.TurnOpen {
-		t.Fatal("the turn was closed by a line that only talked about interrupts")
-	}
+		got, ok := d.evidenceTable().snapshot(id)
+		if !ok {
+			t.Fatal("no evidence recorded")
+		}
+		if got.LastHarnessEvent != nil && got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
+			t.Fatal("a prompt that quotes the marker was read as the user halting the turn")
+		}
+		if !got.TurnOpen {
+			t.Fatal("the turn was closed by a line that only talked about interrupts")
+		}
+	})
 }
 
 func writeLine(t *testing.T, path, line string) {
@@ -386,36 +399,34 @@ func writeLine(t *testing.T, path, line string) {
 	}
 }
 
-// waitForTranscriptDiscovery blocks until the watcher has adopted a transcript,
-// which is the point from which appended lines are tailed.
-func waitForTranscriptDiscovery(t *testing.T, d *Daemon, sessionID string) {
+// requireTranscriptDiscovery advances past enough of the watcher's own polls for
+// it to have adopted a transcript, which is the point from which appended lines
+// are tailed. The watcher is a plain time.Ticker over the filesystem — no
+// fsnotify — so it runs at its shipped 500ms interval inside a bubble and two
+// ticks of fake time cost nothing.
+func requireTranscriptDiscovery(t *testing.T, d *Daemon, sessionID string) {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		d.watchersMu.Lock()
-		watcher := d.transcriptWatch[sessionID]
-		d.watchersMu.Unlock()
-		if watcher != nil && d.findTranscriptPathForWatcher(watcher) != "" {
-			// One more poll so the watcher itself has adopted it.
-			time.Sleep(3 * transcriptPollInterval)
-			return
-		}
-		time.Sleep(transcriptPollInterval / 2)
+	advancePolls(2)
+	d.watchersMu.Lock()
+	watcher := d.transcriptWatch[sessionID]
+	d.watchersMu.Unlock()
+	if watcher == nil || d.findTranscriptPathForWatcher(watcher) == "" {
+		t.Fatal("watcher never discovered the transcript")
 	}
-	t.Fatal("watcher never discovered the transcript")
 }
 
-func waitForAbortEvidence(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
+// advancePolls runs n of the transcript watcher's polls to completion.
+func advancePolls(n int) {
+	time.Sleep(time.Duration(n) * transcriptPollInterval)
+	synctest.Wait()
+}
+
+func requireAbortEvidence(t *testing.T, d *Daemon, sessionID string) sessionstate.Evidence {
 	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for time.Now().Before(deadline) {
-		if got, ok := d.evidenceTable().snapshot(sessionID); ok &&
-			got.LastHarnessEvent != nil &&
-			got.LastHarnessEvent.Claim == sessionstate.ClaimTurnAborted {
-			return got
-		}
-		time.Sleep(transcriptPollInterval / 2)
+	advancePolls(2)
+	got, ok := d.evidenceTable().snapshot(sessionID)
+	if !ok || got.LastHarnessEvent == nil || got.LastHarnessEvent.Claim != sessionstate.ClaimTurnAborted {
+		t.Fatal("the halted turn was never filed as evidence")
 	}
-	t.Fatal("the halted turn was never filed as evidence")
-	return sessionstate.Evidence{}
+	return got
 }

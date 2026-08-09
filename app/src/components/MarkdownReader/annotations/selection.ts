@@ -1,19 +1,12 @@
 /**
- * Selection → pending-annotation mapping (the exceptSelectors + anchoring
- * equivalent of plannotator's web-highlighter setup).
- *
- * `evaluateSelection` is pure over its inputs (root element, a Selection-like
- * object, content, extracted blocks) so tests can drive it with synthetic
- * ranges instead of faking real mouse geometry.
+ * Selection → pending-annotation mapping. `evaluateSelection` is pure over its
+ * inputs so tests can drive it with synthetic ranges, not mouse geometry.
  */
 
 import { createAnchor, domPointToOffset } from '../anchoring';
 import type { AnchorRecord, BlockText } from '../anchoring';
 
-/**
- * Attn chrome a selection may not start or end in. `[data-md-no-annotate]`
- * is the future-proof hook (PR6's session picker adds the attribute).
- */
+/** Attn chrome a selection may not start or end in. */
 export const ANNOTATION_EXCEPT_SELECTORS = [
   '.workspace-dock-tile-header',
   '.md-annotations-sidebar',
@@ -40,14 +33,13 @@ export interface SelectionLike {
 
 export interface PendingSelection {
   anchor: AnchorRecord;
-  /** The anchored (possibly clamped) text — what the toolbar/popover quote shows. */
+  /** The anchored (possibly clamped) text, not the raw selection. */
   selectionText: string;
   /** True when a cross-block selection was clamped to its first block. */
   clamped: boolean;
   blockId: string;
-  /** Owning block renders as a code block (toolbar switches to top-right mode). */
   isCodeBlock: boolean;
-  /** Selection range bounding rect at creation (toolbar positioning). */
+  /** Bounding rect at creation time, for toolbar positioning. */
   rect: DOMRect | null;
 }
 
@@ -65,13 +57,9 @@ function owningBlockElement(node: Node): Element | null {
 }
 
 /**
- * Validate a selection and map it to an anchor. Returns null (no pending
- * annotation) when the selection is collapsed/whitespace-only, escapes the
- * reader root, touches excepted chrome, or cannot be anchored (no owning
- * block, non-paintable block, empty after clamping).
- *
- * Cross-block selections are clamped to the FIRST block (v1 single-block
- * contract of the anchoring core); `clamped` reports it so UI can hint.
+ * Validate a selection and map it to an anchor, or null when it is collapsed,
+ * escapes the reader root, hits excepted chrome, or cannot be anchored.
+ * Cross-block selections clamp to the FIRST block (v1 single-block anchoring).
  */
 export function evaluateSelection(
   root: HTMLElement,
@@ -108,15 +96,11 @@ export function evaluateSelection(
   if (start === null) {
     return null;
   }
-  // End boundary: same block → exact offset; anywhere else (a later sibling
-  // block, or a stamped ancestor when the selection spills out) → clamp to
-  // the first block's end.
+  // End boundary: same block → exact offset; anywhere else → clamp to its end.
   const endBlockEl = owningBlockElement(range.endContainer);
   let end: number | null;
   let clamped = false;
   if (endBlockEl === blockEl || (endBlockEl && blockEl.contains(endBlockEl))) {
-    // Same block, or a nested stamped block inside it: the offset is still
-    // expressible in the owning block's text-space via the DOM walk.
     end = domPointToOffset(blockEl, range.endContainer, range.endOffset);
   } else {
     end = block.text.length;
@@ -126,8 +110,7 @@ export function evaluateSelection(
     return null;
   }
 
-  // Trim whitespace edges so the anchored quote matches what a user perceives
-  // as selected (and so createAnchor's non-empty contract holds).
+  // Trim whitespace edges; createAnchor requires a non-empty range.
   const slice = block.text.slice(start, end);
   const leading = slice.length - slice.replace(/^\s+/, '').length;
   const trailing = slice.length - slice.replace(/\s+$/, '').length;

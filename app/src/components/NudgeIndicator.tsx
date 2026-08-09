@@ -3,34 +3,22 @@ import { CountdownFill } from './CountdownFill';
 import { CountdownCancelHint } from './CountdownCancelHint';
 import type { UISessionState } from '../types/sessionState';
 
-// The visual mode for a session's incoming-ticket indicator, derived from the two
-// daemon-broadcast fields plus local selection state. The daemon owns the timer and
-// the deadline; the frontend only renders to it.
+// The visual mode for a session's incoming-ticket indicator. The daemon owns the
+// timer and the deadline; the frontend only renders to it.
 export type NudgeMode = 'counting' | 'paused' | 'marker';
 
 function isDeliverableForNudge(state: UISessionState): boolean {
-  // Mirrors the daemon's isExplicitNudgeBlocked: an explicit click delivers a doorbell
-  // on demand in every state EXCEPT pending_approval. A click is unambiguous intent, so
-  // — unlike the idle-gated auto-countdown — it honors working, launching, scheduled,
-  // and 'unknown' (codex's common resting state, where no countdown ever arms). The lone
-  // exception is pending_approval: the doorbell's trailing Enter could answer the y/n
-  // prompt, so the chip there is a static, non-clickable marker.
+  // Mirrors the daemon's isExplicitNudgeBlocked: a click delivers on demand in
+  // every state but pending_approval, where the doorbell's trailing Enter could
+  // answer the y/n prompt.
   return state !== 'pending_approval';
 }
 
-// Derive the indicator mode from the daemon fields and local selection.
-//
-// nudge_fires_at is present IFF the daemon is actively counting down to a doorbell
-// (idle + unread + not the selected session). We check active+deliverable+unread FIRST
-// so the session the user is looking at always reads as the clickable paused chip —
-// "deliver on demand" — in every state except pending_approval (working, launching,
-// 'unknown', scheduled all qualify), and so a just-selected idle session reads as paused
-// even while a stale fires_at from the previous broadcast is still in flight (the daemon
-// pauses the selected session and clears fires_at a beat later). The trailing
-// `ticket_unread` branch is the catch-all marker: it covers the non-clickable
-// pending_approval case, off-screen unread sessions that aren't counting, and the brief
-// post-fire transient (timer entry gone, state not yet flipped) so the chip never blinks
-// out.
+// Order matters. Active+deliverable+unread is checked first so the session the
+// user is looking at reads as the clickable paused chip even while a stale
+// fires_at is still in flight. The trailing `ticket_unread` branch is the
+// catch-all marker, including the brief post-fire transient, so the chip never
+// blinks out.
 export function deriveNudgeMode(args: {
   ticketUnread?: boolean;
   nudgeFiresAt?: string;
@@ -46,15 +34,13 @@ export function deriveNudgeMode(args: {
 
 function triggerHandler(onTrigger?: () => void) {
   return (event: React.MouseEvent) => {
-    // Stop the row/pane click so triggering the nudge does not also re-select.
     event.stopPropagation();
     onTrigger?.();
   };
 }
 
-// The left-sidebar row indicator: a thin bar pinned to the bottom of the session row.
-// Counting and marker variants are pointer-events:none so they never steal the row's
-// click/drag; the paused variant is a clickable strip (click-to-trigger).
+// The sidebar row indicator. Counting and marker variants are pointer-events:none
+// so they never steal the row's click/drag; the paused variant is clickable.
 export function SidebarNudgeBar({
   mode,
   firesAt,
@@ -76,9 +62,8 @@ export function SidebarNudgeBar({
       <button
         type="button"
         className="nudge-sidebar-bar nudge-sidebar-bar--paused"
-        // Stop the row's pointerdown drag from arming on a press of this button —
-        // the session row is a drag handle (handleSessionPointerDown) and a sloppy
-        // click that drifts would otherwise start a session drag instead of firing.
+        // The session row is a drag handle, so a click that drifts would start a
+        // session drag instead of firing.
         onPointerDown={(event) => event.stopPropagation()}
         onClick={triggerHandler(onTrigger)}
         title="Deliver the pending ticket nudge now"
@@ -91,14 +76,8 @@ export function SidebarNudgeBar({
   return <div className="nudge-sidebar-bar nudge-sidebar-bar--marker" aria-hidden="true" />;
 }
 
-// The visible-pane indicator: an inline chip rendered inside the pane header
-// (.workspace-pane-header), which the workspace surfaces on a single tile precisely
-// when a session has unread ticket activity. The header is the rectangle; this is its
-// right-aligned content. Only the paused variant's chip is an interactive button.
-//
-// Counting returns a fragment: the inline chip plus a sibling progress track that the
-// header (position:relative) pins to its bottom edge — so the fragment's children land
-// as direct header children and the track spans the full pane width.
+// The pane-header chip. Counting returns a fragment so the chip and its progress
+// track both land as direct header children and the track spans the pane width.
 export function HeaderNudgeIndicator({
   mode,
   firesAt,
@@ -111,19 +90,14 @@ export function HeaderNudgeIndicator({
   onCancel?: () => void;
 }) {
   if (mode === 'counting' && firesAt) {
-    // Counting is a button because the countdown is now something the user can
-    // call off, and the chip announcing it is where they will reach for that. It
-    // carries the same key the settling chip does — one countdown-cancel verb,
-    // whichever countdown is on screen — and clicking is the pointer equivalent,
-    // exactly as it is on the settling chip.
+    // A button: one countdown-cancel verb, whichever countdown is on screen, so
+    // it carries the same key as the settling chip.
     return (
       <>
         <button
           type="button"
           className="nudge-header nudge-header--counting nudge-header-trigger"
-          // Same guard as the paused variant: in a split the pane header is a
-          // leaf-drag handle, so a sloppy click that drifts would relocate the
-          // pane instead of stopping the nudge.
+          // The pane header is a leaf-drag handle; see the paused variant.
           onPointerDown={(event) => event.stopPropagation()}
           onClick={triggerHandler(onCancel)}
           title="Stop this nudge — the ticket stays unread"
@@ -143,10 +117,8 @@ export function HeaderNudgeIndicator({
       <button
         type="button"
         className="nudge-header nudge-header--paused nudge-header-trigger"
-        // Stop the pane header's pointerdown drag from starting on this button. In a
-        // split the header is a leaf-drag handle (beginLeafDrag), so without this a
-        // sloppy click that drifts >=4px would relocate the pane instead of delivering
-        // the nudge — exactly as the sibling rename button guards itself.
+        // The pane header is a leaf-drag handle (beginLeafDrag), so a click that
+        // drifts >=4px would relocate the pane instead of delivering the nudge.
         onPointerDown={(event) => event.stopPropagation()}
         onClick={triggerHandler(onTrigger)}
         title="Deliver the pending ticket nudge now"

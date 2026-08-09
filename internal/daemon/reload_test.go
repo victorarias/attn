@@ -11,6 +11,7 @@ import (
 	"sync"
 	"syscall"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -198,8 +199,21 @@ func (b *fakeReloadBackend) spawnCountFor(id string) int {
 
 func newReloadTestDaemon(t *testing.T, backend *fakeReloadBackend) *Daemon {
 	t.Helper()
+	return newReloadTestDaemonOn(t, newReloadTestBase(t), backend)
+}
+
+// newReloadTestBase builds the daemon a bubbled reload test needs: constructed
+// outside the bubble, its store closed by the outer T. Pair it with
+// newReloadTestDaemonOn inside synctest.Test.
+func newReloadTestBase(t *testing.T) *Daemon {
+	t.Helper()
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(func() { _ = d.store.Close() })
+	return d
+}
+
+func newReloadTestDaemonOn(t *testing.T, d *Daemon, backend *fakeReloadBackend) *Daemon {
+	t.Helper()
 	d.ptyBackend = backend
 	return d
 }
@@ -506,6 +520,10 @@ func TestReloadSessionAgentSkipsUnsupportedAgent(t *testing.T) {
 	}
 }
 
+// Boundary-bound: setting the notebook root starts the notebook fsnotify
+// watcher, whose goroutine parks in kqueue. That is a real fd nobody is durably
+// blocked on, so a bubble here hangs (measured: the 25s test timeout, with the
+// watcher the only goroutine left).
 func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testing.T) {
 	backend := &fakeReloadBackend{
 		liveIDs: []string{"plugin-chief"},
@@ -591,6 +609,7 @@ func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testin
 	}
 }
 
+// Boundary-bound: same notebook fsnotify watcher as the test above.
 func TestReloadSessionAgentLeavesPluginWorkerAliveWhenResumeCannotBePrepared(t *testing.T) {
 	backend := &fakeReloadBackend{
 		liveIDs: []string{"plugin-chief"},
@@ -634,6 +653,8 @@ func TestReloadSessionAgentLeavesPluginWorkerAliveWhenResumeCannotBePrepared(t *
 	}
 }
 
+// Boundary-bound: same notebook fsnotify watcher. Its three sibling
+// set-chief-of-staff tests bubble because they never set a notebook root.
 func TestSetChiefOfStaffRejectsPluginRoleChangeWhenResumePreflightFails(t *testing.T) {
 	for _, test := range []struct {
 		name         string
@@ -751,24 +772,28 @@ func TestReloadSessionAgentRespawnFailureBroadcastsSessionExited(t *testing.T) {
 // Promotion AND demotion both reload, so the new chief status reaches the system
 // prompt either way (assign injects guidance, demote drops it).
 func TestSetChiefOfStaffReloadsOnAssignAndDemote(t *testing.T) {
-	backend := &fakeReloadBackend{
-		liveIDs: []string{"chief"},
-		info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
-		params:  ptybackend.SessionLaunchParams{Recorded: true},
-	}
-	d := newReloadTestDaemon(t, backend)
-	addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	client := newRenameTestClient()
+	base := newReloadTestBase(t)
+	synctest.Test(t, func(t *testing.T) {
+		backend := &fakeReloadBackend{
+			liveIDs: []string{"chief"},
+			info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
+			params:  ptybackend.SessionLaunchParams{Recorded: true},
+		}
+		d := newReloadTestDaemonOn(t, base, backend)
+		stopDaemonBackground(t, d)
+		addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+		client := newRenameTestClient()
 
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
-	})
-	waitForSpawnCount(t, backend, 1, "assign")
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
+		})
+		requireSpawnCount(t, backend, 1, "assign")
 
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: false,
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: false,
+		})
+		requireSpawnCount(t, backend, 2, "demote")
 	})
-	waitForSpawnCount(t, backend, 2, "demote")
 }
 
 // Two reloads of the same session fired concurrently (a rapid double-toggle, or a
@@ -824,33 +849,37 @@ func TestReloadSessionAgentSerializesConcurrentReloads(t *testing.T) {
 // chief via the single-holder upsert. Both must reload: the new chief to gain the
 // guidance, the displaced one to drop it now instead of keeping it until it restarts.
 func TestSetChiefOfStaffRoleTransferReloadsBothChiefs(t *testing.T) {
-	backend := &fakeReloadBackend{
-		liveIDs: []string{"alice", "bob"},
-		info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
-		params:  ptybackend.SessionLaunchParams{Recorded: true},
-	}
-	d := newReloadTestDaemon(t, backend)
-	addReloadSession(d, "alice", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	addReloadSession(d, "bob", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	client := newRenameTestClient()
+	base := newReloadTestBase(t)
+	synctest.Test(t, func(t *testing.T) {
+		backend := &fakeReloadBackend{
+			liveIDs: []string{"alice", "bob"},
+			info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
+			params:  ptybackend.SessionLaunchParams{Recorded: true},
+		}
+		d := newReloadTestDaemonOn(t, base, backend)
+		stopDaemonBackground(t, d)
+		addReloadSession(d, "alice", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+		addReloadSession(d, "bob", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+		client := newRenameTestClient()
 
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "alice", ChiefOfStaff: true,
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "alice", ChiefOfStaff: true,
+		})
+		requireSpawnCount(t, backend, 1, "assign alice")
+
+		// Transfer the role to bob while alice still holds it.
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "bob", ChiefOfStaff: true,
+		})
+		requireSpawnCount(t, backend, 3, "transfer to bob")
+
+		if got := backend.spawnCountFor("bob"); got != 1 {
+			t.Fatalf("bob (new chief) respawns = %d, want 1", got)
+		}
+		if got := backend.spawnCountFor("alice"); got != 2 {
+			t.Fatalf("alice respawns = %d, want 2 (1 assign + 1 displaced-on-transfer)", got)
+		}
 	})
-	waitForSpawnCount(t, backend, 1, "assign alice")
-
-	// Transfer the role to bob while alice still holds it.
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "bob", ChiefOfStaff: true,
-	})
-	waitForSpawnCount(t, backend, 3, "transfer to bob")
-
-	if got := backend.spawnCountFor("bob"); got != 1 {
-		t.Fatalf("bob (new chief) respawns = %d, want 1", got)
-	}
-	if got := backend.spawnCountFor("alice"); got != 2 {
-		t.Fatalf("alice respawns = %d, want 2 (1 assign + 1 displaced-on-transfer)", got)
-	}
 }
 
 // The reload is destructive (kill + respawn), unlike the doorbell it replaced. A
@@ -858,53 +887,56 @@ func TestSetChiefOfStaffRoleTransferReloadsBothChiefs(t *testing.T) {
 // demoting a session that isn't the chief (a ClearProfileRole no-op), or re-assigning
 // the session that already holds the role.
 func TestSetChiefOfStaffNoReloadOnNoOpToggle(t *testing.T) {
-	backend := &fakeReloadBackend{
-		liveIDs: []string{"chief", "other"},
-		info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
-		params:  ptybackend.SessionLaunchParams{Recorded: true},
-	}
-	d := newReloadTestDaemon(t, backend)
-	addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	addReloadSession(d, "other", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	client := newRenameTestClient()
+	base := newReloadTestBase(t)
+	synctest.Test(t, func(t *testing.T) {
+		backend := &fakeReloadBackend{
+			liveIDs: []string{"chief", "other"},
+			info:    ptybackend.SessionInfo{Cols: 80, Rows: 24},
+			params:  ptybackend.SessionLaunchParams{Recorded: true},
+		}
+		d := newReloadTestDaemonOn(t, base, backend)
+		stopDaemonBackground(t, d)
+		addReloadSession(d, "chief", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+		addReloadSession(d, "other", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+		client := newRenameTestClient()
 
-	// Demote a session that holds no role: nothing changes, nothing should reload.
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "other", ChiefOfStaff: false,
-	})
-	assertSpawnCountStaysBelow(t, backend, 1, "no-op demote of a non-chief")
+		// Demote a session that holds no role: nothing changes, nothing should reload.
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "other", ChiefOfStaff: false,
+		})
+		assertSpawnCountStaysBelow(t, backend, 1, "no-op demote of a non-chief")
 
-	// Real assign reloads once.
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
-	})
-	waitForSpawnCount(t, backend, 1, "assign chief")
+		// Real assign reloads once.
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
+		})
+		requireSpawnCount(t, backend, 1, "assign chief")
 
-	// Re-assigning the SAME session that already holds the role changes nothing.
-	d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
-		Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
+		// Re-assigning the SAME session that already holds the role changes nothing.
+		d.handleSetChiefOfStaff(client, &protocol.SetChiefOfStaffMessage{
+			Cmd: protocol.CmdSetChiefOfStaff, SessionID: "chief", ChiefOfStaff: true,
+		})
+		assertSpawnCountStaysBelow(t, backend, 2, "redundant re-assign of the current chief")
 	})
-	assertSpawnCountStaysBelow(t, backend, 2, "redundant re-assign of the current chief")
 }
 
-// assertSpawnCountStaysBelow gives any (incorrectly fired) async reload a window to
-// land, then asserts the spawn count never reached want.
+// assertSpawnCountStaysBelow asserts the spawn count never reached want. The
+// window a wrongly-fired async reload needed is now a settled bubble: there is no
+// goroutine left that could still spawn.
 func assertSpawnCountStaysBelow(t *testing.T, backend *fakeReloadBackend, want int, label string) {
 	t.Helper()
-	time.Sleep(100 * time.Millisecond)
+	synctest.Wait()
 	if got := backend.spawnCount(); got >= want {
 		t.Fatalf("%s: spawn count = %d, want < %d (no-op toggle must not reload)", label, got, want)
 	}
 }
 
-func waitForSpawnCount(t *testing.T, backend *fakeReloadBackend, want int, label string) {
+// requireSpawnCount settles the bubble and reads the count once: the reload is
+// async, and a settled bubble is the instant after which nothing more will spawn.
+func requireSpawnCount(t *testing.T, backend *fakeReloadBackend, want int, label string) {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if backend.spawnCount() >= want {
-			return
-		}
-		time.Sleep(5 * time.Millisecond)
+	synctest.Wait()
+	if got := backend.spawnCount(); got < want {
+		t.Fatalf("%s: respawn count = %d, want >= %d", label, got, want)
 	}
-	t.Fatalf("%s: respawn count = %d, want >= %d", label, backend.spawnCount(), want)
 }

@@ -2,11 +2,9 @@ import type { WorkspaceWithSessions, WorkspaceViewSession } from './workspaceVie
 import { isSnoozed } from './snoozeDurations';
 
 /**
- * The daemon-owned setting selecting the sidebar arrangement: off (the default)
- * is the workspace tree alone, on adds the chief's anchored slot and the "Your
- * turn" band above it. Read it through isQueueModeEnabled so the sidebar's
- * display popover, the command menu, and the sidebar itself can never disagree
- * about what is in effect.
+ * Daemon-owned setting selecting the sidebar arrangement: off (default) is the
+ * workspace tree alone, on adds the chief's slot and the "Your turn" band.
+ * Always read through isQueueModeEnabled so no surface disagrees.
  */
 export const QUEUE_MODE_SETTING = 'queue_mode_enabled';
 
@@ -15,16 +13,10 @@ export function isQueueModeEnabled(settings: Record<string, string>): boolean {
 }
 
 /**
- * Auto-settle: attn closes a turn once you have steered the agent and it has
- * gone back to work. Off by default — it changes state nobody asked it to, so it
- * ships opt-in like the queue itself.
- *
- * The two windows answer different questions. The arm delay is how long the agent
- * must keep working before anything starts, which is what proves the steering
- * took; the countdown is the visible part on the terminal tile, and the only
- * window in which ⌘. can keep the turn. All three are daemon-owned key/value
- * strings and read through the helpers here, so Settings, the command menu, and
- * the indicator can never disagree about what is in effect.
+ * Auto-settle: closes a turn once the user steered the agent and it went back to
+ * work. Off by default. The arm delay is how long the agent must keep working
+ * before anything starts; the countdown is the visible window, and the only one
+ * in which ⌘. can keep the turn. Always read through the helpers here.
  */
 export const AUTO_SETTLE_ENABLED_SETTING = 'auto_settle_enabled';
 export const AUTO_SETTLE_ARM_SETTING = 'auto_settle_arm_seconds';
@@ -37,11 +29,8 @@ export function isAutoSettleEnabled(settings: Record<string, string>): boolean {
   return (settings[AUTO_SETTLE_ENABLED_SETTING] || 'false') === 'true';
 }
 
-/**
- * The effective seconds for one of the two windows. The daemon normalizes both to
- * concrete values in the settings payload, so the fallback is only a safety net
- * for a client that reads settings before the first broadcast lands.
- */
+/** The effective seconds for one of the two windows; the daemon normalizes
+ * both, so the fallback only covers a read before the first broadcast. */
 export function autoSettleSeconds(
   settings: Record<string, string>,
   key: typeof AUTO_SETTLE_ARM_SETTING | typeof AUTO_SETTLE_COUNTDOWN_SETTING,
@@ -70,11 +59,8 @@ export interface QueueRow<TSession extends QueueBandSession> {
   workspaceTitle: string;
 }
 
-/**
- * How long a turn has been outstanding, in the coarsest unit that still reads
- * as an age. `now` is passed in rather than read here so the caller owns the
- * clock and the function stays a pure projection of the two timestamps.
- */
+/** How long a turn has been outstanding, in the coarsest unit that still reads
+ * as an age. `now` is passed in so this stays a pure projection. */
 export function formatTurnAge(openedAt: string | undefined, now: number): string {
   if (!openedAt) return '';
   const opened = Date.parse(openedAt);
@@ -88,12 +74,8 @@ export function formatTurnAge(openedAt: string | undefined, now: number): string
   return `${Math.round(hours / 24)}d`;
 }
 
-/**
- * Queue order: how long the turn has been owed, oldest first, tie-broken by id
- * so the order is total and does not shuffle between renders. Exported because
- * home lists the same turns and must list them in the same order — two orders
- * for one queue is two queues.
- */
+/** Queue order: turn owed longest first, tie-broken by id so the order is
+ * total. Home lists the same turns and must use the same order. */
 export function compareTurnOrder(a: QueueBandSession, b: QueueBandSession): number {
   const openedA = a.turnOpenedAt ?? '';
   const openedB = b.turnOpenedAt ?? '';
@@ -104,12 +86,9 @@ export function compareTurnOrder(a: QueueBandSession, b: QueueBandSession): numb
 }
 
 /**
- * The jump-to-waiting (⌘J) target: of the sessions that want the user, the one
- * whose turn has been owed longest. Queue order, not list order — a jump that
- * follows workspace rank while the band on screen is sorted by age reads as
- * random. `wants` is passed in because each arrangement has its own notion of
- * wanting the user (turn_owed with the queue on, the state predicate with it
- * off) and that choice belongs to the caller.
+ * The jump-to-waiting (⌘J) target, in queue order rather than list order.
+ * `wants` is the caller's: each arrangement has its own notion of wanting the
+ * user (turn_owed with the queue on, the state predicate with it off).
  */
 export function oldestWantedTurn<TSession extends QueueBandSession>(
   sessions: TSession[],
@@ -133,49 +112,24 @@ export interface QueueBands<TSession extends QueueBandSession> {
   /** Everything else you could go and look at, in a stable order. */
   settled: QueueRow<TSession>[];
   /**
-   * Sessions the user pinned out of the queue one at a time, in the order they
-   * were pinned. They sit below the settled band and above the pinned
-   * workspaces: the queue and the draining of it stay at the top, and the things
-   * deliberately held in view sit just above the places you go to work.
-   *
-   * Pin time, not state and not hand-order: the band has to be somewhere the eye
-   * can return to, so a row must not move because the agent in it started
-   * working. New pins land at the bottom, out of the way of the ones already
-   * there.
+   * Sessions pinned out of the queue, in pin order — not state order, so a row
+   * never moves because the agent in it started working.
    */
   pinned: QueueRow<TSession>[];
-  /**
-   * Agents the user deferred, soonest wake first. They are in neither band: a
-   * snooze is an answer to "whose turn is it" — not yours, not yet — and it has
-   * a return time, which is what the section below the settled band exists to
-   * show. Soonest first because the only question a snoozed row answers is when
-   * it comes back.
-   */
+  /** Agents the user deferred, soonest wake first — the only question a snoozed
+   * row answers is when it comes back. */
   snoozed: QueueRow<TSession>[];
 }
 
 /**
- * Derive the sidebar's standing order: the chief, the turns you owe, and the
- * settled rest.
- *
- * Every agent lands in exactly one band, which is what makes a row's position
- * mean something. Pinned and muted workspaces are in none of them — they keep
- * the tree's grouped rendering, because a pinned workspace is a place you go
- * and get work rather than a list handed to you, and a muted one is out of
- * sight by definition.
- *
- * The chief is the one exception: it holds its anchored slot whatever its
- * workspace is, since it is the seat you always want to reach rather than a
- * piece of work you filed away. The tree drops it from a workspace it still
- * draws, so it is never in two places at once either.
+ * Derive the sidebar's standing order: the chief, the turns you owe, the settled
+ * rest. Every agent lands in exactly one band; sessions of pinned or muted
+ * workspaces land in none and keep the tree's grouped rendering. The chief holds
+ * its anchored slot whatever its workspace, and the tree drops it there.
  *
  * Membership is read, never derived: `turnOwed` is the daemon's answer, which
- * already accounts for the exclusions a client cannot see. Turn ordering is by
- * `turnOpenedAt` ascending — how long the turn has been owed, which does not
- * move when the agent changes state under the user. Settled keeps the tree's
- * own order — workspace rank, then the workspace's session order — which is
- * deliberately not a state order: an agent nobody is asking you about should
- * not jump around the list as it works.
+ * accounts for exclusions a client cannot see. Settled keeps the tree's own
+ * order (workspace rank, then session order), deliberately not a state order.
  */
 export function buildQueueBands<TSession extends QueueBandSession>(
   workspaces: WorkspaceWithSessions<TSession>[],
@@ -204,26 +158,19 @@ export function buildQueueBands<TSession extends QueueBandSession>(
       if (workspace.pinned || workspace.muted) {
         continue;
       }
-      // A pinned session is out of the queue whatever else is true of it, which
-      // is the point of pinning: the user said they would come to this one
-      // themselves. It outranks the snooze check because a pin has no deadline
-      // to come back from, and it outranks the turn check for the same reason
-      // the daemon already withholds turnOwed from it.
+      // A pin outranks both the snooze and the turn check: it has no deadline to
+      // come back from, and the daemon already withholds turnOwed from it.
       if (session.pinnedAt) {
         pinned.push(row);
         continue;
       }
-      // A satellite — a shell still sitting beside the agent it was split from —
-      // gets no row of its own. You reach it by going to its agent, where it is
-      // a pane. Losing that parent is what gives it a row back, so nothing ever
-      // becomes unreachable.
+      // A satellite is reached through its agent's pane, so it gets no row.
+      // Losing that parent gives it a row back; nothing becomes unreachable.
       if (isAttachedSatellite(session, workspace.id, attachedParents)) {
         continue;
       }
-      // Before the turn check, though the two cannot both be true: the daemon
-      // settles as it snoozes, so a snoozed session never carries turnOwed. The
-      // order makes the row's home independent of that invariant holding in a
-      // snapshot taken mid-broadcast.
+      // Before the turn check, so the row's home does not depend on the daemon's
+      // settle-as-it-snoozes invariant holding in a mid-broadcast snapshot.
       if (isSnoozed(session.turnSnoozedUntil, now)) {
         snoozed.push(row);
       } else if (session.turnOwed) {
@@ -242,12 +189,8 @@ export function buildQueueBands<TSession extends QueueBandSession>(
 }
 
 /**
- * Index every session by the workspace it is in, so a satellite's parent can be
- * confirmed present *and* in the same workspace in one lookup.
- *
- * The workspace half is what keeps a satellite from vanishing after its pane is
- * moved somewhere else: it is no longer beside its agent, so it is no longer
- * reachable through it, so it gets its own row back.
+ * Index every session by its workspace, so a satellite's parent is confirmed
+ * present *and* co-located in one lookup — a moved pane gets its row back.
  */
 function liveParentIds(workspaces: WorkspaceWithSessions<QueueBandSession>[]): Map<string, string> {
   const byId = new Map<string, string>();
@@ -260,13 +203,9 @@ function liveParentIds(workspaces: WorkspaceWithSessions<QueueBandSession>[]): M
 }
 
 /**
- * Whether this session is a shell whose parent agent is present in the same
- * workspace — the one case that earns no row of its own.
- *
- * An orphan is deliberately loud rather than quiet: a shell whose agent has
- * closed, or one spawned before the link existed, keeps its settled row. The
- * queue's standing rule is that it reorders and never hides, and a session with
- * no parent to be reached through has only its own row left.
+ * Whether this is a shell whose parent agent is present in the same workspace —
+ * the one case that earns no row. An orphan keeps its settled row: the queue
+ * reorders and never hides.
  */
 function isAttachedSatellite(
   session: QueueBandSession,
@@ -288,11 +227,8 @@ function comparePinOrder(a: QueueBandSession, b: QueueBandSession): number {
   return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 }
 
-/**
- * Soonest wake first, tie-broken by id so the order is total. Exported for the
- * same reason as compareTurnOrder: home lists the same deferred agents the
- * sidebar does, and two orders for one set of promises is two sets of promises.
- */
+/** Soonest wake first, tie-broken by id so the order is total. Home lists the
+ * same deferred agents in the same order as the sidebar. */
 export function compareWakeOrder(a: QueueBandSession, b: QueueBandSession): number {
   const untilA = a.turnSnoozedUntil ?? '';
   const untilB = b.turnSnoozedUntil ?? '';
@@ -303,21 +239,11 @@ export function compareWakeOrder(a: QueueBandSession, b: QueueBandSession): numb
 }
 
 /**
- * The row after `settledSessionId` in queue order, wrapping to the top, that is
- * still owed according to `stillOwed`.
- *
- * Two snapshots, two jobs. `turns` is the band as it stood while that turn was
- * still owed, and is consulted only for *order* — the settled row being present
- * is what gives the scan a position to continue from. `stillOwed` is the current
- * band, and decides *eligibility*: a broadcast can close several turns at once,
- * so a successor that looked owed in the old snapshot may have settled in the
- * very same update, and landing on it would hand the user another finished
- * agent.
- *
- * A session that is not in `turns` (already settled, pinned, muted, the chief)
- * has no position to move on from, so the scan simply starts at the top. Null
- * means the old snapshot holds nobody still owed — which is not the same as
- * nothing being owed at all; see advanceAfterTurnClosed.
+ * The row after `settledSessionId` in queue order, wrapping, that is still owed.
+ * Two snapshots, two jobs: `turns` supplies only *order* (and the position to
+ * continue from), `stillOwed` decides *eligibility*, because one broadcast can
+ * close several turns. A session absent from `turns` starts the scan at the top.
+ * Null means the old snapshot holds nobody still owed — not that nothing is.
  */
 function nextOwedAfter<TSession extends QueueBandSession>(
   turns: QueueRow<TSession>[],
@@ -336,11 +262,8 @@ function nextOwedAfter<TSession extends QueueBandSession>(
 }
 
 /**
- * The turn at the head of the queue: the one owed longest, which is the row the
- * band lists first and the agent ⌘J jumps to. Exported because two places send
- * the user there and they must not disagree about which agent "next" means —
- * the handover when it runs off the end of the old snapshot, and home when it is
- * waiting for the queue to refill.
+ * The turn at the head of the queue. Exported because the handover and home both
+ * send the user there and must not disagree about which agent "next" means.
  */
 export function headOfQueue<TSession extends QueueBandSession>(
   bands: QueueBands<TSession> | null,
@@ -354,45 +277,20 @@ export type QueueAdvance<TSession extends QueueBandSession> =
   | { to: 'dashboard' };
 
 /**
- * Where the user should land when the turn they were looking at closed without
- * them asking — an auto-settle countdown completing, or a settle from the
- * sidebar row. Null means stay put: nothing closed, or what changed was not a
- * settle.
+ * Where the user lands when the turn they were looking at closed without them
+ * asking. Null means stay put. `previousTurns` is the only record the row was
+ * ever there, and the only place the user's position still exists.
  *
- * `previousTurns` is the turns band as it stood before `bands`, which is what
- * makes "closed" observable at all — the row is gone from the band by the time
- * anyone can react, so the two snapshots together are the only record that it
- * was ever there, and the earlier one is also the only place the user's
- * position in the queue still exists.
+ * The move that counts is turns → settled or turns → snoozed. Requiring the
+ * ARRIVAL, not just the departure, is what keeps pinning or muting a workspace
+ * from carrying the user away from it. Arrival in the *pinned* band is
+ * deliberately not a close — pinning is the user saying they will come to this
+ * one themselves — so its absence from `closedNow` is not an omission to fix.
  *
- * The move that matters is turns → settled or turns → snoozed. Pinning or muting
- * a workspace clears turn_owed on its sessions too, and those rows leave the
- * bands entirely rather than landing in either — so requiring the arrival,
- * rather than just the departure, is what keeps a pin from carrying the user
- * away from the workspace they pinned to keep in view.
- *
- * Arrival in the *pinned* band is deliberately not a close, for the same reason
- * and more sharply: pinning one agent is the user saying they will come to this
- * one themselves, so moving them off it is the exact opposite of what they
- * asked for. It is left out of `closedNow` on purpose — this is not an omission
- * to be tidied up by adding the third band to the list.
- *
- * Snoozed counts because a snooze is a turn-closing act performed on the agent
- * the user is looking at, exactly like a settle: leaving them parked in an agent
- * they just deferred is the bookkeeping move-on exists to remove.
- *
- * Only the position comes from the old snapshot; whether a row is still worth
- * going to is always read from `bands`. One broadcast can close several turns —
- * an auto-settle countdown and a settle from another client landing together,
- * or two countdowns firing in the same tick — and a successor that was owed in
- * the old snapshot may be settled in this one. Answering from the old snapshot
- * alone would hand the user an agent that is already finished with them, which
- * is the very thing this function exists to avoid.
- *
- * Home is therefore reached from the *current* band being empty, never from the
- * old one running out. A turn that opened in the same broadcast that closed
- * this one has no position in the old snapshot, so the scan cannot find it; the
- * head of the current band is where the queue continues.
+ * Only the position comes from the old snapshot; eligibility always comes from
+ * `bands`, since one broadcast can close several turns. Home is therefore
+ * reached from the *current* band being empty, never from the old one running
+ * out: a turn opened in the same broadcast has no position in the old snapshot.
  */
 export function advanceAfterTurnClosed<TSession extends QueueBandSession>(
   previousTurns: QueueRow<TSession>[],

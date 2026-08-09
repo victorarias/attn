@@ -6,6 +6,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/jobs"
@@ -137,44 +138,47 @@ func TestTasksToProtocolSkipsNil(t *testing.T) {
 // record's id/kind/state mapped through.
 func TestSendTaskListWSResult(t *testing.T) {
 	d := newNotebookDaemon(t)
-	runner, _ := installInstrumentedTaskRunner(t, d)
-	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-a"}); err != nil {
-		t.Fatalf("enqueue ws-a: %v", err)
-	}
-	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-b"}); err != nil {
-		t.Fatalf("enqueue ws-b: %v", err)
-	}
-	// Let the worker run both to a terminal state so the records are stable.
-	waitForTaskState(t, d, testTaskKind, "ws-a", jobs.StateDone)
-	waitForTaskState(t, d, testTaskKind, "ws-b", jobs.StateDone)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		runner, _ := installInstrumentedTaskRunner(t, d)
+		if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-a"}); err != nil {
+			t.Fatalf("enqueue ws-a: %v", err)
+		}
+		if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-b"}); err != nil {
+			t.Fatalf("enqueue ws-b: %v", err)
+		}
+		// Let the worker run both to a terminal state so the records are stable.
+		requireTaskState(t, d, testTaskKind, "ws-a", jobs.StateDone)
+		requireTaskState(t, d, testTaskKind, "ws-b", jobs.StateDone)
 
-	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendTaskListWSResult(client, "list-1")
+		client := &wsClient{send: make(chan outboundMessage, 4)}
+		d.sendTaskListWSResult(client, "list-1")
 
-	var msg protocol.TaskListResultMessage
-	readNotebookWSEvent(t, client.send, &msg)
-	if msg.Event != protocol.EventTaskListResult || msg.RequestID != "list-1" || !msg.Success {
-		t.Fatalf("list result = %+v, want success task_list_result for list-1", msg)
-	}
-	got := map[string]protocol.Task{}
-	for _, task := range msg.Tasks {
-		got[task.Subject] = task
-	}
-	if len(got) != 2 {
-		t.Fatalf("listed %d tasks, want 2: %+v", len(msg.Tasks), msg.Tasks)
-	}
-	for _, subject := range []string{"ws-a", "ws-b"} {
-		task, ok := got[subject]
-		if !ok {
-			t.Fatalf("subject %q missing from list: %+v", subject, msg.Tasks)
+		var msg protocol.TaskListResultMessage
+		readNotebookWSEvent(t, client.send, &msg)
+		if msg.Event != protocol.EventTaskListResult || msg.RequestID != "list-1" || !msg.Success {
+			t.Fatalf("list result = %+v, want success task_list_result for list-1", msg)
 		}
-		if task.Kind != testTaskKind || task.State != string(jobs.StateDone) {
-			t.Fatalf("task %q = %+v, want kind=%s state=done", subject, task, testTaskKind)
+		got := map[string]protocol.Task{}
+		for _, task := range msg.Tasks {
+			got[task.Subject] = task
 		}
-		if want := jobIDForKey(t, runner, testTaskKind, subject); task.ID != want {
-			t.Fatalf("task %q id = %q, want %q", subject, task.ID, want)
+		if len(got) != 2 {
+			t.Fatalf("listed %d tasks, want 2: %+v", len(msg.Tasks), msg.Tasks)
 		}
-	}
+		for _, subject := range []string{"ws-a", "ws-b"} {
+			task, ok := got[subject]
+			if !ok {
+				t.Fatalf("subject %q missing from list: %+v", subject, msg.Tasks)
+			}
+			if task.Kind != testTaskKind || task.State != string(jobs.StateDone) {
+				t.Fatalf("task %q = %+v, want kind=%s state=done", subject, task, testTaskKind)
+			}
+			if want := jobIDForKey(t, runner, testTaskKind, subject); task.ID != want {
+				t.Fatalf("task %q id = %q, want %q", subject, task.ID, want)
+			}
+		}
+	})
 }
 
 // TestSendTaskListWSResultNilRunner confirms a nil runner is a successful
@@ -198,40 +202,43 @@ func TestSendTaskListWSResultNilRunner(t *testing.T) {
 // must carry the task flipped back to queued with NextAttemptAt advanced to ~now.
 func TestSendTaskRetryWSResultRequeuesDeadTask(t *testing.T) {
 	d := newNotebookDaemon(t)
-	runner, shouldFail := installInstrumentedTaskRunner(t, d)
-	shouldFail.Store(true)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		runner, shouldFail := installInstrumentedTaskRunner(t, d)
+		shouldFail.Store(true)
 
-	if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-fail"}); err != nil {
-		t.Fatalf("enqueue ws-fail: %v", err)
-	}
-	dead := waitForTaskState(t, d, testTaskKind, "ws-fail", jobs.StateDead)
-	if dead.LastError == "" {
-		t.Fatalf("dead task has no last_error: %+v", dead)
-	}
+		if _, err := runner.Enqueue(testTaskKind, jobs.EnqueueOptions{UniqueKey: "ws-fail"}); err != nil {
+			t.Fatalf("enqueue ws-fail: %v", err)
+		}
+		dead := requireTaskState(t, d, testTaskKind, "ws-fail", jobs.StateDead)
+		if dead.LastError == "" {
+			t.Fatalf("dead task has no last_error: %+v", dead)
+		}
 
-	before := time.Now()
-	client := &wsClient{send: make(chan outboundMessage, 4)}
-	d.sendTaskRetryWSResult(client, "retry-1", dead.ID)
+		before := time.Now()
+		client := &wsClient{send: make(chan outboundMessage, 4)}
+		d.sendTaskRetryWSResult(client, "retry-1", dead.ID)
 
-	var msg protocol.TaskRetryResultMessage
-	readNotebookWSEvent(t, client.send, &msg)
-	if msg.Event != protocol.EventTaskRetryResult || msg.RequestID != "retry-1" || !msg.Success {
-		t.Fatalf("retry result = %+v, want success task_retry_result for retry-1", msg)
-	}
-	if msg.Task == nil || msg.Task.State != string(jobs.StateQueued) {
-		t.Fatalf("retry result task = %+v, want state queued", msg.Task)
-	}
-	if msg.Task.Attempts != 0 {
-		t.Fatalf("retry result attempts = %d, want 0 (reset)", msg.Task.Attempts)
-	}
-	nextAt, err := time.Parse(time.RFC3339, msg.Task.NextAttemptAt)
-	if err != nil {
-		t.Fatalf("parse next_attempt_at %q: %v", msg.Task.NextAttemptAt, err)
-	}
-	// Retry sets NextAttemptAt = now; allow a small skew on either side of the call.
-	if nextAt.Before(before.Add(-2*time.Second)) || nextAt.After(time.Now().Add(2*time.Second)) {
-		t.Fatalf("next_attempt_at = %s, want ~now (between %s and %s)", nextAt, before, time.Now())
-	}
+		var msg protocol.TaskRetryResultMessage
+		readNotebookWSEvent(t, client.send, &msg)
+		if msg.Event != protocol.EventTaskRetryResult || msg.RequestID != "retry-1" || !msg.Success {
+			t.Fatalf("retry result = %+v, want success task_retry_result for retry-1", msg)
+		}
+		if msg.Task == nil || msg.Task.State != string(jobs.StateQueued) {
+			t.Fatalf("retry result task = %+v, want state queued", msg.Task)
+		}
+		if msg.Task.Attempts != 0 {
+			t.Fatalf("retry result attempts = %d, want 0 (reset)", msg.Task.Attempts)
+		}
+		nextAt, err := time.Parse(time.RFC3339, msg.Task.NextAttemptAt)
+		if err != nil {
+			t.Fatalf("parse next_attempt_at %q: %v", msg.Task.NextAttemptAt, err)
+		}
+		// Retry sets NextAttemptAt = now; allow a small skew on either side of the call.
+		if nextAt.Before(before.Add(-2*time.Second)) || nextAt.After(time.Now().Add(2*time.Second)) {
+			t.Fatalf("next_attempt_at = %s, want ~now (between %s and %s)", nextAt, before, time.Now())
+		}
+	})
 }
 
 // TestSendTaskRetryWSResultNilRunner confirms the disabled-runner retry path
@@ -258,6 +265,9 @@ func TestSendTaskRetryWSResultNilRunner(t *testing.T) {
 // cannot see: a renamed event or a broken broadcast message would slip past them but
 // is caught here. (That the runner invokes OnChange at all is a tasks-package property
 // already covered by internal/tasks; this test owns the daemon's wiring of it.)
+// Boundary-bound: this one runs the real hub (`go d.wsHub.run()`), whose loop has
+// no exit path — a bubble would never finish. Its siblings above bubble because
+// they drive the client channel directly.
 func TestTasksChangedBroadcastReachesClient(t *testing.T) {
 	d := newNotebookDaemon(t)
 	client := &wsClient{send: make(chan outboundMessage, 8)}

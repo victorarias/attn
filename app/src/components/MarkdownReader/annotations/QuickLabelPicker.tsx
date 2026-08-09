@@ -1,18 +1,10 @@
 /**
- * QuickLabelPicker — floating quick-label list, ported from plannotator's
- * FloatingQuickLabelPicker. Appears at the last mouseup cursor position
- * (clamped to the viewport) so the first row sits under the pointer; falls
- * back to the anchor element when no cursor hint exists.
+ * Floating quick-label list at the last mouseup position, clamped to the
+ * viewport; falls back to the anchor element with no cursor hint.
  *
- * It measures itself before settling vertically: the list is as tall as the
- * label set makes it, so where it fits is not something the code can be told
- * once.
- *
- * Interaction contract (spec E14–E16):
- * - bare digits 1..9,0 AND Alt+digit apply label N (0 = 10th);
- * - Escape dismisses;
- * - outside pointerdown dismisses, but the listener installs one tick late
- *   (setTimeout 0) so the click that OPENED the picker never dismisses it.
+ * Interaction contract: bare digits 1..9,0 and Alt+digit apply label N (0 =
+ * 10th); Escape dismisses; outside pointerdown dismisses, but that listener
+ * installs one tick late so the click that OPENED the picker never dismisses.
  */
 
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -32,11 +24,8 @@ const PICKER_WIDTH = 192;
 const GAP = 6;
 const VIEWPORT_PADDING = 12;
 
-// `height` is the picker's measured height, 0 before it has ever been laid
-// out. It is measured rather than assumed because the picker is a list and its
-// height is whatever the label set makes it — a constant guessed against one
-// label count is how a picker ends up hanging off the bottom of the window
-// after somebody adds a label.
+// `height` is measured, 0 before first layout: the list is as tall as the
+// label set makes it, and a guessed constant hangs off-screen once one is added.
 function computePosition(
   anchorEl: HTMLElement,
   cursorHint: { x: number; y: number } | null | undefined,
@@ -44,9 +33,7 @@ function computePosition(
 ): { top: number; left: number } {
   const rect = anchorEl.getBoundingClientRect();
 
-  // Vertical: below the anchor, above it when it does not fit below, and
-  // clamped into the viewport when it fits neither way — a picker drawn
-  // half off-screen is a picker whose last labels cannot be clicked.
+  // Vertical: below the anchor, above when it does not fit, else viewport-clamped.
   const below = rect.bottom + GAP;
   const above = rect.top - GAP - height;
   const lowestTop = window.innerHeight - VIEWPORT_PADDING - height;
@@ -55,8 +42,7 @@ function computePosition(
     top = above >= VIEWPORT_PADDING ? above : Math.max(VIEWPORT_PADDING, lowestTop);
   }
 
-  // Horizontal: prefer cursor x (first row's text directly under the
-  // pointer), fallback to the anchor's right edge.
+  // Horizontal: cursor x puts the first row under the pointer; else anchor edge.
   let left = cursorHint ? cursorHint.x - 28 : rect.right - PICKER_WIDTH / 2;
   left = Math.max(
     VIEWPORT_PADDING,
@@ -71,9 +57,7 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
   const [height, setHeight] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
 
-  // Position tracking. The first pass places the picker with height 0 (below
-  // the anchor); the layout effect below measures it and the placement is
-  // corrected before the browser paints, so it is never seen off-screen.
+  // First pass places with height 0; the layout effect corrects before paint.
   useEffect(() => {
     const update = () => setPosition(computePosition(anchorEl, cursorHint, height));
     update();
@@ -92,14 +76,11 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
     }
   });
 
-  // Escape dismiss via the centralized stack: the picker mounts after (so
-  // registers above) the toolbar — Escape closes picker first, then toolbar.
+  // Mounts after the toolbar, so the stack closes the picker first.
   useEscapeStack(onDismiss, true);
 
-  // Keyboard: 1-9/0 or Alt+1-9/0 applies label.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Picker is open, so digits mean labels — bare or with Alt.
       const isDigit = (e.code >= 'Digit1' && e.code <= 'Digit9') || e.code === 'Digit0';
       if (isDigit && !e.ctrlKey && !e.metaKey) {
         e.preventDefault();
@@ -114,8 +95,7 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [onDismiss, onSelect]);
 
-  // Click outside to dismiss — deferred one tick so the opening click never
-  // catches the capture-phase listener (E15).
+  // Deferred one tick so the opening click misses the capture-phase listener.
   useEffect(() => {
     const handlePointerDown = (e: PointerEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) {
@@ -167,8 +147,7 @@ export function QuickLabelPicker({ anchorEl, cursorHint, onSelect, onDismiss }: 
               {label.emoji}
             </span>
             <span className="md-quick-label-text">{label.text}</span>
-            {/* Only the first ten have a digit; past that the badge would
-                promise a shortcut that applies a different label. */}
+            {/* Past ten, a badge would promise a shortcut for another label. */}
             {index < 10 && <span className="md-quick-label-num">{(index + 1) % 10}</span>}
           </button>
         );

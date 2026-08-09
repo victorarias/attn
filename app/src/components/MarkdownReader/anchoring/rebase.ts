@@ -1,32 +1,16 @@
 /**
- * rebaseAnchor — one fuzzy re-anchor per content change, then re-baseline.
+ * One fuzzy re-anchor per content change, then re-baseline. Runs only when the
+ * content hash changed. Two tiers, the first with ≥1 candidate winning:
+ * (a) every occurrence of `exact` across all blocks, re-attributed to the
+ * deepest stamped owner and scored as one pool; (b) whitespace-normalized
+ * search (`\s+ → ' '`), the only lossy tier.
  *
- * Runs only when the content hash changed (resolve handles the exact path).
- * Two tiers; the first tier with ≥1 candidate wins:
- *
- *  (a) exact search — every occurrence of `exact` across every block,
- *      re-attributed to the deepest stamped owner (avoids ul/li duplicate
- *      candidates), scored together as one pool. `blockId` is an ordinal
- *      position reassigned on every edit, so it is used only to prefer a
- *      same-block match when scores are close — never to accept a lone
- *      same-block hit unchecked. An inserted sibling that happens to inherit
- *      the anchor's old ordinal `blockId` and also contains the exact quote
- *      must still lose to the real match on prefix/suffix/proximity.
- *  (b) whitespace-normalized search — needle and haystacks collapsed with
- *      `\s+ → ' '`; the only lossy tier (rewrapped paragraphs).
- *
- * Candidates are scored by prefix/suffix similarity (Levenshtein over the
- * 32-char context windows) plus source-line proximity — a genuine unedited
- * match keeps near-identical context and wins on that alone, no identity
- * shortcut needed. With multiple candidates the winner must clear an absolute
- * confidence floor AND lead the runner-up by a meaningful margin — an exact
- * or near tie (identical duplicate blocks) orphans as ambiguous instead of
- * silently painting whichever copy sorts first. The winning match is
- * RE-BASELINED: the returned record is
- * rebuilt from scratch against `newContent` (fresh blockId/offsets/lines/
- * context/hash) so fuzz never compounds across successive edits. The
- * reported tier is `'same-block'` when the winner's block still carries the
- * anchor's ordinal `blockId`, `'document'` otherwise.
+ * `blockId` is an ordinal reassigned on every edit, so it never accepts a
+ * candidate on its own. Scoring is Levenshtein similarity over the 32-char
+ * context windows plus source-line proximity; the winner must clear a
+ * confidence floor AND lead the runner-up, so indistinguishable copies orphan
+ * as ambiguous rather than paint whichever sorts first. It is then
+ * RE-BASELINED against `newContent`, so fuzz never compounds across edits.
  */
 
 import { buildAnchor, CONTEXT_CHARS } from './create';
@@ -37,12 +21,10 @@ import type { AnchorRecord, BlockText, RebaseResult, RebaseTier } from './types'
 interface Candidate {
   /** Owning block (deepest stamped element containing the range). */
   block: BlockText;
-  /** Raw offsets into `block.text`. */
   start: number;
   end: number;
 }
 
-/** Classic O(a·b) Levenshtein — inputs are ≤32-char context windows. */
 function levenshtein(a: string, b: string): number {
   if (a === b) {
     return 0;
@@ -83,7 +65,6 @@ function scoreCandidate(candidate: Candidate, anchor: AnchorRecord): number {
   );
 }
 
-/** All indexOf occurrences of `needle` in `haystack` (non-overlapping start scan). */
 function occurrences(haystack: string, needle: string): number[] {
   const out: number[] = [];
   if (needle.length === 0) {
@@ -126,9 +107,8 @@ function documentCandidates(blocks: BlockText[], anchor: AnchorRecord): Candidat
 }
 
 /**
- * Whitespace-collapse `text`, keeping a map from each normalized offset back
- * to the raw offset it came from (runs of whitespace map to the run's first
- * raw index). `map[normalized.length]` maps the end sentinel.
+ * Whitespace-collapse `text`, mapping each normalized offset back to its raw
+ * one (a whitespace run maps to its first index); `map[len]` is the sentinel.
  */
 function normalizeWithMap(text: string): { normalized: string; map: number[] } {
   let normalized = '';
@@ -162,8 +142,7 @@ function normalizedCandidates(blocks: BlockText[], anchor: AnchorRecord): Candid
     const { normalized, map } = normalizeWithMap(block.text);
     for (const at of occurrences(normalized, needle)) {
       const start = map[at];
-      // Raw end = start of the char after the match; trim trailing raw
-      // whitespace the collapsed final space may have swallowed.
+      // Trim trailing raw whitespace the collapsed final space swallowed.
       let end = map[at + needle.length];
       while (end > start && /\s/.test(block.text[end - 1]) && !/\s$/.test(needle)) {
         end--;
@@ -175,18 +154,13 @@ function normalizedCandidates(blocks: BlockText[], anchor: AnchorRecord): Candid
 }
 
 const CONFIDENCE_THRESHOLD = 0.5;
-// With multiple candidates the winner must lead the runner-up by this much.
-// A tie (or near-tie) means the document genuinely contains indistinguishable
-// copies — e.g. two identical whole-block paragraphs, whose empty context
-// windows both score similarity 1 — and picking one via sort order would be
-// a silent wrong-paint. Proximity can still decide, but only when decisive:
-// at 0.2 weight this margin needs a line-distance gap of roughly 10+ lines.
+// A near-tie means indistinguishable copies, where sort order would be a
+// silent wrong-paint. At proximity weight 0.2 this margin needs ~10+ lines.
 const AMBIGUITY_MARGIN = 0.05;
 
 function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 'ambiguous' {
   if (candidates.length === 1) {
-    // The text itself matched exactly, nowhere else in the document — accept
-    // unconditionally (identity of the containing block is irrelevant here).
+    // Matched nowhere else in the document: accept regardless of block.
     return candidates[0];
   }
   const scored = candidates
@@ -201,12 +175,9 @@ function pickWinner(candidates: Candidate[], anchor: AnchorRecord): Candidate | 
 }
 
 /**
- * Re-anchor `anchor` against `newContent`. Returns a fully re-baselined
- * record on success (caller persists it) or an orphan — never a silent
- * wrong-text match.
- *
- * `preExtracted` (optional) must be `extractBlockTexts(newContent)` — pass it
- * when the caller already ran the pipeline for this content.
+ * Re-anchor against `newContent`: a re-baselined record the caller persists,
+ * or an orphan — never a silent wrong-text match. `preExtracted`, when given,
+ * must be `extractBlockTexts(newContent)`.
  */
 export function rebaseAnchor(
   anchor: AnchorRecord,
@@ -240,7 +211,6 @@ export function rebaseAnchor(
       winner.end,
     );
     if (!rebased) {
-      // Whitespace-only match after normalization edge cases — treat as miss.
       continue;
     }
     return { state: 'rebased', anchor: rebased, tier: deriveTier(winner) };

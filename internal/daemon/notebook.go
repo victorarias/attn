@@ -16,24 +16,17 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// originAgent labels notebook changes attn itself makes outside the in-app editor
-// — today only scaffold creation. The UI (origin "ui") and external edits
-// ("external", incl. agents editing files directly on disk) arrive on other paths.
+// originAgent labels notebook changes attn makes outside the in-app editor.
 const originAgent = "agent"
 
-// originExternal labels notebook changes the watcher detects on disk that attn
-// did not make itself (an external markdown sync tool, or the user editing files
-// directly).
+// originExternal labels on-disk notebook changes attn did not make itself.
 const originExternal = "external"
 
-// originUI labels notebook changes made through the in-app editor (the WS
-// notebook_write path), as distinct from agent/CLI writes (origin "agent").
+// originUI labels notebook changes made through the in-app editor.
 const originUI = "ui"
 
-// notebookStoreFor resolves the active notebook root and returns the daemon's
-// single Store for it. The Store is cached and reused so writes serialize
-// through one in-process writer; it is rebuilt only when the resolved root
-// changes (e.g. the notebook.root setting was updated).
+// notebookStoreFor returns the daemon's single Store for the active notebook
+// root, cached so writes serialize through one in-process writer.
 func (d *Daemon) notebookStoreFor() (*notebook.Store, error) {
 	root, err := d.notebookRoot()
 	if err != nil {
@@ -45,21 +38,16 @@ func (d *Daemon) notebookStoreFor() (*notebook.Store, error) {
 	}
 	store := d.notebookStore
 	d.notebookMu.Unlock()
-	// Every notebook operation is a chance to (lazily) start watching for
-	// external edits. Done after releasing notebookMu — ensureNotebookWatcher
-	// takes its own lock — and it no-ops once the active root is already watched.
+	// Must run after releasing notebookMu; ensureNotebookWatcher takes its own.
 	d.ensureNotebookWatcher(root)
 	return store, nil
 }
 
-// ensureNotebookWatcher starts the external-edit watcher for root if it is not
-// already watching it. A root that does not exist yet (no notebook on disk) is
-// skipped; the next operation after the scaffold is created starts the watcher.
+// ensureNotebookWatcher starts the external-edit watcher for root, skipping a
+// root that does not exist yet.
 func (d *Daemon) ensureNotebookWatcher(root string) {
-	// Never resurrect the watcher during shutdown. Stop() closes d.done before it
-	// calls stopNotebookWatcher, so an in-flight notebook handler racing with Stop
-	// observes the closed channel here and returns instead of starting a fresh
-	// watcher that nothing would ever close (a leaked goroutine + kqueue fd).
+	// Never resurrect during shutdown: Stop() closes d.done first, and a watcher
+	// started after that leaks a goroutine and an fd.
 	select {
 	case <-d.done:
 		return
@@ -79,11 +67,8 @@ func (d *Daemon) ensureNotebookWatcher(root string) {
 		d.notebookWatchedRoot = ""
 	}
 	w, err := notebook.NewWatcherWithCleaner(root, notebook.DefaultWatchDebounce, fsdoc.CleanPath, func(paths []string) {
-		// One filesystem, two surfaces over it: fs_changed always fires with every
-		// changed path (the raw fs view is not markdown-aware). notebook_changed is
-		// the curated markdown-only subset, so it only fires for the paths that are
-		// also valid notebook notes — and not at all when none are, since an empty
-		// notebook_changed would misreport "something in the notebook changed".
+		// fs_changed carries every path; notebook_changed only the valid notes, and
+		// never fires with none, which would misreport a notebook change.
 		d.broadcastFsChanged(root, originExternal, paths...)
 		var mdPaths []string
 		for _, p := range paths {
@@ -103,11 +88,9 @@ func (d *Daemon) ensureNotebookWatcher(root string) {
 	d.notebookWatchedRoot = root
 }
 
-// noteNotebookSelfWrite tells the watcher that attn just wrote these notebook
-// paths, so the resulting filesystem events are not reported as external edits.
-// Passing the content hash makes suppression content-aware (an external edit that
-// races attn's write to the same path within the debounce window is still
-// surfaced). Safe to call before the watcher exists (no-op).
+// noteNotebookSelfWrite suppresses the fs events from attn's own writes. The
+// hash keeps it content-aware, so an external edit racing the same path still
+// surfaces. No-op without a watcher.
 func (d *Daemon) noteNotebookSelfWrite(writes ...notebook.SelfWrite) {
 	d.notebookWatcherMu.Lock()
 	w := d.notebookWatcher
@@ -124,8 +107,8 @@ func (d *Daemon) stopNotebookWatcher() {
 	_ = w.Close()
 }
 
-// notebookRoot returns the configured notebook.root, or the profile-derived
-// default (~/attn-notebook[-profile], outside ~/.attn) when unset.
+// notebookRoot returns notebook.root, or the profile default
+// (~/attn-notebook[-profile], outside ~/.attn) when unset.
 func (d *Daemon) notebookRoot() (string, error) {
 	if configured := strings.TrimSpace(d.store.GetSetting(SettingNotebookRoot)); configured != "" {
 		if strings.HasPrefix(configured, "~/") {
@@ -135,8 +118,7 @@ func (d *Daemon) notebookRoot() (string, error) {
 			}
 			return filepath.Join(home, configured[2:]), nil
 		}
-		// Clean so a settings value with a trailing slash or redundant separators
-		// resolves to the same canonical root the store's containment checks expect.
+		// Canonical form is what the store's containment checks expect.
 		return filepath.Clean(configured), nil
 	}
 	home, err := os.UserHomeDir()
@@ -146,10 +128,8 @@ func (d *Daemon) notebookRoot() (string, error) {
 	return notebook.DefaultRoot(home, config.Profile()), nil
 }
 
-// broadcastNotebookChanged publishes one fact per changed file — the file is
-// the entity, and a caller that changed twelve of them changed twelve things.
-// The projection puts them back into a single notebook_changed per origin, so
-// the wire sees exactly one message per call as before.
+// broadcastNotebookChanged publishes one fact per file; the projection collapses
+// them into a single notebook_changed per origin.
 func (d *Daemon) broadcastNotebookChanged(origin string, paths ...string) {
 	d.coalesceSnapshots(func() {
 		for _, path := range paths {
@@ -158,8 +138,7 @@ func (d *Daemon) broadcastNotebookChanged(origin string, paths ...string) {
 	})
 }
 
-// notebookChangeOrigin is the payload of FactNotebookFileChanged: who wrote the
-// file. It is not recoverable from the file itself.
+// notebookChangeOrigin is FactNotebookFileChanged's payload: who wrote the file.
 type notebookChangeOrigin struct {
 	Origin string `json:"origin"`
 }
@@ -192,9 +171,7 @@ func (d *Daemon) projectNotebookChanged(ev bus.Event) {
 	})
 }
 
-// ensureNotebookScaffold creates the notebook scaffold if absent (idempotent),
-// broadcasting notebook_changed only when it actually created files. Returns the
-// resolved root so callers can report it.
+// ensureNotebookScaffold creates the scaffold if absent, idempotently.
 func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error) {
 	store, err := d.notebookStoreFor()
 	if err != nil {
@@ -202,20 +179,15 @@ func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error)
 	}
 	createdPaths, scaffoldErr := store.EnsureScaffold()
 	if len(createdPaths) > 0 {
-		// Record/broadcast exactly the files attn wrote — even if a later file in
-		// the scaffold failed — so a partial scaffold's own writes are not later
-		// mis-surfaced as external edits. (An idempotent re-run writes nothing, so
-		// recording all reserved paths would wrongly suppress real external edits.)
-		// Scaffold content is static and written once, so unconditional suppression
-		// (empty hash) is sufficient here.
+		// Exactly the files written, never all reserved paths: recording those
+		// would suppress real external edits. Static content, so no hash needed.
 		writes := make([]notebook.SelfWrite, len(createdPaths))
 		for i, p := range createdPaths {
 			writes[i] = notebook.SelfWrite{Rel: p}
 		}
 		d.noteNotebookSelfWrite(writes...)
 		d.broadcastNotebookChanged(originAgent, createdPaths...)
-		// The root now exists; start watching it for external edits (the first
-		// scaffold may have run before any operation could start the watcher).
+		// The root now exists; the first scaffold may have preceded any watcher.
 		d.ensureNotebookWatcher(store.Root())
 	}
 	if scaffoldErr != nil {
@@ -224,10 +196,8 @@ func (d *Daemon) ensureNotebookScaffold() (root string, created bool, err error)
 	return store.Root(), len(createdPaths) > 0, nil
 }
 
-// handleNotebookGuide returns the canonical notebook operating guidance (the
-// single source for both the at-launch injection and the live pull). When the
-// requesting session currently holds the chief role, it also ensures the
-// notebook scaffold exists so the chief always has a real notebook to work in.
+// handleNotebookGuide returns the canonical notebook guidance, the single source
+// for both the at-launch injection and the live pull.
 func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideMessage) {
 	root, err := d.notebookRoot()
 	if err != nil {
@@ -252,9 +222,8 @@ func (d *Daemon) handleNotebookGuide(conn net.Conn, msg *protocol.NotebookGuideM
 	})
 }
 
-// sendNotebookListWSResult lists notes and replies to a websocket client with a
-// notebook_list_result event correlated by requestID. This WS path is the only
-// notebook list path; the former unix-socket CLI list command was removed.
+// sendNotebookListWSResult replies with notebook_list_result, correlated by
+// requestID. The only notebook list path.
 func (d *Daemon) sendNotebookListWSResult(client *wsClient, requestID, prefix string) {
 	var entries []protocol.NotebookEntry
 	store, err := d.notebookStoreFor()
@@ -276,8 +245,7 @@ func (d *Daemon) sendNotebookListWSResult(client *wsClient, requestID, prefix st
 	d.sendToClient(client, msg)
 }
 
-// sendNotebookReadWSResult reads one note and replies with a notebook_read_result
-// event correlated by requestID.
+// sendNotebookReadWSResult replies with notebook_read_result by requestID.
 func (d *Daemon) sendNotebookReadWSResult(client *wsClient, requestID, path string) {
 	var result *protocol.NotebookReadResult
 	store, err := d.notebookStoreFor()
@@ -300,8 +268,7 @@ func (d *Daemon) sendNotebookReadWSResult(client *wsClient, requestID, path stri
 	d.sendToClient(client, msg)
 }
 
-// sendNotebookBacklinksWSResult computes backlinks and replies with a
-// notebook_backlinks_result event correlated by requestID.
+// sendNotebookBacklinksWSResult replies with notebook_backlinks_result by requestID.
 func (d *Daemon) sendNotebookBacklinksWSResult(client *wsClient, requestID, path string) {
 	var entries []protocol.NotebookEntry
 	store, err := d.notebookStoreFor()
@@ -323,16 +290,13 @@ func (d *Daemon) sendNotebookBacklinksWSResult(client *wsClient, requestID, path
 	d.sendToClient(client, msg)
 }
 
-// sendNotebookWriteWSResult performs a hash-CAS write on behalf of the in-app
-// editor and replies with a notebook_write_result event correlated by requestID.
-// A conflict (the file changed on disk since the editor loaded it) is a
-// successful result carrying conflict=true for the UI to reconcile, not an error.
+// sendNotebookWriteWSResult performs a hash-CAS write for the in-app editor. A
+// conflict is a successful result carrying conflict=true, not an error.
 func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, content, baseHash string) {
 	var result *protocol.NotebookWriteResult
 	store, err := d.notebookStoreFor()
 	if err == nil {
-		// Normalize to the form notebook_list/append/watcher key on, so the
-		// self-write record and the broadcast agree.
+		// The form other events key on, so record and broadcast agree.
 		changed := path
 		if rel, cerr := notebook.CleanPath(path); cerr == nil {
 			changed = rel
@@ -340,8 +304,7 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 		var hash string
 		var conflict *notebook.Conflict
 		if hash, conflict, err = store.Write(path, []byte(content), baseHash); err == nil {
-			// Echo the normalized path so result.path matches the form
-			// notebook_list/notebook_changed key on, not the raw input.
+			// The normalized path, so result.path matches what other events key on.
 			result = &protocol.NotebookWriteResult{Path: changed}
 			if conflict != nil {
 				result.Conflict = true
@@ -350,9 +313,7 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 				}
 			} else {
 				result.Hash = protocol.Ptr(hash)
-				// Content-aware self-write so the watcher does not echo this UI edit
-				// as an external one: the recorded hash lets a racing external edit of
-				// the same path within the debounce window still surface.
+				// Content-aware, so a racing external edit of the same path still surfaces.
 				d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: changed, Hash: hash})
 				d.broadcastNotebookChanged(originUI, changed)
 			}
@@ -370,25 +331,19 @@ func (d *Daemon) sendNotebookWriteWSResult(client *wsClient, requestID, path, co
 	d.sendToClient(client, msg)
 }
 
-// maxInboxSelection caps a single "send to chief" selection. The whole inbox note
-// is still bounded by MaxFileSize; this rejects one runaway paste up front with a
-// clear error rather than letting it bloat the note.
+// maxInboxSelection caps a single "send to chief" selection, rejecting a runaway
+// paste up front; the whole note is still bounded by MaxFileSize.
 const maxInboxSelection = 32 << 10 // 32 KiB
 
-// chiefInboxNudgePrompt is the bounded doorbell typed into a live chief session
-// when a selection lands in its inbox. Like the activation prompt, it carries only
-// a pointer to the inbox note on disk — never the selection content itself (that is
-// written to the inbox note, the daemon's job, never streamed into the PTY).
+// chiefInboxNudgePrompt is the bounded doorbell typed into a live chief session:
+// a pointer to the inbox note, never the selection content itself.
 func chiefInboxNudgePrompt(root string) string {
 	return fmt.Sprintf("A new selection was added to your Notebook inbox. Read %s to see it.", filepath.Join(root, notebook.FileInbox))
 }
 
-// sendNotebookToChiefWSResult delivers a Notebook selection to the chief of staff:
-// it appends the selection to the chief inbox note (the daemon is the sole writer)
-// and, when a chief session is live and not waiting for approval, fires a bounded
-// PTY nudge.
-// The inbox delivery is the durable channel; the nudge is best-effort immediacy.
-// The UI never messages the chief directly — it only hands the selection here.
+// sendNotebookToChiefWSResult appends a selection to the chief inbox note (the
+// daemon is its sole writer) and nudges a live chief. The inbox is the durable
+// channel; the nudge is best-effort immediacy.
 func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, sourcePath, selection string) {
 	var result *protocol.NotebookSendToChiefResult
 	store, err := d.notebookStoreFor()
@@ -402,8 +357,7 @@ func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, source
 	if err == nil {
 		var relPath, hash string
 		if relPath, hash, err = store.AppendInbox(formatChiefInboxEntry(sourcePath, selection)); err == nil {
-			// Content-aware self-write + broadcast so the open browser refreshes but
-			// the watcher does not re-announce attn's own write as an external edit.
+			// Refreshes the open browser without re-announcing attn's own write.
 			d.noteNotebookSelfWrite(notebook.SelfWrite{Rel: relPath, Hash: hash})
 			d.broadcastNotebookChanged(originUI, relPath)
 			result = &protocol.NotebookSendToChiefResult{
@@ -424,15 +378,13 @@ func (d *Daemon) sendNotebookToChiefWSResult(client *wsClient, requestID, source
 	d.sendToClient(client, msg)
 }
 
-// formatChiefInboxEntry renders one inbox entry: a heading identifying the source
-// note followed by the selection as a markdown blockquote. Both the path and the
-// selection are sanitized so no input can corrupt the note's markdown structure.
+// formatChiefInboxEntry renders a source heading plus the selection as a
+// blockquote, both sanitized so no input corrupts the markdown.
 func formatChiefInboxEntry(sourcePath, selection string) string {
 	var b strings.Builder
 	b.WriteString(chiefInboxSourceHeading(sourcePath))
 	b.WriteString("\n\n")
-	// Normalize CR/CRLF so a non-UI client's line endings don't leave stray
-	// carriage returns on every blockquoted line.
+	// A non-UI client's CRLF would leave a stray CR on every blockquoted line.
 	normalized := strings.ReplaceAll(selection, "\r\n", "\n")
 	normalized = strings.ReplaceAll(normalized, "\r", "\n")
 	for _, line := range strings.Split(strings.TrimRight(normalized, "\n"), "\n") {
@@ -443,13 +395,9 @@ func formatChiefInboxEntry(sourcePath, selection string) string {
 	return b.String()
 }
 
-// chiefInboxSourceHeading renders the "## From ..." heading for a source note.
-// CleanPath validates path segments but permits characters that would corrupt the
-// markdown — control chars, spaces, brackets, parens, backticks — and the notebook
-// root is externally syncable, so such filenames are possible. Control chars and
-// backticks are dropped (they break every rendering); a clean path then renders a
-// clickable root-absolute backlink, while anything else renders as inline code so
-// the heading is always well-formed and the path is shown verbatim.
+// chiefInboxSourceHeading renders the "## From ..." heading. CleanPath permits
+// markdown-corrupting characters and the root is externally syncable, so control
+// chars and backticks are dropped and anything risky renders as inline code.
 func chiefInboxSourceHeading(sourcePath string) string {
 	rel, err := notebook.CleanPath(sourcePath)
 	if err != nil {
@@ -464,9 +412,7 @@ func chiefInboxSourceHeading(sourcePath string) string {
 	if rel == "" {
 		return "## From the Notebook"
 	}
-	// A bare path with none of these characters round-trips through the link
-	// parser (which stops a target at the first ')' or whitespace) and contains no
-	// nested [..](..) that a heading would auto-link.
+	// The link parser stops a target at the first ')' or whitespace.
 	if strings.IndexAny(rel, " \t()[]<>") < 0 {
 		return fmt.Sprintf("## From [/%s](/%s)", rel, rel)
 	}

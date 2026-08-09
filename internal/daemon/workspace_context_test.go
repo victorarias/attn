@@ -34,6 +34,9 @@ func setupWorkspaceContextSession(t *testing.T, d *Daemon, sessionID, workspaceI
 	d.workspaces.associateSession(sessionID, workspaceID, sessionID)
 }
 
+// Boundary-bound: the broadcast assertion needs the WebSocket hub fanning out,
+// and `go d.wsHub.run()` has no exit path — a bubble ends only when its last
+// goroutine does, so this one would never finish.
 func TestWorkspaceContextCheckoutEditUpdateAndStatus(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	setupWorkspaceContextSession(t, d, "session-1", "workspace-1")

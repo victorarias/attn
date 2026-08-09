@@ -1,30 +1,18 @@
 import { create } from 'zustand';
 
-// The app's picture of a conversation session — the ones whose agent runs in a
-// headless host instead of a PTY. It is built entirely from the host's envelope
-// stream, which is why this store is append-only and never asks the daemon
-// anything: the stream is the conversation.
+// Conversation sessions — the ones whose agent runs in a headless host instead
+// of a PTY — built entirely from the host's envelope stream. An unknown kind is
+// ignored on purpose: the host is pinned to a pi version the app is not.
 //
-// Two kinds of envelope land here. Semantic ones (session_ready, run_started,
-// run_settled, tool_started, tool_finished) say where the session is and what
-// the agent did; render ones (message_start, message_delta, message_end,
-// queue_update, tool_detail) say what it said, what it has not read yet, and
-// what one opened tool card shows. An unknown kind is ignored on purpose — the
-// host is pinned to a pi version the app is not, and a kind this build does not
-// draw must not break the ones it does.
-//
-// What a tool call actually read, wrote or printed is NOT in this store until
-// the user opens the card. A tool declaration is a name, a line and a status;
-// the output is fetched with `agent_tool_detail` and arrives as its own
-// envelope. That is the whole reason a long conversation stays small: the
-// corpus behind this design is a p99 11.6 MB transcript with ~0.4% message
-// text, and eagerly inlining tool output is how it got that way.
+// What a tool call read, wrote or printed is NOT here until the user opens the
+// card: a declaration is a name, a line and a status, and the output is fetched
+// with `agent_tool_detail`. Receipt: a p99 11.6 MB transcript is ~0.4% message
+// text, and inlining tool output eagerly is how it got that way.
 
 export interface ConversationMessage {
   id: string;
   role: string;
   text: string;
-  // True between message_start and message_end: the text is still arriving.
   streaming: boolean;
 }
 
@@ -172,8 +160,7 @@ export interface ConversationState {
   ready: boolean;
   // Sent and not yet read. See ConversationQueue.
   queue: ConversationQueue;
-  // The highest envelope seq applied. Envelopes are minted in order by one
-  // host, so anything at or below this is a duplicate to drop.
+  // Highest seq applied; one host mints in order, so anything below is a dup.
   lastSeq: number;
 }
 
@@ -207,9 +194,8 @@ interface ConversationsStore {
   // reading — but nothing about it is live any more.
   hostExited: (sessionId: string) => void;
   clearConversation: (sessionId: string) => void;
-  // Drops every conversation whose session is gone. A transcript outlives its
-  // host on purpose — an exited session stays readable — so the sessions list
-  // is what bounds this store, not the host's exit.
+  // A transcript outlives its host on purpose, so the sessions list — not the
+  // host's exit — is what bounds this store.
   retainConversations: (liveSessionIds: string[]) => void;
 }
 
@@ -447,11 +433,9 @@ function applyToConversation(
     case 'run_started':
       return { ...current, running: true, awaitingRun: false };
     case 'run_settled': {
-      // Whatever was still streaming when the run closed is finished: the host
-      // emits message_end before run_settled, so a message left open here means
-      // the run ended under it and it will never grow again. The same is true
-      // of a tool card still showing as running — pi reports every tool it
-      // starts, so one that never reported is one whose run ended under it.
+      // message_end precedes run_settled, so anything still open ended under the
+      // run and will never grow again — a tool card still running included, since
+      // pi reports every tool it starts.
       const items = current.items.map((item) => {
         if (item.kind === 'message') return item.streaming ? { ...item, streaming: false } : item;
         // A notice settles on its own event, or not at all: a compaction the
@@ -460,9 +444,7 @@ function applyToConversation(
         if (item.kind !== 'tool' || item.status !== 'running') return item;
         return { ...item, status: 'error' as const, error: 'the run ended before this tool reported' };
       });
-      // A run that ended badly says so in the transcript. Otherwise a prompt
-      // that failed outright — an unauthenticated provider, a model that
-      // refused — reads as an agent that answered with silence.
+      // Without this, a prompt that failed outright reads as agent silence.
       const failure = text(body, 'error');
       if (failure !== '') {
         items.push({ kind: 'message', id: `error-${seq}`, role: 'error', text: failure, streaming: false });
@@ -580,8 +562,7 @@ function applyToConversation(
         text: (item as ConversationMessage).text + delta,
       }));
       if (replaced) return { ...current, items: replaced };
-      // A delta for a message we never saw start. Draw it rather than drop
-      // it: losing the agent's words is worse than an unlabelled role.
+      // Losing the agent's words is worse than an unlabelled role.
       return {
         ...current,
         items: [...current.items, { kind: 'message', id, role: 'assistant', text: delta, streaming: true }],
@@ -590,9 +571,8 @@ function applyToConversation(
     case 'message_end': {
       const id = text(body, 'id');
       if (!id) return current;
-      // message_end carries the whole message, so it replaces the accumulated
-      // deltas rather than appending to them. A coalescing window the host
-      // never got to flush cannot leave the app one delta short of the truth.
+      // message_end carries the whole message and replaces the accumulated
+      // deltas, so an unflushed coalescing window cannot lose one.
       const settled = {
         kind: 'message' as const,
         id,
@@ -642,13 +622,11 @@ export const useConversationsStore = create<ConversationsStore>((set) => ({
     };
   }),
 
-  // A prompt's round trip to the host is long enough to press Enter twice in,
-  // and the host answers a second prompt with a log line and nothing else — the
-  // draft would be gone and the user would be told nothing. So the run opens
-  // here, when the prompt is sent, and the composer is shut until the host says
-  // the run is real. From that moment on the composer is open again and what it
-  // sends is a steer. Every way a run can end clears both flags, including the
-  // daemon's settle for a prompt that reached no host at all.
+  // The run opens at send time, not on run_started, because the round trip is
+  // long enough to press Enter twice in and the host drops a mid-run prompt
+  // silently. The composer is shut only until the host says the run is real;
+  // from then on what it sends is a steer. Every way a run can end reopens it,
+  // including the daemon's settle for a prompt that reached no host.
   promptSent: (sessionId) => set((state) => {
     const current = state.conversations[sessionId] ?? emptyConversation;
     if (!current.ready || current.running) return state;

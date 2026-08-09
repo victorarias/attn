@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -176,8 +177,11 @@ func TestBuildNarrateWorkspacePromptEmbedsBriefPathsAndRemovalFlag(t *testing.T)
 // installNotebookNarrationRunner enables the daemon's runner over a temp root and
 // registers BOTH narration executors (real bodies), so the executors' resolve-
 // inputs / verify-ledger logic runs for real. The agent spawn itself is replaced
-// per-test via d.summarizeSessionExecution / d.narrateWorkspaceExecution. A fast
-// poll interval avoids real-time waits. Returns the notebook root.
+// per-test via d.summarizeSessionExecution / d.narrateWorkspaceExecution.
+// Returns the notebook root.
+//
+// Its callers run inside a synctest bubble, so the runner keeps its production
+// poll interval: a tick costs no wall-clock time there.
 func installNotebookNarrationRunner(t *testing.T, d *Daemon) string {
 	t.Helper()
 	root := t.TempDir()
@@ -185,9 +189,8 @@ func installNotebookNarrationRunner(t *testing.T, d *Daemon) string {
 	d.store.SetSetting(canonicalExecutableSettingKey("claude"), writeFakeAgentExecutable(t))
 
 	runner := jobs.New(jobs.Options{
-		Store:        newTestJobStore(t, d),
-		Log:          func(string, ...interface{}) {},
-		PollInterval: 2 * time.Millisecond,
+		Store: newTestJobStore(t, d),
+		Log:   func(string, ...interface{}) {},
 	})
 	if err := runner.RegisterWith(notebookSummarizeSessionKind, d.summarizeSessionHandler,
 		jobs.HandlerConfig{Timeout: notebookSummarizeSessionTimeout}); err != nil {
@@ -218,6 +221,12 @@ func writeFakeAgentExecutable(t *testing.T) string {
 	return path
 }
 
+// requireTaskState asserts a queued task reached want. It is a bubble helper:
+// synctest.Wait() returns once every runner goroutine is durably blocked, so the
+// queue has settled and there is a single state to read — no deadline, no poll.
+// waitForTaskState is requireTaskState for callers outside a bubble, where the
+// only way to know a job reached a state is to keep asking. activity_test.go is
+// the remaining one.
 func waitForTaskState(t *testing.T, d *Daemon, kind, subject string, want jobs.State) *jobs.Job {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
@@ -236,91 +245,121 @@ func waitForTaskState(t *testing.T, d *Daemon, kind, subject string, want jobs.S
 	}
 }
 
+func requireTaskState(t *testing.T, d *Daemon, kind, subject string, want jobs.State) *jobs.Job {
+	t.Helper()
+	synctest.Wait()
+	task, err := d.jobQueue.GetByKey(kind, subject)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if task == nil || task.State != want {
+		t.Fatalf("task %s:%s settled at %s, want %s (last=%+v)", kind, subject, taskState(task), want, task)
+	}
+	return task
+}
+
+// taskState renders a possibly-absent task's state for a failure message.
+func taskState(task *jobs.Job) jobs.State {
+	if task == nil {
+		return "<absent>"
+	}
+	return task.State
+}
+
 // --- summarize_session executor ---
 
 func TestSummarizeSessionExecutorVerifiesDigestLedger(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
-		Directory: t.TempDir(), State: protocol.SessionStateIdle,
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		now := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
+			Directory: t.TempDir(), State: protocol.SessionStateIdle,
+			StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		root := installNotebookNarrationRunner(t, d)
+
+		// A solo session (no workspace) lands its digest under the reserved _solo bucket.
+		soloBucket := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket)
+		digest := filepath.Join(soloBucket, "session-1.md")
+
+		// The fake agent writes the digest where the prompt told it to: success.
+		d.summarizeSessionExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			if err := os.WriteFile(digest, []byte("# Session Digest\n"), 0o644); err != nil {
+				t.Fatalf("fake write digest: %v", err)
+			}
+			// The prompt points the agent at the per-workspace bucket path.
+			if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
+				t.Fatalf("prompt RAW_DIGEST_PATH not the bucketed path:\n%s", req.Prompt)
+			}
+			// The request widens to the digest's bucket dir for a Codex-backed narrate.
+			if len(req.ExtraWritableRoots) != 1 || req.ExtraWritableRoots[0] != soloBucket {
+				t.Fatalf("ExtraWritableRoots = %v, want [%s]", req.ExtraWritableRoots, soloBucket)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
+
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+
+		if _, err := os.Stat(digest); err != nil {
+			t.Fatalf("digest not written: %v", err)
+		}
 	})
-	root := installNotebookNarrationRunner(t, d)
-
-	// A solo session (no workspace) lands its digest under the reserved _solo bucket.
-	soloBucket := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket)
-	digest := filepath.Join(soloBucket, "session-1.md")
-
-	// The fake agent writes the digest where the prompt told it to: success.
-	d.summarizeSessionExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		if err := os.WriteFile(digest, []byte("# Session Digest\n"), 0o644); err != nil {
-			t.Fatalf("fake write digest: %v", err)
-		}
-		// The prompt points the agent at the per-workspace bucket path.
-		if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
-			t.Fatalf("prompt RAW_DIGEST_PATH not the bucketed path:\n%s", req.Prompt)
-		}
-		// The request widens to the digest's bucket dir for a Codex-backed narrate.
-		if len(req.ExtraWritableRoots) != 1 || req.ExtraWritableRoots[0] != soloBucket {
-			t.Fatalf("ExtraWritableRoots = %v, want [%s]", req.ExtraWritableRoots, soloBucket)
-		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
-
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
-
-	if _, err := os.Stat(digest); err != nil {
-		t.Fatalf("digest not written: %v", err)
-	}
 }
 
 func TestSummarizeSessionExecutorFailsWhenDigestMissing(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
-		Directory: t.TempDir(), State: protocol.SessionStateIdle,
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		now := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
+			Directory: t.TempDir(), State: protocol.SessionStateIdle,
+			StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		installNotebookNarrationRunner(t, d)
+
+		// The agent "succeeds" but writes nothing: the file is the ledger, so the run
+		// must fail (it goes failed/requeued, never done on the first attempt).
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			return agentdriver.HeadlessTaskResult{Diagnostics: "claimed done"}, nil
+		}
+
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookSummarizeSessionKind, "session-1")
+		if !strings.Contains(task.LastError, "did not write digest") {
+			t.Fatalf("last error = %q, want digest-missing", task.LastError)
+		}
 	})
-	installNotebookNarrationRunner(t, d)
-
-	// The agent "succeeds" but writes nothing: the file is the ledger, so the run
-	// must fail (it goes failed/requeued, never done on the first attempt).
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		return agentdriver.HeadlessTaskResult{Diagnostics: "claimed done"}, nil
-	}
-
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, "session-1")
-	if !strings.Contains(task.LastError, "did not write digest") {
-		t.Fatalf("last error = %q, want digest-missing", task.LastError)
-	}
 }
 
 func TestSummarizeSessionExecutorSkipsRemovedSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	installNotebookNarrationRunner(t, d)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		installNotebookNarrationRunner(t, d)
 
-	executed := false
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		executed = true
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
+		executed := false
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			executed = true
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
 
-	// No session row exists -> the executor no-ops successfully (nothing to retry).
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "gone-session"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "gone-session", jobs.StateDone)
-	if executed {
-		t.Fatal("executor ran the agent for a removed session")
-	}
+		// No session row exists -> the executor no-ops successfully (nothing to retry).
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "gone-session"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookSummarizeSessionKind, "gone-session", jobs.StateDone)
+		if executed {
+			t.Fatal("executor ran the agent for a removed session")
+		}
+	})
 }
 
 // TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone is the core fix: after a
@@ -329,52 +368,55 @@ func TestSummarizeSessionExecutorSkipsRemovedSession(t *testing.T) {
 // (RawSessionsDir/<wsID>/<sid>.md), NOT the _solo bucket — using the transcript path
 // and workspace id carried on the task, since neither row exists to re-derive from.
 func TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	root := installNotebookNarrationRunner(t, d)
-	// NO session row and NO workspace row: the teardown already removed both. Block
-	// any narrate the re-narrate hook enqueues so it cannot race to done/fail.
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		root := installNotebookNarrationRunner(t, d)
+		// NO session row and NO workspace row: the teardown already removed both. Block
+		// any narrate the re-narrate hook enqueues so it cannot race to done/fail.
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	carriedTranscript := filepath.Join(t.TempDir(), "final-turn.jsonl")
-	if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("seed transcript: %v", err)
-	}
-	wsBucket := filepath.Join(notebook.RawSessionsDir(root), "ws-gone")
-	digest := filepath.Join(wsBucket, "session-1.md")
-	soloDigest := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, "session-1.md")
-
-	d.summarizeSessionExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		// The carried transcript (not a re-derived one) flows into the prompt.
-		if !strings.Contains(req.Prompt, "TRANSCRIPT_PATH: "+carriedTranscript) {
-			t.Fatalf("prompt did not use carried transcript path:\n%s", req.Prompt)
+		carriedTranscript := filepath.Join(t.TempDir(), "final-turn.jsonl")
+		if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("seed transcript: %v", err)
 		}
-		// The carried workspace id routes the digest to the workspace bucket.
-		if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
-			t.Fatalf("digest not routed to workspace bucket:\n%s", req.Prompt)
-		}
-		if err := os.WriteFile(digest, []byte("# Final session digest\n"), 0o644); err != nil {
-			t.Fatalf("fake write digest: %v", err)
-		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
+		wsBucket := filepath.Join(notebook.RawSessionsDir(root), "ws-gone")
+		digest := filepath.Join(wsBucket, "session-1.md")
+		soloDigest := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, "session-1.md")
 
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
-		UniqueKey: "session-1",
-		Payload: summarizeSessionPayload{
-			Transcript:  carriedTranscript,
-			WorkspaceID: protocol.Ptr("ws-gone"),
-		},
-	}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+		d.summarizeSessionExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			// The carried transcript (not a re-derived one) flows into the prompt.
+			if !strings.Contains(req.Prompt, "TRANSCRIPT_PATH: "+carriedTranscript) {
+				t.Fatalf("prompt did not use carried transcript path:\n%s", req.Prompt)
+			}
+			// The carried workspace id routes the digest to the workspace bucket.
+			if !strings.Contains(req.Prompt, "RAW_DIGEST_PATH: "+digest) {
+				t.Fatalf("digest not routed to workspace bucket:\n%s", req.Prompt)
+			}
+			if err := os.WriteFile(digest, []byte("# Final session digest\n"), 0o644); err != nil {
+				t.Fatalf("fake write digest: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
 
-	if _, err := os.Stat(digest); err != nil {
-		t.Fatalf("digest not written to workspace bucket: %v", err)
-	}
-	if _, err := os.Stat(soloDigest); err == nil {
-		t.Fatal("digest leaked into the _solo bucket instead of the workspace bucket")
-	}
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+			UniqueKey: "session-1",
+			Payload: summarizeSessionPayload{
+				Transcript:  carriedTranscript,
+				WorkspaceID: protocol.Ptr("ws-gone"),
+			},
+		}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+
+		if _, err := os.Stat(digest); err != nil {
+			t.Fatalf("digest not written to workspace bucket: %v", err)
+		}
+		if _, err := os.Stat(soloDigest); err == nil {
+			t.Fatal("digest leaked into the _solo bucket instead of the workspace bucket")
+		}
+	})
 }
 
 // TestSummarizeSessionReNarratesWhenWorkspaceRemoved proves the timing-gap hook: a
@@ -382,38 +424,41 @@ func TestSummarizeSessionExecutorUsesCarriedPayloadWhenRowGone(t *testing.T) {
 // zero-debounce narrate_workspace so the removal retrospective is rewritten with the
 // now-available digest.
 func TestSummarizeSessionReNarratesWhenWorkspaceRemoved(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	root := installNotebookNarrationRunner(t, d)
-	// Block narrate so the re-enqueued record stays observable instead of running.
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		root := installNotebookNarrationRunner(t, d)
+		// Block narrate so the re-enqueued record stays observable instead of running.
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	carriedTranscript := filepath.Join(t.TempDir(), "turn.jsonl")
-	if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("seed transcript: %v", err)
-	}
-	digest := filepath.Join(notebook.RawSessionsDir(root), "ws-gone", "session-1.md")
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
-			t.Fatalf("fake write digest: %v", err)
+		carriedTranscript := filepath.Join(t.TempDir(), "turn.jsonl")
+		if err := os.WriteFile(carriedTranscript, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("seed transcript: %v", err)
 		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
+		digest := filepath.Join(notebook.RawSessionsDir(root), "ws-gone", "session-1.md")
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
+				t.Fatalf("fake write digest: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
 
-	// No workspace row for ws-gone, both rows gone -> the hook should re-narrate.
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
-		UniqueKey: "session-1",
-		Payload: summarizeSessionPayload{
-			Transcript:  carriedTranscript,
-			WorkspaceID: protocol.Ptr("ws-gone"),
-		},
-	}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+		// No workspace row for ws-gone, both rows gone -> the hook should re-narrate.
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+			UniqueKey: "session-1",
+			Payload: summarizeSessionPayload{
+				Transcript:  carriedTranscript,
+				WorkspaceID: protocol.Ptr("ws-gone"),
+			},
+		}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
-	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-gone") {
-		t.Fatal("digest success for a removed workspace did not re-enqueue a narrate")
-	}
+		if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-gone") {
+			t.Fatal("digest success for a removed workspace did not re-enqueue a narrate")
+		}
+	})
 }
 
 // TestSummarizeSessionDoesNotReNarrateWhenWorkspacePresent proves the hook is scoped
@@ -421,152 +466,159 @@ func TestSummarizeSessionReNarratesWhenWorkspaceRemoved(t *testing.T) {
 // NOT burn an extra strong-tier narrate (the active workspace's pending narrate
 // already covers the fresh digest).
 func TestSummarizeSessionDoesNotReNarrateWhenWorkspacePresent(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-live")
-	root := installNotebookNarrationRunner(t, d)
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-live")
+		root := installNotebookNarrationRunner(t, d)
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	digest := filepath.Join(notebook.RawSessionsDir(root), "ws-live", "session-1.md")
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
-			t.Fatalf("fake write digest: %v", err)
+		digest := filepath.Join(notebook.RawSessionsDir(root), "ws-live", "session-1.md")
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			if err := os.WriteFile(digest, []byte("# digest\n"), 0o644); err != nil {
+				t.Fatalf("fake write digest: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
 		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
 
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
-		UniqueKey: "session-1",
-		Payload:   summarizeSessionPayload{WorkspaceID: protocol.Ptr("ws-live")},
-	}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{
+			UniqueKey: "session-1",
+			Payload:   summarizeSessionPayload{WorkspaceID: protocol.Ptr("ws-live")},
+		}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookSummarizeSessionKind, "session-1", jobs.StateDone)
 
-	// The workspace is alive -> no re-narrate. Give the worker a beat; the narrate
-	// record must never appear.
-	time.Sleep(20 * time.Millisecond)
-	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-live")
-	if err != nil {
-		t.Fatalf("get narrate: %v", err)
-	}
-	if task != nil {
-		t.Fatalf("live workspace unexpectedly got a re-narrate task: %+v", task)
-	}
+		// The workspace is alive -> no re-narrate. requireTaskState already settled
+		// the bubble, so the record is absent because nothing enqueued it, not
+		// because the read was early.
+		task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-live")
+		if err != nil {
+			t.Fatalf("get narrate: %v", err)
+		}
+		if task != nil {
+			t.Fatalf("live workspace unexpectedly got a re-narrate task: %+v", task)
+		}
+	})
 }
 
 // --- narrate_workspace executor ---
 
 func TestNarrateWorkspaceExecutorActiveDayVerifiesMarker(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
 
-	d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		// Active day -> the live workspace row exists -> IS_REMOVAL_PASS false.
-		if !strings.Contains(req.Prompt, "IS_REMOVAL_PASS: false") {
-			t.Fatalf("expected active-day prompt, got removal flag set")
+		d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			// Active day -> the live workspace row exists -> IS_REMOVAL_PASS false.
+			if !strings.Contains(req.Prompt, "IS_REMOVAL_PASS: false") {
+				t.Fatalf("expected active-day prompt, got removal flag set")
+			}
+			// The Codex sandbox widens to the whole notebook root.
+			if len(req.ExtraWritableRoots) != 1 || req.ExtraWritableRoots[0] != root {
+				t.Fatalf("ExtraWritableRoots = %v, want [%s]", req.ExtraWritableRoots, root)
+			}
+			journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
+			body := "## Chifplace — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nDid work.\n"
+			if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
+				t.Fatalf("fake write journal: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
 		}
-		// The Codex sandbox widens to the whole notebook root.
-		if len(req.ExtraWritableRoots) != 1 || req.ExtraWritableRoots[0] != root {
-			t.Fatalf("ExtraWritableRoots = %v, want [%s]", req.ExtraWritableRoots, root)
+
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
 		}
+		requireTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
+
 		journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-		body := "## Chifplace — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nDid work.\n"
-		if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
-			t.Fatalf("fake write journal: %v", err)
+		content, err := os.ReadFile(journal)
+		if err != nil {
+			t.Fatalf("read journal: %v", err)
 		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
-
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
-
-	journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-	content, err := os.ReadFile(journal)
-	if err != nil {
-		t.Fatalf("read journal: %v", err)
-	}
-	if !strings.Contains(string(content), "attn:wsnarr:ws-1") {
-		t.Fatalf("journal missing workspace marker:\n%s", content)
-	}
+		if !strings.Contains(string(content), "attn:wsnarr:ws-1") {
+			t.Fatalf("journal missing workspace marker:\n%s", content)
+		}
+	})
 }
 
 func TestNarrateWorkspaceExecutorRemovalPassDerivesFlagFromAbsentRow(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
-	// No workspace row for ws-removed -> IS_REMOVAL_PASS must be derived true.
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+		// No workspace row for ws-removed -> IS_REMOVAL_PASS must be derived true.
 
-	var sawRemoval bool
-	d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		sawRemoval = strings.Contains(req.Prompt, "IS_REMOVAL_PASS: true")
-		// Title falls back to the id when the row is gone.
-		if !strings.Contains(req.Prompt, "WORKSPACE_TITLE: ws-removed") {
-			t.Fatalf("removal prompt did not fall back title to id:\n%s", req.Prompt)
+		var sawRemoval bool
+		d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			sawRemoval = strings.Contains(req.Prompt, "IS_REMOVAL_PASS: true")
+			// Title falls back to the id when the row is gone.
+			if !strings.Contains(req.Prompt, "WORKSPACE_TITLE: ws-removed") {
+				t.Fatalf("removal prompt did not fall back title to id:\n%s", req.Prompt)
+			}
+			journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
+			body := "## ws-removed — 2026-06-15\n<!-- attn:wsnarr:ws-removed -->\n\nRetrospective.\n"
+			if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
+				t.Fatalf("fake write journal: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
 		}
-		journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-		body := "## ws-removed — 2026-06-15\n<!-- attn:wsnarr:ws-removed -->\n\nRetrospective.\n"
-		if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
-			t.Fatalf("fake write journal: %v", err)
-		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
 
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-removed"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-removed", jobs.StateDone)
-	if !sawRemoval {
-		t.Fatal("removal pass did not derive IS_REMOVAL_PASS=true from absent workspace row")
-	}
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-removed"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookNarrateWorkspaceKind, "ws-removed", jobs.StateDone)
+		if !sawRemoval {
+			t.Fatal("removal pass did not derive IS_REMOVAL_PASS=true from absent workspace row")
+		}
+	})
 }
 
 func TestNarrateWorkspaceExecutorFailsWhenMarkerMissing(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
 
-	// Agent writes the day's file but NOT this workspace's marker -> ledger says no.
-	d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-		if err := os.WriteFile(journal, []byte("## Other — 2026-06-15\n<!-- attn:wsnarr:other-ws -->\n"), 0o644); err != nil {
-			t.Fatalf("fake write journal: %v", err)
+		// Agent writes the day's file but NOT this workspace's marker -> ledger says no.
+		d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
+			if err := os.WriteFile(journal, []byte("## Other — 2026-06-15\n<!-- attn:wsnarr:other-ws -->\n"), 0o644); err != nil {
+				t.Fatalf("fake write journal: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{Diagnostics: "wrote wrong marker"}, nil
 		}
-		return agentdriver.HeadlessTaskResult{Diagnostics: "wrote wrong marker"}, nil
-	}
 
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
-	if !strings.Contains(task.LastError, "did not write") {
-		t.Fatalf("last error = %q, want marker-missing", task.LastError)
-	}
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
+		if !strings.Contains(task.LastError, "did not write") {
+			t.Fatalf("last error = %q, want marker-missing", task.LastError)
+		}
+	})
 }
 
-// waitForNonDoneFailure waits until a task has recorded a failure (LastError set
-// and not done). The runner auto-requeues failed tasks, so the task may cycle
-// failed->queued->running; we only assert it recorded the failure at least once.
-func waitForNonDoneFailure(t *testing.T, d *Daemon, kind, subject string) *jobs.Job {
+// requireTaskFailure asserts a task recorded a failure (LastError set and not
+// done). The runner auto-requeues a failed task behind its backoff, so once the
+// bubble settles the record sits queued with the failure it just recorded.
+func requireTaskFailure(t *testing.T, d *Daemon, kind, subject string) *jobs.Job {
 	t.Helper()
-	deadline := time.Now().Add(2 * time.Second)
-	for {
-		task, err := d.jobQueue.GetByKey(kind, subject)
-		if err != nil {
-			t.Fatalf("get task: %v", err)
-		}
-		if task != nil && task.LastError != "" && task.State != jobs.StateDone {
-			return task
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("task %s:%s never recorded a failure (last=%+v)", kind, subject, task)
-		}
-		time.Sleep(2 * time.Millisecond)
+	synctest.Wait()
+	task, err := d.jobQueue.GetByKey(kind, subject)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
 	}
+	if task == nil || task.LastError == "" || task.State == jobs.StateDone {
+		t.Fatalf("task %s:%s recorded no failure (last=%+v)", kind, subject, task)
+	}
+	return task
 }
 
 // --- triggers ---
@@ -574,49 +626,57 @@ func waitForNonDoneFailure(t *testing.T, d *Daemon, kind, subject string) *jobs.
 // TestHandleStopEnqueuesNarrationForWorkspaceSession proves a Stop on a workspace
 // session enqueues BOTH a per-session digest and a coalesced workspace narrate.
 func TestHandleStopEnqueuesNarrationForWorkspaceSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	installNotebookNarrationRunner(t, d)
-	// Block both executors so the enqueued records stay observable.
-	d.summarizeSessionExecution = blockingExecution(t)
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+		installNotebookNarrationRunner(t, d)
+		// Block both executors so the enqueued records stay observable.
+		d.summarizeSessionExecution = blockingExecution(t)
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1"})
+		d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1"})
 
-	if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
-		t.Fatal("stop did not enqueue summarize_session")
-	}
-	if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-1") {
-		t.Fatal("stop did not enqueue narrate_workspace for the live workspace")
-	}
+		if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
+			t.Fatal("stop did not enqueue summarize_session")
+		}
+		if !taskExists(t, d, notebookNarrateWorkspaceKind, "ws-1") {
+			t.Fatal("stop did not enqueue narrate_workspace for the live workspace")
+		}
+		settleStopClassification(t)
+	})
 }
 
 // TestHandleStopEnqueuesOnlyDigestForSoloSession proves a Stop on a session with no
 // workspace enqueues the digest but no workspace narrate.
 func TestHandleStopEnqueuesOnlyDigestForSoloSession(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: "solo", Label: "solo", Agent: protocol.SessionAgentClaude,
-		Directory: t.TempDir(), State: protocol.SessionStateIdle,
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		now := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID: "solo", Label: "solo", Agent: protocol.SessionAgentClaude,
+			Directory: t.TempDir(), State: protocol.SessionStateIdle,
+			StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		installNotebookNarrationRunner(t, d)
+		d.summarizeSessionExecution = blockingExecution(t)
+
+		d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "solo"})
+
+		if !taskExists(t, d, notebookSummarizeSessionKind, "solo") {
+			t.Fatal("stop did not enqueue summarize_session for solo session")
+		}
+		// No workspace -> no narrate task at all.
+		task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "")
+		if err != nil {
+			t.Fatalf("get narrate: %v", err)
+		}
+		if task != nil {
+			t.Fatalf("solo session unexpectedly enqueued a narrate task: %+v", task)
+		}
+		settleStopClassification(t)
 	})
-	installNotebookNarrationRunner(t, d)
-	d.summarizeSessionExecution = blockingExecution(t)
-
-	d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "solo"})
-
-	if !taskExists(t, d, notebookSummarizeSessionKind, "solo") {
-		t.Fatal("stop did not enqueue summarize_session for solo session")
-	}
-	// No workspace -> no narrate task at all.
-	task, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "")
-	if err != nil {
-		t.Fatalf("get narrate: %v", err)
-	}
-	if task != nil {
-		t.Fatalf("solo session unexpectedly enqueued a narrate task: %+v", task)
-	}
 }
 
 // TestHandleStopCarriesTranscriptAndWorkspaceOnThePayload proves the Stop trigger
@@ -624,75 +684,82 @@ func TestHandleStopEnqueuesOnlyDigestForSoloSession(t *testing.T) {
 // where both the session row and the workspace row still exist — so the debounced run
 // can still resolve them after a teardown deletes both rows.
 func TestHandleStopCarriesTranscriptAndWorkspaceOnThePayload(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	installNotebookNarrationRunner(t, d)
-	// Block both executors so the enqueued summarize record stays observable.
-	d.summarizeSessionExecution = blockingExecution(t)
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+		installNotebookNarrationRunner(t, d)
+		// Block both executors so the enqueued summarize record stays observable.
+		d.summarizeSessionExecution = blockingExecution(t)
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	transcript := filepath.Join(t.TempDir(), "turn.jsonl")
-	if err := os.WriteFile(transcript, []byte("{}\n"), 0o644); err != nil {
-		t.Fatalf("seed transcript: %v", err)
-	}
+		transcript := filepath.Join(t.TempDir(), "turn.jsonl")
+		if err := os.WriteFile(transcript, []byte("{}\n"), 0o644); err != nil {
+			t.Fatalf("seed transcript: %v", err)
+		}
 
-	d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1", TranscriptPath: transcript})
+		d.handleStop(drainingConn(t), &protocol.StopMessage{ID: "session-1", TranscriptPath: transcript})
 
-	if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
-		t.Fatal("stop did not enqueue summarize_session")
-	}
-	task, err := d.jobQueue.GetByKey(notebookSummarizeSessionKind, "session-1")
-	if err != nil || task == nil {
-		t.Fatalf("get summarize task: %v", err)
-	}
-	var carried summarizeSessionPayload
-	if err := task.DecodePayload(&carried); err != nil {
-		t.Fatalf("decode summarize payload: %v", err)
-	}
-	if carried.Transcript != transcript {
-		t.Fatalf("summarize payload transcript = %q, want %q", carried.Transcript, transcript)
-	}
-	if carried.WorkspaceID == nil || *carried.WorkspaceID != "ws-1" {
-		t.Fatalf("summarize payload workspace = %v, want ws-1", carried.WorkspaceID)
-	}
+		if !taskExists(t, d, notebookSummarizeSessionKind, "session-1") {
+			t.Fatal("stop did not enqueue summarize_session")
+		}
+		task, err := d.jobQueue.GetByKey(notebookSummarizeSessionKind, "session-1")
+		if err != nil || task == nil {
+			t.Fatalf("get summarize task: %v", err)
+		}
+		var carried summarizeSessionPayload
+		if err := task.DecodePayload(&carried); err != nil {
+			t.Fatalf("decode summarize payload: %v", err)
+		}
+		if carried.Transcript != transcript {
+			t.Fatalf("summarize payload transcript = %q, want %q", carried.Transcript, transcript)
+		}
+		if carried.WorkspaceID == nil || *carried.WorkspaceID != "ws-1" {
+			t.Fatalf("summarize payload workspace = %v, want ws-1", carried.WorkspaceID)
+		}
+		settleStopClassification(t)
+	})
 }
 
 // TestWorkspaceRemovalEnqueuesFinalNarrate proves the removal boundary enqueues the
 // final retrospective narrate that overrides a pending active-day debounce (RunNow ->
 // ScheduledAt is not pushed forward).
 func TestWorkspaceRemovalEnqueuesFinalNarrate(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-1", "ws-1")
-	installNotebookNarrationRunner(t, d)
-	d.narrateWorkspaceExecution = blockingExecution(t)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-1", "ws-1")
+		installNotebookNarrationRunner(t, d)
+		d.narrateWorkspaceExecution = blockingExecution(t)
 
-	// Pre-seed a far-future debounced active-day narrate.
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
-		UniqueKey: "ws-1", Delay: time.Hour,
-	}); err != nil {
-		t.Fatalf("seed pending narrate: %v", err)
-	}
-	before, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
-	if err != nil || before == nil {
-		t.Fatalf("get seeded task: %v", err)
-	}
+		// Pre-seed a far-future debounced active-day narrate.
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{
+			UniqueKey: "ws-1", Delay: time.Hour,
+		}); err != nil {
+			t.Fatalf("seed pending narrate: %v", err)
+		}
+		before, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
+		if err != nil || before == nil {
+			t.Fatalf("get seeded task: %v", err)
+		}
 
-	// Remove the workspace (the app's UnregisterWorkspace path).
-	d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{ID: "ws-1"})
+		// Remove the workspace (the app's UnregisterWorkspace path).
+		d.handleUnregisterWorkspace(nil, &protocol.UnregisterWorkspaceMessage{ID: "ws-1"})
 
-	if d.store.GetWorkspace("ws-1") != nil {
-		t.Fatal("workspace not removed")
-	}
-	after, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
-	if err != nil || after == nil {
-		t.Fatalf("get final task: %v", err)
-	}
-	// RunNow overrode the hour-long debounce: the final attempt is no later than the
-	// seeded one (in practice much sooner / now).
-	if after.ScheduledAt.After(before.ScheduledAt) {
-		t.Fatalf("final narrate did not override the pending debounce: before=%s after=%s",
-			before.ScheduledAt, after.ScheduledAt)
-	}
+		if d.store.GetWorkspace("ws-1") != nil {
+			t.Fatal("workspace not removed")
+		}
+		after, err := d.jobQueue.GetByKey(notebookNarrateWorkspaceKind, "ws-1")
+		if err != nil || after == nil {
+			t.Fatalf("get final task: %v", err)
+		}
+		// RunNow overrode the hour-long debounce: the final attempt is no later than the
+		// seeded one (in practice much sooner / now).
+		if after.ScheduledAt.After(before.ScheduledAt) {
+			t.Fatalf("final narrate did not override the pending debounce: before=%s after=%s",
+				before.ScheduledAt, after.ScheduledAt)
+		}
+	})
 }
 
 // TestNarrationTriggersAreNilSafeBeforeRunner proves the Stop and removal triggers
@@ -753,61 +820,67 @@ func assertJournalUntouched(t *testing.T, root string) {
 // agent runs, and nothing lands under the journal dir. The base raw-floor PR added
 // rawTierFilename precisely for this; this is the missing load-bearing test.
 func TestSummarizeSessionExecutorRejectsTraversalSessionID(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-	craftedID := "../../../journal/2026-06-15"
-	d.store.Add(&protocol.Session{
-		ID: craftedID, Label: craftedID, Agent: protocol.SessionAgentClaude,
-		Directory: t.TempDir(), State: protocol.SessionStateIdle,
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		now := string(protocol.TimestampNow())
+		craftedID := "../../../journal/2026-06-15"
+		d.store.Add(&protocol.Session{
+			ID: craftedID, Label: craftedID, Agent: protocol.SessionAgentClaude,
+			Directory: t.TempDir(), State: protocol.SessionStateIdle,
+			StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		root := installNotebookNarrationRunner(t, d)
+
+		ran := false
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			ran = true
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
+
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookSummarizeSessionKind, craftedID)
+		if !strings.Contains(task.LastError, "unsafe session id") {
+			t.Fatalf("last error = %q, want unsafe-session-id rejection", task.LastError)
+		}
+		if ran {
+			t.Fatal("executor spawned the agent for a traversal session id")
+		}
+		assertJournalUntouched(t, root)
 	})
-	root := installNotebookNarrationRunner(t, d)
-
-	ran := false
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		ran = true
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
-
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, craftedID)
-	if !strings.Contains(task.LastError, "unsafe session id") {
-		t.Fatalf("last error = %q, want unsafe-session-id rejection", task.LastError)
-	}
-	if ran {
-		t.Fatal("executor spawned the agent for a traversal session id")
-	}
-	assertJournalUntouched(t, root)
 }
 
 // TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID proves a crafted workspace
 // id is rejected (so the narrate pass is never handed a CONTEXT_SNAPSHOT_PATH/journal
 // read target that climbed out of the raw tier) and nothing lands under the journal.
 func TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
 
-	craftedID := "../../../journal/2026-06-15"
-	ran := false
-	d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		ran = true
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
+		craftedID := "../../../journal/2026-06-15"
+		ran := false
+		d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			ran = true
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
 
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, craftedID)
-	if !strings.Contains(task.LastError, "unsafe workspace id") {
-		t.Fatalf("last error = %q, want unsafe-workspace-id rejection", task.LastError)
-	}
-	if ran {
-		t.Fatal("executor spawned the agent for a traversal workspace id")
-	}
-	assertJournalUntouched(t, root)
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: craftedID}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookNarrateWorkspaceKind, craftedID)
+		if !strings.Contains(task.LastError, "unsafe workspace id") {
+			t.Fatalf("last error = %q, want unsafe-workspace-id rejection", task.LastError)
+		}
+		if ran {
+			t.Fatal("executor spawned the agent for a traversal workspace id")
+		}
+		assertJournalUntouched(t, root)
+	})
 }
 
 // --- ledger freshness (no false done off a prior run's file) ---
@@ -816,35 +889,38 @@ func TestNarrateWorkspaceExecutorRejectsTraversalWorkspaceID(t *testing.T) {
 // agent leaves the prior digest byte-identical is treated as a failure, not a false
 // done — otherwise a stale digest (missing the new turns) would report success.
 func TestSummarizeSessionExecutorRequiresFreshDigest(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
-		Directory: t.TempDir(), State: protocol.SessionStateIdle,
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		now := string(protocol.TimestampNow())
+		d.store.Add(&protocol.Session{
+			ID: "session-1", Label: "session-1", Agent: protocol.SessionAgentClaude,
+			Directory: t.TempDir(), State: protocol.SessionStateIdle,
+			StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		root := installNotebookNarrationRunner(t, d)
+
+		digest := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, "session-1.md")
+		if err := os.MkdirAll(filepath.Dir(digest), 0o755); err != nil {
+			t.Fatalf("mkdir bucket: %v", err)
+		}
+		if err := os.WriteFile(digest, []byte("# Session Digest\n\nprior run\n"), 0o644); err != nil {
+			t.Fatalf("seed prior digest: %v", err)
+		}
+
+		// Agent no-ops: leaves the prior digest exactly as-is.
+		d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
+		}
+
+		if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookSummarizeSessionKind, "session-1")
+		if !strings.Contains(task.LastError, "unchanged") {
+			t.Fatalf("last error = %q, want unchanged-digest rejection", task.LastError)
+		}
 	})
-	root := installNotebookNarrationRunner(t, d)
-
-	digest := filepath.Join(notebook.RawSessionsDir(root), notebookSoloSessionBucket, "session-1.md")
-	if err := os.MkdirAll(filepath.Dir(digest), 0o755); err != nil {
-		t.Fatalf("mkdir bucket: %v", err)
-	}
-	if err := os.WriteFile(digest, []byte("# Session Digest\n\nprior run\n"), 0o644); err != nil {
-		t.Fatalf("seed prior digest: %v", err)
-	}
-
-	// Agent no-ops: leaves the prior digest exactly as-is.
-	d.summarizeSessionExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
-	}
-
-	if _, err := d.jobQueue.Enqueue(notebookSummarizeSessionKind, jobs.EnqueueOptions{UniqueKey: "session-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookSummarizeSessionKind, "session-1")
-	if !strings.Contains(task.LastError, "unchanged") {
-		t.Fatalf("last error = %q, want unchanged-digest rejection", task.LastError)
-	}
 }
 
 // TestNarrateWorkspaceExecutorRequiresFreshEntry proves the removal retrospective
@@ -852,31 +928,34 @@ func TestSummarizeSessionExecutorRequiresFreshDigest(t *testing.T) {
 // agent leaves this workspace's marker block byte-identical fails (and is retried),
 // instead of being marked done off the prior block.
 func TestNarrateWorkspaceExecutorRequiresFreshEntry(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
 
-	journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-	if err := os.MkdirAll(filepath.Dir(journal), 0o755); err != nil {
-		t.Fatalf("mkdir journal: %v", err)
-	}
-	prior := "## ws-1 — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nactive-day entry\n\nsource: workspace:ws-1\n"
-	if err := os.WriteFile(journal, []byte(prior), 0o644); err != nil {
-		t.Fatalf("seed prior entry: %v", err)
-	}
+		journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
+		if err := os.MkdirAll(filepath.Dir(journal), 0o755); err != nil {
+			t.Fatalf("mkdir journal: %v", err)
+		}
+		prior := "## ws-1 — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nactive-day entry\n\nsource: workspace:ws-1\n"
+		if err := os.WriteFile(journal, []byte(prior), 0o644); err != nil {
+			t.Fatalf("seed prior entry: %v", err)
+		}
 
-	// Removal-pass agent no-ops: leaves the active-day block exactly as-is.
-	d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
-	}
+		// Removal-pass agent no-ops: leaves the active-day block exactly as-is.
+		d.narrateWorkspaceExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			return agentdriver.HeadlessTaskResult{Diagnostics: "no-op"}, nil
+		}
 
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	task := waitForNonDoneFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
-	if !strings.Contains(task.LastError, "unchanged") {
-		t.Fatalf("last error = %q, want unchanged-entry rejection", task.LastError)
-	}
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		task := requireTaskFailure(t, d, notebookNarrateWorkspaceKind, "ws-1")
+		if !strings.Contains(task.LastError, "unchanged") {
+			t.Fatalf("last error = %q, want unchanged-entry rejection", task.LastError)
+		}
+	})
 }
 
 // --- marker prefix collision (sibling whose id is a prefix) ---
@@ -917,35 +996,38 @@ func TestWorkspaceNarrationBlockNoPrefixCollision(t *testing.T) {
 // only its OWN workspace's digest bucket, so one workspace's journal entry cannot be
 // contaminated with a sibling's (or a solo session's) digests.
 func TestNarrateWorkspaceScopesSessionsToWorkspace(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	setupWorkspaceContextSession(t, d, "session-a", "ws-1")
-	root := installNotebookNarrationRunner(t, d)
-	d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		setupWorkspaceContextSession(t, d, "session-a", "ws-1")
+		root := installNotebookNarrationRunner(t, d)
+		d.narrationNowOverride = func() time.Time { return time.Date(2026, 6, 15, 12, 0, 0, 0, time.UTC) }
 
-	wantDir, err := notebookWorkspaceSessionsDir(root, "ws-1")
-	if err != nil {
-		t.Fatalf("workspace sessions dir: %v", err)
-	}
-	if wantDir == notebook.RawSessionsDir(root) {
-		t.Fatal("per-workspace dir collapsed to the shared flat sessions dir")
-	}
-
-	d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
-		if !strings.Contains(req.Prompt, "RAW_SESSIONS_DIR: "+wantDir) {
-			t.Fatalf("narrate prompt RAW_SESSIONS_DIR not scoped to ws-1:\n%s", req.Prompt)
+		wantDir, err := notebookWorkspaceSessionsDir(root, "ws-1")
+		if err != nil {
+			t.Fatalf("workspace sessions dir: %v", err)
 		}
-		journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
-		body := "## ws-1 — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nwork.\n"
-		if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
-			t.Fatalf("fake write journal: %v", err)
+		if wantDir == notebook.RawSessionsDir(root) {
+			t.Fatal("per-workspace dir collapsed to the shared flat sessions dir")
 		}
-		return agentdriver.HeadlessTaskResult{}, nil
-	}
 
-	if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
-		t.Fatalf("enqueue: %v", err)
-	}
-	waitForTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
+		d.narrateWorkspaceExecution = func(_ context.Context, _ agentdriver.HeadlessTaskProvider, req agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+			if !strings.Contains(req.Prompt, "RAW_SESSIONS_DIR: "+wantDir) {
+				t.Fatalf("narrate prompt RAW_SESSIONS_DIR not scoped to ws-1:\n%s", req.Prompt)
+			}
+			journal := filepath.Join(root, notebook.DirJournal, "2026-06-15.md")
+			body := "## ws-1 — 2026-06-15\n<!-- attn:wsnarr:ws-1 -->\n\nwork.\n"
+			if err := os.WriteFile(journal, []byte(body), 0o644); err != nil {
+				t.Fatalf("fake write journal: %v", err)
+			}
+			return agentdriver.HeadlessTaskResult{}, nil
+		}
+
+		if _, err := d.jobQueue.Enqueue(notebookNarrateWorkspaceKind, jobs.EnqueueOptions{UniqueKey: "ws-1"}); err != nil {
+			t.Fatalf("enqueue: %v", err)
+		}
+		requireTaskState(t, d, notebookNarrateWorkspaceKind, "ws-1", jobs.StateDone)
+	})
 }
 
 // --- config-time validation (fail fast, not mid-run hang) ---
@@ -988,20 +1070,15 @@ func TestDaemon_ValidatesNotebookNarrationAgentAndExecutable(t *testing.T) {
 	}
 }
 
+// taskExists reports whether a record exists for kind:subject once the bubble has
+// settled. Both answers are then final: an absent record is absent because nobody
+// enqueued it, not because the read arrived early.
 func taskExists(t *testing.T, d *Daemon, kind, subject string) bool {
 	t.Helper()
-	deadline := time.Now().Add(time.Second)
-	for {
-		task, err := d.jobQueue.GetByKey(kind, subject)
-		if err != nil {
-			t.Fatalf("get task: %v", err)
-		}
-		if task != nil {
-			return true
-		}
-		if time.Now().After(deadline) {
-			return false
-		}
-		time.Sleep(2 * time.Millisecond)
+	synctest.Wait()
+	task, err := d.jobQueue.GetByKey(kind, subject)
+	if err != nil {
+		t.Fatalf("get task: %v", err)
 	}
+	return task != nil
 }

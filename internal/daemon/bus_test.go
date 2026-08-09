@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/victorarias/attn/internal/bus"
@@ -17,16 +18,16 @@ import (
 // fake internal/bus uses. A green run in internal/bus only proves the delivery
 // logic; this proves the SQLite adapter carries the same semantics.
 
-func waitForBus(t *testing.T, what string, cond func() bool) {
+// requireBus runs the bus's own safety-net poll out and then asks once. Inside a
+// bubble that poll is the slowest thing that can still deliver, so a condition
+// still false afterwards is false for good.
+func requireBus(t *testing.T, what string, cond func() bool) {
 	t.Helper()
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) {
-		if cond() {
-			return
-		}
-		time.Sleep(2 * time.Millisecond)
+	time.Sleep(2 * bus.DefaultPollInterval)
+	synctest.Wait()
+	if !cond() {
+		t.Fatalf("timed out waiting for %s", what)
 	}
-	t.Fatalf("timed out waiting for %s", what)
 }
 
 // A ticket mutation publishes a durable, subject-carrying fact — and still
@@ -140,83 +141,86 @@ func TestActivityFactProjectsTheSessionSnapshot(t *testing.T) {
 // up from its persisted cursor when it comes back.
 func TestDurableConsumerCatchesUpOverTheSQLiteAdapter(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	backing := d.newSQLBusStore()
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		backing := d.newSQLBusStore()
 
-	var (
-		mu   sync.Mutex
-		seen []string
-	)
-	record := func(_ context.Context, ev bus.Event) error {
-		mu.Lock()
-		seen = append(seen, ev.Name+":"+ev.Subject)
-		mu.Unlock()
-		return nil
-	}
-	snapshot := func() []string {
-		mu.Lock()
-		defer mu.Unlock()
-		return append([]string(nil), seen...)
-	}
-
-	first := bus.New(bus.Options{Store: backing, PollInterval: 5 * time.Millisecond})
-	if err := first.Register("ticket-watcher", bus.Filter{"ticket.*"}, record); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if err := first.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	if _, err := first.Publish(FactTicketCreated, "tk-1", nil); err != nil {
-		t.Fatalf("Publish: %v", err)
-	}
-	waitForBus(t, "the first delivery", func() bool { return len(snapshot()) == 1 })
-	first.Stop()
-
-	// Facts published while the consumer is gone, including one it filters out.
-	offline := bus.New(bus.Options{Store: backing})
-	for _, fact := range []struct{ name, subject string }{
-		{FactTicketCommented, "tk-1"},
-		{FactSessionStateChanged, "sess-9"},
-		{FactTicketStatusChanged, "tk-1"},
-	} {
-		if _, err := offline.Publish(fact.name, fact.subject, nil); err != nil {
-			t.Fatalf("Publish(%s): %v", fact.name, err)
+		var (
+			mu   sync.Mutex
+			seen []string
+		)
+		record := func(_ context.Context, ev bus.Event) error {
+			mu.Lock()
+			seen = append(seen, ev.Name+":"+ev.Subject)
+			mu.Unlock()
+			return nil
 		}
-	}
-
-	second := bus.New(bus.Options{Store: backing, PollInterval: 5 * time.Millisecond})
-	if err := second.Register("ticket-watcher", bus.Filter{"ticket.*"}, record); err != nil {
-		t.Fatalf("Register: %v", err)
-	}
-	if err := second.Start(); err != nil {
-		t.Fatalf("Start: %v", err)
-	}
-	t.Cleanup(second.Stop)
-
-	waitForBus(t, "catch-up", func() bool { return len(snapshot()) == 3 })
-	got := snapshot()
-	want := []string{
-		FactTicketCreated + ":tk-1",
-		FactTicketCommented + ":tk-1",
-		FactTicketStatusChanged + ":tk-1",
-	}
-	for i := range want {
-		if got[i] != want[i] {
-			t.Fatalf("delivered %v, want %v", got, want)
+		snapshot := func() []string {
+			mu.Lock()
+			defer mu.Unlock()
+			return append([]string(nil), seen...)
 		}
-	}
 
-	// The cursor advanced past the filtered-out fact too, so a narrow consumer is
-	// not permanently reported as lagging.
-	rec, ok, err := d.store.GetBusConsumer("ticket-watcher")
-	if err != nil || !ok {
-		t.Fatalf("GetBusConsumer: %v (found=%v)", err, ok)
-	}
-	if rec.Cursor != 4 {
-		t.Fatalf("persisted cursor is %d, want 4 (head)", rec.Cursor)
-	}
-	if rec.Filter != "ticket.*" {
-		t.Fatalf("persisted filter is %q", rec.Filter)
-	}
+		first := bus.New(bus.Options{Store: backing})
+		if err := first.Register("ticket-watcher", bus.Filter{"ticket.*"}, record); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		if err := first.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		if _, err := first.Publish(FactTicketCreated, "tk-1", nil); err != nil {
+			t.Fatalf("Publish: %v", err)
+		}
+		requireBus(t, "the first delivery", func() bool { return len(snapshot()) == 1 })
+		first.Stop()
+
+		// Facts published while the consumer is gone, including one it filters out.
+		offline := bus.New(bus.Options{Store: backing})
+		for _, fact := range []struct{ name, subject string }{
+			{FactTicketCommented, "tk-1"},
+			{FactSessionStateChanged, "sess-9"},
+			{FactTicketStatusChanged, "tk-1"},
+		} {
+			if _, err := offline.Publish(fact.name, fact.subject, nil); err != nil {
+				t.Fatalf("Publish(%s): %v", fact.name, err)
+			}
+		}
+
+		second := bus.New(bus.Options{Store: backing})
+		if err := second.Register("ticket-watcher", bus.Filter{"ticket.*"}, record); err != nil {
+			t.Fatalf("Register: %v", err)
+		}
+		if err := second.Start(); err != nil {
+			t.Fatalf("Start: %v", err)
+		}
+		t.Cleanup(second.Stop)
+
+		requireBus(t, "catch-up", func() bool { return len(snapshot()) == 3 })
+		got := snapshot()
+		want := []string{
+			FactTicketCreated + ":tk-1",
+			FactTicketCommented + ":tk-1",
+			FactTicketStatusChanged + ":tk-1",
+		}
+		for i := range want {
+			if got[i] != want[i] {
+				t.Fatalf("delivered %v, want %v", got, want)
+			}
+		}
+
+		// The cursor advanced past the filtered-out fact too, so a narrow consumer is
+		// not permanently reported as lagging.
+		rec, ok, err := d.store.GetBusConsumer("ticket-watcher")
+		if err != nil || !ok {
+			t.Fatalf("GetBusConsumer: %v (found=%v)", err, ok)
+		}
+		if rec.Cursor != 4 {
+			t.Fatalf("persisted cursor is %d, want 4 (head)", rec.Cursor)
+		}
+		if rec.Filter != "ticket.*" {
+			t.Fatalf("persisted filter is %q", rec.Filter)
+		}
+	})
 }
 
 // Status is the operator surface: head, cursors, and the lag between them.

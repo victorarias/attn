@@ -1,26 +1,14 @@
 /**
- * extractBlocks — headless run of the reader pipeline, yielding each stamped
- * block's rendered text. Pure string/data code: no DOM, no React.
+ * Headless run of the reader pipeline yielding each stamped block's rendered
+ * text. Pure string/data code: no DOM, no React. The processor below must stay
+ * byte-for-byte MarkdownReader's pipeline, so offsets over the extracted text
+ * hold against the live DOM's text nodes; the pipeline-parity fixture pins it.
  *
- * The processor below is byte-for-byte the same pipeline `MarkdownReader`
- * runs (react-markdown uses these exact remark-rehype options when
- * rehype-raw is present), so offsets computed against the extracted text are
- * valid against the live DOM's text nodes: `rehypeProseTransforms` mutates
- * hast text nodes in place before React ever sees them, and React renders
- * text nodes verbatim (including the `\n` separator text nodes
- * mdast-util-to-hast emits between nested blocks). The pipeline-parity
- * fixture in the test suite pins this equivalence against the live reader.
- *
- * Normalization rule (the whole rule — nothing else): a block's `text` is
- * the concatenation of all hast text-node values in its subtree, in tree
- * order. No whitespace collapsing, no trimming, no NFC. Offsets are UTF-16
- * code units into this string. Two deliberate divergence fixes:
- *
- * - `pre` subtrees drop one trailing `\n` (hast keeps it; CodeBlock renders
- *   `text.replace(/\n$/, '')`).
- * - React-added chrome (alert titles, copy buttons, blocked-image fallbacks)
- *   has no hast text at all; the DOM walker skips `[data-md-chrome]`
- *   subtrees so both sides agree.
+ * Normalization rule, entire: a block's `text` is every hast text-node value
+ * in its subtree concatenated in tree order — no collapsing, trimming, or NFC
+ * — indexed in UTF-16 code units. Two deliberate divergence fixes: `pre`
+ * subtrees drop one trailing `\n` to match CodeBlock's render, and React-added
+ * chrome has no hast text at all, so the DOM walker skips `[data-md-chrome]`.
  */
 
 import type { Element, Root, RootContent } from 'hast';
@@ -38,10 +26,7 @@ import rehypeSourceAnchors from '../rehypeSourceAnchors';
 import { readerSanitizeSchema } from '../sanitizeSchema';
 import type { BlockText } from './types';
 
-/**
- * Headless unified processor mirroring MarkdownReader's `remarkPlugins` +
- * `rehypePlugins` exactly (order is load-bearing — see index.tsx).
- */
+/** Mirrors MarkdownReader's plugin list; order is load-bearing (index.tsx). */
 function readerProcessor() {
   return unified()
     .use(remarkParse)
@@ -66,7 +51,6 @@ function isElement(node: Root | RootContent): node is Element {
   return node.type === 'element';
 }
 
-/** Plain subtree text concat (no block bookkeeping) — used for `pre` innards. */
 function subtreeText(node: RootContent): string {
   if (node.type === 'text') {
     return node.value;
@@ -93,11 +77,9 @@ interface OpenBlock {
 }
 
 /**
- * Extract every stamped block's rendered text from `content`, in document
- * order. `parentId`/`startInParent` record where each nested block's text
- * sits inside its nearest stamped ancestor (a descendant's text is always a
- * contiguous slice of the ancestor's), which is what makes `ownerBlockFor`
- * possible on this flat list.
+ * Every stamped block's rendered text, in document order. A descendant's text
+ * is always a contiguous slice of its ancestor's, recorded as
+ * `parentId`/`startInParent` — that is what `ownerBlockFor` walks.
  */
 export function extractBlockTexts(content: string): BlockText[] {
   const blocks: BlockText[] = [];
@@ -110,9 +92,7 @@ export function extractBlockTexts(content: string): BlockText[] {
   };
 
   // A mermaid pre renders as an svg with none of its code text, so text-space
-  // diverges from the DOM for EVERY open block whose text includes it — the
-  // pre itself when stamped, and any stamped ancestor (li containing a nested
-  // mermaid fence) either way.
+  // diverges for every open block whose text includes it, ancestors included.
   const markStackNonPaintable = (): void => {
     for (const open of stack) {
       open.out.nonPaintable = true;
@@ -139,8 +119,6 @@ export function extractBlockTexts(content: string): BlockText[] {
         };
         blocks.push(out);
         stack.push({ out });
-        // walkInner marks this block (and ancestors) nonPaintable when the
-        // subtree turns out to be a mermaid pre.
         walkInner(node);
         stack.pop();
         return;
@@ -157,12 +135,9 @@ export function extractBlockTexts(content: string): BlockText[] {
 
   const walkInner = (node: Element | Root): void => {
     if (isElement(node) && node.tagName === 'pre') {
-      // CodeBlock renders `text.replace(/\n$/, '')`; hast keeps the trailing
-      // newline. Strip exactly one so text-space matches the DOM. Nothing is
-      // ever stamped inside a `pre`, so collapsing the subtree here is safe.
+      // Strip exactly one trailing newline to match CodeBlock's render; nothing
+      // is ever stamped inside a `pre`, so collapsing the subtree is safe.
       if (isMermaidPre(node)) {
-        // Every open block's text will include the diagram's code text: the
-        // pre itself when stamped, plus stamped ancestors (li) either way.
         markStackNonPaintable();
       }
       append(subtreeText(node).replace(/\n$/, ''));
@@ -178,10 +153,8 @@ export function extractBlockTexts(content: string): BlockText[] {
 }
 
 /**
- * Canonical owner selection: when `[start, end)` in `blockId`'s text is fully
- * contained in a stamped descendant (li inside ul), the deepest such
- * descendant owns the range. Returns the owning block plus the range
- * translated into its text.
+ * Canonical owner selection: the deepest stamped descendant fully containing
+ * `[start, end)` owns it. Returns that block and the range in its text-space.
  */
 export function ownerBlockFor(
   blocks: BlockText[],
