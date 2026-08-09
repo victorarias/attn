@@ -126,12 +126,12 @@ func TestEnsureAttnClaudeSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 	assertAttnSkillTree(t, skillDir)
 }
 
-func TestEnsureAttnCodexSkillInstalled(t *testing.T) {
+func TestEnsureAttnAgentsSkillInstalled(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv(toolhome.EnvVar, home)
 
-	if err := ensureAttnCodexSkillInstalled(); err != nil {
-		t.Fatalf("ensureAttnCodexSkillInstalled() error = %v", err)
+	if err := ensureAttnAgentsSkillInstalled(); err != nil {
+		t.Fatalf("ensureAttnAgentsSkillInstalled() error = %v", err)
 	}
 
 	assertAttnSkillTree(t, filepath.Join(home, ".agents", "skills", "attn"))

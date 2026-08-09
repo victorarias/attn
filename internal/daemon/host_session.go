@@ -9,6 +9,7 @@ import (
 	"syscall"
 	"time"
 
+	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/hostsession"
 	"github.com/victorarias/attn/internal/launchenv"
@@ -109,6 +110,13 @@ func (d *Daemon) loginShellEnvForSpawn() []string {
 
 // spawnHostSession starts the host for a conversation session.
 func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
+	// pi scans ~/.agents/skills, which until now only the codex driver's
+	// PrepareLaunch wrote — so a machine without codex gave a delegated
+	// conversation agent repo guidance and no attn skill. Best-effort: a missing
+	// skill is a poorer agent, not a session that must refuse to start.
+	if err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
+		d.logf("host spawn: failed to ensure the attn skill under ~/.agents: %v", err)
+	}
 	// Daemon env, then login shell on top: credentials live in shell profiles and
 	// an app-launched host would otherwise fail its first prompt with "no API key".
 	env := pty.MergeEnvironment(os.Environ(), d.loginShellEnvForSpawn())

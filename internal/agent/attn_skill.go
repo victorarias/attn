@@ -91,7 +91,11 @@ func ensureAttnClaudeSkillInstalled() error {
 	return installAttnSkill(filepath.Join(homeDir, ".claude", "skills", "attn"))
 }
 
-func ensureAttnCodexSkillInstalled() error {
+// ensureAttnAgentsSkillInstalled writes the skill to ~/.agents/skills, which is
+// not codex's alone: pi scans it unconditionally, so nisse reads the attn skill
+// from there too. Installing it on nisse's own spawn is what keeps a delegated
+// conversation agent from depending on codex being configured.
+func ensureAttnAgentsSkillInstalled() error {
 	homeDir, err := toolhome.Dir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory for agent skills: %w", err)
@@ -111,8 +115,8 @@ func EnsureClaudeSkillInstalled() error {
 	return ensureAttnClaudeSkillInstalled()
 }
 
-func EnsureCodexSkillInstalled() error {
-	return ensureAttnCodexSkillInstalled()
+func EnsureAgentsSkillInstalled() error {
+	return ensureAttnAgentsSkillInstalled()
 }
 
 func EnsureCopilotSkillInstalled() error {

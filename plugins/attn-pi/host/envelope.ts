@@ -935,8 +935,9 @@ export type SnapshotItem = SnapshotMessageItem | SnapshotToolItem | SnapshotNoti
  * Paging needs a cursor, and the cursor has to survive the item being replaced
  * in place (a tool card finishing, a message ending) — so it is the item's own
  * identity, not its position. The kind prefix is what keeps a message id and a
- * tool call id from ever colliding. The app derives the same key from the same
- * fields; the two derivations are the contract.
+ * tool call id from ever colliding. Its twin is `conversationItemKey` in
+ * app/src/store/conversations.ts: the two derivations are the contract, they
+ * share no code, and a refactor touching one alone breaks paging silently.
  */
 export function snapshotItemKey(item: SnapshotItem): string {
   return item.kind === "tool" ? `tool:${item.call_id}` : `${item.kind}:${item.id}`;

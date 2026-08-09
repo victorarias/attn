@@ -662,6 +662,11 @@ func readCachedShellEnvFromProcess() []string {
 	return env
 }
 
+// buildSpawnEnv builds a PTY agent's environment. Its identity block
+// (ATTN_SESSION_ID/ATTN_AGENT/ATTN_DAEMON_MANAGED/ATTN_INSIDE_APP + the active
+// attn first on PATH) has a twin in spawnHostSession, internal/daemon: an agent
+// reports by shelling out to `attn`, so both runtimes owe it the same block.
+// Change one and change the other — each is test-pinned separately.
 func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath string, logf LogFunc) []string {
 	env := os.Environ()
 	launchEnv := []string(nil)
