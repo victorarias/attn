@@ -359,18 +359,17 @@ async function main() {
         'delegate',
         '--source-session', delegatorId,
         '--agent', 'nisse',
-        // The retry is not padding. A crash puts activity on the ticket — the
-        // reconciliation note and the revival — and `attn ticket status` spends
-        // an agent's first call showing unread activity instead of applying the
-        // update, so on this leg specifically the first attempt always exits
-        // non-zero. What is under test is that the brief was asked again, not
-        // how diligent the agent is about a refused command.
+        // One call, deliberately. A crash puts attn's own bookkeeping on the
+        // ticket — the reconciliation note and the revival — and the agent's
+        // first report used to die on that news of its own death: the
+        // read-before-you-write gate refused the write and the agent replied
+        // "done" having reported nothing. Since #821 only another
+        // participant's word gates a mutation, so a single call has to land.
+        // Telling the agent to retry would hide a regression of exactly that.
         '--brief', [
-          'Using your bash tool, run exactly this command:',
+          'Using your bash tool, run exactly this command, once:',
           `attn ticket status ready_for_review --comment "${earlyToken}"`,
-          'If it exits non-zero because it showed you unread ticket activity, run',
-          'the very same command once more — that first call only clears the',
-          'activity. Then reply with the single word: done',
+          'Then reply with the single word: done',
         ].join('\n'),
         '--name', `pir-${runner.runId.slice(-6)}`,
       ]);
