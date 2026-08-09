@@ -260,9 +260,20 @@ See `docs/glossary.md` for the vocabulary and
   in the environment rather than argv because a brief is multi-line prose and
   argv is world-readable text a sibling's `pkill -f` can match on. The daemon
   hands the same prompt to every replacement host, so delivery is the host's
-  decision, not the daemon's: it says it exactly when its reopened history is
-  empty (`launchPromptIsUndelivered`), which is true only for a first launch or
-  for a relaunch after a crash so early that pi wrote no session file.
+  decision, not the daemon's: it says it exactly when nothing in the reopened
+  conversation was SPOKEN (`launchPromptIsUndelivered`) — true for a first
+  launch, and for a relaunch after a crash so early that pi wrote no session
+  file. Only messages count. Notices do not, because pi writes one into every
+  session file before the first word is said and a brief swallowed by a row
+  nobody spoke is a delegation that sits there with nothing to do. A history
+  that was FORKED in does not count either: it belongs to the conversation this
+  session was picked up from, and this session has still never been told what it
+  is for. The gap that remains is a session that forks AND carries a brief and
+  then dies inside its first turn — the fork already wrote the file, so the
+  relaunch cannot tell delivered from inherited and stays silent. Closing it
+  needs a delivered-marker in the session dir; no product path reaches the
+  combination today, because resume comes from the picker and briefs come from
+  delegation.
 
 `spike-harness/` drives pi's SDK without attn and is the gate a pi version bump
 has to pass; see its README.

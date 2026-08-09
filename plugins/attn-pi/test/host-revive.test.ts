@@ -175,12 +175,12 @@ describe("launchPromptIsUndelivered", () => {
   test("a host that reopened nothing still owes the launch its brief", () => {
     // The zero-file early crash: killed before pi's first assistant message, so
     // the replacement opens a session that never heard the brief.
-    expect(launchPromptIsUndelivered(brief, [])).toBe(true);
+    expect(launchPromptIsUndelivered(brief, [], false)).toBe(true);
   });
 
   test("a reopened conversation is never asked the same thing twice", () => {
     const { items } = reconstructTranscript([userEntry("e1", brief), assistantEntry("e2", "On it.")]);
-    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
   });
 
   test("an interrupted conversation already carries the brief, so it is not re-sent", () => {
@@ -188,12 +188,34 @@ describe("launchPromptIsUndelivered", () => {
     // agent do the work twice; this reopens as `waiting_input` instead.
     const { items } = reconstructTranscript([userEntry("e1", brief)]);
     expect(conversationInterrupted(items)).toBe(true);
-    expect(launchPromptIsUndelivered(brief, items)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
+  });
+
+  test("a conversation holding only notices has still not been told anything", () => {
+    // Notices are minted for what happened TO a conversation, and pi writes one
+    // kind of them before the first word is said. Counting a row nobody spoke as
+    // delivery is how a delegation launches with its brief silently swallowed.
+    const { items } = reconstructTranscript([
+      { type: "compaction", id: "e1", tokensBefore: 120_000 } as unknown as SessionEntryLike,
+    ]);
+    expect(items).toHaveLength(1);
+    expect(items[0]!.kind).toBe("notice");
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(true);
+  });
+
+  test("a forked conversation is owed the brief however much history came with it", () => {
+    // The history was earned by the conversation this session was picked up
+    // from. This session has never been told what it is for, and skipping the
+    // brief would leave a delegation staring at somebody else's work.
+    const { items } = reconstructTranscript([userEntry("e1", "Something else entirely."), assistantEntry("e2", "Done.")]);
+    expect(launchPromptIsUndelivered(brief, items, false)).toBe(false);
+    expect(launchPromptIsUndelivered(brief, items, true)).toBe(true);
   });
 
   test("a session launched without a brief is owed nothing", () => {
-    expect(launchPromptIsUndelivered("", [])).toBe(false);
-    expect(launchPromptIsUndelivered("   ", [])).toBe(false);
+    expect(launchPromptIsUndelivered("", [], false)).toBe(false);
+    expect(launchPromptIsUndelivered("   ", [], false)).toBe(false);
+    expect(launchPromptIsUndelivered("   ", [], true)).toBe(false);
   });
 });
 

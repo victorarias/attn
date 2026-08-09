@@ -143,12 +143,16 @@ function optionalEnv(name: string): string {
  * With no resume file an empty dir is a fresh conversation, which is what
  * `continueRecent` does when it finds nothing.
  */
-function openSession(cwd: string, sessionDir: string, resumeFile: string): SessionManager {
+function openSession(
+  cwd: string,
+  sessionDir: string,
+  resumeFile: string,
+): { sessionManager: SessionManager; forked: boolean } {
   if (resumeFile !== "" && !holdsSession(sessionDir)) {
     console.error(`[attn-pi-host] forking ${resumeFile} into ${sessionDir}`);
-    return SessionManager.forkFrom(resumeFile, cwd, sessionDir);
+    return { sessionManager: SessionManager.forkFrom(resumeFile, cwd, sessionDir), forked: true };
   }
-  return SessionManager.continueRecent(cwd, sessionDir);
+  return { sessionManager: SessionManager.continueRecent(cwd, sessionDir), forked: false };
 }
 
 /**
@@ -252,7 +256,7 @@ async function main(): Promise<void> {
   // spike), and the relaunch is then an ordinary fresh start. Reopening also
   // migrates the file in place, which is why the version pi writes is not
   // something attn has to track. See openSession.
-  const sessionManager = openSession(cwd, sessionDir, resumeFile);
+  const { sessionManager, forked } = openSession(cwd, sessionDir, resumeFile);
   const settingsManager = SettingsManager.create(cwd);
   const resourceLoader = new DefaultResourceLoader({ cwd, agentDir, settingsManager });
   await resourceLoader.reload();
@@ -557,8 +561,11 @@ async function main(): Promise<void> {
   // typed prompt would, so pi's own events draw it and it lands in the
   // transcript; nothing here is a special case downstream.
   if (initialPrompt !== "") {
-    if (launchPromptIsUndelivered(initialPrompt, history.items)) {
-      console.error(`[attn-pi-host] delivering the launch prompt (${initialPrompt.length} chars) into an empty conversation`);
+    if (launchPromptIsUndelivered(initialPrompt, history.items, forked)) {
+      console.error(
+        `[attn-pi-host] delivering the launch prompt (${initialPrompt.length} chars) into a conversation ` +
+          `that has not been told what it is for (forked=${forked}, ${history.items.length} item(s) reopened)`,
+      );
       void runPrompt(initialPrompt);
     } else {
       console.error(`[attn-pi-host] launch prompt already delivered; ${history.items.length} item(s) reopened`);

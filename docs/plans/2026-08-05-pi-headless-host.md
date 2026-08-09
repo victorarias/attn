@@ -396,6 +396,13 @@ Deliberately left behind:
   hang off. When one lands, `--resume` and `--model` are the shape.
 - **Reaching a tool subprocess a hard kill stranded** (slice 4's handoff).
   `tool_started` still carries no pid.
+- **A resumed session that also carries a launch brief and dies inside its
+  first turn.** Delivery is decided from the reopened conversation, and a fork
+  writes its file before the first turn runs, so the relaunch cannot tell
+  history it was told from history it inherited and stays silent. The two
+  halves — resume from the picker, briefs from delegation — do not meet on any
+  product path today. Closing it means a delivered-marker in the session dir,
+  which is the right shape whenever delegation grows a resume-from.
 - **Remote/Linux host distribution**, per the epic's non-goals.
 
 ### Later (named, unplanned)

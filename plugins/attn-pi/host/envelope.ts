@@ -1518,9 +1518,27 @@ export function conversationInterrupted(items: SnapshotItem[]): boolean {
  * case, where the prompt is there and the answer is not. Asking again there
  * would make the agent do the task twice; `waiting_input` and a nudge are the
  * way out of that one, and they are the user's to spend.
+ *
+ * Emptiness means nobody has SPOKEN, which is not the same as "no items".
+ * Reconstruction mints notices for things that happened to a conversation
+ * rather than in it — a compaction, a refused turn — and pi writes one into
+ * every session file before the first word is said. Counting those as delivery
+ * is how a delegation launches with its brief silently swallowed, so only
+ * messages are evidence.
+ *
+ * A history that was FORKED in is not evidence either: it was earned by the
+ * conversation this session was picked up from, and this session has still
+ * never been told what it is for. Delivering there is the same rule read
+ * honestly, not an exception to it.
  */
-export function launchPromptIsUndelivered(prompt: string, reopened: SnapshotItem[]): boolean {
-  return prompt.trim() !== "" && reopened.length === 0;
+export function launchPromptIsUndelivered(
+  prompt: string,
+  reopened: SnapshotItem[],
+  forked: boolean,
+): boolean {
+  if (prompt.trim() === "") return false;
+  if (forked) return true;
+  return !reopened.some((item) => item.kind === "message");
 }
 
 /**
