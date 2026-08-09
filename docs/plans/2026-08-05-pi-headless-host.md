@@ -435,3 +435,45 @@ day-long memory soak (open item, 15-turn slope measured shallow).
 - Whether the suite keeps any slice-2 role once the host declares state
   directly (leaning: suite dormant until the envelope/skills rocks need
   in-loop power).
+
+## Endgame: merging the epic
+
+The five slices landed on `epic/pi-headless-host` and were reviewed one at a
+time. Per-slice verification does not compose — each ran against a different
+build — so the merge to main carries its own pass of everything, on the merged
+head, in a packaged app installed from a throwaway profile.
+
+- [x] The agent is **nisse** everywhere a user or a reader can see it: the
+      driver and registry name, the `ATTN_NISSE_*` launch block, the host
+      executable `bin/attn-nisse`, the scenarios, the changelog, the glossary.
+      `pi` stays the engine and `host` stays the process, which is what the
+      glossary entry and `plugins/attn-pi/AGENTS.md` now say. Full rename, no
+      compatibility shim: nothing shipped under the old name.
+- [x] Whole matrix green on the merged head — `nisse-conversation`,
+      `nisse-nudge`, `nisse-revive`, `nisse-history`, `nisse-delegate` — plus a
+      hand-driven session: prompt, stream, steer mid-run, `kill -9`, recoverable,
+      Reload, and a revived agent answering a question only the pre-kill
+      conversation could answer.
+- [x] A delegated conversation agent gets attn's skill on a machine without
+      codex. It used to arrive as a side effect of the codex driver's launch
+      preparation, so whether a delegated agent knew what a ticket was depended
+      on an unrelated agent being installed.
+
+Two defects the merge pass found, both in the evidence path rather than the
+product, and both the rename's own doing:
+
+- The scenarios found the host process by the substring `attn-nisse`, which a
+  profile named `nisse*` also puts in the bundle path of the daemon, the plugin
+  driver and the app. The first "new host" a scenario saw could be any of them.
+- Three scenarios typed into `[data-testid="conversation-input"]` unscoped. The
+  app mounts a pane per conversation session, so any other session open in the
+  profile silently took the prompt and the run failed as though the host had
+  never received it.
+
+Carried out of the epic, unowned:
+
+- **A daemon killed by SIGTERM never runs `Daemon.Stop()`** — it installs no
+  signal handler, so `attn daemon stop` strands the plugin driver process
+  (reparented to init) while the conversation host, which exits on its stdin
+  EOF, dies correctly. `internal/procreap` is the net: `attn profile clean`
+  reaps it. Predates this epic; the leak is one driver per daemon restart.
