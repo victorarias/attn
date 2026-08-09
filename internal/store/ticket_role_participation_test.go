@@ -74,7 +74,7 @@ func TestMigration99DetachesPastChiefSessionsFromTheirDelegations(t *testing.T) 
 		INSERT INTO ticket_event_cursors (identity, ticket_id, cursor, updated_at) VALUES
 			('role:chief_of_staff', 'minted', 1, '2026-08-01T10:05:00Z');
 
-	`+migration82View+`
+	` + migration82View + `
 		ALTER TABLE ticket_events DROP COLUMN author_role;
 		DELETE FROM schema_migrations WHERE version >= 99;
 	`); err != nil {
