@@ -232,10 +232,62 @@ Three adopted patterns; full receipts in
   `internal/daemon`). Anything a fake or direct channel write can express
   does not — it costs real seconds.
 
+## How changes ship
+
+The flow is sized by judgment, not a rulebook. When in doubt about which shape
+applies, ask Victor once at kickoff, not mid-flight.
+
+- **Plan docs are the norm.** Non-trivial work gets a plan doc first — often
+  written by the same agent that then implements it in the same session. Only a
+  genuinely small change goes straight to a PR with no plan.
+- **A plan lands as one or several PRs.** When the work changes existing
+  behavior, slice PRs target an `epic/*` branch and the epic gets a whole-review
+  pass when it merges to main. When the work builds a new subsystem that cannot
+  break existing experience, slices may merge directly to main as they land.
+  That criterion — can this slice damage what already works? — decides the
+  shape, not the size of the plan.
+- **A spike answers a question.** It usually does not merge, but that is not a
+  hard rule. The constant: Victor decides what happens after a spike — merging
+  it, discarding it, or building on its conclusion.
+
+### Merging
+
+The standing gate for every PR: figgyster approved on the current head, CI
+green, zero unresolved threads. When it passes, merge — no per-PR authorization
+from Victor needed.
+
+Hold for Victor's explicit go-ahead only for:
+
+- merging an epic branch to main;
+- moving on from a spike;
+- changes that irreversibly destroy or convert existing user state;
+- one-way doors — a way in shipped without its way out;
+- production installs and releases (already covered above).
+
+### Victor's testing
+
+Victor validates **experience**; the harness and figgyster own correctness. His
+pass happens at two moments: very early on spikes (does the idea feel right?)
+and at the end of a substantial series (does the whole feel right?). It is
+never per-PR QA — do not queue an approved PR on his testing.
+
+When a series reaches his checkpoint, stage it: a running profile installed
+from the branch, realistic state, and a short what-to-try list keyed to what
+changed and what you could not judge yourself — feel, latency, keyboard flow.
+His session should be minutes of directed play, not setup.
+
+### Routine mechanics
+
+Protocol version bumps and DB migrations are day-to-day work; their checklists
+are in this file. Do them, verify them, and do not present them as risks,
+blockers, or reasons to pause. Escalate by the hold list above — irreversible
+user-state loss, one-way doors, production lifecycle — never by category.
+
 ## Pull requests
 
-PR policy — ready-for-review, rebase onto main first, who approves — comes from
-the global guide. What is attn-specific is how you wait on one.
+Ready-for-review (not draft) and rebase onto main first, per the global guide;
+merging is governed by "How changes ship" above. What is attn-specific is how
+you wait on one.
 
 To wait on a GitHub PR, run `attn pr wait-ready <pr> --repo <owner/repo>
 --reviewer <login>` once; do not poll checks, reviews, and comments separately.
