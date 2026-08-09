@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  The "How changes ship" opener in AGENTS.md drops "once before starting,
+  not halfway through" — it read as discouraging a mid-work question, and
+  doubt discovered mid-work is exactly when to ask. Now simply "When in
+  doubt, ask the maintainer."
