@@ -1,36 +1,21 @@
 /**
- * proseTransforms — smart punctuation + emoji shortcodes for the markdown
- * reader, ported from plannotator's `inlineTransforms.ts`.
+ * Smart punctuation + emoji shortcodes for the markdown reader.
  *
- * Two exports:
+ * `transformText` is the single source of truth and must stay pure and stable:
+ * annotation text-search reproduces rendered text from source bytes, i.e.
+ * `transformText(sourceText) === renderedText`. Order is load-bearing — emoji
+ * first, then smart punctuation. The plugin applies it to hast text nodes only,
+ * so URLs (element properties) are untouched while link labels transform.
  *
- * - `transformText(text)` — the pure, deterministic string transform. PR4's
- *   annotation text-search must reproduce the rendered text from source bytes
- *   (`transformText(sourceText) === renderedText`), so this function is the
- *   single source of truth and must stay pure and stable.
- * - default `rehypeProseTransforms` — a rehype plugin applying the transform
- *   to hast text nodes, skipping code/pre (and other verbatim) subtrees.
- *   Link URLs live in `properties.href`, never in text nodes, so they are
- *   untouched by construction; link *label* text is transformed (matching
- *   plannotator, where labels go through the plain-text path).
- *
- * Transform order is load-bearing: emoji first, then smart punctuation
- * (`transformText = applySmartPunctuation(replaceEmojiShortcodes(text))`).
- *
- * The narrowed en-dash rule (plannotator's, load-bearing): `--` becomes `–`
- * ONLY between two digits (`3--5` → `3–5`). A broader rule would rewrite CLI
- * flags (`bun --watch` → `bun –watch`). Letter-to-letter en-dashes are
- * deliberately sacrificed so `--flags` are never corrupted. Do NOT swap this
- * for remark-smartypants — its dash handling rewrites `--` everywhere.
+ * The en-dash rule is narrowed on purpose: `--` becomes `–` ONLY between two
+ * digits, so CLI flags such as `bun --watch` survive. Do NOT swap in
+ * remark-smartypants, which rewrites `--` everywhere.
  */
 
 import type { Element, Root, RootContent } from "hast";
 import type { Text } from "hast";
 
-/**
- * Exact 32-entry shortcode map (hand-rolled — NOT the full gemoji set).
- * Keep identical to plannotator's for PR4 determinism.
- */
+/** Hand-rolled 32-entry map, NOT the full gemoji set; keep it stable. */
 const EMOJI_MAP: Record<string, string> = {
   smile: "😄",
   heart: "❤️",
@@ -66,23 +51,16 @@ const EMOJI_MAP: Record<string, string> = {
   bulb: "💡",
 };
 
-/** `:shortcode:` → emoji. Unknown shortcodes are left exactly as written. */
 export function replaceEmojiShortcodes(text: string): string {
   return text.replace(/:([a-z_]+):/g, (match, code: string) => EMOJI_MAP[code] ?? match);
 }
 
 /**
- * Smart punctuation. Exact replacement chain, in this order (plannotator's
- * smartypants): ellipsis, em dash, narrowed en dash, curly quotes.
- *
- * `prevChar` is the rendered character immediately BEFORE `text` (empty string
- * when `text` starts its block). hast splits prose at inline-element
- * boundaries, so a quote at position 0 of a text node is NOT necessarily an
- * opening quote — `He said "**hi**".` puts `".` in its own node right after
- * `</strong>`. A start-of-node quote opens only when prevChar is empty or an
- * opener context ([\s([{]); otherwise it closes, matching what the same
- * characters produce when transformed as one unsplit string (the PR4
- * `transformText(sourceSlice) === renderedText` contract depends on this).
+ * Exact chain, in order: ellipsis, em dash, narrowed en dash, curly quotes.
+ * `prevChar` is the rendered character before `text`, empty at a block start.
+ * hast splits prose at inline boundaries, so a quote at position 0 is not
+ * necessarily an opener — it opens only when prevChar is empty or [\s([{],
+ * which is what keeps `transformText(sourceSlice) === renderedText` true.
  */
 export function applySmartPunctuation(text: string, prevChar = ""): string {
   const opensAtStart = prevChar === "" || /[\s([{]/.test(prevChar);
@@ -99,20 +77,14 @@ export function applySmartPunctuation(text: string, prevChar = ""): string {
 }
 
 /**
- * The full prose transform: emoji shortcodes first, then smart punctuation.
- * Pure and idempotent — `transformText(transformText(s)) === transformText(s)`.
- * `prevChar` (optional) disambiguates a leading quote; see applySmartPunctuation.
+ * Emoji shortcodes then smart punctuation; pure and idempotent. `prevChar`
+ * disambiguates a leading quote — see applySmartPunctuation.
  */
 export function transformText(text: string, prevChar = ""): string {
   return applySmartPunctuation(replaceEmojiShortcodes(text), prevChar);
 }
 
-/**
- * Subtrees whose text must NEVER be transformed: code (inline + block via
- * `pre`), keyboard/sample/variable verbatim text, math (remark-math output
- * uses `<math>`/katex spans — defensive, math is out of PR3 scope), and
- * non-prose containers.
- */
+/** Subtrees whose text must NEVER be transformed: verbatim and non-prose. */
 const SKIP_TAGS = new Set([
   "code",
   "pre",
@@ -127,7 +99,6 @@ const SKIP_TAGS = new Set([
   "math",
 ]);
 
-/** Defensive: skip math-ish elements by class (e.g. `math math-inline`, katex). */
 function isMathLike(node: Element): boolean {
   const className: unknown = node.properties?.className;
   const classes = Array.isArray(className)
@@ -147,9 +118,8 @@ function isText(node: RootContent): node is Text {
 }
 
 /**
- * Last rendered character inside a node, for the prev-char quote context:
- * skipped subtrees (inline code, kbd, …) still contribute their trailing
- * character, so `` `foo`" `` closes. `<br>` counts as a newline.
+ * Last rendered character in a node, for quote context: skipped subtrees still
+ * contribute their trailing character, and `<br>` counts as a newline.
  */
 function trailingTextChar(node: RootContent): string | null {
   if (isText(node)) {
@@ -170,18 +140,10 @@ function trailingTextChar(node: RootContent): string | null {
 }
 
 /**
- * Rehype plugin. Usable directly in react-markdown's `rehypePlugins`:
- *
- *   rehypePlugins={[rehypeProseTransforms]}
- *
- * Mutates text-node values in place; never touches element properties (so
- * hrefs, srcs, and anchoring data attributes are untouched by construction).
- *
- * The walk threads the previous rendered character through the whole tree so
- * a quote that starts a text node (i.e. directly follows an inline element)
- * still curls the right way. Block boundaries need no special-casing:
- * mdast-util-to-hast emits `\n` text nodes between block elements, which
- * reset the context to whitespace (= opening).
+ * Mutates text-node values in place, never element properties. The walk
+ * threads the previous rendered character through the tree so a quote that
+ * starts a text node curls the right way; block boundaries need no case of
+ * their own, as mdast-util-to-hast emits `\n` nodes that reset the context.
  */
 export default function rehypeProseTransforms() {
   return (tree: Root): void => {

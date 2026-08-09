@@ -1,18 +1,11 @@
 // The pixels behind kitty placements, pulled on miss and never pushed.
-//
-// App-level and shared by every pane on purpose: GPU textures die with a pane's
-// GL context when the pane is virtualized away, and re-pulling megabytes of
-// pixels to redraw a pane the user just switched back to is exactly the friction
-// this avoids. The cache survives; the textures are cheap to rebuild from it.
-//
-// Two different keys, because the wire uses two different keys:
+// App-level and shared by every pane: GPU textures die with a virtualized
+// pane's GL context, and the cache outlives them. Two keys, as the wire has two:
 //
 //   - An ENTRY is keyed (session, image id, generation) — the content key both
 //     transports answer with, so a duplicate answer is an idempotent refill.
-//   - A REQUEST is keyed (session, image id), because get_kitty_image carries no
-//     generation and a failure answer therefore cannot name one. A failure marks
-//     every generation that was waiting on that request, which is what keeps a
-//     dead image from being re-pulled on every re-description.
+//   - A REQUEST is keyed (session, image id): get_kitty_image carries no
+//     generation, so a failure marks every generation waiting on it.
 
 import {
   kittyPixelFormatFromName,
@@ -29,14 +22,8 @@ export interface KittyImageBlob {
   pixels: Uint8Array;
 }
 
-/**
- * What the cache holds for one (session, image, generation):
- * - present: pixels are here
- * - pending: a pull is in flight
- * - failed: the daemon answered that it has no such image; do not ask again for
- *   this generation (a retransmission mints a new one, which is a new key)
- * - absent: never asked
- */
+/** Per (session, image, generation): present, pending (pull in flight), failed
+ * (daemon has no such image — never ask again for it), absent (never asked). */
 export type KittyImageStatus = 'present' | 'pending' | 'failed' | 'absent';
 
 /** Sends one get_kitty_image. Returns false when the socket cannot carry it. */
@@ -45,12 +32,9 @@ export type KittyImageRequestSender = (sessionId: string, imageId: number) => bo
 /** Notified after any answer lands, so panes holding that key repaint. */
 export type KittyImageListener = (sessionId: string, imageId: number) => void;
 
-// Receipt: measured against real emitters (kitten icat, timg, chafa) writing
-// into the worker terminal, 2026-08-03. The largest image any of them stored was
-// 6.48MB of decoded pixels (icat, an 1800x1200 RGB photo); typical emissions run
-// 1.9-6MB. 64MB is ~10x the worst single image and holds 10-30 real ones — a
-// tripwire set past every measured case, not a budget a healthy session
-// approaches. An image that does not fit says so (see evictFor).
+// Measured 2026-08-03 against real emitters (kitten icat, timg, chafa): largest
+// stored image 6.48MB of decoded pixels, typical 1.9-6MB. 64MB is ~10x the worst
+// single image — a tripwire, not a budget a healthy session approaches.
 export const KITTY_BLOB_CACHE_BYTES = 64 * 1024 * 1024;
 
 interface CacheEntry {
@@ -59,8 +43,7 @@ interface CacheEntry {
   bytes: number;
 }
 
-// Cache keys put the free-form session id LAST, so no separator can collide
-// with anything inside it: everything before it is a number.
+// The free-form session id goes LAST, so no separator inside it can collide.
 const entryKey = (sessionId: string, imageId: number, generation: number) =>
   `${imageId}:${generation}:${sessionId}`;
 
@@ -77,11 +60,8 @@ export class KittyImageCache {
 
   constructor(private readonly capacityBytes: number = KITTY_BLOB_CACHE_BYTES) {}
 
-  /**
-   * Point the cache at a live socket. Called on every connect; a sender left
-   * over from a closed socket simply reports failure and is replaced, so there
-   * is no teardown to get wrong.
-   */
+  /** Point the cache at a live socket. A stale sender reports failure and is
+   * replaced, so there is no teardown to get wrong. */
   setSender(sender: KittyImageRequestSender | null): void {
     this.sender = sender;
   }
@@ -110,18 +90,13 @@ export class KittyImageCache {
     return entry.blob;
   }
 
-  /**
-   * Ask for the pixels behind a placement, once. Already present, already
-   * failed, or already in flight are all no-ops; a send the socket refuses
-   * leaves the key absent so the next description tries again.
-   */
+  /** Ask for the pixels behind a placement, once. A send the socket refuses
+   * leaves the key absent, so the next description tries again. */
   ensure(sessionId: string, imageId: number, generation: number): void {
     if (this.status(sessionId, imageId, generation) !== 'absent') return;
     const request = requestKey(sessionId, imageId);
     const waiting = this.inFlight.get(request);
     if (waiting) {
-      // A pull for this image is already out; it answers with whatever
-      // generation the daemon holds, and this generation is waiting on it too.
       waiting.add(generation);
       return;
     }
@@ -141,12 +116,8 @@ export class KittyImageCache {
     this.notify(blob.sessionId, blob.imageId);
   }
 
-  /**
-   * Record that a pull produced no pixels. The answer names no generation — an
-   * evicted or unknown image has none — so every generation that was waiting on
-   * this request is marked, and each stops being asked for. A retransmission
-   * mints a new generation, which is a new key and gets a fresh pull.
-   */
+  /** Record that a pull produced no pixels. The answer names no generation, so
+   * every generation waiting on the request is marked and stops being asked. */
   markFailed(sessionId: string, imageId: number, reason: string): void {
     const request = requestKey(sessionId, imageId);
     const waiting = this.inFlight.get(request);
@@ -173,10 +144,8 @@ export class KittyImageCache {
     this.totalBytes -= existing.bytes;
   }
 
-  // Make room for `bytes`, oldest first. An image larger than the whole cache
-  // is stored anyway once everything else is gone: refusing it would leave a
-  // placement that can never draw, and a budget a legitimate image cannot fit
-  // in is a budget that needs remeasuring — so it says so instead of hiding.
+  // Make room for `bytes`, oldest first. An image larger than the whole cache is
+  // stored anyway and says so: the limit needs remeasuring, not the image dropped.
   private evictFor(bytes: number, incoming: KittyImageBlob): void {
     while (this.totalBytes + bytes > this.capacityBytes && this.entries.size > 0) {
       const held = this.totalBytes;
@@ -202,10 +171,10 @@ export class KittyImageCache {
   }
 }
 
-/** The one cache the app uses; panes and the socket both reach it here. */
+/** The one cache the app uses. */
 export const kittyImageCache = new KittyImageCache();
 
-/** The kitty_image_result fields this reads — the JSON half of both transports. */
+/** The kitty_image_result fields this reads. */
 export interface KittyImageResultLike {
   id?: string;
   image_id?: number;
@@ -217,12 +186,9 @@ export interface KittyImageResultLike {
   data_b64?: string;
 }
 
-/**
- * The blob a successful kitty_image_result carries, or null when the answer is
- * a failure or is missing anything the pixels cannot be read without. Both
- * transports must land the same blob in the cache, so the JSON path is a
- * conversion rather than a second shape.
- */
+/** The blob a successful kitty_image_result carries, or null when it fails or
+ * lacks a field the pixels cannot be read without. Both transports must land the
+ * same blob, so this is a conversion rather than a second shape. */
 export function kittyImageBlobFromResult(result: KittyImageResultLike): KittyImageBlob | null {
   if (!result.success || !result.id || typeof result.image_id !== 'number') return null;
   const format = typeof result.format === 'string' ? kittyPixelFormatFromName(result.format) : null;

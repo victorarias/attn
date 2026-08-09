@@ -2,17 +2,12 @@ import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookSurface, type NotebookSurfaceHandle } from '../NotebookSurface';
 
-// NotebookTile is the in-workspace shape of the Notebook: a `tile`-variant
-// NotebookSurface wired to the daemon via context. It reopens to `initialPath`
-// (the tile's persisted file) and reports each opened file back so the tile's
-// params persist the new path. A tile is always active once mounted.
+// The in-workspace shape of the Notebook: a `tile`-variant NotebookSurface wired
+// to the daemon via context, reopening to the tile's persisted `initialPath`.
 //
-// `root`, when set, pins the tile to an arbitrary filesystem root instead of
-// the notebook storage root (editor-over-arbitrary-roots). A root-bound tile
-// also owns its own fs_watch subscription — the notebook root is watched by
-// the daemon unconditionally, but nothing else is, so a tile is the one
-// deciding when it needs live updates for its root and dropping that
-// subscription when it stops needing them.
+// `root` pins the tile to a filesystem root other than the notebook storage
+// root. The daemon watches the notebook root unconditionally and nothing else,
+// so a root-bound tile owns its own fs_watch subscription.
 export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
   initialPath: string | null;
   root?: string;
@@ -24,47 +19,35 @@ export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
 }, ref) {
   const { makeDaemon, effectiveNotebookRoot, sendFsWatch, sendFsUnwatch, connectionGeneration } = useNotebookSurfaceContext();
 
-  // Off-root: this tile is pinned to a filesystem root other than the notebook
-  // storage root. Notebook-only affordances (backlinks, send-to-chief) are
-  // gated off below — mirrors the same root-vs-notebook-root comparison the
-  // fs_watch effect uses (line ~46) so on-root/off-root agree everywhere.
+  // Gates the notebook-only affordances below; the fs_watch effect makes the
+  // same comparison, so on-root/off-root agree everywhere.
   const offRoot = !!root && root !== effectiveNotebookRoot;
 
-  // fs_watch_result may normalize `root` (e.g. macOS resolving /tmp to
-  // /private/tmp) — and fs_changed events for this subscription carry that
-  // resolved form, not the raw prop. Once resolution lands, both the fs_*
-  // calls and the changeSignal lookup must use it, or a root-bound tile's
-  // live refresh is silently dead. Reset on every root change so a stale
-  // resolution from a previous root never leaks into the new one.
+  // fs_watch_result may normalize `root` (/tmp -> /private/tmp), and fs_changed
+  // carries the resolved form, so fs_* calls and changeSignal must use it or the
+  // live refresh is silently dead. Reset per root change, never leaking a stale one.
   const [resolvedRoot, setResolvedRoot] = useState<string | null>(null);
   const effectiveRoot = root ? (resolvedRoot ?? root) : undefined;
   const daemon = useMemo(() => makeDaemon(effectiveRoot), [makeDaemon, effectiveRoot]);
 
-  // The root this tile is actually subscribed to via fs_watch, so the effect's
-  // cleanup unwatches the resolution the daemon echoed back — not necessarily
-  // the raw `root` prop, which fs_watch_result may have normalized.
+  // Cleanup must unwatch the resolution the daemon echoed back, not the raw prop.
   const watchedRootRef = useRef<string | null>(null);
 
   useEffect(() => {
     setResolvedRoot(null);
-    // The notebook root is watched by the daemon unconditionally; only an
-    // arbitrary, distinct root needs this tile to open its own subscription.
+    // Only a distinct root needs a subscription of its own.
     if (!root || root === effectiveNotebookRoot) {
       return;
     }
-    // connectionGeneration is a dep (not read below) purely to force this
-    // effect to re-run on every fresh WebSocket connect: the daemon drops
-    // this tile's explicit fs_watch ref whenever the socket disconnects, but
-    // a normal frontend reconnect leaves the tile mounted and these callback
-    // identities intact, so nothing else here would re-fire the subscription.
+    // connectionGeneration is a dep, unread, purely to re-run on every fresh
+    // connect: the daemon drops the fs_watch ref on disconnect and nothing else
+    // here changes identity, so no other dep would re-subscribe.
     let cancelled = false;
     sendFsWatch(root)
       .then((result) => {
         if (cancelled) {
-          // The tile unmounted (or root changed) before this resolved: the
-          // daemon-side watcher was just established, so it must still be
-          // dropped here — the cleanup below already ran and saw no
-          // watchedRootRef to unwatch, so this is the only chance.
+          // Cleanup already ran with no watchedRootRef, so this late-established
+          // watcher can only be dropped here.
           sendFsUnwatch(result.root).catch((error) => {
             console.warn('[NotebookTile] fs_unwatch failed for root', result.root, error);
           });
@@ -74,8 +57,7 @@ export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
         setResolvedRoot(result.root);
       })
       .catch((error) => {
-        // The tile still works without live refresh (e.g. the daemon's watch
-        // cap is reached) — just no fs_changed-driven reload for this root.
+        // Still usable without live refresh; just no fs_changed-driven reload.
         console.warn('[NotebookTile] fs_watch failed for root', root, error);
       });
     return () => {
@@ -94,21 +76,12 @@ export const NotebookTile = forwardRef<NotebookSurfaceHandle, {
 
   return (
     <NotebookSurface
-      // Remount on root change: NotebookSurface's init effect only depends on
-      // `active`, so without a key change, switching roots via the header
-      // switcher leaves selectedPath/note/draft carrying over from the old
-      // root while the daemon rebinds underneath — the next autosave can then
-      // write the old document's buffer to the same relative path under the
-      // NEW root. Keying on `root` forces a fresh mount (fresh state, fresh
-      // init effect) on every root change.
-      //
-      // This is the RAW `root` prop, not effectiveRoot/resolvedRoot above:
-      // fs_watch_result can normalize the path (e.g. /tmp -> /private/tmp
-      // on macOS), and that normalization must never itself trigger a
-      // remount — only a real root change (a new raw prop value) should.
-      // The root switcher (WorkspaceDockTile) awaits flushPendingSave()
-      // BEFORE updating params, so the old instance persists to the old
-      // root before this key ever changes.
+      // Remount on root change: the surface's init effect depends only on
+      // `active`, so without a fresh key the old root's draft survives the swap
+      // and the next autosave writes it under the NEW root. The RAW prop, never
+      // the resolved one — a path normalization must not force a remount. The
+      // switcher awaits flushPendingSave() before params change, so the old
+      // instance has already persisted to the old root.
       key={root ?? ''}
       ref={ref}
       variant="tile"

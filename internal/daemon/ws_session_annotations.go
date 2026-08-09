@@ -10,25 +10,14 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// Terminal annotations are persisted per session, keyed by session id, and the
-// point of persisting them is that the user's marks are work: they survive the
-// turn scrolling away, the pane unmounting, the app quitting, and the machine
-// rebooting. Nothing about an annotation lives only in a frontend ref.
-//
-// Whole-list saves under a monotonic generation, with clear as a tombstone —
-// the same ordering rule as markdown annotation drafts, implemented once in
-// store/annotation_drafts.go. A save that does not clear the floor comes back
-// stale=true, success=false, which the client treats as benign and re-hydrates
-// from.
-//
-// There are deliberately no broadcast events. The writer is the pane that
-// renders, and the generation floor makes a second writer re-hydrate rather
-// than corrupt the list; live cross-pane sync would need a broadcast and is not
-// a flow today.
+// Terminal annotations persist per session: whole-list saves under a monotonic
+// generation with clear as a tombstone, the ordering rule implemented once in
+// store/annotation_drafts.go. A save below the floor returns stale=true,
+// success=false and the client re-hydrates. No broadcast events by design —
+// live cross-pane sync is not a flow today.
 
 // handleSessionAnnotationsGet replies with a session's persisted annotations.
-// generation is the current floor — max(stored generation, tombstone) — so a
-// re-mounting client seeds its counter past a send that already cleared them.
+// generation is the floor, so a re-mounting client seeds past an earlier clear.
 func (d *Daemon) handleSessionAnnotationsGet(client *wsClient, msg *protocol.SessionAnnotationsGetMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	result := protocol.SessionAnnotationsGetResultMessage{
@@ -145,28 +134,14 @@ func (d *Daemon) handleSessionAnnotationsClear(client *wsClient, msg *protocol.S
 	d.sendToClient(client, result)
 }
 
-// handleSessionAnnotationsSubmit delivers composed annotation feedback into a
-// session through typeDoorbell — bracketed paste, the measured gap, then Enter
-// — so "Send all" both types and submits.
-//
-// The delivery is the daemon's business even though the text is the client's.
-// Three things only reachable here make the difference between a submit and a
-// paste that happens to end in a carriage return:
-//
-//   - The approval guard. pending_approval is an annotatable state (an approval
-//     prompt is exactly when a user wants to push back), but it is also a state
-//     where Enter answers the prompt. typeDoorbell refuses, and the client is
-//     told to keep the marks and retry rather than having them spent on a
-//     y/n it never meant to answer.
-//   - The PTY write fence, which keeps a keystroke racing the gap from landing
-//     between the paste and its Enter.
-//   - The gap itself. An Enter arriving in the same PTY read as the paste
-//     terminator is folded into the pasted text, so the payload sits in the
-//     composer and never submits — see doorbellSubmitDelay's receipt.
-//
-// The annotations are not cleared here. Unlike a markdown draft, whose payload
-// the daemon composes from what it stores, the client composed this one and
-// clears its own list on a delivered result.
+// handleSessionAnnotationsSubmit delivers composed annotation feedback through
+// typeDoorbell — bracketed paste, the measured gap, then Enter. The daemon owns
+// delivery for three reasons only reachable here: the approval guard (Enter in
+// pending_approval would answer the prompt, so the submit is refused and the
+// client keeps its marks), the PTY write fence, and the gap itself (an Enter in
+// the same read as the paste terminator is folded into the pasted text — see
+// doorbellSubmitDelay's receipt). Annotations are not cleared here; the client
+// composed the payload and clears its own list on a delivered result.
 func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.SessionAnnotationsSubmitMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	result := protocol.SessionAnnotationsSubmitResultMessage{

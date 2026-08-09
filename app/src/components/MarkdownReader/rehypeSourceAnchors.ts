@@ -1,35 +1,19 @@
 /**
- * rehypeSourceAnchors — stamps stable anchoring attributes onto the hast tree
- * so rendered markdown blocks can be traced back to raw-file source lines.
+ * Stamps stable anchoring attributes onto the hast tree so rendered blocks
+ * trace back to raw-file source lines. Every top-level block element, plus
+ * every `<li>` anywhere, gets `data-block-id` (deterministic: document-order
+ * index + node type, so identical content yields identical ids) and
+ * `data-source-line`/`-end` (1-based, in the RAW file).
  *
- * Every top-level block element, plus every `<li>` anywhere in the tree
- * (list items anchor individually), receives:
- *
- * - `data-block-id`      deterministic id derived from document-order index +
- *                        node type (e.g. `b3-paragraph`). Identical content
- *                        always produces identical ids.
- * - `data-source-line`     1-based first line of the block in the RAW file.
- * - `data-source-line-end` 1-based last line of the block in the RAW file.
- *
- * Nodes without a source position (plugin-generated) get NO data attributes —
- * skip, don't guess — and don't consume an index slot.
- *
- * Frontmatter awareness: markdown positions are relative to the string that
- * was parsed. When the caller strips YAML frontmatter (or any prefix) before
- * parsing, it must pass `lineOffset` = number of raw-file lines removed, so
- * stamped lines always reflect the raw file (the `contentStartLine` lesson).
- *
- * Pure function of the tree — no DOM, no React.
+ * Markdown positions are relative to the parsed string, so a caller that
+ * strips frontmatter must pass `lineOffset` = raw lines removed. Pure over the
+ * tree — no DOM, no React.
  */
 
 import type { Element, Root, RootContent } from "hast";
 
 export interface RehypeSourceAnchorsOptions {
-  /**
-   * Number of raw-file lines stripped before the parsed content began.
-   * Example: a raw file whose first 4 lines were removed (3 frontmatter
-   * lines + 1 blank) parses with line 1 = raw line 5, so pass 4.
-   */
+  /** Raw-file lines stripped before the parsed content began. */
   lineOffset?: number;
 }
 
@@ -55,12 +39,9 @@ function blockType(tagName: string): string {
 }
 
 /**
- * Stamps the node and returns true, or returns false untouched when the node
- * has no source position (plugin-generated nodes): per the anchoring contract,
- * "stamped" always means "fully anchored" — a block id without a line range is
- * an inconsistent state downstream anchor code would have to special-case, and
- * an unstamped node must not consume an index slot (so its presence never
- * shifts the ids of real source blocks).
+ * Stamped always means fully anchored, so a node with no source position is
+ * left untouched (false) and must not consume an index slot — consuming one
+ * would shift the ids of real source blocks.
  */
 function stamp(node: Element, index: number, lineOffset: number): boolean {
   const position = node.position;
@@ -82,11 +63,6 @@ function isElement(node: Root | RootContent): node is Element {
   return node.type === "element";
 }
 
-/**
- * Rehype plugin. Usable directly in react-markdown's `rehypePlugins`:
- *
- *   rehypePlugins={[[rehypeSourceAnchors, { lineOffset }]]}
- */
 export default function rehypeSourceAnchors(
   options: RehypeSourceAnchorsOptions = {},
 ) {

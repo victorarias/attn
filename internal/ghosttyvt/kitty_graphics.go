@@ -1,15 +1,10 @@
 //go:build (darwin && arm64) || (linux && amd64) || (linux && arm64)
 
-// Kitty graphics observation. The worker never implements kitty semantics: it
-// reads back what ghostty's parser already decided — which images exist, where
-// their placements landed — and diffs consecutive observations. Everything here
-// is read-only with respect to the terminal.
-//
-// Handle lifetime is the whole design constraint. The storage handle and every
-// image handle are borrowed from the terminal and die on the next mutating call
-// (vt_write, resize, reset). So every exported method takes t.mu — the same lock
-// every mutation takes — copies what it needs into Go memory, and returns owned
-// data. Nothing borrowed escapes the lock.
+// Kitty graphics observation: read-only readback of what ghostty's parser
+// already decided. Storage and image handles are borrowed from the terminal and
+// die on the next mutating call (vt_write, resize, reset), so every exported
+// method takes t.mu, copies into Go memory, and returns owned data. Nothing
+// borrowed escapes the lock.
 package ghosttyvt
 
 /*
@@ -148,9 +143,8 @@ func installPNGDecoder() {
 	pngDecoderOnce.Do(func() { pngDecoderRC = C.ghosttyvt_install_png_decoder() })
 }
 
-// KittyImageFormat is the pixel layout of a stored kitty image. PNG is absent
-// on purpose: ghostty decodes PNG payloads to RGBA before storing, so a stored
-// image is always raw pixels.
+// KittyImageFormat is a stored image's pixel layout; never PNG, which ghostty
+// decodes to RGBA before storing.
 type KittyImageFormat uint8
 
 const (
@@ -160,15 +154,11 @@ const (
 	KittyImageGray
 )
 
-// KittyPlacement is one placement observed in the active screen's storage,
-// geometry resolved at observation time (viewport-relative; scrolling moves
-// placements between observations without changing the generation stamp).
-//
-// ImageGeneration is PROCESS-LOCAL, like every stamp in this file: ghostty
-// numbers them per process, so two terminals mint the same numbers for
-// different pixels. internal/pty folds a per-terminal-instance epoch into every
-// generation before it leaves the worker (mintKittyEpoch in
-// internal/pty/kitty.go); nothing here does, and nothing here should.
+// KittyPlacement is one placement in the active screen's storage, geometry
+// resolved at observation time (viewport-relative; scrolling moves placements
+// without changing the generation stamp). ImageGeneration is PROCESS-LOCAL, so
+// two terminals mint the same numbers for different pixels; internal/pty folds a
+// per-instance epoch in before it leaves the worker, and nothing here should.
 type KittyPlacement struct {
 	ImageID         uint32
 	PlacementID     uint32
@@ -188,11 +178,8 @@ type KittyPlacement struct {
 	ImageGeneration uint64 // per-image stamp; changes on any retransmission of the id
 }
 
-// KittyImage is a decoded, uncompressed image copied out of the storage.
-// Format is never PNG (ghostty decodes PNG to RGBA before storing) and the
-// data is never compressed. Generation is the same process-local stamp
-// KittyPlacement.ImageGeneration carries, and gets the same epoch folded into
-// it on the way out of the worker.
+// KittyImage is a decoded, uncompressed image copied out of the storage;
+// Generation is the same process-local stamp KittyPlacement carries.
 type KittyImage struct {
 	ID         uint32
 	Width      uint32
@@ -202,19 +189,10 @@ type KittyImage struct {
 	Data       []byte
 }
 
-// KittyGeneration returns the storage-wide generation stamp of the ACTIVE
-// screen's kitty image storage. Zero means never mutated (and thus empty).
-// Stamps are unique and monotonically increasing process-wide; an unchanged
-// value guarantees the placement set and all image data are identical.
-//
-// The converse does not hold: a nonzero stamp does not mean images exist.
-// Applying a zero storage limit deletes everything, and that deletion takes a
-// stamp of its own — so a terminal with kitty disabled reports nonzero and
-// empty. Only a *changed* stamp means "observe again".
-//
-// Unlike the per-image stamps, this one is used raw wherever it is read: it is
-// a change detector that never leaves the process, so it needs none of the
-// identity epoching internal/pty applies to what it describes to clients.
+// KittyGeneration is the ACTIVE screen storage's generation stamp. An unchanged
+// stamp guarantees identical placements and image data; the converse does not
+// hold (a nonzero stamp can be empty storage), so only a *changed* stamp means
+// "observe again". Used raw: it never leaves the process.
 func (t *Terminal) KittyGeneration() uint64 {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -224,13 +202,9 @@ func (t *Terminal) KittyGeneration() uint64 {
 	return uint64(C.ghosttyvt_kitty_generation(C.ghosttyvt_kitty_storage(t.term)))
 }
 
-// KittyPlacements snapshots every placement in the active screen's storage,
-// in iterator order. All data is copied out; the result stays valid across
-// later terminal mutations.
-//
-// This is the one place that creates a placement iterator, so "every path frees
-// it" is a property of this function alone. The free is deferred in a closure
-// rather than by value because populating the iterator may replace the handle.
+// KittyPlacements snapshots the active screen's placements, copied out so they
+// survive later mutations. The iterator free is deferred in a closure, not by
+// value: populating it may replace the handle.
 func (t *Terminal) KittyPlacements() []KittyPlacement {
 	t.mu.Lock()
 	defer t.mu.Unlock()
@@ -294,10 +268,8 @@ func (t *Terminal) KittyImage(id uint32) (KittyImage, bool) {
 	if !C.ghosttyvt_kitty_image_read(g, C.uint32_t(id), &rec) {
 		return KittyImage{}, false
 	}
-	// Both branches are documented as impossible for a stored image (PNG is
-	// decoded and zlib is inflated at transmission time). Reporting "no image"
-	// beats handing a consumer bytes whose layout does not match the format it
-	// was told.
+	// Both are documented as impossible for a stored image; "no image" beats
+	// bytes whose layout contradicts their format.
 	format, ok := kittyFormat(rec.format)
 	if !ok || rec.compression != C.GHOSTTY_KITTY_IMAGE_COMPRESSION_NONE {
 		return KittyImage{}, false

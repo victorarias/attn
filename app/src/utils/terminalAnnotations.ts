@@ -1,24 +1,11 @@
 // Annotations on an agent's messages, anchored to markdown offsets and painted
 // over whichever terminal rows currently show that markdown.
 //
-// The store owns four things the pure aligner does not: which messages are
-// annotatable, which message each annotation belongs to, when a cached
-// alignment stops being usable, and the gate that decides whether a wash may be
-// painted at all.
-//
-// The gate is the important one. Before emitting a wash, the store re-reads the
-// text sitting at the rows it is about to paint and confirms it still quotes the
-// anchored text. Measured live, every wash that would have landed on words the
-// agent did not write came from an alignment that had outlived the writes which
-// moved the text; the gate turns each of those into a refusal — a wash that
-// vanishes for a frame — instead of a misattribution.
-//
-// Many messages, not one. An annotation is about what the agent said, and the
-// agent saying something else afterwards is not a reason to lose it, so every
-// message in the annotatable window carries its own alignment and its own
-// annotations. Offsets address one specific markdown string, which is why they
-// are stored beside the key of the message they address rather than against
-// whatever the newest turn happens to be.
+// The gate is the invariant: before emitting a wash the store re-reads the text
+// at the rows it is about to paint and confirms it still quotes the anchor, so a
+// stale alignment costs a refusal rather than a misattribution. Every message in
+// the annotatable window carries its own alignment and annotations, because
+// offsets address one specific markdown string.
 //
 // See docs/decisions/2026-08-02-terminal-annotations-anchor-to-the-transcript.md.
 
@@ -36,36 +23,32 @@ export interface MessageRowAccess {
   cols(): number;
   totalRows(): number;
   rowText(bufferRow: number): string;
-  // Text between two code-unit columns of a row. The gate reads exactly the
-  // cells a wash would cover, so a wash that drifted sideways is caught rather
-  // than excused by the rest of the row's words.
+  // Text between two code-unit columns: the gate reads exactly the cells a wash
+  // would cover, so sideways drift is caught.
   rowTextRange(bufferRow: number, startCol: number, endCol: number): string;
 }
 
-// One assistant message that can be annotated, as the daemon serves it.
+// One assistant message that can be annotated.
 export interface AnnotatableMessage {
   key: string;
   markdown: string;
 }
 
 export interface TerminalAnnotation {
-  // Stable for the life of the annotation, across saves and reloads.
   id: string;
-  // Which message the offsets address.
   messageKey: string;
   // Offsets into that message's markdown (UTF-16 code units).
   start: number;
   end: number;
-  // The markdown the offsets covered when the annotation was made. Kept so the
-  // panel can list it, and the draft can be submitted, even when the message
-  // has fallen out of the annotatable window.
+  // The markdown the offsets covered when made; kept so the panel still lists
+  // an annotation whose message fell out of the window.
   quote: string;
   emoji: string;
   comment: string;
 }
 
-// A wash that passed the gate, in BUFFER rows. Callers convert to viewport rows
-// at paint time; a viewport row shifts under scroll and must never be stored.
+// A wash that passed the gate, in BUFFER rows — a viewport row shifts under
+// scroll and must never be stored.
 export interface AnnotationWash {
   annotationId: string;
   rows: RowRange[];
@@ -79,11 +62,9 @@ export interface MessageAnchor {
   quote: string;
 }
 
-// Cap on a whole-buffer search. Real scrollback runs far longer than any single
-// message, and aligning against all of it buys nothing.
+// Cap on a whole-buffer search; scrollback far outruns any single message.
 const ALIGN_WINDOW_ROWS = 2000;
-// How far either side of the last known span to search once the message's
-// location is known. Bounds the per-frame cost independently of scrollback size.
+// Search margin around the last known span; bounds per-frame cost.
 const LOCAL_MARGIN_ROWS = 60;
 
 interface AlignmentCache {
@@ -98,8 +79,7 @@ interface AlignmentCache {
 
 function newAnnotationId(): string {
   const uuid = globalThis.crypto?.randomUUID?.();
-  // A WebView without randomUUID would otherwise hand every annotation the same
-  // id, which the persisted list keys on.
+  // A WebView without randomUUID must not hand every annotation the same id.
   return uuid ?? `anno-${Math.random().toString(36).slice(2)}-${Date.now().toString(36)}`;
 }
 
@@ -108,20 +88,15 @@ export class TerminalAnnotationStore {
   private messages: AnnotatableMessage[] = [];
   private markdownByKey = new Map<string, string>();
   private annotations: TerminalAnnotation[] = [];
-  // One alignment per message, because each is a separate search for separate
-  // text; they invalidate together but resolve independently.
+  // One alignment per message: they invalidate together, resolve independently.
   private caches = new Map<string, AlignmentCache>();
 
   private writeGeneration = 0;
   private geometryGeneration = 0;
 
-  // Replaces the annotatable window. Annotations are kept: they address message
-  // keys, and a key that is still in the window still paints. One that has
-  // fallen out keeps its quote and stays in the panel — it is the user's work,
-  // and losing it because a turn scrolled away is the bug this exists to fix.
-  //
-  // Returns whether the window actually changed, so a caller can skip a repaint
-  // for the common case of re-fetching the same turns.
+  // Replaces the annotatable window, keeping annotations (they address message
+  // keys). Returns whether the window actually changed, so re-fetching the same
+  // turns skips the repaint.
   setMessages(messages: readonly AnnotatableMessage[]): boolean {
     const same = messages.length === this.messages.length
       && messages.every((message, index) => message.key === this.messages[index].key
@@ -129,8 +104,7 @@ export class TerminalAnnotationStore {
     if (same) return false;
     this.messages = messages.map((message) => ({ ...message }));
     this.markdownByKey = new Map(this.messages.map((message) => [message.key, message.markdown]));
-    // A message whose text changed under its key would resolve against a stale
-    // alignment; dropping the caches costs one search each.
+    // Text changed under a key would resolve against a stale alignment.
     this.caches.clear();
     return true;
   }
@@ -143,8 +117,7 @@ export class TerminalAnnotationStore {
     return this.markdownByKey.get(key) ?? null;
   }
 
-  // Whether anything can be annotated right now — i.e. whether a drag over the
-  // grid could resolve to an anchor.
+  // Whether a drag over the grid could resolve to an anchor at all.
   hasMessages(): boolean {
     return this.messages.length > 0;
   }
@@ -153,8 +126,7 @@ export class TerminalAnnotationStore {
     return this.annotations;
   }
 
-  // Replaces the whole list, as hydrating from the daemon does. Ids come from
-  // the stored annotations, so a later save addresses the same entries.
+  // Replaces the whole list; ids come from the stored annotations.
   hydrate(annotations: readonly TerminalAnnotation[]): void {
     this.annotations = annotations.map((annotation) => ({ ...annotation }));
   }
@@ -194,10 +166,8 @@ export class TerminalAnnotationStore {
     this.annotations = [];
   }
 
-  // The buffer the anchors were resolved against is gone (alt-screen
-  // enter/exit, attach restore, a fresh terminal model). Only the alignments
-  // are dropped: the annotations themselves address markdown, not rows, and
-  // survive to be re-resolved against whatever the buffer becomes.
+  // The buffer the anchors resolved against is gone (alt-screen, restore, fresh
+  // model). Only alignments drop; annotations address markdown, not rows.
   reset(): void {
     this.caches.clear();
   }
@@ -214,13 +184,9 @@ export class TerminalAnnotationStore {
     this.geometryGeneration += 1;
   }
 
-  // Where to look for a message this time.
-  //
-  // A whole-buffer search costs O(scrollback). Re-confirming a message near
-  // where it was costs O(message) and is independent of scrollback, so once its
-  // location is known the per-frame cost goes flat. The margin covers the
-  // message doubling in height — a width reflow can do that — plus drift from
-  // output appended between frames.
+  // Where to look for a message this time. A whole-buffer search costs
+  // O(scrollback); re-confirming near the last span costs O(message). The margin
+  // covers the message doubling in height plus drift from appended output.
   private searchWindow(
     lastSpan: { firstRow: number; lastRow: number } | null,
     totalRows: number,
@@ -240,11 +206,8 @@ export class TerminalAnnotationStore {
     const totalRows = access.totalRows();
     const cols = access.cols();
 
-    // A span is only meaningful in the geometry it was measured in. A reflow
-    // re-lays the whole buffer, so the old rows hold different text — seeding a
-    // bounded search from them does not merely miss, it finds the message
-    // shifted and resolves a window that clips its head. Geometry changes are
-    // rare; paying for one whole-buffer search after each is cheap.
+    // A span is only meaningful in the geometry it was measured in: seeding a
+    // bounded search across a reflow resolves a window that clips the message.
     const previous = this.caches.get(key);
     let lastSpan = previous?.lastSpan ?? null;
     if (previous && (previous.cols !== cols || previous.geometryGeneration !== this.geometryGeneration)) {
@@ -261,10 +224,8 @@ export class TerminalAnnotationStore {
     let rows = readRows(base, end);
     let alignment = alignMessage(markdown, rows, base);
 
-    // Widen to the whole buffer when the bounded window missed the message, or
-    // found it pressed against an edge. An edge hit means the message probably
-    // continues outside the window, and trusting it would silently drop the part
-    // that is off-window.
+    // Widen to the whole buffer on a miss, or on an edge hit — the message
+    // probably continues outside the window.
     const missed = alignment.firstRow < 0;
     const atEdge = !missed
       && ((alignment.firstRow <= base + 1 && base > 0)
@@ -291,11 +252,8 @@ export class TerminalAnnotationStore {
     return entry;
   }
 
-  // The alignment for one message, re-computed whenever anything that could
-  // have moved the text has happened since the last one. The containment gate
-  // backs this up, so a missed invalidation costs a refusal rather than a wrong
-  // paint — but re-aligning is cheap enough that there is no reason to lean on
-  // the gate for correctness.
+  // The alignment for one message, re-computed whenever anything could have
+  // moved the text. A missed invalidation costs a refusal, not a wrong paint.
   private currentAlignment(key: string, access: MessageRowAccess): MessageAlignment | null {
     const markdown = this.markdownByKey.get(key);
     if (markdown === undefined || markdown === '') return null;
@@ -312,9 +270,8 @@ export class TerminalAnnotationStore {
     return this.align(key, markdown, access).alignment;
   }
 
-  // The per-frame entry point. Returns only washes whose rows still quote the
-  // text they were anchored to. Annotations on messages outside the window
-  // resolve to nothing, which is correct: their text is not on this grid.
+  // The per-frame entry point: only washes whose rows still quote their anchor.
+  // A message outside the window resolves to nothing; its text is not on-grid.
   project(access: MessageRowAccess): AnnotationWash[] {
     if (!this.hasWork()) return [];
     const washes: AnnotationWash[] = [];
@@ -336,12 +293,9 @@ export class TerminalAnnotationStore {
     return washes;
   }
 
-  // Which annotation covers a buffer cell, or null if none does.
-  //
-  // Resolved from the same gated projection the paint uses, so the affordance
-  // and the wash can never disagree: an annotation the gate refused this frame
-  // is invisible, and invisible things must not be clickable. A later
-  // annotation wins an overlap, because it is the one drawn on top.
+  // Which annotation covers a buffer cell. Resolved from the same gated
+  // projection the paint uses, so an annotation the gate refused is not
+  // clickable; a later annotation wins an overlap, being the one drawn on top.
   annotationAt(access: MessageRowAccess, bufferRow: number, col: number): string | null {
     let hit: string | null = null;
     for (const wash of this.project(access)) {
@@ -354,13 +308,8 @@ export class TerminalAnnotationStore {
     return hit;
   }
 
-  // Turns a drag over the grid into an anchor on whichever message the dragged
-  // rows belong to. Newest first: that is where a drag almost always lands, and
-  // stopping at the first hit keeps a normal selection to one alignment.
-  //
-  // Returns null when the selection covers no confidently-aligned words — the
-  // user dragged over the TUI's chrome, a user turn, or a message that has
-  // fallen out of the annotatable window.
+  // Turns a drag into an anchor on the message the dragged rows belong to,
+  // newest first. Null when the selection covers no confidently-aligned words.
   anchorForSelection(
     access: MessageRowAccess,
     selection: { startRow: number; startCol: number; endRow: number; endCol: number },
@@ -376,8 +325,7 @@ export class TerminalAnnotationStore {
     return null;
   }
 
-  // The rows every annotatable message currently occupies, newest first. Used
-  // to decide whether the annotation affordance is worth offering at all.
+  // The rows every annotatable message currently occupies, newest first.
   resolvedSpans(access: MessageRowAccess): Array<{ key: string; firstRow: number; lastRow: number }> {
     const spans: Array<{ key: string; firstRow: number; lastRow: number }> = [];
     for (let index = this.messages.length - 1; index >= 0; index -= 1) {

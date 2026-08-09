@@ -5,13 +5,9 @@ import {
   type WorkspaceContextKeeperModelPreset,
 } from './workspaceContextKeeper';
 
-// The keeper runs three async background duties off one durable runner. They share
-// the same {agent, model} config shape (parsed/serialized by workspaceContextKeeper)
-// and differ only in their persisted settings key, their model presets, and whether
-// a blank config means "use a built-in default" (default-configured) or "disabled"
-// (opt-in).
-// This module is the single source of truth the Settings UI reads to render one row
-// per duty.
+// The keeper's three background duties share one {agent, model} config shape and
+// differ only in settings key, model presets, and what a blank config means. The
+// single source the Settings UI renders one row per duty from.
 
 export type KeeperConfig = WorkspaceContextKeeperConfig;
 export type KeeperModelPreset = WorkspaceContextKeeperModelPreset;
@@ -25,38 +21,26 @@ export type KeeperDutyKey = 'summarize' | 'narrate' | 'compact';
 
 export interface KeeperDutyDescriptor {
   key: KeeperDutyKey;
-  /** The persisted settings key the daemon reads for this duty. */
   settingKey: string;
-  /** Optional persisted default-on runtime switch, independent of agent/model config. */
+  /** Runtime on/off switch, independent of the agent/model config. */
   enabledSettingKey?: string;
-  /** Row title. */
   title: string;
-  /** One-line summary of what the duty does. */
   description: string;
-  /** data-testid prefix for this row's controls. */
   testIdPrefix: string;
   /**
-   * opt-in duties (compaction) treat a blank config as DISABLED and expose a
-   * "Disabled" agent option plus a Disable button. Default-configured duties
-   * (summarize, narrate) fall back to a built-in tier default when blank, so
-   * they offer no Disabled agent and a "Use default" reset instead. Runtime
-   * enable switches are separate from this agent/model config behavior.
+   * A blank config means disabled for an opt-in duty, and the built-in tier
+   * default for the rest — which is what decides between offering a "Disabled"
+   * agent option and offering a "Use default" reset.
    */
   optInOnly: boolean;
-  /**
-   * Human label for the built-in default a default-configured duty resolves to when unset,
-   * shown in the row hint. Empty for opt-in duties (blank means off, not a default).
-   */
+  /** Row-hint label for the built-in default; empty for opt-in duties. */
   defaultLabel: string;
   /** Per-agent model presets; the FIRST entry is the recommended default. */
   modelPresets: (agent: SessionAgent | '') => readonly KeeperModelPreset[];
 }
 
-// Summarize is the CHEAP tier (one digest per finished session); the recommended
-// model is the smallest competent one. Narrate is the STRONG tier (curates the
-// journal); it leans one notch stronger. Compaction reuses the shipped
-// workspaceContextKeeper presets so its recommended defaults stay byte-identical to
-// the pre-unification behavior (claude -> opus, codex -> gpt-5.4).
+// Summarize is the cheap tier, narrate the strong one; compaction reuses the
+// workspaceContextKeeper presets unchanged.
 const SUMMARIZE_PRESETS: Partial<Record<SessionAgent, readonly KeeperModelPreset[]>> = {
   claude: [
     { value: 'haiku', label: 'Haiku (Recommended — cheap)' },
@@ -142,10 +126,8 @@ export function isKeeperDutyModelPreset(
 }
 
 /**
- * keeperDutyModelSelection maps the draft (agent, model) to the value the model
- * <select> should show: empty when no agent is chosen, the preset value when the
- * model matches a preset, or the sentinel 'custom' when it is a free-form model the
- * presets don't cover (so the custom input reveals).
+ * The value the model <select> shows: the preset, or the 'custom' sentinel that
+ * reveals the free-form input for a model no preset covers.
  */
 export function keeperDutyModelSelection(
   dutyKey: KeeperDutyKey,

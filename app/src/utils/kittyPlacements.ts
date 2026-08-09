@@ -1,16 +1,9 @@
 // Where a session's kitty images sit on the client's grid.
 //
-// The client never anchors a placement itself. Command blocks re-anchor by
-// their command text; an image has no text, and the model's scrollback is
-// byte-capped with no eviction counter, so an absolute row held across a long
-// session drifts by an unknowable amount. Instead the worker re-observes its
-// own grid and describes the WHOLE set whenever anything moved, and this store
-// replaces its set wholesale at each apply — mapping viewport rows to client
-// buffer rows against the scrollback length read fresh at that moment.
-//
-// Between applies a placement only moves with client-side scrolling, which the
-// buffer row already accounts for. A placement whose mapped row falls above the
-// history the client still retains is dropped: correct or absent, never guessed.
+// The client never anchors a placement itself: the worker describes the WHOLE
+// set whenever anything moved, and each apply replaces the set wholesale,
+// mapping viewport rows against the scrollback length read at that moment. A
+// placement mapping above the retained history is dropped, never guessed.
 
 import type { PlacementElement } from '../types/generated';
 
@@ -24,7 +17,7 @@ export interface PlacedKittyImage {
   /** Absolute client buffer row of the placement's top-left cell. */
   bufferRow: number;
   col: number;
-  /** Rendered size in image pixels — the only size signal; grid cells are advisory. */
+  /** Rendered size in image pixels — the only size signal; cells are advisory. */
   pixelWidth: number;
   pixelHeight: number;
   /** Source sub-rect in image pixels. All-zero width/height means the whole image. */
@@ -34,20 +27,15 @@ export interface PlacedKittyImage {
   sourceHeight: number;
 }
 
-// A wire set that has never been applied. Every seq the daemon sends is a
-// uint32, so nothing real compares below this.
+// A wire set never applied; every real seq is a uint32, so nothing sorts below.
 const NO_SEQ = -1;
 
 export class KittyPlacementStore {
   private placed: PlacedKittyImage[] = [];
   private appliedSeq = NO_SEQ;
 
-  /**
-   * Apply one described set. Accepts seq >= the last applied because a resize
-   * re-describes at the replay watermark, so equal seqs happen and both
-   * descriptions are truthful. Returns whether the set was taken, so the caller
-   * knows whether to repaint.
-   */
+  /** Apply one described set, returning whether it was taken. Equal seqs are
+   * accepted: a resize re-describes at the replay watermark. */
   apply(seq: number, wire: readonly PlacementElement[], scrollbackLength: number): boolean {
     if (seq < this.appliedSeq) return false;
     this.appliedSeq = seq;
@@ -55,13 +43,8 @@ export class KittyPlacementStore {
     return true;
   }
 
-  /**
-   * Seed from a restore snapshot. A restore resets the model, so the snapshot's
-   * set (or the empty set when it carries none) is the whole truth — anything
-   * held from before the reattach would draw over a terminal that no longer has
-   * it. The seq gate resets with it: the live stream resumes from the attach
-   * watermark, and holding a pre-restore seq would reject its first descriptions.
-   */
+  /** Seed from a restore snapshot: it is the whole truth, and the seq gate
+   * resets with it because the live stream resumes at the attach watermark. */
   seed(wire: readonly PlacementElement[], scrollbackLength: number): void {
     this.appliedSeq = NO_SEQ;
     this.placed = mapPlacements(wire, scrollbackLength);
@@ -88,16 +71,12 @@ function mapPlacements(
 ): PlacedKittyImage[] {
   const placed: PlacedKittyImage[] = [];
   for (const p of wire) {
-    // A unicode-placeholder placement has no cursor geometry — its cells are
-    // drawn by the program, not by us.
+    // A unicode-placeholder placement has no cursor geometry.
     if (p.virtual) continue;
     if (p.pixel_width <= 0 || p.pixel_height <= 0) continue;
     // viewport_row is screen-relative on the worker's grid, which equals the
-    // client's by the grid-equality invariant, and goes negative once the
-    // placement scrolls above the screen. The equality holds across resizes
-    // too: every frame — the worker's and every client's — resizes without
-    // reflow, so a width change never re-wraps one grid's history and not
-    // another's.
+    // client's: every frame resizes without reflow, so no width change re-wraps
+    // one grid's history and not another's.
     const bufferRow = scrollbackLength + p.viewport_row;
     if (bufferRow < 0) continue;
     placed.push({
@@ -115,23 +94,14 @@ function mapPlacements(
       sourceHeight: p.source_height,
     });
   }
-  // Draw order, and the order every report of the set uses. The renderer reads
-  // z again to pick which of kitty's three layers an image lands in — over the
-  // text at z >= 0, under the text below that, under non-default cell
-  // backgrounds too past KITTY_Z_UNDER_BACKGROUND — so this sort is what orders
-  // images against each other within a layer; the placement id breaks ties so
-  // the order never depends on how the worker's iterator happened to walk the
-  // storage.
+  // Draw order within a layer (the renderer reads z again to pick the layer);
+  // the placement id breaks ties so the order never depends on iteration order.
   placed.sort((a, b) => (a.z - b.z) || (a.placementId - b.placementId));
   return placed;
 }
 
-/**
- * A placement's drawable rectangle in the pane, clipped to the grid's pixel box.
- * u/v are the fractions of the placement's rendered box that survived clipping,
- * in texture order (u across, v down); placementSourceRect turns them into a
- * source sub-rect once the texture's real size is known.
- */
+/** A placement's drawable rect, clipped to the grid; u/v are the surviving
+ * fractions of the rendered box, in texture order. */
 export interface PlacementQuad {
   placement: PlacedKittyImage;
   /** Destination rect in CSS pixels, relative to the grid's top-left. */
@@ -145,18 +115,9 @@ export interface PlacementQuad {
   v1: number;
 }
 
-/**
- * Where a placement lands on screen, or null when it does not intersect the
- * viewport at all. Size comes from the rendered pixel size: grid_cols/grid_rows
- * are 0 on a fresh placement (kitty "natural size" — ghostty resolves cell
- * counts only on reflow) and are advisory even when set.
- *
- * This is the unit boundary. A placement is measured in DEVICE pixels — the
- * emitter sized it against the pixel geometry the PTY reports — while the cell
- * metrics and the grid box are CSS pixels, so the placement's box is divided by
- * devicePixelRatio here, once, before any of the clipping arithmetic mixes the
- * two. Drawn without it, an image lands devicePixelRatio times too large.
- */
+/** Where a placement lands on screen, or null when it misses the viewport. The
+ * unit boundary: placements are DEVICE pixels and the grid box is CSS pixels, so
+ * the box is divided by devicePixelRatio here, once. */
 export function placementQuad(
   placement: PlacedKittyImage,
   firstVisibleBufferRow: number,
@@ -196,12 +157,8 @@ export interface PlacementSourceRect {
   height: number;
 }
 
-/**
- * The texture sub-rect a clipped quad samples. A placement that names no source
- * rect (all zeroes, the common "draw the whole image" case) falls back to the
- * texture's own bounds — which only the caller holding the pixels knows, so the
- * clipping fractions are resolved here rather than at apply time.
- */
+/** The texture sub-rect a clipped quad samples; an all-zero source rect means
+ * the whole image, resolved against the texture's own bounds. */
 export function placementSourceRect(
   quad: PlacementQuad,
   textureWidth: number,
