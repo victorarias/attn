@@ -1,7 +1,7 @@
 kind: internal
 area: docs
 change: >
-  AGENTS.md's event-bus rules state the publish discipline plainly: publish
-  freely on real change, but a periodic loop where nothing moved this tick
-  publishes nothing, with a measured sanity ceiling (healthy fact names all
-  run under 500 facts/hour).
+  AGENTS.md's change discipline gains "idle systems must be idle": recurring
+  work — timers, watchers, changed-gates — does real work only when something
+  moved, and a gate comparing an unstable value fires forever while nothing
+  changes. New recurring work is verified silent on a quiet live session.

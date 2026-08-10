@@ -334,6 +334,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - Complexity belongs at the boundary. The daemon owns orchestration and stays
   authoritative (`applyState`, `wireProjections`); the frontend renders what it
   is told.
+- Idle systems must be idle. Anything recurring — a timer, a watcher, a "did
+  it change?" gate — does real work (publishes, pushes, scans, repaints) only
+  when something moved; a gate comparing an unstable value (clock-derived,
+  sampled) fires forever while nothing changes. Verify new recurring work
+  stays silent on a quiet live session.
 - No continuously repainting animations. attn renders GPU terminals, often on
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
@@ -466,12 +471,6 @@ carries the enumerated exception list.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor. Disabled consumers do not pin the log; they resume at head with a
   logged gap.
-- Publish freely on real change — the bus is built for it, and a fact a
-  consumer needs must never be skipped to save traffic. The one rule: a
-  publish reports a change, so a periodic loop where nothing moved this tick
-  publishes nothing. Sanity ceiling: every healthy fact name measures under
-  500 facts/hour (loudest observed: 480/h); a producer sustaining thousands
-  per hour is republishing something that did not change.
 - Operator surface: `attn bus status`, `attn bus disable|enable <consumer>`.
   The enabled bit is database-only on purpose — the kill switch must not depend
   on the daemon it kills.
