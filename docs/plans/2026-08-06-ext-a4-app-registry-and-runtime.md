@@ -470,7 +470,7 @@ dispatch uses `EnsureUnlessParked` and answers a runtime failure naming the way
 back. Re-verified: one parking, then eight minutes of traffic with the
 generation unchanged and no second notification.
 
-**Three things observed and deliberately not changed**, each a decision rather
+**Four things observed and deliberately not changed**, each a decision rather
 than a defect:
 
 - A hub-managed remote endpoint never gets a sidecar.
