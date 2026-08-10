@@ -404,6 +404,11 @@ model Ticket {
 // brief, the history thread and the artifacts are detail-sized and belong to a
 // read by id (get_ticket over the socket, ticket_show over the CLI), never to a
 // list push.
+//
+// In generated.ts quicktype names an array's element type after the property
+// that holds it, not after the model: TicketRow arrives as `TicketElement` and
+// `Ticket` as `TicketObject`. Import the aliases at the top of
+// useDaemonSocket.ts (`TicketRow`, `Ticket`) rather than either generated name.
 model TicketRow {
   id: string;
   title: string;
