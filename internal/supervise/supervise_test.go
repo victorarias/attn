@@ -335,6 +335,64 @@ func TestEnsureRevivesParkedChild(t *testing.T) {
 	}
 }
 
+// And parking is only reversible deliberately. A caller that runs per unit of
+// traffic — the app runtime's dispatch path — must leave a parked child parked,
+// or the tripwire it crossed cannot hold: traffic would hand it a fresh restart
+// budget over and over, and every parking on the way would be announced again.
+func TestEnsureUnlessParkedLeavesAParkedChildAlone(t *testing.T) {
+	clock := newFakeClock()
+	launcher := &fakeLauncher{}
+	var mu sync.Mutex
+	var gaveUp int
+	supervisor := New(Options{
+		Clock:       clock,
+		GiveUpAfter: 1,
+		OnGiveUp: func(string, Snapshot) {
+			mu.Lock()
+			gaveUp++
+			mu.Unlock()
+		},
+	})
+	_ = supervisor.EnsureUnlessParked("fixture", launcher.start)
+
+	launcher.handle(0).exit(Exit{Error: "boom"})
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseBackoff
+	})
+	clock.Advance(RestartBackoff[0])
+	waitFor(t, func() bool { return launcher.count() == 2 })
+	launcher.handle(1).exit(Exit{Error: "boom"})
+	waitFor(t, func() bool {
+		snapshot, _ := supervisor.Snapshot("fixture")
+		return snapshot.Phase == PhaseParked
+	})
+
+	// Traffic keeps arriving. None of it restarts anything, and none of it
+	// announces a second parking.
+	for range 5 {
+		if err := supervisor.EnsureUnlessParked("fixture", launcher.start); !errors.Is(err, ErrParked) {
+			t.Fatalf("EnsureUnlessParked on a parked child = %v, want ErrParked", err)
+		}
+		clock.Advance(time.Hour)
+	}
+	if got := launcher.count(); got != 2 {
+		t.Fatalf("starts = %d, want the 2 from before parking", got)
+	}
+	mu.Lock()
+	announced := gaveUp
+	mu.Unlock()
+	if announced != 1 {
+		t.Fatalf("OnGiveUp calls = %d, want 1 — one parking is one announcement", announced)
+	}
+
+	// The deliberate way back still works.
+	if err := supervisor.Ensure("fixture", launcher.start); err != nil {
+		t.Fatalf("Ensure on parked child: %v", err)
+	}
+	waitFor(t, func() bool { return launcher.count() == 3 })
+}
+
 func TestNeverParksWithNegativeGiveUpAfter(t *testing.T) {
 	clock := newFakeClock()
 	launcher := &fakeLauncher{}

@@ -242,11 +242,31 @@ func New(opts Options) *Supervisor {
 	}
 }
 
+// ErrParked says the child is one the supervisor has given up restarting, and
+// the caller asked not to revive it.
+var ErrParked = errors.New("supervise: child is parked")
+
 // Ensure declares that a named child should be running, launching it if nothing
 // is running or scheduled for it. Calling it again replaces the StartFunc used
 // by the next start and is otherwise a no-op for a live child — so it is also
 // how a parked child is revived, which resets its restart attempts.
 func (s *Supervisor) Ensure(name string, start StartFunc) error {
+	return s.ensure(name, start, true)
+}
+
+// EnsureUnlessParked is Ensure for a caller that runs per unit of traffic rather
+// than per deliberate act: it starts the child, but reports ErrParked instead of
+// reviving one the supervisor has given up on.
+//
+// Reviving has to stay deliberate. Ensure resets the restart budget, so a caller
+// on a hot path calling it makes the give-up tripwire unreachable — the child
+// crash-loops for as long as traffic keeps arriving, and every parking on the
+// way is announced again.
+func (s *Supervisor) EnsureUnlessParked(name string, start StartFunc) error {
+	return s.ensure(name, start, false)
+}
+
+func (s *Supervisor) ensure(name string, start StartFunc, revive bool) error {
 	if err := validateName(name); err != nil {
 		return err
 	}
@@ -270,6 +290,10 @@ func (s *Supervisor) Ensure(name string, start StartFunc) error {
 			return nil
 		}
 		if c.phase == PhaseParked {
+			if !revive {
+				s.mu.Unlock()
+				return ErrParked
+			}
 			c.restartAttempt = 0
 		}
 	}

@@ -952,6 +952,76 @@ func TestParkedRuntimeIsVisibleOnEveryAppAndRevivable(t *testing.T) {
 	// against a fake clock; here the stub crashes too fast to watch.
 }
 
+// Parked has to survive traffic. Dispatch is the loudest caller the runtime has
+// — one per fact, for as long as facts keep arriving — so a dispatch that
+// revived the child would give a broken host a fresh restart budget every few
+// seconds and park it again at the end of each one. Measured on a broken host
+// before the split: three parkings and three critical notifications in five and
+// a half minutes.
+func TestDispatchLeavesAParkedRuntimeParked(t *testing.T) {
+	d := newAppDaemon(t)
+	d.appRuntimeSupervise = supervise.Options{GiveUpAfter: 1}
+	installApp(t, d, "greeter", subscribing("ticket.*"))
+	t.Setenv(appRuntimeHostOverride, writeExecutableStub(t, "exit 3"))
+	t.Cleanup(d.stopAppRuntime)
+
+	if err := d.ensureAppRuntime(); err != nil {
+		t.Fatalf("ensure runtime: %v", err)
+	}
+	waitFor(t, "the crash-looping runtime to be parked", func() bool {
+		snapshot, ok := d.appRuntimeSnapshot()
+		return ok && snapshot.Phase == supervise.PhaseParked
+	})
+	parked, _ := d.appRuntimeSnapshot()
+
+	for seq := int64(1); seq <= 3; seq++ {
+		err := d.deliverAppEvent(context.Background(), "greeter", appEvent("ticket.created", "tk-1", seq))
+		if !isRuntimeFailure(err) {
+			t.Fatalf("dispatch %d into a parked runtime returned %v, want a runtime failure", seq, err)
+		}
+		// The app's owner reads this line and nothing else: it has to name the
+		// state and the one command that leaves it.
+		if !strings.Contains(err.Error(), "parked") || !strings.Contains(err.Error(), "attn app runtime restart") {
+			t.Fatalf("the dispatch error does not say what happened or how to fix it: %q", err)
+		}
+	}
+
+	after, ok := d.appRuntimeSnapshot()
+	if !ok || after.Phase != supervise.PhaseParked {
+		t.Fatalf("three dispatches moved the runtime off parked: %+v", after)
+	}
+	if after.Generation != parked.Generation {
+		t.Fatalf("generation went %d → %d, so a dispatch started the runtime again",
+			parked.Generation, after.Generation)
+	}
+	// One outage, one notification. Re-parking would write one per revival, and
+	// these are critical — the surface that cannot be ignored is the one that
+	// must not repeat.
+	if notes := appNotifications(t, d, notificationKindAppRuntimeParked); len(notes) != 1 {
+		t.Fatalf("app-runtime-parked notifications = %d, want 1", len(notes))
+	}
+	// Not the app's fault, so it must not be on the auto-disable clock while the
+	// runtime is down.
+	rows := invocationsOf(t, d, "greeter")
+	if len(rows) != 3 {
+		t.Fatalf("recorded %d invocation(s), want 3", len(rows))
+	}
+	for _, row := range rows {
+		if row.Status != appInvocationStatusRuntimeError {
+			t.Fatalf("status = %q, want %q", row.Status, appInvocationStatusRuntimeError)
+		}
+	}
+	if stall, ok := d.appStallSnapshot("greeter"); ok {
+		t.Fatalf("a parked runtime put the app on the auto-disable clock: %+v", stall)
+	}
+
+	// And the deliberate way in still revives it — the split must not turn parked
+	// into a dead end.
+	if revived := appRuntimeRestart(t, d); revived.Runtime.Phase == string(supervise.PhaseParked) {
+		t.Fatalf("restart left the runtime parked: %+v", revived.Runtime)
+	}
+}
+
 // A runtime whose api_version does not match is refused at hello rather than
 // half-served, and the refusal says it is a stale install.
 func TestRuntimeWithTheWrongAPIVersionIsRefusedAtHello(t *testing.T) {
