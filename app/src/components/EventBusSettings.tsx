@@ -145,8 +145,10 @@ export function EventBusSettings({ getBusStatus, setConsumerEnabled }: EventBusS
 
         {status.health.length > 0 && (
           <ul className="bus-health" data-testid="bus-health">
-            {status.health.map((h, i) => (
-              <li key={`${h.kind}:${h.subject}:${i}`} className={`bus-health-entry ${h.level}`}>
+            {/* kind+subject identifies a finding: health() emits at most one of
+                each kind per consumer, producer, or floor. */}
+            {status.health.map((h) => (
+              <li key={`${h.kind}:${h.subject}`} className={`bus-health-entry ${h.level}`}>
                 <span className={`settings-pill ${h.level === 'error' ? 'bad' : 'warn'}`}>
                   {h.level === 'error' ? 'Error' : 'Warning'}
                 </span>
