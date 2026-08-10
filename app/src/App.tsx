@@ -551,8 +551,16 @@ function App() {
   // beside the unread count rather than derived from a listed feed: the panel
   // only lists while open, and this surface has to be right whether or not the
   // user has ever opened it.
-  const [criticalNotifications, setCriticalNotifications] =
+  // Every broadcast carries a fresh object, so replace only on a real change:
+  // notifications_updated fires on each notification write, and a new identity
+  // for an unchanged pair would rebuild the header actions each time.
+  const [criticalNotifications, setCriticalNotificationsState] =
     useState<CriticalNotificationState>({ count: 0, title: '' });
+  const setCriticalNotifications = useCallback((next: CriticalNotificationState) => {
+    setCriticalNotificationsState((prev) =>
+      prev.count === next.count && prev.title === next.title ? prev : next,
+    );
+  }, []);
 
   // Connect to daemon WebSocket. The whole return value goes into context
   // below, for everything under AppContent; App destructures only the names
@@ -647,7 +655,7 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [hasReceivedInitialState, sendNotificationList]);
+  }, [hasReceivedInitialState, sendNotificationList, setCriticalNotifications]);
 
   // Seed the presentation-notice list once the socket is up. The
   // presentation_added/updated broadcasts keep it live thereafter.
@@ -749,6 +757,11 @@ function AppContent({
   clearGitStatus,
   registerSessionExitHandler,
 }: AppContentProps) {
+  // The bell only cares whether anything critical is unread, not how many or
+  // which — depending on the flag keeps the header actions off the broadcast's
+  // cadence and on the state change the user can actually see.
+  const hasCriticalNotification = criticalNotifications.count > 0;
+
   // Every daemon command, read from the context App publishes rather than
   // threaded down as a hundred props.
   const {
@@ -3523,7 +3536,7 @@ function AppContent({
       // The bell half of the ambient critical surface: while something critical
       // is unread the badge stops being the brand accent (see
       // CriticalNotificationStrip.css).
-      toneClassName: criticalNotifications.count > 0 ? 'has-critical' : undefined,
+      toneClassName: hasCriticalNotification ? 'has-critical' : undefined,
       onClick: toggleNotificationsPanel,
     },
     {
@@ -3547,7 +3560,7 @@ function AppContent({
     openBoardSurface,
     notificationsPanelOpen,
     notificationsUnread,
-    criticalNotifications,
+    hasCriticalNotification,
     automationsPanelOpen,
     toggleNotificationsPanel,
   ]);
