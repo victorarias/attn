@@ -82,8 +82,12 @@ type Store interface {
 	// Compact keeps only the newest fact per subject among the named ones, at or
 	// below floor.
 	Compact(names []string, floor int64) (int, error)
-	// Size reports the log's row count and event-text bytes.
-	Size() (rows, bytes int64, err error)
+	// Producers reports every fact class with its totals and its counts at or
+	// after each cutoff, loudest first. It also carries the log's row count and
+	// bytes, summed across classes — one pass answers both questions.
+	Producers(cutoffs []time.Time) ([]ProducerRow, error)
+	// EventTimeAt stamps the first event at or above seq, for age questions.
+	EventTimeAt(seq int64) (time.Time, bool, error)
 }
 
 // Handler receives one event. An error stalls the consumer with backoff and
@@ -721,76 +725,6 @@ func (b *Bus) consumerFloor() (int64, error) {
 		return 0, fmt.Errorf("reading log bounds: %w", err)
 	}
 	return head, nil
-}
-
-// ConsumerStatus is one row of Status.
-type ConsumerStatus struct {
-	Name    string
-	Cursor  int64
-	Lag     int64
-	Filter  string
-	Enabled bool
-	// Live is true when this process has a delivery loop for the consumer.
-	Live bool
-	// Stalled carries the current failure message when a handler is failing.
-	Stalled string
-}
-
-// Status reports the log head and every registration, for operator inspection.
-// Rows and Bytes are the log's actual weight — the receipt that it stays
-// proportional to the data it describes, not to write frequency.
-type Status struct {
-	Head      int64
-	Earliest  int64
-	Rows      int64
-	Bytes     int64
-	Consumers []ConsumerStatus
-}
-
-// Status snapshots the bus for `attn bus status`.
-func (b *Bus) Status() (Status, error) {
-	if b.store == nil {
-		return Status{}, nil
-	}
-	earliest, head, err := b.store.Bounds()
-	if err != nil {
-		return Status{}, err
-	}
-	rows, err := b.store.ListConsumers()
-	if err != nil {
-		return Status{}, err
-	}
-	logRows, logBytes, err := b.store.Size()
-	if err != nil {
-		return Status{}, err
-	}
-
-	b.mu.Lock()
-	live := make(map[string]*durable, len(b.durables))
-	for _, d := range b.durables {
-		live[d.name] = d
-	}
-	b.mu.Unlock()
-
-	out := Status{Head: head, Earliest: earliest, Rows: logRows, Bytes: logBytes}
-	for _, r := range rows {
-		cs := ConsumerStatus{
-			Name:    r.Name,
-			Cursor:  r.Cursor,
-			Lag:     head - r.Cursor,
-			Filter:  r.Filter,
-			Enabled: r.Enabled,
-		}
-		if cs.Lag < 0 {
-			cs.Lag = 0
-		}
-		if d, ok := live[r.Name]; ok {
-			cs.Live = true
-			cs.Stalled = d.stallReason()
-		}
-		out.Consumers = append(out.Consumers, cs)
-	}
-	return out, nil
 }
 
 func (d *durable) position() int64 {

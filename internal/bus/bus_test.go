@@ -3,6 +3,7 @@ package bus
 import (
 	"context"
 	"errors"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -195,14 +196,52 @@ func (m *memStore) Compact(names []string, floor int64) (int, error) {
 	return removed, nil
 }
 
-func (m *memStore) Size() (int64, int64, error) {
+// Producers mirrors the SQLite aggregate: one row per fact class, loudest
+// first, each carrying its totals and one count per cutoff.
+func (m *memStore) Producers(cutoffs []time.Time) ([]ProducerRow, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var bytes int64
+	byName := map[string]*ProducerRow{}
+	subjects := map[string]map[string]bool{}
 	for _, e := range m.events {
-		bytes += int64(len(e.Name) + len(e.Subject) + len(e.Payload) + len(e.Source))
+		row, ok := byName[e.Name]
+		if !ok {
+			row = &ProducerRow{Name: e.Name, Recent: make([]int64, len(cutoffs))}
+			byName[e.Name] = row
+			subjects[e.Name] = map[string]bool{}
+		}
+		row.Events++
+		row.Bytes += int64(len(e.Name) + len(e.Subject) + len(e.Payload) + len(e.Source))
+		subjects[e.Name][e.Subject] = true
+		for i, c := range cutoffs {
+			if !e.CreatedAt.Before(c) {
+				row.Recent[i]++
+			}
+		}
 	}
-	return int64(len(m.events)), bytes, nil
+	out := make([]ProducerRow, 0, len(byName))
+	for name, row := range byName {
+		row.Subjects = int64(len(subjects[name]))
+		out = append(out, *row)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Events != out[j].Events {
+			return out[i].Events > out[j].Events
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
+func (m *memStore) EventTimeAt(seq int64) (time.Time, bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for _, e := range m.events {
+		if e.Seq >= seq {
+			return e.CreatedAt, true, nil
+		}
+	}
+	return time.Time{}, false, nil
 }
 
 // appendOutOfBand puts an event on the log the way a store transaction does:
