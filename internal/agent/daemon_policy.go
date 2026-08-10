@@ -12,12 +12,6 @@ import (
 // ErrNoNewAssistantTurn indicates there is no new assistant turn to classify.
 var ErrNoNewAssistantTurn = errors.New("no new assistant turn")
 
-// SessionRecoveryPolicyProvider customizes startup behavior when a stored session
-// is missing a live PTY backend runtime.
-type SessionRecoveryPolicyProvider interface {
-	RecoverOnMissingPTY() bool
-}
-
 // RecoveredStatePolicyProvider customizes how a recovered session's PTY state
 // maps onto a session state at startup. The second return is whether the driver
 // has an opinion at all; see RecoveredRunningSessionState.
@@ -59,16 +53,6 @@ type TranscriptClassificationExtractor interface {
 // that need an explicit executable path at classification time.
 type ExecutableClassifierProvider interface {
 	ClassifyWithExecutable(text, executable, workDir string, timeout time.Duration) (string, error)
-}
-
-func RecoverOnMissingPTY(d Driver) bool {
-	if d == nil {
-		return false
-	}
-	if p, ok := d.(SessionRecoveryPolicyProvider); ok {
-		return p.RecoverOnMissingPTY()
-	}
-	return false
 }
 
 // RecoveredRunningSessionState maps a recovered worker's cached PTY state onto a

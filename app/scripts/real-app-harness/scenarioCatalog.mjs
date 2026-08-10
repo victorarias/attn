@@ -245,6 +245,12 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'crash-recovery',
+    label: 'A machine crash keeps every session it can bring back and reaps the rest',
+    command: ['pnpm', 'run', 'real-app:scenario-crash-recovery'],
+    timeoutMs: 360_000,
+  },
+  {
     id: 'ghostty-scroll',
     label: 'Ghostty scrollback anchoring while output streams',
     command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],

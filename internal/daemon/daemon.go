@@ -1175,7 +1175,10 @@ func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 		if sessionUpdatedAfter(session, cutoff) {
 			continue
 		}
-		if d.recoverOnMissingPTY(session) {
+		if d.canReviveSession(session) {
+			if session.State == protocol.SessionStateRecoverable {
+				continue
+			}
 			d.applyState(sessionStateChange{
 				sessionID: session.ID,
 				state:     string(protocol.SessionStateRecoverable),
@@ -1193,35 +1196,71 @@ func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 	return removed
 }
 
-func (d *Daemon) recoverOnMissingPTY(session *protocol.Session) bool {
-	if session == nil {
+// canReviveSession is the whole crash-recovery decision: whether the daemon
+// still holds, durably, what it takes to bring this session's conversation
+// back. Every session whose runtime is gone passes through it — kept as
+// `recoverable` when it holds, reaped when it does not.
+//
+// What the session was last seen doing is no part of it: a crash takes `idle`,
+// `working`, `waiting_input`, and `pending_approval` sessions down together and
+// leaves them equally resumable, so activity state is context for the user,
+// never the gate. Neither is the agent's name, nor a driver's advertised
+// capability — only per-session evidence on disk that the revive path will
+// actually consume.
+func (d *Daemon) canReviveSession(session *protocol.Session) bool {
+	if session == nil || d.store == nil {
 		return false
 	}
-	if agentdriver.RecoverOnMissingPTY(agentdriver.Get(string(session.Agent))) {
+	// A close the user asked for is not a crash to come back from; the row only
+	// outlives the mark when the daemon died between marking and removing it.
+	if d.store.SessionCloseIntentional(session.ID) {
+		return false
+	}
+	// How to start the replacement. reviveSessionForAttach refuses without one,
+	// so a session missing it has no way back whatever else is on disk.
+	intent, ok := d.store.LaunchIntent(session.ID)
+	if !ok {
+		return false
+	}
+	return d.sessionConversationSurvives(session, intent)
+}
+
+// sessionConversationSurvives reports whether this session's conversation is
+// still where a replacement runtime would look for it — or that there was never
+// one to lose.
+func (d *Daemon) sessionConversationSurvives(session *protocol.Session, intent store.LaunchIntent) bool {
+	// A shell keeps no conversation; the intent describes it completely.
+	if string(session.Agent) == protocol.AgentShellValue {
 		return true
 	}
-	if run := d.store.GetAgentDriverRun(session.ID); run.RunID != "" {
+	// A PTY agent resumes from an agent-native id attn persisted, and its driver
+	// is what knows whether that target is still on disk — the same question the
+	// spawn and reload paths ask before handing the id to the agent.
+	driver := agentdriver.Get(string(session.Agent))
+	resumeID := agentdriver.ResolveSpawnResumeSessionID(driver, session.ID, "", d.store.GetResumeSessionID(session.ID))
+	if agentdriver.ResumeAvailable(driver, resumeID) {
 		return true
 	}
-	if strings.TrimSpace(d.store.GetAgentMetadata(session.ID)) != "" {
+	// A conversation host's history is a file under attn's data dir that a
+	// replacement reopens. Before it has written one, what the replacement opens
+	// instead is the intent's own seed: the conversation it was forked from, or
+	// the brief it never got to say.
+	if hostSessionStateDirHoldsConversation(session.ID) {
 		return true
 	}
-	if d.plugins != nil {
-		if driver, ok := d.plugins.driver(string(session.Agent)); ok {
-			if driver.Capabilities["resume"] {
-				return true
-			}
-			// A conversation session is recoverable by definition: its whole
-			// history is the host's own session file under attn's data dir, and a
-			// replacement host reopens it. There is no `resume` capability to
-			// declare — that one describes a driver that can resume a PTY agent's
-			// transcript from an argv flag, which a host does not have.
-			if driver.Capabilities[pluginDriverConversationCapability] {
-				return true
-			}
+	if strings.TrimSpace(intent.InitialPrompt) != "" {
+		return true
+	}
+	if resumeFile := strings.TrimSpace(intent.ResumeConversationFile); resumeFile != "" {
+		if _, err := os.Stat(resumeFile); err == nil {
+			return true
 		}
 	}
-	return false
+	// A plugin runtime keeps its own history and leaves attn a per-session
+	// handle to it. Read from the store, not asked of the plugin: at startup the
+	// plugin has usually not reconnected.
+	return d.store.GetAgentDriverRun(session.ID).RunID != "" ||
+		strings.TrimSpace(d.store.GetAgentMetadata(session.ID)) != ""
 }
 
 func (d *Daemon) pluginDriverReportsState(agent protocol.SessionAgent) bool {
@@ -1524,9 +1563,6 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 		if _, ok := liveIDs[session.ID]; ok {
 			continue
 		}
-		if session.State == protocol.SessionStateIdle || session.State == protocol.SessionStateRecoverable {
-			continue
-		}
 		if sessionUpdatedAfter(session, demotionCutoff) {
 			report.SkippedRecent++
 			continue
@@ -1547,7 +1583,11 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.SkippedIdle++
 			continue
 		}
-		if d.recoverOnMissingPTY(session) {
+		if d.canReviveSession(session) {
+			// Already parked there by an earlier pass; the verdict has not changed.
+			if session.State == protocol.SessionStateRecoverable {
+				continue
+			}
 			d.applyState(sessionStateChange{
 				sessionID: session.ID,
 				state:     string(protocol.SessionStateRecoverable),
