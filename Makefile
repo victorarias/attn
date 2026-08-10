@@ -281,6 +281,14 @@ clean:
 	rm -f $(BINARY_NAME)
 
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
+#
+# LC_ALL=C is load-bearing, not hygiene. The `*.json` globs below are sorted by
+# the shell's collation, and quicktype names an anonymous type after whichever
+# schema it meets first — so the same inputs under en_US.UTF-8 rename types in
+# lockstep down the file (FileElement -> ChangedFileElement, and so on), a
+# ~1200-line diff that says nothing. Generating under C makes the output depend
+# only on the schemas.
+generate-types: export LC_ALL = C
 generate-types:
 	rm -rf internal/protocol/schema/tsp-output/json-schema
 	cd internal/protocol/schema && pnpm exec tsp compile .
