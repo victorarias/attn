@@ -34,6 +34,12 @@ BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 SOURCE_FINGERPRINT ?= $(shell bash ./scripts/source-fingerprint.sh --field fingerprint)
 GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
 OUTPUT ?= $(BINARY_NAME)
+# Guards the macOS-only branches below (code signing, the lsof port check). It
+# was used by three recipes and defined by none, so `$(UNAME_S)` expanded to
+# empty and `install-daemon` skipped signing entirely: the copied binary kept its
+# ad-hoc linker signature inside a properly signed bundle, and macOS answered
+# `daemon ensure` with Killed: 9.
+UNAME_S := $(shell uname -s)
 GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
 # Honor the repository's .tool-versions even when an older standalone Zig is
 # earlier on PATH (the app's WASM builder follows the same order).

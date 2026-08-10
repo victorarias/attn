@@ -1,0 +1,7 @@
+kind: fixed
+area: build
+change: >
+  `make install-daemon` signs the daemon binary again on macOS. The recipe's
+  Darwin check read `$(UNAME_S)`, which was referenced by three recipes and
+  defined by none, so signing was silently skipped and the freshly installed
+  sidecar died with `Killed: 9` at `daemon ensure`. `UNAME_S` is now defined.
