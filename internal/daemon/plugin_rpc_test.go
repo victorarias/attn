@@ -478,6 +478,98 @@ func TestDaemon_PluginHealthCheckRecordsStatus(t *testing.T) {
 	})
 }
 
+// A steady plugin costs nothing: the 15-second poll publishes a fact only when
+// the verdict moves, so an idle daemon writes no bus rows and pushes no catalog.
+func TestDaemon_PluginHealthPublishesOnlyWhenItMoves(t *testing.T) {
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		d.pluginDir = filepath.Join(t.TempDir(), "plugins")
+		writeTestPluginManifest(t, d.pluginDir, "health-provider")
+
+		client, done := startPluginPipe(t, d, "health-provider", []string{"worktree.create"})
+		defer client.Close()
+
+		plugin := d.plugins.get("health-provider")
+		if plugin == nil {
+			t.Fatal("plugin registry missing health-provider")
+		}
+
+		poll := func(answer pluginHealthResult) {
+			t.Helper()
+			answered := make(chan struct{})
+			go func() {
+				defer close(answered)
+				request := decodeJSONRPCMessage(t, client)
+				if request.Method != pluginHealthMethod {
+					t.Errorf("health method=%q, want %s", request.Method, pluginHealthMethod)
+					return
+				}
+				result, err := json.Marshal(answer)
+				if err != nil {
+					t.Errorf("marshal health result: %v", err)
+					return
+				}
+				if err := json.NewEncoder(client).Encode(jsonRPCMessage{
+					JSONRPC: "2.0",
+					ID:      request.ID,
+					Result:  result,
+				}); err != nil {
+					t.Errorf("encode health result: %v", err)
+				}
+			}()
+			d.checkPluginHealth(plugin)
+			requireDone(t, answered, "health request did not complete")
+		}
+
+		facts := func() int {
+			t.Helper()
+			events, err := d.store.BusEventsSince(0, 100)
+			if err != nil {
+				t.Fatalf("BusEventsSince: %v", err)
+			}
+			count := 0
+			for _, ev := range events {
+				if ev.Name == FactPluginHealthChanged && ev.Subject == "health-provider" {
+					count++
+				}
+			}
+			return count
+		}
+
+		// unknown -> healthy is a move; staying healthy is not.
+		poll(pluginHealthResult{OK: true})
+		poll(pluginHealthResult{OK: true})
+		poll(pluginHealthResult{OK: true})
+		if got := facts(); got != 1 {
+			t.Fatalf("three healthy polls published %d facts, want 1", got)
+		}
+
+		poll(pluginHealthResult{OK: false, Message: "provider down"})
+		poll(pluginHealthResult{OK: false, Message: "provider down"})
+		if got := facts(); got != 2 {
+			t.Fatalf("after two identical unhealthy polls: %d facts, want 2", got)
+		}
+
+		// The reason moving is a move even while the status holds.
+		poll(pluginHealthResult{OK: false, Message: "worktree provider timed out"})
+		if got := facts(); got != 3 {
+			t.Fatalf("a new unhealthy message published %d facts, want 3", got)
+		}
+
+		poll(pluginHealthResult{OK: true})
+		if got := facts(); got != 4 {
+			t.Fatalf("recovery published %d facts, want 4", got)
+		}
+		if status, _, _ := plugin.healthSnapshot(); status != "healthy" {
+			t.Fatalf("health status=%q, want healthy", status)
+		}
+
+		_ = client.Close()
+		requireDone(t, done, "health provider connection did not close")
+	})
+}
+
 func startPluginPipe(t *testing.T, d *Daemon, name string, surfaces []string) (net.Conn, <-chan struct{}) {
 	return startPluginPipeGeneration(t, d, name, surfaces, 1)
 }
