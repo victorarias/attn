@@ -54,7 +54,7 @@ Two independent sources, both read-only against production:
    production daemon as an ordinary client (`client_hello`, no capabilities,
    never attached to a PTY) and recorded the arrival time and byte length of
    every message. Two runs, 5m09s and a shorter second run, agreeing to within
-   0.4% on rate.
+   0.3% on `session_state_changed` rate (6,944/h and 6,964/h).
 
 The bus log gives rates over a realistic week; the socket gives byte sizes the
 log cannot know, because a fact's payload is not its projection's payload.
@@ -81,7 +81,15 @@ below reports both worlds; the flap-fixed column drops exactly those.
 | pushes/sec p50 / p99 / max | 1 / 5 / 36 | 1 / 3 / 36    |
 | worst 10 s window        | 62 (6.2 /s) | 42 (4.2 /s)   |
 | worst 60 s window        | 255 (4.2 /s) | **104 (1.7 /s)** |
-| per session-hour         | 158.8       | **29.8**      |
+| session pushes per session-hour | 158.8 | **29.8**      |
+
+The last row is deliberately not `total ÷ session-hours` (which would read
+178.1 → 49.1). It counts only the pushes a session causes — the
+`session.state.changed` projection, 232,111 today and 43,554 post-fix — over the
+1,461 session-hours in the window. Dividing the total instead charges each
+session a share of the 15-second plugin health poll and the PR refresh, which
+run whether or not a session exists. This is the row the threshold below is
+derived from, and it has to scale with session count to mean anything.
 
 Concurrency over the same window, measured as distinct sessions publishing per
 5-minute bucket: median 2, p99 9, max 19.
@@ -101,12 +109,21 @@ Measured on the wire, production daemon:
 | `plugins_updated`         | 1,017       | 233–253 /h    |
 | `sessions_updated`        | 6,009       | 127 /h        |
 | `prs_updated`             | 7,037       | 47 /h         |
-| `tickets_updated`         | **217,391** | 1.1 /h        |
+| `tickets_updated`         | **217,391** | 1.1 /h (from the log) |
 | `initial_state`           | 239,486     | once per connect |
 
+Bytes are the live observation throughout. Rates are the live observation too,
+except `tickets_updated` — it fired once in the window, too rarely to rate from
+it, so its rate is the log's 217 pushes over 201 hours.
+
 Whole-socket throughput during observation: **3.0 KB/s**, or 2.3 KB/s
-discounting the one-off `initial_state` — with the flap still running. Post-fix
-the same traffic is roughly 100 B/s average.
+discounting the one-off `initial_state` — with the flap still running.
+
+Carrying the post-fix rates in the table above through these sizes puts the
+whole socket at **206 B/s** on average. Two thirds of that is the two messages
+this document ends up recommending fixing: `prs_updated` at 72 B/s and
+`tickets_updated` at 66 B/s, the latter from a message that fires roughly once
+an hour.
 
 The per-session push is 720 bytes. The daemon marshals it once and enqueues the
 same byte slice per client (`SendRawTextToMatchingClients`), so client fan-out
@@ -153,7 +170,7 @@ today's board size is **1.09 MB** to every client.
 Of the 217 KB, `SELECT SUM(LENGTH(description)) FROM tickets` is **193,435
 bytes** across 45 tickets. The hook's own contract already says these are
 "bare rows … The detail view fetches full records itself"
-(`useDaemonSocket.ts:580`), and the detail panel reads `fullTicket` from a
+(`useDaemonSocket.ts:597`), and the detail panel reads `fullTicket` from a
 `get_ticket` request, falling back to the board row only for the header. No
 frontend code reads `description` off a board row. The board is shipping every
 delegation brief in the workspace to every client on every ticket event, and on
@@ -194,8 +211,9 @@ a number, so nobody has to re-derive it.
 
 ### What to do instead
 
-1. **Land the flap fix** (sibling work, ticket `a4-slice5-rt`). It removes 73%
-   of the wire pushes and 66% of the durable bus log.
+1. **Land the flap fix** (sibling work, ticket `a4-slice5-rt`). Over this
+   window it removes 189,255 facts — 72% of the wire pushes and 60% of the
+   durable bus log.
 2. **Give `plugin.health.changed` a delta gate.** Publish only when
    status or message actually moves. Same shape as the flap fix, ~5 lines. This
    is the one that costs battery while idle.
@@ -213,12 +231,14 @@ before/after. None of them is this document's mechanism.
 ### When to reconsider
 
 Re-open this when the projection layer's **worst 60-second window exceeds
-25 pushes/second sustained** at a client — 15% of one flooding session's PTY
+25 pushes/second sustained** at a client — 12.5% of one flooding session's PTY
 budget, and the point at which projections stop being noise beside the traffic
 they share a buffer with.
 
-From the measured 29.8 pushes per session-hour, that is **3,000 concurrently
-working sessions**. Production peaks at 19. If a future feature makes a *single*
+At the measured 29.8 session pushes per session-hour — the row defined above,
+session-attributable pushes only, because those are the ones that multiply with
+session count — that is **3,000 concurrently working sessions**
+(25 ÷ (29.8 ÷ 3600) = 3,020). Production peaks at 19. If a future feature makes a *single*
 session louder — a per-keystroke fact, a progress meter projected to the wire —
 that changes the divisor, and the check is the same one: model the fact rate
 against the 25/s line before shipping the producer.
@@ -324,5 +344,6 @@ sqlite3 "file:$HOME/.attn/attn.db?mode=ro" ".backup '/tmp/scratch/prod.db'"
 ```
 
 Step 3 is the one that cannot be skipped. Fact counts say nothing about bytes:
-`tickets_updated` is 1.1 events an hour and the single largest thing attn puts
-on the wire.
+`tickets_updated` is 1.1 events an hour and the largest recurring message attn
+puts on the wire — only `initial_state`, sent once per connect and carrying the
+same board, is bigger.
