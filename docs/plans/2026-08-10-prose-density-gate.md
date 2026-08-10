@@ -11,10 +11,10 @@ The deliverable is always a **finding** — a quoted span, the objection,
 and when possible a suggested rewrite. Never a score: an agent can fix
 "this sentence does three jobs, split it"; it cannot fix "readability 32",
 and optimizing against score-shaped readability targets is documented to
-degrade the prose itself — RL against a readability formula collapsed
-outputs into degenerate one-sentence compressions
-([receipt](https://arxiv.org/pdf/2410.17088)), and Hemingway-style length
-rules are the interactive push toward staccato.
+degrade the prose itself — disproportionate weight on sentence-level
+readability rewards destabilizes training and lowers simplification
+quality ([receipt](https://arxiv.org/pdf/2410.17088)), and
+Hemingway-style length rules are the interactive push toward staccato.
 
 ## Shape
 
@@ -67,14 +67,13 @@ from the research gets a Go port; anything needing a real parser is cut.
 
 ### Model judge
 
-One narrow question per call, per paragraph — the granularity at which
-Haiku-class judges hold up: cross-family agreement between small judges
-reaches κ=0.716 on structured, criterion-scoped judging and degrades as
-criterion complexity rises
-([receipt](https://arxiv.org/pdf/2606.16890)); small models judge
-adequately on narrow rubrics but not on open-ended quality
-([SLMJury](https://arxiv.org/html/2606.07810)). Slice 2 re-measures this
-on our own corpus before trusting it.
+One narrow question per call, per paragraph. The cited ground: small
+models judge adequately on narrow, closed-ended rubrics but not on
+open-ended quality ([SLMJury](https://arxiv.org/html/2606.07810)). That
+Haiku-class agreement is *sufficient* at this granularity is a working
+assumption, not a received fact — slice 2 measures it on our own corpus
+before the judge is trusted, and the criterion-scoped design is what
+makes that measurement possible per criterion.
 The reconcile classifier is the in-repo precedent: tool-less, cheap,
 deterministic harness around a small model.
 
