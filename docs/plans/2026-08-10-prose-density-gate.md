@@ -10,9 +10,11 @@ in the writing loop, what to simplify and where.
 The deliverable is always a **finding** — a quoted span, the objection,
 and when possible a suggested rewrite. Never a score: an agent can fix
 "this sentence does three jobs, split it"; it cannot fix "readability 32",
-and score-shaped targets are documented to collapse prose into fragments
-([RL against a readability score](https://arxiv.org/pdf/2410.17088);
-Hemingway is the interactive version of the same failure).
+and optimizing against score-shaped readability targets is documented to
+degrade the prose itself — RL against a readability formula collapsed
+outputs into degenerate one-sentence compressions
+([receipt](https://arxiv.org/pdf/2410.17088)), and Hemingway-style length
+rules are the interactive push toward staccato.
 
 ## Shape
 
@@ -66,8 +68,13 @@ from the research gets a Go port; anything needing a real parser is cut.
 ### Model judge
 
 One narrow question per call, per paragraph — the granularity at which
-Haiku-class judges hold up (cross-family agreement κ≈0.72 on
-criterion-scoped judging; reliability collapses on "grade this document").
+Haiku-class judges hold up: cross-family agreement between small judges
+reaches κ=0.716 on structured, criterion-scoped judging and degrades as
+criterion complexity rises
+([receipt](https://arxiv.org/pdf/2606.16890)); small models judge
+adequately on narrow rubrics but not on open-ended quality
+([SLMJury](https://arxiv.org/html/2606.07810)). Slice 2 re-measures this
+on our own corpus before trusting it.
 The reconcile classifier is the in-repo precedent: tool-less, cheap,
 deterministic harness around a small model.
 
@@ -95,14 +102,26 @@ sentence hitting the gate means the threshold is wrong; remeasure.
 
 ## Where it runs
 
+Activation is **mechanical wherever prose already passes through attn's
+hands** — the gate must not lean on the guidance channel #818 measured
+drifting. Guidance-based activation is reserved for surfaces attn never
+touches.
+
 - **`attn prose check <file|->`** is the base verb: both layers, findings
   to stdout, `--json` for agents, `--deterministic-only` for the free
   tier. Everything else composes it.
-- **Boundary moments, advisory**: agent guidance (embedded skill, crew
-  charters) says to run it before presenting a plan doc, filing a crown
-  body or handoff, or opening a PR whose body carries real prose. The
-  findings go to the agent that just wrote the text — the one reader who
-  can act, while the text is still cheap to fix.
+- **The ticketing system is the first wired surface** (Victor,
+  2026-08-10) — it exists on main today, no need to wait for seeds. A
+  delegation brief and a backlog ticket description are agent-written
+  prose with a named reader who cannot ask clarifying questions, which
+  makes them the highest-value place to catch density. `attn delegate`
+  and `attn ticket new` run the deterministic layer on the brief and
+  return findings alongside success, advisory: the author sees them and
+  decides; nothing is refused.
+- **Boundary moments, advisory**, for prose attn never handles: agent
+  guidance (embedded skill, crew charters) says to run the check before
+  presenting a plan doc, filing a handoff, or opening a PR whose body
+  carries real prose.
 - **Not a hard block anywhere** until the gate earns trust on real
   drafts; promotion to CI or a pre-file hook is a later decision, taken
   per surface.
@@ -114,10 +133,13 @@ sentence hitting the gate means the threshold is wrong; remeasure.
    anti-gaming pair, calibration corpus and receipts, `attn prose check`.
 2. **Judge.** Criterion passes, span-anchored output, vocabulary
    injection, cost and agreement spot-check against the corpus.
-3. **Surface wiring.** Embedded-skill guidance, garden integration once
-   crown bodies and notes exist ([the garden
+3. **Ticket wiring.** `attn delegate` and `attn ticket new` run the
+   deterministic layer on briefs and descriptions, findings advisory in
+   the result; embedded-skill guidance for the unwired surfaces.
+4. **Garden integration** once crown bodies and notes exist ([the garden
    plan](2026-08-06-the-garden-vertical-slices.md) points here for its
-   prose quality gate).
+   prose quality gate) — the same wired-surface pattern, on the garden's
+   write verbs.
 
 ## Decisions
 
@@ -128,6 +150,9 @@ sentence hitting the gate means the threshold is wrong; remeasure.
   quoted span an agent can act on; scores drift and get gamed.
 - **Advisory before blocking** (2026-08-10): the gate reports to the
   writing agent first; hard gates come per surface, with evidence.
+- **Tickets before seeds** (Victor, 2026-08-10): the first wired surface
+  is the ticketing system already on main, so the gate's activation never
+  waits on the garden and never rests on guidance alone.
 
 ## Open questions
 
