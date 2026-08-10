@@ -91,7 +91,9 @@ to fix.
   default shows the most recent few and names what it withheld ("12 more —
   `attn seed notes <id>`"), with the full list pageable and filterable.
   A silent truncation here recreates the unread bulletin board this
-  surface exists to replace. Live queries, bus change events, and revision-checked writes
+  surface exists to replace. Prose quality for crown bodies and notes is
+  the [density gate](2026-08-10-prose-density-gate.md)'s job, not this
+  plan's. Live queries, bus change events, and revision-checked writes
   come free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
