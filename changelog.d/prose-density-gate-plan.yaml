@@ -1,0 +1,9 @@
+kind: internal
+area: docs
+change: >
+  New plan: the prose density gate — a two-layer detector (pure-Go
+  deterministic tripwires plus a criterion-scoped small-model judge) that
+  reports span-anchored simplification findings back to the agent that
+  wrote the text, grounded in a state-of-the-art survey; findings never
+  scores, thresholds calibrated on a labeled corpus, advisory before
+  blocking, no Python dependency.
