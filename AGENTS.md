@@ -338,7 +338,8 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   it change?" gate — does real work (publishes, pushes, scans, repaints) only
   when something moved; a gate comparing an unstable value (clock-derived,
   sampled) fires forever while nothing changes. Verify new recurring work
-  stays silent on a quiet live session.
+  stays silent on a quiet live session — and still fires on every real
+  change; never suppress work a consumer needs to save traffic.
 - No continuously repainting animations. attn renders GPU terminals, often on
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
