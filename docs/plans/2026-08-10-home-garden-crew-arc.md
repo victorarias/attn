@@ -305,13 +305,19 @@ exists to avoid.
   corrected in place): PR flows travel home → remote, keyed on ids the
   home knows; seed commands need the opposite direction, which does not
   exist until the uplink.
+- **Server transport is persistent WSS** (Victor, 2026-08-10), over polled
+  HTTPS. Polling has no interval that is both quiet and alive: fast is
+  idle burn, slow is a dead-feeling web UI, and either way it adds a
+  second delivery rhythm to a push-shaped system. Reconnect/backoff is
+  reuse of the hub's dial path, not new machinery; heartbeats are
+  mandatory, not optional.
+- **Stage 2 ships as its own PR** (Victor, 2026-08-10), not folded into
+  garden slice 1.
 
 ## Open forks
 
-- **Server transport**: persistent WSS (recommended — matches everything
-  else, live push path for intents) vs polled HTTPS (simpler server,
-  second delivery rhythm).
-- Whether the server gets a product name.
+- Whether the server gets a product name (deferred; naming can happen any
+  day before the server ships).
 
 ## Landmines named, not defused
 
