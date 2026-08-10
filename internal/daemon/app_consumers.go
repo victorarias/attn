@@ -14,6 +14,7 @@ import (
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/jobs"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/supervise"
 )
 
 // Apps as bus consumers: registration, delivery, the invocation log, and the
@@ -472,7 +473,11 @@ func (d *Daemon) awaitAppRuntime(ctx context.Context) (*appRuntimeConnection, er
 	if runtime != nil {
 		return runtime, nil
 	}
-	if err := d.ensureAppRuntime(); err != nil {
+	if err := d.startAppRuntimeForDispatch(); err != nil {
+		if errors.Is(err, supervise.ErrParked) {
+			return nil, runtimeFailure(
+				"the app runtime is parked after repeated crashes and is not being restarted; `attn app runtime status` shows why it exited and `attn app runtime restart` tries again")
+		}
 		return nil, runtimeFailure("%v", err)
 	}
 	wait := d.appConnectWait()

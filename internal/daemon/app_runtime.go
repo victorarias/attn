@@ -146,10 +146,25 @@ func (d *Daemon) ensureAppRuntimeSupervisor() *supervise.Supervisor {
 // ensureAppRuntime starts the sidecar, or adopts it if it is already running.
 // It doubles as un-park: supervise.Ensure resets the restart counter, which is
 // what `attn app runtime restart` needs after a crash loop.
-//
-// It is called from the dispatch path, so an app installed into a daemon that
-// has never run one starts the runtime without a restart.
 func (d *Daemon) ensureAppRuntime() error {
+	return d.startAppRuntime(true)
+}
+
+// startAppRuntimeForDispatch is the dispatch path's way in: it starts the
+// runtime lazily, so an app installed into a daemon that has never run one needs
+// no restart, but it leaves a parked runtime parked and answers ErrParked.
+//
+// Reviving here would make parking unreachable. Every delivery attempt passes
+// through this, and the bus retries a failing delivery forever, so a reviving
+// call would hand the crash loop a fresh restart budget every couple of minutes:
+// the runtime would never rest at parked, and each parking on the way would
+// raise its own critical notification. Measured on a broken host: three parkings
+// and three notifications in five and a half minutes.
+func (d *Daemon) startAppRuntimeForDispatch() error {
+	return d.startAppRuntime(false)
+}
+
+func (d *Daemon) startAppRuntime(revive bool) error {
 	host, err := resolveAppRuntimeHost()
 	if err != nil {
 		return err
@@ -161,7 +176,7 @@ func (d *Daemon) ensureAppRuntime() error {
 	if err := os.MkdirAll(d.appsDir, 0o755); err != nil {
 		return fmt.Errorf("creating the app artifact directory %s to start the runtime in: %w", d.appsDir, err)
 	}
-	return d.ensureAppRuntimeSupervisor().Ensure(appRuntimeChildName, func(req supervise.StartRequest) (supervise.Process, error) {
+	start := func(req supervise.StartRequest) (supervise.Process, error) {
 		cmd := exec.Command(host)
 		cmd.Dir = d.appsDir
 		cmd.Env = d.appRuntimeEnv(req.Generation)
@@ -170,7 +185,12 @@ func (d *Daemon) ensureAppRuntime() error {
 			return nil, fmt.Errorf("start the app runtime (%s): %w", host, err)
 		}
 		return process, nil
-	})
+	}
+	supervisor := d.ensureAppRuntimeSupervisor()
+	if revive {
+		return supervisor.Ensure(appRuntimeChildName, start)
+	}
+	return supervisor.EnsureUnlessParked(appRuntimeChildName, start)
 }
 
 // appRuntimeEnv is what the sidecar is launched with. It is the plugin
