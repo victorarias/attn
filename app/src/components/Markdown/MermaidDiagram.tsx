@@ -11,6 +11,8 @@ import {
 import { DiagramFocusView } from './DiagramFocusView';
 import './Markdown.css';
 
+// Preserve at least 80% of Mermaid's generated label size; the measured rationale
+// lives in docs/plans/2026-08-10-mermaid-large-diagram-legibility.md.
 const OVERSIZED_FIT_RATIO = 0.8;
 
 // Loaded lazily so mermaid (large) is code-split out of the main bundle and
@@ -285,7 +287,8 @@ function RenderedMermaidDiagram({
       style={intrinsicStyle}
       tabIndex={isOversized ? 0 : undefined}
       role={isOversized ? 'region' : undefined}
-      aria-label={isOversized ? 'Large Mermaid diagram. Press Enter for diagram focus.' : undefined}
+      aria-label={isOversized ? 'Large Mermaid diagram' : undefined}
+      aria-keyshortcuts={isOversized ? 'Enter' : undefined}
       onKeyDown={isOversized ? handleViewportKeyDown : undefined}
       onDoubleClick={isOversized ? (event) => openFocus(event.currentTarget) : undefined}
     >
@@ -302,7 +305,8 @@ function RenderedMermaidDiagram({
       style={intrinsicStyle}
       tabIndex={isOversized ? 0 : undefined}
       role={isOversized ? 'region' : undefined}
-      aria-label={isOversized ? 'Large Mermaid diagram. Press Enter for diagram focus.' : undefined}
+      aria-label={isOversized ? 'Large Mermaid diagram' : undefined}
+      aria-keyshortcuts={isOversized ? 'Enter' : undefined}
       onKeyDown={isOversized ? handleViewportKeyDown : undefined}
       onDoubleClick={isOversized ? (event) => openFocus(event.currentTarget) : undefined}
       dangerouslySetInnerHTML={{ __html: svg }}

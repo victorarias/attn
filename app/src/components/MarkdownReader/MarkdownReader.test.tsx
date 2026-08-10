@@ -304,6 +304,8 @@ describe('MarkdownReader large Mermaid diagrams', () => {
     viewport.scrollBy = scrollBy;
 
     expect(viewport.style.getPropertyValue('--md-diagram-intrinsic-width')).toBe('1200px');
+    expect(viewport).toHaveAccessibleName('Large Mermaid diagram');
+    expect(viewport).toHaveAttribute('aria-keyshortcuts', 'Enter');
     expect(screen.getByRole('button', { name: 'Focus diagram' })).toBeInTheDocument();
     fireEvent.keyDown(viewport, { key: 'ArrowRight' });
     expect(scrollBy).toHaveBeenCalledWith({ left: 72, top: 0, behavior: 'auto' });
