@@ -183,7 +183,7 @@ func TestTheResolveTickPublishesTheResolution(t *testing.T) {
 	}
 	// The reason names the clause that won, which is the whole diagnostic value
 	// of the row: "working" alone never explains a wrong color.
-	if !strings.Contains(got.Detail, string(sessionstate.ReasonHeartbeatFresh)) {
+	if !strings.Contains(got.Detail, string(sessionstate.ReasonHeartbeatBusy)) {
 		t.Fatalf("detail %q does not name the winning clause", got.Detail)
 	}
 }
@@ -613,7 +613,7 @@ func TestACodexApprovalTitleBecomesAnApproval(t *testing.T) {
 	}
 	if got.Heartbeat == nil || got.Heartbeat.Claim != sessionstate.ClaimBusy {
 		// Guard the exact hazard: an approval title that still reads busy is
-		// invisible, because ReasonHeartbeatFresh returns before the approval
+		// invisible, because ReasonHeartbeatBusy returns before the approval
 		// clause is reached.
 	} else {
 		t.Fatal("the approval title left the heartbeat busy, which hides the approval")
@@ -626,5 +626,116 @@ func TestACodexApprovalTitleBecomesAnApproval(t *testing.T) {
 	res := sessionstate.Resolve(got, sessionstate.PolicyFor(string(protocol.SessionAgentCodex)), at)
 	if res.State != protocol.SessionStatePendingApproval {
 		t.Fatalf("resolved %q (%s), want pending_approval", res.State, res.Reason)
+	}
+}
+
+// stateChangesSince counts the session.state.changed facts the bus logged past
+// cursor, and returns the new cursor.
+func stateChangesSince(t *testing.T, d *Daemon, cursor int64) (int, int64) {
+	t.Helper()
+	events, err := d.store.BusEventsSince(cursor, 1000)
+	if err != nil {
+		t.Fatalf("BusEventsSince: %v", err)
+	}
+	count := 0
+	for _, event := range events {
+		if event.Name == FactSessionStateChanged {
+			count++
+		}
+		cursor = event.Seq
+	}
+	return count, cursor
+}
+
+// The evidence tick is the daemon's loudest publisher: it re-resolves every live
+// session once a second and broadcasts whenever the answer is news. A busy claude
+// session repaints its title about once a second too, so the tick samples the
+// newest frame at every age between two of them, walking across the 1.5s
+// precedence TTL and back all turn long.
+//
+// While the reason named the window that age happened to land in, every one of
+// those crossings was news: a durable bus row and a decorated snapshot pushed to
+// every connected client, once a second, for a session that never moved.
+// Measured over 7.5 production days, session.state.changed was 74.7% of the whole
+// bus log and two thirds of it was this.
+func TestTheEvidenceTickIsSilentWhileTheTurnKeepsRunning(t *testing.T) {
+	d := newTraceDaemon(t)
+	t.Cleanup(d.stopEventBus)
+	id := "sess-tick-quiet"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+
+	base := time.Now()
+	// The first tick is where the reason becomes known, so it is legitimately
+	// news. The sweep is counted from after it.
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", Detail: "⠐ working", At: base})
+	d.resolveAllSessions(base)
+	_, cursor := stateChangesSince(t, d, 0)
+
+	// Ten ticks of a turn that never stops, sampled alternately inside and
+	// outside the TTL — the drift between a 1s tick and a ~1s repaint.
+	for tick := 1; tick <= 10; tick++ {
+		now := base.Add(time.Duration(tick) * time.Second)
+		age := 1200 * time.Millisecond
+		if tick%2 == 1 {
+			age = 1800 * time.Millisecond
+		}
+		d.recordPTYEvidence(id, pty.Observation{
+			Source: pty.SourceHeartbeat,
+			Claim:  "busy",
+			Detail: "⠐ working",
+			At:     now.Add(-age),
+		})
+		d.resolveAllSessions(now)
+	}
+
+	if published, _ := stateChangesSince(t, d, cursor); published != 0 {
+		t.Fatalf("the tick published %d state changes for a turn that never moved", published)
+	}
+}
+
+// The other half of the same gate: quiet is only correct while nothing changes.
+// A reason that moves without the state — the session is now compacting, which
+// is still `working` but a different account of it — is what the tooltip is for,
+// and it has to reach the client.
+func TestTheEvidenceTickPublishesAReasonThatMovesOnItsOwn(t *testing.T) {
+	d := newTraceDaemon(t)
+	t.Cleanup(d.stopEventBus)
+	id := "sess-tick-news"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	d.recordBracketEvidence(id, protocol.StateWorking)
+
+	base := time.Now()
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", Detail: "⠐ working", At: base})
+	d.resolveAllSessions(base)
+	_, cursor := stateChangesSince(t, d, 0)
+
+	// Compaction outranks the bracket, and paints no frames of its own, so the
+	// heartbeat has to be past the TTL for it to be reached.
+	d.recordCompactionEvidence(id, true)
+	now := base.Add(2 * time.Second)
+	d.resolveAllSessions(now)
+
+	published, cursor := stateChangesSince(t, d, cursor)
+	if published != 1 {
+		t.Fatalf("compaction published %d state changes, want 1: the reason moved", published)
+	}
+	if got := d.stateReasons().get(id); got != string(sessionstate.ReasonCompacting) {
+		t.Fatalf("reason %q, want %q", got, sessionstate.ReasonCompacting)
+	}
+	if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+		t.Fatalf("state %q, want working: compaction is work", state)
+	}
+
+	// And a state that moves publishes too, which is the case the gate exists to
+	// let through.
+	d.recordProcessEvidence(id, true)
+	d.resolveAllSessions(now.Add(time.Second))
+
+	if published, _ = stateChangesSince(t, d, cursor); published == 0 {
+		t.Fatal("an exited process published nothing")
+	}
+	if state := d.store.Get(id).State; state != protocol.SessionStateIdle {
+		t.Fatalf("state %q, want idle after the process exited", state)
 	}
 }
