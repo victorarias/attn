@@ -1,5 +1,5 @@
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { forwardRef, useEffect, useImperativeHandle, type ReactNode } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useState, type ReactNode } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { SessionTerminalWorkspace } from './SessionTerminalWorkspace';
 import type { PaneRuntimeEventRouter } from './SessionTerminalWorkspace/paneRuntimeEventRouter';
@@ -62,6 +62,29 @@ const { registeredShortcuts } = vi.hoisted(() => ({
 const mockEventRouter: PaneRuntimeEventRouter = {
   registerBinding: vi.fn(() => () => {}),
 };
+
+// Zoom mode lives in App, so a standalone render needs a host to hold it.
+function ZoomHost({ workspace, activePaneId }: { workspace: TerminalWorkspaceState; activePaneId: string }) {
+  const [zoomActive, setZoomActive] = useState(false);
+  return (
+    <SessionTerminalWorkspace
+      workspaceId="workspace-session-1"
+      workspaceSessions={[{ id: 'session-1', label: 'Session 1', agent: 'claude', cwd: '/tmp/repo' }]}
+      workspace={workspace}
+      activePaneId={activePaneId}
+      fontSize={14}
+      enabled
+      isActiveSession
+      eventRouter={mockEventRouter}
+      onSplitPane={vi.fn()}
+      onClosePane={vi.fn()}
+      onFocusPane={vi.fn()}
+      onNavigateOutOfSession={vi.fn()}
+      zoomActive={zoomActive}
+      onSetZoomActive={setZoomActive}
+    />
+  );
+}
 
 const { mockPtyAttach, mockPtyDetach, mockPtyResize, mockPtyWrite } = vi.hoisted(() => ({
   mockPtyAttach: vi.fn(() => Promise.resolve()),
@@ -941,20 +964,7 @@ describe('SessionTerminalWorkspace', () => {
 
   it('lets zoom arm before splitting and applies once a split exists', () => {
     const { container, rerender } = render(
-      <SessionTerminalWorkspace
-        workspaceId="workspace-session-1"
-        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
-        workspace={createSingleAgentWorkspace()}
-        activePaneId={SESSION_PANE_ID}
-        fontSize={14}
-        enabled
-        isActiveSession
-        eventRouter={mockEventRouter}
-        onSplitPane={vi.fn()}
-        onClosePane={vi.fn()}
-        onFocusPane={vi.fn()}
-        onNavigateOutOfSession={vi.fn()}
-      />
+      <ZoomHost workspace={createSingleAgentWorkspace()} activePaneId={SESSION_PANE_ID} />
     );
 
     act(() => {
@@ -965,9 +975,7 @@ describe('SessionTerminalWorkspace', () => {
     expect(container.querySelector('[data-split-id="root"]')).toBeNull();
 
     rerender(
-      <SessionTerminalWorkspace
-        workspaceId="workspace-session-1"
-        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
+      <ZoomHost
         workspace={{
           agents: [{ id: SESSION_PANE_ID, runtimeId: 'session-1', sessionId: 'session-1', title: 'Session 1' }, { id: 'pane-session-1', runtimeId: 'runtime-session-1', title: "Session", sessionId: 'session-1' }],
           layoutTree: {
@@ -982,14 +990,6 @@ describe('SessionTerminalWorkspace', () => {
           },
         }}
         activePaneId={SESSION_PANE_ID}
-        fontSize={14}
-        enabled
-        isActiveSession
-        eventRouter={mockEventRouter}
-        onSplitPane={vi.fn()}
-        onClosePane={vi.fn()}
-        onFocusPane={vi.fn()}
-        onNavigateOutOfSession={vi.fn()}
       />
     );
 
@@ -1024,20 +1024,7 @@ describe('SessionTerminalWorkspace', () => {
     };
 
     const { container, rerender } = render(
-      <SessionTerminalWorkspace
-        workspaceId="workspace-session-1"
-        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
-        workspace={workspace}
-        activePaneId="bottom-right"
-        fontSize={14}
-        enabled
-        isActiveSession
-        eventRouter={mockEventRouter}
-        onSplitPane={vi.fn()}
-        onClosePane={vi.fn()}
-        onFocusPane={vi.fn()}
-        onNavigateOutOfSession={vi.fn()}
-      />
+      <ZoomHost workspace={workspace} activePaneId="bottom-right" />
     );
 
     expect(container.querySelector('[data-split-id="root"]')).toHaveAttribute('data-split-ratio', '0.500');
@@ -1052,20 +1039,7 @@ describe('SessionTerminalWorkspace', () => {
     expect(container.querySelector('[data-split-id="right"]')).toHaveAttribute('data-split-ratio', '0.240');
 
     rerender(
-      <SessionTerminalWorkspace
-        workspaceId="workspace-session-1"
-        workspaceSessions={[{ id: "session-1", label: "Session 1", agent: "claude", cwd: "/tmp/repo" }]}
-        workspace={workspace}
-        activePaneId={SESSION_PANE_ID}
-        fontSize={14}
-        enabled
-        isActiveSession
-        eventRouter={mockEventRouter}
-        onSplitPane={vi.fn()}
-        onClosePane={vi.fn()}
-        onFocusPane={vi.fn()}
-        onNavigateOutOfSession={vi.fn()}
-      />
+      <ZoomHost workspace={workspace} activePaneId={SESSION_PANE_ID} />
     );
 
     expect(container.querySelector('[data-session-terminal-workspace="workspace-session-1"]')).toHaveAttribute('data-zoomed-pane-id', SESSION_PANE_ID);
