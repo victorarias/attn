@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  AGENTS.md's event-bus rules gain a producer-rate discipline: a publisher
+  fires when the fact changed, not when a timer ticked, and a producer's
+  steady-state facts/hour is part of its design. Written after the evidence
+  flap silently wrote 66% of the durable log; points at the projection
+  coalescing doc for the measured healthy rates.
