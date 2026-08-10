@@ -46,7 +46,7 @@ Two independent sources, both read-only against production:
 1. **The durable bus log.** `~/.attn/attn.db` copied out with a read-only
    `.backup` (never opened read-write). 315,073 facts spanning
    2026-08-02T10:24:55Z → 2026-08-10T19:26:58Z — 201 hours, 110 sessions,
-   1,461 session-hours. A model script maps every fact through
+   1,461.4 session-hours. A model script maps every fact through
    `wireProjections` to the wire message it produces, applies snapshot
    coalescing where the producer wraps its publishes in `coalesceSnapshots`,
    and reports the resulting push timeline.
@@ -93,7 +93,7 @@ below reports both worlds; the flap-fixed column drops exactly those.
 The last row is deliberately not `total ÷ session-hours` (which would read
 178.1 → 49.1). It counts only the pushes a session causes — the
 `session.state.changed` projection, 232,111 today and 43,554 post-fix — over the
-1,461 session-hours in the window. Dividing the total instead charges each
+1,461.4 session-hours in the window. Dividing the total instead charges each
 session a share of the 15-second plugin health poll and the PR refresh, which
 run whether or not a session exists. This is the row the threshold below is
 derived from, and it has to scale with session count to mean anything.
@@ -243,7 +243,7 @@ a number, so nobody has to re-derive it.
 ### What to do instead
 
 1. **Land the flap fix** (sibling work, ticket `a4-slice5-rt`). Over this
-   window it removes 188,557 facts — 72.4% of the wire pushes and 59.9% of the
+   window it removes 188,557 facts — 72.4% of the wire pushes and 59.8% of the
    durable bus log.
 2. **Give `plugin.health.changed` a delta gate.** Publish only when
    status or message actually moves. Same shape as the flap fix, ~5 lines. This
