@@ -632,7 +632,8 @@ func (b *Bus) advance(d *durable, seq int64) error {
 	return nil
 }
 
-// retain runs the retention window.
+// retain runs the bus's own periodic duties: reclaim what retention allows,
+// then say so when a producer is writing far more than any healthy one does.
 func (b *Bus) retain() {
 	ticker := time.NewTicker(b.trimInterval)
 	defer ticker.Stop()
@@ -642,6 +643,31 @@ func (b *Bus) retain() {
 			return
 		case <-ticker.C:
 			_, _ = b.Trim()
+			b.ReportLoudProducers()
+		}
+	}
+}
+
+// ReportLoudProducers writes one loud log line per fact class over the tripwire,
+// and nothing at all otherwise.
+//
+// This is the half of bus observability that does not wait to be looked at. The
+// producer bug this exists for wrote two thirds of the log for a week and was
+// found by accident during unrelated work; a page nobody opens would not have
+// caught it either. Each line names the fact, the rate, the ceiling it crossed,
+// and the window — everything needed to act on it without reading this code.
+func (b *Bus) ReportLoudProducers() {
+	if b.store == nil {
+		return
+	}
+	status, err := b.Status()
+	if err != nil {
+		b.log("bus: reading the log to check producer rates: %v", err)
+		return
+	}
+	for _, h := range status.Health {
+		if h.Kind == HealthProducerSurging {
+			b.log("bus: %s", h.Message)
 		}
 	}
 }

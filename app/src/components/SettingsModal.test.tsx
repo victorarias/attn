@@ -3,7 +3,11 @@ import { act, fireEvent, render, screen, waitFor } from '../test/utils';
 import { SettingsModal } from './SettingsModal';
 import { getSettingsAutomationHandle } from './settingsAutomation';
 
-const daemonApi = vi.hoisted(() => ({ sendGetSettings: vi.fn() }));
+const daemonApi = vi.hoisted(() => ({
+  sendGetSettings: vi.fn(),
+  sendBusStatusGet: vi.fn(() => new Promise(() => {})),
+  sendBusSetConsumerEnabled: vi.fn(),
+}));
 vi.mock('../contexts/DaemonApiContext', () => ({ useDaemonApi: () => daemonApi }));
 
 describe('SettingsModal', () => {

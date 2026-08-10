@@ -195,6 +195,16 @@ const (
 // CompactableFacts are the fact classes retention may reduce to one row per
 // subject — store-backed invalidations where only the newest carries
 // information. Session and ticket facts are deliberately absent.
+//
+// The three loudest classes in a real log are session.state.changed (74%),
+// pr.updated (17%) and plugin.health.changed. All three are subject-only with a
+// nil payload and project to a store re-read, so on delivery semantics alone
+// they qualify: a consumer that missed four of five is not missing anything the
+// fifth does not carry. They stay out anyway, because compaction would delete
+// the created_at history `attn bus status` computes producer rates from —
+// exactly the evidence that catches a producer flapping. Compaction bounds the
+// log by the data it describes; these classes are the ones whose write rate is
+// itself the signal. Bound them by fixing the producer, not by hiding the rows.
 var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared}
 
 // projection maps facts to the wire traffic they produce.

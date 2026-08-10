@@ -251,6 +251,8 @@ const (
 	CmdAgentHistory                          = "agent_history"
 	CmdAgentSetModel                         = "agent_set_model"
 	CmdListPastConversations                 = "list_past_conversations"
+	CmdBusStatusGet                          = "bus_status_get"
+	CmdBusSetConsumerEnabled                 = "bus_set_consumer_enabled"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -420,6 +422,8 @@ const (
 	EventOpenMarkdownResult              = "open_markdown_result"
 	EventSessionMessagesGetResult        = "session_messages_get_result"
 	EventPastConversationsResult         = "past_conversations_result"
+	EventBusStatusResult                 = "bus_status_result"
+	EventBusSetConsumerEnabledResult     = "bus_set_consumer_enabled_result"
 	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
 	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
 	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
@@ -1623,6 +1627,20 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg ListPastConversationsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal list_past_conversations: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBusStatusGet:
+		var msg BusStatusGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal bus_status_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdBusSetConsumerEnabled:
+		var msg BusSetConsumerEnabledMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal bus_set_consumer_enabled: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

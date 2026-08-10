@@ -63,6 +63,7 @@ import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '..
 import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
 import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
@@ -785,6 +786,10 @@ const ATTACH_RETRY_DELAY_MS = 150;
 // git and GitHub commands below, which wait on the network or a subprocess, set
 // their own in minutes.
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+// Bus status is one aggregate pass over the whole event log. Measured on a copy
+// of production, 209ms at 945k rows — so 30s is roughly a hundred times the
+// worst real log, a tripwire for a scan that has hung rather than a budget.
+const BUS_STATUS_TIMEOUT_MS = 30_000;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
 const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
 const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
@@ -2900,6 +2905,7 @@ export function useDaemonSocket({
             if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
             if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
             if (handleSessionAnnotationDaemonEvent(data, pending)) break;
+            if (handleBusDaemonEvent(data, pending)) break;
             break;
           }
         }
@@ -3234,6 +3240,32 @@ export function useDaemonSocket({
       'list_past_conversations',
       {},
       'Listing past conversations timed out',
+    );
+  }, [sendRequest]);
+
+  // Reads the event bus's operator picture — the same snapshot `attn bus status`
+  // renders, computed daemon-side so the two can never disagree.
+  //
+  // The daemon answers with one aggregate pass over the whole log, which is
+  // why the default timeout is not enough for a large one.
+  const sendBusStatusGet = useCallback((): Promise<BusStatus> => {
+    return sendRequest<BusStatus>(
+      'bus_status_get',
+      {},
+      'Reading the event bus timed out',
+      BUS_STATUS_TIMEOUT_MS,
+    );
+  }, [sendRequest]);
+
+  // Flips a durable consumer's kill switch, matching `attn bus enable|disable`.
+  const sendBusSetConsumerEnabled = useCallback((
+    consumer: string,
+    enabled: boolean,
+  ): Promise<{ consumer: string }> => {
+    return sendRequest<{ consumer: string }>(
+      'bus_set_consumer_enabled',
+      { consumer, enabled },
+      'Changing the consumer timed out',
     );
   }, [sendRequest]);
 
@@ -5401,6 +5433,8 @@ export function useDaemonSocket({
     sendAgentHistory,
     sendAgentSetModel,
     sendListPastConversations,
+    sendBusStatusGet,
+    sendBusSetConsumerEnabled,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

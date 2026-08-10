@@ -132,6 +132,12 @@ var CommandMeta = map[string]CommandMetadata{
 	// Local: a conversation's history is a file in THIS daemon's data dir, so
 	// the answer is never merged from an endpoint.
 	protocol.CmdListPastConversations:                 commandMetadata(ScopeHubLocal, false, false),
+	// Local: the bus is this daemon's own spine, and a remote endpoint's log is
+	// its own diagnostic. Merging two would describe neither.
+	protocol.CmdBusStatusGet: commandMetadata(ScopeHubLocal, false, false),
+	// Logged: flipping a consumer's kill switch is an operator decision worth a
+	// record, and the log is where its effect shows up.
+	protocol.CmdBusSetConsumerEnabled:                 commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdPtyResize:                             commandMetadata(ScopeSession, true, true),
 	protocol.CmdKillSession:                           commandMetadata(ScopeSession, true, true),
 	protocol.CmdReloadSession:                         commandMetadata(ScopeSession, true, true),
