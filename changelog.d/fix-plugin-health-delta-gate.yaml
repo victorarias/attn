@@ -1,10 +1,10 @@
 kind: fixed
 area: plugins
 change: >
-  A connected plugin whose health is not moving no longer costs anything. The
-  15-second healthcheck now reports only when the verdict changes, instead of
-  publishing an event, rebuilding the plugin catalog off disk and writing a log
-  line on every poll.
+  A connected plugin whose health is not moving no longer wakes the rest of
+  attn. The 15-second healthcheck still asks, but now reports only when the
+  verdict changes, instead of publishing an event, rebuilding the plugin catalog
+  off disk and writing a log line on every poll.
 symptom: >
   With attn idle and nothing to report, each connected plugin produced 5,760
   events a day, and every one of them re-scanned both plugin directories from
