@@ -1303,6 +1303,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleAgentSetModel(client, msg.(*protocol.AgentSetModelMessage))
 	case protocol.CmdListPastConversations: // wire: list_past_conversations
 		d.handleListPastConversations(client, msg.(*protocol.ListPastConversationsMessage))
+	case protocol.CmdBusStatusGet: // wire: bus_status_get
+		d.handleBusStatusGet(client, msg.(*protocol.BusStatusGetMessage))
+	case protocol.CmdBusSetConsumerEnabled: // wire: bus_set_consumer_enabled
+		d.handleBusSetConsumerEnabled(client, msg.(*protocol.BusSetConsumerEnabledMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession: // wire: kill_session

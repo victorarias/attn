@@ -11,6 +11,7 @@ import {
   PluginListResult,
 } from '../hooks/useDaemonSocket';
 import { BackgroundTasksSettings } from './BackgroundTasksSettings';
+import { EventBusSettings } from './EventBusSettings';
 import {
   assertValidSettingsSectionID,
   setSettingsAutomationHandle,
@@ -96,7 +97,7 @@ interface SettingsModalProps {
   taskChangeSignal?: number;
 }
 
-type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks';
+type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks' | 'eventBus';
 
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
@@ -199,7 +200,7 @@ export function SettingsModal({
   retryTask,
   taskChangeSignal,
 }: SettingsModalProps) {
-  const { sendGetSettings } = useDaemonApi();
+  const { sendGetSettings, sendBusStatusGet, sendBusSetConsumerEnabled } = useDaemonApi();
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
@@ -1067,6 +1068,14 @@ export function SettingsModal({
           description: 'The durable task runner: compaction, summaries, narration, and reconciliation, with retry.',
           count: 1,
           keywords: 'background tasks runner durable compaction summarize narrate reconcile retry failed dead queue',
+        },
+        {
+          id: 'eventBus',
+          label: 'Event bus',
+          title: 'Event bus',
+          description: 'The durable event log: what it holds, which facts are written to it and how fast, and who reads it.',
+          count: 1,
+          keywords: 'event bus log durable facts producers consumers cursor lag retention compaction trim stalled disabled kill switch seq',
         },
       ],
     },
@@ -2768,6 +2777,13 @@ export function SettingsModal({
     </>
   );
 
+  const renderEventBusSettings = () => (
+    <EventBusSettings
+      getBusStatus={sendBusStatusGet}
+      setConsumerEnabled={sendBusSetConsumerEnabled}
+    />
+  );
+
   const renderSelectedSection = () => {
     switch (selectedSection) {
       case 'general':
@@ -2784,6 +2800,8 @@ export function SettingsModal({
         return renderHygieneSettings();
       case 'backgroundTasks':
         return renderBackgroundTasksSettings();
+      case 'eventBus':
+        return renderEventBusSettings();
       case 'connectivity':
       default:
         return renderConnectivitySettings();

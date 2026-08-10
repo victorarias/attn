@@ -801,6 +801,185 @@ type BrowserControlResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type BusConsumerStatus struct {
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor int `json:"cursor"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Filter corresponds to the JSON schema field "filter".
+	Filter string `json:"filter"`
+
+	// HoldsRetentionFloor corresponds to the JSON schema field
+	// "holds_retention_floor".
+	HoldsRetentionFloor bool `json:"holds_retention_floor"`
+
+	// Lag corresponds to the JSON schema field "lag".
+	Lag int `json:"lag"`
+
+	// Live corresponds to the JSON schema field "live".
+	Live bool `json:"live"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// OldestUnreadAt corresponds to the JSON schema field "oldest_unread_at".
+	OldestUnreadAt string `json:"oldest_unread_at"`
+
+	// Stalled corresponds to the JSON schema field "stalled".
+	Stalled string `json:"stalled"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type BusHealthEntry struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Level corresponds to the JSON schema field "level".
+	Level string `json:"level"`
+
+	// Message corresponds to the JSON schema field "message".
+	Message string `json:"message"`
+
+	// Subject corresponds to the JSON schema field "subject".
+	Subject string `json:"subject"`
+}
+
+type BusProducerStatus struct {
+	// BaselinePerHour corresponds to the JSON schema field "baseline_per_hour".
+	BaselinePerHour float64 `json:"baseline_per_hour"`
+
+	// Bytes corresponds to the JSON schema field "bytes".
+	Bytes int `json:"bytes"`
+
+	// Events corresponds to the JSON schema field "events".
+	Events int `json:"events"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// RecentPerHour corresponds to the JSON schema field "recent_per_hour".
+	RecentPerHour float64 `json:"recent_per_hour"`
+
+	// Share corresponds to the JSON schema field "share".
+	Share float64 `json:"share"`
+
+	// Subjects corresponds to the JSON schema field "subjects".
+	Subjects int `json:"subjects"`
+
+	// SurgePerHour corresponds to the JSON schema field "surge_per_hour".
+	SurgePerHour float64 `json:"surge_per_hour"`
+
+	// SurgeWindowSeconds corresponds to the JSON schema field "surge_window_seconds".
+	SurgeWindowSeconds float64 `json:"surge_window_seconds"`
+
+	// Surging corresponds to the JSON schema field "surging".
+	Surging bool `json:"surging"`
+
+	// SustainedPerHour corresponds to the JSON schema field "sustained_per_hour".
+	SustainedPerHour float64 `json:"sustained_per_hour"`
+}
+
+type BusSetConsumerEnabledMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer string `json:"consumer"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type BusSetConsumerEnabledResultMessage struct {
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer string `json:"consumer"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
+type BusStatusGetMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type BusStatusResultMessage struct {
+	// BaselineWindowSeconds corresponds to the JSON schema field
+	// "baseline_window_seconds".
+	BaselineWindowSeconds float64 `json:"baseline_window_seconds"`
+
+	// Bytes corresponds to the JSON schema field "bytes".
+	Bytes int `json:"bytes"`
+
+	// Consumers corresponds to the JSON schema field "consumers".
+	Consumers []BusConsumerStatus `json:"consumers"`
+
+	// Delivering corresponds to the JSON schema field "delivering".
+	Delivering bool `json:"delivering"`
+
+	// Earliest corresponds to the JSON schema field "earliest".
+	Earliest int `json:"earliest"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Head corresponds to the JSON schema field "head".
+	Head int `json:"head"`
+
+	// Health corresponds to the JSON schema field "health".
+	Health []BusHealthEntry `json:"health"`
+
+	// NewestAt corresponds to the JSON schema field "newest_at".
+	NewestAt string `json:"newest_at"`
+
+	// OldestAt corresponds to the JSON schema field "oldest_at".
+	OldestAt string `json:"oldest_at"`
+
+	// Producers corresponds to the JSON schema field "producers".
+	Producers []BusProducerStatus `json:"producers"`
+
+	// RecentWindowSeconds corresponds to the JSON schema field
+	// "recent_window_seconds".
+	RecentWindowSeconds float64 `json:"recent_window_seconds"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// RetentionSeconds corresponds to the JSON schema field "retention_seconds".
+	RetentionSeconds float64 `json:"retention_seconds"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// SurgeRatePerHour corresponds to the JSON schema field "surge_rate_per_hour".
+	SurgeRatePerHour float64 `json:"surge_rate_per_hour"`
+}
+
 type CancelCountdownMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
