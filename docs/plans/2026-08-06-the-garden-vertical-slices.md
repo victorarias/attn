@@ -83,7 +83,15 @@ to fix.
   general historical-context surface, not just machine audit (Victor,
   2026-08-10): an agent writes what happened and what it learned, addressed
   to whoever tends that seed next; a note scoped to the whole effort goes on
-  the crown, which works with no extra machinery because a crown is a seed. Live queries, bus change events, and revision-checked writes
+  the crown, which works with no extra machinery because a crown is a seed.
+  The read side is part of the surface (Victor, 2026-08-10): notes appear
+  where the tender already looks — a seed's show includes its recent notes
+  and, when the seed sits in a plot, the crown's — never behind a verb
+  nobody is told to run. Volume stays under the agent's control: the
+  default shows the most recent few and names what it withheld ("12 more —
+  `attn seed notes <id>`"), with the full list pageable and filterable.
+  A silent truncation here recreates the unread bulletin board this
+  surface exists to replace. Live queries, bus change events, and revision-checked writes
   come free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
