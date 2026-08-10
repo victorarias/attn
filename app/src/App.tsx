@@ -61,7 +61,7 @@ import {
   readWorkspaceSelectionStyle,
   type WorkspaceSelectionStyle,
 } from './utils/workspaceSelectionStyle';
-import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, SessionExitInfo } from './hooks/useDaemonSocket';
+import { useDaemonSocket, DaemonWorktree, DaemonSession, DaemonWorkspace, DaemonPR, DaemonEndpoint, DaemonPlugin, DaemonPluginIssue, GitStatusUpdate, SessionExitInfo, CriticalNotificationState } from './hooks/useDaemonSocket';
 import type { Presentation } from './types/generated';
 import { useSessionWorkspaceController } from './hooks/useSessionWorkspaceController';
 import { isAttentionSessionState, normalizeSessionState, type UISessionState } from './types/sessionState';
@@ -547,6 +547,12 @@ function App() {
   // notifications panel re-lists. Seeded once initial state arrives (below).
   const [notificationsUnread, setNotificationsUnread] = useState(0);
   const [notificationsChangeSignal, setNotificationsChangeSignal] = useState(0);
+  // Drives the ambient critical surface (sidebar strip + bell escalation). Kept
+  // beside the unread count rather than derived from a listed feed: the panel
+  // only lists while open, and this surface has to be right whether or not the
+  // user has ever opened it.
+  const [criticalNotifications, setCriticalNotifications] =
+    useState<CriticalNotificationState>({ count: 0, title: '' });
 
   // Connect to daemon WebSocket. The whole return value goes into context
   // below, for everything under AppContent; App destructures only the names
@@ -574,8 +580,9 @@ function App() {
     onTasksChanged: () => setTaskChangeSignal((n) => n + 1),
     // A notifications_updated broadcast carries the authoritative unread count;
     // set the badge and bump the signal so an open panel re-lists.
-    onNotificationsUpdated: (unread) => {
+    onNotificationsUpdated: (unread, critical) => {
       setNotificationsUnread(unread);
+      setCriticalNotifications(critical);
       setNotificationsChangeSignal((n) => n + 1);
     },
     onTicketsUpdate: setTickets,
@@ -630,7 +637,9 @@ function App() {
     let cancelled = false;
     sendNotificationList()
       .then((r) => {
-        if (!cancelled) setNotificationsUnread(r.unreadCount);
+        if (cancelled) return;
+        setNotificationsUnread(r.unreadCount);
+        setCriticalNotifications(r.critical);
       })
       .catch(() => {
         /* transient (not connected / timeout); the next broadcast reseeds */
@@ -679,6 +688,7 @@ function App() {
           settingError={settingError}
           clearSettingError={() => setSettingError(null)}
           notificationsUnread={notificationsUnread}
+          criticalNotifications={criticalNotifications}
           notificationsChangeSignal={notificationsChangeSignal}
           fsChangeSignals={fsChangeSignals}
           notebookTaskChangeSignal={notebookTaskChangeSignal}
@@ -708,6 +718,7 @@ interface AppContentProps {
   settingError: string | null;
   clearSettingError: () => void;
   notificationsUnread: number;
+  criticalNotifications: CriticalNotificationState;
   notificationsChangeSignal: number;
   fsChangeSignals: Record<string, number>;
   notebookTaskChangeSignal: number;
@@ -731,6 +742,7 @@ function AppContent({
   settingError,
   clearSettingError,
   notificationsUnread,
+  criticalNotifications,
   notificationsChangeSignal,
   fsChangeSignals,
   notebookTaskChangeSignal,
@@ -1717,6 +1729,9 @@ function AppContent({
   }, []);
   const toggleNotificationsPanel = useCallback(() => {
     setNotificationsPanelOpen((open) => !open);
+  }, []);
+  const openNotificationsPanel = useCallback(() => {
+    setNotificationsPanelOpen(true);
   }, []);
   const closeNotificationsPanel = useCallback(() => {
     setNotificationsPanelOpen(false);
@@ -3505,6 +3520,10 @@ function AppContent({
       icon: <NotificationsBellIcon />,
       active: notificationsPanelOpen,
       badge: notificationsUnread > 0 ? notificationsUnread : undefined,
+      // The bell half of the ambient critical surface: while something critical
+      // is unread the badge stops being the brand accent (see
+      // CriticalNotificationStrip.css).
+      toneClassName: criticalNotifications.count > 0 ? 'has-critical' : undefined,
       onClick: toggleNotificationsPanel,
     },
     {
@@ -3528,6 +3547,7 @@ function AppContent({
     openBoardSurface,
     notificationsPanelOpen,
     notificationsUnread,
+    criticalNotifications,
     automationsPanelOpen,
     toggleNotificationsPanel,
   ]);
@@ -3746,6 +3766,8 @@ function AppContent({
           tileContents={tileContents}
           collapsed={sidebarCollapsed}
           headerActions={sidebarHeaderActions}
+          criticalNotifications={criticalNotifications}
+          onOpenNotifications={openNotificationsPanel}
           gridLayout={gridLayout}
           onSelectGridLayout={handleSelectGridLayout}
           dockItems={dockItems}

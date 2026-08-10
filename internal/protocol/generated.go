@@ -3317,6 +3317,9 @@ type Notification struct {
 	// ReadAt corresponds to the JSON schema field "read_at".
 	ReadAt string `json:"read_at"`
 
+	// Severity corresponds to the JSON schema field "severity".
+	Severity NotificationSeverity `json:"severity"`
+
 	// SourceID corresponds to the JSON schema field "source_id".
 	SourceID string `json:"source_id"`
 
@@ -3336,6 +3339,9 @@ type NotificationListMessage struct {
 }
 
 type NotificationListResultMessage struct {
+	// CriticalTitle corresponds to the JSON schema field "critical_title".
+	CriticalTitle *string `json:"critical_title,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -3353,6 +3359,10 @@ type NotificationListResultMessage struct {
 
 	// UnreadCount corresponds to the JSON schema field "unread_count".
 	UnreadCount int `json:"unread_count"`
+
+	// UnreadCriticalCount corresponds to the JSON schema field
+	// "unread_critical_count".
+	UnreadCriticalCount int `json:"unread_critical_count"`
 }
 
 type NotificationMarkReadMessage struct {
@@ -3383,12 +3393,25 @@ type NotificationMarkReadResultMessage struct {
 	UnreadCount int `json:"unread_count"`
 }
 
+type NotificationSeverity string
+
+const NotificationSeverityCritical NotificationSeverity = "critical"
+const NotificationSeverityInfo NotificationSeverity = "info"
+const NotificationSeverityWarning NotificationSeverity = "warning"
+
 type NotificationsUpdatedMessage struct {
+	// CriticalTitle corresponds to the JSON schema field "critical_title".
+	CriticalTitle *string `json:"critical_title,omitempty,omitzero"`
+
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
 
 	// UnreadCount corresponds to the JSON schema field "unread_count".
 	UnreadCount int `json:"unread_count"`
+
+	// UnreadCriticalCount corresponds to the JSON schema field
+	// "unread_critical_count".
+	UnreadCriticalCount int `json:"unread_critical_count"`
 }
 
 type OpenBrowserMessage struct {

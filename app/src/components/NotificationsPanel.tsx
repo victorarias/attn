@@ -25,6 +25,21 @@ interface NotificationsPanelProps {
   changeSignal: number;
 }
 
+// severityClass maps a notification's severity onto its row modifier, treating
+// anything unrecognized as info. The daemon normalizes too; this is the client
+// half of the same closed set, so a daemon a version ahead cannot render a row
+// with no styling at all.
+function severityClass(severity: string | undefined): string {
+  switch (severity) {
+    case 'critical':
+      return 'sev-critical';
+    case 'warning':
+      return 'sev-warning';
+    default:
+      return 'sev-info';
+  }
+}
+
 // formatCreatedAt renders an RFC3339 created_at as a short relative phrase
 // ("now", "5m ago", "3h ago", "2d ago"). Returns '' for an unparseable value.
 function formatCreatedAt(iso: string): string {
@@ -175,11 +190,12 @@ export function NotificationsPanel({
                 return (
                   <li
                     key={n.id}
-                    className={`notification-row${unread ? ' is-unread' : ''}${expanded ? ' is-expanded' : ''}`}
+                    className={`notification-row ${severityClass(n.severity)}${unread ? ' is-unread' : ''}${expanded ? ' is-expanded' : ''}`}
                   >
                     <button type="button" className="notification-row-head" onClick={() => handleToggle(n)}>
                       <span className="notification-dot" aria-hidden="true" />
                       <span className="notification-row-title">{n.title}</span>
+                      <span className="notification-sev-tag">{n.severity}</span>
                       <span className="notification-row-time">{formatCreatedAt(n.created_at)}</span>
                     </button>
                     {expanded ? (

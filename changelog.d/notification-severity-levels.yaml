@@ -1,0 +1,11 @@
+kind: added
+area: app
+change: >
+  Notifications now carry a severity — info, warning, or critical — and the
+  panel styles each one by it. A background job that exhausts its retries is a
+  warning; everything else stays info. Critical additionally gets an ambient
+  surface outside the panel: while any critical notification is unread, a strip
+  sits at the top of the sidebar naming the newest one and the notifications
+  bell turns red, and both disappear when the last one is read. Notifications
+  that were already in the feed are carried across as info rather than
+  relevelled, so nothing you had already dealt with comes back louder.
