@@ -170,6 +170,9 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.broadcast {
 		d.broadcastSessionStateChanged(change.sessionID)
 	}
+	// Last, and only for a target that owes one: a message that could not be
+	// typed when it was sent has no other rail back.
+	d.drainAgentMessagesAfterStateChange(change.sessionID, change.state)
 	return true
 }
 

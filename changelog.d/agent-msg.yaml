@@ -1,0 +1,10 @@
+kind: added
+area: cli
+change: >
+  Agents can now talk to each other: `attn agent msg <id> "text"` delivers a
+  message into another session's conversation, attributed to the sender and
+  carrying the command to reply with. A target that cannot take input yet —
+  waiting on an approval, or not running — has the message queued and delivered
+  when its state next allows it, and the sender is always told which happened.
+  Repeated identical text, a sender going too fast, and a target with a full
+  unread queue are turned away with the reason, never silently.

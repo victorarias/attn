@@ -147,6 +147,7 @@ var sessionCommandsAnsweredWhereTheyLand = map[string]string{
 	protocol.CmdSessionTranscript:   "arrives from the agent process over the unix socket",
 	protocol.CmdStateExplain:        "arrives from the agent process over the unix socket",
 	protocol.CmdAgentPeek:           "arrives from the agent process over the unix socket",
+	protocol.CmdAgentMsg:            "arrives from the agent process over the unix socket",
 	protocol.CmdTicketCreate:        "arrives from the agent process over the unix socket",
 	protocol.CmdTicketInbox:         "arrives from the agent process over the unix socket",
 	protocol.CmdSetTicketStatus:     "arrives from the agent process over the unix socket",

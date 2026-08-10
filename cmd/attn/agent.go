@@ -14,9 +14,9 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// `attn agent` is how one attn-living agent observes another. `list` is the
-// address book — session ids are exposed nowhere else an agent looks — and
-// `peek` reads a session without interrupting it.
+// `attn agent` is how one attn-living agent reaches another. `list` is the
+// address book — session ids are exposed nowhere else an agent looks — `peek`
+// reads a session without interrupting it, and `msg` speaks to one.
 
 const agentShortIDLength = 8
 
@@ -38,6 +38,12 @@ func runAgent() {
 			return
 		}
 		runAgentPeek(os.Args[3:])
+	case "msg":
+		if hasHelpFlag(os.Args[3:]) {
+			writeAgentHelp(os.Stdout)
+			return
+		}
+		runAgentMsg(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "agent: unknown command %q\n", os.Args[2])
 		writeAgentHelp(os.Stderr)
@@ -273,6 +279,100 @@ func formatAgentPeekTime(value string) string {
 	return local.Format("2006-01-02 15:04:05")
 }
 
+type agentMsgArgs struct {
+	target  string
+	content string
+	source  string
+	json    bool
+}
+
+func parseAgentMsgArgs(args []string, envSessionID string) (agentMsgArgs, error) {
+	if len(args) < 2 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {
+		return agentMsgArgs{}, errors.New("usage: attn agent msg <id> \"text\" [--source-session <id>]")
+	}
+	fs := flag.NewFlagSet("agent msg", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	source := fs.String("source-session", "", "sender session id (defaults to ATTN_SESSION_ID)")
+	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
+	if err := fs.Parse(args[2:]); err != nil {
+		return agentMsgArgs{}, err
+	}
+	if fs.NArg() != 0 {
+		return agentMsgArgs{}, errors.New("the message must be one argument; quote it")
+	}
+	parsed := agentMsgArgs{
+		target:  strings.TrimSpace(args[0]),
+		content: args[1],
+		source:  strings.TrimSpace(*source),
+		json:    *jsonOut,
+	}
+	if parsed.source == "" {
+		parsed.source = strings.TrimSpace(envSessionID)
+	}
+	if parsed.source == "" {
+		return agentMsgArgs{}, errors.New(
+			"no sender: this shell is not an attn session, so pass --source-session <id> (`attn agent list` names the sessions)")
+	}
+	if strings.TrimSpace(parsed.content) == "" {
+		return agentMsgArgs{}, errors.New("the message is empty")
+	}
+	// The daemon refuses this too, and is the authority. It is checked here
+	// because a message far past the limit dies as a broken pipe on the way
+	// there — the socket hangs up mid-write and the refusal never comes back.
+	if size := len(strings.TrimSpace(parsed.content)); size > protocol.AgentMessageMaxChars {
+		return agentMsgArgs{}, fmt.Errorf(
+			"message is %d bytes and the limit is %d; send the gist and point at the rest",
+			size, protocol.AgentMessageMaxChars)
+	}
+	return parsed, nil
+}
+
+func runAgentMsg(args []string) {
+	parsed, err := parseAgentMsgArgs(args, os.Getenv("ATTN_SESSION_ID"))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent msg: %v\n", err)
+		os.Exit(2)
+	}
+	result, err := client.New("").AgentMsg(parsed.target, parsed.source, parsed.content)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "agent msg: %s\n", agentMsgErrorMessage(parsed, err))
+		os.Exit(1)
+	}
+	if parsed.json {
+		printJSON(result)
+	} else {
+		fmt.Fprintln(os.Stdout, agentMsgOutcomeLine(result))
+	}
+	// A refusal that exits 0 reads as sent. The reason is on stdout either way.
+	if result.Status == protocol.AgentMsgStatusRefused {
+		os.Exit(1)
+	}
+}
+
+func agentMsgOutcomeLine(result *protocol.AgentMsgResult) string {
+	if result.MessageID == "" {
+		return fmt.Sprintf("%s: %s", result.Status, result.Detail)
+	}
+	return fmt.Sprintf("%s: %s (id %s)", result.Status, result.Detail, result.MessageID)
+}
+
+// agentMsgErrorMessage separates the two ids a send names, so a caller that
+// mistyped one knows which.
+func agentMsgErrorMessage(parsed agentMsgArgs, err error) string {
+	message := strings.TrimSpace(err.Error())
+	switch strings.TrimSpace(strings.TrimPrefix(message, "daemon error: ")) {
+	case "session_not_found":
+		return fmt.Sprintf("no session matches %q; `attn agent list` names the sessions on this daemon", parsed.target)
+	case "ambiguous_session":
+		return fmt.Sprintf("%q matches more than one session; give more of the id (`attn agent list --json` carries full ids)", parsed.target)
+	case "sender_session_not_found":
+		return fmt.Sprintf("the sender %q is not a session on this daemon", parsed.source)
+	case "sender_ambiguous_session":
+		return fmt.Sprintf("the sender %q matches more than one session; give more of the id", parsed.source)
+	}
+	return message
+}
+
 func writeAgentHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn agent <command>
 
@@ -284,5 +384,11 @@ commands:
         observe a session without interrupting it: state, todos, last
         assistant message, and the rendered screen. Passive — the observed
         agent never notices. <id> is a full session id or a unique prefix.
+  msg <id> "text" [--source-session <id>] [--json]
+        send a session a message. It lands in that session's conversation,
+        attributed to you, carrying the command to reply with. A target that
+        cannot take input right now has it queued and delivered when it can;
+        the result always says which. The sender defaults to this session
+        (ATTN_SESSION_ID); pass --source-session when running outside one.
 `)
 }

@@ -998,6 +998,24 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// something the user already dealt with.
 	// Applied by applyMigration100, whose ALTER is column-guarded.
 	{100, "add the severity level to notifications", ``},
+	// chief_of_staff_dispatch_messages (migration 46) never had a writer, so no
+	// user state exists to carry; its dispatch-scoped shape does not fit agent
+	// messages. Drop approved by Victor 2026-08-10.
+	{101, "create agent messages and drop the dispatch message table", `
+		CREATE TABLE IF NOT EXISTS agent_messages (
+			id TEXT PRIMARY KEY,
+			sender_session_id TEXT NOT NULL,
+			target_session_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			delivered_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_messages_target_queued
+			ON agent_messages(target_session_id, delivered_at, created_at, id);
+		CREATE INDEX IF NOT EXISTS idx_agent_messages_sender_created
+			ON agent_messages(sender_session_id, target_session_id, created_at);
+		DROP TABLE IF EXISTS chief_of_staff_dispatch_messages;
+	`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
