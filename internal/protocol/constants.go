@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "226"
+const ProtocolVersion = "227"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -45,6 +45,18 @@ const (
 	// change; resubscribing unchanged would fail the same way.
 	ErrorCodeCollectionRedeclared = "collection_redeclared"
 )
+
+// AgentMessageMaxChars bounds one agent_msg. Measured 2026-08-10 against a live
+// session: a bracketed paste through the doorbell's own mechanics arrived intact
+// at 1KiB, 4KiB, 16KiB, 64KiB and 256KiB, so the PTY is not what constrains it.
+// The unix socket is — one request must fit the daemon's 64KiB frame, and JSON
+// escaping grows the content on the way in. 32KiB is 1.75x the largest assistant
+// prose block measured across 120 transcripts (18,713 chars), and leaves
+// ordinary text room to double before the frame limit would answer first.
+//
+// Both ends check it: the daemon because it is the authority, the sender so the
+// answer is this limit by name rather than a socket that hung up.
+const AgentMessageMaxChars = 32 * 1024
 
 // CapabilityWorkspaceSessions is required for websocket clients that use the
 // interactive daemon API. Clients without it are not workspace-first clients.
@@ -162,6 +174,7 @@ const (
 	CmdSessionTranscript                     = "session_transcript"
 	CmdStateExplain                          = "state_explain"
 	CmdAgentPeek                             = "agent_peek"
+	CmdAgentMsg                              = "agent_msg"
 	CmdStop                                  = "stop"
 	CmdTodos                                 = "todos"
 	CmdFilesEdited                           = "files_edited"
@@ -1066,6 +1079,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAgentPeek:
 		var msg AgentPeekMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAgentMsg:
+		var msg AgentMsgMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

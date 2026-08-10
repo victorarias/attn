@@ -160,3 +160,144 @@ func TestAgentPeekErrorMessagesNameTheTarget(t *testing.T) {
 		t.Fatalf("other message = %q", other)
 	}
 }
+
+func TestParseAgentMsgArgsResolvesTheSenderAndRefusesWhenItCannot(t *testing.T) {
+	tests := []struct {
+		name    string
+		args    []string
+		env     string
+		want    agentMsgArgs
+		wantErr string
+	}{
+		{
+			name: "sender defaults to this session",
+			args: []string{"9f2a", "the rebase is done"},
+			env:  "9f2a1111-2222-3333-4444-555566667777",
+			want: agentMsgArgs{target: "9f2a", content: "the rebase is done", source: "9f2a1111-2222-3333-4444-555566667777"},
+		},
+		{
+			name: "an explicit sender wins over the environment",
+			args: []string{"9f2a", "hello", "--source-session", "aa11"},
+			env:  "bb22",
+			want: agentMsgArgs{target: "9f2a", content: "hello", source: "aa11"},
+		},
+		{
+			name: "--json is carried through",
+			args: []string{"9f2a", "hello", "--json"},
+			env:  "bb22",
+			want: agentMsgArgs{target: "9f2a", content: "hello", source: "bb22", json: true},
+		},
+		{
+			// The escape hatch for a human at a plain shell: say who is speaking.
+			name:    "outside a session with no sender",
+			args:    []string{"9f2a", "hello"},
+			env:     "",
+			wantErr: "--source-session",
+		},
+		{
+			name:    "an unquoted message",
+			args:    []string{"9f2a", "the", "rebase", "is", "done"},
+			env:     "bb22",
+			wantErr: "quote it",
+		},
+		{
+			name:    "no message at all",
+			args:    []string{"9f2a"},
+			env:     "bb22",
+			wantErr: "usage:",
+		},
+		{
+			name:    "a blank message",
+			args:    []string{"9f2a", "   "},
+			env:     "bb22",
+			wantErr: "empty",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := parseAgentMsgArgs(tt.args, tt.env)
+			if tt.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), tt.wantErr) {
+					t.Fatalf("error = %v, want one mentioning %q", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if got != tt.want {
+				t.Fatalf("parsed = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+// The sender reads one line and has to know what happened. Queued and refused
+// both carry the daemon's reason, because both mean "not delivered yet" and the
+// next move differs.
+func TestAgentMsgOutcomeLineCarriesTheDaemonsReason(t *testing.T) {
+	delivered := agentMsgOutcomeLine(&protocol.AgentMsgResult{
+		Status: protocol.AgentMsgStatusDelivered, Detail: "delivered to reviewer", MessageID: "abc",
+	})
+	if !strings.Contains(delivered, "delivered to reviewer") || !strings.Contains(delivered, "abc") {
+		t.Fatalf("delivered line = %q", delivered)
+	}
+	refused := agentMsgOutcomeLine(&protocol.AgentMsgResult{
+		Status: protocol.AgentMsgStatusRefused, Detail: "you already sent that exact text",
+	})
+	if !strings.Contains(refused, "refused") || !strings.Contains(refused, "already sent") {
+		t.Fatalf("refused line = %q", refused)
+	}
+	if strings.Contains(refused, "(id ") {
+		t.Fatalf("a refusal has no message id to print: %q", refused)
+	}
+}
+
+// A send names two sessions, so a failure has to say which one it could not
+// find — otherwise the sender re-checks the wrong id.
+func TestAgentMsgErrorMessageSeparatesTargetFromSender(t *testing.T) {
+	parsed := agentMsgArgs{target: "zzzz", source: "yyyy"}
+	target := agentMsgErrorMessage(parsed, errors.New("daemon error: session_not_found"))
+	if !strings.Contains(target, `"zzzz"`) || strings.Contains(target, "yyyy") {
+		t.Fatalf("target error = %q", target)
+	}
+	sender := agentMsgErrorMessage(parsed, errors.New("daemon error: sender_session_not_found"))
+	if !strings.Contains(sender, `"yyyy"`) || !strings.Contains(sender, "sender") {
+		t.Fatalf("sender error = %q", sender)
+	}
+}
+
+// A message far past the limit never reaches the daemon's refusal: the socket
+// hangs up mid-write and the sender sees a broken pipe. The command answers
+// before it sends, so the size is always named.
+func TestParseAgentMsgArgsNamesTheSizeLimitBeforeSending(t *testing.T) {
+	_, err := parseAgentMsgArgs([]string{"target", strings.Repeat("x", protocol.AgentMessageMaxChars+1)}, "sender-session-id")
+	if err == nil {
+		t.Fatal("an oversize message was accepted")
+	}
+	if !strings.Contains(err.Error(), "32769") || !strings.Contains(err.Error(), "32768") {
+		t.Fatalf("error names neither the ask nor the limit: %v", err)
+	}
+
+	if _, err := parseAgentMsgArgs([]string{"target", strings.Repeat("x", protocol.AgentMessageMaxChars)}, "sender-session-id"); err != nil {
+		t.Fatalf("a message exactly at the limit was refused: %v", err)
+	}
+}
+
+// A message that starts with a dash is still a message. Without the separator
+// the leading dash is read as a mistyped flag, which is right far more often —
+// but the error has to name the way through, or the sender is just stuck.
+func TestParseAgentMsgArgsTakesADashLeadingMessageAfterTheSeparator(t *testing.T) {
+	parsed, err := parseAgentMsgArgs([]string{"--", "target", "-hello", "--json"}, "sender-session-id")
+	if err != nil {
+		t.Fatalf("a quoted message starting with - was refused: %v", err)
+	}
+	if parsed.content != "-hello" || parsed.target != "target" || !parsed.json {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+
+	_, err = parseAgentMsgArgs([]string{"target", "-hello"}, "sender-session-id")
+	if err == nil || !strings.Contains(err.Error(), "attn agent msg -- <id>") {
+		t.Fatalf("the usage error does not name the way through: %v", err)
+	}
+}

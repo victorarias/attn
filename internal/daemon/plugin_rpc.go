@@ -408,6 +408,11 @@ func readSocketFrame(reader *bufio.Reader) ([]byte, error) {
 	}
 }
 
+// maxInitialSocketFrameBytes bounds one request on the unix socket. Every
+// command's arguments travel inside this frame, JSON-escaped, so a command that
+// carries free text has to leave room under it.
+const maxInitialSocketFrameBytes = 64 * 1024
+
 func readInitialSocketFrame(reader *bufio.Reader, maxBytes int) ([]byte, error) {
 	if maxBytes <= 0 {
 		return nil, errors.New("initial socket frame size limit must be positive")

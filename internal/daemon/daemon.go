@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"net/url"
@@ -234,6 +235,13 @@ type Daemon struct {
 	// land inside a multi-write delivery — see pty_write_fence.go.
 	ptyWriteFencesMu sync.Mutex
 	ptyWriteFences   map[string]*sync.Mutex
+	// Which sessions owe an agent-message delivery, and which are draining one
+	// right now. The first keeps the state-report path off the database when
+	// nothing is queued, which is nearly always — see agent_msg.go.
+	agentMessageMu        sync.Mutex
+	queuedAgentMessages   map[string]bool
+	drainingAgentMessages map[string]bool
+	agentMessageDrainHook func(sessionID string, delivered int) // tests only; nil in production
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
@@ -893,6 +901,9 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("start event bus: %w", err)
 	}
 	reapedWorkspaceIDs := d.loadWorkspacesFromStore()
+	// Queued agent messages outlive the process; one nobody remembers is queued
+	// forever, because the drain decides from memory.
+	d.seedQueuedAgentMessages()
 	if d.daemonInstanceID == "" {
 		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
 		if err != nil {
@@ -2412,8 +2423,14 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	// framing only after their hello has been identified, and any pipelined
 	// bytes stay buffered for that loop.
 	reader := bufio.NewReader(conn)
-	data, err := readInitialSocketFrame(reader, 65536)
+	data, err := readInitialSocketFrame(reader, maxInitialSocketFrameBytes)
 	if err != nil {
+		// A client that connects and goes away has nothing to be told. A client
+		// still waiting on an answer does: closing on it silently reaches the
+		// caller as a bare EOF, which names neither the limit nor the ask.
+		if !errors.Is(err, io.EOF) {
+			d.sendError(conn, err.Error())
+		}
 		return
 	}
 
@@ -2538,6 +2555,9 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
 	case protocol.CmdAgentPeek: // wire: agent_peek
 		d.handleAgentPeek(conn, msg.(*protocol.AgentPeekMessage))
+
+	case protocol.CmdAgentMsg: // wire: agent_msg
+		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

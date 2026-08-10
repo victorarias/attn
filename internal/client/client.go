@@ -396,6 +396,25 @@ func (c *Client) AgentPeek(targetSessionID string) (*protocol.AgentPeekResult, e
 	return resp.AgentPeekResult, nil
 }
 
+// AgentMsg sends another session a message. The daemon persists it, composes
+// the attribution, and delivers it — so the result says what became of it
+// (delivered, queued for later, or refused with the reason), never nothing.
+func (c *Client) AgentMsg(targetSessionID, sourceSessionID, content string) (*protocol.AgentMsgResult, error) {
+	resp, err := c.send(protocol.AgentMsgMessage{
+		Cmd:             protocol.CmdAgentMsg,
+		TargetSessionID: targetSessionID,
+		SourceSessionID: sourceSessionID,
+		Content:         content,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.AgentMsgResult == nil {
+		return nil, errors.New("daemon returned no agent msg result")
+	}
+	return resp.AgentMsgResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
 // StopFacts carries what the Stop hook observed about whether the turn actually
 // finished. The daemon decides what it means; see nonTerminalStopState there. A

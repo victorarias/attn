@@ -58,6 +58,9 @@ are *watching* your ticket, not that you inherited a delegation license.
 - **You are a delegated leaf — confirm what you may do, and report your work
   state if it's tracked:** read
   [references/delegated-agent.md](references/delegated-agent.md).
+- **See what other sessions are running here, watch one without interrupting it,
+  or send one a message — and know what a message you receive may ask of you:**
+  read [references/converse-and-observe.md](references/converse-and-observe.md).
 - **Write a good ticket, or create a backlog ticket without delegating (`ticket new`):** read [references/tickets.md](references/tickets.md).
 - **Read or update shared workspace context:** read
   [references/workspace-context.md](references/workspace-context.md).
