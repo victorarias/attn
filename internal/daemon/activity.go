@@ -183,10 +183,12 @@ func (d *Daemon) sessionActivityTranscript(session *protocol.Session) string {
 	return path
 }
 
-// sessionActivityPayload carries the transcript path resolved at enqueue time,
-// so a debounced run does not depend on the finder agreeing minutes later.
+// sessionActivityPayload carries the transcript path and conversation binding
+// observed at enqueue time, so a debounced run neither re-resolves the path nor
+// writes derived state across a later conversation transition.
 type sessionActivityPayload struct {
 	Transcript string `json:"transcript,omitempty"`
+	ResumeID   string `json:"resume_id,omitempty"`
 }
 
 // enqueueSessionActivity queues a refresh for one session, coalesced by session
@@ -212,13 +214,17 @@ func (d *Daemon) enqueueSessionActivity(sessionID string) {
 	if session == nil || !sessionGeneratesActivity(session) {
 		return
 	}
+	resumeID := strings.TrimSpace(d.store.GetResumeSessionID(sessionID))
 	transcriptPath := d.sessionActivityTranscript(session)
 	if transcriptPath == "" {
 		return
 	}
 	if _, err := runner.Enqueue(sessionActivityKind, jobs.EnqueueOptions{
 		UniqueKey: sessionID,
-		Payload:   sessionActivityPayload{Transcript: transcriptPath},
+		Payload: sessionActivityPayload{
+			Transcript: transcriptPath,
+			ResumeID:   resumeID,
+		},
 	}); err != nil {
 		d.logf("session_activity: enqueue %s: %v", sessionID, err)
 	}
@@ -279,6 +285,7 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	if err := job.DecodePayload(&carried); err != nil {
 		return nil, err
 	}
+	resumeID := strings.TrimSpace(carried.ResumeID)
 	transcriptPath := strings.TrimSpace(carried.Transcript)
 	if transcriptPath == "" {
 		transcriptPath = d.sessionActivityTranscript(session)
@@ -291,7 +298,7 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	if stored.Cursor == "" {
 		// Cold start, checked before the read: reading from byte 0 succeeds, which
 		// is the problem — a full scan summarizing history as if it were now.
-		return nil, d.reseedSessionActivity(sessionID, transcriptPath)
+		return nil, d.reseedSessionActivity(sessionID, resumeID, transcriptPath)
 	}
 	window, err := activity.Read(transcriptPath, string(session.Agent), stored.Cursor)
 	switch {
@@ -301,7 +308,7 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 		errors.Is(err, transcript.ErrInvalidCursor) ||
 		errors.Is(err, activity.ErrDeltaTooLarge):
 		// Re-seed and skip: the next movement works against a cursor that validates.
-		return nil, d.reseedSessionActivity(sessionID, transcriptPath)
+		return nil, d.reseedSessionActivity(sessionID, resumeID, transcriptPath)
 	default:
 		return nil, fmt.Errorf("session_activity: read %s: %w", transcriptPath, err)
 	}
@@ -309,7 +316,7 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	if window.Empty() {
 		// Nothing appended: the line is still true. Advance the cursor anyway so
 		// the next trigger measures movement from here.
-		return nil, d.advanceSessionActivityCursor(sessionID, stored, window.NextCursor)
+		return nil, d.advanceSessionActivityCursor(sessionID, resumeID, stored, window.NextCursor)
 	}
 
 	prompt := activity.Baseline().Render(activity.Input{
@@ -374,7 +381,7 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 		d.noteSessionActivityRun(sessionID, func(record *sessionActivityRun) {
 			record.Err = "the agent answered with nothing usable"
 		})
-		return nil, d.advanceSessionActivityCursor(sessionID, stored, window.NextCursor)
+		return nil, d.advanceSessionActivityCursor(sessionID, resumeID, stored, window.NextCursor)
 	}
 	d.noteSessionActivityRun(sessionID, func(record *sessionActivityRun) { record.Err = "" })
 
@@ -386,8 +393,9 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 	if !d.activityEnabled() {
 		return nil, nil
 	}
-	if !d.store.UpdateSessionActivity(sessionID, line, time.Now(), window.NextCursor) {
-		// The row vanished mid-run. Nothing to publish and nothing to retry.
+	if !d.store.UpdateSessionActivityForConversation(sessionID, resumeID, line, time.Now(), window.NextCursor) {
+		// The row vanished or changed conversations mid-run. Nothing from this
+		// transcript belongs on the current session state.
 		return nil, nil
 	}
 	d.publishFact(FactSessionActivityChanged, sessionID, nil)
@@ -397,22 +405,22 @@ func (d *Daemon) sessionActivityHandler(ctx context.Context, job *jobs.Job) (any
 
 // reseedSessionActivity moves the cursor to the transcript head, keeping the
 // existing line. Used for a cold start and for a mismatched cursor.
-func (d *Daemon) reseedSessionActivity(sessionID, transcriptPath string) error {
+func (d *Daemon) reseedSessionActivity(sessionID, resumeID, transcriptPath string) error {
 	head, err := activity.SeedCursor(transcriptPath)
 	if err != nil {
 		return fmt.Errorf("session_activity: seed cursor for %s: %w", transcriptPath, err)
 	}
-	d.store.SetSessionActivityCursor(sessionID, head)
+	d.store.SetSessionActivityCursorForConversation(sessionID, resumeID, head)
 	return nil
 }
 
 // advanceSessionActivityCursor moves the cursor forward without changing the
 // line. An empty cursor here would silently clear the line.
-func (d *Daemon) advanceSessionActivityCursor(sessionID string, stored store.SessionActivity, next string) error {
+func (d *Daemon) advanceSessionActivityCursor(sessionID, resumeID string, stored store.SessionActivity, next string) error {
 	if next == "" || next == stored.Cursor {
 		return nil
 	}
-	d.store.SetSessionActivityCursor(sessionID, next)
+	d.store.SetSessionActivityCursorForConversation(sessionID, resumeID, next)
 	return nil
 }
 

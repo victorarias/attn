@@ -3,6 +3,7 @@ package store
 import (
 	"database/sql"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/victorarias/attn/internal/docstore"
@@ -66,6 +67,19 @@ func (s *Store) GetSessionActivity(id string) SessionActivity {
 // forget it" path, and it deliberately clears the cursor too, so the next run
 // re-seeds from head rather than reading a delta against a line that is gone.
 func (s *Store) UpdateSessionActivity(id, line string, at time.Time, cursor string) bool {
+	return s.updateSessionActivity(id, nil, line, at, cursor)
+}
+
+// UpdateSessionActivityForConversation records activity only while the session
+// is still bound to the conversation that produced it. The check and write
+// share the store lock with TransitionSessionConversation, so an executor that
+// straddles a conversation transition cannot restore the cleared old state.
+func (s *Store) UpdateSessionActivityForConversation(id, resumeID, line string, at time.Time, cursor string) bool {
+	resumeID = strings.TrimSpace(resumeID)
+	return s.updateSessionActivity(id, &resumeID, line, at, cursor)
+}
+
+func (s *Store) updateSessionActivity(id string, resumeID *string, line string, at time.Time, cursor string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -78,6 +92,9 @@ func (s *Store) UpdateSessionActivity(id, line string, at time.Time, cursor stri
 	}
 
 	if s.db == nil {
+		if resumeID != nil && *resumeID != "" {
+			return false
+		}
 		session, ok := s.sessions[id]
 		if !ok {
 			return false
@@ -94,10 +111,13 @@ func (s *Store) UpdateSessionActivity(id, line string, at time.Time, cursor stri
 		return true
 	}
 
-	result, err := s.db.Exec(
-		`UPDATE sessions SET activity = ?, activity_at = ?, activity_cursor = ? WHERE id = ?`,
-		line, stamp, cursor, id,
-	)
+	query := `UPDATE sessions SET activity = ?, activity_at = ?, activity_cursor = ? WHERE id = ?`
+	args := []any{line, stamp, cursor, id}
+	if resumeID != nil {
+		query += ` AND resume_session_id = ?`
+		args = append(args, *resumeID)
+	}
+	result, err := s.db.Exec(query, args...)
 	if err != nil {
 		log.Printf("[store] UpdateSessionActivity: failed for session %s: %v", id, err)
 		return false
@@ -114,10 +134,24 @@ func (s *Store) UpdateSessionActivity(id, line string, at time.Time, cursor stri
 // whole point is to record how far we have read so the first real line is about
 // the present rather than the session's whole history.
 func (s *Store) SetSessionActivityCursor(id, cursor string) bool {
+	return s.setSessionActivityCursor(id, nil, cursor)
+}
+
+// SetSessionActivityCursorForConversation advances the cursor only while the
+// session still names the conversation whose transcript supplied it.
+func (s *Store) SetSessionActivityCursorForConversation(id, resumeID, cursor string) bool {
+	resumeID = strings.TrimSpace(resumeID)
+	return s.setSessionActivityCursor(id, &resumeID, cursor)
+}
+
+func (s *Store) setSessionActivityCursor(id string, resumeID *string, cursor string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
+		if resumeID != nil && *resumeID != "" {
+			return false
+		}
 		if _, ok := s.sessions[id]; !ok {
 			return false
 		}
@@ -132,7 +166,13 @@ func (s *Store) SetSessionActivityCursor(id, cursor string) bool {
 		return true
 	}
 
-	result, err := s.db.Exec(`UPDATE sessions SET activity_cursor = ? WHERE id = ?`, cursor, id)
+	query := `UPDATE sessions SET activity_cursor = ? WHERE id = ?`
+	args := []any{cursor, id}
+	if resumeID != nil {
+		query += ` AND resume_session_id = ?`
+		args = append(args, *resumeID)
+	}
+	result, err := s.db.Exec(query, args...)
 	if err != nil {
 		log.Printf("[store] SetSessionActivityCursor: failed for session %s: %v", id, err)
 		return false

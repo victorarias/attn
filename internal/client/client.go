@@ -308,12 +308,17 @@ func (c *Client) RecordCompaction(id string, active bool, trigger string) error 
 	return err
 }
 
-// SetSessionResumeID stores the agent-native resume session id for an attn session.
-func (c *Client) SetSessionResumeID(id, resumeSessionID string) error {
+// ObserveAgentConversation reports the provider-owned conversation named by a
+// SessionStart hook. The daemon decides whether it is an initial binding, a
+// repeated observation, or a successor conversation.
+func (c *Client) ObserveAgentConversation(id, nativeID, transcriptPath string) error {
 	msg := protocol.SetSessionResumeIDMessage{
 		Cmd:             protocol.CmdSetSessionResumeID,
 		ID:              id,
-		ResumeSessionID: resumeSessionID,
+		ResumeSessionID: nativeID,
+	}
+	if strings.TrimSpace(transcriptPath) != "" {
+		msg.TranscriptPath = protocol.Ptr(transcriptPath)
 	}
 	_, err := c.send(msg)
 	return err

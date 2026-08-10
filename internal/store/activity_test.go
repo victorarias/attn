@@ -169,3 +169,31 @@ func TestUpdateSessionActivityReportsAMissingSession(t *testing.T) {
 		t.Error("writing activity for a session that does not exist reported a change")
 	}
 }
+
+func TestConversationGuardedActivityWritesRejectAStaleBinding(t *testing.T) {
+	s := newTurnStore(t)
+	addTurnSession(t, s, "s1", protocol.SessionStateWorking)
+	s.SetResumeSessionID("s1", "conversation-old")
+	s.UpdateSessionActivity("s1", "old work", time.Now(), "old-cursor")
+
+	changed, err := s.TransitionSessionConversation("s1", "conversation-new")
+	if err != nil || !changed {
+		t.Fatalf("transition: changed=%v err=%v", changed, err)
+	}
+	if s.UpdateSessionActivityForConversation("s1", "conversation-old", "stale work", time.Now(), "stale-cursor") {
+		t.Error("stale conversation restored an activity line")
+	}
+	if s.SetSessionActivityCursorForConversation("s1", "conversation-old", "stale-cursor") {
+		t.Error("stale conversation restored an activity cursor")
+	}
+	if got := s.GetSessionActivity("s1"); got != (SessionActivity{}) {
+		t.Errorf("activity = %+v after stale writes, want the transition clear preserved", got)
+	}
+
+	if !s.UpdateSessionActivityForConversation("s1", "conversation-new", "new work", time.Now(), "new-cursor") {
+		t.Fatal("current conversation could not write activity")
+	}
+	if got := s.GetSessionActivity("s1"); got.Line != "new work" || got.Cursor != "new-cursor" {
+		t.Errorf("activity = %+v after current write", got)
+	}
+}

@@ -5137,6 +5137,9 @@ type SetSessionResumeIDMessage struct {
 
 	// ResumeSessionID corresponds to the JSON schema field "resume_session_id".
 	ResumeSessionID string `json:"resume_session_id"`
+
+	// TranscriptPath corresponds to the JSON schema field "transcript_path".
+	TranscriptPath *string `json:"transcript_path,omitempty,omitzero"`
 }
 
 type SetSettingMessage struct {

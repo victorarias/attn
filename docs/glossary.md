@@ -164,6 +164,20 @@ workspace — so a satellite whose agent closed, or whose pane moved, gets its o
 row back with no cascade. A satellite with no live parent is an **orphan**, and
 orphans keep their rows.
 
+## Agent conversation
+
+An **agent conversation** is the provider-owned history currently hosted by one
+attn session: its native id, transcript, and resume target. The attn session is
+the stable container — its workspace, pane, ticket binding, PTY, and turns can
+continue while the agent conversation changes. Codex `/new` is such a change: it
+starts a new rollout inside the same running attn session.
+
+Conversation-scoped projections move with that binding. A successor conversation
+invalidates the prior transcript watcher, activity line, and activity cursor;
+reload and other point-in-time readers resolve the newly bound native id. This is
+different from a **conversation session** below, which names attn's headless-agent
+runtime rather than a provider-owned history.
+
 ## Session activity, and presence
 
 A session's **activity** is one short present-tense line saying what that agent is

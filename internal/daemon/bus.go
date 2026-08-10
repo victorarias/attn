@@ -61,6 +61,11 @@ const (
 	// correct because the store was written before the publish and the bus fans
 	// out inline.
 	FactSessionActivityChanged = "session.activity.changed"
+	// FactSessionConversationChanged: the provider-owned conversation hosted by
+	// this stable attn session changed. The store already carries the new binding;
+	// the small payload is only the exact live transcript path reported by the
+	// SessionStart hook.
+	FactSessionConversationChanged = "session.conversation.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -232,6 +237,10 @@ func buildWireProjections() []projection {
 			// An activity line has no event of its own: it rides on the session
 			// snapshot, so it re-pushes that session alone.
 			filter: bus.Filter{FactSessionActivityChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{FactSessionConversationChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
@@ -431,6 +440,7 @@ func (d *Daemon) ensureEventBus() {
 	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
+	d.subscribeAgentConversationFacts()
 }
 
 // startEventBus begins durable delivery; runs early in Start, before any
@@ -442,6 +452,7 @@ func (d *Daemon) startEventBus() error {
 
 func (d *Daemon) stopEventBus() {
 	d.unsubscribeDocumentFacts()
+	d.unsubscribeAgentConversationFacts()
 	if d.busUnsubscribe != nil {
 		d.busUnsubscribe()
 		d.busUnsubscribe = nil
