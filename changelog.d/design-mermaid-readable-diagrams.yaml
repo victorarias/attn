@@ -1,0 +1,10 @@
+kind: fixed
+area: markdown
+change: >
+  Large Mermaid diagrams now keep readable, full-size labels inside a scrollable
+  viewport instead of shrinking to fit the Markdown tile. Oversized diagrams
+  also open in a keyboard-accessible focused view with Fit, 100%, zoom, and pan
+  controls, while small diagrams keep their existing centered layout.
+symptom: >
+  Wide component and sequence diagrams could shrink their text to only a few
+  pixels tall in a Markdown tile.

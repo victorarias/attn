@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>attn Mermaid prototype A — intrinsic scroll</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #0b0b0d; --tile: #111113; --panel: #17171a; --raised: #1d1d21;
+    --line: #303036; --line-soft: #242429; --text: #e8e8e8; --secondary: #bbb;
+    --muted: #888; --faint: #666; --accent: #5b8cff; --orange: #ff6b35;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text); font: 13px/1.5 Inter, -apple-system, BlinkMacSystemFont, sans-serif; }
+  button { font: inherit; }
+  .prototype-note { min-height: 46px; display: flex; align-items: center; gap: 14px; padding: 8px 14px; border-bottom: 1px solid var(--line); background: #101012; }
+  .prototype-note strong { color: #fff; }
+  .prototype-note span { color: var(--secondary); }
+  .key { display: inline-flex; min-width: 20px; height: 20px; align-items: center; justify-content: center; padding: 0 5px; border: 1px solid #44444b; border-bottom-color: #55555e; border-radius: 4px; background: #222227; color: #ddd; font: 11px/1 ui-monospace, monospace; }
+  .shell { height: calc(100% - 46px); display: grid; grid-template-columns: minmax(220px, 36%) 5px minmax(420px, 1fr); }
+  .terminal { min-width: 0; background: #0e1012; padding: 12px 14px; color: #a9b7a8; font: 12px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; }
+  .terminal .prompt { color: #6fb5ff; } .terminal .dim { color: #657065; }
+  .divider { background: #1e1e22; cursor: col-resize; border-inline: 1px solid #29292f; }
+  .divider:hover, .divider.dragging { background: color-mix(in srgb, var(--accent) 55%, #1e1e22); }
+  .tile { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tile); }
+  .tile-header { height: 37px; flex: none; display: flex; align-items: center; gap: 8px; padding: 6px 8px 6px 12px; border-bottom: 1px solid var(--line); background: var(--raised); }
+  .tile-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; font-weight: 600; color: var(--secondary); }
+  .tile-pill { padding: 2px 7px; border: 1px solid var(--line); border-radius: 999px; color: var(--muted); font-size: 10px; }
+  .tile-body { min-height: 0; flex: 1; overflow: auto; padding: 12px; }
+  .reader { width: min(832px, 100%); margin: 0 auto; padding: 28px 32px 38px; border: 1px solid var(--line-soft); border-radius: 12px; background: var(--panel); }
+  h1 { margin: 0 0 6px; font-size: 25px; line-height: 1.25; } h2 { margin: 32px 0 8px; font-size: 17px; }
+  p { margin: 0 0 14px; color: #d0d0d4; font-size: 14px; }
+  .diagram-card { margin: 12px 0 26px; }
+  .diagram-top { display: flex; align-items: center; gap: 8px; min-height: 28px; margin-bottom: 6px; }
+  .diagram-label { color: var(--secondary); font-weight: 600; }
+  .diagram-badge { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+  .diagram-badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
+  .diagram-button { border: 1px solid var(--line); border-radius: 5px; padding: 3px 8px; background: #222227; color: var(--secondary); cursor: pointer; }
+  .diagram-button:hover, .diagram-button:focus-visible { border-color: var(--accent); color: #fff; outline: none; }
+  .viewport { position: relative; max-height: 470px; overflow: auto; overscroll-behavior: contain; border: 1px solid var(--line); border-radius: 8px; background: #0d0d10; scrollbar-width: thin; }
+  .viewport:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .diagram-slot { width: max-content; min-width: 100%; padding: 22px; }
+  .diagram-slot svg { display: block; max-width: none; height: auto; }
+  .scroll-meter { position: sticky; left: 0; bottom: 0; width: 100%; height: 3px; background: #222229; pointer-events: none; }
+  .scroll-meter > i { display: block; width: 20%; height: 100%; transform-origin: left; background: var(--accent); }
+  .hint { margin-top: 7px; color: var(--muted); font-size: 11px; }
+  .svg-group { fill: #11151b; stroke: #424a57; stroke-width: 1.5; stroke-dasharray: 7 6; }
+  .svg-node { fill: #20232a; stroke: #707987; stroke-width: 1.3; rx: 7; }
+  .svg-node.hot { fill: #173f35; stroke: #59d8ad; }
+  .svg-node.gap { fill: #4b202a; stroke: #ff7188; }
+  .svg-title { fill: #aeb7c5; font-size: 17px; font-weight: 650; }
+  .svg-text { fill: #eef0f3; font-size: 15px; text-anchor: middle; dominant-baseline: middle; }
+  .svg-small { fill: #b2b6bf; font-size: 13px; text-anchor: middle; }
+  .svg-line { stroke: #8c96a5; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  .svg-dash { stroke: #68717f; stroke-width: 1.2; stroke-dasharray: 5 5; }
+  @media (max-width: 800px) { .shell { grid-template-columns: 1fr; } .terminal, .divider { display: none; } .reader { padding: 20px; } }
+</style>
+</head>
+<body>
+<div class="prototype-note">
+  <strong>A · Intrinsic-size scroll</strong>
+  <span>Drag the divider to resize. Focus a diagram, then use <span class="key">←</span> <span class="key">→</span> <span class="key">↑</span> <span class="key">↓</span>, or scroll normally. Labels never scale down.</span>
+</div>
+<div class="shell" id="shell">
+  <aside class="terminal" aria-label="Mock terminal pane"><span class="prompt">victor@attn</span> design/mermaid-legibility<br><br><span class="dim">The Markdown tile is the active leaf.</span><br>Drag the divider to make it narrower.<br><br><span class="prompt">❯</span> Diagram content keeps its intrinsic size.</aside>
+  <div class="divider" role="separator" aria-orientation="vertical" aria-label="Resize panes" tabindex="0"></div>
+  <section class="tile">
+    <header class="tile-header"><span class="tile-title">2026-08-10-live-terminal-annotation-refresh.md</span><span class="tile-pill">Markdown tile</span><span aria-hidden="true" style="color:#777;font-size:16px">×</span></header>
+    <div class="tile-body">
+      <article class="reader">
+        <h1>Live terminal annotation refresh</h1>
+        <p>Large diagrams render at a readable intrinsic size. Their viewport scrolls independently, while the rest of the document keeps attn’s current reading width.</p>
+
+        <h2>Completed-message-driven refresh</h2>
+        <div class="diagram-card">
+          <div class="diagram-top"><span class="diagram-label">Component flow</span><span class="diagram-badge">Large diagram · 1:1</span><button class="diagram-button" data-center>Center</button></div>
+          <div class="viewport" tabindex="0" aria-label="Large component diagram; scroll to explore" data-kind="component"><div class="diagram-slot"></div><div class="scroll-meter"><i></i></div></div>
+          <div class="hint">Native two-axis scrolling; arrow keys pan by 72px, Page Up/Down by one viewport.</div>
+        </div>
+
+        <h2>Refresh sequence</h2>
+        <div class="diagram-card">
+          <div class="diagram-top"><span class="diagram-label">Sequence</span><span class="diagram-badge">Large diagram · 1:1</span><button class="diagram-button" data-center>Center</button></div>
+          <div class="viewport" tabindex="0" aria-label="Large sequence diagram; scroll to explore" data-kind="sequence"><div class="diagram-slot"></div><div class="scroll-meter"><i></i></div></div>
+          <div class="hint">No zoom state, toolbar, transform, or resize work: content stays legible and the browser owns scrolling.</div>
+        </div>
+      </article>
+    </div>
+  </section>
+</div>
+<script>
+  const NS = 'http://www.w3.org/2000/svg';
+  const el = (tag, attrs = {}, text = '') => { const n = document.createElementNS(NS, tag); Object.entries(attrs).forEach(([k,v]) => n.setAttribute(k, v)); if (text) n.textContent = text; return n; };
+  function baseSvg(width, height, label) {
+    const svg = el('svg', { viewBox:`0 0 ${width} ${height}`, width, height, role:'img', 'aria-label':label });
+    const defs = el('defs'); const marker = el('marker', { id:'arrow', markerWidth:8, markerHeight:8, refX:7, refY:4, orient:'auto', markerUnits:'strokeWidth' }); marker.append(el('path',{d:'M0,0 L8,4 L0,8 z',fill:'#8c96a5'})); defs.append(marker); svg.append(defs); return svg;
+  }
+  function componentDiagram() {
+    const svg = baseSvg(1640, 760, 'Component flow from agent transcript through the daemon to terminal annotations');
+    const groups = [{x:20,w:270,t:'Agent process'},{x:320,w:670,t:'attn daemon'},{x:1020,w:600,t:'attn app'}];
+    groups.forEach(g => { svg.append(el('rect',{x:g.x,y:38,width:g.w,height:684,class:'svg-group',rx:12})); svg.append(el('text',{x:g.x+18,y:68,class:'svg-title'},g.t)); });
+    const nodes = [
+      ['Codex TUI',65,120,180,58,''],['Transcript JSONL',65,255,180,58,''],
+      ['Transcript watcher',365,120,190,58,''],['Completed fact',610,120,160,58,'hot'],['Durable event bus',810,120,145,58,'hot'],
+      ['Wire projection',610,255,160,58,'hot'],['Message reader',365,410,190,58,''],['session_messages_get',610,410,200,58,''],
+      ['Daemon socket',1065,120,170,58,'hot'],['Message revision',1285,120,180,58,'hot'],['AnnotatedTerminal',1065,300,170,58,'hot'],
+      ['Annotation store',1285,300,180,58,''],['Grid aligner',1065,470,170,58,''],['Ghostty grid',1285,470,180,58,'']
+    ];
+    const centers = {};
+    nodes.forEach(([t,x,y,w,h,c]) => { const r=el('rect',{x,y,width:w,height:h,class:`svg-node ${c}`}); svg.append(r); svg.append(el('text',{x:x+w/2,y:y+h/2,class:'svg-text'},t)); centers[t]={x:x+w/2,y:y+h/2,w,h}; });
+    const line = (a,b,label='',dash=false) => { const A=centers[a],B=centers[b], sx=A.x+(B.x>A.x?A.w/2:-A.w/2), ex=B.x+(B.x>A.x?-B.w/2:B.w/2), p=el('path',{d:`M ${sx} ${A.y} C ${(sx+ex)/2} ${A.y}, ${(sx+ex)/2} ${B.y}, ${ex} ${B.y}`,class:dash?'svg-line svg-dash':'svg-line'}); svg.append(p); if(label) svg.append(el('text',{x:(sx+ex)/2,y:(A.y+B.y)/2-8,class:'svg-small'},label)); };
+    line('Codex TUI','Transcript JSONL','appends completed entries'); line('Transcript JSONL','Transcript watcher','file delta'); line('Transcript watcher','Completed fact','publish after dedup'); line('Completed fact','Durable event bus'); line('Durable event bus','Wire projection'); line('Wire projection','Daemon socket','session_messages_changed'); line('Daemon socket','Message revision'); line('Message revision','AnnotatedTerminal','revision change'); line('AnnotatedTerminal','session_messages_get'); line('session_messages_get','Message reader','canonical read'); line('Message reader','Transcript JSONL','bounded window'); line('AnnotatedTerminal','Annotation store'); line('Annotation store','Grid aligner'); line('Ghostty grid','Grid aligner'); line('Codex TUI','Ghostty grid','renders bytes',true);
+    return svg;
+  }
+  function sequenceDiagram() {
+    const names=['Codex','Transcript JSONL','Watcher','Event bus','App socket','AnnotatedTerminal','Message reader','Store + aligner'];
+    const svg=baseSvg(1580,860,'Sequence for a completed assistant message refreshing terminal annotations'); const left=70, gap=205, top=40, bottom=820;
+    const xs={}; names.forEach((n,i)=>{ const x=left+i*gap; xs[n]=x; svg.append(el('rect',{x:x-78,y:top,width:156,height:52,class:'svg-node'})); svg.append(el('text',{x,y:top+26,class:'svg-text'},n)); svg.append(el('line',{x1:x,y1:top+52,x2:x,y2:bottom,class:'svg-dash'})); });
+    const msgs=[
+      ['Codex','Transcript JSONL','Append completed assistant commentary'],['Transcript JSONL','Watcher','File delta'],['Watcher','Watcher','Extract + deduplicate content'],['Watcher','Event bus','Publish session.assistant_message.completed'],['Event bus','App socket','session_messages_changed(session_id)'],['App socket','App socket','Increment per-session revision'],['App socket','AnnotatedTerminal','Revision changed'],['AnnotatedTerminal','Message reader','session_messages_get'],['Message reader','Transcript JSONL','Scan transcript'],['Transcript JSONL','Message reader','Completed messages'],['Message reader','AnnotatedTerminal','Canonical bounded window'],['AnnotatedTerminal','Store + aligner','Replace window + align to grid'],['Codex','AnnotatedTerminal','Commentary visible in terminal'],['AnnotatedTerminal','Store + aligner','Resolve selected cells to message offsets']
+    ];
+    let y=125; msgs.forEach(([a,b,label],i)=>{ const x1=xs[a],x2=xs[b]; if(a===b){ svg.append(el('path',{d:`M ${x1} ${y} h 52 v 30 h -52`,class:'svg-line'})); svg.append(el('text',{x:x1+82,y:y+12,class:'svg-small'},label)); y+=54; } else { svg.append(el('line',{x1,y1:y,x2,y2:y,class:'svg-line'})); svg.append(el('text',{x:(x1+x2)/2,y:y-8,class:'svg-small'},label)); y+=48; } if(i===11){ svg.append(el('rect',{x:440,y:y-5,width:920,height:38,fill:'#173f35',stroke:'#59d8ad',rx:6})); svg.append(el('text',{x:900,y:y+19,class:'svg-small',fill:'#eafff8'},'Session may remain working throughout')); y+=60; } }); return svg;
+  }
+  document.querySelectorAll('.viewport').forEach(view => {
+    const svg=view.dataset.kind==='component'?componentDiagram():sequenceDiagram(); view.querySelector('.diagram-slot').append(svg);
+    const meter=view.querySelector('.scroll-meter i'); const update=()=>{ const max=Math.max(1,view.scrollWidth-view.clientWidth); meter.style.transform=`scaleX(${Math.min(1,view.clientWidth/view.scrollWidth)}) translateX(${view.scrollLeft/(view.clientWidth||1)*100}%)`; meter.title=`${Math.round(view.scrollLeft/max*100)}% across`; }; view.addEventListener('scroll',update,{passive:true}); new ResizeObserver(update).observe(view); update();
+    view.addEventListener('keydown',e=>{ const d=e.shiftKey?220:72; const moves={ArrowLeft:[-d,0],ArrowRight:[d,0],ArrowUp:[0,-d],ArrowDown:[0,d],PageUp:[0,-view.clientHeight],PageDown:[0,view.clientHeight]}; if(moves[e.key]){e.preventDefault(); view.scrollBy(...moves[e.key]);} if(e.key==='Home'){e.preventDefault();view.scrollTo(0,0);} if(e.key==='End'){e.preventDefault();view.scrollTo(view.scrollWidth,view.scrollHeight);} });
+    view.closest('.diagram-card').querySelector('[data-center]').addEventListener('click',()=>{ view.scrollTo((view.scrollWidth-view.clientWidth)/2,(view.scrollHeight-view.clientHeight)/2); view.focus(); });
+  });
+  const shell=document.querySelector('.shell'), divider=document.querySelector('.divider'); let drag=false;
+  divider.addEventListener('pointerdown',e=>{drag=true;divider.classList.add('dragging');divider.setPointerCapture(e.pointerId);});
+  divider.addEventListener('pointermove',e=>{if(!drag)return;const pct=Math.max(22,Math.min(62,e.clientX/window.innerWidth*100));shell.style.gridTemplateColumns=`minmax(220px,${pct}%) 5px minmax(420px,1fr)`;});
+  divider.addEventListener('pointerup',()=>{drag=false;divider.classList.remove('dragging');});
+</script>
+</body>
+</html>

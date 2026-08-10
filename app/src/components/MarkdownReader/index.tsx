@@ -8,7 +8,7 @@ import remarkFrontmatter from 'remark-frontmatter';
 import remarkGfm from 'remark-gfm';
 import type { PluggableList } from 'unified';
 import '@fontsource-variable/inter';
-import { CodeRenderer } from '../Markdown';
+import { CodeRenderer, ReaderDiagramPresentation } from '../Markdown';
 import { CodeBlock } from './CodeBlock';
 import { extractFrontmatter, type FrontmatterEntry } from './frontmatter';
 import { ImageLightbox } from './ImageLightbox';
@@ -331,9 +331,11 @@ const MarkdownReaderBody = memo(function MarkdownReaderBody({
   return (
     <article className="md-reader-card">
       <FrontmatterCard entries={frontmatter.entries} />
-      <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
-        {content}
-      </ReactMarkdown>
+      <ReaderDiagramPresentation>
+        <ReactMarkdown remarkPlugins={remarkPlugins} rehypePlugins={rehypePlugins} components={components}>
+          {content}
+        </ReactMarkdown>
+      </ReaderDiagramPresentation>
     </article>
   );
 });
