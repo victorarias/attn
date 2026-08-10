@@ -612,18 +612,22 @@ func (d *Daemon) autoDisableApp(name string, ev bus.Event, stalled time.Duration
 	if d.store == nil {
 		return
 	}
-	if _, err := d.store.AddNotification(store.NotificationRecord{
-		Kind:  notificationKindAppAutoDisabled,
-		Title: fmt.Sprintf("App disabled: %s", name),
+	record, err := d.store.AddNotification(store.NotificationRecord{
+		Kind:     notificationKindAppAutoDisabled,
+		Severity: store.NotificationWarning,
+		Title:    fmt.Sprintf("App disabled: %s", name),
 		Body: fmt.Sprintf(
 			"%s failed on the same event (%s, seq %d) for %s across %d attempts, so attn disabled it — a stalled app holds the event log open for every other consumer. Fix the handler and `attn app enable %s`; `attn app status %s` shows the failures.",
 			name, ev.Name, ev.Seq, stalled.Round(time.Minute), attempts, name, name),
 		Detail:     message,
 		SourceKind: "app",
 		SourceID:   name,
-	}, d.appNow()); err != nil {
+	}, d.appNow())
+	if err != nil {
 		d.logf("notifications: add app-auto-disabled notification for %s: %v", name, err)
+		return
 	}
+	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
 // ---------------------------------------------------------------------------

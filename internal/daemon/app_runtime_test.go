@@ -930,6 +930,15 @@ func TestParkedRuntimeIsVisibleOnEveryAppAndRevivable(t *testing.T) {
 	if !strings.Contains(parked.Body, "attn app runtime restart") {
 		t.Fatalf("the notification does not name the way back: %q", parked.Body)
 	}
+	// No app's handlers run and nothing retries on its own, so this is the
+	// notification that earns the ambient surface — and it has to reach the app
+	// when it happens, not whenever the feed is re-pushed next.
+	if parked.Severity != store.NotificationCritical {
+		t.Fatalf("severity = %q, want critical", parked.Severity)
+	}
+	if created := appFacts(t, d, FactNotificationCreated); len(created) != 1 || created[0].Subject != parked.ID {
+		t.Fatalf("notification.created facts = %+v, want one for %s", created, parked.ID)
+	}
 
 	revived := appRuntimeRestart(t, d)
 	if revived.Was != string(supervise.PhaseParked) {

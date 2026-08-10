@@ -122,6 +122,14 @@ func TestAppStuckOnOneEventIsDisabledAndSaysSoThreeWays(t *testing.T) {
 	if !strings.Contains(notes[0].Body, "ticket.created") || !strings.Contains(notes[0].Detail, "TypeError") {
 		t.Fatalf("the notification does not say what failed: body=%q detail=%q", notes[0].Body, notes[0].Detail)
 	}
+	// One app is off; everything else still runs. That is a warning, and it
+	// reaches the app now rather than at whatever re-pushes the feed next.
+	if notes[0].Severity != store.NotificationWarning {
+		t.Fatalf("severity = %q, want warning", notes[0].Severity)
+	}
+	if created := appFacts(t, d, FactNotificationCreated); len(created) != 1 || created[0].Subject != notes[0].ID {
+		t.Fatalf("notification.created facts = %+v, want one for %s", created, notes[0].ID)
+	}
 	// And the clock is cleared, so re-enabling does not disable it again on the
 	// very next failure.
 	if stall, ok := d.appStallSnapshot("greeter"); ok {
