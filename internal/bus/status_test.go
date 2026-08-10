@@ -218,6 +218,42 @@ func TestReportLoudProducersNamesTheFactRateAndWindow(t *testing.T) {
 	}
 }
 
+// A restart must not buy a loud producer an hour of silence. The retention tick
+// is an hour apart, so the first report has to come before it — otherwise a
+// daemon restarted more often than that never reports at all.
+func TestStartReportsLoudProducersBeforeTheFirstTick(t *testing.T) {
+	s := newMemStore()
+	said := make(chan string, 8)
+	b := New(Options{
+		Store:        s,
+		Now:          func() time.Time { return statusNow },
+		TrimInterval: time.Hour,
+		Log: func(format string, args ...interface{}) {
+			select {
+			case said <- fmt.Sprintf(format, args...):
+			default:
+			}
+		},
+	})
+	for i := 0; i < 7000; i++ {
+		publishAt(t, s, "session.state.changed", 2, 1, time.Duration(i%360)*time.Minute)
+	}
+
+	if err := b.Start(); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer b.Stop()
+
+	select {
+	case line := <-said:
+		if !strings.Contains(line, "session.state.changed") || !strings.Contains(line, "1000/hour") {
+			t.Fatalf("first line does not report the loud producer: %q", line)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Start never reported the loud producer; it waited for the retention tick")
+	}
+}
+
 func TestStatusReportsConsumerLagAndTheRetentionFloor(t *testing.T) {
 	b, s := statusBus(t)
 	publishAt(t, s, "session.state.changed", 4, 100, 3*time.Hour)

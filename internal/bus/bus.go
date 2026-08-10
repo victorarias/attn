@@ -637,6 +637,10 @@ func (b *Bus) advance(d *durable, seq int64) error {
 func (b *Bus) retain() {
 	ticker := time.NewTicker(b.trimInterval)
 	defer ticker.Stop()
+	// Report before the first tick, not an hour into the run: a producer already
+	// past the ceiling is past it at startup, and a daemon restarted more often
+	// than trimInterval would otherwise never say so.
+	b.ReportLoudProducers()
 	for {
 		select {
 		case <-b.ctx.Done():
