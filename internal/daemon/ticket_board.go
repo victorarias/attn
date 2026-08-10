@@ -14,12 +14,31 @@ import (
 // tickets_updated broadcast per mutation, and a get_ticket request/result for one
 // row's detail. Pushes carry bare rows so a busy board stays cheap.
 
-// ticketsForBroadcast is the payload of both initial_state and tickets_updated.
-func (d *Daemon) ticketsForBroadcast() []protocol.Ticket {
-	return d.ticketRows(store.TicketListFilter{})
+// ticketsForBroadcast is the payload of both initial_state and tickets_updated:
+// the whole non-archived board as slim rows. The brief stays off it — the board
+// is re-pushed on every ticket mutation and to every client on connect, and no
+// client renders a description from a row.
+func (d *Daemon) ticketsForBroadcast() []protocol.TicketRow {
+	if d.store == nil {
+		return nil
+	}
+	rows, err := d.store.ListTickets(store.TicketListFilter{})
+	if err != nil {
+		d.logf("list tickets: %v", err)
+		return nil
+	}
+	out := make([]protocol.TicketRow, 0, len(rows))
+	for _, t := range rows {
+		if t != nil {
+			out = append(out, ticketToProtocolRow(t))
+		}
+	}
+	return out
 }
 
-// ticketRows lists the board through a filter as bare wire rows, newest first.
+// ticketRows lists the board through a filter as full wire records without the
+// activity thread, newest first. This is the agent's board read (ticket_list),
+// which carries the brief; the app's feed uses ticketsForBroadcast.
 func (d *Daemon) ticketRows(filter store.TicketListFilter) []protocol.Ticket {
 	if d.store == nil {
 		return nil
@@ -94,22 +113,26 @@ func (d *Daemon) publishTicketFact(name, ticketID string) {
 }
 
 // projectTicketsUpdated re-pushes the whole non-archived board to every client.
+// Like every other whole-list projection it goes through projectSnapshot, so a
+// bulk ticket operation puts one board on the wire instead of one per ticket.
 func (d *Daemon) projectTicketsUpdated() {
 	if d.store == nil {
 		return
 	}
-	tickets := d.ticketsForBroadcast()
-	// TicketsUpdatedMessage is its own top-level event, so the wsHub's
-	// WebSocketEvent-only broadcastListener cannot see it; tests use this hook.
-	if d.ticketsBroadcastHook != nil {
-		d.ticketsBroadcastHook(tickets)
-	}
-	if d.wsHub == nil {
-		return
-	}
-	d.broadcastMessage(&protocol.TicketsUpdatedMessage{
-		Event:   protocol.EventTicketsUpdated,
-		Tickets: tickets,
+	d.projectSnapshot(snapshotTickets, func() {
+		tickets := d.ticketsForBroadcast()
+		// TicketsUpdatedMessage is its own top-level event, so the wsHub's
+		// WebSocketEvent-only broadcastListener cannot see it; tests use this hook.
+		if d.ticketsBroadcastHook != nil {
+			d.ticketsBroadcastHook(tickets)
+		}
+		if d.wsHub == nil {
+			return
+		}
+		d.broadcastMessage(&protocol.TicketsUpdatedMessage{
+			Event:   protocol.EventTicketsUpdated,
+			Tickets: tickets,
+		})
 	})
 }
 
@@ -169,6 +192,26 @@ func ticketToProtocol(t *store.Ticket) protocol.Ticket {
 		pt.Activity = append(pt.Activity, ticketActivityToProtocol(a))
 	}
 	return pt
+}
+
+// ticketToProtocolRow maps a store ticket to its board-feed row.
+func ticketToProtocolRow(t *store.Ticket) protocol.TicketRow {
+	row := protocol.TicketRow{
+		ID:          t.ID,
+		Title:       t.Title,
+		Status:      protocol.TicketStatus(t.Status),
+		Assignee:    t.Assignee,
+		Cwd:         t.Cwd,
+		LastAgentID: t.LastAgentID,
+		UpdatedAt:   t.UpdatedAt.Format(time.RFC3339),
+	}
+	if t.ClosedAt != nil {
+		row.ClosedAt = protocol.Ptr(t.ClosedAt.Format(time.RFC3339))
+	}
+	if t.ReconciledAt != nil {
+		row.ReconciledAt = protocol.Ptr(t.ReconciledAt.Format(time.RFC3339))
+	}
+	return row
 }
 
 func (d *Daemon) ticketToProtocolFull(t *store.Ticket) (protocol.Ticket, error) {

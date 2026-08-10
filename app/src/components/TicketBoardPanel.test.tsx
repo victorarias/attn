@@ -8,23 +8,18 @@ import {
   groupTicketsByColumn,
   STATUS_COLUMNS,
 } from './TicketBoardPanel';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 import { TicketStatus } from '../types/generated';
 
-function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
+function makeTicket(overrides: Partial<TicketRow> = {}): TicketRow {
   return {
     id: 'tk-1',
     title: 'A ticket',
-    description: '',
     status: TicketStatus.Todo,
     assignee: 'sess-1',
     cwd: '/repo',
     last_agent_id: 'codex',
-    project_id: '',
-    created_at: '2026-06-27T10:00:00Z',
     updated_at: '2026-06-27T10:05:00Z',
-    activity: [],
-    artifacts: [],
     ...overrides,
   };
 }

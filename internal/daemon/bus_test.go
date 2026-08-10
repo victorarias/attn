@@ -37,7 +37,7 @@ func TestTicketMutationPublishesAFactAndPushesTheBoardOnce(t *testing.T) {
 	t.Cleanup(d.stopEventBus)
 
 	var boards int
-	d.ticketsBroadcastHook = func([]protocol.Ticket) { boards++ }
+	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
 
 	now := time.Now()
 	if _, err := d.store.CreateTicket(store.Ticket{ID: "tk-1", Title: "work"}, "sess-a", now); err != nil {
@@ -301,7 +301,7 @@ func TestBoardStillPushesWhenTheBusAppendFails(t *testing.T) {
 	backing := rewireBusWithFailingAppend(t, d)
 
 	var boards int
-	d.ticketsBroadcastHook = func([]protocol.Ticket) { boards++ }
+	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
 
 	now := time.Now()
 	if _, err := d.store.CreateTicket(store.Ticket{ID: "tk-1", Title: "work"}, "sess-a", now); err != nil {

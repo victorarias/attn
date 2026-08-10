@@ -51,6 +51,25 @@ func TestCoalesceSnapshotsKeepsDistinctSnapshotsSeparate(t *testing.T) {
 	}
 }
 
+// The board was the one whole-list projection outside the machinery: it pushed
+// its 200KB message per fact even inside a bulk block. It is a snapshot like
+// every other list, so it collapses like one.
+func TestCoalesceSnapshotsCollapsesTheTicketBoard(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	var boards int
+	d.ticketsBroadcastHook = func([]protocol.TicketRow) { boards++ }
+
+	d.coalesceSnapshots(func() {
+		for _, id := range []string{"tk-1", "tk-2", "tk-3", "tk-4", "tk-5"} {
+			d.publishTicketFact(FactTicketStatusChanged, id)
+		}
+	})
+
+	if boards != 1 {
+		t.Fatalf("five ticket facts in one bulk block pushed %d boards, want 1", boards)
+	}
+}
+
 func TestUncoalescedFactsPushOncePerFact(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	trace := wireRecorder(d)

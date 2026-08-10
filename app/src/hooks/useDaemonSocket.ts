@@ -20,6 +20,7 @@ import type {
   Task as GeneratedTask,
   Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
+  TicketRow as GeneratedTicketRow,
   MarkdownAnnotation,
   Presentation,
   PresentationRound,
@@ -112,6 +113,9 @@ export interface PastConversationsResult {
 }
 
 export type Ticket = GeneratedTicket;
+// The board feed's row. Slimmer than Ticket on purpose: the brief, the history
+// thread and the artifacts come from a read by id, not from a whole-board push.
+export type TicketRow = GeneratedTicketRow;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -226,7 +230,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '224';
+export const PROTOCOL_VERSION = '225';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -595,9 +599,9 @@ interface UseDaemonSocketOptions {
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
   onFsChanged?: (origin: string, paths: string[], root: string) => void;
-  // Fired with the non-archived ticket board (bare rows) on initial_state and on
+  // Fired with the non-archived ticket board (slim rows) on initial_state and on
   // every tickets_updated broadcast. The detail view fetches full records itself.
-  onTicketsUpdate?: (tickets: Ticket[]) => void;
+  onTicketsUpdate?: (tickets: TicketRow[]) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
