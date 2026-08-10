@@ -314,6 +314,31 @@ exists to avoid.
 - **Stage 2 ships as its own PR** (Victor, 2026-08-10), not folded into
   garden slice 1.
 
+## Absorbed surfaces (Victor, 2026-08-10)
+
+Two existing surfaces fail the vision's names-its-reader principle and are
+frozen for new construction now, retired once their absorbers land. Receipt:
+workspace context was never written in 4 of 6 live workspaces; the two that
+used it (revisions 40 and 20) were hand-maintaining crown-shaped documents —
+Area / Current Picture / Threads / Timeline / Decisions — whose canonical
+content already lives in plan docs. The Notebook's automated writers
+(keeper, summarizer, compacter) are all turned off and nothing was missed.
+
+| Job | Old home | New home |
+| --- | --- | --- |
+| What is happening right now | workspace context | `agent peek` / `agent list` (stage 1) |
+| Tell another session something | workspace context | `agent msg` (stage 1) |
+| Effort-level current picture and plan | workspace context, Notebook | the crown's body (stage 3) |
+| Historical context: what happened, what was learned | workspace context, Notebook journal | notes on the seed, or on the crown when effort-scoped — a crown is a seed, so this needs no extra machinery (stage 3) |
+| Delegation artifacts | Notebook | the seed's page (stage 3) |
+| Durable knowledge | Notebook | repo docs and glossary, as today |
+| Continuity of perspective | Notebook journal | crew handoffs (stage 4) |
+
+Notes are the general agent-facing historical-context surface, not a
+machine audit trail: written by an agent to whoever tends that seed next —
+anchored to the thing they are about and read at tending time, which is
+what workspace context never had.
+
 ## Open forks
 
 - Whether the server gets a product name (deferred; naming can happen any

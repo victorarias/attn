@@ -78,9 +78,12 @@ to fix.
 ## Design decisions (cross-slice)
 
 - **Storage: docstore, `core/garden` namespace.** Collections `seeds` and
-  `notes` (audit/progress entries keyed by seed id — a separate collection,
-  not an embedded array, so a long-tended seed never bloats its own
-  document). Live queries, bus change events, and revision-checked writes
+  `notes` (keyed by seed id — a separate collection, not an embedded array,
+  so a long-tended seed never bloats its own document). Notes are the
+  general historical-context surface, not just machine audit (Victor,
+  2026-08-10): an agent writes what happened and what it learned, addressed
+  to whoever tends that seed next; a note scoped to the whole effort goes on
+  the crown, which works with no extra machinery because a crown is a seed. Live queries, bus change events, and revision-checked writes
   come free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.

@@ -52,6 +52,14 @@ builders.
   primitives, and the extensibility mechanism lets each user grow their own.
 - **Grown, not bolted on.** The crew generalizes the chief. The work graph grows
   from tickets, the store, and the bus. Nothing here starts from a blank page.
+- **Every durable surface names its reader.** A surface earns existence by
+  naming who reads it and when: a handoff is read by the successor at wake,
+  a seed note by the next tender, a ticket by its participants. Writers
+  without an addressed reader produce narration into a drawer. The receipt
+  (2026-08-10): workspace context was never written in 4 of 6 live
+  workspaces, and the two that used it were hand-maintaining crown-shaped
+  documents the garden makes native; the Notebook-as-journal had all its
+  writers turned off and nothing was missed.
 - **Retire what does not carry weight.** Machinery that scratched the wrong itch
   is removed once its replacement proves itself — not preserved out of sunk
   cost, and not removed before the replacement earns it.
