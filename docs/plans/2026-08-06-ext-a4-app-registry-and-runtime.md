@@ -437,6 +437,63 @@ by a test:
   native build was unaffected because its default stage dir is absolute — which
   is exactly how a cross-only break stays invisible.
 
+### Slice 6 receipts — the exit proof, run
+
+Run 2026-08-10/11 on an M-series Mac plus the OrbStack aarch64 VM, on a
+throwaway profile installed from the epic. The full transcript is on the
+epic→main PR; what belongs here is what it decided.
+
+**It ran end to end.** An app scaffolded, applied (version 1, 558 bytes), its
+consumer registered at head rather than at the start of the log, the sidecar
+started lazily on the first fact the app was due, cold start 41ms and warm
+invocations at 0-1ms — matching slice 5's 77ms/0-1ms. A broken version stalled
+the consumer without skipping the event, the auto-disable clock ran out in real
+time (16m0s across 15 attempts — the window is measured at the next delivery,
+and the bus's backoff had stretched to a minute by then), the fix applied as a
+new version and `attn app enable` brought it back with the stall clock cleared.
+Rollback moved a pointer and built nothing. The Linux witness dispatched on the
+VM against the cross-compiled sidecar.
+
+**The migration renumber, proved both ways.** The app registry moved 98 → 101
+across three main syncs. A database at main's head opened by this build reaches
+101 and has the three `app_*` tables; the same database opened by a build
+identical except for the number stays at 100 with no tables, and `attn app list`
+fails with `no such table: apps`. The runner keeps one scalar version and skips
+anything at or below it, so the hole was never a free slot.
+
+**One defect, found and fixed (#842).** Parking did not hold. Dispatch called
+the same `supervise.Ensure` that `attn app runtime restart` calls, and `Ensure`
+un-parks; the bus retries a failing delivery forever, so a runtime attn had
+given up on got a fresh ten-attempt budget every couple of minutes — seven
+parkings and seven critical notifications in fourteen minutes, measured. Now
+dispatch uses `EnsureUnlessParked` and answers a runtime failure naming the way
+back. Re-verified: one parking, then eight minutes of traffic with the
+generation unchanged and no second notification.
+
+**Three things observed and deliberately not changed**, each a decision rather
+than a defect:
+
+- A hub-managed remote endpoint never gets a sidecar.
+  `internal/hub/bootstrap.go` (`installRemoteBinary`) streams exactly one file,
+  the `attn` binary, and nothing under `internal/hub/` mentions
+  `attn-app-runtime`. Such a remote hits "the app runtime binary is not
+  installed" forever. Shipping the second file is small, but it is new
+  behavior in the bootstrap path.
+- Bare `attn app rollback <name>` picks the numerically previous version id,
+  not the previously-running one. With history 1 good / 2 broken / 3 fixed, it
+  rolls to the broken one. Naming the version explicitly is always correct.
+  "The previous version" has two honest readings and choosing one is a product
+  call.
+- While the runtime is down, deliveries record `runtime_error` and clear the
+  app's stall clock — the app is not charged for an outage that is not its
+  fault — so nothing disables it and its consumer holds the retention floor for
+  as long as the outage lasts. Whether a parked runtime should start a clock of
+  its own is the open question A4 leaves; the roadmap gate did not ask for one.
+- A restarted daemon forgets the park: a fresh supervisor has no memory of it,
+  so the first dispatch lazy-starts a still-broken host and the crash loop
+  re-arms. Correct for a deliberate act, worth knowing as a way back that is
+  not the restart verb.
+
 ## Out of scope
 
 - UI tiles, panels, the `@attn/app` UI SDK, import maps — A5, which builds
