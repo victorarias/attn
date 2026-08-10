@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  Design record for projection-side snapshot coalescing, decided against.
+  Measures the WebSocket wire load the projection layer actually produces —
+  fact rates modelled from production bus events, payload sizes read off the
+  live socket — and records the reconsider threshold as a number, so the
+  question does not have to be re-derived.
