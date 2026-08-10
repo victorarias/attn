@@ -1,0 +1,9 @@
+kind: added
+area: cli
+change: >
+  An attn-living agent can now observe its neighbours: `attn agent list` names
+  every session on the daemon with a short id, name, workspace, state, and
+  whether a turn is owed, and `attn agent peek <id>` reads one session's state,
+  todos, last assistant message, and rendered screen. Peek is passive by
+  construction — it serves only what the daemon already holds, so the observed
+  agent never notices and loses nothing.

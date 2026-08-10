@@ -2536,6 +2536,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSessionTranscript(conn, msg.(*protocol.SessionTranscriptMessage))
 	case protocol.CmdStateExplain: // wire: state_explain
 		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
+	case protocol.CmdAgentPeek: // wire: agent_peek
+		d.handleAgentPeek(conn, msg.(*protocol.AgentPeekMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

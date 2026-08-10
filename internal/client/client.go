@@ -379,6 +379,23 @@ func (c *Client) StateExplain(targetSessionID string) (*protocol.StateExplainRes
 	return resp.StateExplainResult, nil
 }
 
+// AgentPeek reads another session's daemon-held snapshot — state, todos, last
+// assistant message, rendered screen. Passive: the observed session is never
+// touched. The target may be a full session id or a unique prefix.
+func (c *Client) AgentPeek(targetSessionID string) (*protocol.AgentPeekResult, error) {
+	resp, err := c.send(protocol.AgentPeekMessage{
+		Cmd:             protocol.CmdAgentPeek,
+		TargetSessionID: targetSessionID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.AgentPeekResult == nil {
+		return nil, errors.New("daemon returned no agent peek result")
+	}
+	return resp.AgentPeekResult, nil
+}
+
 // SendStop sends a stop signal with transcript path for classification
 // StopFacts carries what the Stop hook observed about whether the turn actually
 // finished. The daemon decides what it means; see nonTerminalStopState there. A

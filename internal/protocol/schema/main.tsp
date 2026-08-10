@@ -734,6 +734,15 @@ model StateExplainMessage {
   target_session_id: string;
 }
 
+// One agent observes another without interrupting it: state, todos, the last
+// assistant message, and the rendered screen, all served from what the daemon
+// already holds. Passive by construction — nothing here touches the target's
+// PTY or generates input, so watching costs the observed agent nothing.
+model AgentPeekMessage {
+  cmd: "agent_peek";
+  target_session_id: string;    // full id or unique prefix (the short id from `attn agent list`)
+}
+
 // A Stop is not always terminal: the turn may yield with background work still
 // in flight (it auto-resumes on completion) or park on a pending scheduled
 // wakeup. These carry that as FACTS observed by the hook — the statuses of the
@@ -4203,6 +4212,7 @@ model Response {
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
   state_explain_result?: StateExplainResult;
+  agent_peek_result?: AgentPeekResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;
@@ -4244,6 +4254,35 @@ model StateExplainResult {
   // capacity is the ring size, so a full ring can be reported as truncated
   // rather than read as the whole history.
   capacity: int32;
+}
+
+// The target's rendered viewport, plain text from the worker's parsed
+// terminal. Viewport only: scrollback is not part of the snapshot RPC.
+model AgentPeekScreen {
+  text: string;
+  cols: int32;
+  rows: int32;
+}
+
+model AgentPeekResult {
+  session_id: string;
+  label: string;
+  agent: string;
+  workspace_id: string;
+  workspace_title?: string;
+  state: string;
+  state_reason?: string;
+  state_since: string;
+  last_seen: string;
+  turn_owed?: boolean;
+  // The flat strings the todo hook stores, served as-is; consumers parse the
+  // [✓]/[→]/[ ] prefix if they care.
+  todos: string[];
+  // Absent is not an error: a session with no inspectable transcript, or one
+  // that has said nothing yet, simply has no message to show.
+  last_assistant_message?: string;
+  // Absent when the backend cannot serve a snapshot (old worker, no frame).
+  screen?: AgentPeekScreen;
 }
 
 model EvidenceExcerpt {

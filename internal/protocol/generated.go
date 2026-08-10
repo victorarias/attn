@@ -96,6 +96,67 @@ type AgentHistoryMessage struct {
 	ID string `json:"id"`
 }
 
+type AgentPeekMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type AgentPeekResult struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent string `json:"agent"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// LastAssistantMessage corresponds to the JSON schema field
+	// "last_assistant_message".
+	LastAssistantMessage *string `json:"last_assistant_message,omitempty,omitzero"`
+
+	// LastSeen corresponds to the JSON schema field "last_seen".
+	LastSeen string `json:"last_seen"`
+
+	// Screen corresponds to the JSON schema field "screen".
+	Screen *AgentPeekScreen `json:"screen,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// StateReason corresponds to the JSON schema field "state_reason".
+	StateReason *string `json:"state_reason,omitempty,omitzero"`
+
+	// StateSince corresponds to the JSON schema field "state_since".
+	StateSince string `json:"state_since"`
+
+	// Todos corresponds to the JSON schema field "todos".
+	Todos []string `json:"todos"`
+
+	// TurnOwed corresponds to the JSON schema field "turn_owed".
+	TurnOwed *bool `json:"turn_owed,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorkspaceTitle corresponds to the JSON schema field "workspace_title".
+	WorkspaceTitle *string `json:"workspace_title,omitempty,omitzero"`
+}
+
+type AgentPeekScreen struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+}
+
 type AgentPromptMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -4603,6 +4664,9 @@ type Response struct {
 	// ActivityStatusResult corresponds to the JSON schema field
 	// "activity_status_result".
 	ActivityStatusResult *ActivityStatusResult `json:"activity_status_result,omitempty,omitzero"`
+
+	// AgentPeekResult corresponds to the JSON schema field "agent_peek_result".
+	AgentPeekResult *AgentPeekResult `json:"agent_peek_result,omitempty,omitzero"`
 
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
