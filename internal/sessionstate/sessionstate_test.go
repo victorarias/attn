@@ -1038,8 +1038,10 @@ func TestHeartbeatTTLExpiryCannotSettleAnOpenBracket(t *testing.T) {
 // sampled at every age between two frames, so it crosses the TTL in both
 // directions all turn long; naming the windows in the reason made a busy session
 // rename itself about once a second, and each rename wrote a durable bus fact
-// and pushed a decorated snapshot to every client. Measured on 7.5 production
-// days: 66% of the entire bus log was this rename.
+// and pushed a decorated snapshot to every client. Measured over 8.4 production
+// days: session.state.changed was 73.7% of the whole bus log, and 81.6% of
+// consecutive facts for one session landed within a second of the previous one —
+// the tick period, not anything a session did.
 //
 // The sweep is per millisecond and runs to the end of the span the frame is
 // believed, because the flap lived at one boundary inside it and a coarser sweep

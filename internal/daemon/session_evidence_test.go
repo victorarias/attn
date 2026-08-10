@@ -656,8 +656,10 @@ func stateChangesSince(t *testing.T, d *Daemon, cursor int64) (int, int64) {
 // While the reason named the window that age happened to land in, every one of
 // those crossings was news: a durable bus row and a decorated snapshot pushed to
 // every connected client, once a second, for a session that never moved.
-// Measured over 7.5 production days, session.state.changed was 74.7% of the whole
-// bus log and two thirds of it was this.
+// Measured over 8.4 production days, session.state.changed was 73.7% of the whole
+// bus log (233,497 of 316,721 facts), and 81.6% of consecutive facts for one
+// session landed within a second of the previous one — the tick period, not
+// anything a session did.
 func TestTheEvidenceTickIsSilentWhileTheTurnKeepsRunning(t *testing.T) {
 	d := newTraceDaemon(t)
 	t.Cleanup(d.stopEventBus)
