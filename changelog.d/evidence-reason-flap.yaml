@@ -1,0 +1,9 @@
+kind: fixed
+area: sessions
+change: >
+  A running session no longer renames itself once a second. The reason behind a
+  state named the freshness window the tick happened to sample the agent's last
+  title frame in, so a busy turn crossing that window — which a turn painting a
+  frame roughly once a second does constantly — was reported as a change, and
+  every one of those wrote a durable event and pushed the session to every open
+  client. A turn that keeps running now has one reason for as long as it runs.

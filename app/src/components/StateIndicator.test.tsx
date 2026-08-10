@@ -89,7 +89,7 @@ describe('StateIndicator', () => {
   // Every other state says what it means by its own name; a tooltip repeating
   // that is noise.
   it('does not explain states that speak for themselves', () => {
-    render(<StateIndicator state="working" reason="heartbeat_fresh" />);
+    render(<StateIndicator state="working" reason="heartbeat_busy" />);
     expect(screen.getByTestId('state-indicator')).not.toHaveAttribute('title');
   });
 

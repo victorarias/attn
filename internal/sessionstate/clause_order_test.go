@@ -51,7 +51,7 @@ func TestClauseOrder(t *testing.T) {
 				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 5*time.Second),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonHeartbeatBusy,
 		},
 		{
 			why: "an unanswered approval outranks a parked wakeup and an open " +

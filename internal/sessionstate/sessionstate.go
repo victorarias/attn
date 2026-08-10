@@ -188,8 +188,11 @@ func PolicyFor(agent string) Policy {
 type Reason string
 
 const (
-	ReasonProcessExited     Reason = "process_exited"
-	ReasonHeartbeatFresh    Reason = "heartbeat_fresh"
+	ReasonProcessExited Reason = "process_exited"
+	// ReasonHeartbeatBusy covers every believable busy frame, however recently it
+	// was painted: the windows it crosses decide precedence and settling, not
+	// whether the agent is running.
+	ReasonHeartbeatBusy     Reason = "heartbeat_busy"
 	ReasonApprovalOpen      Reason = "approval_open"
 	ReasonQuestionOpen      Reason = "question_open"
 	ReasonCronPending       Reason = "cron_pending"
@@ -197,7 +200,6 @@ const (
 	ReasonPromptIdle        Reason = "prompt_idle"
 	ReasonBracketStale      Reason = "bracket_stale"
 	ReasonHeartbeatSettled  Reason = "heartbeat_settled"
-	ReasonHeartbeatGap      Reason = "heartbeat_gap"
 	ReasonSettleGrace       Reason = "settle_grace"
 	ReasonAwaitingVerdict   Reason = "awaiting_verdict"
 	ReasonBackgroundWork    Reason = "background_work"
@@ -234,7 +236,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 
 	// Rescues a lost turn-open hook: visibly running outranks the brackets.
 	if fresh(e.Heartbeat, ClaimBusy, now, policy.HeartbeatTTL) {
-		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatFresh, Detail: e.Heartbeat.Detail}
+		return running(e)
 	}
 
 	// Blocked on a person, announced exactly when the turn stops looking like it
@@ -306,7 +308,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 			return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonStuck}
 		}
 		if !heartbeatSilentFor(e, now, policy.StaleAfter) {
-			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBracketOpen}
+			return running(e)
 		}
 		// A finished turn and an unannounced approval look the same, so hold for
 		// SettleGrace rather than assert idle into a late explanation; a verdict
@@ -327,7 +329,7 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 		// A gap only longer than the TTL is a repaint gap, not a settle; without
 		// HeartbeatSettleAfter every wide gap costs one owed turn.
 		if e.Heartbeat.Claim == ClaimBusy && !heartbeatSilentFor(e, now, policy.HeartbeatSettleAfter) {
-			return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatGap, Detail: e.Heartbeat.Detail}
+			return running(e)
 		}
 		return settled(e, ReasonHeartbeatSettled, policy, now)
 	}
@@ -358,6 +360,21 @@ func Resolve(e Evidence, policy Policy, now time.Time) Resolution {
 	}
 
 	return Resolution{State: protocol.SessionStateUnknown, Reason: ReasonNoEvidence}
+}
+
+// running is the one answer for a turn that is going. Three clauses reach one,
+// separated by windows a working agent crosses all turn long, so a reason named
+// after the window renamed a session that never moved. The bracket names it when
+// one is open: it is the witness that holds while title frames come and go.
+func running(e Evidence) Resolution {
+	if e.TurnOpen || e.ToolOpen {
+		return Resolution{State: protocol.SessionStateWorking, Reason: ReasonBracketOpen}
+	}
+	detail := ""
+	if e.Heartbeat != nil {
+		detail = e.Heartbeat.Detail
+	}
+	return Resolution{State: protocol.SessionStateWorking, Reason: ReasonHeartbeatBusy, Detail: detail}
 }
 
 // settled resolves a turn that is over, preferring the classifier's verdict and
