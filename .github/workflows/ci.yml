@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       daemon: ${{ steps.filter.outputs.daemon }}
+      generated: ${{ steps.filter.outputs.generated }}
       frontend: ${{ steps.filter.outputs.frontend }}
       tauri: ${{ steps.filter.outputs.tauri }}
       plugins: ${{ steps.filter.outputs.plugins }}
@@ -47,6 +48,15 @@ jobs:
               - 'app/vite.config.ts'
               - 'internal/protocol/schema/**'
               - '.github/workflows/ci.yml'
+            # Every input to the type pipeline plus both of its outputs. The
+            # outputs are listed so a hand-edit is gated even when no schema
+            # moved — that edit is exactly what this catches.
+            generated:
+              - 'internal/protocol/schema/**'
+              - 'internal/protocol/generated.go'
+              - 'app/src/types/generated.ts'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
             tauri:
               - 'app/src-tauri/**'
               - '.github/workflows/ci.yml'
@@ -71,6 +81,42 @@ jobs:
 
       - name: Gate
         run: ./scripts/changelog-gate.sh "${{ github.base_ref }}" "${{ github.head_ref }}"
+
+  # generated.go and generated.ts are compiled from internal/protocol/schema, and
+  # nothing was checking that the committed copies match. The other jobs cannot:
+  # the generated TS interfaces carry an `any` index signature, so `tsc` accepts a
+  # file with a wire field deleted from it — measured, exit 0. This regenerates
+  # from the schema and fails on any difference.
+  generated-types:
+    name: Generated types
+    needs: changes
+    if: needs.changes.outputs.generated == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      # The TypeSpec compiler the recipe invokes as `pnpm exec tsp`.
+      - name: Install schema toolchain
+        working-directory: internal/protocol/schema
+        run: pnpm install --frozen-lockfile
+
+      - name: Regenerate and diff
+        run: make check-types
 
   backend:
     name: Daemon

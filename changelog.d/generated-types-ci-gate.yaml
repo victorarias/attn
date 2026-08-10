@@ -1,0 +1,10 @@
+kind: internal
+area: build
+change: >
+  CI now regenerates the protocol types from the TypeSpec schema and fails on
+  any difference, so a stale or hand-edited generated.go / generated.ts cannot
+  merge. Nothing was checking this: the generated TypeScript interfaces carry
+  an `any` index signature, so deleting a wire field from generated.ts still
+  type-checks. The recipe also pins go-jsonschema — the one generator input
+  that had no version — and resolves it through GOBIN instead of assuming
+  ~/go/bin.

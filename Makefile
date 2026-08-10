@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -288,6 +288,27 @@ clean:
 
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
 #
+# go-jsonschema is the third generator input, and it was the only one with no
+# pin: the recipe ran whatever `go install` had last left behind. Two machines on
+# different versions could disagree about generated.go the same way collation
+# made them disagree about generated.ts, and check-types would blame the change
+# rather than the tool. Bump this deliberately, and regenerate in the same commit.
+GO_JSONSCHEMA_VERSION ?= v0.24.1
+# Where `go install` actually puts it. The recipe hardcoded ~/go/bin, which is
+# right only when GOBIN is unset — under asdf (and any other GOBIN) the install
+# lands elsewhere and the recipe dies on a missing binary.
+GO_BIN_DIR := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
+GO_JSONSCHEMA := $(GO_BIN_DIR)/go-jsonschema
+
+# Installs only on a version mismatch, so the usual run costs one `go version`
+# and never touches the network.
+ensure-go-jsonschema:
+	@have=$$(go version -m $(GO_JSONSCHEMA) 2>/dev/null | awk '$$1=="mod"{print $$3}'); \
+	if [ "$$have" != "$(GO_JSONSCHEMA_VERSION)" ]; then \
+		echo "go-jsonschema: installing $(GO_JSONSCHEMA_VERSION) (have: $${have:-none})"; \
+		go install github.com/atombender/go-jsonschema@$(GO_JSONSCHEMA_VERSION); \
+	fi
+
 # LC_ALL=C is load-bearing, not hygiene. The `*.json` globs below are sorted by
 # the shell's collation, and quicktype names an anonymous type after whichever
 # schema it meets first — so the same inputs under en_US.UTF-8 rename types in
@@ -295,10 +316,10 @@ clean:
 # ~1200-line diff that says nothing. Generating under C makes the output depend
 # only on the schemas.
 generate-types: export LC_ALL = C
-generate-types:
+generate-types: ensure-go-jsonschema
 	rm -rf internal/protocol/schema/tsp-output/json-schema
 	cd internal/protocol/schema && pnpm exec tsp compile .
-	$(HOME)/go/bin/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
+	$(GO_JSONSCHEMA) -p protocol --only-models --tags json --resolve-extension json \
 		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \
 		-o internal/protocol/generated.go \
 		internal/protocol/schema/tsp-output/json-schema/*.json
