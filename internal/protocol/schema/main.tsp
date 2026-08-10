@@ -674,10 +674,15 @@ model HookCompactionMessage {
   trigger?: string;
 }
 
+// A SessionStart hook observed the provider-owned conversation currently hosted
+// by one stable attn session. transcript_path is the provider's exact live path;
+// resume_session_id remains the durable identity used to reconstruct it after a
+// daemon restart.
 model SetSessionResumeIDMessage {
   cmd: "set_session_resume_id";
   id: string;
   resume_session_id: string;
+  transcript_path?: string;
 }
 
 model SessionInstructionsMessage {

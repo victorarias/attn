@@ -3259,8 +3259,6 @@ func runHookStop() {
 	// Note: We gracefully handle stdin parse errors by sending stop without transcript
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
-
 	// Report what the payload says about whether the turn actually finished and let
 	// the daemon decide. A stop that yields with background work in flight or parks
 	// on a scheduled wakeup is not terminal, but that judgment (and the chief-of-
@@ -3299,7 +3297,7 @@ func runHookSessionStart() {
 	// The launch path sets ATTN_WORKSPACE_CONTEXT_GUIDANCE / ATTN_CHIEF_GUIDANCE so
 	// workspaceContextGuidanceProvidedAtLaunch suppresses the fallback when guidance
 	// was already injected.
-	syncSessionResumeID(c, sessionID, input.SessionID)
+	observeAgentConversation(c, sessionID, input.SessionID, input.TranscriptPath)
 	output, err := workspaceContextSessionStartOutput(c, sessionID, 40, 25*time.Millisecond)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: could not load workspace context guidance: %v\n", err)
@@ -3372,7 +3370,6 @@ func runHookState() {
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
 	if err := c.UpdateStateFromHook(sessionID, state, input.PermissionMode); err != nil {
 		fmt.Fprintf(os.Stderr, "error updating state: %v\n", err)
 		os.Exit(1)
@@ -3398,7 +3395,6 @@ func runHookNotification() {
 	}
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
 	if err := c.RecordNotification(sessionID, input.NotificationType, input.Message); err != nil {
 		fmt.Fprintf(os.Stderr, "error recording notification: %v\n", err)
 		os.Exit(1)
@@ -3426,7 +3422,6 @@ func runHookStopFailure() {
 	}
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
 	if err := c.RecordStopFailure(sessionID, errorType, input.ErrorMessage); err != nil {
 		fmt.Fprintf(os.Stderr, "error recording stop failure: %v\n", err)
 		os.Exit(1)
@@ -3470,7 +3465,6 @@ func runHookToolUse() {
 	_ = json.NewDecoder(os.Stdin).Decode(&input)
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
 	// Only the main thread's tool calls report on the main thread's turn. A
 	// subagent runs concurrently with the conversation that spawned it, so its
 	// tool completions say nothing about whether the agent is still blocked —
@@ -3507,8 +3501,6 @@ func runHookTodo() {
 		return // Silently fail if no input
 	}
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
-	syncSessionResumeID(c, sessionID, input.SessionID)
-
 	// Parse tool_input to extract todos
 	var todoInput todoWriteInput
 	if err := json.Unmarshal(input.ToolInput, &todoInput); err != nil {
@@ -3598,12 +3590,12 @@ func parseHookStateArgs() (sessionID string, state string) {
 	}
 }
 
-func syncSessionResumeID(c *client.Client, attnSessionID, agentSessionID string) {
+func observeAgentConversation(c *client.Client, attnSessionID, agentSessionID, transcriptPath string) {
 	agentSessionID = strings.TrimSpace(agentSessionID)
 	if agentSessionID == "" {
 		return
 	}
-	if err := c.SetSessionResumeID(attnSessionID, agentSessionID); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: could not sync resume session id: %v\n", err)
+	if err := c.ObserveAgentConversation(attnSessionID, agentSessionID, transcriptPath); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not observe agent conversation: %v\n", err)
 	}
 }

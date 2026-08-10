@@ -148,6 +148,21 @@ async function waitForStoredResumeId(dbPath, sessionId, timeoutMs = 30_000) {
   throw new Error(`Timed out waiting for stored Codex resume id in ${dbPath}; last value=${JSON.stringify(lastValue)}`);
 }
 
+async function waitForStoredResumeIdChange(dbPath, sessionId, previousId, timeoutMs = 30_000) {
+  const startedAt = Date.now();
+  let lastValue = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    lastValue = await queryStoredResumeId(dbPath, sessionId);
+    if (lastValue && lastValue !== previousId) {
+      return lastValue;
+    }
+    await delay(250);
+  }
+  throw new Error(
+    `Timed out waiting for Codex resume id to change in ${dbPath}; previous=${JSON.stringify(previousId)} last=${JSON.stringify(lastValue)}`
+  );
+}
+
 async function waitForSessionNotWorking(observer, sessionId, timeoutMs = 20_000) {
   return observer.waitFor(() => {
     const session = observer.getSession(sessionId);
@@ -244,6 +259,72 @@ async function waitForCodexTranscript({ codexHome, sessionId, cwd, timeoutMs = 3
   throw new Error(`Timed out waiting for Codex transcript id=${sessionId} cwd=${cwd}`);
 }
 
+function codexAssistantTexts(filePath) {
+  let content = '';
+  try {
+    content = fs.readFileSync(filePath, 'utf8');
+  } catch {
+    return [];
+  }
+
+  const texts = [];
+  for (const line of content.split('\n')) {
+    if (!line.trim()) {
+      continue;
+    }
+    try {
+      const event = JSON.parse(line);
+      const payload = event?.type === 'response_item' ? event.payload : null;
+      if (payload?.type !== 'message' || payload?.role !== 'assistant' || !Array.isArray(payload.content)) {
+        continue;
+      }
+      const text = payload.content
+        .filter((item) => item?.type === 'output_text' && typeof item.text === 'string')
+        .map((item) => item.text)
+        .join('');
+      if (text) {
+        texts.push(text);
+      }
+    } catch {
+      // The final JSONL line may still be in flight.
+    }
+  }
+  return texts;
+}
+
+async function waitForCodexAssistantText(filePath, expected, timeoutMs = 45_000) {
+  const startedAt = Date.now();
+  let lastTexts = [];
+  while (Date.now() - startedAt < timeoutMs) {
+    lastTexts = codexAssistantTexts(filePath);
+    if (lastTexts.some((text) => text.trim() === expected)) {
+      return;
+    }
+    await delay(250);
+  }
+  throw new Error(
+    `Timed out waiting for Codex assistant text ${JSON.stringify(expected)} in ${filePath}; last=${JSON.stringify(lastTexts.at(-1) || '')}`
+  );
+}
+
+function countCodexHeaders(text) {
+  return (text.match(/>_ OpenAI Codex/g) || []).length;
+}
+
+async function waitForCodexFreshPrompt(client, sessionId, paneId, previousHeaderCount, timeoutMs = 20_000) {
+  const startedAt = Date.now();
+  let lastText = '';
+  while (Date.now() - startedAt < timeoutMs) {
+    const pane = await client.request('read_pane_text', { sessionId, paneId });
+    lastText = pane?.text || '';
+    if (countCodexHeaders(lastText) > previousHeaderCount && !lastText.includes('Working (') && lastText.includes('›')) {
+      return pane;
+    }
+    await delay(250);
+  }
+  throw new Error(`Timed out waiting for fresh Codex prompt after /new; pane=${JSON.stringify(lastText)}`);
+}
+
 async function main() {
   const { options, help } = parseArgs(process.argv.slice(2));
   if (help) {
@@ -260,7 +341,7 @@ async function main() {
     prefix: 'scenario-codex-resume-mapping',
     metadata: {
       agent: 'codex',
-      focus: 'Real Codex native session id is preserved across app reload-session flow',
+      focus: 'Real Codex /new changes the native conversation binding and reload resumes the successor',
     },
   });
   const client = new UiAutomationClient({ appPath: options.appPath });
@@ -271,6 +352,7 @@ async function main() {
   let codexExecutable = null;
   let realCodexExecutable = null;
   let isolatedCodexHome = null;
+  let initialNativeSessionId = null;
   let nativeSessionId = null;
   let transcript = null;
   let initialPaneId = null;
@@ -307,12 +389,12 @@ async function main() {
       });
     });
 
-    nativeSessionId = await runner.step('assert_real_codex_hook_records_native_id', async () => {
+    initialNativeSessionId = await runner.step('assert_real_codex_hook_records_native_id', async () => {
       const readiness = await ensureCodexInitialPanePromptReady(client, sessionId, 60_000);
       initialPaneId = readiness.paneId;
       await waitForPaneVisible(client, sessionId, initialPaneId, 30_000);
       runner.writeJson('codex-readiness.json', readiness);
-      await submitCodexPromptViaUi(client, sessionId, initialPaneId, 'Reply with exactly: ok');
+      await submitCodexPromptViaUi(client, sessionId, initialPaneId, 'Reply with exactly: ATTN_FIRST_TURN_COMPLETE');
       await delay(1000);
       runner.writeJson('codex-after-submit.json', await client.request('read_pane_text', {
         sessionId,
@@ -326,6 +408,8 @@ async function main() {
       return resumeId;
     });
 
+    nativeSessionId = initialNativeSessionId;
+
     transcript = await runner.step('assert_resume_id_matches_real_codex_transcript', async () => {
       const found = await waitForCodexTranscript({
         codexHome: isolatedCodexHome,
@@ -333,6 +417,7 @@ async function main() {
         cwd: runner.sessionDir,
         timeoutMs: 45_000,
       });
+      await waitForCodexAssistantText(found.filePath, 'ATTN_FIRST_TURN_COMPLETE', 45_000);
       runner.writeJson('codex-transcript.json', found);
       const stoppedSession = await waitForSessionNotWorking(observer, sessionId, 20_000);
       runner.assert(stoppedSession.state !== 'working', 'real Codex session is not green after the turn stops', {
@@ -342,6 +427,58 @@ async function main() {
       return found;
     });
 
+    await runner.step('start_successor_with_codex_new', async () => {
+      const beforeNew = await client.request('read_pane_text', { sessionId, paneId: initialPaneId });
+      await submitCodexPromptViaUi(client, sessionId, initialPaneId, '/new');
+      const freshPrompt = await waitForCodexFreshPrompt(
+        client,
+        sessionId,
+        initialPaneId,
+        countCodexHeaders(beforeNew?.text || ''),
+        20_000
+      );
+      runner.writeJson('codex-after-new.json', freshPrompt);
+      await submitCodexPromptViaUi(client, sessionId, initialPaneId, 'Reply with exactly: new-ok');
+    });
+
+    const initialTranscript = transcript;
+    nativeSessionId = await runner.step('assert_codex_new_changes_native_binding', async () => {
+      const successorId = await waitForStoredResumeIdChange(
+        dbPath,
+        sessionId,
+        initialNativeSessionId,
+        45_000
+      );
+      runner.assert(successorId !== sessionId, 'successor binding is a Codex native id', {
+        attnSessionId: sessionId,
+        initialNativeSessionId,
+        successorId,
+      });
+      return successorId;
+    });
+
+    transcript = await runner.step('assert_codex_new_rebinds_transcript_while_old_rollout_exists', async () => {
+      const successor = await waitForCodexTranscript({
+        codexHome: isolatedCodexHome,
+        sessionId: nativeSessionId,
+        cwd: runner.sessionDir,
+        timeoutMs: 45_000,
+      });
+      runner.assert(successor.filePath !== initialTranscript.filePath, 'successor uses a different rollout', {
+        initial: initialTranscript.filePath,
+        successor: successor.filePath,
+      });
+      runner.assert(fs.existsSync(initialTranscript.filePath), 'the old rollout still exists during rebinding', {
+        initial: initialTranscript.filePath,
+      });
+      const stoppedSession = await waitForSessionNotWorking(observer, sessionId, 20_000);
+      runner.assert(stoppedSession.state !== 'working', 'successor Codex turn settles normally', {
+        state: stoppedSession.state,
+      });
+      await captureSessionArtifacts(client, runner.runDir, '02-after-new', sessionId);
+      return successor;
+    });
+
     await runner.step('reload_session_from_ui_automation', async () => {
       await client.request('reload_session', { sessionId }, { timeoutMs: 45_000 });
       await observer.waitForSession({ id: sessionId, timeoutMs: 20_000 });
@@ -349,7 +486,7 @@ async function main() {
 
     await runner.step('assert_reload_preserves_real_codex_resume_id', async () => {
       const resumeIdAfterReload = await waitForStoredResumeId(dbPath, sessionId, 30_000);
-      runner.assert(resumeIdAfterReload === nativeSessionId, 'reload keeps the same real Codex native resume id', {
+      runner.assert(resumeIdAfterReload === nativeSessionId, 'reload keeps the successor Codex native resume id', {
         nativeSessionId,
         resumeIdAfterReload,
       });
@@ -363,11 +500,11 @@ async function main() {
         cwd: runner.sessionDir,
         timeoutMs: 30_000,
       });
-      runner.assert(transcriptAfterReload.filePath === transcript.filePath, 'reload still points at the original real Codex transcript', {
+      runner.assert(transcriptAfterReload.filePath === transcript.filePath, 'reload points at the successor Codex transcript', {
         before: transcript.filePath,
         after: transcriptAfterReload.filePath,
       });
-      await captureSessionArtifacts(client, runner.runDir, '02-after-reload', sessionId);
+      await captureSessionArtifacts(client, runner.runDir, '03-after-reload', sessionId);
     });
 
     const summary = runner.finishSuccess({
@@ -375,6 +512,7 @@ async function main() {
       initialPaneId,
       codexExecutable: realCodexExecutable,
       dbPath,
+      initialNativeSessionId,
       nativeSessionId,
       transcriptPath: transcript?.filePath || null,
     });
@@ -385,6 +523,7 @@ async function main() {
       initialPaneId,
       codexExecutable: realCodexExecutable,
       dbPath,
+      initialNativeSessionId,
       nativeSessionId,
       transcriptPath: transcript?.filePath || null,
     });

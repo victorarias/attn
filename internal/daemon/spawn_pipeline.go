@@ -484,9 +484,6 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 	if persistResumeID := agentdriver.SpawnResumeSessionID(req.driver, session.ID, req.resumeSessionID, protocol.Deref(msg.ResumePicker)); persistResumeID != "" {
 		d.persistResumeSessionID(session.ID, persistResumeID)
 	}
-	if pendingResumeID := d.consumePendingResumeSessionID(session.ID); pendingResumeID != "" {
-		d.persistResumeSessionID(session.ID, pendingResumeID)
-	}
 	// Re-arm orphaned-ticket reconciliation: the owning session is alive again
 	// (a ticket Resume respawns under the same id), so a future death deserves
 	// a fresh verdict. No-op when nothing is flagged.
@@ -499,6 +496,9 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 	d.reviveCrashedTicketsForSession(session.ID)
 	if !req.isShell {
 		d.startTranscriptWatcher(session.ID, session.Agent, session.Directory, req.spawnStartedAt)
+	}
+	if pending, ok := d.consumePendingAgentConversation(session.ID); ok {
+		d.observeAgentConversation(pending)
 	}
 	d.store.UpsertRecentLocation(req.cwd)
 	d.associateSessionWithWorkspace(session.ID, req.workspaceID)
