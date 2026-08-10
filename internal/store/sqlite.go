@@ -990,6 +990,14 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// keeps theirs.
 	// Applied by applyMigration99, whose ALTER is column-guarded.
 	{99, "attribute role-acted ticket events to the role", ``},
+	// How much a notification wants the user: info, warning, or critical. Rows
+	// written before this migration are all task failures, which the producer now
+	// stamps warning, but they are carried at the column default rather than
+	// rewritten — a notification already sitting in the feed has been seen at its
+	// old weight, and promoting it retroactively would raise an alarm about
+	// something the user already dealt with.
+	// Applied by applyMigration100, whose ALTER is column-guarded.
+	{100, "add the severity level to notifications", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1361,6 +1369,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 99 {
 			if err := applyMigration99(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 100 {
+			if err := applyMigration100(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2498,6 +2511,17 @@ func applyMigration97(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration100 adds the notification severity column. Guarded on the
+// column, and the DEFAULT is what carries every existing row to 'info'.
+func applyMigration100(tx *sql.Tx) error {
+	has, err := columnExists(tx, "notifications", "severity")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE notifications ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'")
+	return err
 }
 
 // applyMigration93 adds the note a user writes alongside a session's

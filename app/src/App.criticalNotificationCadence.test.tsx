@@ -1,41 +1,41 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { act, render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { act, render } from '@testing-library/react';
 import App from './App';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from './hooks/useWhatsNew';
+import type { CriticalNotificationState } from './hooks/useDaemonSocket';
 
-// The chief-of-staff session is the profile-wide orchestrator and must be
-// protected from accidental close: ⌘W and the close action no-op on it (with a
-// hint), while ordinary sessions keep closing. Both user paths funnel through the
-// same App close handlers, so these tests drive the close button (UI) and the
-// session.close shortcut (⌘W) and assert no daemon close command is sent.
+// notifications_updated fires on every notification write and carries a fresh
+// critical-state object each time, so an unchanged pair still arrives with a new
+// identity. App holds it behind an equality guard so the identity below the
+// socket changes only when the pair does — the witness is the identity of the
+// criticalNotifications prop the Sidebar receives.
+//
+// This does not claim the header actions stop rebuilding. That memo has other
+// deps that are fresh on every render, so it rebuilds regardless; what is pinned
+// here is the one identity this code owns.
 
 const mockUseSessionStore = vi.fn();
 const mockUseDaemonStore = vi.fn();
 const mockUseDaemonSocket = vi.fn();
-const mockUseKeyboardShortcuts = vi.fn();
 
-const { mockShowError, mockSendWorkspaceClosePane, mockSendUnregisterSession } = vi.hoisted(() => ({
-  mockShowError: vi.fn(),
-  mockSendWorkspaceClosePane: vi.fn(async () => ({ success: true })),
-  mockSendUnregisterSession: vi.fn(async () => {}),
-}));
+const { criticalSeen } = vi.hoisted(() => ({ criticalSeen: [] as unknown[] }));
 
-let chiefOfStaff: boolean;
+let notifyCritical: ((unread: number, critical: CriticalNotificationState) => void) | null = null;
 
 vi.mock('@tauri-apps/plugin-deep-link', () => ({
   onOpenUrl: vi.fn(async () => () => {}),
   getCurrent: vi.fn(async () => []),
 }));
 vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn(async () => {}) }));
-
 vi.mock('./components/GhosttyTerminal', async () => {
   const React = await import('react');
   return { GhosttyTerminal: React.forwardRef(function MockTerminal() { return null; }) };
 });
 
-// Sidebar stub: a single close button wired to the same prop the real close
-// control uses (handleRequestCloseSession).
+// Sidebar stub that records the critical-state identity it is handed on each
+// render. Reading identity rather than a render count is deliberate: App
+// re-renders on every broadcast regardless — the change signal an open panel
+// needs — so a render count cannot tell a repeat from a real change.
 vi.mock('./components/Sidebar', () => ({
   EditorIcon: () => null,
   WorkflowIcon: () => null,
@@ -43,11 +43,10 @@ vi.mock('./components/Sidebar', () => ({
   PRsIcon: () => null,
   NotebookIcon: () => null,
   MarkdownIcon: () => null,
-  Sidebar: ({ onCloseSession }: { onCloseSession: (id: string) => void }) => (
-    <button data-testid="close-session" onClick={() => onCloseSession('s1')}>
-      Close Session
-    </button>
-  ),
+  Sidebar: ({ criticalNotifications }: { criticalNotifications: unknown }) => {
+    criticalSeen.push(criticalNotifications);
+    return null;
+  },
 }));
 
 vi.mock('./components/Dashboard', () => ({ Dashboard: () => null }));
@@ -57,11 +56,9 @@ vi.mock('./components/UndoToast', () => ({ UndoToast: () => null }));
 vi.mock('./components/SessionTerminalWorkspace', () => ({ SessionTerminalWorkspace: () => null }));
 vi.mock('./components/ErrorToast', () => ({
   ErrorToast: () => null,
-  useErrorToast: () => ({ message: null, showError: mockShowError, clearError: vi.fn() }),
+  useErrorToast: () => ({ message: null, showError: vi.fn(), clearError: vi.fn() }),
 }));
-vi.mock('./hooks/useKeyboardShortcuts', () => ({
-  useKeyboardShortcuts: (args: unknown) => mockUseKeyboardShortcuts(args),
-}));
+vi.mock('./hooks/useKeyboardShortcuts', () => ({ useKeyboardShortcuts: vi.fn() }));
 vi.mock('./hooks/useUIScale', () => ({
   useUIScale: () => ({ scale: 1, increaseScale: vi.fn(), decreaseScale: vi.fn(), resetScale: vi.fn() }),
 }));
@@ -69,72 +66,40 @@ vi.mock('./hooks/useOpenPR', () => ({ useOpenPR: () => vi.fn() }));
 vi.mock('./hooks/usePRsNeedingAttention', () => ({ usePRsNeedingAttention: () => ({ needsAttention: [] }) }));
 vi.mock('./store/sessions', () => ({ useSessionStore: () => mockUseSessionStore() }));
 vi.mock('./store/daemonSessions', () => ({ useDaemonStore: () => mockUseDaemonStore() }));
-vi.mock('./hooks/useDaemonSocket', async () => {
-  const React = await import('react');
-  return {
-    useDaemonSocket: (args: { onWorkspacesUpdate?: (workspaces: unknown[]) => void }) => {
-      React.useEffect(() => {
-        args.onWorkspacesUpdate?.([
-          {
-            id: 'workspace-s1',
-            title: 'orchestrator',
-            directory: '/tmp/repo',
-            status: 'active',
-            layout: {
-              active_pane_id: 'pane-s1',
-              layout_json: JSON.stringify({ type: 'pane', pane_id: 'pane-s1' }),
-              panes: [{
-                workspace_id: 'workspace-s1',
-                pane_id: 'pane-s1',
-                kind: 'agent',
-                runtime_id: 's1',
-                session_id: 's1',
-                title: 'orchestrator',
-              }],
-            },
-          },
-        ]);
-      }, []);
-      return mockUseDaemonSocket(args);
-    },
-  };
-});
+vi.mock('./hooks/useDaemonSocket', () => ({
+  useDaemonSocket: (args: {
+    onNotificationsUpdated?: (unread: number, critical: CriticalNotificationState) => void;
+  }) => {
+    notifyCritical = args.onNotificationsUpdated ?? null;
+    return mockUseDaemonSocket(args);
+  },
+}));
 vi.mock('./pty/bridge', async () => {
   const actual = await vi.importActual<typeof import('./pty/bridge')>('./pty/bridge');
   return { ...actual, ptySpawn: vi.fn(async () => {}) };
 });
 
-function triggerCmdW() {
-  const calls = mockUseKeyboardShortcuts.mock.calls;
-  const args = calls[calls.length - 1]?.[0] as { onCloseSession?: () => void };
+function broadcast(unread: number, critical: CriticalNotificationState) {
   act(() => {
-    args.onCloseSession?.();
+    notifyCritical?.(unread, critical);
   });
 }
 
-describe('chief-of-staff session is protected from close', () => {
+function latestCritical() {
+  return criticalSeen[criticalSeen.length - 1];
+}
+
+describe('critical notification cadence', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    criticalSeen.length = 0;
+    notifyCritical = null;
     localStorage.clear();
     localStorage.setItem(WHATS_NEW_STORAGE_KEY, WHATS_NEW_ID);
-    chiefOfStaff = false;
 
     mockUseSessionStore.mockReturnValue({
-      sessions: [{
-        id: 's1',
-        label: 'orchestrator',
-        state: 'working',
-        cwd: '/tmp/repo',
-        workspaceId: 'workspace-s1',
-        agent: 'claude',
-        transcriptMatched: true,
-        daemonActivePaneId: 'pane-s1',
-        workspace: {
-          agents: [{ id: 'pane-s1', runtimeId: 's1', sessionId: 's1', title: 'orchestrator' }],
-          layoutTree: { type: 'pane', paneId: 'pane-s1' },
-        },
-      }],
-      activeSessionId: 's1',
+      sessions: [],
+      activeSessionId: null,
       connect: vi.fn(async () => {}),
       connected: true,
       launcherConfig: { executables: {} },
@@ -148,16 +113,8 @@ describe('chief-of-staff session is protected from close', () => {
       syncFromDaemonWorkspaces: vi.fn(),
     });
 
-    // daemonSessions is the source the close guard consults for chief_of_staff;
-    // a getter lets each test flip the flag before render.
     mockUseDaemonStore.mockImplementation(() => ({
-      daemonSessions: [{
-        id: 's1',
-        label: 'orchestrator',
-        directory: '/tmp/repo',
-        state: 'working',
-        chief_of_staff: chiefOfStaff,
-      }],
+      daemonSessions: [],
       setDaemonSessions: vi.fn(),
       prs: [], setPRs: vi.fn(),
       repoStates: [], setRepoStates: vi.fn(),
@@ -168,7 +125,7 @@ describe('chief-of-staff session is protected from close', () => {
     mockUseDaemonSocket.mockReturnValue({
       sendPRAction: fn, sendMutePR: fn, sendMuteRepo: fn, sendMuteAuthor: fn, sendPRVisited: fn,
       sendRefreshPRs: vi.fn(async () => ({ success: true })),
-      sendUnregisterSession: mockSendUnregisterSession,
+      sendUnregisterSession: vi.fn(async () => {}),
       sendRegisterWorkspace: fn,
       sendUnregisterWorkspace: vi.fn(async () => {}),
       sendMuteWorkspace: vi.fn(async () => ({ success: true })),
@@ -183,7 +140,7 @@ describe('chief-of-staff session is protected from close', () => {
       sendEnsureRepo: vi.fn(async () => ({ success: true, path: '/tmp/repo' })),
       sendSubscribeGitStatus: fn, sendUnsubscribeGitStatus: fn,
       sendSessionSelected: fn, sendWorkspaceSelected: fn,
-      sendWorkspaceClosePane: mockSendWorkspaceClosePane,
+      sendWorkspaceClosePane: vi.fn(async () => ({ success: true })),
       sendWorkspaceAddSessionPane: vi.fn(async () => ({ success: true })),
       requestTileContent: fn,
       sendGetFileDiff: vi.fn(async () => ({ success: true, original: '', modified: '' })),
@@ -192,7 +149,9 @@ describe('chief-of-staff session is protected from close', () => {
       getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,
-      sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0, critical: { count: 0, title: '' } })),
+      sendNotificationList: vi.fn(async () => ({
+        notifications: [], unreadCount: 0, critical: { count: 0, title: '' },
+      })),
       sendNotificationMarkRead: vi.fn(async () => 0),
       rateLimit: null,
       warnings: [],
@@ -201,35 +160,38 @@ describe('chief-of-staff session is protected from close', () => {
     });
   });
 
-  it('no-ops the close button on the chief session and shows the protected hint', async () => {
-    chiefOfStaff = true;
+  it('keeps one identity when a broadcast repeats the same critical state', () => {
     render(<App />);
 
-    await userEvent.click(screen.getByTestId('close-session'));
+    broadcast(4, { count: 2, title: 'Plugin stopped' });
+    const afterFirst = latestCritical();
 
-    expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
-    expect(mockSendUnregisterSession).not.toHaveBeenCalled();
-    expect(mockShowError).toHaveBeenCalledWith(expect.stringContaining('Chief of staff is protected'));
+    broadcast(4, { count: 2, title: 'Plugin stopped' });
+
+    expect(latestCritical()).toBe(afterFirst);
   });
 
-  it('no-ops the ⌘W shortcut on the chief session and shows the protected hint', async () => {
-    chiefOfStaff = true;
+  it('takes the new one when the surface has to clear', () => {
     render(<App />);
 
-    triggerCmdW();
+    broadcast(4, { count: 2, title: 'Plugin stopped' });
+    const withCritical = latestCritical();
 
-    expect(mockSendWorkspaceClosePane).not.toHaveBeenCalled();
-    expect(mockSendUnregisterSession).not.toHaveBeenCalled();
-    expect(mockShowError).toHaveBeenCalledWith(expect.stringContaining('Chief of staff is protected'));
+    broadcast(2, { count: 0, title: '' });
+
+    expect(latestCritical()).not.toBe(withCritical);
+    expect(latestCritical()).toEqual({ count: 0, title: '' });
   });
 
-  it('closes an ordinary session normally and shows no hint', async () => {
-    chiefOfStaff = false;
+  it('takes the new one when only the newest critical title changes', () => {
     render(<App />);
 
-    await userEvent.click(screen.getByTestId('close-session'));
+    broadcast(4, { count: 1, title: 'Plugin stopped' });
+    const first = latestCritical();
 
-    expect(mockSendWorkspaceClosePane).toHaveBeenCalledTimes(1);
-    expect(mockShowError).not.toHaveBeenCalled();
+    broadcast(5, { count: 2, title: 'App runtime parked' });
+
+    expect(latestCritical()).not.toBe(first);
+    expect(latestCritical()).toEqual({ count: 2, title: 'App runtime parked' });
   });
 });

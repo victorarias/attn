@@ -25,6 +25,13 @@
   --color-error: #ef4444;
   --color-warning: #f59e0b;
 
+  /* Notification severity. Aliases rather than new colors, so the feed cannot
+     drift from the status colors above; named separately because the panel and
+     the ambient critical surface style by severity, not by "error". */
+  --color-severity-info: var(--color-accent);
+  --color-severity-warning: var(--color-warning);
+  --color-severity-critical: var(--color-error);
+
   color-scheme: dark;
 
   /* Theme colors (dark defaults) */

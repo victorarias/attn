@@ -4348,9 +4348,19 @@ model TasksChangedMessage {
 // (e.g. "task" + the task id) so the detail dialog's Retry can act on it. kind and
 // source_kind are plain strings (not enums) to avoid the quicktype identical-enum
 // merge that drops a generated export.
+// How much a notification wants the user. The panel styles the feed by it, and
+// critical additionally earns an ambient surface outside the panel that stays up
+// while any critical notification is unread.
+enum NotificationSeverity {
+  info,
+  warning,
+  critical,
+}
+
 model Notification {
   id: string;
   kind: string;
+  severity: NotificationSeverity;
   title: string;
   body: string;
   detail: string;
@@ -4369,6 +4379,12 @@ model NotificationListResultMessage {
   error?: string;
   notifications?: Notification[];
   unread_count: int32;
+  // The ambient critical surface's whole input, carried here as well as on the
+  // broadcast so a client that just connected renders it from its seeding list
+  // without a second read. critical_title names the newest unread critical
+  // notification and is absent when the count is zero.
+  unread_critical_count: int32;
+  critical_title?: string;
 }
 
 // Result of notification_mark_read. unread_count is the post-mark count so the
@@ -4387,6 +4403,11 @@ model NotificationMarkReadResultMessage {
 model NotificationsUpdatedMessage {
   event: "notifications_updated";
   unread_count: int32;
+  // The ambient critical surface is driven entirely by these two, so it appears
+  // and clears on the broadcast alone — a panel that was never opened is not a
+  // reason for the user to miss something critical.
+  unread_critical_count: int32;
+  critical_title?: string;
 }
 
 // ---- Generic filesystem surface results (fs_*) ----

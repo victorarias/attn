@@ -117,10 +117,70 @@
   gap: 6px;
 }
 
+/* Severity drives one custom property per row, and everything below reads it:
+   the left spine, the unread dot, the tag. --color-severity-* are defined in
+   App.css :root — an undefined var() is a silent no-op, so they are declared
+   there rather than assumed. */
+.notification-row.sev-info {
+  --sev: var(--color-severity-info);
+}
+
+.notification-row.sev-warning {
+  --sev: var(--color-severity-warning);
+  border-color: color-mix(in srgb, var(--color-severity-warning) 22%, var(--color-border-subtle));
+}
+
+.notification-row.sev-critical {
+  --sev: var(--color-severity-critical);
+  border-color: color-mix(in srgb, var(--color-severity-critical) 32%, var(--color-border-subtle));
+  background: color-mix(in srgb, var(--color-severity-critical) 7%, var(--color-bg-elevated));
+}
+
+.notification-row.sev-critical.is-expanded {
+  background: color-mix(in srgb, var(--color-severity-critical) 10%, var(--color-bg-elevated));
+}
+
 .notification-row {
+  position: relative;
+  padding-left: 2px;
   border: 1px solid var(--color-border-subtle);
   border-radius: 9px;
   background: color-mix(in srgb, var(--color-bg-elevated) 55%, transparent);
+  overflow: hidden;
+}
+
+/* The spine. A read row keeps it, dimmed: severity is a property of the event,
+   not of whether the user has seen it. */
+.notification-row::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: var(--sev, transparent);
+}
+
+.notification-row:not(.is-unread)::before {
+  opacity: 0.35;
+}
+
+.notification-sev-tag {
+  flex: none;
+  padding: 2px 5px;
+  border-radius: 4px;
+  color: var(--sev);
+  background: color-mix(in srgb, var(--sev) 14%, transparent);
+  border: 1px solid color-mix(in srgb, var(--sev) 30%, transparent);
+  font: 700 9px/1 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* info is the mundane case and carries no tag — a feed where every row shouts
+   is a feed nobody reads. */
+.notification-row.sev-info .notification-sev-tag {
+  display: none;
 }
 
 .notification-row.is-expanded {
@@ -149,7 +209,7 @@
 }
 
 .notification-row.is-unread .notification-dot {
-  background: var(--accent, #4c9aff);
+  background: var(--sev, var(--accent, #4c9aff));
 }
 
 .notification-row-title {

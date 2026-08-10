@@ -225,7 +225,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '222';
+export const PROTOCOL_VERSION = '223';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -456,6 +456,24 @@ export interface NotebookReadResult {
 export type Task = GeneratedTask;
 export type DaemonNotification = GeneratedNotification;
 
+// The ambient critical surface's whole input: how many critical notifications
+// are unread and what the newest one is called. The daemon computes both in one
+// read and sends them on both the list result and the notifications_updated
+// broadcast, so the surface never has to derive them from a list it may not have
+// fetched — a panel the user never opened must not be why they miss something.
+export interface CriticalNotificationState {
+  count: number;
+  title: string;
+}
+
+// readCriticalState pulls the pair off any message that carries it, defaulting
+// to "nothing critical" for a daemon that predates the fields.
+function readCriticalState(data: Record<string, unknown>): CriticalNotificationState {
+  const count = typeof data.unread_critical_count === 'number' ? data.unread_critical_count : 0;
+  const title = typeof data.critical_title === 'string' ? data.critical_title : '';
+  return { count, title };
+}
+
 // The outcome of a Notebook hash-CAS save. conflict=true means the note changed
 // on disk since the editor loaded it, so the write did NOT apply; currentHash is
 // the hash now on disk, for the editor to reconcile against. Mirrors the daemon's
@@ -571,7 +589,7 @@ interface UseDaemonSocketOptions {
   // Fired when the global notifications feed changes (a notification is added or
   // one/all are marked read). Carries the authoritative post-change unread count
   // so the sidebar badge updates without a re-list; an open panel re-lists.
-  onNotificationsUpdated?: (unreadCount: number) => void;
+  onNotificationsUpdated?: (unreadCount: number, critical: CriticalNotificationState) => void;
   // Fired when files under the root change (any client/agent/external write). paths
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
@@ -1761,6 +1779,7 @@ export function useDaemonSocket({
             // immediately; an open notifications panel re-lists for the new row.
             callbacksRef.current.onNotificationsUpdated?.(
               typeof data.unread_count === 'number' ? data.unread_count : 0,
+              readCriticalState(data),
             );
             break;
 
@@ -1938,6 +1957,7 @@ export function useDaemonSocket({
               pending.resolve({
                 notifications: (data.notifications || []) as DaemonNotification[],
                 unreadCount: typeof data.unread_count === 'number' ? data.unread_count : 0,
+                critical: readCriticalState(data),
               });
             } else {
               pending.reject(new Error(data.error || 'Notification list failed'));
@@ -4613,12 +4633,14 @@ export function useDaemonSocket({
   const sendNotificationList = useCallback((): Promise<{
     notifications: DaemonNotification[];
     unreadCount: number;
+    critical: CriticalNotificationState;
   }> => {
     const requestId = nextRequestID('notification_list');
     const key = `notification_list:${requestId}`;
     return sendKeyedRequest<{
     notifications: DaemonNotification[];
     unreadCount: number;
+    critical: CriticalNotificationState;
   }>(key, { cmd: 'notification_list', request_id: requestId }, 'Notification list timed out');
   }, [nextRequestID, sendKeyedRequest]);
 

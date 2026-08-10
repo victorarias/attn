@@ -1,0 +1,73 @@
+/* The ambient critical surface: a strip under the sidebar header that stays up
+   while any critical notification is unread, and the bell escalation that goes
+   with it (`.sidebar-tool-btn.has-critical`, styled here so both halves of the
+   surface live in one file).
+
+   Deliberately static — no pulse, no blink, no transition on appear. attn runs
+   all day beside GPU terminals; a surface whose whole job is to persist must
+   cost nothing to keep on screen. */
+
+.critical-strip {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: calc(100% - 16px);
+  margin: 0 8px 6px;
+  padding: 7px 9px;
+  border: 1px solid color-mix(in srgb, var(--color-severity-critical) 34%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-severity-critical) 12%, transparent);
+  cursor: pointer;
+  text-align: left;
+}
+
+.critical-strip:hover {
+  background: color-mix(in srgb, var(--color-severity-critical) 18%, transparent);
+}
+
+.critical-strip-mark {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-severity-critical);
+}
+
+.critical-strip-text {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: color-mix(in srgb, var(--color-severity-critical) 30%, var(--color-text-primary));
+  font-size: var(--font-size-sm);
+}
+
+.critical-strip-count {
+  flex: none;
+  color: var(--color-severity-critical);
+  font: 700 10px/1 ui-monospace, monospace;
+}
+
+/* Bell escalation. The badge is the sidebar's existing unread count; while
+   something critical is unread it stops being the brand accent. */
+.sidebar-tool-btn.has-critical {
+  border-color: color-mix(in srgb, var(--color-severity-critical) 55%, transparent);
+  background: color-mix(in srgb, var(--color-severity-critical) 16%, transparent);
+  color: color-mix(in srgb, var(--color-severity-critical) 55%, var(--color-text-primary));
+}
+
+.sidebar-tool-btn.has-critical:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--color-severity-critical) 24%, transparent);
+  border-color: color-mix(in srgb, var(--color-severity-critical) 70%, transparent);
+}
+
+.sidebar-tool-btn.has-critical .sidebar-tool-badge {
+  background: var(--color-severity-critical);
+  color: #fff;
+  /* Two rings: the panel color first so the badge reads as lifted off the
+     sidebar, then the severity tint. */
+  box-shadow:
+    0 0 0 2px var(--color-bg-panel),
+    0 0 0 4px color-mix(in srgb, var(--color-severity-critical) 40%, transparent);
+}

@@ -11,6 +11,8 @@ import { StateIndicator } from './StateIndicator';
 import { SessionLabel } from './SessionLabel';
 import { QueueBands, QueueSnoozedSection } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
+import { CriticalNotificationStrip } from './CriticalNotificationStrip';
+import type { CriticalNotificationState } from '../hooks/useDaemonSocket';
 import { SidebarSettlingBar } from './SettlingIndicator';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import { isAttentionSessionState, type UISessionState } from '../types/sessionState';
@@ -130,6 +132,10 @@ interface SidebarProps {
   tileContents?: Record<string, TileContentState>;
   collapsed: boolean;
   headerActions: SidebarHeaderAction[];
+  // The ambient critical-notification surface. Optional so existing Sidebar
+  // tests render without wiring it; absent or zero-count renders nothing.
+  criticalNotifications?: CriticalNotificationState;
+  onOpenNotifications?: () => void;
   // Current grid shape + a handler to choose a new one (also opens grid mode).
   // Optional so existing Sidebar tests render without wiring the grid picker.
   gridLayout?: GridLayout;
@@ -348,6 +354,8 @@ export function Sidebar({
   tileContents = {},
   collapsed,
   headerActions,
+  criticalNotifications,
+  onOpenNotifications,
   gridLayout,
   onSelectGridLayout,
   dockItems = [],
@@ -991,6 +999,16 @@ export function Sidebar({
           </div>
         </div>
       </div>
+
+      {/* Above Home, because it outranks it: Home is where you go when nothing
+          is owed, and this only exists when something is. */}
+      {onOpenNotifications && (
+        <CriticalNotificationStrip
+          count={criticalNotifications?.count ?? 0}
+          title={criticalNotifications?.title ?? ''}
+          onOpen={onOpenNotifications}
+        />
+      )}
 
       {/* Home sits above everything, the chief's slot included: it is the one
           row that is not an agent, and it is where the queue leaves you once
