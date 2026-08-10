@@ -36,25 +36,30 @@ func (d *Daemon) reviveCrashedTicketsForSession(sessionID string) {
 	if len(tickets) == 0 {
 		return
 	}
-	for _, ticket := range tickets {
-		if ticket == nil {
-			continue
+	// One session can own several crashed tickets, so this is a bulk operation:
+	// every ticket still publishes its own fact, and the board they all re-push
+	// collapses to a single wire message.
+	d.coalesceSnapshots(func() {
+		for _, ticket := range tickets {
+			if ticket == nil {
+				continue
+			}
+			if _, err := d.store.SetTicketStatus(
+				ticket.ID,
+				store.TicketStatusWorking,
+				store.TicketAuthorAttn,
+				"session was reloaded and is running again",
+				time.Now(),
+			); err != nil {
+				d.logf("ticket revive for %s: %v", sessionID, err)
+				continue
+			}
+			d.logf("ticket %q revived: session %s is live again", ticket.ID, sessionID)
+			// attn authored the move; notify the chief/participants the work is back on.
+			d.notifyTicketObservers(ticket.ID)
+			// Each revived ticket is its own status change, so each publishes its own
+			// fact rather than one anonymous board refresh at the end.
+			d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
 		}
-		if _, err := d.store.SetTicketStatus(
-			ticket.ID,
-			store.TicketStatusWorking,
-			store.TicketAuthorAttn,
-			"session was reloaded and is running again",
-			time.Now(),
-		); err != nil {
-			d.logf("ticket revive for %s: %v", sessionID, err)
-			continue
-		}
-		d.logf("ticket %q revived: session %s is live again", ticket.ID, sessionID)
-		// attn authored the move; notify the chief/participants the work is back on.
-		d.notifyTicketObservers(ticket.ID)
-		// Each revived ticket is its own status change, so each publishes its own
-		// fact rather than one anonymous board refresh at the end.
-		d.publishTicketFact(FactTicketStatusChanged, ticket.ID)
-	}
+	})
 }

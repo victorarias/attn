@@ -1,0 +1,13 @@
+kind: fixed
+area: tickets
+change: >
+  The ticket board is no longer sent as a 220KB message. The board feed now
+  carries only what a board draws — title, column, owner, timestamps — instead
+  of every ticket's full brief, and a bulk ticket change sends one board update
+  instead of one per ticket. Opening a ticket still shows its full brief and
+  history, and `attn ticket list --json` still carries descriptions.
+symptom: >
+  Every ticket change re-sent the whole board to every open window, and 89% of
+  that message was delegation briefs that nothing on the board renders. A
+  connecting window received the same payload again as part of its startup
+  snapshot.

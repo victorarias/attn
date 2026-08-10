@@ -367,9 +367,11 @@ model TicketArtifact {
   path: string;
 }
 
-// Ticket is the wire shape of a durable tracked-work record. `activity` and
-// `artifacts` are the full history thread and current attach files — populated on the
-// get_ticket full record, and left empty on the list / board feed for cheapness.
+// Ticket is the wire shape of a durable tracked-work record — a read by id
+// (get_ticket, ticket_show) or the agent's board read (ticket_list), which
+// carries the brief. `activity` and `artifacts` are the full history thread and
+// current attach files: populated on a full record, left empty on the
+// ticket_list rows. The app's board feed carries TicketRow instead.
 model Ticket {
   id: string;
   title: string;
@@ -392,6 +394,26 @@ model Ticket {
   latest_event_seq?: int32;
   activity: TicketActivity[];
   artifacts: TicketArtifact[];
+}
+
+// TicketRow is a ticket as the board feed carries it — the whole non-archived
+// board is re-pushed on every ticket mutation and again on connect, so it holds
+// only what a board renders: identity, the column, who owns it, and the stamps
+// the app reads (updated_at drives the open detail view's live refresh,
+// closed_at the recently-closed filter, reconciled_at the orphan badge). The
+// brief, the history thread and the artifacts are detail-sized and belong to a
+// read by id (get_ticket over the socket, ticket_show over the CLI), never to a
+// list push.
+model TicketRow {
+  id: string;
+  title: string;
+  status: TicketStatus;
+  assignee: string;
+  cwd: string;
+  last_agent_id: string;
+  updated_at: string;
+  closed_at?: string;
+  reconciled_at?: string;
 }
 
 model PR {
@@ -896,8 +918,8 @@ model TicketInboxMessage {
 // an agent finds a ticket-id here before it can comment on (or take/subscribe to) it.
 // Unlike the write verbs it is NOT identity-scoped — it is a global board read, so
 // source_session_id is optional and unused, present only for command-shape uniformity.
-// Rows carry the description (the brief) but not the activity thread (bare rows, like
-// the broadcast).
+// Rows carry the description (the brief) but not the activity thread — unlike the
+// app's board feed, whose TicketRow drops the brief too.
 model TicketListMessage {
   cmd: "ticket_list";
   source_session_id?: string;
@@ -2872,7 +2894,7 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
-  tickets?: Ticket[];
+  tickets?: TicketRow[];
 }
 
 model EndpointStatusChangedMessage {
@@ -2990,13 +3012,13 @@ model ChiefOfStaffResultMessage {
   error?: string;
 }
 
-// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
-// (bare — no activity/artifacts), re-pushed whenever any ticket mutates. It is
-// the same shape carried in InitialStateMessage.tickets, so a client renders the
-// board identically from the bootstrap snapshot and from each update.
+// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows,
+// re-pushed whenever any ticket mutates. It is the same shape carried in
+// InitialStateMessage.tickets, so a client renders the board identically from
+// the bootstrap snapshot and from each update.
 model TicketsUpdatedMessage {
   event: "tickets_updated";
-  tickets: Ticket[];
+  tickets: TicketRow[];
 }
 
 // TicketResultMessage is the reply to a get_ticket request, correlated by
@@ -4797,7 +4819,7 @@ model WebSocketEvent {
 
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
-  tickets?: Ticket[];
+  tickets?: TicketRow[];
   workspace_contexts?: WorkspaceContext[];
 }
 

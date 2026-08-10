@@ -1,4 +1,4 @@
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 
 /** Statuses where a dead owner no longer matters — the ticket is closed. */
 const TERMINAL_STATUSES = new Set<string>(['done', 'failed', 'crashed']);
@@ -12,7 +12,7 @@ const TERMINAL_STATUSES = new Set<string>(['done', 'failed', 'crashed']);
  * closed ticket does not need an owner.
  */
 export function isTicketOrphaned(
-  t: Pick<Ticket, 'status' | 'reconciled_at'> | null | undefined,
+  t: Pick<TicketRow, 'status' | 'reconciled_at'> | null | undefined,
 ): boolean {
   if (!t) return false;
   return Boolean(t.reconciled_at) && !TERMINAL_STATUSES.has(t.status);

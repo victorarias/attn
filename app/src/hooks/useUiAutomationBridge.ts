@@ -4,7 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import type { Session } from '../store/sessions';
 import type { Presentation } from '../types/generated';
-import type { Ticket } from './useDaemonSocket';
+import type { TicketRow } from './useDaemonSocket';
 import type { SessionAgent } from '../types/sessionAgent';
 import type { TerminalSplitDirection } from '../types/workspace';
 import { SHORTCUTS, type ShortcutId, type Combo, isChord } from '../shortcuts/registry';
@@ -103,7 +103,7 @@ interface UseUiAutomationBridgeArgs {
   // the live ticket rows; openDockPanel above is reused to mount the dock.
   openTicketDetail?: (ticketId: string) => void;
   closeTicketDetail?: () => void;
-  tickets?: Ticket[];
+  tickets?: TicketRow[];
   // Automations panel (profile-level). Mutation verbs drive the real panel
   // controls (toggle/run-now/select), same rationale as the ticket panel
   // above; the bridge only needs to open the dock and read the rendered DOM.

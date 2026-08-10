@@ -1,5 +1,5 @@
 import './PaneTicketChip.css';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 
 // A clickable chip in the agent pane header (.workspace-pane-header) for the
 // ticket bound to that session. It carries a status-tinted rule (via
@@ -19,7 +19,7 @@ export function PaneTicketChip({
   sessionId,
   onToggle,
 }: {
-  ticket: Ticket;
+  ticket: TicketRow;
   unread: boolean;
   open: boolean;
   sessionId: string;

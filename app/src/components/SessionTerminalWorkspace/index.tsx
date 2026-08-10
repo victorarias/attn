@@ -29,7 +29,7 @@ import { HeaderSettlingIndicator } from '../SettlingIndicator';
 import { HeaderPresentationChip } from '../PresentationChip';
 import { PaneTicketChip } from '../PaneTicketChip';
 import { TicketDetailPanel } from '../TicketDetailPanel';
-import type { Ticket } from '../../hooks/useDaemonSocket';
+import type { Ticket, TicketRow } from '../../hooks/useDaemonSocket';
 import { useEscapeStack } from '../../hooks/useEscapeStack';
 import type { Presentation } from '../../types/generated';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
@@ -136,7 +136,7 @@ interface SessionTerminalWorkspaceProps {
     presentation?: Presentation;
     // The board row for the ticket bound to this session (assignee == id), when
     // one exists. Drives the pane-header ticket chip + in-pane overlay.
-    ticket?: Ticket;
+    ticket?: TicketRow;
   }>;
   // Daemon-facing ticket actions, threaded straight into the overlay's
   // TicketDetailPanel. Optional so a workspace without ticket wiring still

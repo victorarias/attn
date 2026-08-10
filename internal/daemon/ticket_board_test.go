@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -26,7 +27,7 @@ func readTicketResult(t *testing.T, ch chan outboundMessage, target any) {
 }
 
 // ticketIDs collects the ids of a broadcast board feed, for membership assertions.
-func ticketIDs(tickets []protocol.Ticket) []string {
+func ticketIDs(tickets []protocol.TicketRow) []string {
 	ids := make([]string, 0, len(tickets))
 	for _, tk := range tickets {
 		ids = append(ids, tk.ID)
@@ -37,12 +38,12 @@ func ticketIDs(tickets []protocol.Ticket) []string {
 // captureTicketBroadcasts records every tickets_updated board push the daemon makes,
 // via the in-process hook, so a test can assert the post-mutation board push
 // deterministically. Returns an accessor for the most recent broadcast.
-func captureTicketBroadcasts(d *Daemon) (latest func() []protocol.Ticket) {
-	var broadcasts [][]protocol.Ticket
-	d.ticketsBroadcastHook = func(tickets []protocol.Ticket) {
+func captureTicketBroadcasts(d *Daemon) (latest func() []protocol.TicketRow) {
+	var broadcasts [][]protocol.TicketRow
+	d.ticketsBroadcastHook = func(tickets []protocol.TicketRow) {
 		broadcasts = append(broadcasts, tickets)
 	}
-	return func() []protocol.Ticket {
+	return func() []protocol.TicketRow {
 		if len(broadcasts) == 0 {
 			return nil
 		}
@@ -193,9 +194,9 @@ func artifactNames(artifacts []protocol.TicketArtifact) []string {
 	return names
 }
 
-// The board feed is the non-archived set, and each row is BARE — activity and
-// artifacts stay empty so a busy board is cheap to broadcast; the detail fetch
-// loads them.
+// The board feed is the non-archived set, and each row is SLIM — the brief, the
+// history thread and the artifacts belong to a read by id, so a busy board is
+// cheap to broadcast and cheap to bootstrap.
 func TestTicketsForBroadcastBareNonArchived(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	now := time.Now()
@@ -220,7 +221,87 @@ func TestTicketsForBroadcastBareNonArchived(t *testing.T) {
 	if len(board) != 1 || board[0].ID != "open-one" {
 		t.Fatalf("board = %+v, want only the non-archived open-one", board)
 	}
-	if len(board[0].Activity) != 0 || len(board[0].Artifacts) != 0 {
-		t.Fatalf("board row should be bare, got activity=%d artifacts=%d", len(board[0].Activity), len(board[0].Artifacts))
+}
+
+// The board row carries exactly what a board renders. The brief is the bulk of a
+// ticket and no client reads it off a row — it is fetched by id — so it must not
+// be on a message pushed to every client on every ticket mutation.
+func TestBoardRowCarriesTheBoardAndNotTheBrief(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	now := time.Now()
+	brief := strings.Repeat("a delegation brief nobody renders from a board row. ", 200)
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID:          "store-migration",
+		Title:       "Migrate the store",
+		Description: brief,
+		Status:      store.TicketStatusWorking,
+		Assignee:    "sess-1",
+		Cwd:         "/repo",
+		LastAgentID: "codex",
+	}, "chief-1", now); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := d.store.AddTicketComment("store-migration", "chief-1", "a note", now.Add(time.Minute)); err != nil {
+		t.Fatalf("comment: %v", err)
+	}
+
+	board := d.ticketsForBroadcast()
+	if len(board) != 1 {
+		t.Fatalf("board = %+v, want one row", board)
+	}
+	raw, err := json.Marshal(board[0])
+	if err != nil {
+		t.Fatalf("marshal row: %v", err)
+	}
+	var wire map[string]any
+	if err := json.Unmarshal(raw, &wire); err != nil {
+		t.Fatalf("unmarshal row: %v", err)
+	}
+	for _, field := range []string{"description", "activity", "artifacts"} {
+		if _, present := wire[field]; present {
+			t.Fatalf("board row carries %q: %s", field, raw)
+		}
+	}
+	if strings.Contains(string(raw), "delegation brief") {
+		t.Fatalf("the brief reached the board row: %s", raw)
+	}
+	// What the app does read off a row: the card, the orphan rule, the resume
+	// affordance, and updated_at (which drives the open detail view's re-fetch).
+	for field, want := range map[string]any{
+		"id":            "store-migration",
+		"title":         "Migrate the store",
+		"status":        string(store.TicketStatusWorking),
+		"assignee":      "sess-1",
+		"cwd":           "/repo",
+		"last_agent_id": "codex",
+	} {
+		if wire[field] != want {
+			t.Fatalf("row %s = %v, want %v", field, wire[field], want)
+		}
+	}
+	if wire["updated_at"] == "" || wire["updated_at"] == nil {
+		t.Fatalf("row is missing updated_at: %s", raw)
+	}
+}
+
+// Slimming the app's board feed must not reach the agent's board read: an agent
+// lists tickets to find work, and the brief is the work.
+func TestTicketListRowsStillCarryTheBrief(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	if _, err := d.store.CreateTicket(store.Ticket{
+		ID:          "store-migration",
+		Title:       "Migrate the store",
+		Description: "move the store to X",
+		Status:      store.TicketStatusTodo,
+	}, "chief-1", time.Now()); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+
+	rows := d.ticketRows(store.TicketListFilter{})
+	if len(rows) != 1 {
+		t.Fatalf("rows = %+v, want one", rows)
+	}
+	if rows[0].Description != "move the store to X" {
+		t.Fatalf("ticket_list row description = %q, want the brief", rows[0].Description)
 	}
 }

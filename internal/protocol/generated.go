@@ -2715,7 +2715,7 @@ type InitialStateMessage struct {
 	SourceFingerprint *string `json:"source_fingerprint,omitempty,omitzero"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets,omitempty,omitzero"`
+	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
@@ -6161,6 +6161,35 @@ type TicketResumeResultMessage struct {
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
+type TicketRow struct {
+	// Assignee corresponds to the JSON schema field "assignee".
+	Assignee string `json:"assignee"`
+
+	// ClosedAt corresponds to the JSON schema field "closed_at".
+	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd string `json:"cwd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LastAgentID corresponds to the JSON schema field "last_agent_id".
+	LastAgentID string `json:"last_agent_id"`
+
+	// ReconciledAt corresponds to the JSON schema field "reconciled_at".
+	ReconciledAt *string `json:"reconciled_at,omitempty,omitzero"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status TicketStatus `json:"status"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
 type TicketShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -6267,7 +6296,7 @@ type TicketsUpdatedMessage struct {
 	Event string `json:"event"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets"`
+	Tickets []TicketRow `json:"tickets"`
 }
 
 type TodosMessage struct {
@@ -6520,7 +6549,7 @@ type WebSocketEvent struct {
 	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets,omitempty,omitzero"`
+	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// TileID corresponds to the JSON schema field "tile_id".
 	TileID *string `json:"tile_id,omitempty,omitzero"`

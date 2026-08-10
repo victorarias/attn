@@ -227,7 +227,7 @@ func TestTicketChangeStatusBroadcastsBoard(t *testing.T) {
 	if board == nil {
 		t.Fatal("the status change fired no tickets_updated board push")
 	}
-	var moved *protocol.Ticket
+	var moved *protocol.TicketRow
 	for i := range board {
 		if board[i].ID == ticketID {
 			moved = &board[i]
