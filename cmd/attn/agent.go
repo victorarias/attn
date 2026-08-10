@@ -287,8 +287,19 @@ type agentMsgArgs struct {
 }
 
 func parseAgentMsgArgs(args []string, envSessionID string) (agentMsgArgs, error) {
-	if len(args) < 2 || strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-") {
-		return agentMsgArgs{}, errors.New("usage: attn agent msg <id> \"text\" [--source-session <id>]")
+	const usage = "usage: attn agent msg <id> \"text\" [--source-session <id>]"
+	literal := len(args) > 0 && args[0] == "--"
+	if literal {
+		args = args[1:]
+	}
+	if len(args) < 2 {
+		return agentMsgArgs{}, errors.New(usage)
+	}
+	// Without the separator a leading dash is a mistyped flag far more often
+	// than it is the message, and reading `--json` as text would send it.
+	if !literal && (strings.HasPrefix(args[0], "-") || strings.HasPrefix(args[1], "-")) {
+		return agentMsgArgs{}, errors.New(
+			usage + `; a message that starts with - goes after --, as: attn agent msg -- <id> "-text"`)
 	}
 	fs := flag.NewFlagSet("agent msg", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -390,5 +401,6 @@ commands:
         cannot take input right now has it queued and delivered when it can;
         the result always says which. The sender defaults to this session
         (ATTN_SESSION_ID); pass --source-session when running outside one.
+        A message that starts with - goes after --, as: agent msg -- <id> "-text"
 `)
 }

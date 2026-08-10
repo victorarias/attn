@@ -283,3 +283,21 @@ func TestParseAgentMsgArgsNamesTheSizeLimitBeforeSending(t *testing.T) {
 		t.Fatalf("a message exactly at the limit was refused: %v", err)
 	}
 }
+
+// A message that starts with a dash is still a message. Without the separator
+// the leading dash is read as a mistyped flag, which is right far more often —
+// but the error has to name the way through, or the sender is just stuck.
+func TestParseAgentMsgArgsTakesADashLeadingMessageAfterTheSeparator(t *testing.T) {
+	parsed, err := parseAgentMsgArgs([]string{"--", "target", "-hello", "--json"}, "sender-session-id")
+	if err != nil {
+		t.Fatalf("a quoted message starting with - was refused: %v", err)
+	}
+	if parsed.content != "-hello" || parsed.target != "target" || !parsed.json {
+		t.Fatalf("parsed = %+v", parsed)
+	}
+
+	_, err = parseAgentMsgArgs([]string{"target", "-hello"}, "sender-session-id")
+	if err == nil || !strings.Contains(err.Error(), "attn agent msg -- <id>") {
+		t.Fatalf("the usage error does not name the way through: %v", err)
+	}
+}
