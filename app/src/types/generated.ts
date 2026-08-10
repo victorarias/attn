@@ -5267,6 +5267,7 @@ export interface SetSessionResumeIDMessage {
     cmd:               SetSessionResumeIDMessageCmd;
     id:                string;
     resume_session_id: string;
+    transcript_path?:  string;
     [property: string]: any;
 }
 
@@ -13449,6 +13450,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("SetSessionResumeIDMessageCmd") },
         { json: "id", js: "id", typ: "" },
         { json: "resume_session_id", js: "resume_session_id", typ: "" },
+        { json: "transcript_path", js: "transcript_path", typ: u(undefined, "") },
     ], "any"),
     "SetSettingMessage": o([
         { json: "cmd", js: "cmd", typ: r("SetSettingMessageCmd") },
