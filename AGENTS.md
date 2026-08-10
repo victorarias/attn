@@ -466,15 +466,12 @@ carries the enumerated exception list.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor. Disabled consumers do not pin the log; they resume at head with a
   logged gap.
-- A producer publishes when the fact changed, not when a timer ticked. Every
-  fact costs a durable row plus, through its projection, a push to every
-  client, so a producer's steady-state rate is part of its design: before
-  shipping a publisher inside a periodic loop, know its facts/hour idle and
-  busy, and make sure a tick where nothing moved publishes nothing. The
-  canonical failure is the 2026-08 evidence flap — a reason string that
-  renamed itself every second and silently wrote 66% of the whole log.
-  Measured healthy rates and the wire-load reconsider threshold live in
-  [docs/plans/2026-08-10-projection-coalescing.md](docs/plans/2026-08-10-projection-coalescing.md).
+- Publish freely on real change — the bus is built for it, and a fact a
+  consumer needs must never be skipped to save traffic. The one rule: a
+  publish reports a change, so a periodic loop where nothing moved this tick
+  publishes nothing. Sanity ceiling: every healthy fact name measures under
+  500 facts/hour (loudest observed: 480/h); a producer sustaining thousands
+  per hour is republishing something that did not change.
 - Operator surface: `attn bus status`, `attn bus disable|enable <consumer>`.
   The enabled bit is database-only on purpose — the kill switch must not depend
   on the daemon it kills.
