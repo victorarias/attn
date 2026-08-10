@@ -1,4 +1,4 @@
-import { createContext, useContext } from 'react';
+import { createContext, useContext, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkBreaks from 'remark-breaks';
 import remarkGfm from 'remark-gfm';
@@ -10,6 +10,16 @@ import { MermaidDiagram } from './MermaidDiagram';
 // onDiagramLayoutChange reference (e.g. PresentTour after an items-version
 // bump) never remounts an in-flight MermaidDiagram.
 const DiagramLayoutChangeContext = createContext<(() => void) | undefined>(undefined);
+const DiagramPresentationContext = createContext<'static' | 'reader'>('static');
+
+/** Opts a full document reader into progressive controls for oversized diagrams. */
+export function ReaderDiagramPresentation({ children }: { children: ReactNode }) {
+  return (
+    <DiagramPresentationContext.Provider value="reader">
+      {children}
+    </DiagramPresentationContext.Provider>
+  );
+}
 
 // react-markdown v10's `code` component gets no `inline` flag; a fenced block
 // carries a `language-*` className, inline code carries none.
@@ -17,8 +27,15 @@ const DiagramLayoutChangeContext = createContext<(() => void) | undefined>(undef
 // component identity) instead of forking diagram rendering.
 export const CodeRenderer: Components['code'] = ({ className, children, ...props }) => {
   const onDiagramLayoutChange = useContext(DiagramLayoutChangeContext);
+  const presentation = useContext(DiagramPresentationContext);
   if (className?.includes('language-mermaid')) {
-    return <MermaidDiagram code={String(children).trimEnd()} onLayoutChange={onDiagramLayoutChange} />;
+    return (
+      <MermaidDiagram
+        code={String(children).trimEnd()}
+        onLayoutChange={onDiagramLayoutChange}
+        presentation={presentation}
+      />
+    );
   }
   return (
     <code className={className} {...props}>

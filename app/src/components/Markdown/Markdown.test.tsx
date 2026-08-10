@@ -53,6 +53,7 @@ describe('Markdown', () => {
       expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument();
     });
     expect(mermaidMock.render).toHaveBeenCalled();
+    expect(screen.queryByRole('button', { name: 'Focus diagram' })).toBeNull();
   });
 
   it('falls back to the raw code on a mermaid render error, without crashing', async () => {

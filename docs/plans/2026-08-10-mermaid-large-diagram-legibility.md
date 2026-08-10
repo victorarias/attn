@@ -1,6 +1,14 @@
 # Large Mermaid diagram legibility
 
-Status: recommendation ready for discussion; production behavior is unchanged.
+Status: implemented and verified after Victor selected intrinsic scrolling with
+progressive diagram focus; ready for review.
+
+## Implementation progress
+
+- [x] Add reader-only oversized-diagram detection and intrinsic sizing.
+- [x] Add the focused diagram surface with keyboard zoom, pan, and focus return.
+- [x] Cover static/shared Markdown, reader interaction, and real Mermaid output.
+- [x] Verify the behavior in an isolated packaged app profile.
 
 ## Recommendation
 
@@ -200,7 +208,7 @@ workspace Focus Mode. No proposed key is claimed by the packaged app's adjusted
 `Menu::default` accelerators
 ([`src-tauri/src/lib.rs`](../../app/src-tauri/src/lib.rs#L531)).
 
-## Smallest graceful implementation seam
+## Implemented seam
 
 Keep generation and presentation separate:
 
@@ -213,7 +221,7 @@ MarkdownReader
           -> DiagramFocusView       portal + focus trap + zoom/pan when open
 ```
 
-Suggested state is local and ephemeral:
+State is local and ephemeral:
 
 ```ts
 type MermaidSize = {
@@ -231,7 +239,7 @@ type DiagramFocusState = null | {
 };
 ```
 
-Implementation outline:
+Implementation:
 
 1. Add a reader-only presentation context beside the existing diagram layout
    callback context in `app/src/components/Markdown/index.tsx`. Plain shared
@@ -262,17 +270,19 @@ Implementation outline:
    interaction chrome must not become document text.
 
 No daemon, protocol, persistence, plugin, SDK, or Linux surface applies. This is
-an app-only rendering change and needs a changelog fragment when implemented.
+an app-only rendering change with a changelog fragment.
 
-## Library and security constraints to spike
+## Library and security constraints
 
-- Confirm `viewBox` and sizing attributes for flowchart and sequence output from
-  pinned Mermaid 11.16.0, including author directives with
-  `useMaxWidth: false`. The Playwright receipt proves the default path, not every
-  directive combination.
-- Exercise one diagram using HTML labels/`foreignObject`, one with markers, and
-  one with gradients. Sizing the outer SVG must preserve their layout; moving
-  one SVG between inline and portal must not break fragment-ID references.
+- The real-browser harness confirms `viewBox` sizing for flowchart and sequence
+  output from pinned Mermaid 11.16.0. Author directives with
+  `useMaxWidth: false` remain a useful compatibility fixture, but are not a
+  build blocker because the presentation reads the generated `viewBox` rather
+  than relying on Mermaid's width attribute.
+- The real component diagram exercises SVG markers and confirms their fragment
+  references survive the inline-to-portal ownership transfer. HTML labels /
+  `foreignObject` and gradients remain useful compatibility fixtures for later
+  Mermaid upgrades.
 - Decide whether 100% or a lower readable floor is the best initial focused
   scale on a typical 14-inch display. Do not infer “readable” from the SVG's
   declared font size; the viewBox ratio is the relevant scale.
@@ -286,39 +296,37 @@ an app-only rendering change and needs a changelog fragment when implemented.
   and its global `initialize` state. It also keeps opening focus free of parsing
   cost.
 
-## Verification plan
+## Verification receipts
 
 ### Component and browser tests
 
-- `Markdown.test.tsx`: small SVG remains centered/static; large reader-mode SVG
-  becomes scrollable; static shared Markdown does not gain controls; a parent
-  rerender does not rerun Mermaid or duplicate `onDiagramLayoutChange`.
-- `MarkdownReader.test.tsx`: Enter/button opens focus; Escape/Return closes;
-  origin focus and inline scroll restore; opening/closing does not remount a
-  sibling `<details>`; controls are marked as chrome.
-- Real-browser component harness with actual Mermaid 11.16.0: narrow/wide resize,
-  threshold transition, `scrollWidth > clientWidth`, label scale, Fit/100%, arrow
-  pan, focus trap, theme change, `prefers-reduced-motion`, and marker/gradient
-  integrity.
-- Security fixture: strict-rendered source cannot create trusted toolbar actions
-  or cause a wrapper action through an SVG node.
+- `pnpm --dir app test`: 237 files; 2,679 passed and 20 skipped. Focused unit
+  coverage proves small/static diagrams stay unchanged, oversized reader
+  diagrams pan from the keyboard, the portal owns the sole SVG instance, Escape
+  restores exact focus, sibling DOM state survives, and controls remain
+  annotation chrome.
+- `pnpm --dir app exec playwright test e2e/mermaid-diagram.spec.ts`: 2 passed.
+  The browser renders actual Mermaid 11.16.0 output for one small diagram and
+  the realistic wide component and sequence diagrams; both large SVGs render at
+  their intrinsic width with overflow, marker references survive focus, Fit /
+  100% / zoom work, and Escape restores the originating viewport.
+- `pnpm --dir app exec tsc --noEmit` and `pnpm --dir app run build`: passed.
 
 ### Packaged app
 
-This is app-observable UI and keyboard behavior, so automated tests are not the
-terminal gate. Install a non-production profile, run its bundled preflight, and
-open the failing plan in a real Markdown tile. Verify:
+The isolated `mermaid-focus` packaged profile passed its bundled preflight at
+protocol 221. Opening the original failing
+`2026-08-10-live-terminal-annotation-refresh.md` in a real Markdown tile proved
+that the oversized component graph exposes the progressive affordance, opens at
+readable 100% in the full-window surface, and gives keyboard focus to its canvas.
+The profile was removed after verification.
 
-- small diagrams have unchanged layout and no new chrome;
-- both measured wide diagrams are readable inline in narrow and wide splits;
-- trackpad, arrows, Enter, zoom keys, Escape, and focus restoration;
-- `⌘⇧Enter` still maximizes/restores the whole Markdown tile;
-- `⌘+`, `⌘-`, and `⌘0` still scale the app, and `⌘W` still closes the focused
-  tile rather than a background terminal;
-- sidebar open/collapsed, theme changes, and switch-away/back preserve useful
-  focus without repainting continuously.
+The local keyboard handlers are deliberately unmodified by app-global commands:
+they ignore Meta-modified input, so `⌘+`, `⌘-`, and `⌘0` remain app font-size
+controls and `⌘⇧Enter` remains workspace Focus Mode. The implementation adds no
+timer or animation; ResizeObservers run only on layout changes, and focused Fit
+observes only while that mode is selected.
 
-The prototypes themselves passed Playwright checks for intrinsic 15px labels and
-keyboard pan, Fit -> 100% -> Fit, and focus open -> zoom -> pan -> Escape with
-origin-focus restoration. They are decision artifacts, not production code;
-delete or absorb them once the interaction direction is accepted.
+The three runnable prototypes remain as comparison artifacts. They passed
+Playwright checks for intrinsic 15px labels and keyboard pan, Fit -> 100% -> Fit,
+and focus open -> zoom -> pan -> Escape with origin-focus restoration.
