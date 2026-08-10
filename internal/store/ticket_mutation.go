@@ -163,7 +163,7 @@ func unreadTargetTicketEventsTx(
 	ticketID, cursorIdentity, authorIdentity string,
 ) ([]TicketEvent, error) {
 	rows, err := tx.Query(`
-		SELECT e.seq, e.ticket_id, e.kind, e.author, e.from_status, e.to_status, e.comment, e.detail, e.created_at
+		SELECT e.seq, e.ticket_id, e.kind, e.author, e.author_role, e.from_status, e.to_status, e.comment, e.detail, e.created_at
 		FROM ticket_events e
 		LEFT JOIN ticket_event_cursors c
 			ON c.identity = ? AND c.ticket_id = e.ticket_id

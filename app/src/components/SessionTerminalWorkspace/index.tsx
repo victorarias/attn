@@ -61,6 +61,10 @@ function suppressTerminalMouseDuringResize(durationMs = RESIZE_MOUSE_SUPPRESSION
   );
 }
 
+// The tile's content request is an effect dependency, so the no-op stand-in
+// has to keep one identity.
+const noRequestContent = () => {};
+
 function zoomLayoutTowardLeaf(node: TerminalLayoutNode, leafId: string): TerminalLayoutNode {
   if (node.type !== 'split') {
     return node;
@@ -186,7 +190,11 @@ interface SessionTerminalWorkspaceProps {
   // daemon use the selected session).
   onOpenMarkdown?: (path: string, sessionId: string) => void;
   onTerminalModelRecovered?: () => void;
-  onZoomModeChange?: (zoomed: boolean) => void;
+  // Zoom is a mode, not a target: it always widens whichever leaf is focused,
+  // so it is a flag rather than a leaf id that has to chase focus. App owns it
+  // because the dock's zoom chip reads it too.
+  zoomActive?: boolean;
+  onSetZoomActive?: (active: boolean) => void;
   onNavigateOutOfSession: (direction: TerminalNavigationDirection) => void;
   onResizeSplit?: (splitId: string, ratio: number) => Promise<unknown> | void;
   // Move an existing leaf (terminal pane or docked tile) beside an anchor leaf,
@@ -241,7 +249,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onOpenPresentation,
     onOpenMarkdown,
     onTerminalModelRecovered,
-    onZoomModeChange,
+    zoomActive = false,
+    onSetZoomActive,
     onNavigateOutOfSession,
     onResizeSplit,
     onMoveLeaf,
@@ -258,9 +267,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     onRequestTileContent,
   }, ref) {
     const [maximizedLeafId, setMaximizedLeafId] = useState<string | null>(null);
-    // Zoom is a mode, not a target: it always widens whichever leaf is focused,
-    // so it is a flag rather than a leaf id that has to chase focus.
-    const [zoomActive, setZoomActive] = useState(false);
     // The docked tile that currently owns workspace focus, or null when a
     // terminal pane does. `activePaneId` is derived from the focused session, so
     // it can only ever name an agent pane; this is the other half of the focus
@@ -598,10 +604,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       }
     }, [paneIds, ticketOverlayPaneId]);
 
-    useEffect(() => {
-      onZoomModeChange?.(Boolean(effectiveZoomedPaneId));
-    }, [effectiveZoomedPaneId, onZoomModeChange]);
-
     // Focusing the terminal is a leaf handoff, not just a DOM focus call: it
     // has to release any focused tile. `activePaneId` does not change here (the
     // pane was already the session's active one), so without the release the
@@ -767,14 +769,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
     }, [activeLeafId, activeLeafIsTile, handleClosePane, onUndockTile]);
 
     const toggleMaximizeActivePane = useCallback(() => {
-      setZoomActive(false);
+      onSetZoomActive?.(false);
       setMaximizedLeafId((current) => (current ? null : activeLeafId));
-    }, [activeLeafId]);
+    }, [activeLeafId, onSetZoomActive]);
 
     const toggleZoomActivePane = useCallback(() => {
       setMaximizedLeafId(null);
-      setZoomActive((current) => !current);
-    }, []);
+      onSetZoomActive?.(!zoomActive);
+    }, [onSetZoomActive, zoomActive]);
 
     // Focus a leaf by id: a tile takes DOM focus in place (the session's pane
     // focus is left alone), a pane goes through the session-level focus path.
@@ -1138,7 +1140,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 onUpdateTile?.(tileLeaf.tileId, tileLeaf.tileParams ?? '', sessionId)
               )}
               onHeaderPointerDown={(event) => beginLeafDrag(tileLeaf.tileId, event)}
-              onRequestContent={onRequestTileContent ?? (() => {})}
+              onRequestContent={onRequestTileContent ?? noRequestContent}
               bodyRef={tileBodyRefFor(tileLeaf.tileId)}
             />
           </div>

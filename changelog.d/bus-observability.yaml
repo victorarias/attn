@@ -1,0 +1,19 @@
+kind: added
+area: daemon
+change: >
+  The durable event bus can be looked at. `attn bus status` and a new
+  Settings › Event Bus page show the same picture — what the log holds, which
+  fact classes write to it and at what rate, how much of the log each one owns,
+  which consumers read it and how far behind they are, and which one is holding
+  retention open. Both render one snapshot the daemon computes, so they cannot
+  disagree; the app can enable and disable a consumer from the page, the same
+  switch `attn bus enable|disable` throws.
+notes: >
+  Health findings are written by the daemon as sentences ("consumer X is 41,000
+  events behind and not advancing"), not left as numbers to interpret. A fact
+  class sustaining above 1000 events/hour over 6 or 24 hours is called out on
+  both surfaces and logged once per retention pass, naming the rate, the window
+  and the tripwire — the class that once wrote two thirds of the log for a week
+  would have announced itself on day one. The whole aggregate is one pass over
+  the log, 209ms at 945k rows, so nothing polls it: the page reads on open and
+  every 30s while it is visible.

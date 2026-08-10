@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render } from '@testing-library/react';
 import { SessionTerminalWorkspace } from './index';
@@ -103,31 +103,38 @@ function renderSplit(overrides: {
   const onUndockTile = overrides.onUndockTile ?? vi.fn();
   const onFocusPane = overrides.onFocusPane ?? vi.fn();
   const eventRouter = createPaneRuntimeEventRouterController();
-  const element = (workspace: TerminalWorkspaceState) => (
-    <SessionTerminalWorkspace
-      workspaceId="workspace-split"
-      workspaceSessions={[{ id: 'sess-1', label: 'shell', agent: 'shell', cwd: '/tmp/project' }]}
-      workspace={workspace}
-      workspaceSelectionStyle={overrides.workspaceSelectionStyle}
-      activePaneId="pane-term"
-      fontSize={13}
-      enabled
-      isActiveSession
-      eventRouter={eventRouter}
-      onSplitPane={vi.fn()}
-      onClosePane={onClosePane}
-      onFocusPane={onFocusPane}
-      onNavigateOutOfSession={vi.fn()}
-      onUndockTile={onUndockTile}
-      tileContents={{
-        [tileContentKey('workspace-split', 'tile-notes')]: {
-          path: '/tmp/project/NOTES.md',
-          content: '# Project notes',
-        },
-      }}
-      onRequestTileContent={vi.fn()}
-    />
-  );
+  // Zoom mode lives in App, so a standalone render needs a host to hold it.
+  function ZoomHost({ workspace }: { workspace: TerminalWorkspaceState }) {
+    const [zoomActive, setZoomActive] = useState(false);
+    return (
+      <SessionTerminalWorkspace
+        workspaceId="workspace-split"
+        workspaceSessions={[{ id: 'sess-1', label: 'shell', agent: 'shell', cwd: '/tmp/project' }]}
+        workspace={workspace}
+        workspaceSelectionStyle={overrides.workspaceSelectionStyle}
+        activePaneId="pane-term"
+        fontSize={13}
+        enabled
+        isActiveSession
+        eventRouter={eventRouter}
+        onSplitPane={vi.fn()}
+        onClosePane={onClosePane}
+        onFocusPane={onFocusPane}
+        onNavigateOutOfSession={vi.fn()}
+        onUndockTile={onUndockTile}
+        zoomActive={zoomActive}
+        onSetZoomActive={setZoomActive}
+        tileContents={{
+          [tileContentKey('workspace-split', 'tile-notes')]: {
+            path: '/tmp/project/NOTES.md',
+            content: '# Project notes',
+          },
+        }}
+        onRequestTileContent={vi.fn()}
+      />
+    );
+  }
+  const element = (workspace: TerminalWorkspaceState) => <ZoomHost workspace={workspace} />;
   const utils = render(element(paneAndTileWorkspace()), { wrapper: NotebookSurfaceTestWrapper });
   const setWorkspace = (workspace: TerminalWorkspaceState) => utils.rerender(element(workspace));
   return { ...utils, setWorkspace, onClosePane, onUndockTile, onFocusPane };

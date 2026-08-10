@@ -25,7 +25,9 @@ session — the brief is its description, the session is its assignee — and yo
 participant on the ticket you created. That ticket is the channel in both
 directions: the agent reports its work state onto it, and you reach the agent with
 `attn ticket comment <ticket-id> -m "<note>"`. The chief of staff is also a
-participant on every delegation ticket, whoever started it.
+participant on every delegation ticket, whoever started it — and when the chief is
+the one delegating, that participation belongs to the ROLE. It moves to whoever
+holds the role next, instead of following the session that delegated.
 
 Follow-up: all runtimes receive the same ticket nudge when activity remains unread;
 Claude may also arm a Monitor on `attn ticket inbox --watch` to consume updates
@@ -77,24 +79,15 @@ transfer directly. Taking over a live assignee requires confirmation:
 
 ## Agent Selection
 
-The source agent is used by default. Select another supported agent with:
-
-    attn delegate --brief-file "$brief_file" --agent claude
-    attn delegate --brief-file "$brief_file" --agent codex
-
+The source agent is used by default; `--agent` selects another supported one.
 Plugin agents work only when they declare delegated initial-prompt support.
 Copilot delegation is currently unsupported.
 
 `--model` and `--effort` pin the delegated agent's model and reasoning effort
-for that delegation only; omitted, the agent uses its own defaults:
-
-    attn delegate --brief-file "$brief_file" \
-      --agent claude --model opus --effort high
-
-`--model` takes an alias or a full model id. `--effort` takes the agent's
-native levels (claude: low, medium, high, xhigh, max; codex: minimal, low,
-medium, high, xhigh). Agents without a native mechanism (e.g. copilot) reject
-these flags.
+for that delegation only; omitted, the agent uses its own defaults. `--effort`
+takes the agent's native levels (claude: low, medium, high, xhigh, max; codex:
+minimal, low, medium, high, xhigh). Agents without a native mechanism (e.g.
+copilot) reject these flags.
 
 ## Placement
 
@@ -116,57 +109,29 @@ task matches an existing workspace's domain, place it there with `--workspace`:
 When delegating multiple independent items in parallel, route each agent to the
 workspace that fits its domain rather than creating a new workspace per item.
 
-If no existing workspace fits, use one of:
-
-No placement flag — adds the session to the current workspace:
-
-    attn delegate --brief-file "$brief_file"
-
-Create a separate workspace using the source directory:
-
-    attn delegate --brief-file "$brief_file" --new-workspace
-
-Create a workspace at an existing directory:
-
-    attn delegate --brief-file "$brief_file" --cwd /path/to/project
+If no existing workspace fits: no placement flag adds the session to the
+current workspace, `--new-workspace` creates a separate workspace from the
+source directory, and `--cwd` creates one at an existing directory.
 
 `attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
 When the source session is the chief of staff, delegating into a muted existing
 workspace automatically unmutes it so the new agent is visible in the sidebar.
 Ordinary delegation preserves the workspace's current mute state.
 
-Git repositories get an isolated worktree with an automatically generated branch.
-Use `--worktree` to choose the branch name explicitly. It combines with any
-placement:
+Git repositories get an isolated worktree with an automatically generated
+branch; `--worktree` chooses the branch name explicitly and combines with any
+placement. Two worktree defaults matter beyond what `attn delegate --help`
+states:
 
-    # worktree in the current workspace
-    attn delegate --brief-file "$brief_file" \
-      --worktree feat/delegated-task
-
-    # worktree in an existing workspace
-    attn delegate --brief-file "$brief_file" \
-      --workspace <workspace-id> --worktree feat/delegated-task
-
-    # worktree in a new workspace
-    attn delegate --brief-file "$brief_file" \
-      --new-workspace --worktree feat/delegated-task
-
-    # worktree of the repo at an existing directory
-    attn delegate --brief-file "$brief_file" \
-      --cwd /path/to/project --worktree feat/delegated-task
-
-Worktree options:
-
-- `--repo <path>` chooses the main repository. It defaults to the repository the
-  target's existing sessions are in — the session you delegate alongside, not the
-  workspace's recorded directory. Delegation fails and asks for `--repo` when
-  those sessions span more than one repository.
-- `--from <ref>` chooses the starting branch or ref. Without it, every placement
-  starts from the repository's default branch — `origin/<default>` when that
-  exists, otherwise the local one. It never depends on what the source or main
-  checkout currently has checked out. Pass `--from` to deliberately continue or
-  stack on another branch.
-- `--worktree-path <path>` chooses an explicit worktree location.
+- `--repo` defaults to the repository the target's *existing sessions* are in —
+  the session you delegate alongside, not the workspace's recorded directory.
+  Delegation fails and asks for `--repo` when those sessions span more than one
+  repository.
+- Without `--from`, every placement starts from the repository's default branch
+  — `origin/<default>` when that exists, otherwise the local one. It never
+  depends on what the source or main checkout currently has checked out. Pass
+  `--from` to deliberately continue or stack on another branch.
 
 When running outside the source session, add `--source-session <session-id>`.
-Run `attn delegate --help` for the exact option combinations.
+Run `attn delegate --help` for the full flag list and the exact option
+combinations.

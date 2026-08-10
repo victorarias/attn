@@ -1,0 +1,16 @@
+kind: added
+area: cli
+change: >
+  `attn skill` prints the agent skill bundled with the binary —
+  release-matched instructions for driving attn — with `--list` and
+  `--reference <name>` for the per-capability references. The skill itself
+  now treats the CLI's own help as the authority for command syntax: the
+  references keep the rules and concepts and drop their hand-maintained
+  flag mirrors, and the skill warns agents never to explore with bare
+  `attn` (it launches a session) or probe mutating commands by omitting
+  arguments.
+notes: >
+  Guidance patterns adapted from herdr's agent skill: binary-as-authority
+  for syntax, probing discipline, a negative trigger in the skill
+  description ("do not use merely because a task could benefit from
+  delegation"), and a read-IDs-from-output-not-prediction shared rule.

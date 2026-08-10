@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -19,11 +20,45 @@ import (
 // (same package), so a blank/garbage value decodes to the zero time. The encoding
 // is the fixed-width one because created_at orders this feed as text.
 
+// NotificationSeverity is how much a notification wants the user. Unlike Kind,
+// which is open, this is a closed set: the app styles the feed by it and gives
+// critical an ambient surface outside the panel, so an unrecognized value must
+// resolve to something rather than render as nothing.
+type NotificationSeverity string
+
+const (
+	// NotificationInfo is the default weight and the value every row written
+	// before the severity column carries.
+	NotificationInfo NotificationSeverity = "info"
+	// NotificationWarning is something that failed and stays failed until the
+	// user acts, but costs them nothing until they get to it.
+	NotificationWarning NotificationSeverity = "warning"
+	// NotificationCritical is something that is broken now and will stay broken
+	// silently — it earns a surface the user cannot miss.
+	NotificationCritical NotificationSeverity = "critical"
+)
+
+// NormalizeNotificationSeverity maps any input onto the closed set, falling back
+// to info. It runs on write and on scan, not just on write: the column is plain
+// TEXT and nothing stops a hand-written row from holding a typo, and an
+// unrecognized value must not reach the app as a severity it has no styling for.
+func NormalizeNotificationSeverity(raw string) NotificationSeverity {
+	switch NotificationSeverity(strings.ToLower(strings.TrimSpace(raw))) {
+	case NotificationWarning:
+		return NotificationWarning
+	case NotificationCritical:
+		return NotificationCritical
+	default:
+		return NotificationInfo
+	}
+}
+
 // NotificationRecord is one durable notification row. ReadAt is the zero time
 // while unread; a non-zero ReadAt marks it read.
 type NotificationRecord struct {
 	ID         string
 	Kind       string // e.g. "task_failed" (extensible)
+	Severity   NotificationSeverity
 	Title      string
 	Body       string
 	Detail     string
@@ -44,10 +79,11 @@ func (s *Store) AddNotification(rec NotificationRecord, now time.Time) (Notifica
 	rec.ID = uuid.NewString()
 	rec.CreatedAt = now.UTC()
 	rec.ReadAt = time.Time{}
+	rec.Severity = NormalizeNotificationSeverity(string(rec.Severity))
 	_, err := s.db.Exec(
-		`INSERT INTO notifications (id, kind, title, body, detail, source_kind, source_id, created_at, read_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, '')`,
-		rec.ID, rec.Kind, rec.Title, rec.Body, rec.Detail, rec.SourceKind, rec.SourceID,
+		`INSERT INTO notifications (id, kind, severity, title, body, detail, source_kind, source_id, created_at, read_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, '')`,
+		rec.ID, rec.Kind, string(rec.Severity), rec.Title, rec.Body, rec.Detail, rec.SourceKind, rec.SourceID,
 		rec.CreatedAt.Format(sortableTimeFormat),
 	)
 	if err != nil {
@@ -62,7 +98,7 @@ func (s *Store) ListNotifications() ([]NotificationRecord, error) {
 		return nil, fmt.Errorf("store: no database")
 	}
 	rows, err := s.db.Query(
-		`SELECT id, kind, title, body, detail, source_kind, source_id, created_at, read_at
+		`SELECT id, kind, severity, title, body, detail, source_kind, source_id, created_at, read_at
 		 FROM notifications ORDER BY created_at DESC, id DESC`)
 	if err != nil {
 		return nil, fmt.Errorf("store: list notifications: %w", err)
@@ -91,6 +127,36 @@ func (s *Store) UnreadNotificationCount() (int, error) {
 		return 0, fmt.Errorf("store: unread notification count: %w", err)
 	}
 	return n, nil
+}
+
+// UnreadCriticalNotifications returns how many critical notifications are unread
+// and the title of the newest of them (empty when the count is zero). Together
+// they are the whole input to the app's ambient critical surface, so they are
+// read in one statement — the surface must never show a count from one instant
+// beside a title from another.
+//
+// The severity comparison is normalization-free on purpose: a row whose severity
+// is a typo is not critical, which is the same answer NormalizeNotificationSeverity
+// gives it.
+func (s *Store) UnreadCriticalNotifications() (int, string, error) {
+	if s.db == nil {
+		return 0, "", fmt.Errorf("store: no database")
+	}
+	var (
+		n     int
+		title string
+	)
+	critical := string(NotificationCritical)
+	if err := s.db.QueryRow(
+		`SELECT COUNT(*),
+		        COALESCE((SELECT title FROM notifications
+		                  WHERE read_at = '' AND severity = ?
+		                  ORDER BY created_at DESC, id DESC LIMIT 1), '')
+		 FROM notifications WHERE read_at = '' AND severity = ?`,
+		critical, critical).Scan(&n, &title); err != nil {
+		return 0, "", fmt.Errorf("store: unread critical notifications: %w", err)
+	}
+	return n, title, nil
 }
 
 // MarkNotificationRead marks one notification read. Idempotent: the WHERE read_at
@@ -129,13 +195,14 @@ func (s *Store) MarkAllNotificationsRead(now time.Time) (int, error) {
 
 func scanNotificationRow(sc rowScanner) (*NotificationRecord, error) {
 	var (
-		rec                 NotificationRecord
-		createdStr, readStr string
+		rec                              NotificationRecord
+		severityStr, createdStr, readStr string
 	)
-	if err := sc.Scan(&rec.ID, &rec.Kind, &rec.Title, &rec.Body, &rec.Detail,
+	if err := sc.Scan(&rec.ID, &rec.Kind, &severityStr, &rec.Title, &rec.Body, &rec.Detail,
 		&rec.SourceKind, &rec.SourceID, &createdStr, &readStr); err != nil {
 		return nil, err
 	}
+	rec.Severity = NormalizeNotificationSeverity(severityStr)
 	rec.CreatedAt = parseStoreTime(createdStr)
 	rec.ReadAt = parseStoreTime(readStr)
 	return &rec, nil

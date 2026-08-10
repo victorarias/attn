@@ -47,9 +47,12 @@ type transcriptWatcher struct {
 	agent     protocol.SessionAgent
 	cwd       string
 	startedAt time.Time
-	behavior  agentdriver.TranscriptWatcherBehavior
-	stopCh    chan struct{}
-	doneCh    chan struct{}
+	// preferredPath is the exact path reported by SessionStart. It is a runtime
+	// hint; after restart the persisted native id resolves the same transcript.
+	preferredPath string
+	behavior      agentdriver.TranscriptWatcherBehavior
+	stopCh        chan struct{}
+	doneCh        chan struct{}
 }
 
 func isDuplicateAssistantEvent(lastContent string, lastAt time.Time, content string, now time.Time) bool {
@@ -72,10 +75,20 @@ func isTranscriptWatchedAgent(agent protocol.SessionAgent) bool {
 }
 
 func (d *Daemon) findTranscriptPathForWatcher(w *transcriptWatcher) string {
+	if path := strings.TrimSpace(w.preferredPath); path != "" {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
 	driver := agentdriver.Get(string(w.agent))
 	tf, ok := agentdriver.GetTranscriptFinder(driver)
 	if !ok {
 		return ""
+	}
+	if resumeID := strings.TrimSpace(d.store.GetResumeSessionID(w.sessionID)); resumeID != "" {
+		if path := strings.TrimSpace(tf.FindTranscriptForResume(resumeID)); path != "" {
+			return path
+		}
 	}
 	return strings.TrimSpace(tf.FindTranscript(w.sessionID, w.cwd, w.startedAt))
 }
@@ -91,6 +104,10 @@ func (d *Daemon) transcriptBootstrapBytesForAgent(agent protocol.SessionAgent) i
 }
 
 func (d *Daemon) startTranscriptWatcher(sessionID string, agent protocol.SessionAgent, cwd string, startedAt time.Time) {
+	d.startTranscriptWatcherAtPath(sessionID, agent, cwd, startedAt, "")
+}
+
+func (d *Daemon) startTranscriptWatcherAtPath(sessionID string, agent protocol.SessionAgent, cwd string, startedAt time.Time, transcriptPath string) {
 	if !isTranscriptWatchedAgent(agent) {
 		return
 	}
@@ -104,13 +121,14 @@ func (d *Daemon) startTranscriptWatcher(sessionID string, agent protocol.Session
 	d.stopTranscriptWatcher(sessionID)
 
 	watcher := &transcriptWatcher{
-		sessionID: sessionID,
-		agent:     agent,
-		cwd:       cwd,
-		startedAt: startedAt,
-		behavior:  behavior,
-		stopCh:    make(chan struct{}),
-		doneCh:    make(chan struct{}),
+		sessionID:     sessionID,
+		agent:         agent,
+		cwd:           cwd,
+		startedAt:     startedAt,
+		preferredPath: strings.TrimSpace(transcriptPath),
+		behavior:      behavior,
+		stopCh:        make(chan struct{}),
+		doneCh:        make(chan struct{}),
 	}
 
 	d.watchersMu.Lock()

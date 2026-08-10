@@ -1,0 +1,14 @@
+kind: fixed
+area: daemon
+change: >
+  A delegation the chief of staff starts now attaches to the chief role rather
+  than to the session holding it, so handing the role to another agent hands over
+  the ticket notifications with it. The retired chief goes quiet and the new one
+  is nudged.
+symptom: >
+  The chief was attached to the tickets it delegated twice — once as the durable
+  role and once as itself. Only the role moved on a handover, so an agent that had
+  been chief kept being nudged about every ticket it ever delegated, for as long
+  as it ran, while the new chief received the same activity. Existing tickets are
+  corrected on first launch; a ticket someone filed and the chief later picked up
+  for a delegation also stops dropping the filer from its notifications.

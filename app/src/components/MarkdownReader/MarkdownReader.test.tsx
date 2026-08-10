@@ -7,11 +7,17 @@ vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
 }));
 
-// jsdom/happy-dom cannot run real mermaid; same mock as Markdown.test.tsx.
+// jsdom/happy-dom cannot run real mermaid; browser coverage exercises the real module.
+const mermaidMock = vi.hoisted(() => ({
+  initialize: vi.fn(),
+  render: vi.fn(async () => ({
+    svg: '<svg viewBox="0 0 1200 400" data-testid="mermaid-svg"></svg>',
+  })),
+}));
 vi.mock('mermaid', () => ({
   default: {
-    initialize: vi.fn(),
-    render: vi.fn(async () => ({ svg: '<svg data-testid="mermaid-svg"></svg>' })),
+    initialize: mermaidMock.initialize,
+    render: mermaidMock.render,
   },
 }));
 
@@ -250,6 +256,102 @@ describe('MarkdownReader code blocks', () => {
     });
     expect(container.querySelector('.md-codeblock')).toBeNull();
     expect(shikiMock.codeToHtml).not.toHaveBeenCalled();
+  });
+});
+
+describe('MarkdownReader large Mermaid diagrams', () => {
+  function diagramWidth(width: number) {
+    return vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return {
+        width: this.classList.contains('markdown-mermaid') ? width : 0,
+        height: 0,
+        top: 0,
+        right: width,
+        bottom: 0,
+        left: 0,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      };
+    });
+  }
+
+  it('leaves a comfortably fitted diagram unchanged', async () => {
+    const rect = diagramWidth(600);
+    mermaidMock.render.mockResolvedValueOnce({
+      svg: '<svg viewBox="0 0 400 200" data-testid="mermaid-svg"></svg>',
+    });
+
+    const { container } = renderReader('```mermaid\ngraph TD;\nA-->B;\n```\n');
+
+    await waitFor(() => expect(screen.getByTestId('mermaid-svg')).toBeInTheDocument());
+    expect(container.querySelector('.markdown-mermaid--oversized')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Focus diagram' })).toBeNull();
+    expect(container.querySelector('.markdown-mermaid')).not.toHaveAttribute('tabindex');
+    rect.mockRestore();
+  });
+
+  it('renders an oversized diagram intrinsically and pans it from the keyboard', async () => {
+    const rect = diagramWidth(600);
+    const { container } = renderReader('```mermaid\ngraph LR;\nA-->B;\n```\n');
+
+    const viewport = await waitFor(() => {
+      const node = container.querySelector<HTMLDivElement>('.markdown-mermaid--oversized');
+      expect(node).toBeInTheDocument();
+      return node!;
+    });
+    const scrollBy = vi.fn();
+    viewport.scrollBy = scrollBy;
+
+    expect(viewport.style.getPropertyValue('--md-diagram-intrinsic-width')).toBe('1200px');
+    expect(viewport).toHaveAccessibleName('Large Mermaid diagram');
+    expect(viewport).toHaveAttribute('aria-keyshortcuts', 'Enter');
+    expect(screen.getByRole('button', { name: 'Focus diagram' })).toBeInTheDocument();
+    fireEvent.keyDown(viewport, { key: 'ArrowRight' });
+    expect(scrollBy).toHaveBeenCalledWith({ left: 72, top: 0, behavior: 'auto' });
+    rect.mockRestore();
+  });
+
+  it('opens one SVG in diagram focus, zooms, and restores the exact origin focus', async () => {
+    const rect = diagramWidth(600);
+    const animationFrame = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 1;
+    });
+    const { container } = renderReader(
+      '<details open><summary>Keep me open</summary>Body</details>\n\n' +
+        '```mermaid\ngraph LR;\nA-->B;\n```\n',
+    );
+
+    const viewport = await waitFor(() => {
+      const node = container.querySelector<HTMLDivElement>('.markdown-mermaid--oversized');
+      expect(node).toBeInTheDocument();
+      return node!;
+    });
+    viewport.focus();
+    fireEvent.keyDown(viewport, { key: 'Enter' });
+
+    const dialog = await screen.findByRole('dialog', { name: 'Mermaid diagram' });
+    expect(dialog.parentElement).toBe(document.body);
+    expect(document.querySelectorAll('[data-testid="mermaid-svg"]')).toHaveLength(1);
+    expect(container.querySelector('.markdown-mermaid-placeholder')).toBeInTheDocument();
+    expect(dialog).toHaveAttribute('data-md-chrome', '1');
+    expect(screen.getByRole('button', { name: 'Focus diagram' }).parentElement).toHaveAttribute(
+      'data-md-chrome',
+      '1',
+    );
+
+    fireEvent.keyDown(dialog, { key: '+' });
+    expect(screen.getByText('110%')).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Mermaid diagram' })).toBeNull());
+    expect(viewport).toHaveFocus();
+    expect(container.querySelector('details')).toHaveAttribute('open');
+    expect(container.querySelector('.markdown-mermaid-placeholder')).toBeNull();
+    expect(document.querySelectorAll('[data-testid="mermaid-svg"]')).toHaveLength(1);
+    animationFrame.mockRestore();
+    rect.mockRestore();
   });
 });
 

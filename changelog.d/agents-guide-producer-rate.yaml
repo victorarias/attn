@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  AGENTS.md's change discipline gains "idle systems must be idle": recurring
+  work — timers, watchers, changed-gates — does real work only when something
+  moved, and a gate comparing an unstable value fires forever while nothing
+  changes. New recurring work is verified silent on a quiet live session.

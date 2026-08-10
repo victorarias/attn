@@ -323,70 +323,70 @@ func TestTicketNudgesActiveChiefAcrossRuntimes(t *testing.T) {
 // delegate. A consumes one report, the role transfers to B, and the next report
 // reaches only B. The role cursor means B receives exactly the post-transfer
 // unread event: nothing A consumed is replayed and nothing new is skipped.
-// Left unconverted deliberately. Mechanically this test fits in a bubble, but its
-// windows are parked (nudgeWindowOverride) and its final assertion only holds
-// while they are: run the nudge window out for real and the retired chief is
-// doorbelled too, because delegateForNotify leaves it a personal participant on
-// the ticket and nudgeCount cannot tell a personal nudge from a role one. Making
-// it honest means either a narrower probe or a product answer about what a
-// retired chief still hears, and both are outside a test-only sweep.
+//
+// The windows run out for real here rather than being parked and hand-fired,
+// which is what makes A's silence mean something: every countdown the daemon
+// could have armed for A fires well inside the sleep, so zero nudges is A having
+// no attachment left, not a timer that had not come due yet.
 func TestChiefTicketContinuityAcrossRoleTransfer(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	d.nudgeWindowOverride = time.Hour
-	t.Cleanup(d.stopNudgeCountdowns)
-	chiefA, agentID, inputs := delegateForNotify(t, d, "codex")
-	ticketID := boundTicketID(t, d, agentID)
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		chiefA, agentID, inputs := delegateForNotify(t, d, "codex")
+		ticketID := boundTicketID(t, d, agentID)
 
-	now := string(protocol.TimestampNow())
-	chiefB := "chief-b"
-	d.store.Add(&protocol.Session{
-		ID: chiefB, Label: "replacement chief", Agent: protocol.SessionAgentCodex,
-		Directory: "/tmp/chief-b", WorkspaceID: "workspace-chief-b",
-		State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		now := string(protocol.TimestampNow())
+		chiefB := "chief-b"
+		d.store.Add(&protocol.Session{
+			ID: chiefB, Label: "replacement chief", Agent: protocol.SessionAgentCodex,
+			Directory: "/tmp/chief-b", WorkspaceID: "workspace-chief-b",
+			State: protocol.SessionStateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+		})
+		d.store.UpdateState(chiefA, protocol.StateIdle)
+		d.store.UpdateState(agentID, protocol.StateIdle)
+
+		// A consumes the first agent report, advancing the durable role cursor.
+		callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateNeedsInput), "need a decision")
+		first := callTicketInbox(t, d, chiefA)
+		if len(first) != 1 || len(first[0].Events) != 1 ||
+			first[0].Events[0].ToStatus == nil || *first[0].Events[0].ToStatus != protocol.TicketStatusBlocked {
+			t.Fatalf("chief A first inbox = %+v, want only the blocked report", first)
+		}
+		nudgesA := nudgeCount(inputs(chiefA))
+
+		// Transfer the singleton profile role. No cursor copy occurs; only delivery is
+		// retargeted and A's stale role nudge state is cleared.
+		if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefB); err != nil {
+			t.Fatalf("transfer chief role: %v", err)
+		}
+		d.retargetChiefTicketDelivery(chiefA, chiefB)
+
+		callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "ready now")
+		if deadline := currentNudgeDeadline(d, chiefA); !deadline.IsZero() {
+			t.Fatalf("retired chief still has a countdown armed for %s", deadline)
+		}
+		// Past the longest window any observer of this ticket could have been given.
+		time.Sleep(2 * d.ticketBufferWindow())
+		synctest.Wait()
+		if !wasNudged(inputs(chiefB)) {
+			t.Fatal("replacement chief was not nudged about unread chief-owned ticket activity")
+		}
+		if got := nudgeCount(inputs(chiefA)); got != nudgesA {
+			t.Fatalf("retired chief was nudged about a ticket it delegated as chief: %d -> %d", nudgesA, got)
+		}
+
+		second := callTicketInbox(t, d, chiefB)
+		if len(second) != 1 || second[0].TicketID != ticketID || len(second[0].Events) != 1 {
+			t.Fatalf("chief B inbox = %+v, want exactly one post-cursor event for %s", second, ticketID)
+		}
+		event := second[0].Events[0]
+		if event.ToStatus == nil || *event.ToStatus != protocol.TicketStatusInReview || event.Author != agentID {
+			t.Fatalf("chief B event = %+v, want agent's in-review report", event)
+		}
+		if again := callTicketInbox(t, d, chiefB); len(again) != 0 {
+			t.Fatalf("chief B second inbox = %+v, want no duplicate activity", again)
+		}
 	})
-	d.store.UpdateState(chiefA, protocol.StateIdle)
-	d.store.UpdateState(agentID, protocol.StateIdle)
-
-	// A consumes the first agent report, advancing the durable role cursor.
-	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateNeedsInput), "need a decision")
-	first := callTicketInbox(t, d, chiefA)
-	if len(first) != 1 || len(first[0].Events) != 1 ||
-		first[0].Events[0].ToStatus == nil || *first[0].Events[0].ToStatus != protocol.TicketStatusBlocked {
-		t.Fatalf("chief A first inbox = %+v, want only the blocked report", first)
-	}
-	nudgesA := nudgeCount(inputs(chiefA))
-
-	// Transfer the singleton profile role. No cursor copy occurs; only delivery is
-	// retargeted and A's stale role nudge state is cleared.
-	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, chiefB); err != nil {
-		t.Fatalf("transfer chief role: %v", err)
-	}
-	d.retargetChiefTicketDelivery(chiefA, chiefB)
-
-	callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateReadyForReview), "ready now")
-	deadline := time.Now().Add(time.Second)
-	for currentNudgeTimer(d, chiefB) == nil && time.Now().Before(deadline) {
-		time.Sleep(time.Millisecond)
-	}
-	fireNudgeNow(t, d, chiefB)
-	if !wasNudged(inputs(chiefB)) {
-		t.Fatal("replacement chief was not nudged about unread chief-owned ticket activity")
-	}
-	if got := nudgeCount(inputs(chiefA)); got != nudgesA {
-		t.Fatalf("retired chief received a role nudge after transfer: %d -> %d", nudgesA, got)
-	}
-
-	second := callTicketInbox(t, d, chiefB)
-	if len(second) != 1 || second[0].TicketID != ticketID || len(second[0].Events) != 1 {
-		t.Fatalf("chief B inbox = %+v, want exactly one post-cursor event for %s", second, ticketID)
-	}
-	event := second[0].Events[0]
-	if event.ToStatus == nil || *event.ToStatus != protocol.TicketStatusInReview || event.Author != agentID {
-		t.Fatalf("chief B event = %+v, want agent's in-review report", event)
-	}
-	if again := callTicketInbox(t, d, chiefB); len(again) != 0 {
-		t.Fatalf("chief B second inbox = %+v, want no duplicate activity", again)
-	}
 }
 
 // A chief can still participate personally through the ordinary explicit

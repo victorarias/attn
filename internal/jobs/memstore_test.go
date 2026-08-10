@@ -18,6 +18,9 @@ type memStore struct {
 	// saveErr, when set, makes the next Save fail. Tests use it to drive the
 	// claim-rollback path.
 	saveErr error
+	// stickySaveErr keeps saveErr in place instead of spending it on one call, so
+	// a test can hold the store down across several attempts.
+	stickySaveErr bool
 }
 
 func newMemStore() *memStore { return &memStore{jobs: make(map[string]*Job)} }
@@ -78,7 +81,9 @@ func (m *memStore) Save(j *Job) error {
 	defer m.mu.Unlock()
 	if m.saveErr != nil {
 		err := m.saveErr
-		m.saveErr = nil
+		if !m.stickySaveErr {
+			m.saveErr = nil
+		}
 		return err
 	}
 	if j.Requeued && j.State == StateRunning {
@@ -163,6 +168,20 @@ func (m *memStore) failNextSave(err error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.saveErr = err
+}
+
+// refuseSaves fails every Save until healSaves: a store that is down, rather
+// than one that is momentarily busy.
+func (m *memStore) refuseSaves(err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveErr, m.stickySaveErr = err, true
+}
+
+func (m *memStore) healSaves() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.saveErr, m.stickySaveErr = nil, false
 }
 
 // fakeClock is a manually advanced clock so backoff and debounce windows are

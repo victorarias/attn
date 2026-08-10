@@ -1,0 +1,187 @@
+/* Event Bus settings section. Only the classes this section owns; the block,
+   intro, kicker, pill, action, hint, empty and warning vocabulary comes from
+   SettingsModal.css. */
+
+.bus-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+/* Health first: what is wrong, in the daemon's own words. */
+.bus-health {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.bus-health-entry {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: color-mix(in srgb, #ff9f7a 8%, transparent);
+}
+
+.bus-health-entry.error {
+  background: color-mix(in srgb, #ff6b6b 10%, transparent);
+}
+
+.bus-health-message {
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  line-height: 1.45;
+}
+
+/* The log's headline numbers. */
+.bus-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 8px;
+}
+
+.bus-stat {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.bus-stat-label {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bus-stat-value {
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--font-size-sm);
+  font-variant-numeric: tabular-nums;
+}
+
+.bus-section-head {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.bus-section-head h4 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+/* Tables are grid row lists, as everywhere else in settings. Wide content
+   scrolls inside its own box rather than pushing the modal sideways. */
+.bus-table {
+  display: grid;
+  gap: 0;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  overflow-x: auto;
+}
+
+.bus-row {
+  display: grid;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--color-border-subtle);
+  min-width: 0;
+}
+
+.bus-row:first-child {
+  border-top: none;
+}
+
+.bus-producers .bus-row {
+  grid-template-columns: minmax(180px, 1fr) repeat(5, minmax(56px, auto));
+}
+
+.bus-consumers .bus-row {
+  grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(56px, auto)) auto;
+}
+
+.bus-head {
+  background: var(--color-bg-elevated);
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.bus-row.surging {
+  background: color-mix(in srgb, #ff9f7a 7%, transparent);
+}
+
+.bus-row.disabled .bus-name,
+.bus-row.disabled .bus-num {
+  opacity: 0.55;
+}
+
+.bus-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.bus-filter {
+  color: var(--color-text-dimmed);
+  font-size: var(--font-size-xs);
+}
+
+.bus-num {
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.bus-head .bus-num {
+  color: var(--color-text-tertiary);
+}
+
+.bus-row-action {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bus-more {
+  justify-self: start;
+  padding: 4px 0;
+  border: none;
+  background: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.bus-more:hover {
+  color: var(--color-text-secondary);
+}
+
+.bus-footer {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+  margin-top: 4px;
+}

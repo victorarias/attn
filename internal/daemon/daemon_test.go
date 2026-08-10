@@ -1968,14 +1968,14 @@ func TestDaemon_HandleSpawnSession_UsesStoredResumeSessionIDForCodexSession(t *t
 	}
 }
 
-func TestDaemon_HandleSetSessionResumeID_QueuesUntilSessionExists(t *testing.T) {
+func TestDaemon_HandleObserveAgentConversation_QueuesUntilSessionExists(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 
 	serverConn, clientConn := net.Pipe()
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		d.handleSetSessionResumeID(serverConn, &protocol.SetSessionResumeIDMessage{
+		d.handleObserveAgentConversation(serverConn, &protocol.SetSessionResumeIDMessage{
 			ID:              "attn-session",
 			ResumeSessionID: "codex-session",
 		})
@@ -1984,12 +1984,12 @@ func TestDaemon_HandleSetSessionResumeID_QueuesUntilSessionExists(t *testing.T) 
 
 	var resp protocol.Response
 	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
-		t.Fatalf("decode set resume response: %v", err)
+		t.Fatalf("decode conversation observation response: %v", err)
 	}
 	_ = clientConn.Close()
 	<-done
 	if !resp.Ok {
-		t.Fatalf("set resume response ok=%v, want true", resp.Ok)
+		t.Fatalf("conversation observation response ok=%v, want true", resp.Ok)
 	}
 	if got := d.store.GetResumeSessionID("attn-session"); got != "" {
 		t.Fatalf("resume id before registration = %q, want empty", got)

@@ -51,7 +51,7 @@ func TestBreaksSnooze(t *testing.T) {
 		{"a session sitting at its prompt", protocol.SessionStateIdle, string(sessionstate.ReasonAtPrompt), false},
 		{"a question", protocol.SessionStateWaitingInput, string(sessionstate.ReasonQuestionOpen), false},
 		{"an approval", protocol.SessionStatePendingApproval, string(sessionstate.ReasonApprovalOpen), false},
-		{"working", protocol.SessionStateWorking, string(sessionstate.ReasonHeartbeatFresh), false},
+		{"working", protocol.SessionStateWorking, string(sessionstate.ReasonHeartbeatBusy), false},
 		{"scheduled", protocol.SessionStateScheduled, string(sessionstate.ReasonCronPending), false},
 		{"recoverable, which the daemon revives unattended", protocol.SessionStateRecoverable, "", false},
 

@@ -316,6 +316,97 @@ func (s *Store) CompactBusEvents(names []string, floor int64) (int, error) {
 	return int(n), err
 }
 
+// BusProducer is one fact class's contribution to the log: how many events it
+// holds, what they weigh, how many distinct entities they describe, and how many
+// landed inside each cutoff BusProducers was asked about.
+type BusProducer struct {
+	Name     string
+	Events   int64
+	Bytes    int64
+	Subjects int64
+	// Recent is aligned with the cutoffs passed to BusProducers, one count per
+	// cutoff, each counting events at or after it.
+	Recent []int64
+}
+
+// BusProducers reports every fact class on the log with its totals and its
+// counts inside each cutoff, loudest first. Which windows are worth asking about
+// is internal/bus's call, so this takes the cutoffs rather than naming them.
+//
+// One pass over bus_events answers all of it, including the row count and bytes
+// BusLogSize would scan for separately — the aggregate subsumes it rather than
+// paying for the table twice. Measured on a copy of production: 209ms at 945k
+// rows (~0.22us/row), against 106ms for BusLogSize alone. That is an on-demand
+// cost, which is why nothing polls it on a timer.
+func (s *Store) BusProducers(cutoffs []time.Time) ([]BusProducer, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, nil
+	}
+	var (
+		columns strings.Builder
+		args    []any
+	)
+	for _, c := range cutoffs {
+		columns.WriteString(", COALESCE(SUM(created_at >= ?), 0)")
+		args = append(args, formatTicketTime(c))
+	}
+	rows, err := s.db.Query(`
+		SELECT name,
+		       COUNT(*),
+		       COALESCE(SUM(LENGTH(name) + LENGTH(subject) + LENGTH(payload) + LENGTH(source) + LENGTH(created_at)), 0),
+		       COUNT(DISTINCT subject)`+columns.String()+`
+		FROM bus_events
+		GROUP BY name
+		ORDER BY COUNT(*) DESC, name ASC
+	`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []BusProducer
+	for rows.Next() {
+		p := BusProducer{Recent: make([]int64, len(cutoffs))}
+		dest := []any{&p.Name, &p.Events, &p.Bytes, &p.Subjects}
+		for i := range p.Recent {
+			dest = append(dest, &p.Recent[i])
+		}
+		if err := rows.Scan(dest...); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// BusEventTimeAt returns the timestamp of the first event at or above seq, and
+// whether one exists. Both callers ask an age question — how old the log's tail
+// is, and how long a consumer's oldest unread event has been waiting — and both
+// resolve through the seq primary key, so neither scans.
+func (s *Store) BusEventTimeAt(seq int64) (time.Time, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return time.Time{}, false, nil
+	}
+	var createdAt string
+	err := s.db.QueryRow(`
+		SELECT created_at FROM bus_events WHERE seq >= ? ORDER BY seq ASC LIMIT 1
+	`, seq).Scan(&createdAt)
+	switch err {
+	case nil:
+		return parseTicketTime(createdAt), true, nil
+	case sql.ErrNoRows:
+		return time.Time{}, false, nil
+	default:
+		return time.Time{}, false, err
+	}
+}
+
 // BusLogSize reports the log's row count and event-text bytes. Bytes measures
 // the rows themselves, not the database file — SQLite pages are shared.
 func (s *Store) BusLogSize() (rows int64, bytes int64, err error) {

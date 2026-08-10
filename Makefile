@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -40,7 +40,7 @@ OUTPUT ?= $(BINARY_NAME)
 # ad-hoc linker signature inside a properly signed bundle, and macOS answered
 # `daemon ensure` with Killed: 9.
 UNAME_S := $(shell uname -s)
-GO_LDFLAGS =-X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
+GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
 # Honor the repository's .tool-versions even when an older standalone Zig is
 # earlier on PATH (the app's WASM builder follows the same order).
 ZIG ?= $(shell if command -v asdf >/dev/null 2>&1; then asdf which zig 2>/dev/null || command -v zig; else command -v zig; fi)
@@ -304,10 +304,39 @@ clean:
 	rm -f $(BINARY_NAME)
 
 # Type generation pipeline: TypeSpec -> JSON Schema -> go-jsonschema/quicktype
-generate-types:
+#
+# go-jsonschema is the third generator input, and it was the only one with no
+# pin: the recipe ran whatever `go install` had last left behind. Two machines on
+# different versions could disagree about generated.go the same way collation
+# made them disagree about generated.ts, and check-types would blame the change
+# rather than the tool. Bump this deliberately, and regenerate in the same commit.
+GO_JSONSCHEMA_VERSION ?= v0.24.1
+# Where `go install` actually puts it. The recipe hardcoded ~/go/bin, which is
+# right only when GOBIN is unset — under asdf (and any other GOBIN) the install
+# lands elsewhere and the recipe dies on a missing binary.
+GO_BIN_DIR := $(or $(shell go env GOBIN),$(shell go env GOPATH)/bin)
+GO_JSONSCHEMA := $(GO_BIN_DIR)/go-jsonschema
+
+# Installs only on a version mismatch, so the usual run costs one `go version`
+# and never touches the network.
+ensure-go-jsonschema:
+	@have=$$(go version -m $(GO_JSONSCHEMA) 2>/dev/null | awk '$$1=="mod"{print $$3}'); \
+	if [ "$$have" != "$(GO_JSONSCHEMA_VERSION)" ]; then \
+		echo "go-jsonschema: installing $(GO_JSONSCHEMA_VERSION) (have: $${have:-none})"; \
+		go install github.com/atombender/go-jsonschema@$(GO_JSONSCHEMA_VERSION); \
+	fi
+
+# LC_ALL=C is load-bearing, not hygiene. The `*.json` globs below are sorted by
+# the shell's collation, and quicktype names an anonymous type after whichever
+# schema it meets first — so the same inputs under en_US.UTF-8 rename types in
+# lockstep down the file (FileElement -> ChangedFileElement, and so on), a
+# ~1200-line diff that says nothing. Generating under C makes the output depend
+# only on the schemas.
+generate-types: export LC_ALL = C
+generate-types: ensure-go-jsonschema
 	rm -rf internal/protocol/schema/tsp-output/json-schema
 	cd internal/protocol/schema && pnpm exec tsp compile .
-	$(HOME)/go/bin/go-jsonschema -p protocol --only-models --tags json --resolve-extension json \
+	$(GO_JSONSCHEMA) -p protocol --only-models --tags json --resolve-extension json \
 		--capitalization ID --capitalization URL --capitalization SHA --capitalization PR --capitalization CI \
 		-o internal/protocol/generated.go \
 		internal/protocol/schema/tsp-output/json-schema/*.json
@@ -327,7 +356,12 @@ generate-types:
 		--no-prefer-unions --no-prefer-unknown \
 		-o app/src/types/generated.ts
 
-# CI check: verify generated files are up-to-date
+# CI check: verify generated files are up-to-date.
+#
+# This flags *committed* drift, which is what CI sees. generate-types rewrites
+# the files in place first, so an uncommitted hand-edit is overwritten before the
+# diff runs and this passes silently — commit the edit if you are trying to
+# reproduce a drift failure locally.
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 

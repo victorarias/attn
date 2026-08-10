@@ -233,7 +233,7 @@ describe('waiting at home for the next turn', () => {
       getPresentations: vi.fn(async () => []),
       connectionError: null,
       hasReceivedInitialState: true,
-      sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0 })),
+      sendNotificationList: vi.fn(async () => ({ notifications: [], unreadCount: 0, critical: { count: 0, title: '' } })),
       sendNotificationMarkRead: vi.fn(async () => 0),
       rateLimit: null,
       warnings: [],

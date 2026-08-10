@@ -16,6 +16,7 @@ func notificationToProtocol(rec store.NotificationRecord) protocol.Notification 
 	pn := protocol.Notification{
 		ID:         rec.ID,
 		Kind:       rec.Kind,
+		Severity:   protocol.NotificationSeverity(store.NormalizeNotificationSeverity(string(rec.Severity))),
 		Title:      rec.Title,
 		Body:       rec.Body,
 		Detail:     rec.Detail,
@@ -55,12 +56,20 @@ func (d *Daemon) sendNotificationListWSResult(client *wsClient, requestID string
 	if err == nil {
 		err = unreadErr
 	}
+	criticalCount, criticalTitle, criticalErr := d.store.UnreadCriticalNotifications()
+	if err == nil {
+		err = criticalErr
+	}
 	msg := protocol.NotificationListResultMessage{
-		Event:         protocol.EventNotificationListResult,
-		RequestID:     requestID,
-		Success:       err == nil,
-		Notifications: notificationsToProtocol(list),
-		UnreadCount:   unread,
+		Event:               protocol.EventNotificationListResult,
+		RequestID:           requestID,
+		Success:             err == nil,
+		Notifications:       notificationsToProtocol(list),
+		UnreadCount:         unread,
+		UnreadCriticalCount: criticalCount,
+	}
+	if criticalTitle != "" {
+		msg.CriticalTitle = protocol.Ptr(criticalTitle)
 	}
 	if err != nil {
 		msg.Error = protocol.Ptr(err.Error())
@@ -169,7 +178,10 @@ func renderTaskFailureNotification(t *jobs.Job) store.NotificationRecord {
 		attemptWord = "attempts"
 	}
 	return store.NotificationRecord{
-		Kind:       notificationKindTaskFailed,
+		Kind: notificationKindTaskFailed,
+		// A dead job stays dead until the user retries it, but nothing else
+		// degrades while it waits — that is warning, not critical.
+		Severity:   store.NotificationWarning,
 		Title:      title,
 		Body:       fmt.Sprintf("attn retried %d %s and gave up. Retry to run it again.", t.Attempts, attemptWord),
 		Detail:     t.LastError,
@@ -186,15 +198,23 @@ func renderTaskFailureNotification(t *jobs.Job) store.NotificationRecord {
 // failure callback. A nil store broadcasts an unread count of 0.
 func (d *Daemon) projectNotificationsUpdated() {
 	d.projectSnapshot(snapshotNotifs, func() {
-		unread := 0
+		unread, criticalCount, criticalTitle := 0, 0, ""
 		if d.store != nil {
 			if n, err := d.store.UnreadNotificationCount(); err == nil {
 				unread = n
 			}
+			if n, title, err := d.store.UnreadCriticalNotifications(); err == nil {
+				criticalCount, criticalTitle = n, title
+			}
 		}
-		d.broadcastMessage(protocol.NotificationsUpdatedMessage{
-			Event:       protocol.EventNotificationsUpdated,
-			UnreadCount: unread,
-		})
+		msg := protocol.NotificationsUpdatedMessage{
+			Event:               protocol.EventNotificationsUpdated,
+			UnreadCount:         unread,
+			UnreadCriticalCount: criticalCount,
+		}
+		if criticalTitle != "" {
+			msg.CriticalTitle = protocol.Ptr(criticalTitle)
+		}
+		d.broadcastMessage(msg)
 	})
 }

@@ -674,10 +674,15 @@ model HookCompactionMessage {
   trigger?: string;
 }
 
+// A SessionStart hook observed the provider-owned conversation currently hosted
+// by one stable attn session. transcript_path is the provider's exact live path;
+// resume_session_id remains the durable identity used to reconstruct it after a
+// daemon restart.
 model SetSessionResumeIDMessage {
   cmd: "set_session_resume_id";
   id: string;
   resume_session_id: string;
+  transcript_path?: string;
 }
 
 model SessionInstructionsMessage {
@@ -2069,6 +2074,119 @@ model PastConversationsResultMessage {
   conversations: PastConversation[];
   // More conversations exist than are listed; the newest ones are here.
   truncated: boolean;
+}
+
+// Asks for the durable event bus's operator picture: what the log holds, which
+// fact classes write to it and how fast, which consumers read it and how far
+// behind they are, and what is wrong with any of it.
+//
+// Answering costs one aggregate pass over the whole log, so this is asked on
+// demand — when the page is opened and on a slow refresh while it is — never on
+// a tick that runs whether or not anyone is looking.
+model BusStatusGetMessage {
+  cmd: "bus_status_get";
+  request_id: string;
+}
+
+// One fact class's contribution to the log. The rates are means over the
+// windows named in the result, already divided out.
+model BusProducerStatus {
+  // The dotted fact name, e.g. `session.state.changed`.
+  name: string;
+  events: safeint;
+  // Event text these rows hold, not database pages.
+  bytes: safeint;
+  // Distinct subjects these events describe. Far fewer subjects than events
+  // means a producer republishing the same entity rather than describing change.
+  subjects: safeint;
+  // Fraction of the log's rows, 0..1.
+  share: float64;
+  recent_per_hour: float64;
+  baseline_per_hour: float64;
+  sustained_per_hour: float64;
+  // The rate crossed the tripwire on one of the sustained windows.
+  surging: boolean;
+  // Which window tripped, and its rate. Zero when not surging.
+  surge_window_seconds: float64;
+  surge_per_hour: float64;
+}
+
+// One durable consumer's registration, position, and lag.
+model BusConsumerStatus {
+  name: string;
+  cursor: safeint;
+  // Events between this cursor and the log head.
+  lag: safeint;
+  filter: string;
+  enabled: boolean;
+  // RFC3339; empty when the registration never recorded a write.
+  updated_at: string;
+  // This daemon owns a delivery loop for it. Meaningful only when the result's
+  // `delivering` is set.
+  live: boolean;
+  // The current failure message when its handler is failing.
+  stalled: string;
+  // RFC3339 stamp of the oldest event it has not read; empty when caught up.
+  // Lag counts events, this says how long they have waited.
+  oldest_unread_at: string;
+  // Its cursor is the floor retention stops at — it is pinning the log.
+  holds_retention_floor: boolean;
+}
+
+// One thing wrong, said in a whole sentence. A client renders `message`; it does
+// not re-derive the finding from the numbers. `kind` is for styling and
+// filtering only.
+model BusHealthEntry {
+  // "warn" or "error".
+  level: string;
+  kind: string;
+  // The consumer or fact name the finding is about.
+  subject: string;
+  message: string;
+}
+
+// Result of bus_status_get.
+model BusStatusResultMessage {
+  event: "bus_status_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  earliest: safeint;
+  head: safeint;
+  rows: safeint;
+  bytes: safeint;
+  // RFC3339 bounds of the log in time; empty on an empty log.
+  oldest_at: string;
+  newest_at: string;
+  // The snapshot came from the process that owns the delivery loops, which is
+  // what makes each consumer's `live` field mean anything.
+  delivering: boolean;
+  retention_seconds: float64;
+  recent_window_seconds: float64;
+  baseline_window_seconds: float64;
+  surge_rate_per_hour: float64;
+  producers: BusProducerStatus[];
+  consumers: BusConsumerStatus[];
+  health: BusHealthEntry[];
+}
+
+// Flips a durable consumer's kill switch, the same bit `attn bus enable|disable`
+// writes. Disabling stops delivery and stops the consumer pinning retention; its
+// cursor is preserved, and re-enabling resumes from wherever trimming left it.
+model BusSetConsumerEnabledMessage {
+  cmd: "bus_set_consumer_enabled";
+  consumer: string;
+  enabled: boolean;
+  request_id: string;
+}
+
+// Result of bus_set_consumer_enabled.
+model BusSetConsumerEnabledResultMessage {
+  event: "bus_set_consumer_enabled_result";
+  request_id: string;
+  consumer: string;
+  success: boolean;
+  error?: string;
 }
 
 // xpixel/ypixel are the pane's TOTAL size in device pixels, the units
@@ -4657,9 +4775,19 @@ model TasksChangedMessage {
 // (e.g. "task" + the task id) so the detail dialog's Retry can act on it. kind and
 // source_kind are plain strings (not enums) to avoid the quicktype identical-enum
 // merge that drops a generated export.
+// How much a notification wants the user. The panel styles the feed by it, and
+// critical additionally earns an ambient surface outside the panel that stays up
+// while any critical notification is unread.
+enum NotificationSeverity {
+  info,
+  warning,
+  critical,
+}
+
 model Notification {
   id: string;
   kind: string;
+  severity: NotificationSeverity;
   title: string;
   body: string;
   detail: string;
@@ -4678,6 +4806,12 @@ model NotificationListResultMessage {
   error?: string;
   notifications?: Notification[];
   unread_count: int32;
+  // The ambient critical surface's whole input, carried here as well as on the
+  // broadcast so a client that just connected renders it from its seeding list
+  // without a second read. critical_title names the newest unread critical
+  // notification and is absent when the count is zero.
+  unread_critical_count: int32;
+  critical_title?: string;
 }
 
 // Result of notification_mark_read. unread_count is the post-mark count so the
@@ -4696,6 +4830,11 @@ model NotificationMarkReadResultMessage {
 model NotificationsUpdatedMessage {
   event: "notifications_updated";
   unread_count: int32;
+  // The ambient critical surface is driven entirely by these two, so it appears
+  // and clears on the broadcast alone — a panel that was never opened is not a
+  // reason for the user to miss something critical.
+  unread_critical_count: int32;
+  critical_title?: string;
 }
 
 // ---- Generic filesystem surface results (fs_*) ----
@@ -5092,4 +5231,6 @@ alias DaemonEvent =
   | MarkdownAnnotationsSaveResultMessage
   | MarkdownAnnotationsClearResultMessage
   | MarkdownAnnotationsSubmitResultMessage
-  | PastConversationsResultMessage;
+  | PastConversationsResultMessage
+  | BusStatusResultMessage
+  | BusSetConsumerEnabledResultMessage;

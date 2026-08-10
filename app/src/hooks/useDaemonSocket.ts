@@ -63,6 +63,7 @@ import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '..
 import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
 import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
@@ -225,7 +226,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '222';
+export const PROTOCOL_VERSION = '225';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -456,6 +457,24 @@ export interface NotebookReadResult {
 export type Task = GeneratedTask;
 export type DaemonNotification = GeneratedNotification;
 
+// The ambient critical surface's whole input: how many critical notifications
+// are unread and what the newest one is called. The daemon computes both in one
+// read and sends them on both the list result and the notifications_updated
+// broadcast, so the surface never has to derive them from a list it may not have
+// fetched — a panel the user never opened must not be why they miss something.
+export interface CriticalNotificationState {
+  count: number;
+  title: string;
+}
+
+// readCriticalState pulls the pair off any message that carries it, defaulting
+// to "nothing critical" for a daemon that predates the fields.
+function readCriticalState(data: Record<string, unknown>): CriticalNotificationState {
+  const count = typeof data.unread_critical_count === 'number' ? data.unread_critical_count : 0;
+  const title = typeof data.critical_title === 'string' ? data.critical_title : '';
+  return { count, title };
+}
+
 // The outcome of a Notebook hash-CAS save. conflict=true means the note changed
 // on disk since the editor loaded it, so the write did NOT apply; currentHash is
 // the hash now on disk, for the editor to reconcile against. Mirrors the daemon's
@@ -571,7 +590,7 @@ interface UseDaemonSocketOptions {
   // Fired when the global notifications feed changes (a notification is added or
   // one/all are marked read). Carries the authoritative post-change unread count
   // so the sidebar badge updates without a re-list; an open panel re-lists.
-  onNotificationsUpdated?: (unreadCount: number) => void;
+  onNotificationsUpdated?: (unreadCount: number, critical: CriticalNotificationState) => void;
   // Fired when files under the root change (any client/agent/external write). paths
   // are root-relative; origin is agent|ui|external. Mirrors onNotebookChanged for
   // the generic filesystem surface (fs_changed).
@@ -767,6 +786,10 @@ const ATTACH_RETRY_DELAY_MS = 150;
 // git and GitHub commands below, which wait on the network or a subprocess, set
 // their own in minutes.
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
+// Bus status is one aggregate pass over the whole event log. Measured on a copy
+// of production, 209ms at 945k rows — so 30s is roughly a hundred times the
+// worst real log, a tripwire for a scan that has hung rather than a budget.
+const BUS_STATUS_TIMEOUT_MS = 30_000;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
 const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
 const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
@@ -1761,6 +1784,7 @@ export function useDaemonSocket({
             // immediately; an open notifications panel re-lists for the new row.
             callbacksRef.current.onNotificationsUpdated?.(
               typeof data.unread_count === 'number' ? data.unread_count : 0,
+              readCriticalState(data),
             );
             break;
 
@@ -1938,6 +1962,7 @@ export function useDaemonSocket({
               pending.resolve({
                 notifications: (data.notifications || []) as DaemonNotification[],
                 unreadCount: typeof data.unread_count === 'number' ? data.unread_count : 0,
+                critical: readCriticalState(data),
               });
             } else {
               pending.reject(new Error(data.error || 'Notification list failed'));
@@ -2880,6 +2905,7 @@ export function useDaemonSocket({
             if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
             if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
             if (handleSessionAnnotationDaemonEvent(data, pending)) break;
+            if (handleBusDaemonEvent(data, pending)) break;
             break;
           }
         }
@@ -3214,6 +3240,32 @@ export function useDaemonSocket({
       'list_past_conversations',
       {},
       'Listing past conversations timed out',
+    );
+  }, [sendRequest]);
+
+  // Reads the event bus's operator picture — the same snapshot `attn bus status`
+  // renders, computed daemon-side so the two can never disagree.
+  //
+  // The daemon answers with one aggregate pass over the whole log, which is
+  // why the default timeout is not enough for a large one.
+  const sendBusStatusGet = useCallback((): Promise<BusStatus> => {
+    return sendRequest<BusStatus>(
+      'bus_status_get',
+      {},
+      'Reading the event bus timed out',
+      BUS_STATUS_TIMEOUT_MS,
+    );
+  }, [sendRequest]);
+
+  // Flips a durable consumer's kill switch, matching `attn bus enable|disable`.
+  const sendBusSetConsumerEnabled = useCallback((
+    consumer: string,
+    enabled: boolean,
+  ): Promise<{ consumer: string }> => {
+    return sendRequest<{ consumer: string }>(
+      'bus_set_consumer_enabled',
+      { consumer, enabled },
+      'Changing the consumer timed out',
     );
   }, [sendRequest]);
 
@@ -4613,12 +4665,14 @@ export function useDaemonSocket({
   const sendNotificationList = useCallback((): Promise<{
     notifications: DaemonNotification[];
     unreadCount: number;
+    critical: CriticalNotificationState;
   }> => {
     const requestId = nextRequestID('notification_list');
     const key = `notification_list:${requestId}`;
     return sendKeyedRequest<{
     notifications: DaemonNotification[];
     unreadCount: number;
+    critical: CriticalNotificationState;
   }>(key, { cmd: 'notification_list', request_id: requestId }, 'Notification list timed out');
   }, [nextRequestID, sendKeyedRequest]);
 
@@ -5379,6 +5433,8 @@ export function useDaemonSocket({
     sendAgentHistory,
     sendAgentSetModel,
     sendListPastConversations,
+    sendBusStatusGet,
+    sendBusSetConsumerEnabled,
     sendTriggerNudge,
     sendSettleTurn,
     sendSnoozeTurn,

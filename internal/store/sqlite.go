@@ -964,6 +964,41 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// generator that a session has written nothing new and needs no run at all.
 	// Applied by applyMigration97. See docs/plans/2026-08-07-session-activity.md.
 	{97, "add the activity line and its transcript cursor to sessions", ``},
+	// 98 is burned: the app registry held it on the A4 epic branch until this
+	// ladder overtook it. Do not reuse it.
+	//
+	// Participation earned by acting as a durable role belongs to the ROLE, not
+	// to the session that filled it at the time. The event now says so directly:
+	// author stays the session for audit provenance, author_role names the role
+	// it acted as, and the view attributes participation accordingly. That
+	// replaces migration 82's approximation — "a created event on a
+	// role-owned ticket is the role's" — which was right for a ticket the chief
+	// minted and wrong for a backlog ticket the chief later adopted, where it
+	// silently dropped the original author's participation.
+	//
+	// The backfill recognizes the delegating transaction by its timestamp: the
+	// role owner row is written in the same transaction as the events the acting
+	// session wrote (created when the chief minted the ticket, assigned plus
+	// status_changed when it adopted one), so all of them share a second. Only
+	// those three kinds are considered, so a comment or an attach that happened to
+	// land in the same second on the same ticket is not swept up with them.
+	//
+	// Rows are carried, never recreated; the only DELETE removes the acting
+	// session's personal subscription — the session-bound second copy of an
+	// attachment the role already holds. It is recognized by the same shared
+	// second, so a subscription the chief made by hand at some other time
+	// survives, and a bystander who happened to write in the delegating second
+	// keeps theirs.
+	// Applied by applyMigration99, whose ALTER is column-guarded.
+	{99, "attribute role-acted ticket events to the role", ``},
+	// How much a notification wants the user: info, warning, or critical. Rows
+	// written before this migration are all task failures, which the producer now
+	// stamps warning, but they are carried at the column default rather than
+	// rewritten — a notification already sitting in the feed has been seen at its
+	// old weight, and promoting it retroactively would raise an alarm about
+	// something the user already dealt with.
+	// Applied by applyMigration100, whose ALTER is column-guarded.
+	{100, "add the severity level to notifications", ``},
 	// The app registry (A4). Three tables, and their absences are as decided as
 	// their columns:
 	//
@@ -982,10 +1017,11 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// content mints no new row" a property of the database rather than a
 	// convention in the apply pipeline.
 	//
-	// Originally numbered 96 on the epic branch; renumbered twice as main
-	// claimed 96 (context-window cap pin) and then 97 (activity line) — never
-	// reusing a number, per the note on migration 86.
-	{98, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
+	// Numbered 96, then 97, then 98 on the epic branch, and now 101: each main
+	// sync found the number taken. A hole is not a free slot — the runner keeps
+	// one scalar version and skips anything at or below it, so a database that
+	// already ran 99 and 100 would never have created these tables from 98.
+	{101, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
     name               TEXT PRIMARY KEY,
     current_version_id INTEGER,
     created_at         TEXT NOT NULL,
@@ -1020,6 +1056,62 @@ CREATE TABLE IF NOT EXISTS app_invocations (
 -- order.
 CREATE INDEX IF NOT EXISTS idx_app_invocations_app ON app_invocations(app_name, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(started_at);`},
+}
+
+// migration99SQL is everything migration 99 does after its guarded ALTER.
+const migration99SQL = `
+		UPDATE ticket_events SET author_role = (
+			SELECT ro.role FROM ticket_role_owners ro
+			WHERE ro.ticket_id = ticket_events.ticket_id
+				AND ro.created_at = ticket_events.created_at
+			LIMIT 1
+		)
+		WHERE kind IN ('created', 'assigned', 'status_changed') AND EXISTS (
+			SELECT 1 FROM ticket_role_owners ro
+			WHERE ro.ticket_id = ticket_events.ticket_id
+				AND ro.created_at = ticket_events.created_at
+		);
+
+		DELETE FROM ticket_subscriptions
+		WHERE EXISTS (
+			SELECT 1 FROM ticket_events e
+			WHERE e.ticket_id = ticket_subscriptions.ticket_id
+				AND e.author_role != ''
+				AND e.author = ticket_subscriptions.identity
+				AND e.created_at = ticket_subscriptions.created_at
+		);
+
+		DROP VIEW IF EXISTS ticket_participants;
+		CREATE VIEW ticket_participants (ticket_id, identity) AS
+			SELECT id, assignee FROM tickets WHERE assignee != ''
+			UNION
+			SELECT e.ticket_id, e.author FROM ticket_events e
+			WHERE e.author != '' AND e.kind != 'commented' AND e.author_role = ''
+			UNION
+			SELECT e.ticket_id, ('role:' || e.author_role) FROM ticket_events e
+			WHERE e.kind != 'commented' AND e.author_role != ''
+			UNION
+			SELECT ticket_id, identity FROM ticket_subscriptions WHERE identity != ''
+			UNION
+			SELECT ticket_id, ('role:' || role) FROM ticket_role_owners WHERE role != '';
+`
+
+// applyMigration99 adds ticket_events.author_role, then backfills and redefines
+// the participant view from migration99SQL. The ALTER is column-guarded so a
+// rewound schema_migrations table re-runs it without failing on work already
+// done; the rest is idempotent on its own.
+func applyMigration99(tx *sql.Tx) error {
+	has, err := columnExists(tx, "ticket_events", "author_role")
+	if err != nil {
+		return err
+	}
+	if !has {
+		if _, err := tx.Exec("ALTER TABLE ticket_events ADD COLUMN author_role TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	_, err = tx.Exec(migration99SQL)
+	return err
 }
 
 // OpenDB opens a SQLite database at the given path, creating it if necessary.
@@ -1330,6 +1422,16 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 97 {
 			if err := applyMigration97(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 99 {
+			if err := applyMigration99(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 100 {
+			if err := applyMigration100(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2467,6 +2569,17 @@ func applyMigration97(tx *sql.Tx) error {
 		}
 	}
 	return nil
+}
+
+// applyMigration100 adds the notification severity column. Guarded on the
+// column, and the DEFAULT is what carries every existing row to 'info'.
+func applyMigration100(tx *sql.Tx) error {
+	has, err := columnExists(tx, "notifications", "severity")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE notifications ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'")
+	return err
 }
 
 // applyMigration93 adds the note a user writes alongside a session's

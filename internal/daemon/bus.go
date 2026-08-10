@@ -61,6 +61,11 @@ const (
 	// correct because the store was written before the publish and the bus fans
 	// out inline.
 	FactSessionActivityChanged = "session.activity.changed"
+	// FactSessionConversationChanged: the provider-owned conversation hosted by
+	// this stable attn session changed. The store already carries the new binding;
+	// the small payload is only the exact live transcript path reported by the
+	// SessionStart hook.
+	FactSessionConversationChanged = "session.conversation.changed"
 
 	// FactWorktreeSessionsRemoved: deleting this worktree took its sessions with
 	// it. Subject is the worktree path.
@@ -222,6 +227,16 @@ const (
 // CompactableFacts are the fact classes retention may reduce to one row per
 // subject — store-backed invalidations where only the newest carries
 // information. Session and ticket facts are deliberately absent.
+//
+// The three loudest classes in a real log are session.state.changed (74%),
+// pr.updated (17%) and plugin.health.changed. All three are subject-only with a
+// nil payload and project to a store re-read, so on delivery semantics alone
+// they qualify: a consumer that missed four of five is not missing anything the
+// fifth does not carry. They stay out anyway, because compaction would delete
+// the created_at history `attn bus status` computes producer rates from —
+// exactly the evidence that catches a producer flapping. Compaction bounds the
+// log by the data it describes; these classes are the ones whose write rate is
+// itself the signal. Bound them by fixing the producer, not by hiding the rows.
 var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared}
 
 // projection maps facts to the wire traffic they produce.
@@ -264,6 +279,10 @@ func buildWireProjections() []projection {
 			// An activity line has no event of its own: it rides on the session
 			// snapshot, so it re-pushes that session alone.
 			filter: bus.Filter{FactSessionActivityChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{FactSessionConversationChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{
@@ -463,6 +482,7 @@ func (d *Daemon) ensureEventBus() {
 	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
+	d.subscribeAgentConversationFacts()
 }
 
 // startEventBus begins durable delivery; runs early in Start, before any
@@ -474,6 +494,7 @@ func (d *Daemon) startEventBus() error {
 
 func (d *Daemon) stopEventBus() {
 	d.unsubscribeDocumentFacts()
+	d.unsubscribeAgentConversationFacts()
 	if d.busUnsubscribe != nil {
 		d.busUnsubscribe()
 		d.busUnsubscribe = nil

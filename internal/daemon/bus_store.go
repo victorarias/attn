@@ -103,7 +103,27 @@ func (a *sqlBusStore) Compact(names []string, floor int64) (int, error) {
 	return a.store.CompactBusEvents(names, floor)
 }
 
-func (a *sqlBusStore) Size() (int64, int64, error) { return a.store.BusLogSize() }
+func (a *sqlBusStore) Producers(cutoffs []time.Time) ([]bus.ProducerRow, error) {
+	rows, err := a.store.BusProducers(cutoffs)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]bus.ProducerRow, 0, len(rows))
+	for _, r := range rows {
+		out = append(out, bus.ProducerRow{
+			Name:     r.Name,
+			Events:   r.Events,
+			Bytes:    r.Bytes,
+			Subjects: r.Subjects,
+			Recent:   r.Recent,
+		})
+	}
+	return out, nil
+}
+
+func (a *sqlBusStore) EventTimeAt(seq int64) (time.Time, bool, error) {
+	return a.store.BusEventTimeAt(seq)
+}
 
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {
 	return bus.Consumer{

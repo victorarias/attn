@@ -164,8 +164,8 @@ type Daemon struct {
 	classificationTranscriptExtractor func(*protocol.Session, string, int, time.Time) (string, string, error)
 	forcedStopMu                      sync.Mutex
 	forcedStop                        map[string]time.Time
-	pendingResumeMu                   sync.Mutex
-	pendingResumeID                   map[string]string
+	pendingConversationMu             sync.Mutex
+	pendingConversation               map[string]agentConversationObservation
 	// Orphaned-ticket reconciliation (docs/plans/2026-07-01-orphaned-ticket-
 	// reconciliation.md): when an owning session dies with a non-terminal ticket,
 	// a capped headless classifier judges the dead transcript against the brief.
@@ -459,10 +459,11 @@ type Daemon struct {
 	// query; a document write wakes every subscription whose collection it
 	// touched, and the subscription re-runs its query and delivers the current
 	// result set. See documents.go.
-	docSubsMu     sync.Mutex
-	docSubs       map[string]*docSubscription
-	docSubsSeq    int64
-	docUnsubHooks func()
+	docSubsMu              sync.Mutex
+	docSubs                map[string]*docSubscription
+	docSubsSeq             int64
+	docUnsubHooks          func()
+	conversationUnsubHooks func()
 
 	// Paths accumulated by the notebook_changed projection while a bulk change
 	// is coalescing, keyed by origin. See projectNotebookChanged.
@@ -779,7 +780,7 @@ func New(socketPath string) *Daemon {
 		classifiedTurn:      make(map[string]string),
 		classifyingTurn:     make(map[string]string),
 		forcedStop:          make(map[string]time.Time),
-		pendingResumeID:     make(map[string]string),
+		pendingConversation: make(map[string]agentConversationObservation),
 		tailscale:           newTailscaleRuntime(),
 		plugins:             newPluginRegistry(),
 		pluginHealthEnabled: true,
@@ -805,34 +806,34 @@ func NewForTesting(socketPath string) *Daemon {
 	pidPath := filepath.Join(dataRoot, "attn.pid")
 	manager := pty.NewManager(nil)
 	d := &Daemon{
-		socketPath:         socketPath,
-		pidPath:            pidPath,
-		dataRoot:           dataRoot,
-		store:              store.New(),
-		wsHub:              newWSHub(),
-		done:               make(chan struct{}),
-		logger:             nil, // No logging in tests
-		ghRegistry:         github.NewClientRegistry(),
-		hubManager:         nil,
-		repoCaches:         make(map[string]*repoCache),
-		gitCoord:           newGitCoordinator(),
-		ptyBackend:         ptybackend.NewEmbedded(manager),
-		transcriptWatch:    make(map[string]*transcriptWatcher),
-		pendingInitialWS:   make(map[*wsClient]struct{}),
-		startedCh:          make(chan struct{}),
-		classifiedTurn:     make(map[string]string),
-		classifyingTurn:    make(map[string]string),
-		forcedStop:         make(map[string]time.Time),
-		pendingResumeID:    make(map[string]string),
-		tailscale:          newTailscaleRuntime(),
-		plugins:            newPluginRegistry(),
-		pluginDir:          pluginDirForSocket(socketPath),
-		bundledPluginDir:   bundledPluginDirForExecutable(),
-		appsDir:            config.AppsDir(),
-		workspaces:         newWorkspaceRegistry(),
-		workflowDirty:      make(map[string]bool),
-		workflowEngineConn: make(map[string]workflowEngineSink),
-		spawnLocks:         make(map[string]*spawnLock),
+		socketPath:          socketPath,
+		pidPath:             pidPath,
+		dataRoot:            dataRoot,
+		store:               store.New(),
+		wsHub:               newWSHub(),
+		done:                make(chan struct{}),
+		logger:              nil, // No logging in tests
+		ghRegistry:          github.NewClientRegistry(),
+		hubManager:          nil,
+		repoCaches:          make(map[string]*repoCache),
+		gitCoord:            newGitCoordinator(),
+		ptyBackend:          ptybackend.NewEmbedded(manager),
+		transcriptWatch:     make(map[string]*transcriptWatcher),
+		pendingInitialWS:    make(map[*wsClient]struct{}),
+		startedCh:           make(chan struct{}),
+		classifiedTurn:      make(map[string]string),
+		classifyingTurn:     make(map[string]string),
+		forcedStop:          make(map[string]time.Time),
+		pendingConversation: make(map[string]agentConversationObservation),
+		tailscale:           newTailscaleRuntime(),
+		plugins:             newPluginRegistry(),
+		pluginDir:           pluginDirForSocket(socketPath),
+		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
+		workspaces:          newWorkspaceRegistry(),
+		workflowDirty:       make(map[string]bool),
+		workflowEngineConn:  make(map[string]workflowEngineSink),
+		spawnLocks:          make(map[string]*spawnLock),
 		// A disabled queue (no store) keeps the unconditional Cancel/Enqueue
 		// callsites nil-safe in tests; tests that exercise a live run override
 		// this with an enabled one (see installTestCompactQueue).
@@ -852,35 +853,35 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 	}
 	manager := pty.NewManager(nil)
 	d := &Daemon{
-		socketPath:         socketPath,
-		pidPath:            pidPath,
-		dataRoot:           dataRoot,
-		store:              store.New(),
-		wsHub:              newWSHub(),
-		done:               make(chan struct{}),
-		logger:             nil,
-		ghRegistry:         registry,
-		hubManager:         nil,
-		repoCaches:         make(map[string]*repoCache),
-		gitCoord:           newGitCoordinator(),
-		ptyBackend:         ptybackend.NewEmbedded(manager),
-		transcriptWatch:    make(map[string]*transcriptWatcher),
-		pendingInitialWS:   make(map[*wsClient]struct{}),
-		startedCh:          make(chan struct{}),
-		classifiedTurn:     make(map[string]string),
-		classifyingTurn:    make(map[string]string),
-		forcedStop:         make(map[string]time.Time),
-		pendingResumeID:    make(map[string]string),
-		tailscale:          newTailscaleRuntime(),
-		plugins:            newPluginRegistry(),
-		pluginDir:          pluginDirForSocket(socketPath),
-		bundledPluginDir:   bundledPluginDirForExecutable(),
-		appsDir:            config.AppsDir(),
-		workspaces:         newWorkspaceRegistry(),
-		workflowDirty:      make(map[string]bool),
-		workflowEngineConn: make(map[string]workflowEngineSink),
-		spawnLocks:         make(map[string]*spawnLock),
-		jobQueue:           jobs.New(jobs.Options{}),
+		socketPath:          socketPath,
+		pidPath:             pidPath,
+		dataRoot:            dataRoot,
+		store:               store.New(),
+		wsHub:               newWSHub(),
+		done:                make(chan struct{}),
+		logger:              nil,
+		ghRegistry:          registry,
+		hubManager:          nil,
+		repoCaches:          make(map[string]*repoCache),
+		gitCoord:            newGitCoordinator(),
+		ptyBackend:          ptybackend.NewEmbedded(manager),
+		transcriptWatch:     make(map[string]*transcriptWatcher),
+		pendingInitialWS:    make(map[*wsClient]struct{}),
+		startedCh:           make(chan struct{}),
+		classifiedTurn:      make(map[string]string),
+		classifyingTurn:     make(map[string]string),
+		forcedStop:          make(map[string]time.Time),
+		pendingConversation: make(map[string]agentConversationObservation),
+		tailscale:           newTailscaleRuntime(),
+		plugins:             newPluginRegistry(),
+		pluginDir:           pluginDirForSocket(socketPath),
+		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
+		workspaces:          newWorkspaceRegistry(),
+		workflowDirty:       make(map[string]bool),
+		workflowEngineConn:  make(map[string]workflowEngineSink),
+		spawnLocks:          make(map[string]*spawnLock),
+		jobQueue:            jobs.New(jobs.Options{}),
 	}
 	d.ensureEventBus()
 	return d
@@ -2605,7 +2606,7 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	case protocol.CmdHookCompaction: // wire: hook_compaction
 		d.handleHookCompaction(conn, msg.(*protocol.HookCompactionMessage))
 	case protocol.CmdSetSessionResumeID: // wire: set_session_resume_id
-		d.handleSetSessionResumeID(conn, msg.(*protocol.SetSessionResumeIDMessage))
+		d.handleObserveAgentConversation(conn, msg.(*protocol.SetSessionResumeIDMessage))
 	case protocol.CmdSessionInstructions: // wire: session_instructions
 		d.handleSessionInstructions(conn, msg.(*protocol.SessionInstructionsMessage))
 	case protocol.CmdSessionTranscript: // wire: session_transcript
@@ -2750,8 +2751,8 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	d.store.AddWorkspace(&protocol.Workspace{ID: workspaceID, Title: workspaceTitle, Directory: session.Directory, Status: protocol.WorkspaceStatusLaunching, Rank: workspaceRank})
 	d.workspaces.register(workspaceID, workspaceTitle, session.Directory, workspaceRank, false, false)
 	d.store.Add(session)
-	if resumeSessionID := d.consumePendingResumeSessionID(session.ID); resumeSessionID != "" {
-		d.persistResumeSessionID(session.ID, resumeSessionID)
+	if pending, ok := d.consumePendingAgentConversation(session.ID); ok {
+		d.observeAgentConversation(pending)
 	}
 	// Re-arm orphaned-ticket reconciliation: a registering session under a
 	// flagged ticket's assignee id is that ticket's owner coming back to life
@@ -2855,55 +2856,14 @@ func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.sendOK(conn)
 }
 
-func (d *Daemon) handleSetSessionResumeID(conn net.Conn, msg *protocol.SetSessionResumeIDMessage) {
-	resumeSessionID := strings.TrimSpace(msg.ResumeSessionID)
-	if resumeSessionID == "" {
-		d.sendError(conn, "missing resume_session_id")
-		return
-	}
-	d.setOrQueueResumeSessionID(msg.ID, resumeSessionID)
-	d.sendOK(conn)
-}
-
-func (d *Daemon) setOrQueueResumeSessionID(sessionID, resumeSessionID string) {
-	sessionID = strings.TrimSpace(sessionID)
-	resumeSessionID = strings.TrimSpace(resumeSessionID)
-	if sessionID == "" || resumeSessionID == "" {
-		return
-	}
-	d.pendingResumeMu.Lock()
-	defer d.pendingResumeMu.Unlock()
-	if d.store.Get(sessionID) != nil {
-		d.persistResumeSessionID(sessionID, resumeSessionID)
-		return
-	}
-	if d.pendingResumeID == nil {
-		d.pendingResumeID = make(map[string]string)
-	}
-	d.pendingResumeID[sessionID] = resumeSessionID
-}
-
-func (d *Daemon) consumePendingResumeSessionID(sessionID string) string {
-	sessionID = strings.TrimSpace(sessionID)
-	if sessionID == "" {
-		return ""
-	}
-	d.pendingResumeMu.Lock()
-	defer d.pendingResumeMu.Unlock()
-	resumeSessionID := d.pendingResumeID[sessionID]
-	delete(d.pendingResumeID, sessionID)
-	return strings.TrimSpace(resumeSessionID)
-}
-
 // persistResumeSessionID records the agent-native resume id on the session AND
 // mirrors it onto any ticket bound to that session (assignee == sessionID). The
 // session row is deleted on close, taking its resume_session_id with it, so the
 // durable copy on the ticket is what lets ticket Resume reattach the prior
 // conversation directly instead of dropping into the agent's resume picker.
 func (d *Daemon) persistResumeSessionID(sessionID, resumeSessionID string) {
-	d.store.SetResumeSessionID(sessionID, resumeSessionID)
-	if err := d.store.SetTicketResumeSessionID(sessionID, resumeSessionID); err != nil {
-		d.logf("persistResumeSessionID: mirror to ticket failed for session %s: %v", sessionID, err)
+	if _, err := d.store.TransitionSessionConversation(sessionID, resumeSessionID); err != nil {
+		d.logf("persistResumeSessionID: update failed for session %s: %v", sessionID, err)
 	}
 }
 

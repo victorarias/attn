@@ -1,0 +1,8 @@
+kind: fixed
+area: sessions
+change: >
+  A running session now follows an agent conversation change as one transition,
+  updating its resume target, transcript watcher, and dashboard activity together.
+symptom: >
+  After using Codex /new, reloading returned to the previous conversation and
+  transcript-based attn features continued reading the old rollout.

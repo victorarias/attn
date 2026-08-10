@@ -231,7 +231,8 @@
 --- 19 notifications_updated
 {
   "event": "notifications_updated",
-  "unread_count": 0
+  "unread_count": 0,
+  "unread_critical_count": 0
 }
 --- 20 notebook_changed
 {

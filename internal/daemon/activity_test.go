@@ -520,6 +520,39 @@ func TestActivityExecutorWritesNothingAfterTheFeatureIsTurnedOff(t *testing.T) {
 	}
 }
 
+// A generation spends seconds outside the store lock. If /new lands in that
+// window, the old transcript's answer must not restore the activity that the
+// conversation transition cleared.
+func TestActivityExecutorWritesNothingAfterTheConversationChanges(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
+	installActivityRunner(t, d)
+	watchingClient(d)
+
+	d.store.SetResumeSessionID("session-1", "conversation-old")
+	transcriptPath := writeActivityTranscript(t, "first")
+	d.store.UpdateSessionActivity("session-1", "reading the plan", time.Now(), seedActivityCursor(t, transcriptPath))
+	appendActivityTranscript(t, transcriptPath, "second")
+
+	d.sessionActivityExecution = func(context.Context, agentdriver.HeadlessTaskProvider, agentdriver.HeadlessTaskRequest) (agentdriver.HeadlessTaskResult, error) {
+		changed, err := d.store.TransitionSessionConversation("session-1", "conversation-new")
+		if err != nil || !changed {
+			t.Fatalf("transition during activity generation: changed=%v err=%v", changed, err)
+		}
+		return agentdriver.HeadlessTaskResult{Text: "summarizing the old conversation"}, nil
+	}
+
+	enqueueActivity(t, d, "session-1", transcriptPath)
+	waitForTaskState(t, d, sessionActivityKind, "session-1", jobs.StateDone)
+
+	if got := d.store.GetResumeSessionID("session-1"); got != "conversation-new" {
+		t.Fatalf("resume id = %q, want successor conversation", got)
+	}
+	if got := d.store.GetSessionActivity("session-1"); got != (store.SessionActivity{}) {
+		t.Errorf("activity = %+v after transition, want the atomic clear preserved", got)
+	}
+}
+
 // A feature that is on, configured, and silently failing is indistinguishable
 // from a broken one. The failure rides back on activity_status, which is the
 // only place a terminal can see it.
@@ -608,7 +641,10 @@ func enqueueActivity(t *testing.T, d *Daemon, sessionID, transcriptPath string) 
 	t.Helper()
 	if _, err := d.jobQueue.Enqueue(sessionActivityKind, jobs.EnqueueOptions{
 		UniqueKey: sessionID,
-		Payload:   sessionActivityPayload{Transcript: transcriptPath},
+		Payload: sessionActivityPayload{
+			Transcript: transcriptPath,
+			ResumeID:   d.store.GetResumeSessionID(sessionID),
+		},
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}

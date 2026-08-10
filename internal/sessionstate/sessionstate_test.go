@@ -49,7 +49,7 @@ func TestResolve(t *testing.T) {
 				Heartbeat: seen(SourceHeartbeat, ClaimBusy, 200*time.Millisecond),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonHeartbeatBusy,
 		},
 		{
 			// A lost Stop hook used to hold the session working forever. Once the
@@ -162,7 +162,7 @@ func TestResolve(t *testing.T) {
 				LastBusyAt: now.Add(-50 * time.Millisecond),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonBracketOpen,
 		},
 		{
 			// Only a full window with no busy frame at all settles it, however
@@ -364,7 +364,7 @@ func TestResolve(t *testing.T) {
 				LastHarnessEvent: seen(SourceHarnessEvent, ClaimApprovalPending, 30*time.Second),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonHeartbeatBusy,
 		},
 		{
 			// Once the heartbeat expires, the approval stands again.
@@ -426,7 +426,7 @@ func TestResolve(t *testing.T) {
 				LastBusyAt:  now.Add(-100 * time.Millisecond),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonHeartbeatBusy,
 		},
 		{
 			// A yield is judged, and the verdict outranks the yield's own guess. An
@@ -730,7 +730,7 @@ func TestResolve(t *testing.T) {
 				LastMovement:     now.Add(-100 * time.Millisecond),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonBracketOpen,
 		},
 		{
 			// An abort is not an approval: the agent asked nothing, so the session
@@ -1029,6 +1029,75 @@ func TestHeartbeatTTLExpiryCannotSettleAnOpenBracket(t *testing.T) {
 	}
 }
 
+// A running turn must resolve to ONE answer for as long as it keeps painting
+// busy frames — the same state, the same reason, the same detail.
+//
+// The resolver is sampled once a second by a loop that publishes whenever its
+// answer changes, so an answer that moves while the session does not is a flood
+// rather than a cosmetic wobble. A turn painting frames roughly once a second is
+// sampled at every age between two frames, so it crosses the TTL in both
+// directions all turn long; naming the windows in the reason made a busy session
+// rename itself about once a second, and each rename wrote a durable bus fact
+// and pushed a decorated snapshot to every client. Measured over 8.4 production
+// days: session.state.changed was 73.7% of the whole bus log, and 81.6% of
+// consecutive facts for one session landed within a second of the previous one —
+// the tick period, not anything a session did.
+//
+// The sweep is per millisecond and runs to the end of the span the frame is
+// believed, because the flap lived at one boundary inside it and a coarser sweep
+// steps over the next one.
+func TestARunningTurnKeepsOneAnswerWhileItKeepsPainting(t *testing.T) {
+	policy := testPolicy()
+	for _, tc := range []struct {
+		name     string
+		evidence func(age time.Duration) Evidence
+		believed time.Duration
+	}{
+		{
+			// Claude with hooks: the shape the flap was measured on.
+			name: "an open bracket believes a frame until the stale window",
+			evidence: func(age time.Duration) Evidence {
+				return Evidence{
+					TurnOpen:       true,
+					TurnEverOpened: true,
+					Heartbeat:      seen(SourceHeartbeat, ClaimBusy, age),
+					LastBusyAt:     now.Add(-age),
+					LastMovement:   now.Add(-age),
+				}
+			},
+			believed: policy.StaleAfter,
+		},
+		{
+			// The same turn with no bracket to hold it — a lost turn-open hook, or
+			// an agent that reports no brackets at all. The heartbeat is then the
+			// only witness, and it is believed only to the settle window.
+			name: "a bare heartbeat believes a frame until the settle window",
+			evidence: func(age time.Duration) Evidence {
+				return Evidence{
+					TurnEverOpened: true,
+					Heartbeat:      seen(SourceHeartbeat, ClaimBusy, age),
+					LastBusyAt:     now.Add(-age),
+					LastMovement:   now.Add(-age),
+				}
+			},
+			believed: policy.HeartbeatSettleAfter,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			want := Resolve(tc.evidence(0), policy, now)
+			if want.State != protocol.SessionStateWorking {
+				t.Fatalf("the freshest frame resolved %s, want working", want.State)
+			}
+			for age := time.Duration(0); age <= tc.believed; age += time.Millisecond {
+				if got := Resolve(tc.evidence(age), policy, now); got != want {
+					t.Fatalf("a %s-old busy frame resolved %+v, want the %+v it resolved at 0: the answer moved while the session did not",
+						age, got, want)
+				}
+			}
+		})
+	}
+}
+
 // Same for the stale window: a bracket holds until the silence passes it.
 func TestBracketStalenessBoundary(t *testing.T) {
 	policy := testPolicy()
@@ -1179,7 +1248,7 @@ func TestShellLifecycleResolvesOnTheForegroundHeartbeatAlone(t *testing.T) {
 				LastBusyAt: now.Add(-time.Second),
 			},
 			wantState:  protocol.SessionStateWorking,
-			wantReason: ReasonHeartbeatFresh,
+			wantReason: ReasonHeartbeatBusy,
 		},
 		{
 			// The command ended and the shell took the foreground back. No
