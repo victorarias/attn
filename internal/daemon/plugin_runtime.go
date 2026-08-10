@@ -130,6 +130,7 @@ func (d *Daemon) notifyPluginParked(name string, snapshot pluginRuntimeSnapshot)
 	}
 	record, err := d.store.AddNotification(store.NotificationRecord{
 		Kind:       notificationKindPluginParked,
+		Severity:   store.NotificationCritical,
 		Title:      fmt.Sprintf("Plugin stopped: %s", name),
 		Body:       fmt.Sprintf("attn restarted it %d times without it ever staying up, and has stopped trying. Reinstall the plugin, or restart attn, to try again.", snapshot.RestartAttempt),
 		Detail:     detail,

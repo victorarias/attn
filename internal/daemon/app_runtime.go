@@ -224,18 +224,22 @@ func (d *Daemon) notifyAppRuntimeParked(_ string, snapshot supervise.Snapshot) {
 	if d.store == nil {
 		return
 	}
-	if _, err := d.store.AddNotification(store.NotificationRecord{
-		Kind:  notificationKindAppRuntimeParked,
-		Title: "Apps stopped running",
+	record, err := d.store.AddNotification(store.NotificationRecord{
+		Kind:     notificationKindAppRuntimeParked,
+		Severity: store.NotificationCritical,
+		Title:    "Apps stopped running",
 		Body: fmt.Sprintf(
 			"attn restarted the shared app runtime %d times without it ever staying up, and has stopped trying. No app's handlers are running. `attn app runtime status` shows why it exited; `attn app runtime restart` tries again.",
 			snapshot.RestartAttempt),
 		Detail:     detail,
 		SourceKind: "app_runtime",
 		SourceID:   appRuntimeChildName,
-	}, d.appNow()); err != nil {
+	}, d.appNow())
+	if err != nil {
 		d.logf("notifications: add app-runtime-parked notification: %v", err)
+		return
 	}
+	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
 // appNow is the daemon's clock for everything app-runtime — the stall clock most

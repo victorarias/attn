@@ -11,6 +11,7 @@ import (
 	"testing/synctest"
 	"time"
 
+	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/supervise"
 )
 
@@ -132,6 +133,11 @@ func TestParkedPluginRaisesADurableNotification(t *testing.T) {
 	}
 	if !strings.Contains(record.Detail, "exit code 9") {
 		t.Fatalf("notification detail=%q, want the last exit", record.Detail)
+	}
+	// Nothing retries a parked plugin, so this is the last word the user gets on
+	// it: critical, with the ambient surface that comes with it.
+	if record.Severity != store.NotificationCritical {
+		t.Fatalf("severity = %q, want critical", record.Severity)
 	}
 }
 
