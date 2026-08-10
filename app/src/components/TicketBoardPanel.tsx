@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 import { TicketStatus } from '../types/generated';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
 import './TicketBoardPanel.css';
 
 export type BoardFilter = 'all' | 'blocked' | 'in_review' | 'closed_today';
 
-type TicketStatusValue = Ticket['status'];
+type TicketStatusValue = TicketRow['status'];
 
 /** Statuses that own a flow column (terminal-bad statuses do not — they fold into Done). */
 type FlowStatus =
@@ -85,7 +85,7 @@ export function relativeTime(iso: string, now: Date = new Date()): string {
 }
 
 /** Narrow the ticket set per the active filter BEFORE bucketing, so per-column counts reflect what is shown. */
-export function applyFilter(tickets: Ticket[], filter: BoardFilter, now: Date = new Date()): Ticket[] {
+export function applyFilter(tickets: TicketRow[], filter: BoardFilter, now: Date = new Date()): TicketRow[] {
   return (tickets ?? []).filter((t) => {
     if (filter === 'blocked') return t.status === 'blocked';
     if (filter === 'in_review') return t.status === 'in_review';
@@ -99,9 +99,9 @@ export interface BoardColumnData {
   label: string;
   empty: string;
   /** Cards for this column's own status, preserving incoming order (created_at desc). */
-  cards: Ticket[];
+  cards: TicketRow[];
   /** Only populated for the Done column: terminal-bad tickets in the CLOSED sub-lane. */
-  terminalBad: Ticket[];
+  terminalBad: TicketRow[];
 }
 
 /**
@@ -109,7 +109,7 @@ export interface BoardColumnData {
  * are attached to the Done column's `terminalBad` lane rather than getting a
  * column of their own. Pure and side-effect free.
  */
-export function groupTicketsByColumn(visible: Ticket[]): BoardColumnData[] {
+export function groupTicketsByColumn(visible: TicketRow[]): BoardColumnData[] {
   const terminalBad = visible.filter((t) => TERMINAL_BAD_STATUSES.includes(t.status));
   return STATUS_COLUMNS.map((col) => ({
     status: col.status,
@@ -123,7 +123,7 @@ export function groupTicketsByColumn(visible: Ticket[]): BoardColumnData[] {
 export interface TicketBoardPanelProps {
   isOpen: boolean;
   /** useDaemonStore().tickets — non-archived, created_at desc. Read-only. */
-  tickets: Ticket[];
+  tickets: TicketRow[];
   /** App.tsx: setSelectedTicketId(id) + openDockPanel('ticketDetail'). */
   onOpenTicket: (ticketId: string) => void;
   /** closeDockPanel('board'). */
@@ -250,7 +250,7 @@ export function TicketBoardPanel({ isOpen, tickets = [], onOpenTicket, onClose }
 }
 
 interface BoardCardProps {
-  ticket: Ticket;
+  ticket: TicketRow;
   index: number;
   onOpen: (ticketId: string) => void;
   terminalBad?: boolean;

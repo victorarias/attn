@@ -96,6 +96,67 @@ type AgentHistoryMessage struct {
 	ID string `json:"id"`
 }
 
+type AgentPeekMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// TargetSessionID corresponds to the JSON schema field "target_session_id".
+	TargetSessionID string `json:"target_session_id"`
+}
+
+type AgentPeekResult struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent string `json:"agent"`
+
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// LastAssistantMessage corresponds to the JSON schema field
+	// "last_assistant_message".
+	LastAssistantMessage *string `json:"last_assistant_message,omitempty,omitzero"`
+
+	// LastSeen corresponds to the JSON schema field "last_seen".
+	LastSeen string `json:"last_seen"`
+
+	// Screen corresponds to the JSON schema field "screen".
+	Screen *AgentPeekScreen `json:"screen,omitempty,omitzero"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// State corresponds to the JSON schema field "state".
+	State string `json:"state"`
+
+	// StateReason corresponds to the JSON schema field "state_reason".
+	StateReason *string `json:"state_reason,omitempty,omitzero"`
+
+	// StateSince corresponds to the JSON schema field "state_since".
+	StateSince string `json:"state_since"`
+
+	// Todos corresponds to the JSON schema field "todos".
+	Todos []string `json:"todos"`
+
+	// TurnOwed corresponds to the JSON schema field "turn_owed".
+	TurnOwed *bool `json:"turn_owed,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+
+	// WorkspaceTitle corresponds to the JSON schema field "workspace_title".
+	WorkspaceTitle *string `json:"workspace_title,omitempty,omitzero"`
+}
+
+type AgentPeekScreen struct {
+	// Cols corresponds to the JSON schema field "cols".
+	Cols int `json:"cols"`
+
+	// Rows corresponds to the JSON schema field "rows".
+	Rows int `json:"rows"`
+
+	// Text corresponds to the JSON schema field "text".
+	Text string `json:"text"`
+}
+
 type AgentPromptMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -3076,7 +3137,7 @@ type InitialStateMessage struct {
 	SourceFingerprint *string `json:"source_fingerprint,omitempty,omitzero"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets,omitempty,omitzero"`
+	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// Warnings corresponds to the JSON schema field "warnings".
 	Warnings []DaemonWarning `json:"warnings,omitempty,omitzero"`
@@ -4965,6 +5026,9 @@ type Response struct {
 	// "activity_status_result".
 	ActivityStatusResult *ActivityStatusResult `json:"activity_status_result,omitempty,omitzero"`
 
+	// AgentPeekResult corresponds to the JSON schema field "agent_peek_result".
+	AgentPeekResult *AgentPeekResult `json:"agent_peek_result,omitempty,omitzero"`
+
 	// AppApplyResult corresponds to the JSON schema field "app_apply_result".
 	AppApplyResult *AppApplyResult `json:"app_apply_result,omitempty,omitzero"`
 
@@ -6555,6 +6619,35 @@ type TicketResumeResultMessage struct {
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
+type TicketRow struct {
+	// Assignee corresponds to the JSON schema field "assignee".
+	Assignee string `json:"assignee"`
+
+	// ClosedAt corresponds to the JSON schema field "closed_at".
+	ClosedAt *string `json:"closed_at,omitempty,omitzero"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd string `json:"cwd"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// LastAgentID corresponds to the JSON schema field "last_agent_id".
+	LastAgentID string `json:"last_agent_id"`
+
+	// ReconciledAt corresponds to the JSON schema field "reconciled_at".
+	ReconciledAt *string `json:"reconciled_at,omitempty,omitzero"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status TicketStatus `json:"status"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
 type TicketShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -6661,7 +6754,7 @@ type TicketsUpdatedMessage struct {
 	Event string `json:"event"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets"`
+	Tickets []TicketRow `json:"tickets"`
 }
 
 type TodosMessage struct {
@@ -6914,7 +7007,7 @@ type WebSocketEvent struct {
 	Ticket *Ticket `json:"ticket,omitempty,omitzero"`
 
 	// Tickets corresponds to the JSON schema field "tickets".
-	Tickets []Ticket `json:"tickets,omitempty,omitzero"`
+	Tickets []TicketRow `json:"tickets,omitempty,omitzero"`
 
 	// TileID corresponds to the JSON schema field "tile_id".
 	TileID *string `json:"tile_id,omitempty,omitzero"`

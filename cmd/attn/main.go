@@ -230,6 +230,9 @@ func main() {
 	case "session":
 		maybePrintProfileBanner()
 		runSession()
+	case "agent":
+		maybePrintProfileBanner()
+		runAgent()
 	case "state":
 		maybePrintProfileBanner()
 		runState()
@@ -629,6 +632,8 @@ func writeHelp(w io.Writer) {
 
 commands:
   presence                          check whether the current shell runs inside attn
+  agent list                        name every session running here
+  agent peek <id>                   read a session without interrupting it
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief

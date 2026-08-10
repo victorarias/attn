@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, AuthorState, Ticket } from '../hooks/useDaemonSocket';
+import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
@@ -8,8 +8,8 @@ interface DaemonStore {
 
   // Work-tracker board: non-archived tickets (bare rows). The detail view fetches
   // the full record on demand via get_ticket.
-  tickets: Ticket[];
-  setTickets: (tickets: Ticket[]) => void;
+  tickets: TicketRow[];
+  setTickets: (tickets: TicketRow[]) => void;
 
   // PRs from daemon
   prs: DaemonPR[];

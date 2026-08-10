@@ -432,7 +432,7 @@ type Daemon struct {
 	workflowEngineMu      sync.Mutex
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
-	ticketsBroadcastHook  func([]protocol.Ticket)                   // optional, tests only
+	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every
@@ -2613,6 +2613,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSessionTranscript(conn, msg.(*protocol.SessionTranscriptMessage))
 	case protocol.CmdStateExplain: // wire: state_explain
 		d.handleStateExplain(conn, msg.(*protocol.StateExplainMessage))
+	case protocol.CmdAgentPeek: // wire: agent_peek
+		d.handleAgentPeek(conn, msg.(*protocol.AgentPeekMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

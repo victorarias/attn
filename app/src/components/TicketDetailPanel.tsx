@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { Ticket, TicketRow } from '../hooks/useDaemonSocket';
 import { isTicketOrphaned } from '../utils/ticketOrphan';
 import { writeClipboardText } from '../utils/clipboardBridge';
 import { Markdown } from './Markdown';
@@ -12,7 +12,7 @@ interface TicketDetailPanelProps {
   // The bare board row for this ticket (from the store). It gives an instant
   // header while the full record loads, and its updated_at drives a live
   // re-fetch when the ticket changes under an open panel.
-  ticketRow?: Ticket;
+  ticketRow?: TicketRow;
   fetchTicket: (ticketId: string) => Promise<Ticket>;
   // Chief/user actions (slice 4c). Optional so the panel can render read-only
   // when an owner does not wire them. Each resolves once the daemon confirms;

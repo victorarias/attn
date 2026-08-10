@@ -270,15 +270,23 @@ func (p *pluginConnection) request(ctx context.Context, method string, params in
 	return p.jsonrpcPeer.request(ctx, "plugin", method, params, result)
 }
 
-func (p *pluginConnection) setHealth(status, message string, at time.Time) {
+// setHealth records a health observation and reports whether it moved. The
+// check timestamp is not part of that answer: it advances every poll and no
+// client renders it, so gating on it would publish a fact 5,760 times a day per
+// plugin with nothing to say.
+func (p *pluginConnection) setHealth(status, message string, at time.Time) bool {
 	p.healthMu.Lock()
 	defer p.healthMu.Unlock()
-	p.healthStatus = strings.TrimSpace(status)
-	if p.healthStatus == "" {
-		p.healthStatus = "unknown"
+	next := strings.TrimSpace(status)
+	if next == "" {
+		next = "unknown"
 	}
-	p.healthMessage = strings.TrimSpace(message)
+	nextMessage := strings.TrimSpace(message)
+	changed := next != p.healthStatus || nextMessage != p.healthMessage
+	p.healthStatus = next
+	p.healthMessage = nextMessage
 	p.lastHealthAt = at
+	return changed
 }
 
 func (p *pluginConnection) healthSnapshot() (string, string, time.Time) {
@@ -560,9 +568,7 @@ func (d *Daemon) checkPluginHealth(plugin *pluginConnection) {
 		Now: now.Format(time.RFC3339Nano),
 	}, &result)
 	if err != nil {
-		plugin.setHealth("unhealthy", err.Error(), now)
-		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(err.Error()))
-		d.publishFact(FactPluginHealthChanged, plugin.name, nil)
+		d.reportPluginHealth(plugin, now, "unhealthy", err.Error())
 		return
 	}
 	if !result.OK {
@@ -570,13 +576,27 @@ func (d *Daemon) checkPluginHealth(plugin *pluginConnection) {
 		if message == "" {
 			message = "plugin reported unhealthy"
 		}
-		plugin.setHealth("unhealthy", message, now)
-		d.logf("plugin health plugin=%s status=unhealthy error=%s", plugin.name, providerLogValue(message))
-		d.publishFact(FactPluginHealthChanged, plugin.name, nil)
+		d.reportPluginHealth(plugin, now, "unhealthy", message)
 		return
 	}
 
-	plugin.setHealth("healthy", result.Message, now)
-	d.logf("plugin health plugin=%s status=healthy", plugin.name)
+	d.reportPluginHealth(plugin, now, "healthy", result.Message)
+}
+
+// reportPluginHealth records a poll's verdict and publishes only the ones that
+// moved. A steady plugin is silent: no fact, no durable bus row, no plugins
+// catalog rebuild (which re-scans both plugin directories from disk), and no log
+// line, while attn is idle. Crash and recovery still surface — they arrive as
+// supervisor phase transitions and connect/disconnect facts, not as a poll
+// verdict.
+func (d *Daemon) reportPluginHealth(plugin *pluginConnection, at time.Time, status, message string) {
+	if !plugin.setHealth(status, message, at) {
+		return
+	}
+	if status == "healthy" {
+		d.logf("plugin health plugin=%s status=healthy", plugin.name)
+	} else {
+		d.logf("plugin health plugin=%s status=%s error=%s", plugin.name, status, providerLogValue(message))
+	}
 	d.publishFact(FactPluginHealthChanged, plugin.name, nil)
 }

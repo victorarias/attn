@@ -1,23 +1,18 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { PaneTicketChip } from './PaneTicketChip';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 import { TicketStatus } from '../types/generated';
 
-function makeTicket(overrides: Partial<Ticket> = {}): Ticket {
+function makeTicket(overrides: Partial<TicketRow> = {}): TicketRow {
   return {
     id: 'store-migration',
     title: 'Migrate the store',
-    description: '',
     status: TicketStatus.Working,
     assignee: 'sess-1',
     cwd: '/repo',
     last_agent_id: 'codex',
-    project_id: '',
-    created_at: '2026-06-27T10:00:00Z',
     updated_at: '2026-06-27T10:05:00Z',
-    activity: [],
-    artifacts: [],
     ...overrides,
   };
 }

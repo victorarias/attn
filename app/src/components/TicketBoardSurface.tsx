@@ -1,12 +1,12 @@
 import FocusTrap from 'focus-trap-react';
-import type { Ticket } from '../hooks/useDaemonSocket';
+import type { TicketRow } from '../hooks/useDaemonSocket';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { TicketBoardPanel } from './TicketBoardPanel';
 import './TicketBoardSurface.css';
 
 export interface TicketBoardSurfaceProps {
   isOpen: boolean;
-  tickets: Ticket[];
+  tickets: TicketRow[];
   onOpenTicket: (ticketId: string) => void;
   onClose: () => void;
 }

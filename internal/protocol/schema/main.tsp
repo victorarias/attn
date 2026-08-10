@@ -367,9 +367,11 @@ model TicketArtifact {
   path: string;
 }
 
-// Ticket is the wire shape of a durable tracked-work record. `activity` and
-// `artifacts` are the full history thread and current attach files — populated on the
-// get_ticket full record, and left empty on the list / board feed for cheapness.
+// Ticket is the wire shape of a durable tracked-work record — a read by id
+// (get_ticket, ticket_show) or the agent's board read (ticket_list), which
+// carries the brief. `activity` and `artifacts` are the full history thread and
+// current attach files: populated on a full record, left empty on the
+// ticket_list rows. The app's board feed carries TicketRow instead.
 model Ticket {
   id: string;
   title: string;
@@ -392,6 +394,31 @@ model Ticket {
   latest_event_seq?: int32;
   activity: TicketActivity[];
   artifacts: TicketArtifact[];
+}
+
+// TicketRow is a ticket as the board feed carries it — the whole non-archived
+// board is re-pushed on every ticket mutation and again on connect, so it holds
+// only what a board renders: identity, the column, who owns it, and the stamps
+// the app reads (updated_at drives the open detail view's live refresh,
+// closed_at the recently-closed filter, reconciled_at the orphan badge). The
+// brief, the history thread and the artifacts are detail-sized and belong to a
+// read by id (get_ticket over the socket, ticket_show over the CLI), never to a
+// list push.
+//
+// In generated.ts quicktype names an array's element type after the property
+// that holds it, not after the model: TicketRow arrives as `TicketElement` and
+// `Ticket` as `TicketObject`. Import the aliases at the top of
+// useDaemonSocket.ts (`TicketRow`, `Ticket`) rather than either generated name.
+model TicketRow {
+  id: string;
+  title: string;
+  status: TicketStatus;
+  assignee: string;
+  cwd: string;
+  last_agent_id: string;
+  updated_at: string;
+  closed_at?: string;
+  reconciled_at?: string;
 }
 
 model PR {
@@ -707,6 +734,15 @@ model StateExplainMessage {
   target_session_id: string;
 }
 
+// One agent observes another without interrupting it: state, todos, the last
+// assistant message, and the rendered screen, all served from what the daemon
+// already holds. Passive by construction — nothing here touches the target's
+// PTY or generates input, so watching costs the observed agent nothing.
+model AgentPeekMessage {
+  cmd: "agent_peek";
+  target_session_id: string;    // full id or unique prefix (the short id from `attn agent list`)
+}
+
 // A Stop is not always terminal: the turn may yield with background work still
 // in flight (it auto-resumes on completion) or park on a pending scheduled
 // wakeup. These carry that as FACTS observed by the hook — the statuses of the
@@ -896,8 +932,8 @@ model TicketInboxMessage {
 // an agent finds a ticket-id here before it can comment on (or take/subscribe to) it.
 // Unlike the write verbs it is NOT identity-scoped — it is a global board read, so
 // source_session_id is optional and unused, present only for command-shape uniformity.
-// Rows carry the description (the brief) but not the activity thread (bare rows, like
-// the broadcast).
+// Rows carry the description (the brief) but not the activity thread — unlike the
+// app's board feed, whose TicketRow drops the brief too.
 model TicketListMessage {
   cmd: "ticket_list";
   source_session_id?: string;
@@ -2872,7 +2908,7 @@ model InitialStateMessage {
   github_hosts?: string[];
   settings?: Record<string>;
   warnings?: DaemonWarning[];
-  tickets?: Ticket[];
+  tickets?: TicketRow[];
 }
 
 model EndpointStatusChangedMessage {
@@ -2990,13 +3026,13 @@ model ChiefOfStaffResultMessage {
   error?: string;
 }
 
-// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows
-// (bare — no activity/artifacts), re-pushed whenever any ticket mutates. It is
-// the same shape carried in InitialStateMessage.tickets, so a client renders the
-// board identically from the bootstrap snapshot and from each update.
+// TicketsUpdatedMessage is the live board feed: the non-archived ticket rows,
+// re-pushed whenever any ticket mutates. It is the same shape carried in
+// InitialStateMessage.tickets, so a client renders the board identically from
+// the bootstrap snapshot and from each update.
 model TicketsUpdatedMessage {
   event: "tickets_updated";
-  tickets: Ticket[];
+  tickets: TicketRow[];
 }
 
 // TicketResultMessage is the reply to a get_ticket request, correlated by
@@ -4480,6 +4516,7 @@ model Response {
   session_instructions_result?: SessionInstructionsResult;
   session_transcript_result?: SessionTranscriptResult;
   state_explain_result?: StateExplainResult;
+  agent_peek_result?: AgentPeekResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;
@@ -4531,6 +4568,35 @@ model StateExplainResult {
   // capacity is the ring size, so a full ring can be reported as truncated
   // rather than read as the whole history.
   capacity: int32;
+}
+
+// The target's rendered viewport, plain text from the worker's parsed
+// terminal. Viewport only: scrollback is not part of the snapshot RPC.
+model AgentPeekScreen {
+  text: string;
+  cols: int32;
+  rows: int32;
+}
+
+model AgentPeekResult {
+  session_id: string;
+  label: string;
+  agent: string;
+  workspace_id: string;
+  workspace_title?: string;
+  state: string;
+  state_reason?: string;
+  state_since: string;
+  last_seen: string;
+  turn_owed?: boolean;
+  // The flat strings the todo hook stores, served as-is; consumers parse the
+  // [✓]/[→]/[ ] prefix if they care.
+  todos: string[];
+  // Absent is not an error: a session with no inspectable transcript, or one
+  // that has said nothing yet, simply has no message to show.
+  last_assistant_message?: string;
+  // Absent when the backend cannot serve a snapshot (old worker, no frame).
+  screen?: AgentPeekScreen;
 }
 
 model EvidenceExcerpt {
@@ -5111,7 +5177,7 @@ model WebSocketEvent {
 
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
-  tickets?: Ticket[];
+  tickets?: TicketRow[];
   workspace_contexts?: WorkspaceContext[];
 }
 

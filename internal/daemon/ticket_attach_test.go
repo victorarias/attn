@@ -262,7 +262,7 @@ func TestTicketAttachNotifiesChiefAndBroadcasts(t *testing.T) {
 	}
 }
 
-func containsTicketID(tickets []protocol.Ticket, id string) bool {
+func containsTicketID(tickets []protocol.TicketRow, id string) bool {
 	for _, ticket := range tickets {
 		if ticket.ID == id {
 			return true
