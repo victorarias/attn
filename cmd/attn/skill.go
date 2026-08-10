@@ -39,6 +39,10 @@ func writeSkill(stdout, stderr io.Writer, args []string) int {
 		}
 	}
 
+	if list && reference != "" {
+		fmt.Fprintln(stderr, "skill: --list and --reference are mutually exclusive; pass one")
+		return 2
+	}
 	if list {
 		for _, name := range agent.SkillReferenceNames() {
 			fmt.Fprintln(stdout, name)

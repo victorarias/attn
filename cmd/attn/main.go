@@ -650,7 +650,7 @@ commands:
 	  daemon ensure|stop                ensure the daemon is running, or stop it
   profile <status|resolve|list>     show / resolve the active profile's resources
   profile-env <profile|--unset>     print shell commands for selecting a profile
-  skill [--reference <name>]        print the bundled agent skill and its references
+  skill [--reference <name>|--list] print the bundled agent skill and its references
   version                           print version information
 `)
 }

@@ -55,6 +55,19 @@ func TestWriteSkillUnknownReferenceNamesTheBundledOnes(t *testing.T) {
 	}
 }
 
+func TestWriteSkillRejectsListCombinedWithReference(t *testing.T) {
+	var stdout, stderr strings.Builder
+	if code := writeSkill(&stdout, &stderr, []string{"--list", "--reference", "tickets"}); code != 2 {
+		t.Fatalf("--list --reference exit code = %d, want 2", code)
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("--list --reference wrote output despite the usage error: %q", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "mutually exclusive") {
+		t.Fatalf("--list --reference error does not name the conflict: %q", stderr.String())
+	}
+}
+
 func TestWriteSkillReferenceWithoutNameFails(t *testing.T) {
 	var stdout, stderr strings.Builder
 	if code := writeSkill(&stdout, &stderr, []string{"--reference"}); code != 2 {
