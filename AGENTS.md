@@ -334,6 +334,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - Complexity belongs at the boundary. The daemon owns orchestration and stays
   authoritative (`applyState`, `wireProjections`); the frontend renders what it
   is told.
+- Idle systems must be idle. Anything recurring — a timer, a watcher, a "did
+  it change?" gate — does real work (publishes, pushes, scans, repaints) only
+  when something moved; a gate comparing an unstable value (clock-derived,
+  sampled) fires forever while nothing changes. Verify new recurring work
+  stays silent on a quiet live session — and still fires on every real
+  change; never suppress work a consumer needs to save traffic.
 - No continuously repainting animations. attn renders GPU terminals, often on
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
