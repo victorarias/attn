@@ -35,9 +35,6 @@ func (r *Runner) cronInterval(kind string) time.Duration {
 }
 
 // armCron gives every registered cron kind a recurring record, once, from Start.
-// An on-schedule record is left alone: re-arming every boot would starve a daemon
-// restarted more often than the interval. A terminal record is revived — a build
-// that missed the registration killed it as unknown-kind, and nothing else selects it.
 func (r *Runner) armCron() {
 	r.mu.Lock()
 	kinds := make(map[string]time.Duration, len(r.handlers))
@@ -49,22 +46,109 @@ func (r *Runner) armCron() {
 	r.mu.Unlock()
 
 	for kind, interval := range kinds {
-		existing, err := r.GetByKey(kind, CronKey)
-		if err != nil {
-			r.log("jobs: read cron entry for %s: %v", kind, err)
-			continue
-		}
-		if existing != nil && !existing.State.Terminal() {
-			continue
-		}
-		if existing != nil {
-			r.log("jobs: cron entry for %s was %s (%s); reviving it", kind, existing.State, existing.LastError)
-		}
-		// Enqueue coalesces, so a revive resets that row rather than minting a second.
-		if _, err := r.Enqueue(kind, EnqueueOptions{UniqueKey: CronKey, Delay: interval}); err != nil {
-			r.log("jobs: arm cron entry for %s: %v", kind, err)
+		r.armCronKind(kind, interval)
+	}
+}
+
+// pendingArm is a cron kind the store refused to arm. It lives in memory because
+// a kind that failed to arm left NO record behind: dispatch never selects it and
+// finish() never re-arms it, so there is nothing durable to retry from.
+type pendingArm struct {
+	interval time.Duration
+	attempts int
+	retryAt  time.Time
+	lastErr  error
+}
+
+// armCronKind writes one kind's recurring record, parking it for retry when the
+// store refuses.
+func (r *Runner) armCronKind(kind string, interval time.Duration) {
+	if err := r.writeCronEntry(kind, interval); err != nil {
+		r.deferCronArm(kind, interval, err)
+		return
+	}
+	r.mu.Lock()
+	pending := r.pendingArms[kind]
+	delete(r.pendingArms, kind)
+	r.mu.Unlock()
+	if pending != nil {
+		r.log("jobs: cron %s is armed after %d failed attempt(s)", kind, pending.attempts)
+	}
+}
+
+// writeCronEntry is the arming write for one kind. An on-schedule record is left
+// alone: re-arming every boot would starve a daemon restarted more often than the
+// interval. A terminal record is revived — a build that missed the registration
+// killed it as unknown-kind, and nothing else selects it.
+func (r *Runner) writeCronEntry(kind string, interval time.Duration) error {
+	existing, err := r.GetByKey(kind, CronKey)
+	if err != nil {
+		return fmt.Errorf("read cron entry: %w", err)
+	}
+	if existing != nil && !existing.State.Terminal() {
+		return nil
+	}
+	if existing != nil {
+		r.log("jobs: cron entry for %s was %s (%s); reviving it", kind, existing.State, existing.LastError)
+	}
+	// Enqueue coalesces, so a revive resets that row rather than minting a second.
+	if _, err := r.Enqueue(kind, EnqueueOptions{UniqueKey: CronKey, Delay: interval}); err != nil {
+		return fmt.Errorf("enqueue cron entry: %w", err)
+	}
+	return nil
+}
+
+// deferCronArm parks a failed arm on the runner's standard backoff and says so.
+func (r *Runner) deferCronArm(kind string, interval time.Duration, cause error) {
+	r.mu.Lock()
+	pending := r.pendingArms[kind]
+	if pending == nil {
+		pending = &pendingArm{interval: interval}
+		r.pendingArms[kind] = pending
+	}
+	pending.attempts++
+	pending.lastErr = cause
+	pending.retryAt = r.now().Add(r.backoff(pending.attempts))
+	attempts, retryAt := pending.attempts, pending.retryAt
+	r.mu.Unlock()
+	r.log("jobs: CRON %s IS NOT ARMED (attempt %d): %v — it will not fire until it is; retrying at %s",
+		kind, attempts, cause, retryAt.Format(time.RFC3339))
+}
+
+// retryCronArming re-attempts every parked arm whose backoff has elapsed. The
+// dispatch loop calls it once per pass, so it costs one uncontended mutex on a
+// runner with nothing parked — which is every runner that is healthy.
+func (r *Runner) retryCronArming() {
+	r.mu.Lock()
+	if len(r.pendingArms) == 0 {
+		r.mu.Unlock()
+		return
+	}
+	now := r.now()
+	due := make(map[string]time.Duration, len(r.pendingArms))
+	for kind, pending := range r.pendingArms {
+		if !now.Before(pending.retryAt) {
+			due[kind] = pending.interval
 		}
 	}
+	r.mu.Unlock()
+	for kind, interval := range due {
+		r.armCronKind(kind, interval)
+	}
+}
+
+// cronArmError reports why a kind has no recurring record, or nil when the
+// runner has no explanation to offer.
+func (r *Runner) cronArmError(kind string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.startErr != nil {
+		return fmt.Errorf("the runner did not start: %w", r.startErr)
+	}
+	if pending := r.pendingArms[kind]; pending != nil {
+		return fmt.Errorf("arming it has failed %d time(s), last: %w", pending.attempts, pending.lastErr)
+	}
+	return nil
 }
 
 // rearmCronLocked returns a finished cron job to queued one interval out.
@@ -84,7 +168,9 @@ func (r *Runner) rearmCronLocked(j *Job, interval time.Duration, runErr error) {
 		j.LastError = ""
 	}
 	if err := r.store.Save(j); err != nil {
-		r.log("jobs: re-arm cron entry for %s: %v", j.Kind, err)
+		// The claim write left the row RUNNING, which dispatch never selects; only
+		// the orphan recovery at the next Start puts it back in the rotation.
+		r.log("jobs: CRON %s DID NOT RE-ARM: %v — it will not fire again until the daemon restarts", j.Kind, err)
 	}
 }
 
@@ -95,6 +181,8 @@ var ErrNotCron = errors.New("jobs: kind is not a cron entry")
 var ErrCronKind = errors.New("jobs: kind is a cron entry and cannot be enqueued directly")
 
 // CronEntry returns the recurring record for kind: next fire and last outcome.
+// A missing record is an error whenever the runner knows why it is missing —
+// "no entry, no error" reads as "not armed yet" and explains nothing.
 func (r *Runner) CronEntry(kind string) (*Job, error) {
 	if r.disabled {
 		return nil, ErrDisabled
@@ -102,5 +190,12 @@ func (r *Runner) CronEntry(kind string) (*Job, error) {
 	if r.cronInterval(kind) <= 0 {
 		return nil, fmt.Errorf("%w: %s", ErrNotCron, kind)
 	}
-	return r.GetByKey(kind, CronKey)
+	entry, err := r.GetByKey(kind, CronKey)
+	if err != nil || entry != nil {
+		return entry, err
+	}
+	if armErr := r.cronArmError(kind); armErr != nil {
+		return nil, fmt.Errorf("jobs: cron entry for %s is not armed: %w", kind, armErr)
+	}
+	return nil, nil
 }

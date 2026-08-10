@@ -3,6 +3,9 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"testing/synctest"
@@ -212,6 +215,104 @@ func TestArmingRevivesACronEntryAPriorBuildKilled(t *testing.T) {
 			t.Fatalf("the revived cron entry never fired; it sits at state=%q scheduled=%s", j.State, j.ScheduledAt)
 		}
 	})
+}
+
+// The store can refuse the arming write — a busy SQLite under load is the case
+// that happens. A kind that fails to arm has no record at all: dispatch never
+// selects it and finish() never re-arms it, so noting the error and moving on
+// retires the duty until someone restarts the daemon. Arming keeps trying, and
+// while it has not landed it says so both in the log and to a caller asking.
+func TestArmingRetriesUntilTheStoreTakesTheCronEntry(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		var logMu sync.Mutex
+		var logged []string
+		r, store := newBubbleRunner(t, func(o *Options) {
+			o.Log = func(format string, args ...any) {
+				logMu.Lock()
+				logged = append(logged, fmt.Sprintf(format, args...))
+				logMu.Unlock()
+			}
+		})
+		var fires atomic.Int64
+		if err := r.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
+			fires.Add(1)
+			return nil, nil
+		}, HandlerConfig{}); err != nil {
+			t.Fatalf("register cron: %v", err)
+		}
+
+		store.refuseSaves(errors.New("database is locked"))
+		mustStart(t, r)
+		synctest.Wait()
+
+		entry, err := r.CronEntry(cronKind)
+		if entry != nil {
+			t.Fatalf("a store that refused every write still produced a cron entry: %+v", entry)
+		}
+		if err == nil {
+			t.Fatal("an unarmed cron entry reported no error, which reads exactly like a healthy one that has not been written yet")
+		}
+		for _, want := range []string{cronKind, "database is locked"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("CronEntry error %q does not name %q", err, want)
+			}
+		}
+		logMu.Lock()
+		lines := strings.Join(logged, "\n")
+		logMu.Unlock()
+		if !strings.Contains(lines, cronKind) || !strings.Contains(lines, "database is locked") {
+			t.Fatalf("nothing in the log names the kind and the cause:\n%s", lines)
+		}
+
+		store.healSaves()
+		// The retry is one backoff away and the dispatch loop is what runs it.
+		time.Sleep(DefaultBackoffBase + time.Second)
+		synctest.Wait()
+
+		armed, err := r.CronEntry(cronKind)
+		if err != nil || armed == nil {
+			t.Fatalf("cron entry after the store recovered: %v (%+v)", err, armed)
+		}
+		if armed.State != StateQueued {
+			t.Fatalf("re-armed cron entry state = %s, want queued", armed.State)
+		}
+		// Armed is not the same as beating: let the interval elapse and watch it fire.
+		time.Sleep(time.Hour)
+		synctest.Wait()
+		if got := fires.Load(); got != 1 {
+			t.Fatalf("the re-armed cron fired %d times over its interval, want 1", got)
+		}
+	})
+}
+
+// A runner whose Start failed arms nothing at all, so every kind it registered is
+// missing for a reason it alone knows. Losing the single-instance lock to another
+// runner is how that happens.
+func TestCronEntryReportsARunnerThatNeverStarted(t *testing.T) {
+	store := newMemStore()
+	opts := Options{Store: store, PollInterval: testPoll, Log: func(string, ...any) {}}
+
+	holder := New(opts)
+	mustStart(t, holder)
+	t.Cleanup(holder.Stop)
+
+	blocked := New(opts)
+	if err := blocked.RegisterCron(cronKind, time.Hour, func(context.Context, *Job) (any, error) {
+		return nil, nil
+	}, HandlerConfig{}); err != nil {
+		t.Fatalf("register cron: %v", err)
+	}
+	if err := blocked.Start(); !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("second Start = %v, want ErrAlreadyRunning", err)
+	}
+
+	entry, err := blocked.CronEntry(cronKind)
+	if entry != nil {
+		t.Fatalf("a runner that never started produced a cron entry: %+v", entry)
+	}
+	if !errors.Is(err, ErrAlreadyRunning) {
+		t.Fatalf("CronEntry on a runner that never started = %v, want it to carry %v", err, ErrAlreadyRunning)
+	}
 }
 
 // Enqueueing ordinary work onto a recurring kind would mint a second record that

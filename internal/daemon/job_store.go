@@ -18,8 +18,11 @@ var _ jobs.Store = (*sqlJobStore)(nil)
 // (which imports both internal/jobs and internal/store) so neither of those
 // packages depends on the other.
 //
-// The single-instance lock is a file lock in the profile data dir — one queue per
-// profile, matching one daemon per profile.
+// The single-instance lock is a file lock in the daemon's own data root, beside
+// the attn.pid that already marks one daemon per root — one queue per daemon.
+// config.ValidateDaemonIsolation refuses to start a daemon whose data root is not
+// the profile data dir unless its database is separately isolated, so a root of
+// its own always means a store of its own.
 type sqlJobStore struct {
 	store   *store.Store
 	lockDir string
@@ -27,9 +30,13 @@ type sqlJobStore struct {
 }
 
 // newSQLJobStore builds the adapter over the daemon's store, locking under the
-// profile data dir.
+// daemon's data root.
 func (d *Daemon) newSQLJobStore() *sqlJobStore {
-	return &sqlJobStore{store: d.store, lockDir: config.DataDir(), log: d.logf}
+	lockDir := d.dataRoot
+	if lockDir == "" {
+		lockDir = config.DataDir()
+	}
+	return &sqlJobStore{store: d.store, lockDir: lockDir, log: d.logf}
 }
 
 // jobSubject names the entity a background job acts on — the workspace, session,
