@@ -65,6 +65,10 @@ interface MermaidDiagramProps {
   presentation?: 'static' | 'reader';
 }
 
+interface RenderedMermaidDiagramProps extends MermaidDiagramProps {
+  theme: MermaidTheme;
+}
+
 interface DiagramSize {
   width: number;
   height: number;
@@ -115,8 +119,17 @@ function scrollDiagram(viewport: HTMLDivElement, event: KeyboardEvent<HTMLDivEle
   return false;
 }
 
-export function MermaidDiagram({ code, onLayoutChange, presentation = 'static' }: MermaidDiagramProps) {
+export function MermaidDiagram(props: MermaidDiagramProps) {
   const theme = useMermaidTheme();
+  return <RenderedMermaidDiagram key={`${theme}:${props.code}`} {...props} theme={theme} />;
+}
+
+function RenderedMermaidDiagram({
+  code,
+  onLayoutChange,
+  presentation = 'static',
+  theme,
+}: RenderedMermaidDiagramProps) {
   const rawId = useId();
   const [svg, setSvg] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -128,10 +141,6 @@ export function MermaidDiagram({ code, onLayoutChange, presentation = 'static' }
 
   useEffect(() => {
     let cancelled = false;
-    setSvg(null);
-    setError(null);
-    setSize(null);
-    setFocusState(null);
 
     loadMermaid()
       .then(async ({ default: mermaid }) => {
