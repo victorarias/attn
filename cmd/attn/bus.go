@@ -108,15 +108,19 @@ type busStatusJSON struct {
 }
 
 type busProducerReport struct {
-	Name            string  `json:"name"`
-	Events          int64   `json:"events"`
-	Bytes           int64   `json:"bytes"`
-	Subjects        int64   `json:"subjects"`
-	Share           float64 `json:"share"`
-	RecentPerHour   float64 `json:"recent_per_hour"`
-	BaselinePerHour float64 `json:"baseline_per_hour"`
-	SurgePerHour    float64 `json:"surge_per_hour"`
-	Surging         bool    `json:"surging"`
+	Name             string  `json:"name"`
+	Events           int64   `json:"events"`
+	Bytes            int64   `json:"bytes"`
+	Subjects         int64   `json:"subjects"`
+	Share            float64 `json:"share"`
+	RecentPerHour    float64 `json:"recent_per_hour"`
+	BaselinePerHour  float64 `json:"baseline_per_hour"`
+	SustainedPerHour float64 `json:"sustained_per_hour"`
+	SurgePerHour     float64 `json:"surge_per_hour"`
+	// SurgeWindowSeconds names which window tripped, so a script can act on the
+	// crossing without parsing the health sentence written for a human.
+	SurgeWindowSeconds float64 `json:"surge_window_seconds"`
+	Surging            bool    `json:"surging"`
 }
 
 type busConsumerReport struct {
@@ -161,7 +165,8 @@ func busStatusReport(s bus.Status) busStatusJSON {
 		out.Producers = append(out.Producers, busProducerReport{
 			Name: p.Name, Events: p.Events, Bytes: p.Bytes, Subjects: p.Subjects,
 			Share: p.Share, RecentPerHour: p.RecentPerHour,
-			BaselinePerHour: p.BaselinePerHour, SurgePerHour: p.SurgePerHour,
+			BaselinePerHour: p.BaselinePerHour, SustainedPerHour: p.SustainedPerHour,
+			SurgePerHour: p.SurgePerHour, SurgeWindowSeconds: p.SurgeWindow.Seconds(),
 			Surging: p.Surging,
 		})
 	}

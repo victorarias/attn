@@ -303,10 +303,13 @@ export function EventBusSettings({ getBusStatus, setConsumerEnabled }: EventBusS
           >
             {loading ? 'Reading…' : 'Refresh'}
           </button>
+          {/* This page always reads the daemon, so `delivering: false` here can
+              only mean the daemon runs no durable delivery loops — never the
+              CLI's other meaning, that the snapshot came from the database. */}
           <span className="settings-hint">
             {status.delivering
               ? 'Read from the daemon that owns delivery, so a consumer that is registered but not running is visible.'
-              : 'Read from the database rather than from the running daemon, so whether a delivery loop is actually running is not visible.'}
+              : 'Read from the daemon, which is running no durable delivery loops right now, so there is nothing to report as running or stalled.'}
           </span>
         </div>
       </div>

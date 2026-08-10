@@ -196,6 +196,18 @@ describe('EventBusSettings', () => {
     expect(screen.getByTestId('bus-consumer-absent')).not.toHaveTextContent('Not running');
   });
 
+  // `delivering: false` means two different things depending on who read the
+  // snapshot. The CLI read the database; this page always read the daemon, so it
+  // must not borrow the CLI's sentence and claim a transport it did not use.
+  it('says the daemon has no delivery loops rather than claiming it read the database', async () => {
+    renderPane(status({ delivering: false }));
+    await screen.findByTestId('bus-producers');
+
+    const footer = screen.getByTestId('bus-refresh').parentElement as HTMLElement;
+    expect(footer).toHaveTextContent('Read from the daemon');
+    expect(footer).not.toHaveTextContent('from the database');
+  });
+
   // The way in needs the way out: disable and enable are the same button.
   it('toggles a consumer and re-reads the result', async () => {
     const setEnabled = vi.fn().mockResolvedValue({ consumer: 'notifier' });
