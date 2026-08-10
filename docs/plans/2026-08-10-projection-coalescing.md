@@ -59,23 +59,30 @@ Two independent sources, both read-only against production:
 The bus log gives rates over a realistic week; the socket gives byte sizes the
 log cannot know, because a fact's payload is not its projection's payload.
 
-One known inaccuracy, in the conservative direction: the model assumed
-`ticket.*` collapses inside `coalesceSnapshots` like `pr.*` does. It does not
-(see below), so the true push count is 13 higher than the table reports across
-201 hours. Nothing else in the model depends on it.
+Two traps in building that model, both of which produced wrong numbers on the
+first pass and are worth knowing before re-running it:
+
+- `ticket.*` does **not** collapse inside `coalesceSnapshots` the way `pr.*`
+  does (see below). Assuming it did undercounted by 13 pushes over 201 hours.
+- Deriving the gap between consecutive facts in SQL as
+  `CAST((julianday(b) - julianday(a)) * 86400 AS INT)` truncates 698 genuine
+  2-second gaps to 1, inflating the flap's measured share. Compute gaps on
+  integer epoch seconds. Every push figure below comes from the integer path;
+  the drop is **188,557**, which is exactly 260,286 − 71,729 and exactly
+  232,111 − 43,554.
 
 ### Post-flap-fix is the world this is designed for
 
 A sibling change fixes the evidence-reason flap: `runEvidenceResolveLoop`
 re-resolves every session each second and broadcasts whenever the resolver
 *reason* changes, and on a busy session two co-true clauses alternate at 1 Hz
-without the state ever moving. In the log, **81.5%** of `session.state.changed`
+without the state ever moving. In the log, **81.2%** of `session.state.changed`
 facts land within 1 second of the previous fact on the same subject. The model
 below reports both worlds; the flap-fixed column drops exactly those.
 
 |                          | today       | post flap-fix |
 | ------------------------ | ----------- | ------------- |
-| pushes over 201 h        | 260,273     | 71,716        |
+| pushes over 201 h        | 260,286     | 71,729        |
 | average rate             | 1,295 /h    | **357 /h**    |
 | seconds with any push    | 23.1 % of wall clock | 8.6 % |
 | pushes/sec p50 / p99 / max | 1 / 5 / 36 | 1 / 3 / 36    |
@@ -112,18 +119,42 @@ Measured on the wire, production daemon:
 | `tickets_updated`         | **217,391** | 1.1 /h (from the log) |
 | `initial_state`           | 239,486     | once per connect |
 
-Bytes are the live observation throughout. Rates are the live observation too,
-except `tickets_updated` — it fired once in the window, too rarely to rate from
-it, so its rate is the log's 217 pushes over 201 hours.
-
 Whole-socket throughput during observation: **3.0 KB/s**, or 2.3 KB/s
 discounting the one-off `initial_state` — with the flap still running.
 
-Carrying the post-fix rates in the table above through these sizes puts the
-whole socket at **206 B/s** on average. Two thirds of that is the two messages
-this document ends up recommending fixing: `prs_updated` at 72 B/s and
-`tickets_updated` at 66 B/s, the latter from a message that fires roughly once
-an hour.
+**The rate column above is a short-window sample; do not compute with it.** It
+is what a five-minute observation saw, which is fine for saying "this arrives
+often" and useless as a rate. `sessions_updated` is the clearest trap: two
+messages in 57 seconds reads as 127/h, and the log's 201 hours put it at 0.8/h.
+Rates to carry through the sizes come from the model, below.
+
+### The post-fix byte budget
+
+Model push counts over the 201-hour window, priced at the observed sizes above:
+
+| message                 | pushes | /h    | bytes   | B/s   |
+| ----------------------- | ------ | ----- | ------- | ----- |
+| `session_state_changed` | 43,769 | 217.8 | 720     | 43.6  |
+| `plugins_updated`       | 14,924 | 74.2  | 1,017   | 21.0  |
+| `prs_updated`           | 7,404  | 36.8  | 7,037   | 72.0  |
+| `workspace_state_changed` | 1,767 | 8.8  | 265     | 0.6   |
+| `tasks_changed`         | 1,642  | 8.2   | 25      | 0.1   |
+| `session_pty_resized`   | 1,042  | 5.2   | 720     | 1.0   |
+| `tickets_updated`       | 230    | 1.1   | 217,391 | 69.1  |
+| `sessions_updated`      | 160    | 0.8   | 6,009   | 1.3   |
+| everything else         | 791    | 3.9   | ≤1,000  | 0.4   |
+| **total**               | **71,729** | **356.9** | | **209.1** |
+
+**209 B/s** for the whole socket, post-fix. Two thirds of it is the two
+messages this document ends up recommending fixing — `prs_updated` at 72 B/s
+and `tickets_updated` at 69 B/s, the second from a message that fires about
+once an hour.
+
+The `session_state_changed` row counts 43,769, not the 43,554
+`session.state.changed` facts: seven other session facts (`registered`,
+`renamed`, `pin`, `cap`, `activity`, `conversation`, `workspace`) project the
+same wire message. The per-session-hour row above counts facts, this one counts
+pushes, and the 215 difference is why they are not the same number.
 
 The per-session push is 720 bytes. The daemon marshals it once and enqueues the
 same byte slice per client (`SendRawTextToMatchingClients`), so client fan-out
@@ -212,7 +243,7 @@ a number, so nobody has to re-derive it.
 ### What to do instead
 
 1. **Land the flap fix** (sibling work, ticket `a4-slice5-rt`). Over this
-   window it removes 189,255 facts — 72% of the wire pushes and 60% of the
+   window it removes 188,557 facts — 72.4% of the wire pushes and 59.9% of the
    durable bus log.
 2. **Give `plugin.health.changed` a delta gate.** Publish only when
    status or message actually moves. Same shape as the flap fix, ~5 lines. This
