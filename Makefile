@@ -339,7 +339,12 @@ generate-types: ensure-go-jsonschema
 		--no-prefer-unions --no-prefer-unknown \
 		-o app/src/types/generated.ts
 
-# CI check: verify generated files are up-to-date
+# CI check: verify generated files are up-to-date.
+#
+# This flags *committed* drift, which is what CI sees. generate-types rewrites
+# the files in place first, so an uncommitted hand-edit is overwritten before the
+# diff runs and this passes silently — commit the edit if you are trying to
+# reproduce a drift failure locally.
 check-types: generate-types
 	git diff --exit-code internal/protocol/generated.go app/src/types/generated.ts
 
