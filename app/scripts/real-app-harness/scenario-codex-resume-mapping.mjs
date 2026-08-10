@@ -429,12 +429,25 @@ async function main() {
 
     await runner.step('start_successor_with_codex_new', async () => {
       const beforeNew = await client.request('read_pane_text', { sessionId, paneId: initialPaneId });
+      const previousHeaderCount = countCodexHeaders(beforeNew?.text || '');
       await submitCodexPromptViaUi(client, sessionId, initialPaneId, '/new');
+
+      // Some Codex versions use the first Enter to accept the slash-command
+      // completion. Confirm it only when /new has not already opened a prompt.
+      await delay(1000);
+      const afterFirstEnter = await client.request('read_pane_text', { sessionId, paneId: initialPaneId });
+      if (countCodexHeaders(afterFirstEnter?.text || '') <= previousHeaderCount) {
+        await client.request('type_pane_via_ui', {
+          sessionId,
+          paneId: initialPaneId,
+          text: '\n',
+        });
+      }
       const freshPrompt = await waitForCodexFreshPrompt(
         client,
         sessionId,
         initialPaneId,
-        countCodexHeaders(beforeNew?.text || ''),
+        previousHeaderCount,
         20_000
       );
       runner.writeJson('codex-after-new.json', freshPrompt);
