@@ -131,7 +131,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAgentSetModel: commandMetadata(ScopeSession, true, true),
 	// Local: a conversation's history is a file in THIS daemon's data dir, so
 	// the answer is never merged from an endpoint.
-	protocol.CmdListPastConversations:                 commandMetadata(ScopeHubLocal, false, false),
+	protocol.CmdListPastConversations: commandMetadata(ScopeHubLocal, false, false),
 	// Local: the bus is this daemon's own spine, and a remote endpoint's log is
 	// its own diagnostic. Merging two would describe neither.
 	protocol.CmdBusStatusGet: commandMetadata(ScopeHubLocal, false, false),

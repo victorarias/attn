@@ -138,12 +138,12 @@ const (
 // Health kinds. Machine-readable so a surface can style or filter by them; the
 // Message is the whole sentence and needs no assembly.
 const (
-	HealthConsumerDisabled  = "consumer_disabled"
-	HealthConsumerStalled   = "consumer_stalled"
-	HealthConsumerNotLive   = "consumer_not_live"
-	HealthConsumerLagging   = "consumer_lagging"
-	HealthRetentionPinned   = "retention_pinned"
-	HealthProducerSurging   = "producer_surging"
+	HealthConsumerDisabled = "consumer_disabled"
+	HealthConsumerStalled  = "consumer_stalled"
+	HealthConsumerNotLive  = "consumer_not_live"
+	HealthConsumerLagging  = "consumer_lagging"
+	HealthRetentionPinned  = "retention_pinned"
+	HealthProducerSurging  = "producer_surging"
 )
 
 // Health is one thing wrong, said plainly. A surface renders Message; it does
