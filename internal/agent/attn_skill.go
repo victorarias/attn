@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 
@@ -81,6 +82,28 @@ func pruneOrphanedSkillFiles(skillDir string, expected map[string]bool) error {
 		}
 		return nil
 	})
+}
+
+// SkillFile returns a bundled skill file by path relative to the skill root,
+// e.g. "SKILL.md" or "references/tickets.md".
+func SkillFile(relative string) ([]byte, error) {
+	return attnSkillFiles.ReadFile(path.Join("attn_skill", relative))
+}
+
+// SkillReferenceNames lists the bundled skill references without the .md suffix.
+func SkillReferenceNames() []string {
+	entries, err := fs.ReadDir(attnSkillFiles, "attn_skill/references")
+	if err != nil {
+		return nil
+	}
+	names := make([]string, 0, len(entries))
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".md") {
+			continue
+		}
+		names = append(names, strings.TrimSuffix(entry.Name(), ".md"))
+	}
+	return names
 }
 
 func ensureAttnClaudeSkillInstalled() error {
