@@ -175,11 +175,11 @@ func TestTicketInboxRoutesOrdinaryDelegationToCreatorAndChief(t *testing.T) {
 	}
 }
 
-// When the creator IS the chief, it holds two identities on the ticket (its session
-// subscription and the durable chief role). ticketnotify.ConsumeAll merges the two
-// queues by event seq, so the agent's report is delivered exactly once — no
-// dedup guard of our own is needed.
-func TestTicketInboxDoesNotDuplicateWhenChiefIsTheCreator(t *testing.T) {
+// When the creator IS the chief, the ticket attaches to the durable role and to
+// nothing else: the acting session gets no subscription of its own, so nothing
+// keeps nudging it once the role moves on. It still observes through both of its
+// identities, and the agent's report reaches its inbox once, through the role.
+func TestChiefCreatedTicketAttachesTheRoleAndNotTheSession(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
 	_, chiefSessionID, _ := setupDelegationSource(t, d, backend)
@@ -206,23 +206,34 @@ func TestTicketInboxDoesNotDuplicateWhenChiefIsTheCreator(t *testing.T) {
 		t.Fatalf("chief observers = %+v, want session and role identities", observers)
 	}
 	subscribed, err := d.store.IsTicketSubscribed(chiefSessionID, ticketID)
-	if err != nil || !subscribed {
-		t.Fatalf("chief session subscribed = %v (err %v), want true as the creator", subscribed, err)
+	if err != nil || subscribed {
+		t.Fatalf("chief session subscribed = %v (err %v), want the role to carry the creator's attachment", subscribed, err)
+	}
+	participants, err := d.store.TicketParticipants(ticketID)
+	if err != nil {
+		t.Fatalf("TicketParticipants: %v", err)
+	}
+	for _, identity := range participants {
+		if identity == chiefSessionID {
+			t.Fatalf("participants = %v, want the chief attached through its role only", participants)
+		}
 	}
 
 	callTicketInbox(t, d, chiefSessionID)
 	callSetTicketStatus(t, d, agentSession, string(protocol.DispatchWorkStateReadyForReview), "take a look")
 
-	// The merge is load-bearing here, not incidental: BOTH identities have the report
-	// queued, so an unmerged consume would hand the chief the same event twice.
+	// The report is queued on the role and on nothing else, so the chief's own
+	// session identity has an empty queue.
+	queued := map[string]int{}
 	for _, observer := range observers {
 		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
 		if err != nil {
 			t.Fatalf("UnreadTicketEventsFor(%s): %v", observer.ID, err)
 		}
-		if len(events) != 1 {
-			t.Fatalf("identity %s queue = %+v, want the report queued once", observer.ID, events)
-		}
+		queued[observer.ID] = len(events)
+	}
+	if queued[chiefSessionID] != 0 || queued[store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)] != 1 {
+		t.Fatalf("queued per identity = %v, want the report on the role alone", queued)
 	}
 
 	bundles := callTicketInbox(t, d, chiefSessionID)

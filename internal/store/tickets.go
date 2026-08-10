@@ -301,7 +301,11 @@ func (s *Store) createTicket(t Ticket, author, ownerRole string, subscribers []s
 		TicketID: t.ID,
 		Kind:     TicketEventCreated,
 		Author:   author,
-		ToStatus: t.Status,
+		// Minting a role-owned ticket is the role's act: the role carries the
+		// creator's attachment, so the session filling it now is not left with a
+		// second, session-bound copy the next role holder cannot inherit.
+		AuthorRole: ownerRole,
+		ToStatus:   t.Status,
 	}, now)
 	if err != nil {
 		return nil, err
@@ -595,13 +599,13 @@ func (s *Store) SetTicketStatusWithOptions(
 	var updated *Ticket
 	outcome, err := s.withTicketMutation(id, options, now, func(tx *sql.Tx) error {
 		var mutationErr error
-		updated, mutationErr = setTicketStatusTx(tx, id, to, author, comment, now)
+		updated, mutationErr = setTicketStatusTx(tx, id, to, author, "", comment, now)
 		return mutationErr
 	})
 	return updated, outcome, err
 }
 
-func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, comment string, now time.Time) (*Ticket, error) {
+func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, authorRole, comment string, now time.Time) (*Ticket, error) {
 	current, err := scanTicket(tx.QueryRow(ticketSelect+` WHERE id = ?`, id))
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("%w: %q", ErrTicketNotFound, id)
@@ -637,6 +641,7 @@ func setTicketStatusTx(tx *sql.Tx, id string, to TicketStatus, author, comment s
 		TicketID:   id,
 		Kind:       TicketEventStatusChanged,
 		Author:     author,
+		AuthorRole: authorRole,
 		FromStatus: from,
 		ToStatus:   to,
 		Comment:    comment,
@@ -822,15 +827,19 @@ func (s *Store) AdoptTicketForDelegation(id, sessionID, cwd, lastAgentID, author
 	`, sessionID, cwd, lastAgentID, formatTicketTime(now), id); err != nil {
 		return nil, err
 	}
+	// Adoption is the same delegation act as minting, so it attaches the same way:
+	// when a role delegated this ticket, the events the acting session writes here
+	// carry the role. An ordinary session adopting a ticket the role happens to own
+	// passes no ownerRole and stays personally attached, as before.
 	if previousAssignee != sessionID {
 		if _, _, err := appendTicketEventTx(tx, TicketEvent{
-			TicketID: id, Kind: TicketEventAssigned, Author: author, Detail: sessionID,
+			TicketID: id, Kind: TicketEventAssigned, Author: author, AuthorRole: ownerRole, Detail: sessionID,
 		}, now); err != nil {
 			return nil, err
 		}
 	}
 	if current.Status != TicketStatusWorking {
-		if _, err := setTicketStatusTx(tx, id, TicketStatusWorking, author, "", now); err != nil {
+		if _, err := setTicketStatusTx(tx, id, TicketStatusWorking, author, ownerRole, "", now); err != nil {
 			return nil, err
 		}
 	}
@@ -1088,7 +1097,7 @@ func submitTicketAttachTx(
 		return nil, err
 	}
 	if status != nil {
-		updated, updateErr := setTicketStatusTx(tx, ticketID, *status, author, "", now)
+		updated, updateErr := setTicketStatusTx(tx, ticketID, *status, author, "", "", now)
 		if updateErr != nil {
 			return nil, updateErr
 		}

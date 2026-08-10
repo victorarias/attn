@@ -81,16 +81,20 @@ func TestCreateDelegatedTicketFallsBackPastSequentialRange(t *testing.T) {
 }
 
 // Participation is the routing contract: the delegated agent (assignee), the
-// delegator, and the chief of staff each reach the ticket, for an ordinary
-// delegation as much as a chief-initiated one.
+// delegator, and the chief of staff each reach the ticket. Who the delegator IS
+// decides how it attaches — an ordinary session personally, the chief through
+// its durable role and never also as itself, so the attachment transfers with
+// the role instead of following the session that held it at delegation time.
 func TestCreateDelegatedTicketParticipants(t *testing.T) {
 	chiefRole := store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
 	for _, tc := range []struct {
 		name             string
 		ownedByChiefRole bool
+		want             []string
+		absent           string
 	}{
-		{"ordinary delegation", false},
-		{"chief delegation", true},
+		{"ordinary delegation", false, []string{"sess-delegated", "sess-creator", chiefRole}, ""},
+		{"chief delegation", true, []string{"sess-delegated", chiefRole}, "sess-creator"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -107,10 +111,13 @@ func TestCreateDelegatedTicketParticipants(t *testing.T) {
 			for _, p := range participants {
 				got[p] = true
 			}
-			for _, want := range []string{"sess-delegated", "sess-creator", chiefRole} {
+			for _, want := range tc.want {
 				if !got[want] {
 					t.Fatalf("participants = %v, missing %q", participants, want)
 				}
+			}
+			if tc.absent != "" && got[tc.absent] {
+				t.Fatalf("participants = %v, want %q attached through the role only", participants, tc.absent)
 			}
 
 			// Role ownership stays reserved for chief-initiated delegations: it is what

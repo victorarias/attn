@@ -25,7 +25,9 @@ session — the brief is its description, the session is its assignee — and yo
 participant on the ticket you created. That ticket is the channel in both
 directions: the agent reports its work state onto it, and you reach the agent with
 `attn ticket comment <ticket-id> -m "<note>"`. The chief of staff is also a
-participant on every delegation ticket, whoever started it.
+participant on every delegation ticket, whoever started it — and when the chief is
+the one delegating, that participation belongs to the ROLE. It moves to whoever
+holds the role next, instead of following the session that delegated.
 
 Follow-up: all runtimes receive the same ticket nudge when activity remains unread;
 Claude may also arm a Monitor on `attn ticket inbox --watch` to consume updates
