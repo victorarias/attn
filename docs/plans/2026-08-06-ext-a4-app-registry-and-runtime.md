@@ -495,6 +495,32 @@ than a defect:
   re-arms. Correct for a deliberate act, worth knowing as a way back that is
   not the restart verb.
 
+### Rulings on the four (2026-08-11)
+
+Victor ruled on all four after re-running the failure loop live on the
+merged head (lazy start, missing-binary path, crash-loop park, held park,
+recovery drain, bare-rollback trap):
+
+- **Hub sidecar: fix.** Bootstrap uploads `attn-app-runtime` beside the
+  `attn` binary so hub-managed remotes can run apps.
+- **Bare rollback: previously-serving.** `attn app rollback <name>` without
+  a version returns to the version that was serving before the current one
+  — the registry records the pointer at every flip — and says which version
+  it chose and why. No recorded previous fails loud with the version list.
+- **Restart must not forget a park.** The park persists and is restored at
+  daemon startup before anything can lazy-start the broken host; `attn app
+  runtime restart` stays the only unpark and clears the persisted state.
+  The original critical notification stands; a restore adds no second one.
+- **Retention floor: still no clock, but never silent.** Events pinned by an
+  enabled consumer are never dropped and no expiry exists — that stands.
+  What changes: a recurring check emits one warning notification per episode
+  when a consumer pins the floor past a threshold measured from healthy
+  data, and `attn bus status` and the settings page mark the consumer the
+  same way. Visibility instead of a clock.
+
+Each ruling was delegated for implementation the same day; this section
+records the decisions, and the PRs that land them carry their own receipts.
+
 ## Out of scope
 
 - UI tiles, panels, the `@attn/app` UI SDK, import maps — A5, which builds

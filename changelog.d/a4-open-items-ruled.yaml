@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  The A4 plan records Victor's rulings on the four open items the exit
+  proof left: upload the app-runtime sidecar to hub remotes, make bare
+  rollback return to the previously-serving version, persist a runtime
+  park across daemon restarts, and surface pinned bus retention with a
+  warning notification instead of an expiry clock.
