@@ -743,6 +743,17 @@ model AgentPeekMessage {
   target_session_id: string;    // full id or unique prefix (the short id from `attn agent list`)
 }
 
+// One agent sends another a message. The daemon persists it, composes the
+// attributed prompt, and delivers it into the target's conversation — the
+// sender never touches the target's PTY, so attribution cannot be forged
+// beyond what the sender puts in content.
+model AgentMsgMessage {
+  cmd: "agent_msg";
+  target_session_id: string;    // full id or unique prefix
+  source_session_id: string;    // who is speaking; the daemon composes from this
+  content: string;
+}
+
 // A Stop is not always terminal: the turn may yield with background work still
 // in flight (it auto-resumes on completion) or park on a pending scheduled
 // wakeup. These carry that as FACTS observed by the hook — the statuses of the
@@ -4517,6 +4528,7 @@ model Response {
   session_transcript_result?: SessionTranscriptResult;
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
+  agent_msg_result?: AgentMsgResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;
@@ -4597,6 +4609,23 @@ model AgentPeekResult {
   last_assistant_message?: string;
   // Absent when the backend cannot serve a snapshot (old worker, no frame).
   screen?: AgentPeekScreen;
+}
+
+// What became of a message. Never a silent drop: a message that could not be
+// typed right now is `queued` and the daemon retries it on the target's next
+// state change, and one the inbound guard turned away is `refused` with the
+// reason. `detail` is the sentence for the sender, presence-specific.
+enum AgentMsgStatus {
+  delivered,
+  queued,
+  refused,
+}
+
+model AgentMsgResult {
+  message_id: string;
+  target_session_id: string;
+  status: AgentMsgStatus;
+  detail: string;
 }
 
 model EvidenceExcerpt {

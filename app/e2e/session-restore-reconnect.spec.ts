@@ -54,7 +54,7 @@ test.describe('Session restore and reconnect harness', () => {
     await expect(page.locator('[data-testid="sidebar-session-restore-s2"][data-state="waiting_input"]')).not.toHaveClass(/selected/);
   });
 
-  test('reconnects after daemon restart and marks stale Claude sessions recoverable when worker is missing', async ({ page, daemon }) => {
+  test('reconnects after daemon restart and drops a stale session it cannot bring back', async ({ page, daemon }) => {
     await daemon.start();
 
     await daemon.injectSession({
@@ -75,11 +75,10 @@ test.describe('Session restore and reconnect harness', () => {
 
     await daemon.restart();
 
-    // Session remains tracked and is marked recoverable (claude sessions with a
-    // missing worker can be revived from their stored launch intent).
-    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(1, { timeout: 15000 });
-    await expect(page.locator('[data-testid="session-reconnect-s1"][data-state="recoverable"]')).toBeVisible({ timeout: 15000 });
-    await expect(page.locator('.warning-banner')).toContainText(/can be recovered/i, { timeout: 10000 });
+    // The injected row was never launched, so nothing on disk can restore its
+    // conversation: startup recovery reaps it along with its pane.
+    await expect(page.locator('[data-testid="session-reconnect-s1"]')).toHaveCount(0, { timeout: 15000 });
+    await expect(page.locator('[data-testid="sidebar-session-reconnect-s1"]')).toHaveCount(0);
 
     await daemon.injectSession({
       id: 'reconnect-s2',

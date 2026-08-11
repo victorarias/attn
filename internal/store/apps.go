@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// The app registry's persistence (migration 101). An app is a manifest-declared,
+// The app registry's persistence (migration 102). An app is a manifest-declared,
 // bus-consuming automation running in the shared runtime; this file is the three
 // tables it lives in and nothing else — the lifecycle that stops a delivery loop
 // and the pipeline that builds an artifact are the daemon's.

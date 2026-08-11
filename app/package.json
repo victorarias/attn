@@ -34,6 +34,7 @@
     "real-app:scenario-tr204": "node scripts/real-app-harness/scenario-tr204-local-relaunch-formatting.mjs",
     "real-app:scenario-tr301": "node scripts/real-app-harness/scenario-tr301-local-utility-session-switch.mjs",
     "real-app:scenario-codex-resume": "node scripts/real-app-harness/scenario-codex-resume-mapping.mjs",
+    "real-app:scenario-crash-recovery": "node scripts/real-app-harness/scenario-crash-recovery-resumability.mjs",
     "real-app:scenario-automation-pr-continuity": "node scripts/real-app-harness/scenario-automation-pr-continuity.mjs",
     "real-app:scenario-automation-scheduled-cleanup": "node scripts/real-app-harness/scenario-automation-scheduled-cleanup.mjs",
     "real-app:scenario-automation-lifecycle": "node scripts/real-app-harness/scenario-automation-lifecycle.mjs",

@@ -471,7 +471,7 @@ func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
 	d.store.Add(&protocol.Session{
 		ID:             sessionID,
 		Label:          "claude",
-		Agent:          protocol.SessionAgentClaude, // recoverable: prune keeps it
+		Agent:          protocol.SessionAgentClaude,
 		Directory:      cwd,
 		State:          protocol.SessionStateWorking,
 		StateSince:     nowStr,
@@ -479,6 +479,9 @@ func TestDaemon_ReseedWorkspaceStatusesAfterRecovery(t *testing.T) {
 		LastSeen:       nowStr,
 		WorkspaceID:    workspaceID,
 	})
+	// Recoverable: a transcript to resume and an intent to relaunch from.
+	newRecoveryHome(t).resumableClaude(t, sessionID)
+	giveRestorationEvidence(t, d, sessionID, sessionID)
 	d.workspaces.associateSession(sessionID, workspaceID, "claude")
 
 	// Seed the cached rollup the way loadWorkspacesFromStore does at startup.
@@ -822,8 +825,10 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 	if report.StateUpdated != 2 {
 		t.Fatalf("state_updated = %d, want 2", report.StateUpdated)
 	}
-	if report.Reaped != 1 {
-		t.Fatalf("reaped = %d, want 1", report.Reaped)
+	// Both missing sessions go: neither has a resume target, and being idle is
+	// not a reason to keep one.
+	if report.Reaped != 2 {
+		t.Fatalf("reaped = %d, want 2", report.Reaped)
 	}
 	if report.MarkedIdle != 0 {
 		t.Fatalf("marked_idle = %d, want 0", report.MarkedIdle)
@@ -872,17 +877,11 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend(t *testing.T) {
 		t.Fatalf("live-exited state = %s, want %s", liveExited.State, protocol.SessionStateIdle)
 	}
 
-	missingRunning := d.store.Get("missing-running")
-	if missingRunning != nil {
-		t.Fatal("missing-running session should be reaped (non-claude agent without live PTY)")
+	if missingRunning := d.store.Get("missing-running"); missingRunning != nil {
+		t.Fatal("missing-running session should be reaped: no worker and nothing to resume")
 	}
-
-	missingIdle := d.store.Get("missing-idle")
-	if missingIdle == nil {
-		t.Fatal("missing-idle session missing after reconcile")
-	}
-	if missingIdle.State != protocol.SessionStateIdle {
-		t.Fatalf("missing-idle state = %s, want idle", missingIdle.State)
+	if missingIdle := d.store.Get("missing-idle"); missingIdle != nil {
+		t.Fatal("missing-idle session should be reaped: idle is not evidence of anything to come back to")
 	}
 }
 
@@ -954,142 +953,6 @@ func TestDaemon_ReconcileSessionsWithWorkerBackend_ReapRemovesEmptyWorkspace(t *
 	}
 	if _, ok := d.workspaces.snapshot("ws-stale"); ok {
 		t.Fatal("empty workspace still registered after session reap")
-	}
-}
-
-func TestDaemon_ReconcileSessionsWithWorkerBackend_ClaudeSessionsRecoverable(t *testing.T) {
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	now := string(protocol.TimestampNow())
-
-	// Claude session without live PTY should be marked recoverable
-	d.store.Add(&protocol.Session{
-		ID:             "claude-stale",
-		Label:          "claude-stale",
-		Agent:          protocol.SessionAgentClaude,
-		Directory:      "/tmp/claude-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-
-	// Codex session without live PTY should be reaped
-	d.store.Add(&protocol.Session{
-		ID:             "codex-stale",
-		Label:          "codex-stale",
-		Agent:          protocol.SessionAgentCodex,
-		Directory:      "/tmp/codex-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-
-	// Copilot session without live PTY should be reaped
-	d.store.Add(&protocol.Session{
-		ID:             "copilot-stale",
-		Label:          "copilot-stale",
-		Agent:          protocol.SessionAgentCopilot,
-		Directory:      "/tmp/copilot-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-
-	d.store.Add(&protocol.Session{
-		ID:             "plugin-metadata-stale",
-		Label:          "plugin-metadata-stale",
-		Agent:          "snipe",
-		Directory:      "/tmp/plugin-metadata-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-	if !d.store.BeginAgentDriverRun("plugin-metadata-stale", "snipe-plugin", "run-metadata") {
-		t.Fatal("BeginAgentDriverRun(plugin-metadata-stale) failed")
-	}
-	if !d.store.ApplyAgentDriverMetadata("plugin-metadata-stale", "run-metadata", 1, `{"native_id":"resume-me"}`) {
-		t.Fatal("ApplyAgentDriverMetadata(plugin-metadata-stale) failed")
-	}
-	d.store.EndAgentDriverRun("plugin-metadata-stale")
-
-	d.store.Add(&protocol.Session{
-		ID:             "plugin-capability-stale",
-		Label:          "plugin-capability-stale",
-		Agent:          "snipe-live",
-		Directory:      "/tmp/plugin-capability-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-	plugin := &pluginConnection{name: "snipe-live-plugin"}
-	if err := d.plugins.register(plugin); err != nil {
-		t.Fatalf("register plugin: %v", err)
-	}
-	if err := d.plugins.registerDriver(plugin, pluginDriverRegisterParams{
-		Agent:        "snipe-live",
-		Capabilities: map[string]bool{"resume": true},
-	}); err != nil {
-		t.Fatalf("register resumable driver: %v", err)
-	}
-
-	d.store.Add(&protocol.Session{
-		ID:             "plugin-owned-stale",
-		Label:          "plugin-owned-stale",
-		Agent:          "resume-before-register",
-		Directory:      "/tmp/plugin-owned-stale",
-		State:          protocol.SessionStateWorking,
-		StateSince:     now,
-		StateUpdatedAt: now,
-		LastSeen:       now,
-	})
-	if !d.store.BeginAgentDriverRun("plugin-owned-stale", "offline-plugin", "run-offline") {
-		t.Fatal("BeginAgentDriverRun(plugin-owned-stale) failed")
-	}
-
-	d.ptyBackend = &fakeWorkerReconcileBackend{
-		liveIDs: nil,
-		info:    map[string]ptybackend.SessionInfo{},
-	}
-
-	report := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
-
-	if report.MarkedRecoverable != 4 {
-		t.Fatalf("marked_recoverable = %d, want 4", report.MarkedRecoverable)
-	}
-	if report.Reaped != 2 {
-		t.Fatalf("reaped = %d, want 2", report.Reaped)
-	}
-
-	// Claude session should be recoverable.
-	claudeSession := d.store.Get("claude-stale")
-	if claudeSession == nil {
-		t.Fatal("claude-stale session should not be reaped")
-	}
-	if claudeSession.State != protocol.SessionStateRecoverable {
-		t.Fatalf("claude-stale state = %s, want recoverable", claudeSession.State)
-	}
-	for _, id := range []string{"plugin-metadata-stale", "plugin-capability-stale", "plugin-owned-stale"} {
-		session := d.store.Get(id)
-		if session == nil || session.State != protocol.SessionStateRecoverable {
-			t.Fatalf("%s session = %+v, want recoverable plugin session", id, session)
-		}
-	}
-
-	// Non-claude sessions should be removed
-	if d.store.Get("codex-stale") != nil {
-		t.Fatal("codex-stale session should be reaped")
-	}
-	if d.store.Get("copilot-stale") != nil {
-		t.Fatal("copilot-stale session should be reaped")
-	}
-
-	secondReport := d.reconcileSessionsWithWorkerBackend(context.Background(), true, time.Time{})
-	if secondReport.MarkedRecoverable != 0 {
-		t.Fatalf("second marked_recoverable = %d, want 0", secondReport.MarkedRecoverable)
 	}
 }
 
@@ -1174,8 +1037,10 @@ func TestDaemon_PruneSessionsWithoutPTY_SkipsSessionsRegisteredAfterCutoff(t *te
 		t.Fatalf("state = %s, want %s untouched", session.State, protocol.SessionStateLaunching)
 	}
 
-	// Same session, no cutoff: the claude driver recovers on a missing PTY, which
-	// is what the guard above is holding off.
+	// Same session, no cutoff: it has a transcript and an intent, so the verdict
+	// the guard above was holding off is `recoverable`.
+	newRecoveryHome(t).resumableClaude(t, "just-registered")
+	giveRestorationEvidence(t, d, "just-registered", "just-registered")
 	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
 		t.Fatalf("pruneSessionsWithoutPTY(zero) removed = %d, want 0", removed)
 	}
@@ -1203,6 +1068,7 @@ func TestDaemon_PruneSessionsWithoutPTY_PreservesPluginMetadataForResume(t *test
 	if !d.store.ApplyAgentDriverMetadata("plugin-resume", "run-resume", 1, `{"native_id":"resume-me"}`) {
 		t.Fatal("ApplyAgentDriverMetadata(plugin-resume) failed")
 	}
+	giveLaunchIntent(t, d, "plugin-resume")
 
 	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
 		t.Fatalf("pruneSessionsWithoutPTY removed = %d, want 0", removed)
@@ -1347,7 +1213,7 @@ func TestDaemon_RunDeferredWorkerReconciliationForcesIdleDemotion(t *testing.T) 
 
 	session := d.store.Get("stale-running")
 	if session != nil {
-		t.Fatal("stale-running session should be reaped (non-claude agent without live PTY)")
+		t.Fatal("stale-running session should be reaped: no worker and nothing to resume")
 	}
 
 	warnings := d.getWarnings()

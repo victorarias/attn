@@ -1,0 +1,7 @@
+kind: fixed
+area: daemon
+change: >
+  A request too large for the daemon's unix socket frame used to close the
+  connection without a word, reaching the caller as a bare "EOF" that named
+  neither the limit nor what was asked for. The daemon now answers with the
+  limit it hit.

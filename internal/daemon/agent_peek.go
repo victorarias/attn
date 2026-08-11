@@ -23,6 +23,10 @@ import (
 // runaway transcript touches.
 const agentPeekMessageMaxChars = annotatableMessageMaxChars
 
+// agentShortIDLength matches what `attn agent list` prints, so an id the daemon
+// puts in front of an agent is one that agent can paste back.
+const agentShortIDLength = 8
+
 // agentPeekSnapshotTimeout matches the model-capture snapshot budget: the
 // worker answers from its parsed terminal without touching the agent process.
 const agentPeekSnapshotTimeout = modelCaptureSnapshotTimeout

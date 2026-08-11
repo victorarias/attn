@@ -345,6 +345,25 @@ accumulates state across deliveries; the daemon re-runs the query when a write t
 the collection says the answer may have moved. A skipped delivery is not a lost
 update — the next one supersedes it.
 
+## Recoverable
+
+A session is **recoverable** when its runtime is gone but attn can still bring
+its conversation back — the state the sidebar offers a Reload on, and the state
+a pane revives itself from when it mounts. It is decided from two durable
+things and nothing else: a launch intent, which says how to start a
+replacement, and a restoration target that is still on disk, which says what
+the replacement reopens — an agent-native resume id the agent's driver still
+recognises, a conversation host's own session file, the launch intent's seed
+(a source conversation or an initial prompt the host had not said yet), or a
+plugin's persisted per-session handle.
+
+Recoverability and activity are separate axes. A crash takes `idle`, `working`,
+`waiting_input`, and `pending_approval` sessions down together and leaves them
+equally resumable, so what a session was last seen doing is context for the user
+and never the reason it survives or is reaped. A session that cannot be brought
+back is **reaped**: the row and its pane go, rather than lingering as a Reload
+that cannot work.
+
 ## Conversation session
 
 A **conversation session** is an attn session whose agent runs headless in a
@@ -477,10 +496,9 @@ finished.
 
 An agent becomes a conversation agent by its plugin driver registering the
 `conversation` capability. Everything else about launching it — argv, env, cwd —
-comes back from the same `driver.spawn` call a PTY-backed agent uses. That
-capability is also what makes its sessions recoverable rather than reaped: a
-conversation always has somewhere to come back from, so it never has to declare
-the PTY agents' `resume`.
+comes back from the same `driver.spawn` call a PTY-backed agent uses. It never
+has to declare the PTY agents' `resume`: that capability describes an agent
+resumed from an argv flag, and a host is resumed from its own session file.
 
 ## nisse
 

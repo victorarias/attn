@@ -30,7 +30,6 @@ var _ TranscriptWatcherBehaviorProvider = (*Claude)(nil)
 var _ ClassifierProvider = (*Claude)(nil)
 var _ ExecutableClassifierProvider = (*Claude)(nil)
 var _ LaunchPreparer = (*Claude)(nil)
-var _ SessionRecoveryPolicyProvider = (*Claude)(nil)
 var _ RecoveredStatePolicyProvider = (*Claude)(nil)
 var _ ResumePolicyProvider = (*Claude)(nil)
 var _ ResumeAvailabilityProvider = (*Claude)(nil)
@@ -571,10 +570,6 @@ func (c *Claude) BootstrapBytes() int64 {
 
 func (c *Claude) NewTranscriptWatcherBehavior() TranscriptWatcherBehavior {
 	return &claudeTranscriptWatcherBehavior{}
-}
-
-func (c *Claude) RecoverOnMissingPTY() bool {
-	return true
 }
 
 // RecoveredRunningState mirrors the default recovered-state mapping. Claude has

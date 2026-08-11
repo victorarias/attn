@@ -999,6 +999,24 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// something the user already dealt with.
 	// Applied by applyMigration100, whose ALTER is column-guarded.
 	{100, "add the severity level to notifications", ``},
+	// chief_of_staff_dispatch_messages (migration 46) never had a writer, so no
+	// user state exists to carry; its dispatch-scoped shape does not fit agent
+	// messages. Drop approved by Victor 2026-08-10.
+	{101, "create agent messages and drop the dispatch message table", `
+		CREATE TABLE IF NOT EXISTS agent_messages (
+			id TEXT PRIMARY KEY,
+			sender_session_id TEXT NOT NULL,
+			target_session_id TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			delivered_at TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_agent_messages_target_queued
+			ON agent_messages(target_session_id, delivered_at, created_at, id);
+		CREATE INDEX IF NOT EXISTS idx_agent_messages_sender_created
+			ON agent_messages(sender_session_id, target_session_id, created_at);
+		DROP TABLE IF EXISTS chief_of_staff_dispatch_messages;
+	`},
 	// The app registry (A4). Three tables, and their absences are as decided as
 	// their columns:
 	//
@@ -1017,11 +1035,12 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// content mints no new row" a property of the database rather than a
 	// convention in the apply pipeline.
 	//
-	// Numbered 96, then 97, then 98 on the epic branch, and now 101: each main
-	// sync found the number taken. A hole is not a free slot — the runner keeps
-	// one scalar version and skips anything at or below it, so a database that
-	// already ran 99 and 100 would never have created these tables from 98.
-	{101, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
+	// Numbered 96, then 97, then 98, then 101 on the epic branch, and now 102:
+	// each main sync found the number taken. A hole is not a free slot — the
+	// runner keeps one scalar version and skips anything at or below it, so a
+	// database that already ran 99 and 100 would never have created these
+	// tables from 98.
+	{102, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
     name               TEXT PRIMARY KEY,
     current_version_id INTEGER,
     created_at         TEXT NOT NULL,

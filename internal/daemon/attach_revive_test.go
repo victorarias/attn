@@ -27,6 +27,11 @@ func (b *attachReviveBackend) Attach(context.Context, string, string) (ptybacken
 
 func newAttachReviveTestDaemon(t *testing.T, state protocol.SessionState, intent *store.LaunchIntent) (*Daemon, *attachReviveBackend, *wsClient, string) {
 	t.Helper()
+	return newAttachReviveTestDaemonForAgent(t, protocol.SessionAgentClaude, state, intent)
+}
+
+func newAttachReviveTestDaemonForAgent(t *testing.T, agent protocol.SessionAgent, state protocol.SessionState, intent *store.LaunchIntent) (*Daemon, *attachReviveBackend, *wsClient, string) {
+	t.Helper()
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(func() { _ = d.store.Close() })
 	backend := &attachReviveBackend{}
@@ -37,7 +42,7 @@ func newAttachReviveTestDaemon(t *testing.T, state protocol.SessionState, intent
 	d.store.Add(&protocol.Session{
 		ID:             "recoverable",
 		Label:          "recoverable",
-		Agent:          protocol.SessionAgentClaude,
+		Agent:          agent,
 		Directory:      cwd,
 		WorkspaceID:    "workspace",
 		State:          state,
@@ -94,6 +99,40 @@ func TestAttachReviveRespawnsRecoverableSessionFromStoredIntent(t *testing.T) {
 	}
 	if opts.Cols != 101 || opts.Rows != 37 || !opts.YoloMode || opts.Executable != intent.Executable || opts.Model != intent.Model || opts.Effort != intent.Effort {
 		t.Fatalf("spawn options = %+v, want attach geometry and stored intent", opts)
+	}
+}
+
+// Mounting the pane is what brings a crashed codex session back, and it has to
+// come back to the same conversation: the native rollout id attn persisted is
+// what the relaunch resumes, under the launch policy the session already had.
+func TestAttachReviveResumesCodexFromItsNativeRolloutID(t *testing.T) {
+	home := newRecoveryHome(t)
+	home.resumableCodex(t, "native-rollout-1")
+	intent := store.LaunchIntent{Executable: "/opt/codex", Model: "gpt-5", Effort: "high"}
+	d, backend, client, _ := newAttachReviveTestDaemonForAgent(t, protocol.SessionAgentCodex, protocol.SessionStateRecoverable, &intent)
+	d.store.SetResumeSessionID("recoverable", "native-rollout-1")
+
+	d.handleAttachSession(client, &protocol.AttachSessionMessage{
+		Cmd:          protocol.CmdAttachSession,
+		ID:           "recoverable",
+		AttachPolicy: protocol.Ptr(protocol.AttachPolicyRevive),
+		Cols:         protocol.Ptr(120),
+		Rows:         protocol.Ptr(40),
+	})
+
+	result := readAttachReviveResult(t, client)
+	if !result.Success || !protocol.Deref(result.Revived) {
+		t.Fatalf("attach result = %+v, want success with revived=true", result)
+	}
+	opts, spawned := backend.LastSpawn()
+	if !spawned {
+		t.Fatal("backend Spawn not called")
+	}
+	if opts.ResumeSessionID != "native-rollout-1" {
+		t.Fatalf("resume_session_id = %q, want the persisted native rollout id", opts.ResumeSessionID)
+	}
+	if opts.Agent != string(protocol.SessionAgentCodex) || opts.Executable != intent.Executable || opts.Model != intent.Model || opts.Effort != intent.Effort {
+		t.Fatalf("spawn options = %+v, want the stored launch intent", opts)
 	}
 }
 

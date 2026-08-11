@@ -454,12 +454,13 @@ new version and `attn app enable` brought it back with the stall clock cleared.
 Rollback moved a pointer and built nothing. The Linux witness dispatched on the
 VM against the cross-compiled sidecar.
 
-**The migration renumber, proved both ways.** The app registry moved 98 → 101
-across three main syncs. A database at main's head opened by this build reaches
-101 and has the three `app_*` tables; the same database opened by a build
-identical except for the number stays at 100 with no tables, and `attn app list`
-fails with `no such table: apps`. The runner keeps one scalar version and skips
-anything at or below it, so the hole was never a free slot.
+**The migration renumber, proved both ways.** The app registry moved 98 → 101 →
+102, one step per main sync. Measured at 101, before the last sync moved it
+again: a database at main's head opened by this build reached 101 and had the
+three `app_*` tables; the same database opened by a build identical except for
+the number stayed at 100 with no tables, and `attn app list` failed with `no
+such table: apps`. The runner keeps one scalar version and skips anything at or
+below it, so the hole was never a free slot.
 
 **One defect, found and fixed (#842).** Parking did not hold. Dispatch called
 the same `supervise.Ensure` that `attn app runtime restart` calls, and `Ensure`
