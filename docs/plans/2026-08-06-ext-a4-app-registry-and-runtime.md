@@ -513,6 +513,13 @@ recovery drain, bare-rollback trap):
   a version returns to the version that was serving before the current one
   — the registry records the pointer at every flip — and says which version
   it chose and why. No recorded previous fails loud with the version list.
+  *Shipped* (#858) with undo semantics: the pointer swaps on every move, so
+  a second bare rollback returns to where you started (`cd -`), stated in
+  `--help` and tested. **Open, deliberately until the platform work's end:**
+  Victor leans toward a stack instead — each bare rollback walking one step
+  further back through serving history. Undo was shipped first because its
+  meaning never depends on how many times it has run; revisit once real
+  rollback usage exists to judge against.
 - **Restart must not forget a park.** The park persists and is restored at
   daemon startup before anything can lazy-start the broken host; `attn app
   runtime restart` stays the only unpark and clears the persisted state.

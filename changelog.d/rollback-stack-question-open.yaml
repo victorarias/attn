@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  The A4 plan records bare rollback's shipped undo semantics (a second
+  bare rollback returns to where you started) and keeps the alternative
+  — a stack walking further back through serving history, Victor's lean
+  — as an open question to revisit at the end of the platform work.
