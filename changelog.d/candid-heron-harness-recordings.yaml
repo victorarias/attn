@@ -1,0 +1,6 @@
+kind: internal
+area: harness
+change: >
+  ATTN_HARNESS_RECORD=1 records the app window of every createScenarioRunner
+  scenario to per-launch mp4 segments in the run's artifacts dir, for PR
+  evidence and failure diagnosis.

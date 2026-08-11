@@ -189,6 +189,11 @@ description. Record the run, publish, paste the emitted markdown:
 pass the profile you installed for this verification, the same name you will
 `profile clean` later. `--app <owner>` overrides for a non-attn window.
 
+Harness runs record themselves: `ATTN_HARNESS_RECORD=1` makes every
+`createScenarioRunner` scenario (and each serial-matrix or soak leg) write
+`recording-NN.mp4` segments into its artifacts dir, publishable with the same
+`publish` command. Details in `app/scripts/real-app-harness/CLAUDE.md`.
+
 The evidence repo is public and the clip shows whatever the window shows —
 session names, transcripts, tickets. Watch the recording before publishing;
 re-record rather than push something that should not be on the open internet.
