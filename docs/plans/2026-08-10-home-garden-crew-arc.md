@@ -126,6 +126,14 @@ boundary; the docstore id charset forbids `/`
 (`internal/docstore/docstore.go:307`), so qualified forms cannot leak into
 local storage. A seed command on an outpost hits the stage-2 fence.
 
+**Enrolling a machine that has been its own home takes a decision here.**
+Stage 2 enrolls a standalone home silently — right while a home owns nothing
+but its own sessions, and the record is the only thing that moves. Once the
+garden exists, that same sync fences off real state a person put on that
+machine. The state stays on disk and `attn enrollment leave` restores it, but
+the sync must say what it is fencing before it does, not after. Decide that
+wording when this stage opens.
+
 **Ticket retirement is gated on the uplink, not just on "garden usable".**
 Every delegation is ticket-tracked, including on outposts, and outpost
 tickets are daemon-local — retiring tickets while outposts are fenced
