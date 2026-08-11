@@ -1,0 +1,28 @@
+wall-of-prose.md:8:1 expletive-opener
+    span: There is
+    objection: "There is" opens on a placeholder — start with the subject
+wall-of-prose.md:8:1 long-sentence
+    span: There is a consideration that must be given to the fact that the subsystem lifecycle coordination layer configuration state machine transition handler performs an evaluation of every candidate before the point at which any determination about eventual disposition can be arrived at, and it is the case that this evaluation, which is performed once per candidate and which may be repeated in the event that a subsequent revision of the underlying record is observed by the watcher that is registered against the store at the moment the coordination layer is brought up, must be understood as being separate from the disposition itself, because the disposition is a thing that is decided later by a different component entirely, which means that any reader attempting to follow the flow of control through this paragraph will have lost the thread long before reaching the point where it is finally explained that none of this happens at all when the feature flag is off.
+    objection: 160 words in one sentence, past the 120-word tripwire — find the second idea in it and give it its own sentence
+wall-of-prose.md:8:31 passive-no-actor
+    span: must be given
+    objection: "must be given" tells someone to act without saying who — name the actor
+wall-of-prose.md:8:66 noun-string
+    span: subsystem lifecycle coordination layer configuration state machine transition handler
+    objection: 9 nouns in a row ("subsystem lifecycle coordination layer configuration state machine transition handler") — the reader holds the whole stack before the phrase resolves; turn one into a verb or a preposition
+wall-of-prose.md:10:1 hidden-verb
+    span: performs an evaluation
+    objection: "performs an evaluation" buries the verb in a noun
+    suggestion: evaluate
+wall-of-prose.md:22:1 expletive-opener
+    span: There are
+    objection: "There are" opens on a placeholder — start with the subject
+wall-of-prose.md:22:28 passive-no-actor
+    span: should be considered
+    objection: "should be considered" tells someone to act without saying who — name the actor
+wall-of-prose.md:22:50 expletive-opener
+    span: It is
+    objection: "It is" opens on a placeholder — start with the subject
+wall-of-prose.md:23:70 passive-no-actor
+    span: must be validated
+    objection: "must be validated" tells someone to act without saying who — name the actor

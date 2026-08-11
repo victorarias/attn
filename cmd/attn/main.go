@@ -254,6 +254,9 @@ func main() {
 	case "journal":
 		maybePrintProfileBanner()
 		runJournal()
+	case "prose":
+		// No banner: findings go to stdout for an agent to read.
+		runProse()
 	case "vision-check":
 		// No banner: output must stay pure (stdout = answer only, or a single
 		// --json line) for machine consumption by the calling agent.
@@ -655,6 +658,7 @@ commands:
   bus <command>                     event bus: consumer cursors, lag, kill switch
   doc <command>                     document store: collections, documents, live queries
   app <command>                     apps: list, status, enable, disable, remove
+  prose check <file|->              report what to simplify in Markdown prose
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
 	  daemon ensure|stop                ensure the daemon is running, or stop it

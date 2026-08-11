@@ -1,0 +1,14 @@
+kind: added
+area: cli
+change: >
+  `attn prose check <file>` reads Markdown and reports what to simplify: a
+  quoted span, the rule that objected, and what to do about it, at a file:line
+  you can jump to. Never a score. It objects to hidden verbs, noun pile-ups,
+  instructions that never say who acts, sentences opening on "there is", terms
+  on a word list the project owns, and sentences carrying more ideas than their
+  words can hold — and it catches the prose that games those rules, where every
+  sentence has been chopped short and nothing connects to anything. Code
+  fences, mermaid diagrams, front matter, tables, and link targets are not
+  prose and are never read. `--json` gives an agent the same findings, and
+  every threshold is set past what the repository's own accepted writing
+  reaches, so healthy prose never feels one.

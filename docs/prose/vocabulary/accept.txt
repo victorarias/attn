@@ -1,0 +1,8 @@
+# Terms reject.txt matches but that are right here anyway.
+#
+# Same format as reject.txt. This is the escape hatch for the one place a
+# rejected word is the correct word — a quoted error string, a proper name, a
+# term of art. It is not the place to park a word the gate keeps catching: if
+# the objection is wrong in general, delete the entry from reject.txt.
+#
+# Empty on purpose. Nothing has needed it yet.

@@ -1,0 +1,15 @@
+staccato.md:3:1 lost-thread
+    span: Every sentence here is short. A length rule sees nothing wrong. The words per sentence stay low. Each one parses cleanly. None of them is hard. The reader still cannot follow. Nothing connects to anything.
+    objection: 6 sentences in a row share no subject with the one before and open on no connective — the paragraph has lost its through-line
+staccato.md:3:1 flat-rhythm
+    span: Every sentence here is short. A length rule sees nothing wrong. The words per sentence stay low. Each one parses cleanly. None of them is hard. The reader still cannot follow. Nothing connects to anything. The subject changes every time. Cohesion is what went missing. Length was never the problem.
+    objection: 10 sentences whose lengths vary by 13% (floor 16%) — every sentence is the same size, so nothing in the paragraph reads as more important than anything else
+staccato.md:3:1 staccato-run
+    span: Every sentence here is short. A length rule sees nothing wrong. The words per sentence stay low. Each one parses cleanly. None of them is hard. The reader still cannot follow. Nothing connects to anything. The subject changes every time. Cohesion is what went missing. Length was never the problem.
+    objection: 10 sentences in a row of 9 words or fewer — this is chopped, not simple; join the ones that share a subject
+staccato.md:8:1 flat-rhythm
+    span: The daemon writes the record. Timers fire on a schedule. Reviewers open the pull request. Nobody names the caller. Ports collide at startup. The worktree holds a branch.
+    objection: 6 sentences whose lengths vary by 11% (floor 16%) — every sentence is the same size, so nothing in the paragraph reads as more important than anything else
+staccato.md:8:1 staccato-run
+    span: The daemon writes the record. Timers fire on a schedule. Reviewers open the pull request. Nobody names the caller. Ports collide at startup. The worktree holds a branch.
+    objection: 6 sentences in a row of 9 words or fewer — this is chopped, not simple; join the ones that share a subject

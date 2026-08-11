@@ -40,7 +40,9 @@ from the research gets a Go port; anything needing a real parser is cut.
   prose linter — markup-aware, production-proven (Datadog, Grafana), and
   its Vocab model (per-project accept/reject term lists) is exactly the
   user-curated loaded-word list. Embed it or mirror its style format so
-  existing styles carry over; decided in slice 1.
+  existing styles carry over; decided in slice 1 — see Decisions, which
+  records that every Vale package is `internal/` and only its Vocab format
+  carried over.
 - **Rules that survive technical prose**: nominalizations and hidden verbs
   ("give consideration to"), noun strings (3+ consecutive nouns), passive
   voice hiding its actor, expletive openers, the reject vocabulary, and a
@@ -53,8 +55,11 @@ from the research gets a Go port; anything needing a real parser is cut.
   [receipt](https://link.springer.com/article/10.3758/BRM.40.2.540)),
   ported to Go over a pure-Go tagger
   ([jdkato/prose](https://pkg.go.dev/github.com/jdkato/prose)). Chopping a
-  sentence moves words but deletes no propositions, so this number cannot
-  be gamed by fragmenting.
+  sentence moves words and propositions into both halves, so each half
+  keeps roughly the density of the whole — measured at 0.03–0.09 lost per
+  rewrite, against 0.17 of headroom (see Calibration receipts). Weak
+  escape, not a free one, and the opposite of a length rule, which a split
+  satisfies outright.
 - **Anti-gaming pair for the length rule**: a staccato detector (runs of
   consecutive sub-threshold sentences, sentence-length variance floor) and
   an adjacent-sentence referent-overlap check — chopped prose loses
@@ -152,10 +157,95 @@ touches.
 - **Tickets before seeds** (Victor, 2026-08-10): the first wired surface
   is the ticketing system already on main, so the gate's activation never
   waits on the garden and never rests on guidance alone.
+- **Our own engine, keeping only Vale's Vocab format** (slice 1,
+  2026-08-11). Vale cannot be embedded: every package in
+  `errata-ai/vale/v3` sits under `internal/`, so importing one is a
+  compiler error rather than a trade-off — `use of internal package
+  github.com/errata-ai/vale/v3/internal/core not allowed`. The remaining
+  ways in were vendoring the module (111 modules in its closure, and a Go
+  toolchain bump: v3.17.1 requires 1.25.7 against attn's 1.25.3) or
+  shelling out to the binary, which the plan's no-sidecar rule forbids.
+  Neither buys much: the load-bearing rules here — idea density, staccato
+  runs, length variance, referent overlap — are computed, and no Vale rule
+  type expresses them. What does carry over is the Vocab file format, so
+  `docs/prose/vocabulary/{reject,accept}.txt` is Vale's: one
+  case-insensitive regex per line, `#` for comments.
+- **`jdkato/prose/v3` for the tagger, `goldmark` for the Markdown** (slice
+  1, 2026-08-11). prose/v3 splits `tag`, `tokenize` and `segment` into
+  separate packages, so the POS model comes without the entity-extraction
+  model and the gonum stack behind it; it also carries byte offsets
+  through the whole pipeline, which is what makes a finding's `file:line`
+  exact. Measured: +4.9MB linked against a hello-world baseline (prose/v2
+  costs +6.3MB and drags `gonum/plot`, `gofpdf` and `rsc.io/pdf` into the
+  module graph), two dependencies, 17.6ms to load the models once per
+  process, 3.4ms to segment, tokenize and tag a 1453-token document.
+  goldmark costs +0.6MB and no dependencies. The whole `attn` binary goes
+  from 40.7MB to 45.8MB, +12.7%. Hand-rolled fence stripping was the
+  alternative to goldmark and is the classic landmine — it works on the
+  documents you tested it on.
+
+## Calibration receipts
+
+Reproduce with `go test ./internal/prose -run TestCalibrationReceipts -v`.
+Three labelled sets: **healthy** is `docs/plans` and `docs/vision` on main
+(78 documents, 162k words, prose Victor accepted); **dense** is comment
+prose as it stood before the #818 sweep and **swept** is the same twelve
+files after it (`internal/prose/testdata/corpus/`, 36k and 15k words).
+
+| measure | healthy | swept | dense |
+|---|---|---|---|
+| sentence length p50 / p99 / max | 14 / 53 / 115 | 16 / 38 / 78 | 19 / 54 / 78 |
+| idea density p50 / p99 / max | 0.47 / 0.68 / 0.83 | 0.47 / 0.70 / 0.71 | 0.48 / 0.68 / 0.78 |
+| longest noun run p99 / max | 4 / 6 | 4 / 5 | 4 / 5 |
+| paragraph length CV min | 0.17 | 0.74 | 0.35 |
+| longest run of ≤9-word sentences | 4 | 3 | 3 |
+| longest zero-overlap run | 5 | 4 | 3 |
+
+Every numeric tripwire is one step past the healthy maximum, and all six
+are silent on both healthy sets (`TestHealthyCorpusStaysQuiet`): 120 words
+per sentence, density 0.85 over sentences of 14 words or more, 7
+consecutive nouns, 5 consecutive sentences of ≤9 words, a length CV floor
+of 0.16 over paragraphs of 5+ sentences, 6 consecutive sentences sharing
+no referent.
+
+**The #818 pair does not separate on any per-sentence measure**, and that
+is the finding worth carrying into slice 2. Density, sentence length and
+noun runs are the same on both sides of a sweep that deleted 57% of the
+words; at the calibrated thresholds the numeric rules fire zero times on
+either side. What #818 removed was whole paragraphs of retelling and
+narration from a surface whose standard is one or two lines — volume
+against purpose, which no per-sentence metric can see. The pattern rules
+do separate it: expletive openers run at 0.82 findings per 1000 words in
+the deleted prose and 0.00 in what replaced it. So the deterministic
+layer's numeric rules are runaway-catchers, the judge is what has to catch
+#818-style density, and slice 2 now has a labelled corpus to measure its
+agreement on.
+
+Chopping is a weaker escape from density than the plan assumed but not a
+free one: three measured rewrites lost 0.03–0.09 density, because the
+conjunctions a split deletes are propositions. That is a fraction of the
+0.17 gap between accepted prose (p99 0.68) and the tripwire (0.85), where
+a split satisfies a length rule outright — and the cohesion rules measure
+exactly what the split removed.
+
+Two rules were wrong rather than miscalibrated, and both were narrowed
+against the corpus rather than exempted. Actor-hiding passive fired 1038
+times on prose Victor accepted ("is wired", "is merged") until it was
+narrowed to obligation modals, where the reader genuinely cannot tell
+whose job it is; it now fires 25 times. Hidden verbs driven by noun
+suffixes reported "takes an extension" and "reached migration 51", so the
+rule is now driven by a curated noun→verb table plus a following
+preposition, and every finding names the verb to use instead.
+
+Running the shipped gate over all 78 accepted documents produces 76
+findings in 0.55s — 49 expletive openers, 25 obligation passives, 2 hidden
+verbs, and nothing from the numeric rules or the word list.
 
 ## Open questions
 
-- Embed Vale as a library vs mirror its style format with our own engine
-  (slice 1 decides; embedding buys the ecosystem, mirroring buys control).
 - Whether the judge rides the daemon (a job kind) or stays CLI-only until
   a surface needs it ambiently.
+- Whether a volume-against-purpose rule belongs in the deterministic layer
+  at all, now that the #818 receipt shows that is where the density Victor
+  objects to actually lives. Slice 2 should answer it by measuring the
+  judge on the same corpus before anyone writes a paragraph-length rule.

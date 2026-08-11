@@ -1,0 +1,41 @@
+# Terms `attn prose check` objects to in this repository.
+#
+# Format is Vale's Vocab: one entry per line, `#` starts a comment, and an
+# entry is a case-insensitive regular expression matched at word boundaries.
+#
+# Every entry here was checked against docs/plans and docs/vision before it was
+# added and appears in neither. That is the bar: a term Victor has used in
+# prose he accepted does not belong on this list, and the fix for a wrong entry
+# is to delete it. "leverage", "essentially", "realm" and "landscape" were
+# considered and left off for exactly that reason.
+#
+# accept.txt is the way out for the one place a rejected term is right.
+
+# Padding that says nothing.
+in order to
+due to the fact that
+at this point in time
+the fact that
+a number of
+in terms of
+needless to say
+it should be noted
+it is worth noting
+simply put
+basically
+
+# Words reaching for weight the sentence has not earned.
+delve
+crucial
+pivotal
+myriad
+plethora
+holistic
+seamless
+tapestry
+testament to
+deep dive
+game.?chang(er|ing)
+
+# Say the plain verb.
+utilize
