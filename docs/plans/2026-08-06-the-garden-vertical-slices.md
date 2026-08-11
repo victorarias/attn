@@ -2,6 +2,13 @@
 
 ## Alignment
 
+Stage 3 of the **home–garden–crew arc**
+([docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md)),
+which owns the sequencing around this plan: the home/outpost vocabulary,
+the fence that keeps these slices home-only, the uplink that later unfences
+outposts (and gates ticket retirement), and the central server. This plan
+owns the garden itself.
+
 First vertical through
 [docs/vision/friendly-home-for-agents.md](../vision/friendly-home-for-agents.md):
 the fine-grained, addressable work graph — **seeds** — for any attn-living
@@ -71,9 +78,22 @@ to fix.
 ## Design decisions (cross-slice)
 
 - **Storage: docstore, `core/garden` namespace.** Collections `seeds` and
-  `notes` (audit/progress entries keyed by seed id — a separate collection,
-  not an embedded array, so a long-tended seed never bloats its own
-  document). Live queries, bus change events, and revision-checked writes
+  `notes` (keyed by seed id — a separate collection, not an embedded array,
+  so a long-tended seed never bloats its own document). Notes are the
+  general historical-context surface, not just machine audit (Victor,
+  2026-08-10): an agent writes what happened and what it learned, addressed
+  to whoever tends that seed next; a note scoped to the whole effort goes on
+  the crown, which works with no extra machinery because a crown is a seed.
+  The read side is part of the surface (Victor, 2026-08-10): notes appear
+  where the tender already looks — a seed's show includes its recent notes
+  and, when the seed sits in a plot, the crown's — never behind a verb
+  nobody is told to run. Volume stays under the agent's control: the
+  default shows the most recent few and names what it withheld ("12 more —
+  `attn seed notes <id>`"), with the full list pageable and filterable.
+  A silent truncation here recreates the unread bulletin board this
+  surface exists to replace. Prose quality for crown bodies and notes is
+  the [density gate](2026-08-10-prose-density-gate.md)'s job, not this
+  plan's. Live queries, bus change events, and revision-checked writes
   come free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
@@ -93,8 +113,14 @@ to fix.
   the daemon the app talks to. A garden per daemon is a split brain: a remote
   delegate asking its own daemon would see an empty garden, and remotely
   planted seeds would never reach the panel. So a remote session's seed
-  commands must reach the hub's garden over the relay, the way PR flows
-  already do. Cross-machine and offline syncing is real and wanted, and rides
+  commands must reach the hub's garden over the relay. (An earlier draft said
+  "the way PR flows already do" — the 2026-08-09 central-server ground pass
+  found that analogy backwards: PR flows travel hub → remote, keyed on ids
+  the hub already knows, while seed commands need remote → hub, a direction
+  with no path today. The shape that fixes it — an inverted request/response
+  over the existing relay connection — is in
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md).)
+  Cross-machine and offline syncing is real and wanted, and rides
   the central-server arc (see the vision's blindspot) — hub-local is the
   honest first version, not the end state.
 - **Server-ready, not server-dependent.** The future central server (closed,
@@ -450,11 +476,16 @@ Acceptance:
   itself is the first rendering, not a commitment — whether the garden
   becomes the app's front door is a named question in the vision, decided
   with the foundational rendering work.
-- The relay mechanics for remote sessions: how `attn seed …` from a session
+- ~~The relay mechanics for remote sessions: how `attn seed …` from a session
   on a remote daemon reaches the hub's garden (relayed command vs. another
-  path), and what happens when the hub is unreachable. Must be answered
-  before slice 5's dispatch acceptance can include a remote delegate;
-  cross-machine syncing proper stays with the central-server arc.
+  path), and what happens when the hub is unreachable.~~ Answered by the
+  2026-08-09 central-server ground pass: an inverted request/response over
+  the existing relay (remote daemon pushes an intent event to its connected
+  hub-kind client; the hub applies and the result returns), and a loud
+  refusal when no hub is connected — see
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md).
+  Still to build before slice 5's dispatch acceptance can include a remote
+  delegate; cross-machine syncing proper stays with the central-server arc.
 - Whether `ready` should exclude seeds whose tender session is dead vs.
   recoverable (interacts with daemon-owned revive). Slice 3 decides.
 - Crew references: free-string member names are knowingly un-validated

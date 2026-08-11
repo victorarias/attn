@@ -363,6 +363,47 @@ equally resumable, so what a session was last seen doing is context for the user
 and never the reason it survives or is reaped. A session that cannot be brought
 back is **reaped**: the row and its pane go, rather than lingering as a Reload
 that cannot work.
+## Home daemon
+
+A daemon that is **its own home** — standalone, complete, owning its garden,
+its crew, and every other piece of user-level shared state. Every fresh
+install starts as a home daemon, and the user's app talks to one. "Home" is
+not a rank or a different binary: it is the default state of any daemon that
+nobody has enrolled, and the one that may have enrolled others.
+
+The ownership rule underneath: **every piece of state has exactly one owner
+daemon; everyone else is a client of it.** Sessions are owned by the daemon
+where they run — including on outposts; the garden and the crew are owned by
+a home daemon, because one board and one roster are their whole point.
+
+The central server (closed, operated, optional) connects **home daemons to
+each other** — federation, a different relationship from home↔outpost
+ownership. Outposts never meet the server; a home represents its whole
+fleet. Plan:
+[docs/plans/2026-08-10-home-garden-crew-arc.md](plans/2026-08-10-home-garden-crew-arc.md).
+
+## Outpost
+
+A daemon **enrolled to a home**: it keeps owning its own sessions, but
+garden and crew asks pass to its home over the **uplink** (the generic
+outpost-asks-home intent channel). An outpost holds no garden state at all —
+not a copy, not a cache; reads pass through like writes.
+
+**Enrollment** is the recorded, mutual act that makes an outpost: the
+outpost persists its home's daemon id, and only a connection presenting that
+identity acts as home. Every daemon has exactly one home; a second home
+dialing an already-enrolled outpost is a loud re-home decision, never silent
+adoption.
+
+Until the uplink is built, outposts are **fenced**: garden and crew surfaces
+refuse on an outpost with an error naming the home and the plan tracking the
+gap. Everything outposts do today — sessions, PTY, PR flows, local
+tickets — is unaffected.
+
+The transport vocabulary is older than these words and stays: **hub** (the
+code's name for the dialing side), **endpoint** (a stored SSH target), and
+**remote** (the dialed machine) describe the plumbing; home and outpost
+describe the ownership relationship carried over it.
 
 ## Conversation session
 

@@ -1,0 +1,11 @@
+kind: internal
+area: docs
+change: >
+  The central-server ground pass grew into the home–garden–crew arc's spine
+  plan: the code-verified map of the hub/relay, the home daemon / outpost /
+  enrollment concepts it surfaced (with glossary entries), the fence that
+  defers the multi-machine price until the uplink channel exists, the arc's
+  sequencing (messaging, vocabulary and fence, garden, crew, uplink,
+  server), and the smallest honest first version of the server. The garden
+  and messaging plans now name their stage in the arc, and the garden
+  plan's backwards PR-flow analogy is corrected.
