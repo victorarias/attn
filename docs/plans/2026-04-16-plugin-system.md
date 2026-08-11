@@ -98,6 +98,7 @@ These were proposed in conversation but not explicitly confirmed:
 5. Plugin responds `{ argv, env, cwd }`. attn spawns that command in a PTY under the session. **Attn owns the PTY. Plugin owns agent-specific semantics.**
 6. Plugin stages companion files (extensions, hooks) however it likes. Plugin monitors the agent however it likes.
 7. Plugin reports state via `session.report_state`, `session.report_stop`, `session.report_metadata`. The daemon supplies a fresh `run_id` per launched PTY and persists the spawning plugin as that run's owner; only that owner can report or receive close notification for the run. The plugin sequences reports within that run so asynchronous work cannot overwrite newer status or a replacement run.
+   Crash recovery keeps a plugin-driven session only when attn has per-session evidence for the replacement to consume: an open run handle or persisted metadata. Advertising `resume` or `conversation` capability alone does not make a particular session recoverable.
 8. When an attn-owned plugin agent PTY exits or has been killed successfully, attn calls `driver.session_closed` on the recorded run owner so the plugin can dispose bridge tokens, watchers, classifiers, and staged launch resources for that run.
 9. Plugin exits intentionally when attn shuts down or removes it. Unexpected exits are supervised and do not terminate attn-owned agent PTYs.
 

@@ -77,27 +77,26 @@ func TestHostExitForAClosedSessionMovesNothing(t *testing.T) {
 
 // The daemon restarting is the other way a host dies. A conversation session
 // must come back as recoverable rather than be reaped: its history is on disk
-// under attn's data dir, and a replacement host reopens it.
-//
-// The driver deliberately does not declare `resume` — that capability describes
-// a PTY agent resumed from an argv flag, which a host does not have — so this is
-// exactly the case the old rules dropped.
+// under attn's data dir, and a replacement host reopens it. Nothing about that
+// needs the plugin to have reconnected — the file is the evidence.
 func TestConversationSessionSurvivesADaemonRestart(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
-	registerConversationDriver(t, d, "nisse")
 	addHostSession(t, d, "conv-r3")
+	d.store.SetLaunchIntent("conv-r3", store.LaunchIntent{ApprovalRoute: launchcontract.ApprovalRouteUser})
+	writeHostConversationFile(t, "conv-r3")
 	// The exit path already closed the driver run, which is what made this
 	// session look like an ordinary agent with nothing behind it.
 	d.store.EndAgentDriverRun("conv-r3")
 
 	session := d.store.Get("conv-r3")
-	if !d.recoverOnMissingPTY(session) {
+	if !d.canReviveSession(session) {
 		t.Fatal("a conversation session with no live host was going to be dropped, not recovered")
 	}
 }
 
-// The same rule must not sweep up an ordinary plugin agent that declares
-// neither capability: it has nothing to come back to.
+// The same rule must not sweep up an ordinary plugin agent with nothing behind
+// it. The launch intent is there, so what is being asserted is the second half
+// of the decision: how to relaunch is known, what to relaunch into is not.
 func TestNonConversationPluginSessionIsStillReaped(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	plugin := &pluginConnection{name: "snipe-plugin"}
@@ -115,9 +114,24 @@ func TestNonConversationPluginSessionIsStillReaped(t *testing.T) {
 		ID: "plain-1", Agent: "snipe", Label: "plain-1", Directory: t.TempDir(),
 		State: protocol.StateIdle, StateSince: now, StateUpdatedAt: now, LastSeen: now,
 	})
+	d.store.SetLaunchIntent("plain-1", store.LaunchIntent{ApprovalRoute: launchcontract.ApprovalRouteUser})
 
-	if d.recoverOnMissingPTY(d.store.Get("plain-1")) {
+	if d.canReviveSession(d.store.Get("plain-1")) {
 		t.Fatal("an agent with nothing to resume was marked recoverable")
+	}
+}
+
+// writeHostConversationFile puts a pi session file where a replacement host
+// looks for one, which is what makes the conversation survive its host.
+func writeHostConversationFile(t *testing.T, sessionID string) {
+	t.Helper()
+	dir := hostSessionStateDir(sessionID)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("mkdir host state dir: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	if err := os.WriteFile(filepath.Join(dir, "session.jsonl"), []byte("{}\n"), 0o644); err != nil {
+		t.Fatalf("write host session file: %v", err)
 	}
 }
 

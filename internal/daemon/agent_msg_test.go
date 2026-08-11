@@ -263,11 +263,11 @@ func TestAgentMsgSizeRefusalsSurviveTheSocket(t *testing.T) {
 	sockPath := filepath.Join(shortTempDir(t), "attn.sock")
 
 	d := NewForTesting(sockPath)
-	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
-	addCharacterizationSession(t, d, "target-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 	go d.Start()
 	defer d.Stop()
 	waitForSocket(t, sockPath, 5*time.Second)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	addCharacterizationSession(t, d, "target-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 
 	c := client.New(sockPath)
 

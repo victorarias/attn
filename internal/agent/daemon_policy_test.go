@@ -29,15 +29,6 @@ func (d executableClassifierDriver) ClassifyWithExecutable(text, executable, wor
 	return "idle", nil
 }
 
-func TestRecoverOnMissingPTY(t *testing.T) {
-	if !RecoverOnMissingPTY(Get("claude")) {
-		t.Fatal("claude should be recoverable when PTY is missing")
-	}
-	if RecoverOnMissingPTY(Get("codex")) {
-		t.Fatal("codex should not be recoverable when PTY is missing")
-	}
-}
-
 func TestRecoveredRunningSessionState_DefaultAndAgentOverrides(t *testing.T) {
 	defaultDriver := noPolicyDriver{
 		testDriver: testDriver{
