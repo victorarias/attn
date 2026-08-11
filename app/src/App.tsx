@@ -846,6 +846,7 @@ function AppContent({
     sendWorkspaceUpdateTile,
     sendOpenMarkdown,
     sendSessionMessagesGet,
+    subscribeSessionMessagesChanged,
     sendSessionAnnotationsGet,
     sendSessionAnnotationsSave,
     sendSessionAnnotationsClear,
@@ -3432,11 +3433,12 @@ function AppContent({
   // would refire it on every unrelated render of App.
   const annotationApi = useMemo(() => ({
     fetchMessages: sendSessionMessagesGet,
+    subscribeMessagesChanged: subscribeSessionMessagesChanged,
     fetchAnnotations: sendSessionAnnotationsGet,
     saveAnnotations: sendSessionAnnotationsSave,
     clearAnnotations: sendSessionAnnotationsClear,
     submitAnnotations: sendSessionAnnotationsSubmit,
-  }), [sendSessionMessagesGet, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear, sendSessionAnnotationsSubmit]);
+  }), [sendSessionMessagesGet, subscribeSessionMessagesChanged, sendSessionAnnotationsGet, sendSessionAnnotationsSave, sendSessionAnnotationsClear, sendSessionAnnotationsSubmit]);
 
   const isZedEditorConfigured = useMemo(() => {
     const editor = (settings.editor_executable || '').trim().toLowerCase();

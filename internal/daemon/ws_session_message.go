@@ -4,7 +4,6 @@ import (
 	"strings"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/transcript"
 )
 
 // The annotatable window: how much of a session's transcript is handed back for
@@ -26,10 +25,9 @@ const (
 )
 
 // handleSessionMessagesGet replies with the markdown of a session's recent
-// assistant messages, oldest first. Read-only: it resolves the transcript by
-// the same identity ladder classification uses (hook-reported path, then
-// agent-native resume id, then the finder's cwd guess) and reads it. No PTY, no
-// session state.
+// assistant messages, oldest first. Read-only: the per-session live transcript
+// owns exact identity, lifecycle, provider normalization, and the bounded
+// rolling window. This handler only translates its snapshot to the wire.
 //
 // Recent messages rather than only the newest, because an annotation is about
 // what the agent said, and the agent saying something else afterwards is not a
@@ -44,6 +42,7 @@ func (d *Daemon) handleSessionMessagesGet(client *wsClient, msg *protocol.Sessio
 		RequestID: msg.RequestID,
 		SessionID: sessionID,
 		Messages:  []protocol.SessionMessage{},
+		Status:    protocol.SessionMessageWindowStatusUnavailable,
 	}
 	if sessionID == "" {
 		result.Error = protocol.Ptr("session_messages_get: session_id is required")
@@ -58,49 +57,40 @@ func (d *Daemon) handleSessionMessagesGet(client *wsClient, msg *protocol.Sessio
 		return
 	}
 
-	path := strings.TrimSpace(d.resolveTranscriptPathForSession(session, ""))
-	if path == "" {
-		// Logged, not only returned: this is the one outcome a user reads as "the
-		// feature is broken", and the identity ladder that produced it (no
-		// hook-reported path, no resume id, no find by session id) is invisible
-		// from the app. Naming the session and its directory is what makes the
-		// next question answerable — whether a transcript exists at all.
-		d.logf("session_messages_get: %s: no transcript resolved (agent=%s dir=%s); nothing is annotatable in this session",
-			sessionID, session.Agent, session.Directory)
-		result.Error = protocol.Ptr("session_messages_get: no transcript for session " + sessionID)
+	snapshot, ok := d.assistantWindow(sessionID, session.Agent)
+	if !ok {
+		detail := "live transcript watching is unavailable for this session"
+		result.Success = true
+		result.Detail = protocol.Ptr(detail)
+		d.logf("session_messages_get: %s: %s (agent=%s dir=%s)", sessionID, detail, session.Agent, session.Directory)
 		d.sendToClient(client, result)
 		return
 	}
-
-	messages, report, err := transcript.ReadRecentAssistantMessages(path, transcript.RecentAssistantMessagesLimits{
-		MaxMessages:     annotatableWindowMessages,
-		MaxMessageChars: annotatableMessageMaxChars,
-		MaxTotalChars:   annotatableWindowMaxChars,
-	})
-	if err != nil {
-		d.logf("session_messages_get: %s: %v", sessionID, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
+	result.Success = true
+	result.Status = snapshot.Status
+	if snapshot.Detail != "" {
+		result.Detail = protocol.Ptr(snapshot.Detail)
 	}
 	// A window that left something out says which limit it hit and by how much,
 	// so the number can be argued with rather than guessed at.
-	if report.DroppedOversize > 0 {
+	if snapshot.Report.DroppedOversize > 0 {
 		d.logf("session_messages_get: %s: dropped %d message(s) over the %d-char per-message cap (largest %d chars); annotations cannot address a partial message",
-			sessionID, report.DroppedOversize, annotatableMessageMaxChars, report.LargestDropped)
+			sessionID, snapshot.Report.DroppedOversize, annotatableMessageMaxChars, snapshot.Report.LargestDropped)
 	}
-	if report.DroppedOld > 0 {
+	if snapshot.Report.DroppedOld > 0 {
 		d.logf("session_messages_get: %s: window held %d of %d message(s); caps are %d messages / %d chars",
-			sessionID, len(messages), len(messages)+report.DroppedOld, annotatableWindowMessages, annotatableWindowMaxChars)
+			sessionID, len(snapshot.Messages), len(snapshot.Messages)+snapshot.Report.DroppedOld, annotatableWindowMessages, annotatableWindowMaxChars)
+	}
+	if snapshot.Report.OmittedPrefix {
+		d.logf("session_messages_get: %s: annotatable window began at the bounded transcript tail", sessionID)
 	}
 
-	for _, message := range messages {
+	for _, message := range snapshot.Messages {
 		result.Messages = append(result.Messages, protocol.SessionMessage{
 			Key:      message.Key,
 			Markdown: message.Content,
 		})
 	}
-	result.Success = true
-	result.Truncated = report.Truncated()
+	result.Truncated = snapshot.Report.Truncated()
 	d.sendToClient(client, result)
 }

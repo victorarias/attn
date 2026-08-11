@@ -18,11 +18,13 @@ import { settlePendingRequest } from './daemonPendingRequests';
 /** The event shapes this module reads, loosely typed off the wire union. */
 type SessionAnnotationEvent = {
   event: string;
+  session_id?: unknown;
   request_id?: unknown;
   success?: boolean;
   error?: string;
   stale?: unknown;
   status?: unknown;
+  detail?: unknown;
   messages?: unknown;
   truncated?: unknown;
   annotations?: unknown;
@@ -34,6 +36,19 @@ type SessionAnnotationEvent = {
 export interface DaemonSessionMessage {
   key: string;
   markdown: string;
+}
+
+export type SessionMessageWindowStatus = 'discovering' | 'ready' | 'unavailable';
+
+function toMessageWindowStatus(raw: unknown): SessionMessageWindowStatus | undefined {
+  switch (raw) {
+    case 'discovering':
+    case 'ready':
+    case 'unavailable':
+      return raw;
+    default:
+      return undefined;
+  }
 }
 
 /** A persisted annotation, exactly as the store holds it. */
@@ -93,14 +108,30 @@ export function annotationToWire(annotation: DaemonSessionAnnotation): Record<st
 export function handleSessionAnnotationDaemonEvent(
   event: SessionAnnotationEvent,
   pending: PendingRequests,
+  onMessagesChanged: (sessionId: string) => void,
 ): boolean {
   switch (event.event) {
+    case 'session_messages_changed': {
+      const sessionId = typeof event.session_id === 'string' ? event.session_id.trim() : '';
+      if (sessionId !== '') onMessagesChanged(sessionId);
+      return true;
+    }
+
     case 'session_messages_get_result':
       settlePendingRequest(
         pending,
         'session_messages_get',
         event,
-        (e) => ({ messages: toMessages(e.messages), truncated: e.truncated === true }),
+        (e) => {
+          const status = toMessageWindowStatus(e.status);
+          if (!status) return undefined;
+          return {
+            messages: toMessages(e.messages),
+            status,
+            detail: typeof e.detail === 'string' ? e.detail : undefined,
+            truncated: e.truncated === true,
+          };
+        },
         'Session message fetch failed',
       );
       return true;

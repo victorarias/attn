@@ -1,29 +1,11 @@
 package daemon
 
 import (
-	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 )
-
-func TestReadTranscriptDelta(t *testing.T) {
-	tmpDir := t.TempDir()
-	path := filepath.Join(tmpDir, "events.jsonl")
-	if err := os.WriteFile(path, []byte("line1\nline2\n"), 0o644); err != nil {
-		t.Fatalf("write file: %v", err)
-	}
-
-	data, err := readTranscriptDelta(path, int64(len("line1\n")))
-	if err != nil {
-		t.Fatalf("readTranscriptDelta error: %v", err)
-	}
-	if string(data) != "line2\n" {
-		t.Fatalf("unexpected delta: %q", string(data))
-	}
-}
 
 func TestIsTranscriptWatchedAgent(t *testing.T) {
 	if !isTranscriptWatchedAgent(protocol.SessionAgentClaude) {
