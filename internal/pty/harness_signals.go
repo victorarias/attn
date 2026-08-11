@@ -3,6 +3,7 @@ package pty
 import (
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
@@ -10,7 +11,7 @@ import (
 
 // Harness-owned state signals, read off the PTY stream via the OSC 0/2 title:
 //
-//	ESC ] 0 ; ⠐ Run background sleep command BEL     claude, turn RUNNING
+//	ESC ] 0 ; ◐ Run background sleep command BEL     claude, turn RUNNING
 //	ESC ] 0 ; ✳ Run background sleep command BEL     claude, turn NOT running
 //	ESC ] 0 ; ⠸ my-project BEL                       codex, busy
 //	ESC ] 0 ; my-project BEL                         codex, idle
@@ -19,7 +20,21 @@ import (
 // measured against hook ground truth it tracks the turn within ~100ms. It
 // bounds stuck states rather than detecting on its own — claude's title goes
 // silent ~3.5s mid blocking foreground tool call, so no TTL gives both a fast
-// settle and no false settle. Nothing here drives session state yet.
+// settle and no false settle.
+//
+// Claude animates the running glyph and has changed which glyphs it animates
+// with (braille through 2.1.227, ◐/◑ from 2.1.228), so the busy rule is the
+// shape of the title rather than a glyph list: claude prefixes a status symbol,
+// ✳ is the resting one, and any other symbol is a spinner frame. Measured on
+// 2.1.228 through a real PTY: 170 paints ~960ms apart across one 150s blocking
+// tool call, and ✳ painted once on parking at a permission prompt followed by
+// total silence until it was answered.
+//
+// A title that starts with no status symbol claims nothing about the agent
+// (typically a subprocess overwrote it) and is reported as claimUnclassified
+// rather than dropped: whoever painted it was running at that instant, which is
+// what the resolver's stuck tripwire asks. Reading the glyph can go wrong; going
+// blind must not follow.
 
 const (
 	// heartbeatKeepalive bounds how often an unchanged heartbeat re-emits: at
@@ -34,6 +49,9 @@ const (
 	// claimApproval: blocked on the user. Codex only; claude announces
 	// approvals on its Notification hook instead.
 	claimApproval = "approval"
+	// claimUnclassified: a title arrived that says nothing about the agent. It
+	// carries liveness and no level — the previous level still stands.
+	claimUnclassified = "unclassified"
 )
 
 const (
@@ -113,21 +131,22 @@ func (o *harnessSignalObserver) observeTitle(title string, now time.Time) (Obser
 	return newObservation(SourceHeartbeat, claim, summary, now), true
 }
 
-// classifyClaudeTitle reads Claude Code's title glyph: a braille spinner frame
-// while the turn runs, U+2733 EIGHT SPOKED ASTERISK when it does not. Anything
-// else is not claude talking.
+// classifyClaudeTitle reads Claude Code's title glyph: U+2733 EIGHT SPOKED
+// ASTERISK while the turn is not running, any other status symbol a frame of the
+// running spinner. Claude has changed the spinner's glyphs between releases, so
+// naming them is what goes blind; the resting glyph is the one that has held.
 func classifyClaudeTitle(title string) (string, string, bool) {
 	first, ok := firstRune(title)
 	if !ok {
 		return "", "", false
 	}
 	switch {
-	case isBrailleSpinner(first):
-		return claimBusy, stripLevelGlyph(title), true
 	case first == '✳':
 		return claimNotBusy, stripLevelGlyph(title), true
+	case isStatusGlyph(first):
+		return claimBusy, stripLevelGlyph(title), true
 	default:
-		return "", "", false
+		return claimUnclassified, strings.TrimSpace(title), true
 	}
 }
 
@@ -186,7 +205,7 @@ func codexTitleSummary(title string) string {
 func stripLevelGlyph(title string) string {
 	trimmed := strings.TrimSpace(title)
 	first, size := utf8.DecodeRuneInString(trimmed)
-	if isBrailleSpinner(first) || first == '✳' {
+	if isStatusGlyph(first) {
 		return strings.TrimSpace(trimmed[size:])
 	}
 	return trimmed
@@ -196,6 +215,13 @@ func stripLevelGlyph(title string) string {
 // both agents animate their spinners with.
 func isBrailleSpinner(r rune) bool {
 	return r >= 0x2800 && r <= 0x28FF
+}
+
+// isStatusGlyph reports whether r is a symbol an agent would prefix its title
+// with. Braille spinner frames, ◐/◑, and ✳ are all Unicode symbols, while a
+// title a subprocess wrote starts with the text of a path or a command.
+func isStatusGlyph(r rune) bool {
+	return unicode.IsSymbol(r)
 }
 
 // firstRune returns the first non-space rune of s.

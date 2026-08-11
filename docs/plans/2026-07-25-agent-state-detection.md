@@ -66,6 +66,24 @@ codex:   ESC ] 0 ; ⠸ attn--fix-state-detec... BEL       <- spinner prefix = bu
   running. A level that stops arriving cannot get stuck — though the spike below
   shows it goes briefly silent mid-tool, which is why it corroborates rather than
   leads.
+
+  Re-measured 2026-08-11 on claude 2.1.228 through a real PTY: the running glyph
+  is no longer braille but `◐`/`◑` (U+25D0/U+25D1), `✳` is unchanged, and 170
+  paints arrived ~960ms apart across one 150s blocking tool call with no gap at
+  all. Recognising the running glyph by name is what went blind on that release —
+  every session started after it lost its heartbeat, leaving the hooks that
+  bracket a tool call as the only evidence, and a tool call longer than
+  `StuckAfter` read as a session that had stopped explaining itself. Claude is
+  now read by the *shape* of the title: `✳` is the resting glyph and any other
+  status symbol is a spinner frame, so a glyph claude has not shipped yet still
+  reads as running. A title with no status symbol claims nothing and is reported
+  as liveness alone, because whoever painted it was running at that instant —
+  which is the whole question the stuck tripwire asks.
+
+  Parked-on-approval was measured the same day: claude paints `✳` once as it
+  parks and then nothing at all until the prompt is answered. Silence therefore
+  does not mean the agent is gone, and the liveness rule cannot mask an approval
+  — there are no paints to mask it with.
 - **OSC 777 is real but strictly redundant with the `Notification` hook.** Claude
   emits `ESC ] 777 ; notify ; Claude Code ; <message> BEL` — it appears in three
   of the nine captures (`run_approval`, `run_approval2`, `run_claude_fg`), the

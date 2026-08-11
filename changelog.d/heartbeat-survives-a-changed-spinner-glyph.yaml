@@ -1,0 +1,21 @@
+kind: fixed
+area: daemon
+change: >
+  A Claude session running a long tool call no longer goes grey. attn reads
+  whether an agent is running from the spinner glyph the harness paints into the
+  terminal title, and it recognised only the braille spinner Claude used up to
+  2.1.227. Claude 2.1.228 animates half circles instead, so every session
+  launched after that update lost its heartbeat entirely and left the hooks that
+  bracket a tool call as the only sign of life — and those are silent for the
+  whole call. Any tool call longer than ninety seconds, which a test run or a
+  wait on CI passes easily, therefore read as a session that had stopped
+  explaining itself: attn painted it unknown and asked for attention it did not
+  need, then recovered the moment the call returned. Whether the turn is running
+  is now read from the shape of the title rather than a list of glyphs, so a
+  spinner Claude has not shipped yet still reads as running, and a title attn
+  cannot read at all still counts as the agent being alive instead of counting
+  as nothing.
+symptom: >
+  A session turned grey with "unknown" and asked for attention while its agent
+  was plainly working, then went back to green on its own a few minutes later.
+  Sessions started before the Claude Code 2.1.228 update were unaffected.

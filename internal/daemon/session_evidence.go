@@ -147,6 +147,13 @@ func (d *Daemon) recordPTYEvidence(sessionID string, obs pty.Observation) {
 			})
 			return
 		}
+		// A title nobody can read is still someone painting: it stamps
+		// LastMovement (updateIf does that for every write) and leaves the level
+		// alone. Filed as settled instead, it would retire an open turn.
+		if obs.Claim == "unclassified" {
+			d.recordEvidence(sessionID, at, func(*sessionstate.Evidence) {})
+			return
+		}
 		claim := sessionstate.ClaimSettled
 		if obs.Claim == "busy" {
 			claim = sessionstate.ClaimBusy
