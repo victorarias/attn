@@ -48,9 +48,14 @@ func TestClaudeTitleHeartbeat(t *testing.T) {
 		claim   string
 		summary string
 	}{
-		// The braille block is the spinner; claude cycles through its frames.
+		// Claude cycles the running glyph and has changed which glyphs it cycles
+		// through: braille up to 2.1.227, half circles from 2.1.228. Both read as
+		// busy because busy is "a status symbol that is not the resting one",
+		// which is what survives the next change.
 		{name: "braille spinner is busy", title: "⠐ Run background sleep command", claim: claimBusy, summary: "Run background sleep command"},
-		{name: "another spinner frame", title: "⠸ Editing files", claim: claimBusy, summary: "Editing files"},
+		{name: "another braille frame", title: "⠸ Editing files", claim: claimBusy, summary: "Editing files"},
+		{name: "2.1.228 half circle is busy", title: "◐ Run background sleep command", claim: claimBusy, summary: "Run background sleep command"},
+		{name: "the other half circle frame", title: "◑ Editing files", claim: claimBusy, summary: "Editing files"},
 		{name: "asterisk is not busy", title: "✳ Run background sleep command", claim: claimNotBusy, summary: "Run background sleep command"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -71,14 +76,27 @@ func TestClaudeTitleHeartbeat(t *testing.T) {
 	}
 }
 
-// A title claude did not write says nothing about claude. Reporting not-busy for
-// it would let any subprocess that sets a title settle the session.
-func TestClaudeIgnoresAForeignTitle(t *testing.T) {
+// A title claude did not write says nothing about claude, and claiming a level
+// for it would let any subprocess that sets a title settle the session. It is
+// still reported: someone painted it, which is all the stuck tripwire asks.
+func TestClaudeReportsAForeignTitleAsLivenessOnly(t *testing.T) {
 	o := newHarnessSignalObserver(agentdriver.HarnessSignalsClaude)
-	for _, foreign := range []string{"victor@mac: ~", "htop", ""} {
-		if got := observeAt(o, time.Now(), title(foreign)); got != nil {
-			t.Fatalf("title %q produced %+v", foreign, got)
+	now := time.Now()
+	// A second past the keepalive: unchanged levels collapse, and unclassified
+	// is a level like any other.
+	for i, foreign := range []string{"victor@mac: ~", "htop"} {
+		got := onlySignal(t, observeAt(o, now.Add(time.Duration(i)*2*time.Second), title(foreign)))
+		if got.Claim != claimUnclassified {
+			t.Fatalf("title %q claimed %q, want %q", foreign, got.Claim, claimUnclassified)
 		}
+	}
+}
+
+// An empty title is not a paint: there is nothing to have witnessed.
+func TestClaudeIgnoresAnEmptyTitle(t *testing.T) {
+	o := newHarnessSignalObserver(agentdriver.HarnessSignalsClaude)
+	if got := observeAt(o, time.Now(), title("")); got != nil {
+		t.Fatalf("empty title produced %+v", got)
 	}
 }
 
@@ -245,8 +263,8 @@ func TestCodexTitleReportsAnApproval(t *testing.T) {
 // Claude's title has no approval marker — it announces approvals on the
 // Notification hook instead — so the marker must not leak across agents.
 func TestClaudeTitleHasNoApprovalMarker(t *testing.T) {
-	claim, _, ok := classifyClaudeTitle("[ . ] Action Required | whatever")
-	if ok {
-		t.Fatalf("claude classified a codex title as %q", claim)
+	claim, _, _ := classifyClaudeTitle("[ . ] Action Required | whatever")
+	if claim != claimUnclassified {
+		t.Fatalf("claude read a codex title as %q, want %q", claim, claimUnclassified)
 	}
 }
