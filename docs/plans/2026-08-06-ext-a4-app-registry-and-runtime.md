@@ -475,7 +475,7 @@ generation unchanged and no second notification.
 the supervisor's memory, so a daemon restart — an upgrade, a crash, a reboot —
 forgot it, lazy-started the still-broken host on the first due fact, re-armed
 the whole crash loop, and raised a second critical notification for one outage.
-The give-up is now a `supervised_parks` row (migration 103) written when it
+The give-up is now a `supervised_parks` row (migration 104) written when it
 happens and handed back to the supervisor by `supervise.AdoptParked` inside
 `ensureAppRuntimeSupervisor`, so every way to reach the supervisor finds the
 park already applied. `attn app runtime restart` deletes the row along with the

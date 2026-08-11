@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// Parked supervised children (migration 103).
+// Parked supervised children (migration 104).
 //
 // internal/supervise parks a child that keeps dying without ever running
 // stably: it stops restarting it, and only a deliberate act brings it back. That
