@@ -147,6 +147,33 @@
   box-shadow: none;
 }
 
+/* ---- Kept: the user answered the next settle, so no clock is running ----
+
+   No track under it — there is no deadline to draw — and a still square mark
+   where the countdown pulses a dot. Dimmer than a running countdown and firmer
+   than a held one: held is a clock waiting to resume, this is a decision. */
+
+.settling-header--kept {
+  background: rgba(var(--settling-accent), 0.09);
+  border-color: rgba(var(--settling-accent), 0.4);
+  border-style: dashed;
+  color: #c8bcf0;
+}
+
+.settling-header--kept:hover {
+  background: rgba(var(--settling-accent), 0.2);
+  border-color: rgba(var(--settling-accent), 0.7);
+}
+
+.settling-kept-mark {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 1px;
+  background: var(--settling-accent-solid);
+  opacity: 0.7;
+}
+
 @keyframes settling-dot-pulse {
   0%, 100% { opacity: 1; transform: scale(1); }
   50% { opacity: 0.4; transform: scale(0.75); }

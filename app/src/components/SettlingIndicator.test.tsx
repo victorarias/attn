@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { HeaderSettlingIndicator, SidebarSettlingBar } from './SettlingIndicator';
+import { HeaderSettleKeptChip, HeaderSettlingIndicator, SidebarSettlingBar } from './SettlingIndicator';
 import { CountdownFill } from './CountdownFill';
 
 const FIRES_AT = '2999-01-01T00:00:00.000Z'; // far future, so the bar is mid-countdown
@@ -73,6 +73,44 @@ describe('HeaderSettlingIndicator', () => {
       fireEvent.click(screen.getByTestId('settling-indicator'));
       expect(onCancel).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('HeaderSettleKeptChip', () => {
+  it('says the turn is kept, with nothing running', () => {
+    const { container } = render(<HeaderSettleKeptChip />);
+    expect(screen.getByTestId('settle-kept-chip')).toHaveTextContent('Turn kept');
+    // No deadline exists, so there must be nothing that looks like one: a track
+    // under this chip would read as a countdown frozen at full.
+    expect(container.querySelector('.settling-header-track')).toBeNull();
+    expect(container.querySelector('.settling-dot')).toBeNull();
+  });
+
+  it('names the key that undoes it, on the chip itself', () => {
+    // A standing dismissal outlives the countdown it answered, so unlike every
+    // other indicator here it is the only thing on screen pointing at its own
+    // way out.
+    const { container } = render(<HeaderSettleKeptChip />);
+    expect(container.querySelector('.countdown-cancel-hint-key')?.textContent).toBe('⌘.');
+    expect(screen.getByText('undo')).toBeTruthy();
+  });
+
+  it('undoes on click without reaching the row underneath, and starts no drag', () => {
+    const onDisarm = vi.fn();
+    const onRowClick = vi.fn();
+    const onPointerDown = vi.fn();
+    render(
+      <div onClick={onRowClick} onPointerDown={onPointerDown}>
+        <HeaderSettleKeptChip onDisarm={onDisarm} />
+      </div>,
+    );
+
+    fireEvent.pointerDown(screen.getByTestId('settle-kept-chip'));
+    fireEvent.click(screen.getByTestId('settle-kept-chip'));
+
+    expect(onDisarm).toHaveBeenCalledTimes(1);
+    expect(onRowClick).not.toHaveBeenCalled();
+    expect(onPointerDown).not.toHaveBeenCalled();
   });
 });
 

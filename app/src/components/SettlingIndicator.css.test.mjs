@@ -40,6 +40,9 @@ describe('SettlingIndicator stylesheet', () => {
     ['.settling-header-track-fill', '.settling-header-track'],
     ['.settling-sidebar-bar', '.settling-sidebar-bar'],
     ['.settling-sidebar-bar-fill', '.settling-sidebar-bar'],
+    // The kept chip carries .settling-header too, so it inherits from there.
+    ['.settling-header--kept', '.settling-header'],
+    ['.settling-kept-mark', '.settling-header'],
   ])('%s can resolve --settling-accent via %s', (user, root) => {
     expect(css, `${user} has no rule`).toMatch(new RegExp(`\\${user}\\s*[,{]`));
     expect(declaringRoots).toContain(root);

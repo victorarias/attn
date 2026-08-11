@@ -5301,6 +5301,10 @@ type Session struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
 
+	// AutoSettleDismissArmed corresponds to the JSON schema field
+	// "auto_settle_dismiss_armed".
+	AutoSettleDismissArmed *bool `json:"auto_settle_dismiss_armed,omitempty,omitzero"`
+
 	// AutoSettleFiresAt corresponds to the JSON schema field "auto_settle_fires_at".
 	AutoSettleFiresAt *string `json:"auto_settle_fires_at,omitempty,omitzero"`
 

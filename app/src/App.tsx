@@ -1240,6 +1240,7 @@ function AppContent({
       parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
+      autoSettleDismissArmed: daemonSession?.auto_settle_dismiss_armed ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -3069,15 +3070,33 @@ function AppContent({
     }
     return ids;
   }, [enrichedLocalSessions, onScreenSessionIds]);
-  // Undefined when nothing visible is counting down, which unregisters the
-  // shortcut entirely: pressing it then falls through as a no-op rather than
-  // firing at a session picked by guesswork.
-  const handleCancelCountdown = useMemo(
-    () => (visibleCountdownSessionIds.length > 0
-      ? () => visibleCountdownSessionIds.forEach(sendCancelCountdown)
-      : undefined),
-    [visibleCountdownSessionIds, sendCancelCountdown],
+  // Who a press answers when nothing is counting down: the focused session, and
+  // only while its own tile is on screen.
+  //
+  // One session rather than all of them, because arming is not cancelling. A
+  // countdown pill announces the key that stops it, so a press that stops every
+  // pill you can see is answering what each of them asked. Nothing asks for an
+  // arm — it is the user getting ahead of a settle that has not been announced —
+  // so it goes where they are looking and nowhere else.
+  const armDismissSessionId = useMemo(
+    () => (activeSessionId && onScreenSessionIds.has(activeSessionId) ? activeSessionId : undefined),
+    [activeSessionId, onScreenSessionIds],
   );
+  // Undefined only when there is neither a visible countdown nor a session to
+  // arm, which unregisters the shortcut entirely: pressing it then falls through
+  // as a no-op rather than firing at a session picked by guesswork.
+  const handleCancelCountdown = useMemo(() => {
+    // What is on screen and running wins: the user is answering the thing that
+    // announced itself, not getting ahead of the next one.
+    if (visibleCountdownSessionIds.length > 0) {
+      return () => visibleCountdownSessionIds.forEach(sendCancelCountdown);
+    }
+    if (!armDismissSessionId) return undefined;
+    // The daemon decides between arming and disarming: it is the one that knows
+    // whether a dismissal is already standing, and whether this session has an
+    // auto-settle coming at all.
+    return () => sendCancelCountdown(armDismissSessionId);
+  }, [visibleCountdownSessionIds, armDismissSessionId, sendCancelCountdown]);
 
   const warmWorkspaceIds = useMemo(
     () => computeWarmWorkspaceIds(
@@ -3909,6 +3928,7 @@ function AppContent({
                       nudgeFiresAt: entry.nudgeFiresAt,
                       autoSettleFiresAt: entry.autoSettleFiresAt,
                       autoSettleHeld: entry.autoSettleHeld,
+                      autoSettleDismissArmed: entry.autoSettleDismissArmed,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),

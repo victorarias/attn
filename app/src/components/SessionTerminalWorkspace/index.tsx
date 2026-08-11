@@ -25,7 +25,7 @@ import {
 import type { SessionAgent } from '../../types/sessionAgent';
 import type { UISessionState } from '../../types/sessionState';
 import { HeaderNudgeIndicator, deriveNudgeMode } from '../NudgeIndicator';
-import { HeaderSettlingIndicator } from '../SettlingIndicator';
+import { HeaderSettleKeptChip, HeaderSettlingIndicator } from '../SettlingIndicator';
 import { HeaderPresentationChip } from '../PresentationChip';
 import { PaneTicketChip } from '../PaneTicketChip';
 import { TicketDetailPanel } from '../TicketDetailPanel';
@@ -132,6 +132,9 @@ interface SessionTerminalWorkspaceProps {
     // True while that countdown is frozen because the user is typing or moving
     // the pointer in this session. Mutually exclusive with the deadline above.
     autoSettleHeld?: boolean;
+    // True while the user's standing dismissal covers this session's next
+    // auto-settle. Excludes both of the above: arming is what stops the timer.
+    autoSettleDismissArmed?: boolean;
     isActive?: boolean;
     presentation?: Presentation;
     // The board row for the ticket bound to this session (assignee == id), when
@@ -929,6 +932,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         // it gets the non-draggable variant.
         const autoSettleFiresAt = paneSession?.autoSettleFiresAt;
         const autoSettleHeld = paneSession?.autoSettleHeld;
+        const autoSettleDismissArmed = paneSession?.autoSettleDismissArmed;
         return (
           <div
             key={agentPane.id}
@@ -994,6 +998,10 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   held={autoSettleHeld}
                   onCancel={() => onCancelCountdown?.(agentPane.sessionId)}
                 />
+              ) : autoSettleDismissArmed ? (
+                // The same command both ways: the daemon reads the standing
+                // dismissal it owns and undoes it.
+                <HeaderSettleKeptChip onDisarm={() => onCancelCountdown?.(agentPane.sessionId)} />
               ) : null}
               {nudgeMode ? (
                 <HeaderNudgeIndicator

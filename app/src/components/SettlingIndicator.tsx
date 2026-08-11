@@ -51,6 +51,40 @@ export function HeaderSettlingIndicator({
   );
 }
 
+/**
+ * The armed variant: the user has already answered this session's next
+ * auto-settle, so nothing is counting and there is nothing to animate. Drawn in
+ * the countdown's own slot and its own violet — same subject, opposite outcome —
+ * with a still mark where the countdown pulses, because the one thing this chip
+ * has to say is that no clock is running.
+ *
+ * It carries the key that undoes it for the same reason the countdown carries
+ * the key that stops it: a standing answer outlives the thing it answered, so
+ * the way back out has to be on the thing announcing it.
+ */
+export function HeaderSettleKeptChip({ onDisarm }: { onDisarm?: () => void }) {
+  return (
+    <button
+      type="button"
+      className="settling-header settling-header--kept"
+      // The pane header is a leaf-drag handle, so a click that drifts would
+      // relocate the pane instead of undoing the dismissal.
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={(event) => {
+        event.stopPropagation();
+        onDisarm?.();
+      }}
+      title="This turn will not auto-settle. Undo to let it settle again."
+      aria-label="Turn kept; undo to let it auto-settle again"
+      data-testid="settle-kept-chip"
+    >
+      <span className="settling-kept-mark" aria-hidden="true" />
+      <span className="settling-header-label">Turn kept</span>
+      <CountdownCancelHint verb="undo" />
+    </button>
+  );
+}
+
 /** The sidebar variant, for a session whose tile is not rendered. */
 export function SidebarSettlingBar({ firesAt, held }: { firesAt?: string; held?: boolean }) {
   return (
