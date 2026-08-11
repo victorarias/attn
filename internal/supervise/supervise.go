@@ -121,6 +121,19 @@ type Snapshot struct {
 	StartedAt      time.Time
 	ConnectedAt    time.Time
 	NextRestartAt  time.Time
+	ParkedAt       time.Time
+	LastExit       *Exit
+}
+
+// Park is a parking as something outside the supervisor remembers it.
+//
+// The supervisor's own memory ends with its process, so a consumer that must
+// keep a child parked across restarts persists this and hands it back with
+// AdoptParked. ParkedAt is the moment the give-up happened, not the moment it
+// was restored: a park has one timestamp for as long as it lasts.
+type Park struct {
+	ParkedAt       time.Time
+	RestartAttempt int
 	LastExit       *Exit
 }
 
@@ -198,6 +211,7 @@ type child struct {
 	startedAt      time.Time
 	connectedAt    time.Time
 	nextRestartAt  time.Time
+	parkedAt       time.Time
 	lastExit       *Exit
 
 	restartTimer    Timer
@@ -266,6 +280,42 @@ func (s *Supervisor) EnsureUnlessParked(name string, start StartFunc) error {
 	return s.ensure(name, start, false)
 }
 
+// AdoptParked begins supervising a child that is already parked, without ever
+// launching it.
+//
+// It is the restore half of Park: a consumer that persisted a give-up hands it
+// back here, and the child lands exactly where the give-up left it — nothing
+// running, nothing scheduled, EnsureUnlessParked refused, Ensure the only way
+// out. Nothing is announced, because nothing moved: the child was parked before
+// this supervisor existed and it is parked now.
+//
+// A name that is already supervised is refused. Adopting onto a live child would
+// overwrite what this process knows with a record an earlier one wrote.
+func (s *Supervisor) AdoptParked(name string, park Park) error {
+	if err := validateName(name); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.shutdown {
+		return fmt.Errorf("supervise: supervisor is shut down, cannot adopt %q", name)
+	}
+	if s.children[name] != nil {
+		return fmt.Errorf("supervise: child %q is already supervised, so a persisted park cannot be adopted onto it", name)
+	}
+	s.children[name] = &child{
+		name: name,
+		// Still wanted, still not running: parking is the supervisor giving up,
+		// not the consumer changing its mind.
+		desired:        DesiredRunning,
+		phase:          PhaseParked,
+		parkedAt:       park.ParkedAt,
+		restartAttempt: park.RestartAttempt,
+		lastExit:       copyExit(park.LastExit),
+	}
+	return nil
+}
+
 func (s *Supervisor) ensure(name string, start StartFunc, revive bool) error {
 	if err := validateName(name); err != nil {
 		return err
@@ -327,6 +377,7 @@ func (s *Supervisor) Stop(name string) {
 	c.generation++
 	c.connectedAt = time.Time{}
 	c.nextRestartAt = time.Time{}
+	c.parkedAt = time.Time{}
 	stopTimer(&c.restartTimer)
 	stopTimer(&c.disconnectTimer)
 	stopTimer(&c.stabilityTimer)
@@ -429,22 +480,31 @@ func snapshotOf(c *child) Snapshot {
 		StartedAt:      c.startedAt,
 		ConnectedAt:    c.connectedAt,
 		NextRestartAt:  c.nextRestartAt,
+		ParkedAt:       c.parkedAt,
 	}
-	if c.lastExit != nil {
-		exit := *c.lastExit
-		if c.lastExit.ExitCode != nil {
-			code := *c.lastExit.ExitCode
-			exit.ExitCode = &code
-		}
-		snapshot.LastExit = &exit
-	}
+	snapshot.LastExit = copyExit(c.lastExit)
 	return snapshot
+}
+
+// copyExit deep-copies an exit so neither side of a hand-off shares the other's
+// memory — the supervisor keeps mutating its copy, and ExitCode is a pointer.
+func copyExit(from *Exit) *Exit {
+	if from == nil {
+		return nil
+	}
+	exit := *from
+	if from.ExitCode != nil {
+		code := *from.ExitCode
+		exit.ExitCode = &code
+	}
+	return &exit
 }
 
 func (s *Supervisor) spawnLocked(c *child) error {
 	c.generation++
 	c.phase = PhaseStarting
 	c.nextRestartAt = time.Time{}
+	c.parkedAt = time.Time{}
 	stopTimer(&c.restartTimer)
 	generation := c.generation
 	process, err := s.startChild(c, generation)
@@ -533,6 +593,7 @@ func (s *Supervisor) scheduleRestartLocked(c *child) {
 	if s.giveUpAfter > 0 && c.restartAttempt >= s.giveUpAfter {
 		c.phase = PhaseParked
 		c.nextRestartAt = time.Time{}
+		c.parkedAt = s.clock.Now()
 		detail := "no exit recorded"
 		if c.lastExit != nil {
 			detail = c.lastExit.String()

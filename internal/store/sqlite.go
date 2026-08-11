@@ -1087,6 +1087,15 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// pointer move, and bare rollback says so rather than guessing.
 	// Applied by applyMigration103, whose ALTER is column-guarded.
 	{103, "record the previously-serving version of each app", ``},
+	{104, "remember a parked supervised child across daemon restarts", `CREATE TABLE IF NOT EXISTS supervised_parks (
+    child           TEXT PRIMARY KEY,
+    parked_at       TEXT NOT NULL,
+    restart_attempt INTEGER NOT NULL DEFAULT 0,
+    exit_at         TEXT NOT NULL DEFAULT '',
+    exit_code       INTEGER,
+    exit_signal     TEXT NOT NULL DEFAULT '',
+    exit_error      TEXT NOT NULL DEFAULT ''
+);`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

@@ -423,6 +423,9 @@ type AppRuntimeInfo struct {
 	// NextRestartAt corresponds to the JSON schema field "next_restart_at".
 	NextRestartAt *string `json:"next_restart_at,omitempty,omitzero"`
 
+	// ParkedAt corresponds to the JSON schema field "parked_at".
+	ParkedAt *string `json:"parked_at,omitempty,omitzero"`
+
 	// Phase corresponds to the JSON schema field "phase".
 	Phase string `json:"phase"`
 

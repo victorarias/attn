@@ -471,7 +471,18 @@ dispatch uses `EnsureUnlessParked` and answers a runtime failure naming the way
 back. Re-verified: one parking, then eight minutes of traffic with the
 generation unchanged and no second notification.
 
-**Four things observed and deliberately not changed**, each a decision rather
+**A second defect, found and fixed after A4 landed.** The park lived only in
+the supervisor's memory, so a daemon restart — an upgrade, a crash, a reboot —
+forgot it, lazy-started the still-broken host on the first due fact, re-armed
+the whole crash loop, and raised a second critical notification for one outage.
+The give-up is now a `supervised_parks` row (migration 103) written when it
+happens and handed back to the supervisor by `supervise.AdoptParked` inside
+`ensureAppRuntimeSupervisor`, so every way to reach the supervisor finds the
+park already applied. `attn app runtime restart` deletes the row along with the
+park; nothing else does, and a runtime binary that changed since the park stays
+parked until someone asks for it.
+
+**Three things observed and deliberately not changed**, each a decision rather
 than a defect:
 
 - A hub-managed remote endpoint never gets a sidecar.
@@ -490,10 +501,6 @@ than a defect:
   fault — so nothing disables it and its consumer holds the retention floor for
   as long as the outage lasts. Whether a parked runtime should start a clock of
   its own is the open question A4 leaves; the roadmap gate did not ask for one.
-- A restarted daemon forgets the park: a fresh supervisor has no memory of it,
-  so the first dispatch lazy-starts a still-broken host and the crash loop
-  re-arms. Correct for a deliberate act, worth knowing as a way back that is
-  not the restart verb.
 
 ### Rulings on the four (2026-08-11)
 

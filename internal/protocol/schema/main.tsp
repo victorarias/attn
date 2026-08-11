@@ -4286,6 +4286,11 @@ model AppRuntimeInfo {
   "connected_at"?: string;
   // When the next restart fires, while backing off.
   "next_restart_at"?: string;
+  // When attn gave up restarting. Present only while parked, and it survives a
+  // daemon restart: a park has one timestamp for as long as it lasts, so a
+  // reader can tell a runtime that has been down since this morning from one
+  // that just crash-looped.
+  "parked_at"?: string;
   // How the last process ended, rendered. Absent when it has never exited.
   "last_exit"?: string;
 }

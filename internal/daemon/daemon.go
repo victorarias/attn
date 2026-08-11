@@ -1087,6 +1087,10 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 	d.log("daemon started")
 	d.startInstalledPlugins()
+	// A give-up outlives the daemon that made it, and this is where it is read
+	// back — before the consumers that would otherwise lazy-start the runtime on
+	// their first due fact.
+	d.restoreAppRuntimePark()
 	// Apps get their consumers here, not their runtime: the sidecar starts on the
 	// first fact an app is actually due, so a user with installed-but-quiet apps
 	// pays nothing for them.
