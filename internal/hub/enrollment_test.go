@@ -73,7 +73,7 @@ func TestEnrollRemote_RecordsANewEnrollment(t *testing.T) {
 	if err != nil {
 		t.Fatalf("enrollRemote: %v", err)
 	}
-	if !log.contains("enrolled fake-target as an outpost of "+testHomeDaemonID) {
+	if !log.contains("enrolled fake-target as an outpost of " + testHomeDaemonID) {
 		t.Fatalf("enrollment was not reported:\n%s", log)
 	}
 }
