@@ -197,6 +197,9 @@ func (d *Daemon) appRuntimeInfo(snapshot supervise.Snapshot) protocol.AppRuntime
 	if !snapshot.NextRestartAt.IsZero() {
 		info.NextRestartAt = protocol.Ptr(stampForWire(snapshot.NextRestartAt))
 	}
+	if !snapshot.ParkedAt.IsZero() {
+		info.ParkedAt = protocol.Ptr(stampForWire(snapshot.ParkedAt))
+	}
 	if snapshot.LastExit != nil {
 		info.LastExit = protocol.Ptr(snapshot.LastExit.String())
 	}

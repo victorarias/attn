@@ -1,0 +1,17 @@
+kind: fixed
+area: daemon
+change: >
+  A shared app runtime attn has given up on now stays given up on across a
+  daemon restart. Every installed app's handlers run in one background process,
+  and when that process crash-loops attn stops restarting it, says so once, and
+  waits for `attn app runtime restart`. That decision used to live only in
+  memory, so the next daemon start — an upgrade, a crash, a reboot — began the
+  whole crash loop again, spent another few minutes on it, and raised a second
+  critical alert about an outage the user had already been told about. The
+  decision is now written down and read back before anything can start the
+  runtime, `attn app runtime status` reports how long it has been parked rather
+  than restarting the clock, and the restart command clears the record along
+  with the park.
+symptom: >
+  After a broken app runtime was reported as stopped, restarting attn started
+  it crashing again and produced a second "Apps stopped running" alert.

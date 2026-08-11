@@ -846,6 +846,7 @@ export interface AppRuntimeInfo {
     generation:       number;
     last_exit?:       string;
     next_restart_at?: string;
+    parked_at?:       string;
     phase:            string;
     pid?:             number;
     restart_attempt:  number;
@@ -876,6 +877,7 @@ export interface Runtime {
     generation:       number;
     last_exit?:       string;
     next_restart_at?: string;
+    parked_at?:       string;
     phase:            string;
     pid?:             number;
     restart_attempt:  number;
@@ -11788,6 +11790,7 @@ const typeMap: any = {
         { json: "generation", js: "generation", typ: 0 },
         { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
         { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "parked_at", js: "parked_at", typ: u(undefined, "") },
         { json: "phase", js: "phase", typ: "" },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "restart_attempt", js: "restart_attempt", typ: 0 },
@@ -11808,6 +11811,7 @@ const typeMap: any = {
         { json: "generation", js: "generation", typ: 0 },
         { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
         { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "parked_at", js: "parked_at", typ: u(undefined, "") },
         { json: "phase", js: "phase", typ: "" },
         { json: "pid", js: "pid", typ: u(undefined, 0) },
         { json: "restart_attempt", js: "restart_attempt", typ: 0 },

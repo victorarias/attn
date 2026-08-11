@@ -150,11 +150,68 @@ func (d *Daemon) ensureAppRuntimeSupervisor() *supervise.Supervisor {
 		options.OnChange = func(string) {
 			d.publishFact(FactAppRuntimeChanged, appRuntimeChildName, nil)
 		}
-		options.OnGiveUp = d.notifyAppRuntimeParked
+		options.OnGiveUp = d.recordAppRuntimeParked
 		options.Logf = d.logf
 		d.appRuntimeSupervisor = supervise.New(options)
+		d.adoptPersistedParkLocked(d.appRuntimeSupervisor)
 	}
 	return d.appRuntimeSupervisor
+}
+
+// adoptPersistedParkLocked hands a previous daemon's give-up to the supervisor
+// being built, so it opens already parked.
+//
+// It lives here, in the constructor, rather than in a startup step: every way to
+// reach the supervisor — a dispatch, `attn app runtime status`, the restart verb,
+// the sidecar saying hello — goes through ensureAppRuntimeSupervisor, so no
+// caller can outrun the restore and spawn a host attn has already given up on.
+// A startup step would leave that ordering to be maintained by hand.
+func (d *Daemon) adoptPersistedParkLocked(supervisor *supervise.Supervisor) {
+	if d.store == nil {
+		return
+	}
+	park, ok, err := d.store.GetSupervisedPark(appRuntimeChildName)
+	if err != nil {
+		d.logf("apps: reading the persisted app-runtime park: %v", err)
+		return
+	}
+	if !ok {
+		return
+	}
+	exit := &supervise.Exit{
+		At:       park.ExitAt,
+		ExitCode: park.ExitCode,
+		Signal:   park.ExitSignal,
+		Error:    park.ExitError,
+	}
+	if err := supervisor.AdoptParked(appRuntimeChildName, supervise.Park{
+		ParkedAt:       park.ParkedAt,
+		RestartAttempt: park.RestartAttempt,
+		LastExit:       exit,
+	}); err != nil {
+		d.logf("apps: restoring the app runtime's park: %v", err)
+		return
+	}
+	d.logf("app runtime is still parked from %s (%d restarts, last exit: %s); `attn app runtime restart` tries again",
+		park.ParkedAt.Format(time.RFC3339), park.RestartAttempt, exit.String())
+}
+
+// restoreAppRuntimePark builds the supervisor at daemon start when — and only
+// when — a previous daemon left a park behind, so `attn app runtime status`
+// answers "parked" from the first moment rather than from whatever later call
+// happens to build one.
+//
+// Building it unconditionally would be wrong: a daemon that has never run an app
+// would then report a stopped runtime instead of never having started one, and
+// that difference is the whole of "is something broken here".
+func (d *Daemon) restoreAppRuntimePark() {
+	if d.store == nil {
+		return
+	}
+	if _, ok, err := d.store.GetSupervisedPark(appRuntimeChildName); err != nil || !ok {
+		return
+	}
+	d.ensureAppRuntimeSupervisor()
 }
 
 // ensureAppRuntime starts the sidecar, or adopts it if it is already running.
@@ -201,10 +258,32 @@ func (d *Daemon) startAppRuntime(revive bool) error {
 		return process, nil
 	}
 	supervisor := d.ensureAppRuntimeSupervisor()
-	if revive {
-		return supervisor.Ensure(appRuntimeChildName, start)
+	if !revive {
+		return supervisor.EnsureUnlessParked(appRuntimeChildName, start)
 	}
-	return supervisor.EnsureUnlessParked(appRuntimeChildName, start)
+	err = supervisor.Ensure(appRuntimeChildName, start)
+	// The supervisor has left parked whether or not the launch succeeded — a
+	// failed start goes to backoff, not back to parked — so the durable record of
+	// the park goes with it. Keeping it would re-park the runtime on the next
+	// daemon start, which is the way out being a door that opens once.
+	d.forgetAppRuntimePark()
+	return err
+}
+
+// forgetAppRuntimePark deletes the persisted park. Reviving is deliberate and
+// rare, so it logs when it actually erased something.
+func (d *Daemon) forgetAppRuntimePark() {
+	if d.store == nil {
+		return
+	}
+	cleared, err := d.store.ClearSupervisedPark(appRuntimeChildName)
+	if err != nil {
+		d.logf("apps: clearing the persisted app-runtime park: %v", err)
+		return
+	}
+	if cleared {
+		d.logf("app runtime revived; it will start again on the next daemon start too")
+	}
 }
 
 // appRuntimeEnv is what the sidecar is launched with. It is the plugin
@@ -246,10 +325,15 @@ func (d *Daemon) appRuntimeSnapshot() (supervise.Snapshot, bool) {
 // sidecar crash-looped past the give-up tripwire.
 const notificationKindAppRuntimeParked = "app_runtime_parked"
 
-// notifyAppRuntimeParked is the supervisor's OnGiveUp sink. Unlike a parked
-// plugin, a parked app runtime has a way back — `attn app runtime restart` — so
-// the copy names it.
-func (d *Daemon) notifyAppRuntimeParked(_ string, snapshot supervise.Snapshot) {
+// recordAppRuntimeParked is the supervisor's OnGiveUp sink: it makes the park
+// durable and then tells the user about it. Unlike a parked plugin, a parked app
+// runtime has a way back — `attn app runtime restart` — so the copy names it.
+//
+// Persisting comes first. A daemon that dies between the two writes should come
+// back parked and silent rather than running and about to crash-loop: the
+// notification says the runtime is not being restarted, and the durable park is
+// what makes that true past this process.
+func (d *Daemon) recordAppRuntimeParked(_ string, snapshot supervise.Snapshot) {
 	detail := ""
 	if snapshot.LastExit != nil {
 		detail = snapshot.LastExit.String()
@@ -258,6 +342,7 @@ func (d *Daemon) notifyAppRuntimeParked(_ string, snapshot supervise.Snapshot) {
 	if d.store == nil {
 		return
 	}
+	d.persistAppRuntimePark(snapshot)
 	record, err := d.store.AddNotification(store.NotificationRecord{
 		Kind:     notificationKindAppRuntimeParked,
 		Severity: store.NotificationCritical,
@@ -274,6 +359,32 @@ func (d *Daemon) notifyAppRuntimeParked(_ string, snapshot supervise.Snapshot) {
 		return
 	}
 	d.publishFact(FactNotificationCreated, record.ID, nil)
+}
+
+// persistAppRuntimePark writes the park so the next daemon inherits it.
+//
+// A park that lived only in memory was the bug: daemon restarts are ordinary
+// (an upgrade, a crash, a reboot), and each one lazy-started the same broken
+// host, spent the whole backoff schedule on it again, and raised a second
+// critical notification for one outage the user had already been told about.
+func (d *Daemon) persistAppRuntimePark(snapshot supervise.Snapshot) {
+	park := store.SupervisedPark{
+		Child:          appRuntimeChildName,
+		ParkedAt:       snapshot.ParkedAt,
+		RestartAttempt: snapshot.RestartAttempt,
+	}
+	if park.ParkedAt.IsZero() {
+		park.ParkedAt = d.appNow()
+	}
+	if snapshot.LastExit != nil {
+		park.ExitAt = snapshot.LastExit.At
+		park.ExitCode = snapshot.LastExit.ExitCode
+		park.ExitSignal = snapshot.LastExit.Signal
+		park.ExitError = snapshot.LastExit.Error
+	}
+	if err := d.store.SaveSupervisedPark(park); err != nil {
+		d.logf("apps: persisting the app-runtime park: %v", err)
+	}
 }
 
 // appNow is the daemon's clock for everything app-runtime — the stall clock most

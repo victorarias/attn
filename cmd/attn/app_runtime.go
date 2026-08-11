@@ -160,6 +160,11 @@ func writeAppRuntimeInfo(info protocol.AppRuntimeInfo) {
 	fmt.Printf("  state:    %s (%s), generation %d\n", info.Phase, connected, info.Generation)
 	if info.Phase == "parked" {
 		fmt.Printf("            attn gave up restarting it after %d attempts; no app's handlers are running.\n", info.RestartAttempt)
+		if info.ParkedAt != nil {
+			// The park outlives the daemon that made it, so this is not "a moment
+			// ago" — it is how long apps have actually been dead.
+			fmt.Printf("            parked since %s.\n", *info.ParkedAt)
+		}
 		fmt.Printf("            `attn app runtime restart` tries again.\n")
 	} else if info.RestartAttempt > 0 {
 		fmt.Printf("            restart attempt %d\n", info.RestartAttempt)
