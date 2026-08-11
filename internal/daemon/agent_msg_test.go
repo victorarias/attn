@@ -266,6 +266,10 @@ func TestAgentMsgSizeRefusalsSurviveTheSocket(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 	waitForSocket(t, sockPath, 5*time.Second)
+	// The socket appears before startup recovery finishes, and recovery reaps
+	// sessions with no PTY — these seeded rows are deliberately backdated, so
+	// the reaper's own-run guard cannot protect them. Seed only after it ran.
+	waitForRecovery(t, d)
 	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 	addCharacterizationSession(t, d, "target-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 

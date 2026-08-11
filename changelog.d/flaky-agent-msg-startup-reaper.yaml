@@ -1,0 +1,11 @@
+kind: internal
+area: daemon tests
+change: >
+  The agent-msg socket test now waits for startup recovery to finish before
+  seeding its backdated sessions, so the startup reaper can no longer remove
+  the sender mid-test.
+notes: >
+  TestAgentMsgSizeRefusalsSurviveTheSocket failed under CI load with
+  "sender_session_not_found": the socket appears before recovery runs, and
+  the deliberately backdated characterization sessions are outside the
+  reaper's own-run guard. Test-only change; no daemon behavior touched.
