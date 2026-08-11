@@ -1,0 +1,6 @@
+kind: internal
+area: testing
+change: >
+  scripts/pr-evidence.sh records an app window to mp4 and publishes mp4+gif to
+  victorarias/attn-pr-evidence, emitting the markdown that embeds the gif
+  inline in a PR description as testing evidence.
