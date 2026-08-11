@@ -58,11 +58,21 @@ func TestRulePrecision(t *testing.T) {
 			caught: []string{
 				"There are three cases the classifier has to separate.",
 				"It is the daemon that decides, not the worker.",
+				// The impersonal-"it" family, pinned deliberately: the
+				// corpus never sampled it, and slice 2's judge inherits
+				// these calls. Both are hedges the reader can lose — "the
+				// daemon handles it" says the same thing sooner.
+				"It is safe to say the daemon handles it.",
+				"It is time to raise the threshold.",
 			},
 			spared: []string{
 				"It works the same way on every platform.",
 				"There the reader finally learns who writes the record.",
 				"The daemon is there before any client connects.",
+				// A marker inside a later clause is that clause's, not the
+				// opener's; both of these used to fire on their last word.
+				"It is slower than the path we compared it to.",
+				"It is fine on every platform I ported it to.",
 			},
 		},
 		{

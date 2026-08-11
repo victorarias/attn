@@ -215,7 +215,7 @@ words; at the calibrated thresholds the numeric rules fire zero times on
 either side. What #818 removed was whole paragraphs of retelling and
 narration from a surface whose standard is one or two lines — volume
 against purpose, which no per-sentence metric can see. The pattern rules
-do separate it: expletive openers run at 0.82 findings per 1000 words in
+do separate it: expletive openers run at 0.33 findings per 1000 words in
 the deleted prose and 0.00 in what replaced it. So the deterministic
 layer's numeric rules are runaway-catchers, the judge is what has to catch
 #818-style density, and slice 2 now has a labelled corpus to measure its
@@ -228,18 +228,23 @@ conjunctions a split deletes are propositions. That is a fraction of the
 a split satisfies a length rule outright — and the cohesion rules measure
 exactly what the split removed.
 
-Two rules were wrong rather than miscalibrated, and both were narrowed
-against the corpus rather than exempted. Actor-hiding passive fired 1038
-times on prose Victor accepted ("is wired", "is merged") until it was
-narrowed to obligation modals, where the reader genuinely cannot tell
-whose job it is; it now fires 25 times. Hidden verbs driven by noun
+Three rules were wrong rather than miscalibrated, and all three were
+narrowed against the corpus rather than exempted. Actor-hiding passive
+fired 1038 times on prose Victor accepted ("is wired", "is merged") until
+it was narrowed to obligation modals, where the reader genuinely cannot
+tell whose job it is; it now fires 25 times. Hidden verbs driven by noun
 suffixes reported "takes an extension" and "reached migration 51", so the
 rule is now driven by a curated noun→verb table plus a following
-preposition, and every finding names the verb to use instead.
+preposition, and every finding names the verb to use instead. The
+expletive opener took any later "that/to/whether/which" as its marker, so
+a stranded preposition decided it — "it is slower than the path we
+compared it to" opens on a real pronoun and fired on its last word; the
+marker now has to be the opener's own complement, which drops 10 of the
+49 findings the healthy set produced.
 
-Running the shipped gate over all 78 accepted documents produces 76
-findings in 0.55s — 49 expletive openers, 25 obligation passives, 2 hidden
-verbs, and nothing from the numeric rules or the word list.
+Running the shipped gate over all 78 accepted documents produces 66
+findings in about a second — 39 expletive openers, 25 obligation passives,
+2 hidden verbs, and nothing from the numeric rules or the word list.
 
 ## Open questions
 

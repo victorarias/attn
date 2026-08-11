@@ -179,12 +179,42 @@ func (expletiveRule) check(doc *Document, _ Thresholds) []Finding {
 
 // clauseMarkerFollows separates the expletive "it" ("it is clear that …") from
 // the pronoun "it" ("it works"), which is fine.
+//
+// The marker has to be the complement of the opening "is", and two things keep
+// it there. A finite verb ends the scan, because it carries a clause with its
+// own subject and anything past it belongs to that clause. And "to" counts only
+// when an infinitive follows it, which is what the expletive always takes ("it
+// is time to go"); a stranded preposition is not a marker. Without both, a
+// sentence's last word decided the rule — "it is slower than the path we
+// compared it to" opens on a real pronoun and fired anyway. Participles and
+// gerunds do not end the scan: they are still the opening predicate ("it is
+// claimed that …", "it is worth checking whether …").
 func clauseMarkerFollows(tokens []Token) bool {
-	for _, t := range tokens[2:] {
+	for i, t := range tokens[2:] {
 		switch lower(t) {
-		case "that", "to", "whether", "which":
+		case "that", "whether", "which":
 			return true
+		case "to":
+			if infinitiveFollows(tokens[2+i:]) {
+				return true
+			}
 		}
+		switch t.Tag {
+		case "VBZ", "VBD", "VBP":
+			return false
+		}
+	}
+	return false
+}
+
+// infinitiveFollows reports whether "to" heads an infinitive, reachable across
+// the adverb that can split it.
+func infinitiveFollows(tokens []Token) bool {
+	for _, t := range tokens[1:] {
+		if isAdverb(t) {
+			continue
+		}
+		return t.Tag == "VB"
 	}
 	return false
 }
