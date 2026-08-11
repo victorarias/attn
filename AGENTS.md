@@ -175,6 +175,30 @@ output as product evidence.
 - On failure, inspect captured pane text and native screenshots before diagnosis.
 - Remote scenarios target the local OrbStack VM (`attn-remote@orb`); provision with `pnpm --dir app run real-app:provision-remote`.
 
+### Evidence recordings
+
+A PR with a visible change carries a recording of the live verification in its
+description. Record the run, publish, paste the emitted markdown:
+
+```bash
+./scripts/pr-evidence.sh record --profile <name> --seconds 20 --out clip.mp4
+./scripts/pr-evidence.sh publish clip.mp4   # pushes mp4+gif to victorarias/attn-pr-evidence, prints the markdown
+```
+
+`record` captures the window of the named profile's app (`attn-<name>.app`) —
+pass the profile you installed for this verification, the same name you will
+`profile clean` later. `--app <owner>` overrides for a non-attn window.
+
+The evidence repo is public and the clip shows whatever the window shows —
+session names, transcripts, tickets. Watch the recording before publishing;
+re-record rather than push something that should not be on the open internet.
+
+The GIF renders inline in the PR; the mp4 beside it is the full-quality
+master. GitHub never inline-plays a repo-hosted mp4 — only the GIF embeds —
+and images render only under 10MB, so keep clips around 20s (the script warns
+past the limit). Rendering receipts, one section per embed form:
+[attn-pr-evidence#1](https://github.com/victorarias/attn-pr-evidence/issues/1).
+
 ## Hit every surface
 
 The most common defect is a change that works on the path you tested and is
