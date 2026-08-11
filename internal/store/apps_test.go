@@ -1,6 +1,7 @@
 package store
 
 import (
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -146,6 +147,62 @@ func TestApps_RollbackMovesThePointerOnly(t *testing.T) {
 	}
 }
 
+// Every path that moves the pointer records the version it replaced, and a
+// no-op move leaves that record alone. This is what bare `attn app rollback`
+// reads, so the two writers have to agree.
+func TestApps_PointerMovesRecordWhatTheyReplaced(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	older, newer := seedApps(t, s, now)
+
+	previousOf := func(step string) int64 {
+		t.Helper()
+		app, ok, err := s.GetApp("approval-gate")
+		if err != nil || !ok {
+			t.Fatalf("%s: get app: %v ok=%t", step, err, ok)
+		}
+		return app.PreviousVersionID
+	}
+
+	// The first version had nothing before it; the second replaced it.
+	if got := previousOf("after two applies"); got != older.ID {
+		t.Fatalf("previous after the second apply = %d, want %d", got, older.ID)
+	}
+
+	// Re-applying the version already current moves nothing, so the predecessor
+	// must survive — otherwise an idle dev loop erases the way back.
+	if _, _, err := s.CommitAppVersion(AppVersion{
+		AppName:      "approval-gate",
+		ContentHash:  newer.ContentHash,
+		Declaration:  "ignored",
+		ArtifactPath: "ignored",
+	}, now.Add(time.Hour)); err != nil {
+		t.Fatalf("re-apply: %v", err)
+	}
+	if got := previousOf("after a no-op re-apply"); got != older.ID {
+		t.Fatalf("a no-op re-apply rewrote the predecessor to %d, want %d", got, older.ID)
+	}
+
+	// A rollback is a pointer move like any other and records the same way, which
+	// is what lets a second rollback undo the first.
+	if err := s.SetAppCurrentVersion("approval-gate", older.ID, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("rollback: %v", err)
+	}
+	if got := previousOf("after a rollback"); got != newer.ID {
+		t.Fatalf("previous after the rollback = %d, want %d", got, newer.ID)
+	}
+
+	// An app whose pointer has never moved off a real version has no predecessor,
+	// and reports 0 rather than guessing at one.
+	other, _, err := s.GetApp("standup-digest")
+	if err != nil {
+		t.Fatalf("get the single-version app: %v", err)
+	}
+	if other.PreviousVersionID != 0 {
+		t.Fatalf("a first apply invented a predecessor: %d", other.PreviousVersionID)
+	}
+}
+
 // Removal takes the registry row and nothing else: versions and invocations are
 // history, and `attn app remove` says so by counting what it kept.
 func TestApps_DeleteKeepsVersionsAndInvocations(t *testing.T) {
@@ -282,5 +339,51 @@ func TestApps_CommitVersionRefusesAnIncompleteRow(t *testing.T) {
 	}
 	if apps, err := s.ListApps(); err != nil || len(apps) != 0 {
 		t.Fatalf("a refused commit left rows behind: %+v (%v)", apps, err)
+	}
+}
+
+// A database written before this column existed carries its app rows across the
+// migration with no predecessor rather than inventing one: what was serving
+// before is history the registry never recorded, and deriving it from ids is the
+// bug bare rollback exists to avoid.
+func TestApps_MigrationCarriesRowsWithNoPredecessor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "attn.db")
+	s, err := NewWithDB(path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedApps(t, s, now)
+	s.Close()
+
+	// Rewind to the schema as it stood before 103, with the app rows still there.
+	db, err := OpenDB(path)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	for _, stmt := range []string{
+		"ALTER TABLE apps DROP COLUMN previous_version_id",
+		"DELETE FROM schema_migrations WHERE version = 103",
+	} {
+		if _, err := db.Exec(stmt); err != nil {
+			t.Fatalf("rewinding with %q: %v", stmt, err)
+		}
+	}
+	db.Close()
+
+	s, err = NewWithDB(path)
+	if err != nil {
+		t.Fatalf("reopen after rewind: %v", err)
+	}
+	defer s.Close()
+	app, ok, err := s.GetApp("approval-gate")
+	if err != nil || !ok {
+		t.Fatalf("get app after migration: %v ok=%t", err, ok)
+	}
+	if app.CurrentVersionID == 0 {
+		t.Fatal("the migration lost the current version pointer")
+	}
+	if app.PreviousVersionID != 0 {
+		t.Fatalf("the migration invented a predecessor: %d", app.PreviousVersionID)
 	}
 }

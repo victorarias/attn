@@ -167,15 +167,26 @@ func runAppRollback(args []string) {
 		writeJSON(result)
 		return
 	}
-	// Naming a version explicitly can move the pointer forward, and calling that
+	target := fmt.Sprintf("version %d (%s)", result.VersionID, appbuild.ShortHash(result.ContentHash))
+	switch {
+	// Bare rollback follows a recorded pointer rather than the version list, and
+	// the id it lands on can be higher than the one it left — rolling back off a
+	// rollback is exactly that. Saying which version was serving is what makes
+	// the choice checkable, and it is always backwards in time, whatever the ids
+	// did.
+	case versionID == 0 && result.PreviousVersionID != nil:
+		fmt.Printf("rolled app %s back to %s, which was serving before version %d\n",
+			result.Name, target, *result.PreviousVersionID)
+	// A version named explicitly can move the pointer forward, and calling that
 	// "rolled back" would be a lie about which direction the app just went.
-	verb := "rolled app %s back to version %d (%s)\n"
-	if result.PreviousVersionID != nil && *result.PreviousVersionID < result.VersionID {
-		verb = "moved app %s forward to version %d (%s)\n"
-	}
-	fmt.Printf(verb, result.Name, result.VersionID, appbuild.ShortHash(result.ContentHash))
-	if result.PreviousVersionID != nil {
-		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
+	case result.PreviousVersionID != nil && *result.PreviousVersionID < result.VersionID:
+		fmt.Printf("moved app %s forward to %s\n  was on version %d\n",
+			result.Name, target, *result.PreviousVersionID)
+	case result.PreviousVersionID != nil:
+		fmt.Printf("rolled app %s back to %s\n  was on version %d\n",
+			result.Name, target, *result.PreviousVersionID)
+	default:
+		fmt.Printf("rolled app %s back to %s\n", result.Name, target)
 	}
 	fmt.Printf("  artifact %s\n", result.ArtifactPath)
 }

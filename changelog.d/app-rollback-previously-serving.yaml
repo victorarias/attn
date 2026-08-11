@@ -1,0 +1,12 @@
+kind: fixed
+area: cli
+change: >
+  `attn app rollback <name>` with no version now returns to the version that was
+  serving immediately before the current one, instead of the version with the
+  next id down. Those differ exactly when rollback matters: after a broken
+  version is rolled off and a fix applied, the next id down is the broken one.
+  The registry now records what each pointer move replaced, so the command
+  follows a fact rather than guessing, and says why it chose that version.
+  Rolling back twice returns to where you started. An app with no recorded
+  predecessor — one carried across this change, or on its first version — is
+  refused with its version list rather than sent somewhere arbitrary.
