@@ -90,8 +90,15 @@ commands:
         byte-identical content again is the same version, not a new one.
 
   rollback <name> [version]
-        point the app at a version it already has — the one before the current
-        one, or the one you name. Builds nothing: the artifact is still on disk.
+        point the app at a version it already has — the one you name, or with no
+        version, the one that was serving immediately before the current one.
+        That is a recorded pointer, not the next id down. If a broken version
+        was rolled off before the current one was applied, the next id down is
+        that broken version; what was serving is the one you kept running.
+        Rolling back again returns to where you started, because every move
+        records what it replaced.
+
+        Builds nothing: the artifact is still on disk.
 
   dev <path>
         apply on every change, and print every handler invocation as it runs.

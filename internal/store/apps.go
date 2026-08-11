@@ -25,12 +25,42 @@ import (
 
 // App is one registered app. CurrentVersionID is 0 until a version has been
 // applied — a registry row can exist ahead of its first successful build.
+//
+// PreviousVersionID is what was serving immediately before CurrentVersionID, and
+// it is 0 until the pointer has moved at least once off a real version. It is
+// the fact bare `attn app rollback` follows, so it is maintained by every path
+// that moves the pointer and by nothing else.
 type App struct {
-	Name             string
-	CurrentVersionID int64
-	CreatedAt        time.Time
-	UpdatedAt        time.Time
+	Name              string
+	CurrentVersionID  int64
+	PreviousVersionID int64
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
 }
+
+// movePointerSQL sets an app's current version and carries the version it
+// replaced into previous_version_id. Both pointer-moving statements share it, so
+// there is one place the predecessor can be recorded and no way to move the
+// pointer without recording it.
+//
+// The CASE keeps the predecessor unchanged when the move is a no-op — re-applying
+// byte-identical content lands on the version already current, and overwriting
+// the predecessor with itself would make a rollback that changed nothing lose the
+// version it could have gone back to. SQLite evaluates every assignment against
+// the pre-update row, so current_version_id on the right-hand side is the
+// outgoing one.
+//
+// Parameters, in order: the incoming version id (twice), the stamp, the name.
+const movePointerSQL = `
+	UPDATE apps SET
+		previous_version_id = CASE
+			WHEN current_version_id IS NOT NULL AND current_version_id <> ?
+			THEN current_version_id
+			ELSE previous_version_id
+		END,
+		current_version_id = ?,
+		updated_at = ?
+	WHERE name = ?`
 
 // AppVersion is an immutable record of one built artifact. ContentHash is the
 // version's identity: applying byte-identical content again reuses this row
@@ -98,7 +128,7 @@ func (s *Store) GetApp(name string) (App, bool, error) {
 		return App{}, false, nil
 	}
 	app, err := scanApp(s.db.QueryRow(`
-		SELECT name, current_version_id, created_at, updated_at FROM apps WHERE name = ?
+		SELECT name, current_version_id, previous_version_id, created_at, updated_at FROM apps WHERE name = ?
 	`, name))
 	switch err {
 	case nil:
@@ -119,7 +149,7 @@ func (s *Store) ListApps() ([]App, error) {
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT name, current_version_id, created_at, updated_at FROM apps ORDER BY name ASC
+		SELECT name, current_version_id, previous_version_id, created_at, updated_at FROM apps ORDER BY name ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -220,9 +250,7 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 		return AppVersion{}, false, err
 	}
 
-	if _, err := tx.Exec(`
-		UPDATE apps SET current_version_id = ?, updated_at = ? WHERE name = ?
-	`, v.ID, stamp, v.AppName); err != nil {
+	if _, err := tx.Exec(movePointerSQL, v.ID, v.ID, stamp, v.AppName); err != nil {
 		return AppVersion{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -251,9 +279,8 @@ func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time
 	case owner != name:
 		return fmt.Errorf("store: app version %d belongs to app %q, not %q", versionID, owner, name)
 	}
-	res, err := s.db.Exec(`
-		UPDATE apps SET current_version_id = ?, updated_at = ? WHERE name = ?
-	`, versionID, now.UTC().Format(sortableTimeFormat), name)
+	stamp := now.UTC().Format(sortableTimeFormat)
+	res, err := s.db.Exec(movePointerSQL, versionID, versionID, stamp, name)
 	if err != nil {
 		return err
 	}
@@ -460,15 +487,17 @@ func (s *Store) TrimAppInvocations(cutoff time.Time, perApp int) (int, error) {
 
 func scanApp(row rowScanner) (App, error) {
 	var (
-		app       App
-		versionID sql.NullInt64
-		createdAt string
-		updatedAt string
+		app        App
+		versionID  sql.NullInt64
+		previousID sql.NullInt64
+		createdAt  string
+		updatedAt  string
 	)
-	if err := row.Scan(&app.Name, &versionID, &createdAt, &updatedAt); err != nil {
+	if err := row.Scan(&app.Name, &versionID, &previousID, &createdAt, &updatedAt); err != nil {
 		return App{}, err
 	}
 	app.CurrentVersionID = versionID.Int64
+	app.PreviousVersionID = previousID.Int64
 	app.CreatedAt = parseStoreTime(createdAt)
 	app.UpdatedAt = parseStoreTime(updatedAt)
 	return app, nil

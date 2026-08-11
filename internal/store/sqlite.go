@@ -1075,6 +1075,18 @@ CREATE TABLE IF NOT EXISTS app_invocations (
 -- order.
 CREATE INDEX IF NOT EXISTS idx_app_invocations_app ON app_invocations(app_name, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(started_at);`},
+	// What was serving immediately before the version an app is on now. Bare
+	// `attn app rollback <name>` follows it, because "the version before this
+	// one" is the operator's get-me-back-to-what-worked, and the numerically
+	// previous id is a different question with a different answer — the app that
+	// went good, broken, fixed rolls back onto the broken one under the old rule.
+	//
+	// Nothing backfills it: what was serving before is history the registry never
+	// recorded, and inventing it from ids would reproduce the bug this fixes. An
+	// app carried across this migration has no recorded previous until its next
+	// pointer move, and bare rollback says so rather than guessing.
+	// Applied by applyMigration103, whose ALTER is column-guarded.
+	{103, "record the previously-serving version of each app", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1451,6 +1463,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 100 {
 			if err := applyMigration100(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 103 {
+			if err := applyMigration103(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2598,6 +2615,19 @@ func applyMigration100(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE notifications ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'")
+	return err
+}
+
+// applyMigration103 adds the previously-serving version pointer to the app
+// registry. Guarded on the column, and NULL is the honest carried value: an app
+// that existed before this migration has no recorded predecessor until its next
+// pointer move.
+func applyMigration103(tx *sql.Tx) error {
+	has, err := columnExists(tx, "apps", "previous_version_id")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE apps ADD COLUMN previous_version_id INTEGER")
 	return err
 }
 

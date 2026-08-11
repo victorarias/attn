@@ -181,7 +181,8 @@ func (d *Daemon) handleAppRollback(conn net.Conn, msg *protocol.AppRollbackMessa
 // reader's terms: a version that is not this app's is refused by listing the
 // ones that are, and an app already on the version asked for is refused rather
 // than answered with a success that changed nothing and a fact about a move that
-// did not happen.
+// did not happen. Every refusal ends with the app's version list, so the caller
+// can fix its next call from the error alone.
 //
 // versions arrives newest-id-first, as ListAppVersions returns it.
 func pickRollbackTarget(name string, app store.App, versions []store.AppVersion, requested *int) (store.AppVersion, error) {
@@ -200,16 +201,30 @@ func pickRollbackTarget(name string, app store.App, versions []store.AppVersion,
 		}
 		return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is not a version of this app; %s", name, id, versionsSentence(versions, app.CurrentVersionID))
 	}
-	// No version named: the one applied before the current one, which is the
-	// highest id below the pointer. "The newest that is not current" would roll
-	// *forward* for an app already rolled back, which is not what the verb says.
+	// No version named: whatever was serving immediately before the current one,
+	// which the registry records at every pointer move. The numerically previous
+	// id is a different question and answers it wrong exactly when rollback
+	// matters — an app that went good, broken, fixed has the broken one below its
+	// pointer, and that is the version an operator is running from.
+	//
+	// Because the predecessor is rewritten on every move, rolling back twice
+	// returns to where the first rollback started. That flip-flop is the point:
+	// "back" always means the version that was serving a moment ago.
+	if app.CurrentVersionID == 0 {
+		return store.AppVersion{}, fmt.Errorf("app rollback %s: it is not on any version, so there is no back to go to; name one of them. %s",
+			name, versionsSentence(versions, 0))
+	}
+	if app.PreviousVersionID == 0 {
+		return store.AppVersion{}, fmt.Errorf("app rollback %s: nothing is recorded as serving before version %d, so bare rollback has no target; name the version to roll onto. %s",
+			name, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
+	}
 	for _, v := range versions {
-		if app.CurrentVersionID == 0 || v.ID < app.CurrentVersionID {
+		if v.ID == app.PreviousVersionID {
 			return v, nil
 		}
 	}
-	return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is its oldest, so there is nothing before it; %s",
-		name, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
+	return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is recorded as serving before version %d but is not among this app's versions; name the version to roll onto. %s",
+		name, app.PreviousVersionID, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
 }
 
 // versionsSentence lists what an app actually has, marking the current one. It
