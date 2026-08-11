@@ -4,7 +4,8 @@ set -euo pipefail
 # PR evidence recordings: capture an app window to mp4, publish mp4+gif to the
 # evidence repo, and emit the markdown to paste into a PR description.
 #
-#   pr-evidence.sh record  [--app <owner>] [--seconds N] [--out FILE]
+#   pr-evidence.sh record  --profile <name> [--seconds N] [--out FILE]
+#                          (or --app <owner> for a non-attn window)
 #   pr-evidence.sh publish [--dir <name>] [--fps N] [--width N] FILE.mp4 ...
 #
 # GitHub inline-renders a GIF referenced from a public repo's raw URL, but a
@@ -68,20 +69,23 @@ cmd_record() {
   # 20s default: busy terminal content converts at ~320KB/s of gif at the
   # publish defaults (receipt: 6s live attn window -> 1.9MB), so 20s stays
   # well under GitHub's 10MB inline-render limit; 30s flirts with it.
-  local app="" seconds=20 out=""
+  local app="" profile="" seconds=20 out=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --profile) profile="$2"; shift 2 ;;
       --app) app="$2"; shift 2 ;;
       --seconds) seconds="$2"; shift 2 ;;
       --out) out="$2"; shift 2 ;;
       *) die "record: unknown argument $1" ;;
     esac
   done
-  # Record the profile the caller is already verifying on (attn-<profile>.app
-  # owns a window named after itself); never guess between running profiles.
+  # Record the profile under verification (attn-<profile>.app owns a window
+  # named after itself; bare "prod" is attn.app). ATTN_PROFILE only exists in
+  # the shell that eval'd profile-env, so it is a fallback, never the story.
   if [[ -z "$app" ]]; then
-    [[ -n "${ATTN_PROFILE:-}" ]] || die "no --app and no ATTN_PROFILE; pass --app <owner> (e.g. attn-<profile>) or select a profile first"
-    app="attn-$ATTN_PROFILE"
+    profile="${profile:-${ATTN_PROFILE:-}}"
+    [[ -n "$profile" ]] || die "which window? pass --profile <name> (the profile you are verifying on) or --app <owner>"
+    if [[ "$profile" == "prod" ]]; then app="attn"; else app="attn-$profile"; fi
   fi
   [[ -n "$out" ]] || out="evidence-$(date +%Y%m%d-%H%M%S).mp4"
 

@@ -181,13 +181,13 @@ A PR with a visible change carries a recording of the live verification in its
 description. Record the run, publish, paste the emitted markdown:
 
 ```bash
-./scripts/pr-evidence.sh record --seconds 20 --out clip.mp4   # window-scoped; records the ATTN_PROFILE you are verifying on
-./scripts/pr-evidence.sh publish clip.mp4                     # pushes mp4+gif to victorarias/attn-pr-evidence, prints the markdown
+./scripts/pr-evidence.sh record --profile <name> --seconds 20 --out clip.mp4
+./scripts/pr-evidence.sh publish clip.mp4   # pushes mp4+gif to victorarias/attn-pr-evidence, prints the markdown
 ```
 
-`record` targets the window of the profile you are already live-verifying on
-(`attn-$ATTN_PROFILE`); `--app <owner>` overrides when the window belongs to
-another bundle.
+`record` captures the window of the named profile's app (`attn-<name>.app`) —
+pass the profile you installed for this verification, the same name you will
+`profile clean` later. `--app <owner>` overrides for a non-attn window.
 
 The evidence repo is public and the clip shows whatever the window shows —
 session names, transcripts, tickets. Watch the recording before publishing;
