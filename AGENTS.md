@@ -517,6 +517,13 @@ carries the enumerated exception list.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor. Disabled consumers do not pin the log; they resume at head with a
   logged gap.
+- An enabled consumer that stops consuming therefore grows the log until someone
+  intervenes, so past `bus.DefaultPinAlarmAge` the pin is reported: a warning
+  notification, a `(PINNING …)` tag in `attn bus status`, and a badge on the
+  settings page, all from one predicate in `internal/bus`. Announced once per
+  episode — the cursor moving is what ends one. `ATTN_BUS_PIN_ALARM_AGE` moves
+  the tripwire (0 turns it off), which is also how the condition is demonstrated
+  without waiting an hour.
 - A durable consumer can register and unregister while the daemon runs.
   `Unregister` cancels that consumer alone, waits for its delivery loop to exit,
   and only then deletes the row: deleting first leaves a live loop reading a

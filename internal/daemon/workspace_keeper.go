@@ -291,6 +291,19 @@ func (d *Daemon) startJobQueue() {
 		); err != nil {
 			d.logf("apps: register invocation retention tick: %v", err)
 		}
+		// The event log's retention floor is the fourth. A consumer that stops
+		// consuming grows the log for as long as it lasts and nothing else ever
+		// says so, so the check is only skipped when it is deliberately turned off.
+		if age := d.busPinAlarmAge(); age > 0 {
+			if err := runner.RegisterCron(
+				busPinAlarmKind,
+				busPinAlarmInterval(age),
+				d.busPinAlarmHandler,
+				jobs.HandlerConfig{Timeout: busPinAlarmTimeout},
+			); err != nil {
+				d.logf("bus: register retention-pin alarm tick: %v", err)
+			}
+		}
 		if err := runner.RegisterCron(
 			automationScheduleKind,
 			automationScheduleInterval,

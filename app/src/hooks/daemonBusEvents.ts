@@ -31,6 +31,8 @@ export interface BusStatus {
   recentWindowSeconds: number;
   baselineWindowSeconds: number;
   surgeRatePerHour: number;
+  /** How long a consumer may pin the retention floor before the pin is reported. */
+  pinAlarmSeconds: number;
   producers: BusProducerStatus[];
   consumers: BusConsumerStatus[];
   health: BusHealthEntry[];
@@ -61,6 +63,7 @@ const toBusStatus = (event: BusDaemonEvent): BusStatus => ({
   recentWindowSeconds: num(event.recent_window_seconds),
   baselineWindowSeconds: num(event.baseline_window_seconds),
   surgeRatePerHour: num(event.surge_rate_per_hour),
+  pinAlarmSeconds: num(event.pin_alarm_seconds),
   producers: list<BusProducerStatus>(event.producers),
   consumers: list<BusConsumerStatus>(event.consumers),
   health: list<BusHealthEntry>(event.health),

@@ -479,7 +479,12 @@ func (d *Daemon) ensureEventBus() {
 	if d.store != nil {
 		backing = d.newSQLBusStore()
 	}
-	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
+	d.eventBus = bus.New(bus.Options{
+		Store:       backing,
+		Log:         d.logf,
+		Compactable: CompactableFacts,
+		PinAlarmAge: d.busPinAlarmAge(),
+	})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
 	d.subscribeAgentConversationFacts()

@@ -52,6 +52,23 @@ const formatSpan = (seconds: number): string => {
   return `${Math.round(seconds)}s`;
 };
 
+/**
+ * Renders a configured limit exactly, where formatSpan renders an observation:
+ * "1h", "1m30s", "45s". A limit rounded to "2m" when it was set to 1m30s names a
+ * number the reader cannot check their own value against. Mirrors limitDuration
+ * in internal/bus.
+ */
+const formatLimit = (seconds: number): string => {
+  if (!Number.isFinite(seconds) || seconds <= 0) return '';
+  const whole = Math.round(seconds);
+  const h = Math.floor(whole / 3600);
+  const m = Math.floor((whole % 3600) / 60);
+  const s = whole % 60;
+  if (h > 0) return s === 0 ? (m === 0 ? `${h}h` : `${h}h${m}m`) : `${h}h${m}m${s}s`;
+  if (m > 0) return s === 0 ? `${m}m` : `${m}m${s}s`;
+  return `${s}s`;
+};
+
 /** Age of an RFC3339 stamp, as a span. Empty for an absent or unparseable one. */
 const formatAge = (iso: string, now: number): string => {
   if (!iso) return '';
@@ -262,9 +279,19 @@ export function EventBusSettings({ getBusStatus, setConsumerEnabled }: EventBusS
               >
                 <span className="bus-name">
                   {c.name}
-                  {c.holds_retention_floor && (
+                  {/* Holding the floor is the system working. Holding it past the
+                      tripwire is the thing to act on, so the two never look alike. */}
+                  {c.holds_retention_floor && !c.pin_alarm && (
                     <span className="settings-pill" title="Retention stops at this consumer's cursor">
                       Retention floor
+                    </span>
+                  )}
+                  {c.pin_alarm && (
+                    <span
+                      className="settings-pill bad"
+                      title={`Nothing below this consumer's cursor can be trimmed, and it has held that for longer than ${formatLimit(status.pinAlarmSeconds)}`}
+                    >
+                      Pinning {formatBytes(c.pinned_bytes)}
                     </span>
                   )}
                   {!c.enabled && <span className="settings-pill warn">Disabled</span>}

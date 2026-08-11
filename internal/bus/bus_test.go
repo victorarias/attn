@@ -271,6 +271,18 @@ func (m *memStore) EventTimeAt(seq int64) (time.Time, bool, error) {
 	return time.Time{}, false, nil
 }
 
+func (m *memStore) PendingBytes(above int64) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	var bytes int64
+	for _, e := range m.events {
+		if e.Seq > above {
+			bytes += int64(len(e.Name) + len(e.Subject) + len(e.Payload) + len(e.Source))
+		}
+	}
+	return bytes, nil
+}
+
 // appendOutOfBand puts an event on the log the way a store transaction does:
 // committed, with no fan-out — which is what Announce is for.
 func (m *memStore) appendOutOfBand(name, subject string, now time.Time) int64 {

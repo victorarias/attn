@@ -1,0 +1,13 @@
+kind: added
+area: daemon
+change: >
+  attn now tells you when something has stopped reading the event log. A durable
+  consumer that is switched on but not consuming holds the log open — nothing
+  below its position can be trimmed — and until now the only way to notice was to
+  go and look. After an hour of that, you get a warning notification naming the
+  consumer, how much it is holding, how long it has held it, and the command that
+  ends it. `attn bus status` and the event bus settings page mark the same
+  consumer, so the alarm and the page you open to check it always agree. It is
+  said once per outage, not once per check, and nothing is ever dropped or
+  switched off on its behalf — the alarm makes the condition visible and leaves
+  what to do about it to you.
