@@ -22,6 +22,9 @@
  *
  *   1. a real Cmd+. cancels an armed auto-settle on the visible agent, and the
  *      turn stays owed — the countdown was called off, not completed,
+ *   1b. a second real Cmd+., with nothing counting down, undoes the standing
+ *      dismissal that cancel left behind and the settle re-arms; this is the
+ *      same delivery seam in the case the page used to unregister entirely,
  *   2. a real Cmd+. cancels an armed ticket nudge on a visible-but-unselected
  *      split pane, and the ticket stays unread — it calls off the interruption,
  *      not the message,
@@ -232,12 +235,18 @@ async function main() {
       await client.request('set_setting', { key: 'auto_settle_enabled', value: 'true' });
 
       // Steering is what arms it, and the agent has to still be working when the
-      // arm window elapses — leaving `working` cancels the settle by itself.
+      // arm window elapses — leaving `working` cancels the settle by itself, and
+      // an agent that stops before then has a classifier verdict pending, which
+      // drops the arm too. The count is deliberately long: it has to outlast the
+      // arm delay plus both keystrokes plus the second arm, on whatever model is
+      // configured, and a fast model answered 200 numbers in five seconds.
+      // Tool-free on purpose — a tool would ask for approval, and a pending
+      // approval leaves `working`.
       await submitPrompt(
         client,
         agentId,
         agentPaneId,
-        'Count from 1 to 200, one number per line, nothing else. Do not use any tools.',
+        'Count from 1 to 2000, one number per line, nothing else. Do not use any tools.',
       );
       await pollFor(
         () => (observer.getSession(agentId)?.state === 'working' ? true : null),
@@ -280,6 +289,36 @@ async function main() {
         `the turn the user kept is still owed after the cancel (got turn_owed=${JSON.stringify(after?.turn_owed)})`,
         after,
       );
+      // The cancel leaves a standing dismissal behind, and says so: without it
+      // the next re-reported `working` re-arms what the user just called off,
+      // and without the flag nothing on screen would admit the settle is off.
+      runner.assert(
+        after?.auto_settle_dismiss_armed === true,
+        `the cancel left a standing dismissal on the wire (got auto_settle_dismiss_armed=${JSON.stringify(after?.auto_settle_dismiss_armed)})`,
+        after,
+      );
+
+      // The second press is the delivery this scenario exists for, in its other
+      // form: nothing is counting down now, so the page carries the shortcut only
+      // because the standing dismissal is a thing worth pressing at. Before this
+      // change App unregistered the handler whenever no countdown was visible,
+      // and a real Cmd+. here reached nothing.
+      await pressCancelCountdown(driver);
+
+      await pollFor(
+        () => (observer.getSession(agentId)?.auto_settle_dismiss_armed ? null : true),
+        'the real Cmd+. to undo the standing dismissal',
+        15_000,
+      );
+      // Undoing hands the session back to the ordinary rule with no state change
+      // to trigger it — the agent has been working throughout — so a countdown
+      // coming back is the whole proof that the disarm re-armed it.
+      const rearmed = await pollFor(
+        () => observer.getSession(agentId)?.auto_settle_fires_at || null,
+        'the settle to re-arm after the dismissal was undone',
+        60_000,
+      );
+      note('dismissal undone, settle re-armed', { firesAt: rearmed });
 
       // Off before the next leg so nothing can arm a second countdown behind it.
       await client.request('set_setting', { key: 'auto_settle_enabled', value: 'false' });

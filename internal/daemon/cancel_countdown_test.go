@@ -50,9 +50,11 @@ func TestCancelCountdown_StopsBothCountdownsOnOneSession(t *testing.T) {
 	}
 }
 
-// A cancel that lands on a session with nothing counting down is a no-op, not an
-// error: the shortcut is pressed at whatever is on screen, and a stale press must
-// not settle, doorbell, or otherwise change anything.
+// A press that lands on a session with nothing to answer — nothing counting
+// down, and auto-settle off, so no settle to dismiss ahead of time — is a no-op,
+// not an error: the shortcut is pressed at whatever is on screen, and a stale
+// press must not settle, doorbell, or otherwise change anything. What the same
+// press does when there IS a settle coming is TestAutoSettle_ArmedBeforeTheSteer.
 func TestCancelCountdown_NoCountdownIsHarmless(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

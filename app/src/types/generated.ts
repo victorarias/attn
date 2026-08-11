@@ -1467,36 +1467,37 @@ export enum BranchChangedMessageEvent {
 }
 
 export interface SessionObject {
-    activity?:             string;
-    activity_at?:          string;
-    agent:                 string;
-    auto_settle_fires_at?: string;
-    auto_settle_held?:     boolean;
-    branch?:               string;
-    chief_of_staff?:       boolean;
-    context_window_cap?:   number;
-    delegated_from_chief?: boolean;
-    directory:             string;
-    endpoint_id?:          string;
-    id:                    string;
-    is_worktree?:          boolean;
-    label:                 string;
-    last_seen:             string;
-    main_repo?:            string;
-    nudge_fires_at?:       string;
-    parent_session_id?:    string;
-    pinned_at?:            string;
-    state:                 SessionState;
-    state_reason?:         string;
-    state_since:           string;
-    state_updated_at:      string;
-    ticket_unread?:        boolean;
-    todos?:                string[];
-    turn_opened_at?:       string;
-    turn_owed?:            boolean;
-    turn_snoozed_until?:   string;
-    workspace_id:          string;
-    workspace_muted?:      boolean;
+    activity?:                  string;
+    activity_at?:               string;
+    agent:                      string;
+    auto_settle_dismiss_armed?: boolean;
+    auto_settle_fires_at?:      string;
+    auto_settle_held?:          boolean;
+    branch?:                    string;
+    chief_of_staff?:            boolean;
+    context_window_cap?:        number;
+    delegated_from_chief?:      boolean;
+    directory:                  string;
+    endpoint_id?:               string;
+    id:                         string;
+    is_worktree?:               boolean;
+    label:                      string;
+    last_seen:                  string;
+    main_repo?:                 string;
+    nudge_fires_at?:            string;
+    parent_session_id?:         string;
+    pinned_at?:                 string;
+    state:                      SessionState;
+    state_reason?:              string;
+    state_since:                string;
+    state_updated_at:           string;
+    ticket_unread?:             boolean;
+    todos?:                     string[];
+    turn_opened_at?:            string;
+    turn_owed?:                 boolean;
+    turn_snoozed_until?:        string;
+    workspace_id:               string;
+    workspace_muted?:           boolean;
     [property: string]: any;
 }
 
@@ -5557,36 +5558,37 @@ export enum RuntimeRespawnedMessageEvent {
 }
 
 export interface Session {
-    activity?:             string;
-    activity_at?:          string;
-    agent:                 string;
-    auto_settle_fires_at?: string;
-    auto_settle_held?:     boolean;
-    branch?:               string;
-    chief_of_staff?:       boolean;
-    context_window_cap?:   number;
-    delegated_from_chief?: boolean;
-    directory:             string;
-    endpoint_id?:          string;
-    id:                    string;
-    is_worktree?:          boolean;
-    label:                 string;
-    last_seen:             string;
-    main_repo?:            string;
-    nudge_fires_at?:       string;
-    parent_session_id?:    string;
-    pinned_at?:            string;
-    state:                 SessionState;
-    state_reason?:         string;
-    state_since:           string;
-    state_updated_at:      string;
-    ticket_unread?:        boolean;
-    todos?:                string[];
-    turn_opened_at?:       string;
-    turn_owed?:            boolean;
-    turn_snoozed_until?:   string;
-    workspace_id:          string;
-    workspace_muted?:      boolean;
+    activity?:                  string;
+    activity_at?:               string;
+    agent:                      string;
+    auto_settle_dismiss_armed?: boolean;
+    auto_settle_fires_at?:      string;
+    auto_settle_held?:          boolean;
+    branch?:                    string;
+    chief_of_staff?:            boolean;
+    context_window_cap?:        number;
+    delegated_from_chief?:      boolean;
+    directory:                  string;
+    endpoint_id?:               string;
+    id:                         string;
+    is_worktree?:               boolean;
+    label:                      string;
+    last_seen:                  string;
+    main_repo?:                 string;
+    nudge_fires_at?:            string;
+    parent_session_id?:         string;
+    pinned_at?:                 string;
+    state:                      SessionState;
+    state_reason?:              string;
+    state_since:                string;
+    state_updated_at:           string;
+    ticket_unread?:             boolean;
+    todos?:                     string[];
+    turn_opened_at?:            string;
+    turn_owed?:                 boolean;
+    turn_snoozed_until?:        string;
+    workspace_id:               string;
+    workspace_muted?:           boolean;
     [property: string]: any;
 }
 
@@ -12175,6 +12177,7 @@ const typeMap: any = {
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
+        { json: "auto_settle_dismiss_armed", js: "auto_settle_dismiss_armed", typ: u(undefined, true) },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -14694,6 +14697,7 @@ const typeMap: any = {
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
+        { json: "auto_settle_dismiss_armed", js: "auto_settle_dismiss_armed", typ: u(undefined, true) },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },

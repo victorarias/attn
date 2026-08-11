@@ -282,10 +282,13 @@ type Daemon struct {
 	autoSettleFireMu sync.Mutex
 
 	// autoSettleMu guards both auto-settle maps: the pending timers and the
-	// standing user cancels. See auto_settle.go.
-	autoSettleMu         sync.Mutex
-	autoSettleTimers     map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
-	autoSettleSuppressed map[string]bool             // sessions whose countdown the user cancelled, until they leave `working`
+	// standing user dismissals. See auto_settle.go.
+	autoSettleMu     sync.Mutex
+	autoSettleTimers map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
+	// autoSettleDismissals: presence == the user has answered this session's next
+	// auto-settle and it will not run; the value says whether the `working`
+	// stretch it is spent on has begun. See answerAutoSettleByUser.
+	autoSettleDismissals map[string]bool
 	autoSettleFireHook   func(sessionID, outcome string)
 	// Called inside the fire-time decision, between confirming the turn is still
 	// owed and settling it. Tests only; nil in production. See auto_settle.go.

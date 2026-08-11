@@ -21,11 +21,15 @@ import (
 // is cancelled that was not on screen.
 //
 // The two cancels keep their own semantics for how long the answer stands, which
-// is where the mechanisms genuinely differ. See each one.
+// is where the mechanisms genuinely differ. See each one. Only the auto-settle
+// half can be answered before it starts counting: a nudge countdown is armed by
+// activity the user has not read yet, so there is nothing to pre-empt until it
+// exists.
 
-// handleCancelCountdown calls off every countdown running on a session. A session
-// with none is a no-op — the shortcut behind this is pressed on whatever is
-// visible, and a stale press must not be an error.
+// handleCancelCountdown calls off every countdown running on a session, and
+// arms a standing dismissal of the next auto-settle when none is. A session
+// where neither applies is a no-op — the shortcut behind this is pressed on
+// whatever is visible, and a stale press must not be an error.
 func (d *Daemon) handleCancelCountdown(msg *protocol.CancelCountdownMessage) {
 	if d == nil || msg == nil {
 		return
@@ -35,10 +39,10 @@ func (d *Daemon) handleCancelCountdown(msg *protocol.CancelCountdownMessage) {
 		return
 	}
 
-	settleCancelled := d.cancelAutoSettleByUser(sessionID)
+	settleAnswered := d.answerAutoSettleByUser(sessionID)
 	nudgeCancelled := d.cancelNudgeCountdownByUser(sessionID)
 
-	if !settleCancelled && !nudgeCancelled {
+	if !settleAnswered && !nudgeCancelled {
 		return
 	}
 	// One broadcast for the whole cancel: both deadlines ride the same session

@@ -145,6 +145,17 @@ one; in particular, looking at an agent is not acting on it. `turn_owed` is deri
 at broadcast from the persisted `turn_opened_at`/`turn_settled_at` stamps and is
 never stored. The predicates live in `internal/attention`.
 
+**Auto-settle** closes a turn the user already dealt with by steering the agent
+back to work: the session holds `working` through an invisible arm delay, then a
+visible countdown, then the turn settles. It applies only to sessions the queue
+includes — the exclusions below are also the exclusions here.
+
+A **standing dismissal** is the user answering that settle, whether the countdown
+is on screen or has not started yet: the session's next auto-settle does not run.
+It is spent at the end of the `working` stretch it covers, so the turn after that
+is a fresh decision, and it is off the wire as `auto_settle_dismiss_armed` while
+it stands. Neither of those is settling — the turn stays owed either way.
+
 The **queue** is the sidebar arrangement built on turns (queue mode; off by
 default). Its standing order is the chief's anchored slot, the turns you owe
 (oldest first), the settled rest, pinned agents, pinned workspaces, muted.

@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/attention"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/sessionstate"
 )
@@ -104,10 +105,11 @@ func resolveAutoSettleSeconds(stored string, fallbackSeconds int) time.Duration 
 // internal/sessionstate already absorbs the flickers it knows about.
 func (d *Daemon) syncAutoSettle(sessionID, state string) {
 	if state != protocol.StateWorking {
-		d.clearAutoSettleSuppression(sessionID)
+		d.retireAutoSettleDismissal(sessionID)
 		d.cancelAutoSettle(sessionID, "left working")
 		return
 	}
+	d.coverAutoSettleDismissal(sessionID)
 	d.armAutoSettle(sessionID)
 }
 
@@ -122,8 +124,8 @@ func (d *Daemon) armAutoSettle(sessionID string) {
 	if !cfg.enabled {
 		return
 	}
-	if d.autoSettleSuppressedFor(sessionID) {
-		// The user cancelled and the session has not left `working` since.
+	if d.autoSettleDismissalArmed(sessionID) {
+		// A standing dismissal: the user answered this settle before it ran.
 		return
 	}
 	// turnOwed carries the shell/chief/pinned/muted exclusions too, so those are
@@ -225,11 +227,12 @@ func (d *Daemon) cancelAutoSettle(sessionID, reason string) {
 	}
 }
 
-// clearAutoSettleState drops a removed session's timer without broadcasting; the
-// removal's own sessions-updated follows.
+// clearAutoSettleState drops a removed session's timer and standing dismissal
+// without broadcasting; the removal's own sessions-updated follows.
 func (d *Daemon) clearAutoSettleState(sessionID string) {
 	d.autoSettleMu.Lock()
 	d.stopAutoSettleLocked(sessionID)
+	delete(d.autoSettleDismissals, sessionID)
 	d.autoSettleMu.Unlock()
 }
 
@@ -375,30 +378,102 @@ func (d *Daemon) holdFromFire(sessionID string, resume autoSettlePhase, quiet ti
 	d.autoSettleMu.Unlock()
 }
 
-// cancelAutoSettleByUser stops the countdown and does not re-arm (see
-// CancelCountdownMessage), reporting whether anything was pending.
-func (d *Daemon) cancelAutoSettleByUser(sessionID string) bool {
+// answerAutoSettleByUser is the auto-settle half of a cancel-countdown press,
+// and the whole of it when nothing is counting down.
+//
+// A pending settle — a visible countdown or the invisible arm delay behind it —
+// is stopped, and a standing dismissal takes its place: without one the next
+// `working` re-report would just re-arm the timer the user cancelled. Pressed
+// with nothing pending, the same key arms that dismissal ahead of time, which is
+// the moment the user actually knows they want the turn kept: while they are
+// still typing the steer that will start the working stretch. Pressed again, it
+// disarms — a standing dismissal is the one countdown answer that outlives the
+// thing it answered, so it needs a way back out.
+//
+// Reports whether anything moved. No broadcast: handleCancelCountdown makes
+// exactly one after both halves have answered.
+func (d *Daemon) answerAutoSettleByUser(sessionID string) bool {
+	session := d.decoratedSession(sessionID)
+	if !d.autoSettleAppliesTo(session) {
+		// Nothing to dismiss, so nothing to arm — a chip promising to stop a
+		// settle that was never coming is worse than no chip.
+		return false
+	}
+	working := string(session.State) == protocol.StateWorking
+
 	d.autoSettleMu.Lock()
 	removed, _ := d.stopAutoSettleLocked(sessionID)
-	if removed {
-		// Suppression makes the cancel stick: without it the next `working`
-		// re-report re-arms. Cleared when the session leaves `working`.
-		if d.autoSettleSuppressed == nil {
-			d.autoSettleSuppressed = make(map[string]bool)
+	_, armed := d.autoSettleDismissals[sessionID]
+	// A dismissal and a pending timer never coexist — arming is what stops the
+	// timer, and arming is refused while one stands. Preferring the cancel if
+	// they ever did keeps the press meaning "stop what is happening".
+	disarm := armed && !removed
+	if disarm {
+		delete(d.autoSettleDismissals, sessionID)
+	} else {
+		if d.autoSettleDismissals == nil {
+			d.autoSettleDismissals = make(map[string]bool)
 		}
-		d.autoSettleSuppressed[sessionID] = true
+		// Covered from the start when the stretch it answers is already running;
+		// otherwise it waits for one, so the state re-reports between the press and
+		// the steer cannot retire it early.
+		d.autoSettleDismissals[sessionID] = working
 	}
 	d.autoSettleMu.Unlock()
-	if d.debugLogging {
-		d.logf("auto-settle canceled by user: session=%s had_pending=%v", sessionID, removed)
+
+	if disarm && working {
+		// Back to the ordinary rule for a session already in the stretch: without
+		// this the disarm would leave it in a limbo no state change reaches until
+		// it next enters `working`.
+		d.armAutoSettle(sessionID)
 	}
-	// No broadcast here: handleCancelCountdown makes exactly one after every
-	// countdown on the session is called off.
-	return removed
+	if d.debugLogging {
+		d.logf("auto-settle answered by user: session=%s had_pending=%v armed=%v", sessionID, removed, !disarm)
+	}
+	return true
+}
+
+// autoSettleDismissalArmed reports whether a standing dismissal covers this
+// session's next auto-settle.
+func (d *Daemon) autoSettleDismissalArmed(sessionID string) bool {
+	d.autoSettleMu.Lock()
+	defer d.autoSettleMu.Unlock()
+	_, armed := d.autoSettleDismissals[sessionID]
+	return armed
+}
+
+// coverAutoSettleDismissal marks a standing dismissal as covering the `working`
+// stretch that just began — the stretch it will be spent on.
+func (d *Daemon) coverAutoSettleDismissal(sessionID string) {
+	d.autoSettleMu.Lock()
+	if _, armed := d.autoSettleDismissals[sessionID]; armed {
+		d.autoSettleDismissals[sessionID] = true
+	}
+	d.autoSettleMu.Unlock()
+}
+
+// retireAutoSettleDismissal spends a standing dismissal at the end of the
+// `working` stretch it covered, and broadcasts because the chip announcing it
+// has to go with it. A dismissal still waiting for its stretch survives: the
+// resolver re-reports the state the user armed in, and retiring on that would
+// silently drop the answer between the press and the steer.
+func (d *Daemon) retireAutoSettleDismissal(sessionID string) {
+	d.autoSettleMu.Lock()
+	covered, armed := d.autoSettleDismissals[sessionID]
+	retire := armed && covered
+	if retire {
+		delete(d.autoSettleDismissals, sessionID)
+	}
+	d.autoSettleMu.Unlock()
+	if retire {
+		d.broadcastSessionStateChanged(sessionID)
+	}
 }
 
 // decorateSessionWithAutoSettle stamps the broadcast clone with the countdown
-// deadline or the held flag, never both. Callers must not hold autoSettleMu.
+// deadline, the held flag, or a standing dismissal — never more than one, since
+// arming a dismissal is what stops a pending timer. Callers must not hold
+// autoSettleMu.
 func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 	if clone == nil {
 		return
@@ -415,7 +490,14 @@ func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 			held = true
 		}
 	}
+	_, dismissArmed := d.autoSettleDismissals[clone.ID]
 	d.autoSettleMu.Unlock()
+
+	if dismissArmed {
+		clone.AutoSettleDismissArmed = protocol.Ptr(true)
+	} else {
+		clone.AutoSettleDismissArmed = nil
+	}
 
 	if firesAt != "" {
 		clone.AutoSettleFiresAt = protocol.Ptr(firesAt)
@@ -429,43 +511,46 @@ func (d *Daemon) decorateSessionWithAutoSettle(clone *protocol.Session) {
 	}
 }
 
-// turnOwed reads the decorated clone rather than re-deriving, so the timer and
-// the queue can never disagree about who is owed.
+// turnOwed reads the same decorated clone a broadcast carries rather than
+// re-deriving, so the timer and the queue can never disagree about who is owed.
+// The chief flag is a decoration: deriving from a stored record would leave the
+// chief's turns auto-settling while the queue says it owes none.
 func (d *Daemon) turnOwed(sessionID string) bool {
-	if d.store == nil {
-		return false
-	}
-	session := d.store.Get(sessionID)
-	if session == nil {
-		return false
-	}
-	clone := cloneSession(session)
+	clone := d.decoratedSession(sessionID)
 	if clone == nil {
 		return false
 	}
-	d.decorateSessionWithWorkspace(clone)
-	d.decorateSessionWithTurn(clone)
 	return protocol.Deref(clone.TurnOwed)
 }
 
-// autoSettleSuppressedFor reports whether a user cancel is still standing for
-// this session.
-func (d *Daemon) autoSettleSuppressedFor(sessionID string) bool {
-	d.autoSettleMu.Lock()
-	defer d.autoSettleMu.Unlock()
-	return d.autoSettleSuppressed[sessionID]
+// autoSettleAppliesTo reports whether this session could ever auto-settle, which
+// is what makes a standing dismissal mean something. The exclusions are the
+// queue's own — a session outside the queue never settles automatically, so
+// arming against it would promise to stop something that was never coming.
+// Takes the decorated clone, not an id: the exclusions it reads are decorations.
+func (d *Daemon) autoSettleAppliesTo(session *protocol.Session) bool {
+	return session != nil &&
+		d.autoSettleConfig().enabled &&
+		!attention.Excluded(d.attentionInputFor(session))
 }
 
-// clearAutoSettleSuppression lifts a standing cancel when the session leaves
-// `working` — the edge that makes the next steer a new decision.
-func (d *Daemon) clearAutoSettleSuppression(sessionID string) {
-	d.autoSettleMu.Lock()
-	delete(d.autoSettleSuppressed, sessionID)
-	d.autoSettleMu.Unlock()
+// decoratedSession is one session as a broadcast would carry it. Callers must
+// not hold autoSettleMu or nudgeMu: the decorations take both.
+func (d *Daemon) decoratedSession(sessionID string) *protocol.Session {
+	if d.store == nil {
+		return nil
+	}
+	session := d.store.Get(sessionID)
+	if session == nil {
+		return nil
+	}
+	return d.sessionForBroadcast(session)
 }
 
-// cancelAllAutoSettle drops every pending settle. Used when the feature is
-// switched off: a countdown already on screen must stop, not run out.
+// cancelAllAutoSettle drops every pending settle and every standing dismissal.
+// Used when the feature is switched off: a countdown already on screen must
+// stop, not run out, and a dismissal of a settle that can no longer happen is
+// a chip with nothing behind it.
 func (d *Daemon) cancelAllAutoSettle() {
 	d.autoSettleMu.Lock()
 	visible := make([]string, 0, len(d.autoSettleTimers))
@@ -476,7 +561,10 @@ func (d *Daemon) cancelAllAutoSettle() {
 		}
 		delete(d.autoSettleTimers, id)
 	}
-	d.autoSettleSuppressed = nil
+	for id := range d.autoSettleDismissals {
+		visible = append(visible, id)
+	}
+	d.autoSettleDismissals = nil
 	d.autoSettleMu.Unlock()
 	for _, id := range visible {
 		d.broadcastSessionStateChanged(id)
