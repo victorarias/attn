@@ -141,13 +141,17 @@ $(GOTESTSUM):
 verify-ghostty-vt-wasm:
 	bash ./app/scripts/ghostty-vt-wasm-lock.sh verify
 
-test: $(NATIVE_VT_DEP) test-hooks verify-ghostty-vt-wasm
+test: $(NATIVE_VT_DEP) test-hooks test-scripts verify-ghostty-vt-wasm
 	./scripts/test-go.sh
 
 # Repository Claude Code hooks are shell, so they are invisible to the Go suite
 # and would otherwise rot unnoticed.
 test-hooks:
 	@bash ./scripts/claude/attn-profile-nudge_test.sh
+
+# Same blind spot for the shell an agent runs by hand.
+test-scripts:
+	@bash ./scripts/pr-evidence_test.sh
 
 # Verbose test output (shows all test names as they run)
 test-v: $(NATIVE_VT_DEP) verify-ghostty-vt-wasm

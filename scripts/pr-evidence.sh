@@ -125,8 +125,11 @@ cmd_publish() {
   fi
   dir="${dir//\//-}"
 
-  local clone
-  clone="$(mktemp -d -t pr-evidence)"
+  # Deliberately not `local`: an EXIT trap's body is expanded when it fires,
+  # which is after this frame is gone, so a local would read as unset under
+  # `set -u` — the trap then dies on its own first line, leaving the temp dir
+  # behind and turning a successful publish into a non-zero exit.
+  clone="$(mktemp -d "${TMPDIR:-/tmp}/pr-evidence.XXXXXX")"
   trap 'rm -rf "$clone"' EXIT
   gh repo clone "$EVIDENCE_REPO" "$clone" -- --depth 1 --quiet
 
@@ -143,7 +146,7 @@ cmd_publish() {
       -vf "fps=$fps,scale='min($width,iw/2)':-2:flags=lanczos,split[s0][s1];[s0]palettegen=stats_mode=diff[p];[s1][p]paletteuse=dither=bayer:bayer_scale=4" \
       "$clone/$dir/$gif"
     local gif_bytes
-    gif_bytes="$(stat -f %z "$clone/$dir/$gif")"
+    gif_bytes="$(wc -c < "$clone/$dir/$gif" | tr -d ' ')"
     if (( gif_bytes > 10485760 )); then
       echo "warning: $gif is $((gif_bytes / 1048576))MB; GitHub inline-renders images only under 10MB — shorten the clip or lower --fps/--width" >&2
     fi
