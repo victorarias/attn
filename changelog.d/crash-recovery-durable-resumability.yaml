@@ -6,4 +6,6 @@ change: >
   conversation is still on disk and there is a launch intent to relaunch from,
   whatever agent it is and whatever it was last seen doing — where before only
   Claude sessions survived, and an idle one survived by accident. Sessions with
-  nothing left to reopen are reaped as before.
+  nothing left to reopen are reaped as before. Plugin capabilities alone no
+  longer keep a crashed session: the plugin must have left an open run handle or
+  persisted metadata for that session.

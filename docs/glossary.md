@@ -301,8 +301,9 @@ a pane revives itself from when it mounts. It is decided from two durable
 things and nothing else: a launch intent, which says how to start a
 replacement, and a restoration target that is still on disk, which says what
 the replacement reopens — an agent-native resume id the agent's driver still
-recognises, a conversation host's own session file, or a plugin's persisted
-per-session handle.
+recognises, a conversation host's own session file, the launch intent's seed
+(a source conversation or an initial prompt the host had not said yet), or a
+plugin's persisted per-session handle.
 
 Recoverability and activity are separate axes. A crash takes `idle`, `working`,
 `waiting_input`, and `pending_approval` sessions down together and leaves them
