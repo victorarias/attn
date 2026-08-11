@@ -6,6 +6,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
 import { e2ePorts, resolveAttnBinaryPath } from './profileEnv';
+import { waitForDaemonSocket } from './daemonReadiness';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../src/hooks/useWhatsNew';
 
 // Mock GitHub Server
@@ -120,26 +121,6 @@ async function killTestDaemons(): Promise<void> {
   }
 }
 
-async function waitForSocket(
-  socketPath: string,
-  timeoutMs: number,
-  getDebugInfo?: () => string
-): Promise<void> {
-  await new Promise<void>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      const suffix = getDebugInfo ? ` ${getDebugInfo()}` : '';
-      reject(new Error(`Daemon timeout after ${timeoutMs}ms.${suffix}`));
-    }, timeoutMs);
-    const check = setInterval(() => {
-      if (fs.existsSync(socketPath)) {
-        clearInterval(check);
-        clearTimeout(timeout);
-        resolve();
-      }
-    }, 100);
-  });
-}
-
 // Create a bin directory with minimal agent stubs so the daemon reports agents
 // as available on CI machines that have no real agent CLIs installed.
 // Returns the bin dir path and a cleanup function.
@@ -164,6 +145,17 @@ function createFakeAgentStubs(): { binDir: string; cleanup: () => void } {
 // sun_path at 104 bytes. os.tmpdir() (/var/folders/...) is already too long.
 function makeDaemonTempDir(prefix: string): string {
   return fs.mkdtempSync(path.join('/tmp', prefix));
+}
+
+function daemonStartDebugInfo(tempDir: string, stdout: string, stderr: string): string {
+  const logPath = path.join(tempDir, 'daemon.log');
+  let daemonLog = '';
+  try {
+    daemonLog = fs.readFileSync(logPath, 'utf8');
+  } catch {
+    daemonLog = '(daemon log was not created)';
+  }
+  return `stdout: ${stdout}\nstderr: ${stderr}\ndaemon log: ${daemonLog}`;
 }
 
 // Daemon launcher - creates isolated temp directory for DB and socket
@@ -191,6 +183,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     env: {
       ...process.env,
       PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+      ATTN_DATA_DIR: tempDir,
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
@@ -218,7 +211,7 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     console.log(`[Daemon] Process exited with code ${code}, signal ${signal}`);
   });
 
-  await waitForSocket(socketPath, 5000, () => `stdout: ${stdout}\nstderr: ${stderr}`);
+  await waitForDaemonSocket(proc, socketPath, () => daemonStartDebugInfo(tempDir, stdout, stderr));
   console.log(`Daemon started with socket at ${socketPath}`);
 
   return {
@@ -280,6 +273,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
       env: {
         ...process.env,
         PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+        ATTN_DATA_DIR: tempDir,
         ATTN_WS_PORT: TEST_DAEMON_PORT,
         ATTN_SOCKET_PATH: socketPath,
         ATTN_DB_PATH: dbPath,
@@ -307,7 +301,7 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
       proc = null;
     });
 
-    await waitForSocket(socketPath, 5000, () => `stdout: ${stdout}\nstderr: ${stderr}`);
+    await waitForDaemonSocket(proc, socketPath, () => daemonStartDebugInfo(tempDir, stdout, stderr));
     console.log(`[Managed daemon] started with socket ${socketPath}`);
   };
 

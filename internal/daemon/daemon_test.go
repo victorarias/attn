@@ -169,13 +169,7 @@ func waitForSocket(t *testing.T, sockPath string, timeout time.Duration) {
 
 func waitForRecovery(t *testing.T, d *Daemon) {
 	t.Helper()
-	deadline := time.Now().Add(5 * time.Second)
-	for d.isRecovering() {
-		if time.Now().After(deadline) {
-			t.Fatal("daemon recovery did not finish before test setup")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	<-d.recoverySettledSignal()
 }
 
 func shortTempDir(t *testing.T) string {
@@ -429,9 +423,9 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 			t.Fatalf("daemon start error: %v", err)
 		}
 		t.Fatal("daemon exited unexpectedly during startup")
-	case <-time.After(75 * time.Millisecond):
+	case <-d.startedCh:
 	}
-	waitForSocket(t, sockPath, 3*time.Second)
+	waitForRecovery(t, d)
 
 	c := client.New(sockPath)
 	sessions, err := c.Query("")
@@ -449,6 +443,27 @@ func TestDaemon_PrunesSessionsWithoutLivePTYOnStart(t *testing.T) {
 	if warnings[0].Code != "stale_sessions_pruned" {
 		t.Fatalf("warning code = %q, want stale_sessions_pruned", warnings[0].Code)
 	}
+}
+
+func TestDaemon_RecoverySettledSignalFollowsEachRecoveryCycle(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+
+	if settled := d.recoverySettledSignal(); settled != recoveryAlreadySettled {
+		t.Fatal("a daemon outside recovery returned a blocking signal")
+	}
+
+	d.setRecovering(true)
+	first := d.recoverySettledSignal()
+	d.setRecovering(false)
+	<-first
+
+	d.setRecovering(true)
+	second := d.recoverySettledSignal()
+	if second == first {
+		t.Fatal("a new recovery cycle reused the prior completion signal")
+	}
+	d.setRecovering(false)
+	<-second
 }
 
 // Startup recovery rewrites session states directly in the store (prune marks a

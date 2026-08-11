@@ -300,10 +300,11 @@ type Daemon struct {
 	// snooze can land in. Tests only; nil in production. See snooze.go.
 	snoozeWakeGapHook func(sessionID string)
 
-	recoveryMu    sync.RWMutex
-	recovering    bool
-	notebookMu    sync.Mutex
-	notebookStore *notebook.Store
+	recoveryMu      sync.RWMutex
+	recovering      bool
+	recoverySettled chan struct{}
+	notebookMu      sync.Mutex
+	notebookStore   *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -607,6 +608,12 @@ func (d *Daemon) setRecovering(value bool) {
 	var pending []*wsClient
 
 	d.recoveryMu.Lock()
+	if value && !d.recovering {
+		d.recoverySettled = make(chan struct{})
+	}
+	if !value && d.recovering && d.recoverySettled != nil {
+		close(d.recoverySettled)
+	}
 	d.recovering = value
 	if !value {
 		pending = make([]*wsClient, 0, len(d.pendingInitialWS))
@@ -628,6 +635,21 @@ func (d *Daemon) isRecovering() bool {
 	d.recoveryMu.RLock()
 	defer d.recoveryMu.RUnlock()
 	return d.recovering
+}
+
+var recoveryAlreadySettled = func() <-chan struct{} {
+	settled := make(chan struct{})
+	close(settled)
+	return settled
+}()
+
+func (d *Daemon) recoverySettledSignal() <-chan struct{} {
+	d.recoveryMu.RLock()
+	defer d.recoveryMu.RUnlock()
+	if !d.recovering || d.recoverySettled == nil {
+		return recoveryAlreadySettled
+	}
+	return d.recoverySettled
 }
 
 func (d *Daemon) scheduleInitialState(client *wsClient) {
