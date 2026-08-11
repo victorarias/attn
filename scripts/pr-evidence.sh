@@ -68,7 +68,7 @@ cmd_record() {
   # 20s default: busy terminal content converts at ~320KB/s of gif at the
   # publish defaults (receipt: 6s live attn window -> 1.9MB), so 20s stays
   # well under GitHub's 10MB inline-render limit; 30s flirts with it.
-  local app="attn-dev" seconds=20 out=""
+  local app="" seconds=20 out=""
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --app) app="$2"; shift 2 ;;
@@ -77,6 +77,12 @@ cmd_record() {
       *) die "record: unknown argument $1" ;;
     esac
   done
+  # Record the profile the caller is already verifying on (attn-<profile>.app
+  # owns a window named after itself); never guess between running profiles.
+  if [[ -z "$app" ]]; then
+    [[ -n "${ATTN_PROFILE:-}" ]] || die "no --app and no ATTN_PROFILE; pass --app <owner> (e.g. attn-<profile>) or select a profile first"
+    app="attn-$ATTN_PROFILE"
+  fi
   [[ -n "$out" ]] || out="evidence-$(date +%Y%m%d-%H%M%S).mp4"
 
   local id_and_width
