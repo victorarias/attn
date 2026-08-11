@@ -29,7 +29,7 @@ complete — it owns its garden and crew, every fresh install starts as one,
 and the user's app talks to one. An **outpost** is a daemon enrolled to a
 home: it keeps its own sessions and passes garden and crew asks upward.
 **Enrollment** is the recorded, mutual act: the outpost persists its home's
-daemon id (`d-<32 hex>`, `internal/daemon/instance_id.go:16`). A second
+daemon id (`d-<32 hex>`, `internal/daemon/instance_id.go:66`). A second
 home dialing an enrolled outpost is a loud re-home decision, never silent
 adoption.
 
@@ -115,7 +115,7 @@ sequenceDiagram
 as planned, entirely at the home daemon. Seed ids stay
 fully-qualified-ready: `<daemon-id>/<local-id>` minted only at the
 boundary; the docstore id charset forbids `/`
-(`internal/docstore/docstore.go:218`), so qualified forms cannot leak into
+(`internal/docstore/docstore.go:307`), so qualified forms cannot leak into
 local storage. A seed command on an outpost hits the stage-2 fence.
 
 **Ticket retirement is gated on the uplink, not just on "garden usable".**
@@ -236,31 +236,31 @@ flowchart LR
 
 **Relay — outward commands, mirrored events.** App commands are forwarded
 as their original raw bytes, keyed on ids the hub already knows
-(`internal/daemon/websocket.go:1219`, `internal/hub/manager.go:1047-1063`);
+(`internal/daemon/websocket.go:1383-1471`, `internal/hub/manager.go:1047-1063`);
 the routing principle is stated at
 `internal/daemon/websocket.go:1326-1416` — a command forwards when the
 state it mutates lives in the owning daemon's store. Events come back
 re-composed into an in-memory mirror, plus a verbatim allowlist
 (`internal/hub/manager.go:791-828`) into `broadcastRawWSMessage`
-(`internal/daemon/websocket.go:1659`), the enumerated bus exception
+(`internal/daemon/websocket.go:1811`), the enumerated bus exception
 (`internal/daemon/bus.go:50-52`). The one request/response precedent —
 `browser_control` (`internal/hub/manager.go:1065-1140`) — is hub-initiated
 like everything else.
 
 **Identity — daemon yes, session no.** Every daemon mints a durable
-`d-<32 hex>` id under an flock (`internal/daemon/instance_id.go:16-78`)
-and sends it in `initial_state` (`internal/daemon/websocket.go:719`).
+`d-<32 hex>` id under an flock (`internal/daemon/instance_id.go:66`)
+and sends it in `initial_state` (`internal/daemon/websocket.go:772-773`).
 "Hub" is unmodeled: the relationship lives only in the hub-side
 `endpoints` table; the remote persists nothing, and `ClientKind: "hub"` is
 an unverified self-declaration it ignores
-(`internal/daemon/websocket.go:128`). Session ids are bare UUIDs resolved
+(`internal/hub/manager.go:593`). Session ids are bare UUIDs resolved
 across endpoints by first-match scan — no namespace, no collision
 detection (`internal/hub/manager.go:901-913`).
 
 **Auth — the SSH key is the whole boundary.** `ATTN_WS_AUTH_TOKEN` is
 default-empty, enforced only when the remote sets it, and not forwarded in
 the env the hub exports over ssh (`internal/hub/ssh.go:37-65`,
-`internal/daemon/websocket.go:661-670`) — a no-op in practice. No API-key
+`internal/daemon/websocket.go:655-660`) — a no-op in practice. No API-key
 store, no rotation, no per-endpoint credential anywhere. The server is the
 first component that needs real authentication; there is nothing to reuse.
 
@@ -269,7 +269,7 @@ loop (`internal/hub/manager.go:645-647,519-529`). Fingerprint mismatch
 keeps the connection with status `binary_mismatch`
 (`internal/hub/manager.go:652-655,1811-1837`); the real gate is the
 frontend refusing new sessions on any endpoint not `connected`
-(`app/src/App.tsx:2049-2052`). The user's Sync click is the sole path that
+(`app/src/App.tsx:2076`). The user's Sync click is the sole path that
 reinstalls a running remote (`internal/hub/manager.go:272-289`).
 
 **Nothing sync-shaped exists.** The remote mirror is in-memory,
