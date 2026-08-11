@@ -82,7 +82,7 @@ func (d *Daemon) handleBusSetConsumerEnabled(client *wsClient, msg *protocol.Bus
 		d.sendToClient(client, result)
 		return
 	}
-	if err := d.store.SetBusConsumerEnabled(name, msg.Enabled, time.Now()); err != nil {
+	if _, err := d.store.SetBusConsumerEnabled(name, msg.Enabled, time.Now()); err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)
 		return

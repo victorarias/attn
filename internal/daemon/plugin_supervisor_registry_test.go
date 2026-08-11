@@ -27,18 +27,18 @@ func TestExecLauncherWritesAndRemovesTheRegistryEntry(t *testing.T) {
 
 	registryDir := t.TempDir()
 	launcher := execPluginProcessLauncher{registryDir: registryDir}
-	process, err := launcher.Start(manifest, os.Environ())
+	process, err := launcher.Start(manifest, os.Environ(), nil)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
-	execProcess := process.(*execPluginProcess)
-	pid := execProcess.cmd.Process.Pid
+	registered := process.(*reapRegisteredProcess)
+	pid := registered.pid
 	t.Cleanup(func() { _ = syscall.Kill(-pid, syscall.SIGKILL) })
 
-	if execProcess.registryPath == "" {
+	if registered.registryPath == "" {
 		t.Fatal("launcher recorded no registry path")
 	}
-	entry, err := procreap.ReadEntry(execProcess.registryPath)
+	entry, err := procreap.ReadEntry(registered.registryPath)
 	if err != nil {
 		t.Fatalf("registry entry not written at spawn: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestExecLauncherWritesAndRemovesTheRegistryEntry(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("driver never exited after Kill")
 	}
-	if _, err := os.Stat(execProcess.registryPath); !os.IsNotExist(err) {
+	if _, err := os.Stat(registered.registryPath); !os.IsNotExist(err) {
 		t.Fatalf("registry entry survived the driver's exit: %v", err)
 	}
 }

@@ -1,0 +1,22 @@
+kind: internal
+area: daemon
+change: >
+  Durable bus consumers can now arrive and leave while the daemon runs.
+  `Register` works after `Start` — it persists the registration and starts that
+  consumer's delivery loop immediately, from the log head, so nothing has to wait
+  for a restart to be served. `Unregister` is the way out: it cancels the
+  consumer's own context (interrupting the idle wait and the retry sleep alike, so
+  a consumer stalled at the two-minute retry cap does not delay it), waits for the
+  delivery loop to exit, and only then deletes the row.
+notes: >
+  The order is load-bearing in both directions: deleting the row first would leave
+  a live loop reading a registration that disappeared and retrying that error
+  forever, and returning before the loop exits would hand the caller a consumer
+  that is still delivering. Deleting the row is also what releases the retention
+  floor — an abandoned enabled registration pins the log against trimming and
+  compaction indefinitely. `Unregister` is idempotent and deletes rows this
+  process never registered, so it can clear an orphan an earlier daemon left
+  behind. At-least-once delivery, stall-don't-skip, cursor-after-handler, and the
+  database-only enabled bit are unchanged. Groundwork for stage A4, where each app
+  is its own durable consumer:
+  docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.

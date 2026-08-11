@@ -1,0 +1,21 @@
+kind: added
+area: cli
+change: >
+  `attn app` is the operator surface for apps — automations attn runs for you,
+  each consuming facts from the event bus as `app:<name>` and keeping its own
+  documents under `app/<name>`. `attn app list` shows every installed app with
+  the version it runs, whether it is enabled, and how far behind the event log it
+  is; `attn app status <name>` adds its consumer, its version and invocation
+  history, and its most recent runs; `enable`/`disable` start and stop delivery;
+  `remove` uninstalls.
+notes: >
+  Removing an app stops and deletes its bus consumer and deletes its registry
+  row, and nothing else: version history, the invocation log and every document
+  under `app/<name>` survive, and the command says so. Deleting your data is a
+  separate act and this is not it. An app's enabled state IS its bus consumer's
+  bit — there is no second copy — so `attn bus disable app:<name>` still kills an
+  app straight against the database when the daemon is not running. Status
+  reports only what exists: an app whose consumer has never been registered says
+  so rather than showing a default. This is stage A4's registry half; applying,
+  rolling back and scaffolding an app come with the pipeline that builds one.
+  Design: docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.

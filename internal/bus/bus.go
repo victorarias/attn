@@ -33,10 +33,6 @@ const (
 	DefaultRetryCap  = 2 * time.Minute
 )
 
-// ErrAlreadyStarted is returned by Register once Start has run: the set of
-// durable consumers is fixed at startup.
-var ErrAlreadyStarted = errors.New("bus: consumers must be registered before Start")
-
 // LogFunc is the daemon's injected logger shape. All runtime logging goes
 // through it — never log.Printf, whose stderr is discarded in the background.
 type LogFunc func(format string, args ...interface{})
@@ -76,6 +72,9 @@ type Store interface {
 	Bounds() (earliest, head int64, err error)
 	GetConsumer(name string) (Consumer, bool, error)
 	SaveConsumer(c Consumer, now time.Time) error
+	// DeleteConsumer removes a registration. Deleting one that is not there is
+	// success: Unregister is an uninstall path and must be re-runnable.
+	DeleteConsumer(name string) error
 	SetCursor(name string, cursor int64, now time.Time) error
 	ListConsumers() ([]Consumer, error)
 	Trim(cutoff time.Time) (int, error)
@@ -136,11 +135,21 @@ type Bus struct {
 	// by publishMu; both Publish and Announce read the log forward from it.
 	announced int64
 
+	// mu guards the consumer sets and the lifecycle bits below. Runtime
+	// registration does its two store reads under it: registering is a rare
+	// lifecycle event, and the alternative is a window where a consumer is in the
+	// set with no row behind it, or has a row with nobody serving it.
 	mu        sync.Mutex
 	durables  []*durable
 	ephemeral map[int]*ephemeralSub
 	nextSubID int
 	started   bool
+	// stopped is set before Stop cancels, so a registration racing shutdown does
+	// not add to wg while Stop is already waiting on it.
+	stopped bool
+	// retiring holds the names Unregister is between removing and deleting the row
+	// for. See Register for what taking one of them back early would cost.
+	retiring map[string]struct{}
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -149,16 +158,37 @@ type Bus struct {
 
 type durable struct {
 	name    string
-	filter  Filter
 	handler Handler
 
 	wake chan struct{}
 
-	mu       sync.Mutex
+	// ctx is a child of the bus context, so Stop cancels every consumer and
+	// Unregister cancels exactly one. Both of the delivery loop's waits — the
+	// retry sleep and the idle select — watch it, which is what lets an
+	// unregister interrupt a loop parked behind the two-minute retry cap instead
+	// of waiting it out.
+	ctx    context.Context
+	cancel context.CancelFunc
+	// done is closed when this consumer's delivery loop returns; Unregister waits
+	// on it before deleting the row. launched says a loop was ever started, and
+	// is guarded by the bus mutex — a consumer registered before Start and
+	// unregistered before it has no loop to wait for.
+	done     chan struct{}
+	launched bool
+
+	mu sync.Mutex
+	// filter is under the same lock as the position because SetFilter changes it
+	// while the delivery loop is reading it — an app's subscriptions move when a
+	// new version is applied, and the loop must not be racing the change.
+	filter   Filter
 	cursor   int64
 	enabled  bool
 	stalled  string
 	failures int
+	// retired is set by Unregister before the row goes. It drops a late result
+	// from a handler that was in flight — a cursor advance or a failure record
+	// against a registration that no longer exists is a no-op, not an error.
+	retired bool
 }
 
 type ephemeralSub struct {
@@ -181,6 +211,7 @@ func New(opts Options) *Bus {
 		retryCap:     nonZeroDuration(opts.RetryCap, DefaultRetryCap),
 		compactable:  append([]string(nil), opts.Compactable...),
 		ephemeral:    map[int]*ephemeralSub{},
+		retiring:     map[string]struct{}{},
 	}
 	if b.now == nil {
 		b.now = time.Now
@@ -339,9 +370,12 @@ func (b *Bus) wakeDurables() {
 	}
 }
 
-// Register adds a durable consumer; must be called before Start. A new
-// consumer begins at head; an existing one keeps its cursor and enabled bit —
-// a restart must neither rewind a consumer nor resurrect a killed one.
+// Register adds a durable consumer, before or after Start: called after, it
+// persists the registration and starts the delivery loop immediately — an app
+// installed while the daemon runs must not wait for a restart. A new consumer
+// begins at head; an existing one keeps its cursor and enabled bit — a restart
+// must neither rewind a consumer nor resurrect a killed one. A registration
+// that fails to persist leaves nothing behind, so the caller can retry.
 func (b *Bus) Register(name string, filter Filter, h Handler) error {
 	if strings.TrimSpace(name) == "" {
 		return errors.New("bus: consumer name is required")
@@ -352,22 +386,210 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.started {
-		return ErrAlreadyStarted
-	}
 	for _, d := range b.durables {
 		if d.name == name {
 			return fmt.Errorf("bus: consumer %s already registered", name)
 		}
 	}
-	b.durables = append(b.durables, &durable{
+	// A name being unregistered is claimed until its row is gone. Taking it back
+	// inside that window would resume the outgoing consumer's cursor from a row
+	// that is about to be deleted under the new loop — which then drains against a
+	// registration that disappeared and retries that error forever. Same zombie the
+	// delete-last ordering exists to prevent, through the side door.
+	if _, retiring := b.retiring[name]; retiring {
+		return fmt.Errorf("bus: consumer %s is being unregistered; retry once it is gone", name)
+	}
+	d := b.newDurable(name, filter, h)
+
+	// Before Start, the registration is all there is to do: Start persists every
+	// consumer and launches its loop. The same is true for a bus with no store,
+	// which never delivers durably at all.
+	if !b.started || b.store == nil {
+		b.durables = append(b.durables, d)
+		return nil
+	}
+
+	_, head, err := b.store.Bounds()
+	if err != nil {
+		d.cancel()
+		return fmt.Errorf("bus: reading log bounds to register %s: %w", name, err)
+	}
+	if err := b.initConsumer(d, head); err != nil {
+		d.cancel()
+		return err
+	}
+	b.durables = append(b.durables, d)
+	b.launchLocked(d)
+	return nil
+}
+
+// Unregister stops a consumer's delivery loop and deletes its persisted row. It
+// is the way out of Register, and the reason it exists at all: an abandoned
+// enabled row holds the retention floor down forever, against a consumer nobody
+// serves.
+//
+// It is idempotent. A name this process never registered — an orphan row left by
+// an earlier daemon — is still deleted, and a name that does not exist at all is
+// success. The caller is an uninstall path, and an uninstall that fails the
+// second time it runs is a worse surface than one that says nothing.
+//
+// The order is cancel, wait for the loop to exit, then delete the row, and it is
+// load-bearing in both directions. Deleting first would leave the live loop's
+// next drain reading a registration that disappeared — an error path that records
+// a failure and retries forever, a zombie. Returning before the loop exits would
+// hand the caller a consumer that is still delivering. The wait is unbounded for
+// the same reason Stop's is: a handler that ignores its cancelled context is a
+// bug in the handler, and a retired consumer's late cursor advance is already
+// dropped, so waiting costs nothing a correct handler will notice.
+//
+// The name stays claimed for the whole of it, so a Register that arrives while the
+// loop is winding down is refused rather than served from a row about to be
+// deleted underneath it.
+func (b *Bus) Unregister(name string) error {
+	b.mu.Lock()
+	var (
+		found *durable
+		wait  bool
+	)
+	for i, d := range b.durables {
+		if d.name != name {
+			continue
+		}
+		found = d
+		wait = d.launched
+		b.durables = append(b.durables[:i], b.durables[i+1:]...)
+		break
+	}
+	b.retiring[name] = struct{}{}
+	b.mu.Unlock()
+	// Released whatever happens, including a failed delete: a surviving row is the
+	// ordinary resume-from-cursor case, and the caller already has the error.
+	defer func() {
+		b.mu.Lock()
+		delete(b.retiring, name)
+		b.mu.Unlock()
+	}()
+
+	if found != nil {
+		found.retire()
+		found.cancel()
+		if wait {
+			<-found.done
+		}
+	}
+
+	if b.store == nil {
+		return nil
+	}
+	if err := b.store.DeleteConsumer(name); err != nil {
+		return fmt.Errorf("bus: deleting consumer %s: %w", name, err)
+	}
+	return nil
+}
+
+// SetFilter changes what a registered consumer receives, keeping its cursor and
+// its enabled bit.
+//
+// It exists because a consumer's subscriptions can outlive neither the consumer
+// nor its position: an app declares its event patterns in its manifest, and
+// applying a new version can change them. Unregister-then-Register would express
+// the same intent and delete the cursor on the way through — the app would resume
+// at head and silently skip everything published while it was being updated.
+// Register refuses a name it already serves, so this is the only way to say "same
+// consumer, different subscriptions".
+//
+// A name that is not registered here is an error rather than a silent no-op: the
+// caller believes it is changing a live consumer's behavior, and learning
+// otherwise from later missing deliveries is the worst way to find out.
+func (b *Bus) SetFilter(name string, filter Filter) error {
+	b.mu.Lock()
+	var found *durable
+	for _, d := range b.durables {
+		if d.name == name {
+			found = d
+			break
+		}
+	}
+	started := b.started
+	b.mu.Unlock()
+	if found == nil {
+		return fmt.Errorf("bus: consumer %s is not registered, so its filter cannot be changed", name)
+	}
+	// Persist first, then swap what the loop reads. The other order would have the
+	// loop filtering by a rule no restart would reproduce if the write failed.
+	//
+	// Before Start there is nothing persisted to correct: Register only holds the
+	// consumer in memory, and Start writes every one of them with the filter it
+	// carries at that moment — which is this one.
+	if b.store != nil && started {
+		existing, ok, err := b.store.GetConsumer(name)
+		if err != nil {
+			return fmt.Errorf("bus: reading consumer %s to change its filter: %w", name, err)
+		}
+		if !ok {
+			return fmt.Errorf("bus: consumer %s has no registration to change", name)
+		}
+		if err := b.store.SaveConsumer(Consumer{
+			Name:    name,
+			Cursor:  existing.Cursor,
+			Filter:  filter.String(),
+			Enabled: existing.Enabled,
+		}, b.now()); err != nil {
+			return fmt.Errorf("bus: saving the filter of consumer %s: %w", name, err)
+		}
+	}
+	found.setFilter(filter)
+	return nil
+}
+
+// Registered reports whether this process serves a consumer under name.
+//
+// It is how a caller chooses between Register and SetFilter without guessing
+// from an error string: those two are not interchangeable — one mints a cursor,
+// the other preserves it — and picking the wrong one is silent.
+func (b *Bus) Registered(name string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, d := range b.durables {
+		if d.name == name {
+			return true
+		}
+	}
+	return false
+}
+
+// newDurable builds a consumer and its cancel scope. Callers that also touch the
+// consumer set hold b.mu; the bus context it reads is fixed at construction.
+func (b *Bus) newDurable(name string, filter Filter, h Handler) *durable {
+	ctx, cancel := context.WithCancel(b.ctx)
+	return &durable{
 		name:    name,
 		filter:  filter,
 		handler: h,
 		wake:    make(chan struct{}, 1),
+		ctx:     ctx,
+		cancel:  cancel,
+		done:    make(chan struct{}),
 		enabled: true,
-	})
-	return nil
+	}
+}
+
+// launchLocked starts d's delivery loop. Caller holds b.mu, which is what keeps
+// the WaitGroup increment ordered against Stop: Stop sets stopped under the same
+// lock before it waits, so a registration racing shutdown gets no loop rather
+// than adding to a WaitGroup somebody is already waiting on.
+func (b *Bus) launchLocked(d *durable) {
+	if b.stopped || b.ctx.Err() != nil {
+		close(d.done)
+		return
+	}
+	d.launched = true
+	b.wg.Add(1)
+	go func() {
+		defer b.wg.Done()
+		defer close(d.done)
+		b.deliver(d)
+	}()
 }
 
 // Subscribe adds an ephemeral subscriber and returns its cancel function. The
@@ -395,13 +617,11 @@ func (b *Bus) Subscribe(filter Filter, fn func(Event)) func() {
 // consumer, plus the retention loop.
 func (b *Bus) Start() error {
 	b.mu.Lock()
+	defer b.mu.Unlock()
 	if b.started {
-		b.mu.Unlock()
 		return nil
 	}
 	b.started = true
-	ds := append([]*durable(nil), b.durables...)
-	b.mu.Unlock()
 
 	if b.store == nil {
 		return nil
@@ -412,17 +632,16 @@ func (b *Bus) Start() error {
 		return fmt.Errorf("bus: reading log bounds: %w", err)
 	}
 
-	for _, d := range ds {
+	for _, d := range b.durables {
 		if err := b.initConsumer(d, head); err != nil {
 			return err
 		}
-		b.wg.Add(1)
-		go func(d *durable) {
-			defer b.wg.Done()
-			b.deliver(d)
-		}(d)
+		b.launchLocked(d)
 	}
 
+	if b.stopped {
+		return nil
+	}
 	b.wg.Add(1)
 	go func() {
 		defer b.wg.Done()
@@ -442,7 +661,7 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 		if err := b.store.SaveConsumer(Consumer{
 			Name:    d.name,
 			Cursor:  head,
-			Filter:  d.filter.String(),
+			Filter:  d.filterExpr(),
 			Enabled: true,
 		}, now); err != nil {
 			return fmt.Errorf("bus: registering consumer %s: %w", d.name, err)
@@ -454,7 +673,7 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 	if err := b.store.SaveConsumer(Consumer{
 		Name:    d.name,
 		Cursor:  existing.Cursor,
-		Filter:  d.filter.String(),
+		Filter:  d.filterExpr(),
 		Enabled: existing.Enabled,
 	}, now); err != nil {
 		return fmt.Errorf("bus: updating consumer %s: %w", d.name, err)
@@ -467,11 +686,17 @@ func (b *Bus) initConsumer(d *durable, head int64) error {
 // a cancelled context; their cursor is not advanced, so an interrupted event is
 // redelivered on the next start.
 func (b *Bus) Stop() {
+	b.mu.Lock()
+	b.stopped = true
+	b.mu.Unlock()
+
 	b.cancel()
 	b.wg.Wait()
 }
 
-// deliver is one durable consumer's loop.
+// deliver is one durable consumer's loop. Every wait watches the consumer's own
+// context, a child of the bus context: Stop reaches all of them, Unregister
+// reaches this one, and neither has to wait out a retry sleep to be noticed.
 func (b *Bus) deliver(d *durable) {
 	ticker := time.NewTicker(b.pollInterval)
 	defer ticker.Stop()
@@ -481,7 +706,7 @@ func (b *Bus) deliver(d *durable) {
 		if retry > 0 {
 			timer := time.NewTimer(retry)
 			select {
-			case <-b.ctx.Done():
+			case <-d.ctx.Done():
 				timer.Stop()
 				return
 			case <-timer.C:
@@ -489,7 +714,7 @@ func (b *Bus) deliver(d *durable) {
 			retry = 0
 		} else {
 			select {
-			case <-b.ctx.Done():
+			case <-d.ctx.Done():
 				return
 			case <-d.wake:
 			case <-ticker.C:
@@ -498,7 +723,7 @@ func (b *Bus) deliver(d *durable) {
 
 		failures := d.drainFailures()
 		if err := b.drain(d); err != nil {
-			if b.ctx.Err() != nil {
+			if d.ctx.Err() != nil {
 				return
 			}
 			retry = backoff(b.retryBase, b.retryCap, failures+1)
@@ -549,7 +774,7 @@ func (b *Bus) drain(d *durable) error {
 	}
 
 	for {
-		if b.ctx.Err() != nil {
+		if d.ctx.Err() != nil {
 			return nil
 		}
 		events, err := b.store.Since(d.position(), b.batchSize)
@@ -563,7 +788,7 @@ func (b *Bus) drain(d *durable) error {
 
 		var skipped int64
 		for _, ev := range events {
-			if b.ctx.Err() != nil {
+			if d.ctx.Err() != nil {
 				return nil
 			}
 			stop, err := killed()
@@ -576,7 +801,7 @@ func (b *Bus) drain(d *durable) error {
 				}
 				return nil
 			}
-			if !d.filter.Matches(ev.Name) {
+			if !d.matches(ev.Name) {
 				// Unwanted events still advance the cursor, batched into one write.
 				skipped = ev.Seq
 				continue
@@ -587,8 +812,8 @@ func (b *Bus) drain(d *durable) error {
 				}
 				skipped = 0
 			}
-			if err := d.handler(b.ctx, ev); err != nil {
-				if b.ctx.Err() != nil {
+			if err := d.handler(d.ctx, ev); err != nil {
+				if d.ctx.Err() != nil {
 					return nil
 				}
 				return fmt.Errorf("handling %s (seq %d): %w", ev.Name, ev.Seq, err)
@@ -625,6 +850,13 @@ func (b *Bus) reconcileGap(d *durable) error {
 }
 
 func (b *Bus) advance(d *durable, seq int64) error {
+	// A handler that was in flight when Unregister landed may still be returning
+	// here. Its registration is gone, so there is no cursor to move: dropping the
+	// write is the correct outcome, and reporting it as an error would turn a
+	// clean uninstall into a stall on a consumer nobody serves.
+	if d.isRetired() {
+		return nil
+	}
 	if err := b.store.SetCursor(d.name, seq, b.now()); err != nil {
 		return fmt.Errorf("persisting cursor: %w", err)
 	}
@@ -757,6 +989,24 @@ func (b *Bus) consumerFloor() (int64, error) {
 	return head, nil
 }
 
+func (d *durable) matches(name string) bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.filter.Matches(name)
+}
+
+func (d *durable) filterExpr() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.filter.String()
+}
+
+func (d *durable) setFilter(f Filter) {
+	d.mu.Lock()
+	d.filter = f
+	d.mu.Unlock()
+}
+
 func (d *durable) position() int64 {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -782,11 +1032,29 @@ func (d *durable) setEnabled(enabled bool) {
 	d.mu.Unlock()
 }
 
+// retire marks the consumer unregistered, which is what makes a late result from
+// an in-flight handler a no-op rather than an error or a failure streak against a
+// registration that no longer exists.
+func (d *durable) retire() {
+	d.mu.Lock()
+	d.retired = true
+	d.mu.Unlock()
+}
+
+func (d *durable) isRetired() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.retired
+}
+
 func (d *durable) recordFailure(reason string, count int) {
 	d.mu.Lock()
+	defer d.mu.Unlock()
+	if d.retired {
+		return
+	}
 	d.stalled = reason
 	d.failures = count
-	d.mu.Unlock()
 }
 
 func (d *durable) clearFailure() {

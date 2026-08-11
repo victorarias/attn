@@ -475,7 +475,7 @@ model PluginInfo {
   running: boolean;
   availability: string; // "bundled" | "user"
   installation_state: string; // "available" | "installed"
-  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded"
+  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded" | "parked"
   can_install: boolean;
   can_uninstall: boolean;
   // "starting" | "connected" | "backoff" | "stopped". Plain string keeps
@@ -4173,6 +4173,310 @@ model DocSubscribeResult {
 }
 
 // ============================================================================
+// App registry
+// ============================================================================
+//
+// An app is a manifest-declared automation running in attn's shared runtime: it
+// consumes facts from the durable bus as its own consumer `app:<name>`, keeps
+// state in the document namespace `app/<name>`, and is versioned by the content
+// hash of its built artifact. A plugin is the other thing entirely — an
+// integration with its own process — and the two never share a surface.
+//
+// Scaffolding an app is a local act with no daemon in it — `attn app new` writes
+// a directory. Building is the caller's too: it runs the developer's bun and the
+// TypeScript attn keeps under its data dir, and only the finished result crosses
+// this surface. What the daemon owns is the part that must be atomic and
+// observed — recording the version, moving the pointer, publishing the fact.
+
+// One app as `attn app list` shows it: the registry row, plus the consumer that
+// carries its enabled state. There is no enabled field on the app itself —
+// enabled IS the consumer's bit, and a second copy here would be a value that
+// can disagree with the one the bus actually reads.
+model AppSummary {
+  "name": string;
+  // The version this app currently runs. Absent when no version has been
+  // applied yet: a registry row can exist ahead of its first successful build.
+  "current_version"?: AppVersionInfo;
+  "created_at": string;
+  "updated_at": string;
+  // Absent when the app has no `app:<name>` consumer registered. That is a real
+  // state, not a gap in the answer: it means nothing is delivering facts to
+  // this app.
+  "consumer"?: AppConsumerInfo;
+}
+
+model AppVersionInfo {
+  "id": safeint;
+  // The content hash of the built artifact — the version's identity, which is
+  // why re-applying byte-identical content reports this same version.
+  "content_hash": string;
+  "artifact_path": string;
+  "created_at": string;
+}
+
+// The bus consumer behind an app. `enabled` is the app's enabled state, `lag` is
+// head minus cursor: how many facts the app has yet to be delivered.
+model AppConsumerInfo {
+  "name": string;
+  "enabled": boolean;
+  "cursor": safeint;
+  "lag": safeint;
+  "filter": string;
+}
+
+model AppListMessage {
+  "cmd": "app_list";
+}
+
+model AppListResult {
+  "apps": AppSummary[];
+}
+
+model AppStatusMessage {
+  "cmd": "app_status";
+  "name": string;
+}
+
+// What is known about one app, and only what is known: the registry row, the
+// consumer if there is one, the invocations recorded so far, and the shared
+// runtime's state. An app's status must not claim a health it cannot observe, so
+// every field the runtime owns is absent when there is no runtime.
+model AppStatusResult {
+  "app": AppSummary;
+  "versions": safeint;
+  "invocations": safeint;
+  // The most recent invocations, newest first, when any have been recorded.
+  "recent"?: AppInvocationInfo[];
+  // The shared runtime every app's handlers execute in. Absent until it has been
+  // started once — a daemon with quiet apps starts no sidecar, and reporting a
+  // "stopped" runtime that was never asked to run would read as a fault.
+  "runtime"?: AppRuntimeInfo;
+  // What this app is currently stuck on, when it is stuck. Present only while a
+  // handler is failing on the same event; a successful delivery clears it.
+  "stall"?: AppStallInfo;
+}
+
+// The shared app runtime as the supervisor sees it. One process for every app —
+// isolation between apps is failure attribution, not an OS boundary — so this
+// answer is the same whichever app's status asked for it.
+model AppRuntimeInfo {
+  // "starting" | "connected" | "backoff" | "stopped" | "parked". Parked is the
+  // one that needs acting on: it means attn gave up restarting and no app's
+  // handlers are running until `attn app runtime restart`.
+  "phase": string;
+  // "running" | "stopped" — what attn is trying to achieve, as opposed to where
+  // it currently is.
+  "desired": string;
+  "running": boolean;
+  "connected": boolean;
+  // Increments on every start. The supervisor fences stale processes by it, so a
+  // generation that keeps climbing is a crash loop in one number.
+  "generation": safeint;
+  "restart_attempt": int32;
+  // The connected runtime's process id. Absent when nothing is connected.
+  "pid"?: safeint;
+  "started_at"?: string;
+  "connected_at"?: string;
+  // When the next restart fires, while backing off.
+  "next_restart_at"?: string;
+  // How the last process ended, rendered. Absent when it has never exited.
+  "last_exit"?: string;
+}
+
+// An app that has failed on the same event long enough to be on the clock.
+//
+// `disables_at` is the whole point of reporting this: an app stalled on one
+// event holds the durable log's retention floor open for every other consumer,
+// so attn disables it, and the reader is entitled to know when.
+model AppStallInfo {
+  "event_seq": safeint;
+  "event_name": string;
+  // When the app first failed on this event.
+  "since": string;
+  "attempts": int32;
+  "last_error": string;
+  "disables_at": string;
+}
+
+// The shared runtime's own surface, addressed as `runtime` rather than as an app
+// — which is why no app may be called that.
+model AppRuntimeStatusMessage {
+  "cmd": "app_runtime_status";
+}
+
+model AppRuntimeStatusResult {
+  // Absent when the runtime has never been started in this daemon.
+  "runtime"?: AppRuntimeInfo;
+  // How many apps are registered, and how many of those are enabled — the answer
+  // to "should anything be running at all".
+  "apps": safeint;
+  "apps_enabled": safeint;
+  // The binary that gets launched. Absent, with `host_error` set, when it cannot
+  // be found: a runtime that will never start must say so before it is asked to.
+  "host_path"?: string;
+  "host_error"?: string;
+  // Where the runtime's captured output lands. `attn app logs` reads it.
+  "log_path": string;
+}
+
+// Restart the shared runtime: kill the current process if there is one, and
+// start a fresh generation. It is also the way out of `parked` — a crash-looped
+// runtime is not retried until somebody asks.
+//
+// It takes no app name, deliberately. There is one runtime for every app, so
+// naming one would suggest a per-app restart that does not exist.
+model AppRuntimeRestartMessage {
+  "cmd": "app_runtime_restart";
+}
+
+model AppRuntimeRestartResult {
+  // The phase the runtime was in before the restart, so the answer says what
+  // actually changed — reviving a parked runtime and bouncing a healthy one are
+  // different acts with the same verb.
+  "was": string;
+  "runtime": AppRuntimeInfo;
+}
+
+// The shared runtime's captured stdout and stderr, filtered to one app.
+//
+// Every app's handlers print to the same process's output, so the runtime tags
+// each line with the app that wrote it and this reads the tag back. `runtime` as
+// the name means the whole log, untagged lines included — the runtime's own
+// output, which is where a startup failure appears.
+model AppLogsMessage {
+  "cmd": "app_logs";
+  "name": string;
+  // How many matching lines to return, newest last. 0 means the default.
+  "lines"?: int32;
+}
+
+model AppLogsResult {
+  "name": string;
+  "path": string;
+  // Matching lines in the order they were written, with the app tag removed.
+  "lines": string[];
+  // True when older matching lines were dropped to honour the limit.
+  "truncated": boolean;
+}
+
+// Stream an app's invocations as they are recorded. The connection stays open
+// and one result is written per invocation, which is what `attn app dev` renders
+// beside its apply results: an app author editing a handler sees the handler run.
+model AppWatchMessage {
+  "cmd": "app_watch";
+  "name": string;
+}
+
+model AppWatchResult {
+  "invocation": AppInvocationInfo;
+}
+
+model AppInvocationInfo {
+  "id": safeint;
+  // The version that actually ran, which is not necessarily the one the app
+  // points at now — a rollback does not rewrite what happened.
+  "version_id": safeint;
+  "event_seq": safeint;
+  "event_name": string;
+  "event_subject": string;
+  "handler": string;
+  "status": string;
+  "error": string;
+  "duration_ms": safeint;
+  "started_at": string;
+}
+
+// Flip an app's enabled state, which is its bus consumer's enabled bit and
+// nothing else. Refused when the app has no consumer: there is no state to flip,
+// and inventing one would leave the app looking enabled while nothing delivers
+// to it.
+model AppSetEnabledMessage {
+  "cmd": "app_set_enabled";
+  "name": string;
+  "enabled": boolean;
+}
+
+model AppSetEnabledResult {
+  "name": string;
+  "consumer": string;
+  "enabled": boolean;
+}
+
+// Uninstall an app: stop and delete its bus consumer, then delete its registry
+// row. What survives is deliberate — version history, the invocation log, and
+// every document under `app/<name>`. The result counts them so the answer says
+// what was kept rather than leaving the caller to guess.
+model AppRemoveMessage {
+  "cmd": "app_remove";
+  "name": string;
+}
+
+model AppRemoveResult {
+  "name": string;
+  "consumer_removed": boolean;
+  "versions_kept": safeint;
+  "invocations_kept": safeint;
+  "namespace_kept": string;
+}
+
+// Record a built version and point the app at it — the whole of what an apply
+// changes, in one transaction.
+//
+// The caller has already parsed the manifest, regenerated the derived types,
+// typechecked, bundled and placed the artifact in the content-addressed store;
+// everything that could be refused has been. The daemon does not take that on
+// trust: it re-derives the hash from the declaration and the bytes on disk
+// before recording anything, so a version row never names content that is not
+// what it says it is.
+model AppApplyMessage {
+  "cmd": "app_apply";
+  "name": string;
+  // The version's identity: the frozen declaration and the built bundle hashed
+  // together. The bundle alone would be wrong — generated types are erased at
+  // build time, so a manifest edit can leave the bundle byte-identical while
+  // changing what the app declares.
+  "content_hash": string;
+  // The manifest's snapshot as JSON, frozen onto the version row so what an old
+  // version declared survives editing the file.
+  "declaration": string;
+  // Where it was built from. Logged, never stored: attn does not remember where
+  // an app's source lives.
+  "source_path"?: string;
+}
+
+model AppApplyResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  // False when this exact content was already a version of this app. Applying
+  // byte-identical content mints no row — the hash is the version's identity —
+  // so the pointer simply lands back on the version that already was.
+  "version_created": boolean;
+  // What the app pointed at before this apply. Absent when it pointed at
+  // nothing, which is every app's first apply.
+  "previous_version_id"?: safeint;
+}
+
+// Move an app onto a version it already has. Rollback builds nothing: a version
+// is an immutable row and an artifact that is still on disk, so going back is a
+// pointer move and nothing else.
+model AppRollbackMessage {
+  "cmd": "app_rollback";
+  "name": string;
+  // Absent means the version applied before the current one.
+  "version_id"?: safeint;
+}
+
+model AppRollbackResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  "previous_version_id"?: safeint;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -4234,6 +4538,16 @@ model Response {
   doc_query_result?: DocQueryResult;
   doc_count_result?: DocCountResult;
   doc_subscribe_result?: DocSubscribeResult;
+  app_list_result?: AppListResult;
+  app_status_result?: AppStatusResult;
+  app_set_enabled_result?: AppSetEnabledResult;
+  app_remove_result?: AppRemoveResult;
+  app_apply_result?: AppApplyResult;
+  app_rollback_result?: AppRollbackResult;
+  app_logs_result?: AppLogsResult;
+  app_runtime_status_result?: AppRuntimeStatusResult;
+  app_runtime_restart_result?: AppRuntimeRestartResult;
+  app_watch_result?: AppWatchResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an

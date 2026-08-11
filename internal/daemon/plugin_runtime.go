@@ -2,13 +2,17 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/victorarias/attn/internal/plugins"
+	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/supervise"
 )
 
 const pluginManifestName = plugins.ManifestName
@@ -70,7 +74,7 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 	if d.pluginSupervisor == nil {
 		d.pluginSupervisor = newPluginSupervisor(
 			execPluginProcessLauncher{registryDir: plugins.RuntimeRegistryDir(filepath.Dir(d.socketPath))},
-			realPluginSupervisorClock{},
+			nil,
 			func(manifest pluginManifest, generation uint64) []string {
 				overrides := []string{
 					"ATTN_SOCKET_PATH=" + d.socketPath,
@@ -84,12 +88,60 @@ func (d *Daemon) ensurePluginSupervisor() *pluginSupervisor {
 				}
 				return d.pluginCommandEnv(overrides...)
 			},
-			func(pluginName string) {
-				d.publishFact(FactPluginHealthChanged, pluginName, nil)
+			supervise.Options{
+				LogDir: pluginLogDirForSocket(d.socketPath),
+				OnChange: func(pluginName string) {
+					d.publishFact(FactPluginHealthChanged, pluginName, nil)
+				},
+				OnGiveUp: d.notifyPluginParked,
+				Logf:     d.logf,
 			},
 		)
 	}
 	return d.pluginSupervisor
+}
+
+// pluginLogDirForSocket keeps each plugin's captured stdout/stderr beside the
+// runtime root that owns the plugin, next to the pty workers' own log tree. It
+// deliberately sits outside the plugin discovery directory: anything under
+// there is scanned for manifests.
+func pluginLogDirForSocket(socketPath string) string {
+	return filepath.Join(filepath.Dir(socketPath), "plugin-log")
+}
+
+// notificationKindPluginParked marks a notification produced by a plugin the
+// supervisor gave up restarting.
+const notificationKindPluginParked = "plugin_parked"
+
+// notifyPluginParked is the supervisor's OnGiveUp sink: a plugin that crash-
+// looped past the give-up tripwire stops being retried, so the only way the
+// user learns about it is a loud line in the daemon log plus a durable
+// notification. Reinstalling the plugin, or restarting attn, re-enters
+// supervision — there is no per-plugin restart verb yet, so the copy must not
+// promise one.
+func (d *Daemon) notifyPluginParked(name string, snapshot pluginRuntimeSnapshot) {
+	detail := ""
+	if snapshot.LastExit != nil {
+		detail = snapshot.LastExit.String()
+	}
+	d.logf("plugin %s parked after %d restarts without a stable connection: %s", name, snapshot.RestartAttempt, detail)
+	if d.store == nil {
+		return
+	}
+	record, err := d.store.AddNotification(store.NotificationRecord{
+		Kind:       notificationKindPluginParked,
+		Severity:   store.NotificationCritical,
+		Title:      fmt.Sprintf("Plugin stopped: %s", name),
+		Body:       fmt.Sprintf("attn restarted it %d times without it ever staying up, and has stopped trying. Reinstall the plugin, or restart attn, to try again.", snapshot.RestartAttempt),
+		Detail:     detail,
+		SourceKind: "plugin",
+		SourceID:   name,
+	}, time.Now())
+	if err != nil {
+		d.logf("notifications: add plugin-parked notification for %s: %v", name, err)
+		return
+	}
+	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
 func pluginDataDirForSocket(socketPath, pluginName string) string {
@@ -241,5 +293,5 @@ func (d *Daemon) stopInstalledPlugins() {
 }
 
 func (d *Daemon) stopInstalledPlugin(name string) {
-	d.ensurePluginSupervisor().Stop(name, pluginStopRemove)
+	d.ensurePluginSupervisor().Stop(name)
 }

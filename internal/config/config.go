@@ -276,6 +276,14 @@ func PluginDir() string {
 	return filepath.Join(attnDir(), "plugins")
 }
 
+// AppsDir returns the app artifact store for the active profile: one directory
+// per app, one directory per version inside it, named by the version's content
+// hash. The shared TypeScript apply typechecks with lives here too — it is
+// build machinery, not data, and it belongs beside what it builds.
+func AppsDir() string {
+	return filepath.Join(attnDir(), "apps")
+}
+
 // DataDirForProfile computes the canonical data directory for a profile name
 // ("" for default), without reading ATTN_PROFILE. Deliberately bypasses the
 // attnDir() chokepoint — no ATTN_DATA_DIR override, no go-test backstop — so

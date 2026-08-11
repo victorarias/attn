@@ -1,0 +1,28 @@
+kind: added
+area: cli
+change: >
+  Installed apps now run. attn dispatches the facts an app subscribes to into
+  its handlers, records every run, and shows you the result: `attn app status
+  <name>` lists recent invocations, `attn app logs <name>` shows what the app
+  printed, and `attn app dev <path>` streams invocations beside its build
+  output. `attn app runtime status` and `attn app runtime restart` are the
+  shared process every app's handlers run in.
+notes: >
+  One process for every app, not one each. That is the design: attn knows which
+  app's handler was running when something threw and charges the failure to
+  that app, but a runtime that dies is nobody's fault — no app moves closer to
+  being switched off because the shared process crashed. A handler that throws
+  keeps its event: the app retries it with backoff and never skips ahead, which
+  is what makes at-least-once delivery real. An app stuck on the same event for
+  fifteen minutes is disabled, because a stalled app holds the event log open
+  for every other consumer; you get a notification saying which event and which
+  error, and `attn app enable <name>` resumes it with a clean slate. A handler
+  reaches only the collections its own manifest declares, in its own document
+  namespace — there is no way to name another app's. Applying a new version
+  re-points the next dispatch without disturbing one already running. Runs are
+  kept for 30 days, or the newest 20,000 per app, whichever comes first — an app
+  watching a busy part of attn can record hundreds of thousands of runs a month,
+  and the recent ones are the ones worth reading. If the shared runtime
+  crash-loops attn parks it and says so on every app's status; `attn app runtime
+  restart` is the way back.
+  Design: docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.

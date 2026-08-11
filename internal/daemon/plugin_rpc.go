@@ -10,7 +10,6 @@ import (
 	"io"
 	"net"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -247,18 +246,10 @@ func validatePluginSurfaces(values []string) ([]string, error) {
 }
 
 type pluginConnection struct {
+	*jsonrpcPeer
+
 	name       string
 	generation uint64
-
-	conn   net.Conn
-	reader *bufio.Reader
-
-	writeMu sync.Mutex
-
-	pendingMu sync.Mutex
-	pending   map[string]chan jsonRPCMessage
-	nextID    uint64
-	closed    bool
 
 	healthMu      sync.RWMutex
 	healthStatus  string
@@ -268,106 +259,15 @@ type pluginConnection struct {
 
 func newPluginConnection(conn net.Conn, reader *bufio.Reader, params pluginHelloParams) *pluginConnection {
 	return &pluginConnection{
+		jsonrpcPeer:  newJSONRPCPeer(conn, reader),
 		name:         strings.TrimSpace(params.Name),
 		generation:   params.Generation,
-		conn:         conn,
-		reader:       reader,
-		pending:      make(map[string]chan jsonRPCMessage),
 		healthStatus: "unknown",
 	}
 }
 
-func (p *pluginConnection) send(msg jsonRPCMessage) error {
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	return json.NewEncoder(p.conn).Encode(msg)
-}
-
-func (p *pluginConnection) closePending(err error) {
-	p.pendingMu.Lock()
-	defer p.pendingMu.Unlock()
-	if p.closed {
-		return
-	}
-	p.closed = true
-	for key, ch := range p.pending {
-		delete(p.pending, key)
-		ch <- jsonRPCMessage{
-			Error: &jsonRPCError{Code: jsonRPCInternalError, Message: err.Error()},
-		}
-	}
-}
-
-func (p *pluginConnection) routeResponse(msg jsonRPCMessage) bool {
-	key := jsonRPCIDKey(msg.ID)
-	if key == "" {
-		return false
-	}
-
-	p.pendingMu.Lock()
-	ch, exists := p.pending[key]
-	if exists {
-		delete(p.pending, key)
-	}
-	p.pendingMu.Unlock()
-	if !exists {
-		return false
-	}
-	ch <- msg
-	return true
-}
-
 func (p *pluginConnection) request(ctx context.Context, method string, params interface{}, result interface{}) error {
-	payload, err := json.Marshal(params)
-	if err != nil {
-		return fmt.Errorf("marshal plugin request params: %w", err)
-	}
-
-	p.pendingMu.Lock()
-	if p.closed {
-		p.pendingMu.Unlock()
-		return errors.New("plugin connection is closed")
-	}
-	p.nextID++
-	id := strconv.FormatUint(p.nextID, 10)
-	responseCh := make(chan jsonRPCMessage, 1)
-	p.pending[id] = responseCh
-	p.pendingMu.Unlock()
-
-	request := jsonRPCMessage{
-		JSONRPC: "2.0",
-		ID:      json.RawMessage(id),
-		Method:  method,
-		Params:  payload,
-	}
-	if err := p.send(request); err != nil {
-		p.pendingMu.Lock()
-		delete(p.pending, id)
-		p.pendingMu.Unlock()
-		return fmt.Errorf("send plugin request: %w", err)
-	}
-
-	select {
-	case <-ctx.Done():
-		p.pendingMu.Lock()
-		delete(p.pending, id)
-		p.pendingMu.Unlock()
-		return ctx.Err()
-	case response := <-responseCh:
-		if response.Error != nil {
-			return fmt.Errorf("plugin %s: %s", method, response.Error.Message)
-		}
-		if result == nil {
-			return nil
-		}
-		if len(response.Result) == 0 {
-			return fmt.Errorf("plugin %s returned no result", method)
-		}
-		if err := json.Unmarshal(response.Result, result); err != nil {
-			return fmt.Errorf("decode plugin %s result: %w", method, err)
-		}
-		return nil
-	}
+	return p.jsonrpcPeer.request(ctx, "plugin", method, params, result)
 }
 
 // setHealth records a health observation and reports whether it moved. The

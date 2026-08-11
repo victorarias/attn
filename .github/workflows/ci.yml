@@ -136,6 +136,18 @@ jobs:
       - name: Ensure native VT library
         run: ./scripts/build-libghostty-vt.sh
 
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      # internal/appbuild typechecks and bundles an app with the real toolchain.
+      # Without bun those tests skip themselves, so CI would go green on a
+      # pipeline it never ran.
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
       - name: Check formatting
         run: |
           if [ -n "$(gofmt -l .)" ]; then

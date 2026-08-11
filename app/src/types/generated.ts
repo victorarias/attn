@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -19,6 +19,32 @@
 //   const agentPromptMessage = Convert.toAgentPromptMessage(json);
 //   const agentSetModelMessage = Convert.toAgentSetModelMessage(json);
 //   const agentToolDetailMessage = Convert.toAgentToolDetailMessage(json);
+//   const appApplyMessage = Convert.toAppApplyMessage(json);
+//   const appApplyResult = Convert.toAppApplyResult(json);
+//   const appConsumerInfo = Convert.toAppConsumerInfo(json);
+//   const appInvocationInfo = Convert.toAppInvocationInfo(json);
+//   const appListMessage = Convert.toAppListMessage(json);
+//   const appListResult = Convert.toAppListResult(json);
+//   const appLogsMessage = Convert.toAppLogsMessage(json);
+//   const appLogsResult = Convert.toAppLogsResult(json);
+//   const appRemoveMessage = Convert.toAppRemoveMessage(json);
+//   const appRemoveResult = Convert.toAppRemoveResult(json);
+//   const appRollbackMessage = Convert.toAppRollbackMessage(json);
+//   const appRollbackResult = Convert.toAppRollbackResult(json);
+//   const appRuntimeInfo = Convert.toAppRuntimeInfo(json);
+//   const appRuntimeRestartMessage = Convert.toAppRuntimeRestartMessage(json);
+//   const appRuntimeRestartResult = Convert.toAppRuntimeRestartResult(json);
+//   const appRuntimeStatusMessage = Convert.toAppRuntimeStatusMessage(json);
+//   const appRuntimeStatusResult = Convert.toAppRuntimeStatusResult(json);
+//   const appSetEnabledMessage = Convert.toAppSetEnabledMessage(json);
+//   const appSetEnabledResult = Convert.toAppSetEnabledResult(json);
+//   const appStallInfo = Convert.toAppStallInfo(json);
+//   const appStatusMessage = Convert.toAppStatusMessage(json);
+//   const appStatusResult = Convert.toAppStatusResult(json);
+//   const appSummary = Convert.toAppSummary(json);
+//   const appVersionInfo = Convert.toAppVersionInfo(json);
+//   const appWatchMessage = Convert.toAppWatchMessage(json);
+//   const appWatchResult = Convert.toAppWatchResult(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const attachBlock = Convert.toAttachBlock(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
@@ -667,6 +693,318 @@ export interface AgentToolDetailMessage {
 
 export enum AgentToolDetailMessageCmd {
     AgentToolDetail = "agent_tool_detail",
+}
+
+export interface AppApplyMessage {
+    cmd:          AppApplyMessageCmd;
+    content_hash: string;
+    declaration:  string;
+    name:         string;
+    source_path?: string;
+    [property: string]: any;
+}
+
+export enum AppApplyMessageCmd {
+    AppApply = "app_apply",
+}
+
+export interface AppApplyResult {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_created:      boolean;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppConsumerInfo {
+    cursor:  number;
+    enabled: boolean;
+    filter:  string;
+    lag:     number;
+    name:    string;
+    [property: string]: any;
+}
+
+export interface AppInvocationInfo {
+    duration_ms:   number;
+    error:         string;
+    event_name:    string;
+    event_seq:     number;
+    event_subject: string;
+    handler:       string;
+    id:            number;
+    started_at:    string;
+    status:        string;
+    version_id:    number;
+    [property: string]: any;
+}
+
+export interface AppListMessage {
+    cmd: AppListMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppListMessageCmd {
+    AppList = "app_list",
+}
+
+export interface AppListResult {
+    apps: App[];
+    [property: string]: any;
+}
+
+export interface App {
+    consumer?:        Consumer;
+    created_at:       string;
+    current_version?: CurrentVersion;
+    name:             string;
+    updated_at:       string;
+    [property: string]: any;
+}
+
+export interface Consumer {
+    cursor:  number;
+    enabled: boolean;
+    filter:  string;
+    lag:     number;
+    name:    string;
+    [property: string]: any;
+}
+
+export interface CurrentVersion {
+    artifact_path: string;
+    content_hash:  string;
+    created_at:    string;
+    id:            number;
+    [property: string]: any;
+}
+
+export interface AppLogsMessage {
+    cmd:    AppLogsMessageCmd;
+    lines?: number;
+    name:   string;
+    [property: string]: any;
+}
+
+export enum AppLogsMessageCmd {
+    AppLogs = "app_logs",
+}
+
+export interface AppLogsResult {
+    lines:     string[];
+    name:      string;
+    path:      string;
+    truncated: boolean;
+    [property: string]: any;
+}
+
+export interface AppRemoveMessage {
+    cmd:  AppRemoveMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppRemoveMessageCmd {
+    AppRemove = "app_remove",
+}
+
+export interface AppRemoveResult {
+    consumer_removed: boolean;
+    invocations_kept: number;
+    name:             string;
+    namespace_kept:   string;
+    versions_kept:    number;
+    [property: string]: any;
+}
+
+export interface AppRollbackMessage {
+    cmd:         AppRollbackMessageCmd;
+    name:        string;
+    version_id?: number;
+    [property: string]: any;
+}
+
+export enum AppRollbackMessageCmd {
+    AppRollback = "app_rollback",
+}
+
+export interface AppRollbackResult {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppRuntimeInfo {
+    connected:        boolean;
+    connected_at?:    string;
+    desired:          string;
+    generation:       number;
+    last_exit?:       string;
+    next_restart_at?: string;
+    phase:            string;
+    pid?:             number;
+    restart_attempt:  number;
+    running:          boolean;
+    started_at?:      string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeRestartMessage {
+    cmd: AppRuntimeRestartMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppRuntimeRestartMessageCmd {
+    AppRuntimeRestart = "app_runtime_restart",
+}
+
+export interface AppRuntimeRestartResult {
+    runtime: Runtime;
+    was:     string;
+    [property: string]: any;
+}
+
+export interface Runtime {
+    connected:        boolean;
+    connected_at?:    string;
+    desired:          string;
+    generation:       number;
+    last_exit?:       string;
+    next_restart_at?: string;
+    phase:            string;
+    pid?:             number;
+    restart_attempt:  number;
+    running:          boolean;
+    started_at?:      string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeStatusMessage {
+    cmd: AppRuntimeStatusMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppRuntimeStatusMessageCmd {
+    AppRuntimeStatus = "app_runtime_status",
+}
+
+export interface AppRuntimeStatusResult {
+    apps:         number;
+    apps_enabled: number;
+    host_error?:  string;
+    host_path?:   string;
+    log_path:     string;
+    runtime?:     Runtime;
+    [property: string]: any;
+}
+
+export interface AppSetEnabledMessage {
+    cmd:     AppSetEnabledMessageCmd;
+    enabled: boolean;
+    name:    string;
+    [property: string]: any;
+}
+
+export enum AppSetEnabledMessageCmd {
+    AppSetEnabled = "app_set_enabled",
+}
+
+export interface AppSetEnabledResult {
+    consumer: string;
+    enabled:  boolean;
+    name:     string;
+    [property: string]: any;
+}
+
+export interface AppStallInfo {
+    attempts:    number;
+    disables_at: string;
+    event_name:  string;
+    event_seq:   number;
+    last_error:  string;
+    since:       string;
+    [property: string]: any;
+}
+
+export interface AppStatusMessage {
+    cmd:  AppStatusMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppStatusMessageCmd {
+    AppStatus = "app_status",
+}
+
+export interface AppStatusResult {
+    app:         App;
+    invocations: number;
+    recent?:     InvocationElement[];
+    runtime?:    Runtime;
+    stall?:      Stall;
+    versions:    number;
+    [property: string]: any;
+}
+
+export interface InvocationElement {
+    duration_ms:   number;
+    error:         string;
+    event_name:    string;
+    event_seq:     number;
+    event_subject: string;
+    handler:       string;
+    id:            number;
+    started_at:    string;
+    status:        string;
+    version_id:    number;
+    [property: string]: any;
+}
+
+export interface Stall {
+    attempts:    number;
+    disables_at: string;
+    event_name:  string;
+    event_seq:   number;
+    last_error:  string;
+    since:       string;
+    [property: string]: any;
+}
+
+export interface AppSummary {
+    consumer?:        Consumer;
+    created_at:       string;
+    current_version?: CurrentVersion;
+    name:             string;
+    updated_at:       string;
+    [property: string]: any;
+}
+
+export interface AppVersionInfo {
+    artifact_path: string;
+    content_hash:  string;
+    created_at:    string;
+    id:            number;
+    [property: string]: any;
+}
+
+export interface AppWatchMessage {
+    cmd:  AppWatchMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppWatchMessageCmd {
+    AppWatch = "app_watch",
+}
+
+export interface AppWatchResult {
+    invocation: InvocationElement;
+    [property: string]: any;
 }
 
 export interface ApprovePRMessage {
@@ -4673,6 +5011,16 @@ export interface Response {
     activity_status_result?:               ActivityStatusResultObject;
     agent_msg_result?:                     AgentMsgResultObject;
     agent_peek_result?:                    AgentPeekResultObject;
+    app_apply_result?:                     AppApplyResultObject;
+    app_list_result?:                      AppListResultObject;
+    app_logs_result?:                      AppLogsResultObject;
+    app_remove_result?:                    AppRemoveResultObject;
+    app_rollback_result?:                  AppRollbackResultObject;
+    app_runtime_restart_result?:           AppRuntimeRestartResultObject;
+    app_runtime_status_result?:            AppRuntimeStatusResultObject;
+    app_set_enabled_result?:               AppSetEnabledResultObject;
+    app_status_result?:                    AppStatusResultObject;
+    app_watch_result?:                     AppWatchResultObject;
     authors?:                              AuthorElement[];
     data?:                                 string;
     delegate_result?:                      DelegateResultObject;
@@ -4750,6 +5098,85 @@ export interface AgentPeekResultObject {
     turn_owed?:              boolean;
     workspace_id:            string;
     workspace_title?:        string;
+    [property: string]: any;
+}
+
+export interface AppApplyResultObject {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_created:      boolean;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppListResultObject {
+    apps: App[];
+    [property: string]: any;
+}
+
+export interface AppLogsResultObject {
+    lines:     string[];
+    name:      string;
+    path:      string;
+    truncated: boolean;
+    [property: string]: any;
+}
+
+export interface AppRemoveResultObject {
+    consumer_removed: boolean;
+    invocations_kept: number;
+    name:             string;
+    namespace_kept:   string;
+    versions_kept:    number;
+    [property: string]: any;
+}
+
+export interface AppRollbackResultObject {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppRuntimeRestartResultObject {
+    runtime: Runtime;
+    was:     string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeStatusResultObject {
+    apps:         number;
+    apps_enabled: number;
+    host_error?:  string;
+    host_path?:   string;
+    log_path:     string;
+    runtime?:     Runtime;
+    [property: string]: any;
+}
+
+export interface AppSetEnabledResultObject {
+    consumer: string;
+    enabled:  boolean;
+    name:     string;
+    [property: string]: any;
+}
+
+export interface AppStatusResultObject {
+    app:         App;
+    invocations: number;
+    recent?:     InvocationElement[];
+    runtime?:    Runtime;
+    stall?:      Stall;
+    versions:    number;
+    [property: string]: any;
+}
+
+export interface AppWatchResultObject {
+    invocation: InvocationElement;
     [property: string]: any;
 }
 
@@ -7157,6 +7584,214 @@ export class Convert {
 
     public static agentToolDetailMessageToJson(value: AgentToolDetailMessage): string {
         return JSON.stringify(uncast(value, r("AgentToolDetailMessage")), null, 2);
+    }
+
+    public static toAppApplyMessage(json: string): AppApplyMessage {
+        return cast(JSON.parse(json), r("AppApplyMessage"));
+    }
+
+    public static appApplyMessageToJson(value: AppApplyMessage): string {
+        return JSON.stringify(uncast(value, r("AppApplyMessage")), null, 2);
+    }
+
+    public static toAppApplyResult(json: string): AppApplyResult {
+        return cast(JSON.parse(json), r("AppApplyResult"));
+    }
+
+    public static appApplyResultToJson(value: AppApplyResult): string {
+        return JSON.stringify(uncast(value, r("AppApplyResult")), null, 2);
+    }
+
+    public static toAppConsumerInfo(json: string): AppConsumerInfo {
+        return cast(JSON.parse(json), r("AppConsumerInfo"));
+    }
+
+    public static appConsumerInfoToJson(value: AppConsumerInfo): string {
+        return JSON.stringify(uncast(value, r("AppConsumerInfo")), null, 2);
+    }
+
+    public static toAppInvocationInfo(json: string): AppInvocationInfo {
+        return cast(JSON.parse(json), r("AppInvocationInfo"));
+    }
+
+    public static appInvocationInfoToJson(value: AppInvocationInfo): string {
+        return JSON.stringify(uncast(value, r("AppInvocationInfo")), null, 2);
+    }
+
+    public static toAppListMessage(json: string): AppListMessage {
+        return cast(JSON.parse(json), r("AppListMessage"));
+    }
+
+    public static appListMessageToJson(value: AppListMessage): string {
+        return JSON.stringify(uncast(value, r("AppListMessage")), null, 2);
+    }
+
+    public static toAppListResult(json: string): AppListResult {
+        return cast(JSON.parse(json), r("AppListResult"));
+    }
+
+    public static appListResultToJson(value: AppListResult): string {
+        return JSON.stringify(uncast(value, r("AppListResult")), null, 2);
+    }
+
+    public static toAppLogsMessage(json: string): AppLogsMessage {
+        return cast(JSON.parse(json), r("AppLogsMessage"));
+    }
+
+    public static appLogsMessageToJson(value: AppLogsMessage): string {
+        return JSON.stringify(uncast(value, r("AppLogsMessage")), null, 2);
+    }
+
+    public static toAppLogsResult(json: string): AppLogsResult {
+        return cast(JSON.parse(json), r("AppLogsResult"));
+    }
+
+    public static appLogsResultToJson(value: AppLogsResult): string {
+        return JSON.stringify(uncast(value, r("AppLogsResult")), null, 2);
+    }
+
+    public static toAppRemoveMessage(json: string): AppRemoveMessage {
+        return cast(JSON.parse(json), r("AppRemoveMessage"));
+    }
+
+    public static appRemoveMessageToJson(value: AppRemoveMessage): string {
+        return JSON.stringify(uncast(value, r("AppRemoveMessage")), null, 2);
+    }
+
+    public static toAppRemoveResult(json: string): AppRemoveResult {
+        return cast(JSON.parse(json), r("AppRemoveResult"));
+    }
+
+    public static appRemoveResultToJson(value: AppRemoveResult): string {
+        return JSON.stringify(uncast(value, r("AppRemoveResult")), null, 2);
+    }
+
+    public static toAppRollbackMessage(json: string): AppRollbackMessage {
+        return cast(JSON.parse(json), r("AppRollbackMessage"));
+    }
+
+    public static appRollbackMessageToJson(value: AppRollbackMessage): string {
+        return JSON.stringify(uncast(value, r("AppRollbackMessage")), null, 2);
+    }
+
+    public static toAppRollbackResult(json: string): AppRollbackResult {
+        return cast(JSON.parse(json), r("AppRollbackResult"));
+    }
+
+    public static appRollbackResultToJson(value: AppRollbackResult): string {
+        return JSON.stringify(uncast(value, r("AppRollbackResult")), null, 2);
+    }
+
+    public static toAppRuntimeInfo(json: string): AppRuntimeInfo {
+        return cast(JSON.parse(json), r("AppRuntimeInfo"));
+    }
+
+    public static appRuntimeInfoToJson(value: AppRuntimeInfo): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeInfo")), null, 2);
+    }
+
+    public static toAppRuntimeRestartMessage(json: string): AppRuntimeRestartMessage {
+        return cast(JSON.parse(json), r("AppRuntimeRestartMessage"));
+    }
+
+    public static appRuntimeRestartMessageToJson(value: AppRuntimeRestartMessage): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeRestartMessage")), null, 2);
+    }
+
+    public static toAppRuntimeRestartResult(json: string): AppRuntimeRestartResult {
+        return cast(JSON.parse(json), r("AppRuntimeRestartResult"));
+    }
+
+    public static appRuntimeRestartResultToJson(value: AppRuntimeRestartResult): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeRestartResult")), null, 2);
+    }
+
+    public static toAppRuntimeStatusMessage(json: string): AppRuntimeStatusMessage {
+        return cast(JSON.parse(json), r("AppRuntimeStatusMessage"));
+    }
+
+    public static appRuntimeStatusMessageToJson(value: AppRuntimeStatusMessage): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeStatusMessage")), null, 2);
+    }
+
+    public static toAppRuntimeStatusResult(json: string): AppRuntimeStatusResult {
+        return cast(JSON.parse(json), r("AppRuntimeStatusResult"));
+    }
+
+    public static appRuntimeStatusResultToJson(value: AppRuntimeStatusResult): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeStatusResult")), null, 2);
+    }
+
+    public static toAppSetEnabledMessage(json: string): AppSetEnabledMessage {
+        return cast(JSON.parse(json), r("AppSetEnabledMessage"));
+    }
+
+    public static appSetEnabledMessageToJson(value: AppSetEnabledMessage): string {
+        return JSON.stringify(uncast(value, r("AppSetEnabledMessage")), null, 2);
+    }
+
+    public static toAppSetEnabledResult(json: string): AppSetEnabledResult {
+        return cast(JSON.parse(json), r("AppSetEnabledResult"));
+    }
+
+    public static appSetEnabledResultToJson(value: AppSetEnabledResult): string {
+        return JSON.stringify(uncast(value, r("AppSetEnabledResult")), null, 2);
+    }
+
+    public static toAppStallInfo(json: string): AppStallInfo {
+        return cast(JSON.parse(json), r("AppStallInfo"));
+    }
+
+    public static appStallInfoToJson(value: AppStallInfo): string {
+        return JSON.stringify(uncast(value, r("AppStallInfo")), null, 2);
+    }
+
+    public static toAppStatusMessage(json: string): AppStatusMessage {
+        return cast(JSON.parse(json), r("AppStatusMessage"));
+    }
+
+    public static appStatusMessageToJson(value: AppStatusMessage): string {
+        return JSON.stringify(uncast(value, r("AppStatusMessage")), null, 2);
+    }
+
+    public static toAppStatusResult(json: string): AppStatusResult {
+        return cast(JSON.parse(json), r("AppStatusResult"));
+    }
+
+    public static appStatusResultToJson(value: AppStatusResult): string {
+        return JSON.stringify(uncast(value, r("AppStatusResult")), null, 2);
+    }
+
+    public static toAppSummary(json: string): AppSummary {
+        return cast(JSON.parse(json), r("AppSummary"));
+    }
+
+    public static appSummaryToJson(value: AppSummary): string {
+        return JSON.stringify(uncast(value, r("AppSummary")), null, 2);
+    }
+
+    public static toAppVersionInfo(json: string): AppVersionInfo {
+        return cast(JSON.parse(json), r("AppVersionInfo"));
+    }
+
+    public static appVersionInfoToJson(value: AppVersionInfo): string {
+        return JSON.stringify(uncast(value, r("AppVersionInfo")), null, 2);
+    }
+
+    public static toAppWatchMessage(json: string): AppWatchMessage {
+        return cast(JSON.parse(json), r("AppWatchMessage"));
+    }
+
+    public static appWatchMessageToJson(value: AppWatchMessage): string {
+        return JSON.stringify(uncast(value, r("AppWatchMessage")), null, 2);
+    }
+
+    public static toAppWatchResult(json: string): AppWatchResult {
+        return cast(JSON.parse(json), r("AppWatchResult"));
+    }
+
+    public static appWatchResultToJson(value: AppWatchResult): string {
+        return JSON.stringify(uncast(value, r("AppWatchResult")), null, 2);
     }
 
     public static toApprovePRMessage(json: string): ApprovePRMessage {
@@ -11044,6 +11679,214 @@ const typeMap: any = {
         { json: "full", js: "full", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "AppApplyMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppApplyMessageCmd") },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "declaration", js: "declaration", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "source_path", js: "source_path", typ: u(undefined, "") },
+    ], "any"),
+    "AppApplyResult": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_created", js: "version_created", typ: true },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppConsumerInfo": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "filter", js: "filter", typ: "" },
+        { json: "lag", js: "lag", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppInvocationInfo": o([
+        { json: "duration_ms", js: "duration_ms", typ: 0 },
+        { json: "error", js: "error", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_subject", js: "event_subject", typ: "" },
+        { json: "handler", js: "handler", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppListMessageCmd") },
+    ], "any"),
+    "AppListResult": o([
+        { json: "apps", js: "apps", typ: a(r("App")) },
+    ], "any"),
+    "App": o([
+        { json: "consumer", js: "consumer", typ: u(undefined, r("Consumer")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_version", js: "current_version", typ: u(undefined, r("CurrentVersion")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "Consumer": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "filter", js: "filter", typ: "" },
+        { json: "lag", js: "lag", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "CurrentVersion": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+    ], "any"),
+    "AppLogsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppLogsMessageCmd") },
+        { json: "lines", js: "lines", typ: u(undefined, 0) },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppLogsResult": o([
+        { json: "lines", js: "lines", typ: a("") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "truncated", js: "truncated", typ: true },
+    ], "any"),
+    "AppRemoveMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRemoveMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppRemoveResult": o([
+        { json: "consumer_removed", js: "consumer_removed", typ: true },
+        { json: "invocations_kept", js: "invocations_kept", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "namespace_kept", js: "namespace_kept", typ: "" },
+        { json: "versions_kept", js: "versions_kept", typ: 0 },
+    ], "any"),
+    "AppRollbackMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRollbackMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+        { json: "version_id", js: "version_id", typ: u(undefined, 0) },
+    ], "any"),
+    "AppRollbackResult": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppRuntimeInfo": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "connected_at", js: "connected_at", typ: u(undefined, "") },
+        { json: "desired", js: "desired", typ: "" },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
+        { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: "" },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "restart_attempt", js: "restart_attempt", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+    ], "any"),
+    "AppRuntimeRestartMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRuntimeRestartMessageCmd") },
+    ], "any"),
+    "AppRuntimeRestartResult": o([
+        { json: "runtime", js: "runtime", typ: r("Runtime") },
+        { json: "was", js: "was", typ: "" },
+    ], "any"),
+    "Runtime": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "connected_at", js: "connected_at", typ: u(undefined, "") },
+        { json: "desired", js: "desired", typ: "" },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
+        { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: "" },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "restart_attempt", js: "restart_attempt", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+    ], "any"),
+    "AppRuntimeStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRuntimeStatusMessageCmd") },
+    ], "any"),
+    "AppRuntimeStatusResult": o([
+        { json: "apps", js: "apps", typ: 0 },
+        { json: "apps_enabled", js: "apps_enabled", typ: 0 },
+        { json: "host_error", js: "host_error", typ: u(undefined, "") },
+        { json: "host_path", js: "host_path", typ: u(undefined, "") },
+        { json: "log_path", js: "log_path", typ: "" },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+    ], "any"),
+    "AppSetEnabledMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppSetEnabledMessageCmd") },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppSetEnabledResult": o([
+        { json: "consumer", js: "consumer", typ: "" },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStallInfo": o([
+        { json: "attempts", js: "attempts", typ: 0 },
+        { json: "disables_at", js: "disables_at", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "last_error", js: "last_error", typ: "" },
+        { json: "since", js: "since", typ: "" },
+    ], "any"),
+    "AppStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppStatusMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStatusResult": o([
+        { json: "app", js: "app", typ: r("App") },
+        { json: "invocations", js: "invocations", typ: 0 },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
+        { json: "versions", js: "versions", typ: 0 },
+    ], "any"),
+    "InvocationElement": o([
+        { json: "duration_ms", js: "duration_ms", typ: 0 },
+        { json: "error", js: "error", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_subject", js: "event_subject", typ: "" },
+        { json: "handler", js: "handler", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "Stall": o([
+        { json: "attempts", js: "attempts", typ: 0 },
+        { json: "disables_at", js: "disables_at", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "last_error", js: "last_error", typ: "" },
+        { json: "since", js: "since", typ: "" },
+    ], "any"),
+    "AppSummary": o([
+        { json: "consumer", js: "consumer", typ: u(undefined, r("Consumer")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_version", js: "current_version", typ: u(undefined, r("CurrentVersion")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "AppVersionInfo": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+    ], "any"),
+    "AppWatchMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppWatchMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppWatchResult": o([
+        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
+    ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -13433,6 +14276,16 @@ const typeMap: any = {
         { json: "activity_status_result", js: "activity_status_result", typ: u(undefined, r("ActivityStatusResultObject")) },
         { json: "agent_msg_result", js: "agent_msg_result", typ: u(undefined, r("AgentMsgResultObject")) },
         { json: "agent_peek_result", js: "agent_peek_result", typ: u(undefined, r("AgentPeekResultObject")) },
+        { json: "app_apply_result", js: "app_apply_result", typ: u(undefined, r("AppApplyResultObject")) },
+        { json: "app_list_result", js: "app_list_result", typ: u(undefined, r("AppListResultObject")) },
+        { json: "app_logs_result", js: "app_logs_result", typ: u(undefined, r("AppLogsResultObject")) },
+        { json: "app_remove_result", js: "app_remove_result", typ: u(undefined, r("AppRemoveResultObject")) },
+        { json: "app_rollback_result", js: "app_rollback_result", typ: u(undefined, r("AppRollbackResultObject")) },
+        { json: "app_runtime_restart_result", js: "app_runtime_restart_result", typ: u(undefined, r("AppRuntimeRestartResultObject")) },
+        { json: "app_runtime_status_result", js: "app_runtime_status_result", typ: u(undefined, r("AppRuntimeStatusResultObject")) },
+        { json: "app_set_enabled_result", js: "app_set_enabled_result", typ: u(undefined, r("AppSetEnabledResultObject")) },
+        { json: "app_status_result", js: "app_status_result", typ: u(undefined, r("AppStatusResultObject")) },
+        { json: "app_watch_result", js: "app_watch_result", typ: u(undefined, r("AppWatchResultObject")) },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
@@ -13504,6 +14357,65 @@ const typeMap: any = {
         { json: "turn_owed", js: "turn_owed", typ: u(undefined, true) },
         { json: "workspace_id", js: "workspace_id", typ: "" },
         { json: "workspace_title", js: "workspace_title", typ: u(undefined, "") },
+    ], "any"),
+    "AppApplyResultObject": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_created", js: "version_created", typ: true },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppListResultObject": o([
+        { json: "apps", js: "apps", typ: a(r("App")) },
+    ], "any"),
+    "AppLogsResultObject": o([
+        { json: "lines", js: "lines", typ: a("") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "truncated", js: "truncated", typ: true },
+    ], "any"),
+    "AppRemoveResultObject": o([
+        { json: "consumer_removed", js: "consumer_removed", typ: true },
+        { json: "invocations_kept", js: "invocations_kept", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "namespace_kept", js: "namespace_kept", typ: "" },
+        { json: "versions_kept", js: "versions_kept", typ: 0 },
+    ], "any"),
+    "AppRollbackResultObject": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppRuntimeRestartResultObject": o([
+        { json: "runtime", js: "runtime", typ: r("Runtime") },
+        { json: "was", js: "was", typ: "" },
+    ], "any"),
+    "AppRuntimeStatusResultObject": o([
+        { json: "apps", js: "apps", typ: 0 },
+        { json: "apps_enabled", js: "apps_enabled", typ: 0 },
+        { json: "host_error", js: "host_error", typ: u(undefined, "") },
+        { json: "host_path", js: "host_path", typ: u(undefined, "") },
+        { json: "log_path", js: "log_path", typ: "" },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+    ], "any"),
+    "AppSetEnabledResultObject": o([
+        { json: "consumer", js: "consumer", typ: "" },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStatusResultObject": o([
+        { json: "app", js: "app", typ: r("App") },
+        { json: "invocations", js: "invocations", typ: 0 },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
+        { json: "versions", js: "versions", typ: 0 },
+    ], "any"),
+    "AppWatchResultObject": o([
+        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
     ], "any"),
     "DocCollectionsResultObject": o([
         { json: "collections", js: "collections", typ: a(r("Schema")) },
@@ -14914,6 +15826,36 @@ const typeMap: any = {
     ],
     "AgentToolDetailMessageCmd": [
         "agent_tool_detail",
+    ],
+    "AppApplyMessageCmd": [
+        "app_apply",
+    ],
+    "AppListMessageCmd": [
+        "app_list",
+    ],
+    "AppLogsMessageCmd": [
+        "app_logs",
+    ],
+    "AppRemoveMessageCmd": [
+        "app_remove",
+    ],
+    "AppRollbackMessageCmd": [
+        "app_rollback",
+    ],
+    "AppRuntimeRestartMessageCmd": [
+        "app_runtime_restart",
+    ],
+    "AppRuntimeStatusMessageCmd": [
+        "app_runtime_status",
+    ],
+    "AppSetEnabledMessageCmd": [
+        "app_set_enabled",
+    ],
+    "AppStatusMessageCmd": [
+        "app_status",
+    ],
+    "AppWatchMessageCmd": [
+        "app_watch",
     ],
     "ApprovePRMessageCmd": [
         "approve_pr",

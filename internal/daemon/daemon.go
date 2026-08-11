@@ -40,6 +40,7 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/statetrace"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/supervise"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -334,6 +335,42 @@ type Daemon struct {
 	pluginExits         map[string]ptybackend.ExitInfo
 	pluginDir           string
 	bundledPluginDir    string
+	// appsDir is the app artifact store, `<data-dir>/apps`. It is derived from
+	// the data directory rather than the socket path because the CLI that builds
+	// an artifact derives it the same way: a socket relocated by
+	// ATTN_SOCKET_PATH would leave the two looking in different places.
+	appsDir string
+	// The shared app runtime. appRuntimeMu guards the supervisor and the live
+	// sidecar connection together: "is there a process" and "is it reachable"
+	// are read as one answer by `attn app runtime status` and by every dispatch.
+	appRuntimeMu         sync.Mutex
+	appRuntimeSupervisor *supervise.Supervisor
+	// appRuntimeSupervise is the tunable half of that supervision — the clock
+	// and the give-up tripwire. A test sets it so a crash loop can be watched
+	// without waiting out the real backoff; production leaves it zero.
+	appRuntimeSupervise supervise.Options
+	// appRuntimeWait overrides appRuntimeConnectWait, for the same reason.
+	appRuntimeWait time.Duration
+	appRuntimeConn *appRuntimeConnection
+	// appRuntimeReady closes when a sidecar connects, and is replaced with a
+	// fresh open channel when one goes away. It is how a delivery waits for a
+	// cold start on a real signal instead of a poll.
+	appRuntimeReady chan struct{}
+	// appDispatches is what is running right now, by dispatch id. A collection
+	// callback resolves its app through this and nowhere else.
+	appDispatchMu  sync.Mutex
+	appDispatches  map[string]*appDispatch
+	appDispatchSeq uint64
+	// appStalls is the auto-disable clock, one entry per app that is currently
+	// failing on an event. See appStall.
+	appStallMu sync.Mutex
+	appStalls  map[string]*appStall
+	// appWatchers are the open `app_watch` connections `attn app dev` renders.
+	appWatcherMu sync.Mutex
+	appWatchers  map[*appWatcher]struct{}
+	// appClock is the clock every app-runtime duration is measured against.
+	// Injected by tests so the fifteen-minute stall window costs no wall time.
+	appClock            func() time.Time
 	removePlugin        func(pluginDir, name string) error
 	pluginActionMu      sync.Mutex
 	bundledPluginMu     sync.Mutex
@@ -757,6 +794,7 @@ func New(socketPath string) *Daemon {
 		pluginHealthEnabled: true,
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		spawnLocks:          make(map[string]*spawnLock),
 	}
@@ -799,6 +837,7 @@ func NewForTesting(socketPath string) *Daemon {
 		plugins:             newPluginRegistry(),
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		workflowDirty:       make(map[string]bool),
 		workflowEngineConn:  make(map[string]workflowEngineSink),
@@ -845,6 +884,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		plugins:             newPluginRegistry(),
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		workflowDirty:       make(map[string]bool),
 		workflowEngineConn:  make(map[string]workflowEngineSink),
@@ -1011,6 +1051,10 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 	d.log("daemon started")
 	d.startInstalledPlugins()
+	// Apps get their consumers here, not their runtime: the sidecar starts on the
+	// first fact an app is actually due, so a user with installed-but-quiet apps
+	// pays nothing for them.
+	d.registerAppConsumers()
 
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
@@ -1747,6 +1791,7 @@ func (d *Daemon) Stop() {
 		d.hubManager.Stop()
 	}
 	d.stopInstalledPlugins()
+	d.stopAppRuntime()
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
 	d.stopAutoSettleTimers()
@@ -2474,6 +2519,18 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		return
 	}
 
+	// The app runtime is sniffed first: the plugin parser treats every JSON-RPC
+	// frame as a plugin's, so it would refuse this one with a true sentence about
+	// the wrong protocol.
+	if runtimeHelloID, runtimeParams, runtimeMode, err := parseAppRuntimeHello(data); runtimeMode {
+		if err != nil {
+			_ = json.NewEncoder(conn).Encode(jsonRPCFailure(runtimeHelloID, jsonRPCInvalidRequest, err.Error()))
+			return
+		}
+		d.handleAppRuntimeConnection(conn, reader, runtimeHelloID, runtimeParams)
+		return
+	}
+
 	helloID, helloParams, pluginMode, err := parsePluginHello(data)
 	if pluginMode {
 		if err != nil {
@@ -2540,6 +2597,26 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	// caller disconnects, rather than answering once.
 	case protocol.CmdDocSubscribe: // wire: doc_subscribe
 		d.handleDocSubscribe(conn, msg.(*protocol.DocSubscribeMessage))
+	case protocol.CmdAppList: // wire: app_list
+		d.handleAppList(conn, msg.(*protocol.AppListMessage))
+	case protocol.CmdAppStatus: // wire: app_status
+		d.handleAppStatus(conn, msg.(*protocol.AppStatusMessage))
+	case protocol.CmdAppSetEnabled: // wire: app_set_enabled
+		d.handleAppSetEnabled(conn, msg.(*protocol.AppSetEnabledMessage))
+	case protocol.CmdAppRemove: // wire: app_remove
+		d.handleAppRemove(conn, msg.(*protocol.AppRemoveMessage))
+	case protocol.CmdAppApply: // wire: app_apply
+		d.handleAppApply(conn, msg.(*protocol.AppApplyMessage))
+	case protocol.CmdAppRollback: // wire: app_rollback
+		d.handleAppRollback(conn, msg.(*protocol.AppRollbackMessage))
+	case protocol.CmdAppLogs: // wire: app_logs
+		d.handleAppLogs(conn, msg.(*protocol.AppLogsMessage))
+	case protocol.CmdAppRuntimeStatus: // wire: app_runtime_status
+		d.handleAppRuntimeStatus(conn, msg.(*protocol.AppRuntimeStatusMessage))
+	case protocol.CmdAppRuntimeRestart: // wire: app_runtime_restart
+		d.handleAppRuntimeRestart(conn, msg.(*protocol.AppRuntimeRestartMessage))
+	case protocol.CmdAppWatch: // wire: app_watch
+		d.handleAppWatch(conn, msg.(*protocol.AppWatchMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

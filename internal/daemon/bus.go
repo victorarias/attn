@@ -190,6 +190,38 @@ const (
 	// FactDocumentCollectionRedeclared: subject is the collection. A redeclare that
 	// drops a queried field must end the subscriptions using it. No wire entry.
 	FactDocumentCollectionRedeclared = "document.collection.redeclared"
+
+	// App registry facts; subject is the app's name.
+	//
+	// Neither has an entry in wireProjections, and that is not an omission: the
+	// app registry has no UI surface, so these produce no WebSocket traffic. They
+	// exist because the runtime has to hear about a state change it did not make
+	// — an app disabled from the CLI, or by the auto-disable clock, has to reach
+	// the loop that dispatches its handlers, and the log is how one part of the
+	// daemon tells another something happened.
+	//
+	// FactAppEnabledChanged: the app's bus consumer bit was flipped. The payload
+	// carries which way, so a consumer of this fact does not have to read back a
+	// bit that may already have moved again.
+	FactAppEnabledChanged = "app.enabled.changed"
+	// FactAppRemoved: the app was uninstalled — consumer stopped and deleted,
+	// registry row gone. It carries a payload rather than only a subject because
+	// the entity it describes no longer exists to be read.
+	FactAppRemoved = "app.removed"
+	// FactAppVersionChanged: the app now points at a different version. One fact
+	// for both ways of getting there — an apply and a rollback are the same
+	// pointer move, and a runtime that reloads on one must reload on the other.
+	// The payload names the version moved to and the one moved from, so a
+	// consumer that has to drain the outgoing version's handlers knows which one
+	// that is without racing the pointer it would otherwise read back.
+	FactAppVersionChanged = "app.version.changed"
+	// FactAppRuntimeChanged: the shared app runtime's supervision state moved —
+	// started, connected, backing off, parked, stopped. Subject is the runtime's
+	// child name rather than an app's, because the entity that moved is the one
+	// process every app shares. It carries no payload: the state is the
+	// supervisor's and a reader asks it (`attn app runtime status`) rather than
+	// trusting a copy that was true when the fact was written.
+	FactAppRuntimeChanged = "app.runtime.changed"
 )
 
 // CompactableFacts are the fact classes retention may reduce to one row per

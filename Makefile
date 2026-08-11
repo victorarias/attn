@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -106,15 +106,32 @@ build: $(NATIVE_VT_DEP)
 # the target GOOS/GOARCH + zig as the cgo cross-compiler: passing them on the
 # sub-make command line exports them, so the sub-make's `go env` resolves the
 # Linux archive dependency (download-first) before the cross cgo link.
-build-linux-amd64:
+# The daemon's Linux targets carry the app runtime host with them. A daemon that
+# runs on a Linux remote and cannot start its runtime there is a silently
+# darwin-only platform, so the two travel together rather than by convention.
+build-linux-amd64: build-app-runtime-host-linux-amd64
 	$(MAKE) build GOOS=linux GOARCH=amd64 CGO_ENABLED=1 \
 		CC='$(ZIG) cc -target x86_64-linux-gnu' \
 		CXX='$(ZIG) c++ -target x86_64-linux-gnu'
 
-build-linux-arm64:
+build-linux-arm64: build-app-runtime-host-linux-arm64
 	$(MAKE) build GOOS=linux GOARCH=arm64 CGO_ENABLED=1 \
 		CC='$(ZIG) cc -target aarch64-linux-gnu' \
 		CXX='$(ZIG) c++ -target aarch64-linux-gnu'
+
+# attn's shared app runtime: a bun --compile standalone binary, per platform. The
+# native build stages into the Tauri resource dir so the next app build collects
+# it; the cross builds stage under dist/ for a remote install to pick up.
+APP_RUNTIME_HOST_DIR ?= app/src-tauri/app-runtime
+
+build-app-runtime-host:
+	bash ./scripts/build-app-runtime-host.sh $(APP_RUNTIME_HOST_DIR)
+
+build-app-runtime-host-linux-amd64:
+	bash ./scripts/build-app-runtime-host.sh dist/app-runtime/linux_amd64 bun-linux-x64
+
+build-app-runtime-host-linux-arm64:
+	bash ./scripts/build-app-runtime-host.sh dist/app-runtime/linux_arm64 bun-linux-arm64
 
 GOTESTSUM=$(HOME)/go/bin/gotestsum
 

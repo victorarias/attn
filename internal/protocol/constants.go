@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "227"
+const ProtocolVersion = "228"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -126,6 +126,16 @@ const (
 	CmdDocQuery                              = "doc_query"
 	CmdDocCount                              = "doc_count"
 	CmdDocSubscribe                          = "doc_subscribe"
+	CmdAppList                               = "app_list"
+	CmdAppStatus                             = "app_status"
+	CmdAppSetEnabled                         = "app_set_enabled"
+	CmdAppRemove                             = "app_remove"
+	CmdAppApply                              = "app_apply"
+	CmdAppRollback                           = "app_rollback"
+	CmdAppLogs                               = "app_logs"
+	CmdAppRuntimeStatus                      = "app_runtime_status"
+	CmdAppRuntimeRestart                     = "app_runtime_restart"
+	CmdAppWatch                              = "app_watch"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -729,6 +739,76 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDocSubscribe:
 		var msg DocSubscribeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppList:
+		var msg AppListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppStatus:
+		var msg AppStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppSetEnabled:
+		var msg AppSetEnabledMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRemove:
+		var msg AppRemoveMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppApply:
+		var msg AppApplyMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRollback:
+		var msg AppRollbackMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppLogs:
+		var msg AppLogsMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRuntimeStatus:
+		var msg AppRuntimeStatusMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppRuntimeRestart:
+		var msg AppRuntimeRestartMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppWatch:
+		var msg AppWatchMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

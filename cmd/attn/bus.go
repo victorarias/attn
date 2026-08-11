@@ -414,8 +414,13 @@ func runBusSetEnabled(args []string, enabled bool) {
 		fmt.Fprintf(os.Stderr, "bus %s: no consumer named %q (see `attn bus status`)\n", verb, name)
 		os.Exit(1)
 	}
-	if err := s.SetBusConsumerEnabled(name, enabled, time.Now()); err != nil {
+	flipped, err := s.SetBusConsumerEnabled(name, enabled, time.Now())
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "bus %s: %v\n", verb, err)
+		os.Exit(1)
+	}
+	if !flipped {
+		fmt.Fprintf(os.Stderr, "bus %s: consumer %q was removed while this command ran, so nothing was changed (see `attn bus status`)\n", verb, name)
 		os.Exit(1)
 	}
 	fmt.Printf("consumer %q %sd\n", name, verb)

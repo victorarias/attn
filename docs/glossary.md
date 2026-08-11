@@ -243,15 +243,67 @@ The raw tier is physically unreachable through the user-facing notebook APIs
 happens; the keeper's narration is best-effort on top of it, so nothing is lost if
 narration never runs.
 
+## App
+
+An **app** is automation built on attn's platform: it declares what it does in a
+manifest, consumes domain facts from the event bus, keeps its state in its own
+document-store namespace, and runs inside attn's one shared supervised runtime.
+Apps are written by agents, applied while attn runs, and are meant to be cheap
+and numerous.
+
+An app has exactly one name, and that name is its whole identity: registry key,
+bus consumer `app:<name>`, document namespace `app/<name>`, directory
+convention. Nothing stores those separately, so they cannot drift apart.
+
+Two consequences of that single identity are worth stating outright, because
+they are what the lifecycle verbs mean:
+
+- An app's **enabled** state *is* its bus consumer's enabled bit. There is no
+  second copy. Flipping it is the one act that both stops delivery and releases
+  the event log's retention floor, and because the bit lives in the database,
+  `attn bus disable app:<name>` kills an app whether or not the daemon is
+  listening.
+- **Removing** an app stops and deletes its bus consumer and deletes its
+  registry row — and nothing else. Its version history, its invocation log, and
+  every document under `app/<name>` survive. Deleting a user's data is a
+  separate, explicit act, and uninstalling is not it.
+
+A **version** is one built artifact, identified by its content hash and frozen
+together with the declaration the manifest carried when it was built. Versions
+are never rewritten: applying is an insert plus a pointer move, and rolling back
+is the same pointer move to an older row. Re-applying byte-identical content
+reuses the version that is already there, which is what keeps "which version
+actually ran" answerable in the invocation log after a long editing session.
+
+**Applying** is how a directory becomes a version: parse the manifest, generate
+the types the handlers are checked against, typecheck, bundle, hash, write the
+artifact, insert the row, move the pointer. Apply never evaluates the app's
+code — nothing is imported and nothing is run — so every way an apply can fail
+happens before the pointer moves, with the previous version still serving. That
+is what makes applying safe to do repeatedly while attn is running, and it is
+why `attn app dev` can re-apply on every save.
+
+## Plugin
+
+A **plugin** integrates the outside world into attn: agent drivers, worktree
+hooks. It runs as its own supervised process, dials the daemon, is installed
+rarely, and is effectively part of the platform — a device driver.
+
+App and plugin are deliberately different mechanisms, not two words for one. A
+failing plugin takes an integration down; a failing app is disabled while
+everything else keeps running. Different trust, different rate of change,
+different blast radius.
+
 ## The document store
 
-attn's **document store** is where an extension keeps its own data. Three names
+attn's **document store** is where an app keeps its own data. Three names
 locate every record:
 
-- **Namespace** — `owner/name`, e.g. `ext/approval-gate`. A namespace is granted
-  to exactly one author and is the isolation boundary: nothing an extension does
+- **Namespace** — `owner/name`, e.g. `app/approval-gate`. A namespace is granted
+  to exactly one author and is the isolation boundary: nothing an app does
   can read or write another namespace, and two namespaces may use the same
-  collection name without meeting.
+  collection name without meeting. `app/` is the owner segment apps are granted;
+  `core/` is attn's own.
 - **Collection** — a named set of documents inside a namespace, e.g. `requests`.
 - **Document** — one JSON object with a caller-chosen **id**, unique within its
   collection. The body is stored byte for byte and nothing ever rewrites it, so

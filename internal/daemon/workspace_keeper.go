@@ -281,6 +281,16 @@ func (d *Daemon) startJobQueue() {
 		); err != nil {
 			d.logf("session activity: register scan tick: %v", err)
 		}
+		// The app invocation log is the third periodic duty. It trims on the same
+		// queue as the others so there is one place to look when it stops running.
+		if err := runner.RegisterCron(
+			appInvocationRetentionKind,
+			appInvocationRetentionInterval,
+			d.appInvocationRetentionHandler,
+			jobs.HandlerConfig{Timeout: appInvocationRetentionTimeout},
+		); err != nil {
+			d.logf("apps: register invocation retention tick: %v", err)
+		}
 		if err := runner.RegisterCron(
 			automationScheduleKind,
 			automationScheduleInterval,

@@ -43,6 +43,10 @@ cp "$attn" "app/src-tauri/binaries/attn-aarch64-apple-darwin"
 # available in the catalog; the daemon still requires a per-profile opt-in.
 bash ./scripts/build-bundled-plugins.sh
 
+# The shared app runtime, compiled the same way and for the same reason: a
+# GUI-spawned daemon cannot resolve bun on a developer PATH.
+bash ./scripts/build-app-runtime-host.sh
+
 cd app
 pnpm install
 
@@ -92,7 +96,7 @@ if [ "$(uname -s)" = "Darwin" ]; then
   if [ -z "$identity" ]; then identity="-"; fi
   while IFS= read -r executable; do
     codesign --force --sign "$identity" "$executable"
-  done < <(find "${bundle_dir}/Contents/Resources/plugins" -type f -perm -111 2>/dev/null | sort)
+  done < <(find "${bundle_dir}/Contents/Resources/plugins" "${bundle_dir}/Contents/Resources/app-runtime" -type f -perm -111 2>/dev/null | sort)
   codesign --force --sign "$identity" "${bundle_dir}/Contents/MacOS/attn"
   codesign --force --sign "$identity" "${bundle_dir}"
 fi
