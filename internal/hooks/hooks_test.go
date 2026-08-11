@@ -10,7 +10,7 @@ func TestGenerateHooks(t *testing.T) {
 	sessionID := "abc123"
 	socketPath := "/home/user/.claude-manager.sock"
 
-	settings := Generate(sessionID, socketPath, "/tmp/attn")
+	settings := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	// Verify it's valid JSON
 	var parsed map[string]interface{}
@@ -52,7 +52,7 @@ func TestGenerateHooks(t *testing.T) {
 // it stays a single spawn: _hook-tool-use resets the working state AND records
 // any markdown the call wrote, instead of a second hook entry doing the latter.
 func TestGenerateHooks_CatchAllPostToolUseIsOneSpawn(t *testing.T) {
-	settings := Generate("abc123", "/tmp/test.sock", "/tmp/attn")
+	settings := Generate("abc123", "/tmp/test.sock", "/tmp/attn", nil)
 
 	var parsed SettingsConfig
 	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
@@ -89,7 +89,7 @@ func TestGenerateHooks_ContainsSessionID(t *testing.T) {
 	sessionID := "unique-session-id-12345"
 	socketPath := "/tmp/test.sock"
 
-	hooks := Generate(sessionID, socketPath, "/tmp/attn")
+	hooks := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, sessionID) {
 		t.Error("generated hooks should contain session ID")
@@ -100,7 +100,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 	sessionID := "test"
 	socketPath := "/custom/path/to/socket.sock"
 
-	hooks := Generate(sessionID, socketPath, "/tmp/attn")
+	hooks := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, socketPath) {
 		t.Error("generated hooks should contain socket path")
@@ -108,7 +108,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 }
 
 func TestGenerateHooks_HasStopHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, "Stop") {
 		t.Error("hooks should include Stop event for waiting state")
@@ -116,7 +116,7 @@ func TestGenerateHooks_HasStopHook(t *testing.T) {
 }
 
 func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	for _, expected := range []string{
 		"SessionStart",
@@ -134,7 +134,7 @@ func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
 // evidence silently absent rather than failing anything.
 func TestGenerateHooks_HasNotificationHook(t *testing.T) {
 	var parsed SettingsConfig
-	if err := json.Unmarshal([]byte(Generate("abc123", "/tmp/test.sock", "/tmp/attn")), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(Generate("abc123", "/tmp/test.sock", "/tmp/attn", nil)), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestGenerateHooks_HasNotificationHook(t *testing.T) {
 }
 
 func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, "UserPromptSubmit") {
 		t.Error("hooks should include UserPromptSubmit event for working state")
@@ -156,7 +156,7 @@ func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 }
 
 func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/Users/testuser/Applications/attn.app/Contents/MacOS/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/Users/testuser/Applications/attn.app/Contents/MacOS/attn", nil)
 
 	if !strings.Contains(hooks, "'/Users/testuser/Applications/attn.app/Contents/MacOS/attn' _hook-stop") {
 		t.Error("hooks should include wrapper path in stop hook command")
@@ -164,11 +164,42 @@ func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
 }
 
 func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "")
+	hooks := Generate("test", "/tmp/test.sock", "", nil)
 
 	if !strings.Contains(hooks, "'attn' _hook-stop") {
 		t.Error("hooks should default wrapper path to 'attn'")
 	}
+}
+
+func TestGenerateHooks_EnvBlock(t *testing.T) {
+	decode := func(t *testing.T, content string) map[string]any {
+		t.Helper()
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		return parsed
+	}
+
+	t.Run("carries the supplied env", func(t *testing.T) {
+		parsed := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", map[string]string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "128000"}))
+		env, ok := parsed["env"].(map[string]any)
+		if !ok {
+			t.Fatalf("env block missing: %#v", parsed)
+		}
+		if got := env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != "128000" {
+			t.Fatalf("env cap = %v, want \"128000\"", got)
+		}
+	})
+
+	t.Run("omits an empty env", func(t *testing.T) {
+		if _, present := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", nil))["env"]; present {
+			t.Error("nil env should not emit an env block")
+		}
+		if _, present := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", map[string]string{}))["env"]; present {
+			t.Error("empty env should not emit an env block")
+		}
+	})
 }
 
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {

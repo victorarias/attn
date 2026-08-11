@@ -252,8 +252,10 @@ type SpawnOpts struct {
 // HookProvider generates hook/settings configurations for agents that support them.
 type HookProvider interface {
 	// GenerateHooksConfig returns settings/hooks config file content; the
-	// caller writes it to a temp file and passes --settings to the agent.
-	GenerateHooksConfig(sessionID, socketPath, wrapperPath string) string
+	// caller writes it to a temp file and passes --settings to the agent. It
+	// takes the whole launch because that file is also how a launch knob the
+	// user's own settings could otherwise overwrite reaches the agent.
+	GenerateHooksConfig(opts SpawnOpts) string
 }
 
 // ConfigOverrideProvider generates per-launch CLI config overrides.

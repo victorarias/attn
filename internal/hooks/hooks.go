@@ -22,6 +22,13 @@ type Hook struct {
 // SettingsConfig represents Claude Code settings with hooks
 type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
+	// Env carries launch knobs that must beat the user's own configuration.
+	// Claude Code copies every settings file's `env` block onto its own
+	// process environment at startup, overwriting what the parent exported, so
+	// a knob attn only sets in the spawn environment loses to the same key in
+	// ~/.claude/settings.json. This file is passed with --settings, whose scope
+	// is applied last of the non-managed scopes, so what lands here wins.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 type sessionStartHookSpecificOutput struct {
@@ -153,8 +160,10 @@ func ChiefGuidance(root string, hasSelfMonitor bool) string {
 - %[5]s`, root, ticketWaitingGuidance, wakeBoundary, delegationBoundary, TicketAwarenessGuidance())
 }
 
-// Generate generates settings configuration with hooks for a session
-func Generate(sessionID, socketPath, wrapperPath string) string {
+// Generate generates settings configuration with hooks for a session. env, when
+// non-empty, becomes the file's `env` block — see SettingsConfig.Env for why a
+// launch knob has to travel here rather than only in the spawn environment.
+func Generate(sessionID, socketPath, wrapperPath string, env map[string]string) string {
 	wrapper := strings.TrimSpace(wrapperPath)
 	if wrapper == "" {
 		wrapper = "attn"
@@ -163,6 +172,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 	socketCmd := shellQuote(strings.TrimSpace(socketPath))
 
 	config := SettingsConfig{
+		Env: env,
 		Hooks: map[string][]HookEntry{
 			"SessionStart": {
 				{
