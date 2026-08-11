@@ -23,15 +23,12 @@ import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelByEmoji } from './quic
 import { clampToViewport, placePopup, type PlaceOptions, type Placement } from './placement';
 import { useShortcut } from '../../shortcuts/useShortcut';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
-import type { UISessionState } from '../../types/sessionState';
 import './TerminalAnnotations.css';
-
-// States in which the agent has stopped talking, so its newest message is
-// complete; mid-turn its offsets would be replaced moments later.
-const SETTLED_STATES: ReadonlyArray<UISessionState> = ['idle', 'waiting_input', 'pending_approval'];
 
 export interface SessionMessagesResult {
   messages: AnnotatableMessage[];
+  status: 'discovering' | 'ready' | 'unavailable';
+  detail?: string;
   truncated: boolean;
 }
 
@@ -48,9 +45,11 @@ export type SessionAnnotationsSubmitStatus =
   | 'skipped_pending_approval'
   | (string & {});
 
-// The daemon calls this surface needs; a partial set degrades to in-memory.
+// The daemon calls this surface needs. Omitting the whole surface disables
+// annotations for terminal-only mounts.
 export interface SessionAnnotationApi {
   fetchMessages: (sessionId: string) => Promise<SessionMessagesResult>;
+  subscribeMessagesChanged: (sessionId: string, listener: () => void) => () => void;
   fetchAnnotations: (sessionId: string) => Promise<SessionAnnotationsResult>;
   saveAnnotations: (
     sessionId: string,
@@ -75,8 +74,6 @@ type TerminalProps = Omit<
 
 export interface AnnotatedTerminalProps extends TerminalProps {
   sessionId: string;
-  // Drives when the message window is (re)fetched. Absent disables annotation.
-  sessionState?: UISessionState;
   annotationApi?: SessionAnnotationApi;
   // Gates the send shortcut's *registration*: the dispatcher consumes ⌘Enter
   // whenever a handler exists, so every mounted pane registering would eat it.
@@ -112,7 +109,7 @@ interface Composer {
 
 export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerminalProps>(
   function AnnotatedTerminal(
-    { sessionId, sessionState, annotationApi, paneActive = false, ...terminalProps },
+    { sessionId, annotationApi, paneActive = false, ...terminalProps },
     ref,
   ) {
     // Built once: `useRef(new …)` would construct and discard a store per render.
@@ -133,6 +130,8 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // re-rendering the terminal to record a failed background fetch repaints
     // for no one.
     const windowErrorRef = useRef<string | null>(null);
+    const windowStatusRef = useRef<SessionMessagesResult['status']>('discovering');
+    const windowDetailRef = useRef<string | null>(null);
     const [draft, setDraft] = useState('');
 
     // What the chip row is about to do, named in words under it, because the
@@ -252,30 +251,41 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       };
     }, [annotationApi, bump, enabled, sessionId, store]);
 
-    // Fetch the annotatable window when the agent settles; unchanged messages
-    // come back identical, so nothing repaints unless a new turn arrived. A
-    // failure is remembered: it is what a later miss needs to explain itself.
+    // Fetch once on mount, then whenever the watcher records a complete
+    // assistant entry. The event is only an invalidation; this canonical read
+    // still owns stable keys, ordering, and limits. Concurrent reads are
+    // last-result-wins so an older window cannot replace a newer one.
     useEffect(() => {
       if (!enabled || !sessionId) return;
-      if (!sessionState || !SETTLED_STATES.includes(sessionState)) return;
       let cancelled = false;
-      void annotationApi!.fetchMessages(sessionId)
-        .then((result) => {
-          if (cancelled) return;
-          windowErrorRef.current = null;
-          if (store.setMessages(result.messages)) bump();
-        })
-        .catch((error: unknown) => {
-          if (cancelled) return;
-          const detail = error instanceof Error ? error.message : String(error);
-          windowErrorRef.current = detail;
-          // Logged as well as shown: the daemon's wording is what is searchable.
-          console.warn(`[annotations] ${sessionId}: message window unavailable: ${detail}`);
-        });
+      let request = 0;
+      const refresh = () => {
+        const current = ++request;
+        void annotationApi!.fetchMessages(sessionId)
+          .then((result) => {
+            if (cancelled || current !== request) return;
+            windowErrorRef.current = null;
+            windowStatusRef.current = result.status;
+            windowDetailRef.current = result.detail ?? null;
+            if (store.setMessages(result.messages)) bump();
+          })
+          .catch((error: unknown) => {
+            if (cancelled || current !== request) return;
+            const detail = error instanceof Error ? error.message : String(error);
+            windowStatusRef.current = 'unavailable';
+            windowDetailRef.current = detail;
+            windowErrorRef.current = detail;
+            // Logged as well as shown: the daemon's wording is what is searchable.
+            console.warn(`[annotations] ${sessionId}: message window unavailable: ${detail}`);
+          });
+      };
+      const unsubscribe = annotationApi!.subscribeMessagesChanged(sessionId, refresh);
+      refresh();
       return () => {
         cancelled = true;
+        unsubscribe();
       };
-    }, [annotationApi, bump, enabled, sessionId, sessionState, store]);
+    }, [annotationApi, bump, enabled, sessionId, store]);
 
     // Closing hands the keyboard back to the terminal, unless a press landed
     // elsewhere deliberately: that press owns where focus goes.
@@ -315,8 +325,6 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
 
     // A gesture that resolved to nothing. Four causes look identical on screen
     // and each has a different remedy, so the notice names the one that applies.
-    // `sessionState` is a dependency rather than a ref read because the terminal
-    // holds callbacks in refs: a changing identity costs only a prop write.
     const missSeqRef = useRef(0);
     const handleMiss = useCallback(
       (reason: 'no-messages' | 'outside-messages', at: { clientX: number; clientY: number }) => {
@@ -324,13 +332,15 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           ? 'Only what the agent wrote can be annotated. This text is the TUI’s own, your own, or from a turn that has scrolled out of the window.'
           : windowErrorRef.current
             ? 'No transcript could be read for this session, so there is nothing to annotate. The daemon log names the lookup that failed.'
-            : !sessionState || !SETTLED_STATES.includes(sessionState)
-              ? 'Annotations open once the agent stops talking. Nothing is anchored while a turn is still running.'
+            : windowStatusRef.current === 'discovering'
+              ? 'The agent’s first completed message is still being recorded. Try again in a moment.'
+              : windowStatusRef.current === 'unavailable'
+                ? windowDetailRef.current || 'No exact transcript is available for this session.'
               : 'The agent has not written a message to annotate yet.';
         setNoticeAt(null);
         setNotice({ text, ...at, seq: missSeqRef.current++ });
       },
-      [sessionState],
+      [],
     );
 
     // Reopening an annotation: its comment becomes the draft, and one that

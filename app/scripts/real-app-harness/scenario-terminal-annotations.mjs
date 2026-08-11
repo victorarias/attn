@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 
-// Terminal annotations end to end in the packaged app: a real claude turn on a
-// real WebGL grid, an alt-drag that resolves through the markdown/grid
-// alignment to an anchor, and the two guarantees the unit tests can only claim
-// about mocks —
+// Terminal annotations end to end in the packaged app: a real Codex turn on a
+// real WebGL grid, an alt-drag over completed commentary while its tool call is
+// still running, and the guarantees the unit tests can only claim about mocks —
 //
 //   1. the annotation is the daemon's, not the pane's, so it survives the app
 //      being quit and relaunched, and still resolves onto live rows there;
@@ -24,7 +23,6 @@ import {
   printCommonHelp,
   relaunchAppAndConnect,
 } from './common.mjs';
-import { dataDirForProfile } from './harnessProfile.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
@@ -33,7 +31,7 @@ import {
   sleep,
   waitForFirstWorkspacePane,
 } from './scenarioAssertions.mjs';
-import { ensureClaudePromptReadyViaPty, preTrustClaudeFolder } from './scenarioAgents.mjs';
+import { ensureCodexPromptReadyViaPty } from './scenarioAgents.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 
 // Generous on purpose: how long a live agent takes to stop says nothing about
@@ -41,8 +39,8 @@ import { createScenarioRunner } from './scenarioRunner.mjs';
 // into a failure that reads like a product regression.
 const SETTLE_TIMEOUT_MS = 240_000;
 const TURN_START_TIMEOUT_MS = 90_000;
-// The window is fetched when the turn settles; this covers that round trip and
-// the repaint, not the agent.
+// Completed messages invalidate the live window; this covers that round trip
+// and the repaint, not the agent.
 const ANCHOR_TIMEOUT_MS = 30_000;
 const SETTLED_STATES = new Set(['idle', 'waiting_input', 'pending_approval']);
 
@@ -51,6 +49,10 @@ const SETTLED_STATES = new Set(['idle', 'waiting_input', 'pending_approval']);
 const LABEL = { name: 'Show the receipt', emoji: '🧾' };
 // The note drafted beside the marks, and what proves it left the composer.
 const NOTE = 'Prefer the smallest change that covers this.';
+const FIRST_MESSAGE = 'A retry wrapper protects idempotent operations from duplicate network effects.';
+const SECOND_MESSAGE = 'A circuit breaker stops repeated calls while a dependency is failing.';
+const FIRST_MESSAGE_WORDS = ['retry', 'wrapper', 'idempotent', 'duplicate', 'network', 'effects'];
+const SECOND_MESSAGE_WORDS = ['circuit', 'breaker', 'repeated', 'calls', 'dependency', 'failing'];
 
 function parseArgs(argv) {
   const args = [...argv];
@@ -73,18 +75,27 @@ async function pollFor(fn, description, timeoutMs) {
   throw new Error(`Timed out waiting for ${description} after ${timeoutMs}ms${lastError ? `: ${lastError.message}` : ''}`);
 }
 
-// Claude treats a fast multi-line write as a paste, so the submit has to be a
-// lone carriage return a beat later.
+// Keep submission separate from the text write so the TUI cannot interpret a
+// fast multi-line payload as pasted input.
 async function submitPrompt(client, sessionId, paneId, text) {
   await client.request('write_pane', { sessionId, paneId, text, submit: false });
   await sleep(600);
   await client.request('write_pane', { sessionId, paneId, text: '\r', submit: false });
 }
 
-function prosePrompt(topic) {
+function prosePrompt(sentence) {
   return [
-    `In two or three plain sentences, and using no tools and no files, explain ${topic}.`,
-    'Answer in prose only — no lists, no code, no headings.',
+    `Reply with exactly this sentence: ${sentence}`,
+    'Use no tools, lists, code, or headings.',
+  ].join(' ');
+}
+
+function workingCommentaryPrompt(sentence, startedMarker, releaseMarker) {
+  return [
+    `Before using a tool, write exactly this sentence as ordinary prose: ${sentence}`,
+    `Then run exactly this shell command: touch ${JSON.stringify(startedMarker)}; while [ ! -f ${JSON.stringify(releaseMarker)} ]; do sleep 1; done`,
+    'Do not use any other tools.',
+    'After it finishes, reply with exactly: finished.',
   ].join(' ');
 }
 
@@ -124,11 +135,11 @@ function overlaps(a, b) {
 
 // Alt-drag over the agent's prose until it resolves to an anchor. Returns the
 // row it landed on, which every later assertion is about.
-async function pollForDrag(client, runner, sessionId, paneId, description) {
+async function pollForDrag(client, runner, sessionId, paneId, description, requiredWords) {
   let lastRow = null;
   let lastSpan = null;
   const attempt = async () => {
-    const target = proseRow(await readLines(client, sessionId, paneId));
+    const target = proseRow(await readVisibleLines(client, sessionId, paneId), requiredWords);
     if (!target) return null;
     const span = wordSpan(target.text);
     if (!span) return null;
@@ -204,50 +215,24 @@ function daemonAnnotations(wsUrl, sessionId, timeoutMs = 8_000) {
   });
 }
 
-// The agent's prose on the grid. Claude renders an assistant message as a "⏺ "
-// line plus two-space-indented continuations; the widest continuation is the
-// safest row to drag across because it is the least likely to be a wrapped
-// fragment of something else. Returns null until such a row exists.
-export function proseRow(lines) {
+// Find the Codex assistant row containing the requested words. Requiring the
+// leading bullet excludes wrapped user-prompt continuations, which can repeat
+// the exact sentence the scenario asked Codex to write.
+export function proseRow(lines, requiredWords = []) {
   let best = null;
-  // Claude draws on the alternate screen, which has no scrollback, so an answer
-  // taller than the grid pushes its own "⏺ " marker off the top and leaves only
-  // continuations behind. Those rows are still the agent talking and still what
-  // a user would drag across, so the indented run before the first marker line
-  // counts as in-block; requiring a visible marker made the scenario depend on
-  // the answer being short enough to fit.
-  let inBlock = true;
+  const wanted = requiredWords.map((word) => word.toLowerCase());
   for (let row = 0; row < lines.length; row += 1) {
     const line = lines[row];
-    if (line.startsWith('⏺ ')) {
-      // Tool calls render as "⏺ Bash(...)"; only prose is annotatable.
-      inBlock = !/^⏺ \w+\(/.test(line);
-      continue;
-    }
-    if (!inBlock) continue;
-    if (!line.startsWith('  ') || line.trim() === '') {
-      inBlock = false;
-      continue;
-    }
-    // A row worth dragging holds several whole words and no box drawing.
-    const words = line.trim().split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]*[.,;:]?$/.test(word));
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('• ') || /[─│┌┐└┘]/u.test(line)) continue;
+    const words = trimmed.split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]*[.,;:]?$/.test(word));
     if (words.length < 6) continue;
-    if (!best || line.trim().length > best.text.trim().length) best = { row, text: line, words };
-  }
-  return best;
-}
-
-// The widest row carrying real text, whatever it is. Used before the agent has
-// said anything, when the point is not which row is dragged over but that a
-// drag over any of them is refused out loud — nothing on the grid at that
-// moment belongs to a transcript message.
-export function anyTextRow(lines) {
-  let best = null;
-  for (let row = 0; row < lines.length; row += 1) {
-    const line = lines[row];
-    const words = line.trim().split(/\s+/).filter((word) => /^[A-Za-z][A-Za-z'-]*[.,;:]?$/.test(word));
-    if (words.length < 5) continue;
-    if (!best || line.trim().length > best.text.trim().length) best = { row, text: line, words };
+    const normalized = new Set(words.map((word) => word.toLowerCase().replace(/[.,;:]$/, '')));
+    const matches = wanted.filter((word) => normalized.has(word)).length;
+    if (wanted.length > 0 && matches < Math.min(3, wanted.length)) continue;
+    if (!best || matches > best.matches || (matches === best.matches && trimmed.length > best.text.trim().length)) {
+      best = { row, text: line, words, matches };
+    }
   }
   return best;
 }
@@ -264,9 +249,12 @@ export function wordSpan(rowText) {
   return { startCol: first.index, endCol: last.index + last[0].length };
 }
 
-async function readLines(client, sessionId, paneId) {
-  const read = await client.request('read_pane_text', { sessionId, paneId });
-  return (read.text ?? '').split('\n');
+async function readVisibleLines(client, sessionId, paneId) {
+  // Drag coordinates are viewport rows. `read_pane_text` returns the whole
+  // buffer, so its indices point below the canvas as soon as Codex has enough
+  // startup output to create scrollback.
+  const state = await client.request('get_pane_state', { sessionId, paneId });
+  return state.pane?.visibleContent?.lines ?? [];
 }
 
 async function main() {
@@ -281,7 +269,7 @@ async function main() {
     tier: 'tier3-local-agent',
     prefix: 'terminal-annotations',
     metadata: {
-      focus: 'alt-drag anchors to the transcript; a past turn stays annotated and the annotations outlive the app',
+      focus: 'completed commentary is annotatable while a tool runs; a past turn stays annotated and outlives the app',
     },
   });
 
@@ -293,6 +281,9 @@ async function main() {
   const driver = new MacOSDriver({ appPath: options.appPath });
   let sessionId = null;
   let paneId = null;
+  const toolGateDir = path.join(runner.sessionDir, 'tool-gate');
+  const toolStartedMarker = path.join(toolGateDir, 'started');
+  const toolReleaseMarker = path.join(toolGateDir, 'release');
   // What the agent said, and where it sits on the grid. Carried through the
   // rest of the run so every later assertion is about this exact text, and
   // named in the failure report when a step goes wrong.
@@ -303,6 +294,10 @@ async function main() {
 
   runner.registerCleanup('close_observer', () => observer.close());
   runner.registerCleanup('quit_app', () => client.quitApp());
+  runner.registerCleanup('release_held_tool', () => {
+    fs.mkdirSync(toolGateDir, { recursive: true });
+    fs.writeFileSync(toolReleaseMarker, 'release\n', 'utf8');
+  });
   runner.registerCleanup('close_session_panes', async () => {
     if (!sessionId) return;
     const workspace = await client.request('get_workspace', { sessionId }).catch(() => null);
@@ -319,15 +314,14 @@ async function main() {
     await runner.step('create_agent_session', async () => {
       const cwd = path.join(runner.sessionDir, 'annotated');
       fs.mkdirSync(cwd, { recursive: true });
-      preTrustClaudeFolder(cwd);
       sessionId = await createSessionAndWaitForInitialPane({
         client,
         observer,
         cwd,
         label: `annotate-${runner.runId}`,
-        agent: 'claude',
+        agent: 'codex',
         sessionWaitMs: 60_000,
-        promptReadyFn: ensureClaudePromptReadyViaPty,
+        promptReadyFn: ensureCodexPromptReadyViaPty,
         promptReadyTimeoutMs: 90_000,
       });
       await client.request('select_session', { sessionId });
@@ -335,97 +329,29 @@ async function main() {
       paneId = pane.paneId;
     });
 
-    // Before the agent has said anything there is nothing to annotate, and the
-    // whole failure mode this covers is that the gesture used to do exactly
-    // nothing about it — no popup, no message, no log line, indistinguishable
-    // from the feature being broken. Runs first because "no window yet" is only
-    // deterministic before the first turn.
-    await runner.step('a_refused_drag_says_why', async () => {
-      // Settle first. A session still coming up is refused for a different and
-      // equally correct reason ("annotations open once the agent stops
-      // talking"), and pinning whichever one the timing produced would make
-      // this step a race rather than a check.
-      await pollFor(
-        () => (SETTLED_STATES.has(observer.getSession(sessionId)?.state) ? true : null),
-        'the new session to settle at its prompt',
-        60_000,
-      );
-
-      const refused = await pollFor(
-        async () => {
-          const target = anyTextRow(await readLines(client, sessionId, paneId));
-          if (!target) return null;
-          const span = wordSpan(target.text);
-          if (!span) return null;
-          await client.request('drag_pane_selection', {
-            sessionId,
-            paneId,
-            start: { col: span.startCol, row: target.row },
-            end: { col: span.endCol, row: target.row },
-            altKey: true,
-          });
-          // Read straight away: the notice retires itself after a few seconds,
-          // and polling around this request would race its own dismissal.
-          const state = await client.request('get_annotation_state', {});
-          return state.notice ? { state, target } : null;
-        },
-        'an alt-drag before the first turn to be refused out loud',
-        20_000,
-      );
-
-      runner.assert(
-        !refused.state.popupOpen,
-        `A drag before the agent said anything opened an annotation editor: ${JSON.stringify(refused.state)}`,
-      );
-      // A session that has never taken a turn has no transcript on disk yet, so
-      // the identity ladder resolves nothing — the same outcome as a session
-      // whose transcript was cleaned up, which is what this is standing in for.
-      runner.assert(
-        /No transcript could be read/.test(refused.state.notice),
-        `The refusal did not name its reason: ${JSON.stringify(refused.state.notice)}`,
-      );
-      const { noticeRect: box, viewport } = refused.state;
-      runner.assert(
-        box && box.left >= 0 && box.top >= 0
-        && box.left + box.width <= viewport.width && box.top + box.height <= viewport.height,
-        `The refusal was drawn off-screen, where it explains nothing: `
-        + `${JSON.stringify(box)} in ${JSON.stringify(viewport)}`,
-      );
-      runner.log('refused', { row: refused.target.row, notice: refused.state.notice });
-
-      // The other half of the fix: the daemon used to return this outcome and
-      // log nothing, so a user reporting "I cannot annotate" left no trace to
-      // diagnose from. The line names the session and where it was running.
-      const logPath = path.join(dataDirForProfile(), 'daemon.log');
-      const logged = fs.existsSync(logPath)
-        ? fs.readFileSync(logPath, 'utf8').split('\n').filter((line) => line.includes(sessionId) && line.includes('no transcript resolved'))
-        : [];
-      runner.assert(
-        logged.length > 0,
-        `The daemon refused the message window without logging it, so the cause is invisible outside the app (${logPath})`,
-      );
-
-      // It must retire on its own — it explains a finished gesture, and one
-      // that lingers becomes a thing in the way of the next drag.
-      await sleep(6_000);
-      const after = await client.request('get_annotation_state', {});
-      runner.assert(
-        after.notice === null,
-        `The refusal was still on screen 6s later: ${JSON.stringify(after.notice)}`,
-      );
-    });
-
     await runner.step('first_turn_and_annotate', async () => {
-      await submitPrompt(client, sessionId, paneId, prosePrompt('what a retry wrapper around a network call should do about idempotency'));
-      await waitForTurn(observer, sessionId, 'the first turn');
+      fs.mkdirSync(toolGateDir, { recursive: true });
+      await submitPrompt(client, sessionId, paneId, workingCommentaryPrompt(FIRST_MESSAGE, toolStartedMarker, toolReleaseMarker));
+      await pollFor(
+        () => (observer.getSession(sessionId)?.state === 'working' ? true : null),
+        'the first turn to start',
+        TURN_START_TIMEOUT_MS,
+      );
+      await pollFor(
+        () => (fs.existsSync(toolStartedMarker) && !fs.existsSync(toolReleaseMarker) ? true : null),
+        'the agent tool to enter the externally held gate',
+        TURN_START_TIMEOUT_MS,
+      );
 
-      // Prose reaches the grid while the agent is still writing, but the
-      // annotatable window is only read once the turn settles — mid-turn the
-      // message is incomplete and its offsets would move. So the drag is the
-      // poll: retry until one resolves, rather than guessing how long after
-      // the settle the window lands.
-      const anchored = await pollForDrag(client, runner, sessionId, paneId, 'the first turn');
+      // The prose before the Bash call is a completed assistant message even
+      // though the session remains working. The watcher invalidation must make
+      // it annotatable without waiting for the sleep or the turn to settle.
+      const anchored = await pollForDrag(client, runner, sessionId, paneId, 'the first turn', FIRST_MESSAGE_WORDS);
       anchoredRowText = anchored.rowText;
+      runner.assert(
+        observer.getSession(sessionId)?.state === 'working' && fs.existsSync(toolStartedMarker) && !fs.existsSync(toolReleaseMarker),
+        `The annotation editor only opened after the held tool stopped: ${JSON.stringify(observer.getSession(sessionId))}`,
+      );
 
       await client.request('dom_click', { selector: `[aria-label="${LABEL.name}"]` });
       const filed = await pollFor(
@@ -453,6 +379,21 @@ async function main() {
         + `row ${JSON.stringify(anchoredRowText)}, words not on the row: ${JSON.stringify(missing)}`,
       );
       runner.log('annotated', { quote, row: anchored.row, span: anchored.span });
+
+      runner.assert(
+        fs.existsSync(toolStartedMarker) && !fs.existsSync(toolReleaseMarker),
+        'The tool gate was no longer held when the annotation was filed',
+      );
+      fs.writeFileSync(toolReleaseMarker, 'release\n', 'utf8');
+
+      await pollFor(
+        () => {
+          const state = observer.getSession(sessionId)?.state;
+          return SETTLED_STATES.has(state) ? state : null;
+        },
+        'the first turn to settle after its held tool call',
+        SETTLE_TIMEOUT_MS,
+      );
     });
 
     await runner.step('daemon_holds_it', async () => {
@@ -498,7 +439,7 @@ async function main() {
     await runner.step('still_projects_onto_the_grid', async () => {
       const found = await pollFor(
         async () => {
-          const lines = await readLines(client, sessionId, paneId);
+          const lines = await readVisibleLines(client, sessionId, paneId);
           const row = lines.findIndex((line) => line === anchoredRowText);
           if (row >= 0) return { row, lines };
           await client.request('wheel_pane', { sessionId, paneId, deltaY: -300 });
@@ -540,7 +481,7 @@ async function main() {
     // annotation. Surviving a new turn is a claim about the panel and the
     // daemon, so assert it there and leave the grid out of it.
     await runner.step('survives_a_second_turn', async () => {
-      await submitPrompt(client, sessionId, paneId, prosePrompt('what a circuit breaker is and when it beats a retry'));
+      await submitPrompt(client, sessionId, paneId, prosePrompt(SECOND_MESSAGE));
       await waitForTurn(observer, sessionId, 'the second turn');
 
       const state = await client.request('get_annotation_state', {});
@@ -562,7 +503,7 @@ async function main() {
     // line anchors it at the pane's left edge, which is where it used to be
     // drawn half under the sidebar.
     await runner.step('the_editor_lands_inside_its_pane', async () => {
-      await pollForDrag(client, runner, sessionId, paneId, 'the second turn');
+      await pollForDrag(client, runner, sessionId, paneId, 'the second turn', SECOND_MESSAGE_WORDS);
       const state = await pollFor(
         async () => {
           const current = await client.request('get_annotation_state', {});
@@ -717,20 +658,15 @@ async function main() {
       // rather than being folded into the pasted block.
       await waitForTurn(observer, sessionId, 'the turn the annotation feedback opened');
 
-      const lines = await readLines(client, sessionId, paneId);
-      // Submitted means the composer no longer holds the payload. Read the
-      // composer itself — the rows between the last two rules the agent draws
-      // around it — and look for the payload's own words. A "❯ " prefix is not
-      // enough: the agent draws a suggested prompt in there when it is empty,
-      // and by prefix alone that is indistinguishable from text left unsent.
-      const rules = lines
-        .map((line, index) => (/^─{10,}/.test(line.trim()) ? index : -1))
+      const lines = await readVisibleLines(client, sessionId, paneId);
+      // Codex renders the live composer as the final `›` block. Horizontal
+      // rules also surround assistant output, so they cannot delimit input.
+      const prompts = lines
+        .map((line, index) => (/^›\s/.test(line) ? index : -1))
         .filter((index) => index >= 0);
-      const composer = rules.length >= 2
-        ? lines.slice(rules[rules.length - 2] + 1, rules[rules.length - 1])
-        : [];
+      const composer = prompts.length > 0 ? lines.slice(prompts[prompts.length - 1]) : [];
       runner.assert(
-        rules.length >= 2,
+        prompts.length > 0,
         `Could not find the composer in the pane, so this cannot prove the payload left it. Pane text:\n${lines.join('\n')}`,
       );
       const held = composer.filter((line) => (

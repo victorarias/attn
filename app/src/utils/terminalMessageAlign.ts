@@ -24,14 +24,18 @@ export interface GridToken {
   row: number;
   col: number;
   endCol: number;
+  // The first prose token after an assistant marker. This breaks an otherwise
+  // exact tie when the user's prompt quotes the response it requests.
+  assistantLead: boolean;
 }
 
 // Markdown syntax and TUI chrome, stripped from both sides before comparison.
 const CUT_CHARS = new Set([
   ...'*_`~#|>',
   ...'┌─┬┐│├┼┤└┴┘━┃┏┓┗┛',
-  ...'⏺✻❯⎿·▪●○',
+  ...'⏺✻❯⎿·•▪●○',
 ]);
+const ASSISTANT_MARKERS = new Set(['⏺', '•']);
 
 function isSpace(ch: string): boolean {
   return /\s/.test(ch);
@@ -68,6 +72,9 @@ export function tokenizeRows(rows: readonly string[], rowBase = 0): GridToken[] 
   const out: GridToken[] = [];
   for (let r = 0; r < rows.length; r += 1) {
     const row = rows[r];
+    const firstNonSpace = row.search(/\S/);
+    const assistantRow = firstNonSpace >= 0 && ASSISTANT_MARKERS.has(row[firstNonSpace]);
+    let emitted = 0;
     let i = 0;
     while (i < row.length) {
       if (isSpace(row[i])) {
@@ -77,7 +84,16 @@ export function tokenizeRows(rows: readonly string[], rowBase = 0): GridToken[] 
       let j = i;
       while (j < row.length && !isSpace(row[j])) j += 1;
       const norm = normalizeWord(row.slice(i, j));
-      if (norm) out.push({ norm, row: rowBase + r, col: i, endCol: j });
+      if (norm) {
+        out.push({
+          norm,
+          row: rowBase + r,
+          col: i,
+          endCol: j,
+          assistantLead: assistantRow && emitted === 0,
+        });
+        emitted += 1;
+      }
       i = j;
     }
   }
@@ -176,11 +192,14 @@ function findSeed(src: readonly SrcToken[], grid: readonly GridToken[]): { si: n
   // No word unique on both sides: fall back to the opening words.
   let gi = -1;
   let bestScore = 0;
+  let bestAssistantLead = false;
   for (let j = 0; j < grid.length; j += 1) {
     if (grid[j].norm !== src[0].norm) continue;
     const score = seedScore(src, grid, j);
-    if (score > bestScore) {
+    const assistantLead = grid[j].assistantLead;
+    if (score > bestScore || (score === bestScore && assistantLead && !bestAssistantLead)) {
       bestScore = score;
+      bestAssistantLead = assistantLead;
       gi = j;
     }
   }

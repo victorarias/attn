@@ -337,7 +337,7 @@ func TestActivityScanRespectsTheTierInterval(t *testing.T) {
 	watchingClient(d)
 	d.store.SetSetting(SettingActivityIntervals, `{"watching":120,"present":300}`)
 
-	transcriptPath := discoverableTranscript(t, "session-1", "first", "second")
+	transcriptPath := discoverableTranscript(t, d, "session-1", "session-1", "first", "second")
 	// Inside the window, and the transcript HAS moved since the line was
 	// generated — so only the interval can hold this session back.
 	generatedInsideWindow := time.Now().Add(-10 * time.Second)
@@ -371,7 +371,7 @@ func TestActivityScanSkipsASessionThatHasNotWritten(t *testing.T) {
 	installActivityRunner(t, d)
 	watchingClient(d)
 
-	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	transcriptPath := discoverableTranscript(t, d, "session-1", "session-1", "first")
 	generatedAt := time.Now().Add(-time.Hour)
 	d.store.UpdateSessionActivity("session-1", "running the test suite", generatedAt, "v1:abc:1:0")
 	// Written before the line was generated: nothing new to say.
@@ -395,7 +395,7 @@ func TestActivityScanHoldsAFailedRunToTheInterval(t *testing.T) {
 	watchingClient(d)
 	d.store.SetSetting(SettingActivityIntervals, `{"watching":120,"present":300}`)
 
-	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	transcriptPath := discoverableTranscript(t, d, "session-1", "session-1", "first")
 	touchFile(t, transcriptPath, time.Now())
 	// No stored line at all: the failed run never produced one. Only the run
 	// record can hold this session back.
@@ -431,7 +431,7 @@ func TestActivityScanTreatsASpendlessPassAsHavingLooked(t *testing.T) {
 	installActivityRunner(t, d)
 	watchingClient(d)
 
-	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	transcriptPath := discoverableTranscript(t, d, "session-1", "session-1", "first")
 	looked := time.Now()
 	touchFile(t, transcriptPath, looked.Add(-time.Minute))
 	// Looked just now and spent nothing, which is what a seed leaves behind.
@@ -461,7 +461,7 @@ func TestActivityTranscriptPathIsRememberedUntilItMoves(t *testing.T) {
 	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
 	session := d.store.Get("session-1")
 
-	transcriptPath := discoverableTranscript(t, "session-1", "first")
+	transcriptPath := discoverableTranscript(t, d, "session-1", "session-1", "first")
 	if got := d.sessionActivityTranscript(session); got != transcriptPath {
 		t.Fatalf("resolved %q, want %q", got, transcriptPath)
 	}
@@ -482,7 +482,7 @@ func TestActivityTranscriptPathIsRememberedUntilItMoves(t *testing.T) {
 
 	// And a transcript that goes away is re-resolved too, rather than handed back
 	// as a path nothing can read.
-	restored := discoverableTranscript(t, "session-1", "first")
+	restored := discoverableTranscript(t, d, "session-1", "resume-2", "first")
 	if got := d.sessionActivityTranscript(session); got != restored {
 		t.Fatalf("resolved %q, want %q", got, restored)
 	}
@@ -586,7 +586,7 @@ func TestActivityScanGeneratesNothingWhenAway(t *testing.T) {
 	addActivitySession(t, d, "session-1", protocol.SessionStateWorking)
 	installActivityRunner(t, d)
 
-	discoverableTranscript(t, "session-1", "first")
+	discoverableTranscript(t, d, "session-1", "session-1", "first")
 
 	if _, err := d.sessionActivityScanHandler(context.Background(), nil); err != nil {
 		t.Fatalf("scan: %v", err)
@@ -602,7 +602,7 @@ func TestOpeningATurnRefreshesTheActivityLineImmediately(t *testing.T) {
 	installActivityRunner(t, d)
 	watchingClient(d)
 
-	discoverableTranscript(t, "session-1", "first")
+	discoverableTranscript(t, d, "session-1", "session-1", "first")
 	// Well inside the watching interval: the scan would refuse this session.
 	d.store.UpdateSessionActivity("session-1", "running the test suite", time.Now(), "v1:abc:1:0")
 
@@ -663,7 +663,7 @@ func assertNoActivityJob(t *testing.T, d *Daemon, sessionID string) {
 
 // discoverableTranscript writes a transcript where the Claude finder looks, so
 // the scan and enqueue paths resolve it exactly as they do in production.
-func discoverableTranscript(t *testing.T, sessionID string, texts ...string) string {
+func discoverableTranscript(t *testing.T, d *Daemon, sessionID, nativeID string, texts ...string) string {
 	t.Helper()
 	home := t.TempDir()
 	t.Setenv(toolhome.EnvVar, home)
@@ -671,8 +671,9 @@ func discoverableTranscript(t *testing.T, sessionID string, texts ...string) str
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatalf("mkdir projects: %v", err)
 	}
-	path := filepath.Join(dir, sessionID+".jsonl")
+	path := filepath.Join(dir, nativeID+".jsonl")
 	appendActivityTranscript(t, path, texts...)
+	d.store.SetResumeSessionID(sessionID, nativeID)
 	return path
 }
 

@@ -4,85 +4,64 @@
 // report a product regression that is really a parsing bug here.
 
 import { describe, expect, it } from 'vitest';
-import { anyTextRow, proseRow, wordSpan } from './scenario-terminal-annotations.mjs';
+import { proseRow, wordSpan } from './scenario-terminal-annotations.mjs';
 
-const PROSE = '  A retry wrapper should only retry operations that are idempotent, since';
+const PROSE = '• A retry wrapper protects idempotent operations from duplicate network effects.';
 const SHORT_PROSE = '  Yes, exactly.';
+const REQUIRED = ['retry', 'wrapper', 'idempotent', 'duplicate', 'network', 'effects'];
 
 describe('proseRow', () => {
-  it('finds the agent\'s prose continuation rows', () => {
+  it('finds Codex assistant prose by its bullet and requested words', () => {
     const found = proseRow([
-      '❯ what about retries?',
+      '› explain retry wrappers',
       '',
-      '⏺ Here is the answer you asked for.',
       PROSE,
       '',
-    ]);
+    ], REQUIRED);
     expect(found?.text).toBe(PROSE);
-    expect(found?.row).toBe(3);
+    expect(found?.row).toBe(2);
   });
 
-  it('skips a tool call, which renders in the same marker but is not prose', () => {
-    // "⏺ Bash(...)" and its ⎿ output are not the agent talking, and an
-    // annotation on them would address text no transcript message contains.
+  it('skips prompt and tool rows even when they repeat requested words', () => {
     const found = proseRow([
-      '⏺ Bash(git status --short --branch --porcelain=v2 && echo done)',
-      '  git status --short --branch and then some more words here',
-      '  ⎿  On branch main and nothing else to report about it at all',
-    ]);
+      '› A retry wrapper protects idempotent operations from duplicate network effects.',
+      '└ Ran retry wrapper diagnostic for idempotent duplicate network effects',
+    ], REQUIRED);
     expect(found).toBeNull();
   });
 
-  it('takes the widest prose row, which is the least likely to be a wrap fragment', () => {
-    const found = proseRow(['⏺ Answer.', SHORT_PROSE, PROSE]);
+  it('takes the row matching the most requested words', () => {
+    const found = proseRow([
+      '  A retry wrapper handles idempotent requests in ordinary prose.',
+      PROSE,
+    ], REQUIRED);
     expect(found?.text).toBe(PROSE);
   });
 
   it('ignores a row too short to drag a whole-word span across', () => {
-    expect(proseRow(['⏺ Answer.', SHORT_PROSE])).toBeNull();
+    expect(proseRow([SHORT_PROSE], REQUIRED)).toBeNull();
   });
 
-  it('ends the block at the first non-indented line', () => {
-    // Without this the status footer and the prompt divider read as prose.
+  it('ignores terminal chrome', () => {
     const found = proseRow([
-      '⏺ Answer.',
-      '✻ Crunched for 13s',
-      '  ctx 4% · 5h 8% and some other status words down here',
-    ]);
+      '────────────────────────────────────────────────────────────',
+      '│ retry wrapper idempotent duplicate network effects status │',
+    ], REQUIRED);
     expect(found).toBeNull();
   });
 
-  it('takes continuations whose marker scrolled off the alternate screen', () => {
-    // An answer taller than the grid leaves no "⏺ " on screen at all. Those rows
-    // are the whole point of the scenario's second half, so refusing them made
-    // the run depend on how much the agent chose to say.
+  it('takes the marked row of a wrapped assistant message', () => {
     const found = proseRow([
-      PROSE,
-      '  and the wrapper itself has no way at all to know which one of those it just made.',
+      '• A retry wrapper protects idempotent operations from',
+      '  duplicate network effects while dependencies are failing safely.',
       '',
-      '❯ ',
-    ]);
-    expect(found?.row).toBe(1);
+      '› ',
+    ], REQUIRED);
+    expect(found?.row).toBe(0);
   });
 
   it('returns null before the agent has said anything', () => {
-    expect(proseRow(['❯ ', '──────────────'])).toBeNull();
-  });
-});
-
-// The scenario drags over this row before the first turn, to prove a refused
-// annotation says why. Nothing on the grid is annotatable at that point, so any
-// row will do — what matters is that one wide enough to span is found at all.
-describe('anyTextRow', () => {
-  it('takes the widest row carrying real text, whatever it is', () => {
-    // Before the first turn nothing on the grid belongs to a transcript
-    // message, so which row is dragged over does not matter — only that one
-    // wide enough to span exists.
-    expect(anyTextRow(['❯ ', PROSE, SHORT_PROSE])?.row).toBe(1);
-  });
-
-  it('returns null on a grid with nothing to drag across', () => {
-    expect(anyTextRow(['❯ ', '──────', SHORT_PROSE])).toBeNull();
+    expect(proseRow(['› ', '──────────────'], REQUIRED)).toBeNull();
   });
 });
 
@@ -90,7 +69,7 @@ describe('wordSpan', () => {
   it('spans whole words away from both edges of the row', () => {
     const span = wordSpan(PROSE);
     const quoted = PROSE.slice(span.startCol, span.endCol);
-    expect(quoted).toBe('retry wrapper should only');
+    expect(quoted).toBe('retry wrapper protects idempotent');
     // Starting inside the indent would drag over the terminal's own gutter,
     // and ending mid-word would anchor half a token.
     expect(span.startCol).toBeGreaterThanOrEqual(PROSE.length - PROSE.trimStart().length);

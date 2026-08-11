@@ -142,6 +142,30 @@ describe('rowsForOffsets', () => {
 });
 
 describe('offsetsForSelection', () => {
+  it('prefers Codex’s assistant row when the prompt quotes the requested response', () => {
+    const message = 'A retry wrapper protects idempotent operations from duplicate network effects.';
+    const rows = [
+      '› Before using a tool, write exactly this sentence as',
+      '  ordinary prose: A retry wrapper protects idempotent',
+      '  operations from duplicate network effects.',
+      '',
+      ...render(message, 54, '• '),
+    ];
+    const alignment = alignMessage(message, rows);
+    const assistantRow = rows.findIndex((row) => row.startsWith('• '));
+    const startCol = rows[assistantRow].indexOf('retry');
+
+    const span = offsetsForSelection(alignment, {
+      startRow: assistantRow,
+      startCol,
+      endRow: assistantRow,
+      endCol: rows[assistantRow].indexOf('idempotent') + 'idempotent'.length,
+    });
+
+    expect(span).not.toBeNull();
+    expect(message.slice(span!.start, span!.end)).toBe('retry wrapper protects idempotent');
+  });
+
   it('turns a drag over the grid back into the markdown the agent wrote', () => {
     const rows = render(MESSAGE, 62);
     const alignment = alignMessage(MESSAGE, rows);

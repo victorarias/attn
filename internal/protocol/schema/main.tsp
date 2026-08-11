@@ -2552,6 +2552,12 @@ model SessionMessagesGetMessage {
   request_id: string;
 }
 
+enum SessionMessageWindowStatus {
+  discovering,
+  ready,
+  unavailable,
+}
+
 // Result of session_messages_get.
 model SessionMessagesGetResultMessage {
   event: "session_messages_get_result";
@@ -2559,14 +2565,25 @@ model SessionMessagesGetResultMessage {
   session_id: string;
   success: boolean;
   error?: string;
-  // Oldest first, newest last. Empty when the transcript holds no annotatable
-  // prose (structured verdicts, or pure tool activity); that is a success, and
-  // the client is expected to say so rather than offer an empty surface.
+  // The command succeeded independently of the transcript's domain lifecycle.
+  // `unavailable` therefore remains success=true and carries its reason here.
+  status: SessionMessageWindowStatus;
+  detail?: string;
+  // Oldest first, newest last. Empty is valid for every status; under `ready`
+  // it means the transcript contains no annotatable assistant prose yet.
   messages: SessionMessage[];
   // Messages were left out of the window: older ones beyond the count/byte
   // budget, or one too large to hand back with offsets that still mean
   // anything. The daemon logs which limit was hit and by how much.
   truncated: boolean;
+}
+
+// Invalidation for one session's annotatable message window. Content stays in
+// session_messages_get so ordering, stable keys, and size limits have one
+// authoritative implementation.
+model SessionMessagesChangedMessage {
+  event: "session_messages_changed";
+  session_id: string;
 }
 
 // One persisted terminal annotation. Offsets address `message_key`'s markdown,

@@ -195,11 +195,12 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 		lineOffset := offset
 		nextOffset := offset + int64(len(record))
 		line := bytes.TrimSpace(record)
-		parsed := parseEventLine(agent, line)
-		allEvents := parsed.events
-		if isDuplicateAssistantEcho(parsed, previousEvent, hasPreviousEvent) {
-			allEvents = nil
-		}
+		allEvents, nextPreviousEvent, nextHasPreviousEvent := decodeEventRecord(
+			agent,
+			line,
+			previousEvent,
+			hasPreviousEvent,
+		)
 		if skipEvents > len(allEvents) {
 			return EventPage{}, ErrInvalidCursor
 		}
@@ -217,10 +218,8 @@ func ReadEventPage(path, agent, cursor string, maxEvents int) (EventPage, error)
 		if len(events) > 0 {
 			page.NextCursor = events[len(events)-1].Cursor
 		}
-		if len(allEvents) > 0 {
-			previousEvent = allEvents[len(allEvents)-1]
-			hasPreviousEvent = true
-		}
+		previousEvent = nextPreviousEvent
+		hasPreviousEvent = nextHasPreviousEvent
 
 		if len(page.Events) >= maxEvents {
 			return page, nil
@@ -402,6 +401,21 @@ func isDuplicateAssistantEcho(parsed parsedEventLine, previous Event, hasPreviou
 		hasPrevious &&
 		previous.Kind == EventKindAssistant &&
 		previous.Text == parsed.events[0].Text
+}
+
+// decodeEventRecord is the single stateful normalization step used by both
+// paged transcript reads and live followers. It owns provider parsing and
+// adjacent provider-echo suppression; callers only own how bytes are read.
+func decodeEventRecord(agent string, line []byte, previous Event, hasPrevious bool) ([]Event, Event, bool) {
+	parsed := parseEventLine(agent, line)
+	events := parsed.events
+	if isDuplicateAssistantEcho(parsed, previous, hasPrevious) {
+		events = nil
+	}
+	if len(events) == 0 {
+		return events, previous, hasPrevious
+	}
+	return events, events[len(events)-1], true
 }
 
 func parseCodexEvent(envelope eventEnvelope) []Event {

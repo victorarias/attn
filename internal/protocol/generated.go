@@ -5229,6 +5229,20 @@ type SessionMessage struct {
 	Markdown string `json:"markdown"`
 }
 
+type SessionMessageWindowStatus string
+
+const SessionMessageWindowStatusDiscovering SessionMessageWindowStatus = "discovering"
+const SessionMessageWindowStatusReady SessionMessageWindowStatus = "ready"
+const SessionMessageWindowStatusUnavailable SessionMessageWindowStatus = "unavailable"
+
+type SessionMessagesChangedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
 type SessionMessagesGetMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -5241,6 +5255,9 @@ type SessionMessagesGetMessage struct {
 }
 
 type SessionMessagesGetResultMessage struct {
+	// Detail corresponds to the JSON schema field "detail".
+	Detail *string `json:"detail,omitempty,omitzero"`
+
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
 
@@ -5255,6 +5272,9 @@ type SessionMessagesGetResultMessage struct {
 
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status SessionMessageWindowStatus `json:"status"`
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
