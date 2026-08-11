@@ -1,6 +1,9 @@
 package apps
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -87,5 +90,34 @@ func TestDerivedIdentities(t *testing.T) {
 	}
 	if got := Namespace("approval-gate"); got != "app/approval-gate" {
 		t.Errorf("Namespace = %q", got)
+	}
+}
+
+// The build writes the sidecar under a name the daemon and the hub both look
+// for. Nothing links the shell script to this constant, so a rename there would
+// produce a daemon that cannot find its runtime and a remote that is shipped a
+// file nobody starts.
+func TestRuntimeHostBinaryNameMatchesTheBuild(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate this test's own file")
+	}
+	script := filepath.Join(filepath.Dir(file), "..", "..", "scripts", "build-app-runtime-host.sh")
+	contents, err := os.ReadFile(script)
+	if err != nil {
+		t.Fatalf("reading %s: %v", script, err)
+	}
+	want := `binary_name="` + RuntimeHostBinaryName + `"`
+	if !strings.Contains(string(contents), want) {
+		t.Fatalf("%s does not build %q (looked for %s)", script, RuntimeHostBinaryName, want)
+	}
+}
+
+func TestRuntimeHostBinaryNameForProfile(t *testing.T) {
+	if got := RuntimeHostBinaryNameForProfile(""); got != "attn-app-runtime" {
+		t.Errorf("default profile = %q", got)
+	}
+	if got := RuntimeHostBinaryNameForProfile("dev"); got != "attn-app-runtime-dev" {
+		t.Errorf("named profile = %q", got)
 	}
 }

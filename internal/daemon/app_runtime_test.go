@@ -1051,3 +1051,35 @@ func TestAppRuntimeHelloSniffIgnoresEverythingElse(t *testing.T) {
 		}
 	}
 }
+
+// Where a daemon looks for its sidecar. The profile-suffixed name exists for
+// remotes: several profile-isolated daemons install into one ~/.local/bin, and
+// each has to start the runtime built from the same source as the binary beside
+// it — not whichever profile synced last.
+func TestAppRuntimeHostCandidates(t *testing.T) {
+	bundled := appRuntimeHostCandidates("/Applications/attn.app/Contents/MacOS/attn", "")
+	if len(bundled) != 2 || bundled[0] != "/Applications/attn.app/Contents/Resources/app-runtime/attn-app-runtime" {
+		t.Fatalf("bundled candidates = %v", bundled)
+	}
+
+	remote := appRuntimeHostCandidates("/home/v/.local/bin/attn-dev", "dev")
+	want := []string{
+		"/home/v/.local/bin/attn-app-runtime-dev",
+		"/home/v/.local/bin/attn-app-runtime",
+	}
+	if len(remote) != len(want) {
+		t.Fatalf("profile candidates = %v, want %v", remote, want)
+	}
+	for i := range want {
+		if remote[i] != want[i] {
+			t.Fatalf("profile candidates = %v, want %v", remote, want)
+		}
+	}
+
+	// A checkout keeps working under any profile: `./attn` is one binary and the
+	// staged sidecar beside it carries no suffix.
+	checkout := appRuntimeHostCandidates("/src/attn/attn", "dev")
+	if checkout[len(checkout)-1] != "/src/attn/attn-app-runtime" {
+		t.Fatalf("checkout candidates = %v", checkout)
+	}
+}

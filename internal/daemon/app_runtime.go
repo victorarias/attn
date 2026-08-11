@@ -10,6 +10,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/apps"
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/supervise"
 )
@@ -38,10 +40,10 @@ const (
 	// `attn app runtime status` both have to mean one thing.
 	appRuntimeChildName = "runtime"
 
-	// appRuntimeBinaryName is the compiled sidecar. Changing it here alone
-	// produces a daemon that cannot find its runtime — scripts/build-app-runtime-host.sh
-	// writes this name.
-	appRuntimeBinaryName = "attn-app-runtime"
+	// appRuntimeBinaryName is the compiled sidecar. The name lives in
+	// internal/apps because the build, this daemon and the hub's remote install
+	// all have to agree on it.
+	appRuntimeBinaryName = apps.RuntimeHostBinaryName
 
 	// appRuntimeAPIVersion is the host contract this daemon speaks. A host
 	// presenting anything else is refused at hello rather than half-served: the
@@ -77,17 +79,7 @@ func resolveAppRuntimeHost() (string, error) {
 		return "", fmt.Errorf("resolving this daemon's own executable to find %s beside it: %w", appRuntimeBinaryName, err)
 	}
 
-	candidates := []string{}
-	// Inside a .app the daemon is Contents/MacOS/attn and Tauri stages resources
-	// under Contents/Resources.
-	macOSDir := filepath.Dir(executable)
-	contentsDir := filepath.Dir(macOSDir)
-	if filepath.Base(macOSDir) == "MacOS" && filepath.Base(contentsDir) == "Contents" {
-		candidates = append(candidates, filepath.Join(contentsDir, "Resources", "app-runtime", appRuntimeBinaryName))
-	}
-	// A checkout, and every Linux install: beside the daemon binary.
-	candidates = append(candidates, filepath.Join(macOSDir, appRuntimeBinaryName))
-
+	candidates := appRuntimeHostCandidates(executable, config.Profile())
 	for _, candidate := range candidates {
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
 			return candidate, nil
@@ -96,6 +88,28 @@ func resolveAppRuntimeHost() (string, error) {
 	return "", fmt.Errorf(
 		"the app runtime binary %s is not installed; looked in %s. It is built by `make build-app-runtime-host` (or any `make install`), and %s overrides the location",
 		appRuntimeBinaryName, strings.Join(candidates, " and "), appRuntimeHostOverride)
+}
+
+// appRuntimeHostCandidates lists where a daemon at `executable` looks for its
+// sidecar, in order.
+func appRuntimeHostCandidates(executable, profile string) []string {
+	candidates := []string{}
+	// Inside a .app the daemon is Contents/MacOS/attn and Tauri stages resources
+	// under Contents/Resources.
+	binDir := filepath.Dir(executable)
+	contentsDir := filepath.Dir(binDir)
+	if filepath.Base(binDir) == "MacOS" && filepath.Base(contentsDir) == "Contents" {
+		candidates = append(candidates, filepath.Join(contentsDir, "Resources", "app-runtime", appRuntimeBinaryName))
+	}
+	// A checkout, and every Linux install: beside the daemon binary. A named
+	// profile looks for its own copy first — profile-isolated daemons on a remote
+	// share one `~/.local/bin`, and each needs the sidecar built from the same
+	// source as the binary beside it. A checkout is the case that keeps the
+	// unsuffixed name last: there `./attn` serves whatever profile is exported.
+	if profile != "" {
+		candidates = append(candidates, filepath.Join(binDir, apps.RuntimeHostBinaryNameForProfile(profile)))
+	}
+	return append(candidates, filepath.Join(binDir, appRuntimeBinaryName))
 }
 
 // appRuntimeLogDir sits beside the plugin log tree rather than under the app

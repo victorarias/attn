@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/victorarias/attn/internal/apps"
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/enrollment"
@@ -28,6 +29,13 @@ type RemotePlatform struct {
 	GOOS         string
 	GOARCH       string
 	ArtifactName string
+	// RuntimeArtifactName is the app runtime host for this platform — the Bun
+	// sidecar every installed app's handlers execute in. It travels with the
+	// binary rather than being fetched on demand: a remote daemon that cannot
+	// start its runtime parks every app it hosts.
+	RuntimeArtifactName string
+	// BunTarget is what `bun build --compile --target=` calls this platform.
+	BunTarget string
 }
 
 type Bootstrapper struct {
@@ -68,7 +76,7 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 
 	preferSourceBuild := sourceCheckoutAvailable()
 	var localBinary string
-	binaryUpdated := false
+	binariesUpdated := false
 	if remoteVersion != localVersion || preferSourceBuild {
 		localBinary, err = b.ensureLocalBinary(ctx, platform, localVersion)
 		if err != nil {
@@ -92,11 +100,31 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 		}
 	}
 
+	remoteInstallPath, err := b.resolveRemoteInstall(ctx, sshTarget, profile)
+	if err != nil {
+		return fmt.Errorf("resolve the install path on %s: %w", sshTarget, err)
+	}
+
 	if shouldInstall {
-		if err := b.installRemoteBinary(ctx, sshTarget, profile, localBinary); err != nil {
+		if err := b.installRemoteBinary(ctx, sshTarget, profile, localBinary, remoteInstallPath); err != nil {
 			return fmt.Errorf("install attn on %s: %w", sshTarget, err)
 		}
-		binaryUpdated = true
+		binariesUpdated = true
+	}
+
+	// The app runtime host ships beside the binary and is gated on its own
+	// content, so it is checked on every sync rather than only when the binary
+	// moved: the two are built from different trees and an apphost-only change
+	// leaves the attn binary identical. A remote that cannot get one still runs
+	// sessions — only apps park — so this reports and continues.
+	runtimeUpdated, err := b.ensureRemoteAppRuntime(ctx, sshTarget, profile, platform, localVersion, remoteInstallPath)
+	if err != nil {
+		b.logf("%v", err)
+	}
+	if runtimeUpdated {
+		// A replaced sidecar is a new file; the running one keeps the old inode
+		// until something restarts it, and the daemon is what starts it.
+		binariesUpdated = true
 	}
 
 	// Enroll before the daemon starts, so a remote coming up for the first time
@@ -107,7 +135,7 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 		return err
 	}
 
-	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, profile, binaryUpdated); err != nil {
+	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, profile, binariesUpdated); err != nil {
 		return fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
 	}
 	return nil
@@ -199,14 +227,33 @@ func (b *Bootstrapper) detectRemotePlatform(ctx context.Context, sshTarget, prof
 	if fields[0] != "Linux" {
 		return RemotePlatform{}, fmt.Errorf("unsupported platform %q (Linux only)", out)
 	}
+	return remoteLinuxPlatform(fields[1])
+}
 
-	switch fields[1] {
+// remoteLinuxPlatform maps a Linux `uname -m` onto the artifacts a remote needs.
+// The Go and Bun names for the same machine disagree (amd64 vs x64), and each is
+// the one its own toolchain accepts, so both are recorded here rather than
+// derived at the call site.
+func remoteLinuxPlatform(machine string) (RemotePlatform, error) {
+	switch machine {
 	case "x86_64", "amd64":
-		return RemotePlatform{GOOS: "linux", GOARCH: "amd64", ArtifactName: "attn-linux-amd64"}, nil
+		return RemotePlatform{
+			GOOS:                "linux",
+			GOARCH:              "amd64",
+			ArtifactName:        "attn-linux-amd64",
+			RuntimeArtifactName: apps.RuntimeHostBinaryName + "-linux-amd64",
+			BunTarget:           "bun-linux-x64",
+		}, nil
 	case "aarch64", "arm64":
-		return RemotePlatform{GOOS: "linux", GOARCH: "arm64", ArtifactName: "attn-linux-arm64"}, nil
+		return RemotePlatform{
+			GOOS:                "linux",
+			GOARCH:              "arm64",
+			ArtifactName:        "attn-linux-arm64",
+			RuntimeArtifactName: apps.RuntimeHostBinaryName + "-linux-arm64",
+			BunTarget:           "bun-linux-arm64",
+		}, nil
 	default:
-		return RemotePlatform{}, fmt.Errorf("unsupported architecture %q", fields[1])
+		return RemotePlatform{}, fmt.Errorf("unsupported architecture %q", machine)
 	}
 }
 
@@ -279,7 +326,7 @@ func (b *Bootstrapper) ensureLocalBinary(ctx context.Context, platform RemotePla
 	}
 
 	if version != "" && version != "dev" {
-		if err := b.downloadReleaseBinary(ctx, version, platform, filepath.Dir(cachePath)); err == nil {
+		if err := b.downloadReleaseArtifact(ctx, version, platform.ArtifactName, filepath.Dir(cachePath)); err == nil {
 			return cachePath, nil
 		} else {
 			b.logf("release download failed for %s %s: %v", version, platform.ArtifactName, err)
@@ -292,17 +339,135 @@ func (b *Bootstrapper) ensureLocalBinary(ctx context.Context, platform RemotePla
 	return cachePath, nil
 }
 
-func (b *Bootstrapper) downloadReleaseBinary(ctx context.Context, version string, platform RemotePlatform, destDir string) error {
+func (b *Bootstrapper) downloadReleaseArtifact(ctx context.Context, version, artifact, destDir string) error {
 	tag := version
 	if !strings.HasPrefix(tag, "v") {
 		tag = "v" + tag
 	}
-	cmd := exec.CommandContext(ctx, "gh", "release", "download", tag, "--repo", githubRepo, "--pattern", platform.ArtifactName, "--dir", destDir, "--clobber")
+	cmd := exec.CommandContext(ctx, "gh", "release", "download", tag, "--repo", githubRepo, "--pattern", artifact, "--dir", destDir, "--clobber")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("gh release download %s: %s", tag, strings.TrimSpace(string(out)))
 	}
 	return nil
+}
+
+// appRuntimeCacheDir is where prepared app runtime hosts live, keyed by what
+// produced them.
+//
+// A source build overwrites one file per platform instead of accumulating a copy
+// per attn build: the sidecar is built from apphost/, which no version or
+// daemon-binary fingerprint covers, so any such key would serve a stale runtime
+// after an apphost-only edit — and the artifact is ~90MB, so a key per build is
+// also a disk leak. The compile is fast enough (~0.4s measured, bun embeds its
+// runtime rather than compiling it) that rebuilding every sync costs nothing. A
+// downloaded release artifact is immutable and does cache per version.
+func appRuntimeCacheDir(home, key string) string {
+	return filepath.Join(home, ".attn", "remotes", "app-runtime", key)
+}
+
+// ensureLocalAppRuntime produces the app runtime host for the remote's platform
+// and returns its local path. Source build first, published artifact second —
+// the same order, and for the same reason, as the attn binary beside it.
+func (b *Bootstrapper) ensureLocalAppRuntime(ctx context.Context, platform RemotePlatform, version string) (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+
+	var reasons []string
+	if sourceCheckoutAvailable() {
+		stageDir := appRuntimeCacheDir(home, platform.GOOS+"_"+platform.GOARCH)
+		if err := b.buildAppRuntimeFromSource(ctx, platform, stageDir); err == nil {
+			return filepath.Join(stageDir, apps.RuntimeHostBinaryName), nil
+		} else {
+			reasons = append(reasons, fmt.Sprintf("source build: %v", err))
+		}
+	}
+
+	if version != "" && version != "dev" {
+		cachePath := filepath.Join(appRuntimeCacheDir(home, version), platform.RuntimeArtifactName)
+		if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
+			return cachePath, nil
+		}
+		if err := os.MkdirAll(filepath.Dir(cachePath), 0o755); err != nil {
+			return "", err
+		}
+		if err := b.downloadReleaseArtifact(ctx, version, platform.RuntimeArtifactName, filepath.Dir(cachePath)); err == nil {
+			return cachePath, nil
+		} else {
+			reasons = append(reasons, fmt.Sprintf("release download: %v", err))
+		}
+	} else {
+		reasons = append(reasons, "no published release to download it from (this hub reports version "+version+")")
+	}
+
+	return "", fmt.Errorf("no %s available (%s)", platform.RuntimeArtifactName, strings.Join(reasons, "; "))
+}
+
+func (b *Bootstrapper) buildAppRuntimeFromSource(ctx context.Context, platform RemotePlatform, stageDir string) error {
+	root := sourceRoot()
+	if root == "" {
+		return fmt.Errorf("source checkout not available")
+	}
+	if platform.BunTarget == "" {
+		return fmt.Errorf("no bun target for %s/%s", platform.GOOS, platform.GOARCH)
+	}
+	script := filepath.Join(root, "scripts", "build-app-runtime-host.sh")
+	if _, err := os.Stat(script); err != nil {
+		return fmt.Errorf("%s is not in this checkout", script)
+	}
+	cmd := exec.CommandContext(ctx, "bash", script, stageDir, platform.BunTarget)
+	cmd.Dir = root
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+	}
+	return nil
+}
+
+// remoteAppRuntimePath is where the sidecar lands on the remote: beside the attn
+// binary that starts it, under the name that binary's profile resolves.
+func remoteAppRuntimePath(remoteInstallPath, profile string) string {
+	return filepath.Join(filepath.Dir(remoteInstallPath), apps.RuntimeHostBinaryNameForProfile(profile))
+}
+
+// ensureRemoteAppRuntime ships the app runtime host to the remote and reports
+// whether it changed. The gate is content: the artifact is ~90MB, and a hub that
+// syncs its endpoints on a timer would otherwise push it across the network on
+// every pass.
+//
+// Its error is the missing-sidecar report, so it names the remote path, the
+// platform, and what would make the upload possible — the daemon on the far end
+// can only say the file is not there.
+func (b *Bootstrapper) ensureRemoteAppRuntime(ctx context.Context, sshTarget, profile string, platform RemotePlatform, version, remoteInstallPath string) (bool, error) {
+	remotePath := remoteAppRuntimePath(remoteInstallPath, profile)
+
+	localPath, err := b.ensureLocalAppRuntime(ctx, platform, version)
+	if err != nil {
+		return false, fmt.Errorf(
+			"the app runtime host is missing from %s at %s: %w. Apps on that daemon park until it is there; run the hub from a source checkout with bun installed, or copy %s there yourself",
+			sshTarget, remotePath, err, platform.RuntimeArtifactName)
+	}
+
+	localHash, err := fileSHA256(localPath)
+	if err != nil {
+		return false, fmt.Errorf("hash the local app runtime host %s: %w", localPath, err)
+	}
+	remoteHash, err := b.remoteFileSHA256(ctx, sshTarget, profile, shellQuote(remotePath))
+	if err != nil {
+		return false, fmt.Errorf("hash the app runtime host on %s at %s: %w", sshTarget, remotePath, err)
+	}
+	if remoteHash == localHash {
+		return false, nil
+	}
+
+	if err := b.uploadRemoteFile(ctx, sshTarget, profile, localPath, remotePath); err != nil {
+		return false, fmt.Errorf(
+			"the app runtime host could not be installed on %s at %s: %w. Apps on that daemon park until it is there",
+			sshTarget, remotePath, err)
+	}
+	b.logf("installed the app runtime host on %s at %s (%s)", sshTarget, remotePath, localHash[:12])
+	return true, nil
 }
 
 func sourceRoot() string {
@@ -346,27 +511,29 @@ func fileSHA256(path string) (string, error) {
 	return fmt.Sprintf("%x", hash.Sum(nil)), nil
 }
 
-func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget, profile string) (string, error) {
-	binName := remoteBinaryName(profile)
-	script := fmt.Sprintf(`
-ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
-if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
-  ATTN_BIN="$(command -v %s 2>/dev/null || true)"
-fi
-if [ -z "$ATTN_BIN" ] || [ ! -f "$ATTN_BIN" ]; then
+// remoteSHA256Script hashes whatever pathExpr expands to in the remote shell —
+// a quoted literal, or a variable an earlier line resolved. A file that is not
+// there answers NOT_FOUND rather than failing: "no copy yet" is the first sync,
+// not an error.
+func remoteSHA256Script(pathExpr string) string {
+	return fmt.Sprintf(`
+if [ ! -f %[1]s ]; then
   printf NOT_FOUND
   exit 0
 fi
 if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum "$ATTN_BIN" | awk '{print $1}'
+  sha256sum %[1]s | awk '{print $1}'
   exit 0
 fi
 if command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 "$ATTN_BIN" | awk '{print $1}'
+  shasum -a 256 %[1]s | awk '{print $1}'
   exit 0
 fi
 printf NO_HASH_TOOL
-`, binName, binName)
+`, pathExpr)
+}
+
+func (b *Bootstrapper) runRemoteSHA256(ctx context.Context, sshTarget, profile, script string) (string, error) {
 	out, err := runSSH(ctx, sshTarget, profile, script)
 	if err != nil {
 		return "", err
@@ -380,6 +547,23 @@ printf NO_HASH_TOOL
 	default:
 		return value, nil
 	}
+}
+
+// remoteFileSHA256 returns the hash of a remote file, or "" when it is not
+// there. pathExpr is a shell expression, so callers quote their own literals.
+func (b *Bootstrapper) remoteFileSHA256(ctx context.Context, sshTarget, profile, pathExpr string) (string, error) {
+	return b.runRemoteSHA256(ctx, sshTarget, profile, remoteSHA256Script(pathExpr))
+}
+
+func (b *Bootstrapper) remoteBinarySHA256(ctx context.Context, sshTarget, profile string) (string, error) {
+	binName := remoteBinaryName(profile)
+	resolve := fmt.Sprintf(`
+ATTN_BIN="${ATTN_REMOTE_ATTN_BIN:-$HOME/.local/bin/%s}"
+if [ ! -x "$ATTN_BIN" ] && [ -z "${ATTN_REMOTE_ATTN_BIN:-}" ]; then
+  ATTN_BIN="$(command -v %s 2>/dev/null || true)"
+fi
+`, binName, binName)
+	return b.runRemoteSHA256(ctx, sshTarget, profile, resolve+remoteSHA256Script(`"$ATTN_BIN"`))
 }
 
 func (b *Bootstrapper) localBinaryCacheKey(version string) (string, bool, error) {
@@ -511,21 +695,37 @@ func resolveRemoteInstallPath(remoteHome, override, profile string) string {
 	return path
 }
 
-func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profile, localBinary string) error {
+// resolveRemoteInstall asks the remote where $HOME is and returns the path the
+// attn binary installs to. Every file this bootstrap ships lands beside it.
+func (b *Bootstrapper) resolveRemoteInstall(ctx context.Context, sshTarget, profile string) (string, error) {
 	remoteHome, err := runSSH(ctx, sshTarget, profile, `printf '%s' "$HOME"`)
 	if err != nil {
-		return err
+		return "", err
 	}
-	remoteInstallPath := resolveRemoteInstallPath(strings.TrimSpace(remoteHome), os.Getenv("ATTN_REMOTE_ATTN_BIN"), profile)
-	remoteInstallDir := filepath.Dir(remoteInstallPath)
-	remoteTmpPath := filepath.Join("/tmp", fmt.Sprintf("%s.%d.%d.tmp", filepath.Base(remoteInstallPath), os.Getpid(), time.Now().UnixNano()))
+	return resolveRemoteInstallPath(strings.TrimSpace(remoteHome), os.Getenv("ATTN_REMOTE_ATTN_BIN"), profile), nil
+}
+
+func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profile, localBinary, remoteInstallPath string) error {
 	attnDir := remoteAttnDirShell(profile)
-	if _, err := runSSH(ctx, sshTarget, profile, fmt.Sprintf("mkdir -p %s %s", shellQuote(remoteInstallDir), attnDir)); err != nil {
+	if _, err := runSSH(ctx, sshTarget, profile, fmt.Sprintf("mkdir -p %s", attnDir)); err != nil {
 		return err
 	}
-	file, err := os.Open(localBinary)
+	return b.uploadRemoteFile(ctx, sshTarget, profile, localBinary, remoteInstallPath)
+}
+
+// uploadRemoteFile streams a local executable to the remote and installs it in
+// place. `install` unlinks the destination before writing it, so replacing a
+// binary that is running right now hands the new file a new inode instead of
+// failing with ETXTBSY — the running process keeps the old one until it exits.
+func (b *Bootstrapper) uploadRemoteFile(ctx context.Context, sshTarget, profile, localPath, remotePath string) error {
+	remoteDir := filepath.Dir(remotePath)
+	remoteTmpPath := filepath.Join("/tmp", fmt.Sprintf("%s.%d.%d.tmp", filepath.Base(remotePath), os.Getpid(), time.Now().UnixNano()))
+	if _, err := runSSH(ctx, sshTarget, profile, fmt.Sprintf("mkdir -p %s", shellQuote(remoteDir))); err != nil {
+		return err
+	}
+	file, err := os.Open(localPath)
 	if err != nil {
-		return fmt.Errorf("open local binary: %w", err)
+		return fmt.Errorf("open %s: %w", localPath, err)
 	}
 	defer file.Close()
 	cmd := exec.CommandContext(
@@ -536,7 +736,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profi
 	cmd.Stdin = file
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("copy binary over ssh: %s", strings.TrimSpace(string(out)))
+		return fmt.Errorf("copy %s over ssh: %s", filepath.Base(localPath), strings.TrimSpace(string(out)))
 	}
 	if probe, probeErr := runSSH(
 		ctx,
@@ -544,7 +744,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profi
 		profile,
 		fmt.Sprintf("if [ -f %s ]; then wc -c < %s; else printf MISSING; fi", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath)),
 	); probeErr == nil {
-		b.logf("remote binary upload probe: target=%s tmp=%s result=%s", sshTarget, remoteTmpPath, strings.TrimSpace(probe))
+		b.logf("remote upload probe: target=%s tmp=%s result=%s", sshTarget, remoteTmpPath, strings.TrimSpace(probe))
 	}
 	_, err = runSSH(
 		ctx,
@@ -553,7 +753,7 @@ func (b *Bootstrapper) installRemoteBinary(ctx context.Context, sshTarget, profi
 		fmt.Sprintf(
 			"install -m 755 %s %s && rm -f %s",
 			shellQuote(remoteTmpPath),
-			shellQuote(remoteInstallPath),
+			shellQuote(remotePath),
 			shellQuote(remoteTmpPath),
 		),
 	)
@@ -670,7 +870,7 @@ printf 'stopped\n'
 	}
 }
 
-func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget, profile string, binaryUpdated bool) error {
+func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget, profile string, binariesUpdated bool) error {
 	state, err := b.probeRemoteDaemon(ctx, sshTarget, profile)
 	if err != nil {
 		return err
@@ -683,7 +883,7 @@ func (b *Bootstrapper) ensureRemoteDaemonRunning(ctx context.Context, sshTarget,
 		state = remoteDaemonState{}
 	}
 
-	if (state.Running || state.Starting) && binaryUpdated {
+	if (state.Running || state.Starting) && binariesUpdated {
 		if err := b.restartRemoteDaemon(ctx, sshTarget, profile, state.PID); err != nil {
 			return err
 		}
