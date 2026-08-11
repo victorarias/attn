@@ -1,0 +1,14 @@
+kind: fixed
+area: daemon
+change: >
+  Apps now run on remote endpoints. Setting up a remote machine installed the
+  attn binary and nothing else, so the daemon there had no app runtime host to
+  start: every app it hosted parked, and the events they were due were recorded
+  as runtime failures instead. The setup now ships the runtime host beside the
+  binary, matching the remote's platform, and skips the transfer when the
+  machine already has that exact build. A machine that cannot be given one says
+  so by name — which file, on which host, and what would produce it — and still
+  runs sessions.
+symptom: >
+  On a remote endpoint, every app showed as parked and its events were charged
+  to the runtime rather than to the app.

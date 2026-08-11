@@ -502,7 +502,13 @@ merged head (lazy start, missing-binary path, crash-loop park, held park,
 recovery drain, bare-rollback trap):
 
 - **Hub sidecar: fix.** Bootstrap uploads `attn-app-runtime` beside the
-  `attn` binary so hub-managed remotes can run apps.
+  `attn` binary so hub-managed remotes can run apps. *Shipped:* the host is
+  built for the remote's platform from the checkout (or downloaded from the
+  release, which now publishes `attn-app-runtime-linux-{amd64,arm64}`),
+  transferred only when its content hash differs — it is ~90MB and endpoints
+  sync on a timer — and named per profile on the remote, because
+  profile-isolated daemons share one `~/.local/bin` and one shared file name
+  would have the newest sync replace another profile's runtime.
 - **Bare rollback: previously-serving.** `attn app rollback <name>` without
   a version returns to the version that was serving before the current one
   — the registry records the pointer at every flip — and says which version

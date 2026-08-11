@@ -27,6 +27,26 @@ import (
 // name, so it is the intersection of what all three accept.
 var nameRe = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
+// RuntimeHostBinaryName is the compiled sidecar every app's handlers run in.
+// Three places need the same string and none of them can see the others: the
+// build (scripts/build-app-runtime-host.sh) writes it, the daemon resolves it
+// beside itself, and the hub ships it to a remote alongside the attn binary.
+// TestRuntimeHostBinaryNameMatchesTheBuild pins the build to this one.
+const RuntimeHostBinaryName = "attn-app-runtime"
+
+// RuntimeHostBinaryNameForProfile is the same binary under the name a given
+// profile installs it as. One machine hosts several profile-isolated daemons —
+// `~/.local/bin/attn` beside `~/.local/bin/attn-dev` — and each resolves its
+// runtime beside its own binary, so sharing one file name there would have the
+// newest sync silently replace another profile's sidecar with a different build.
+func RuntimeHostBinaryNameForProfile(profile string) string {
+	p := strings.TrimSpace(profile)
+	if p == "" {
+		return RuntimeHostBinaryName
+	}
+	return RuntimeHostBinaryName + "-" + p
+}
+
 // MaxNameLength bounds an app name. The tripwire is the document namespace: the
 // store validates `owner/name` and an app's namespace is `app/<name>`, so a name
 // nobody could address is refused here, where the error can say so, rather than

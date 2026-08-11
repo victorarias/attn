@@ -216,3 +216,68 @@ func TestResolveRemoteInstallPath(t *testing.T) {
 		}
 	}
 }
+
+// The app runtime host lands beside the attn binary that starts it, because
+// that is the one place the remote daemon looks. A named profile gets its own
+// copy: several profile-isolated daemons share one ~/.local/bin, and one shared
+// file name would have the newest sync replace another profile's runtime.
+func TestRemoteAppRuntimePath(t *testing.T) {
+	cases := []struct {
+		remoteInstallPath string
+		profile           string
+		want              string
+	}{
+		{"/home/v/.local/bin/attn", "", "/home/v/.local/bin/attn-app-runtime"},
+		{"/home/v/.local/bin/attn-dev", "dev", "/home/v/.local/bin/attn-app-runtime-dev"},
+		{"/home/v/.attn/harness/run-1/bin/attn", "", "/home/v/.attn/harness/run-1/bin/attn-app-runtime"},
+	}
+	for _, c := range cases {
+		if got := remoteAppRuntimePath(c.remoteInstallPath, c.profile); got != c.want {
+			t.Errorf("remoteAppRuntimePath(%q, %q) = %q, want %q", c.remoteInstallPath, c.profile, got, c.want)
+		}
+	}
+}
+
+// Go and Bun name the same machine differently, and a target either toolchain
+// rejects is a cross-build that fails at the last step of a remote sync.
+func TestRemoteLinuxPlatformArtifacts(t *testing.T) {
+	cases := []struct {
+		machine   string
+		goarch    string
+		runtime   string
+		bunTarget string
+	}{
+		{"x86_64", "amd64", "attn-app-runtime-linux-amd64", "bun-linux-x64"},
+		{"amd64", "amd64", "attn-app-runtime-linux-amd64", "bun-linux-x64"},
+		{"aarch64", "arm64", "attn-app-runtime-linux-arm64", "bun-linux-arm64"},
+		{"arm64", "arm64", "attn-app-runtime-linux-arm64", "bun-linux-arm64"},
+	}
+	for _, c := range cases {
+		platform, err := remoteLinuxPlatform(c.machine)
+		if err != nil {
+			t.Fatalf("remoteLinuxPlatform(%q): %v", c.machine, err)
+		}
+		if platform.GOARCH != c.goarch || platform.RuntimeArtifactName != c.runtime || platform.BunTarget != c.bunTarget {
+			t.Errorf("remoteLinuxPlatform(%q) = %+v, want goarch %s runtime %s bun %s",
+				c.machine, platform, c.goarch, c.runtime, c.bunTarget)
+		}
+	}
+	if _, err := remoteLinuxPlatform("riscv64"); err == nil {
+		t.Fatal("an unsupported architecture was accepted")
+	}
+}
+
+// A file that is not there yet answers NOT_FOUND rather than failing the sync:
+// the first bootstrap of a remote has no copy of anything.
+func TestRemoteSHA256ScriptHandlesAMissingFile(t *testing.T) {
+	script := remoteSHA256Script(shellQuote("/home/v/.local/bin/attn-app-runtime"))
+	if !strings.Contains(script, "printf NOT_FOUND") {
+		t.Fatalf("hash script has no missing-file answer: %s", script)
+	}
+	if !strings.Contains(script, `sha256sum '/home/v/.local/bin/attn-app-runtime'`) {
+		t.Fatalf("hash script does not hash the path it was given: %s", script)
+	}
+	if !strings.Contains(script, "shasum -a 256") {
+		t.Fatalf("hash script has no shasum fallback: %s", script)
+	}
+}
