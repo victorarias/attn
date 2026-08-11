@@ -58,7 +58,10 @@ if ProcessInfo.processInfo.environment["WINID_LIST"] != nil {
 guard best.id != 0 else { exit(3) }
 print("\(best.id) \(best.width)")
 EOF
-  swift "$swift_src" "$owner"
+  local status=0
+  swift "$swift_src" "$owner" || status=$?
+  rm -f "$swift_src" "${swift_src%.swift}"
+  return "$status"
 }
 
 cmd_record() {
@@ -140,7 +143,7 @@ cmd_publish() {
   git -C "$clone" add "$dir"
   git -C "$clone" commit --quiet -m "evidence: $dir"
   # Another agent may publish concurrently; rebase once and retry.
-  git -C "$clone" push --quiet || { git -C "$clone" pull --rebase --quiet && git -C "$clone" push --quiet; }
+  git -C "$clone" push --quiet || { git -C "$clone" pull --rebase --quiet && git -C "$clone" push --quiet; } || die "push to $EVIDENCE_REPO failed"
   local sha
   sha="$(git -C "$clone" rev-parse HEAD)"
 

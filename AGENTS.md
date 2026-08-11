@@ -185,6 +185,10 @@ description. Record the run, publish, paste the emitted markdown:
 ./scripts/pr-evidence.sh publish clip.mp4                     # pushes mp4+gif to victorarias/attn-pr-evidence, prints the markdown
 ```
 
+The evidence repo is public and the clip shows whatever the window shows —
+session names, transcripts, tickets. Watch the recording before publishing;
+re-record rather than push something that should not be on the open internet.
+
 The GIF renders inline in the PR; the mp4 beside it is the full-quality
 master. GitHub never inline-plays a repo-hosted mp4 — only the GIF embeds —
 and images render only under 10MB, so keep clips around 20s (the script warns
