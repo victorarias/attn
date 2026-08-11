@@ -85,6 +85,26 @@ sweep the whole catalog. Catalog entries marked `soakOnly: true` (e.g.
 `run-serial-matrix.mjs` entirely, so matrix behavior never changes when a
 soak-only probe is added.
 
+## Recordings
+
+`ATTN_HARNESS_RECORD=1` records the app window of every
+`createScenarioRunner` scenario to `<runDir>/recording-NN.mp4` — one segment
+per app launch, listed in `<runDir>/recording.json` — with zero per-scenario
+wiring (`windowRecording.mjs`, wired in `scenarioRunner.mjs`). The env var
+passes through `run-serial-matrix.mjs` and `run-soak.mjs` to every leg.
+Capture is `WindowRecorder.swift`, compiled on demand like `InputDriver.swift`
+and using ScreenCaptureKit's desktop-independent window filter: it records the
+window's own content even parked almost fully off-screen (how
+`uiAutomationClient` keeps bridge-driven windows) or occluded —
+`screencapture -v` records black there, which is why it is not used (receipts
+in the swift header). It needs the Screen Recording permission of whatever
+context runs the harness; the binary is codesigned so the grant survives
+rebuilds. An app relaunch rotates to a new segment. Recording failures trace
+and never fail a run. Publish a segment as PR evidence with
+`scripts/pr-evidence.sh publish` (repo root). Default off: a matrix run must
+not pay recording CPU/disk unasked. Ad-hoc scenarios without the runner do
+not record, matching the verdict-line contract's scope.
+
 ## Real-App Parity
 
 - Scenarios must match real app usage. Do not invent command sequences that the app cannot perform.

@@ -3,6 +3,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
 import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH } from './common.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
+import { createScenarioRecorder, recordingEnabled } from './windowRecording.mjs';
 
 // Collapse to a single line and cap length so the verdict's firstFailure field
 // can never break the one-line ATTN_VERDICT contract regardless of what the
@@ -186,6 +188,20 @@ export function createScenarioRunner(options, {
     process.stdout.write(line);
   };
 
+  // ATTN_HARNESS_RECORD=1 records the app window to runDir/recording-NN.mp4,
+  // one segment per app launch. The recorder follows the window by polling, so
+  // no scenario has to wire anything; when disabled nothing runs at all.
+  let recorder = null;
+  if (recordingEnabled()) {
+    const recordingDriver = new MacOSDriver({ appPath: options.appPath });
+    recorder = createScenarioRecorder({
+      runDir,
+      resolveWindowId: () => recordingDriver.mainWindowId(),
+      log: appendTrace,
+    });
+    recorder.start();
+  }
+
   const runRegisteredCleanup = async (reason) => {
     if (cleanupPromise) {
       return cleanupPromise;
@@ -218,6 +234,10 @@ export function createScenarioRunner(options, {
       return;
     }
     finalized = true;
+    // Not awaited: the recorder's screencapture child keeps the event loop
+    // alive until it has finalized its file, and an orphaned recorder (signal
+    // path exits immediately) finalizes on its own after the SIGINT.
+    void recorder?.stop();
     releaseScenarioLock?.();
     process.removeListener('exit', exitHandler);
     for (const [signal, handler] of signalHandlers.entries()) {
