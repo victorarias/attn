@@ -38,7 +38,7 @@ func WriteSettingsConfig(tmpDir, sessionID, content string) (string, error) {
 
 // WriteHooksConfig writes a temporary hooks configuration file.
 func WriteHooksConfig(tmpDir, sessionID, socketPath, wrapperPath string) (string, error) {
-	content := hooks.Generate(sessionID, socketPath, wrapperPath)
+	content := hooks.Generate(sessionID, socketPath, wrapperPath, nil)
 	return WriteSettingsConfig(tmpDir, sessionID, content)
 }
 

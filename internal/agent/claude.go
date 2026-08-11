@@ -139,6 +139,8 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	// Cap the effective context window so auto-compaction fires at the configured
 	// threshold. The daemon owns the policy of who gets a cap (chief setting vs
 	// default_context_window_cap_<agent>); this only applies what it resolved.
+	// The spawn environment alone does not settle it — the user's settings can
+	// overwrite this key, so claudeSettingsEnv repeats it in the --settings file.
 	if opts.AutoCompactWindow > 0 {
 		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.AutoCompactWindow))
 	}
@@ -540,8 +542,23 @@ func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
 
 // --- HookProvider ---
 
-func (c *Claude) GenerateHooksConfig(sessionID, socketPath, wrapperPath string) string {
-	return hooks.Generate(sessionID, socketPath, wrapperPath)
+func (c *Claude) GenerateHooksConfig(opts SpawnOpts) string {
+	return hooks.Generate(opts.SessionID, opts.SocketPath, opts.WrapperPath, claudeSettingsEnv(opts))
+}
+
+// claudeSettingsEnv is the `env` block of the --settings file attn writes for a
+// launch. Only knobs that must outrank the user's own configuration belong here:
+// Claude Code copies each settings file's env onto its process environment,
+// so `"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"}` in
+// ~/.claude/settings.json silently replaces the value attn exported at spawn.
+// The --settings scope is applied after the user's, so the cap set here holds.
+func claudeSettingsEnv(opts SpawnOpts) map[string]string {
+	if opts.AutoCompactWindow <= 0 {
+		return nil
+	}
+	return map[string]string{
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": strconv.Itoa(opts.AutoCompactWindow),
+	}
 }
 
 // --- TranscriptFinder ---

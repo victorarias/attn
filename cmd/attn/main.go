@@ -3116,7 +3116,7 @@ func runAgentDirectly(requestedAgent string) {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
 	if hp, ok := agentdriver.GetHookProvider(driver); ok {
-		content := hp.GenerateHooksConfig(sessionID, opts.SocketPath, opts.WrapperPath)
+		content := hp.GenerateHooksConfig(opts)
 		settingsPath, err := wrapper.WriteSettingsConfig(os.TempDir(), sessionID, content)
 		if err != nil {
 			cleanup()
