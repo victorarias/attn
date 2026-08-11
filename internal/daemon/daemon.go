@@ -26,6 +26,7 @@ import (
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/diag"
+	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
@@ -967,14 +968,24 @@ func (d *Daemon) Start() error {
 	// forever, because the drain decides from memory.
 	d.seedQueuedAgentMessages()
 	if d.daemonInstanceID == "" {
-		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
+		instanceID, err := enrollment.EnsureDaemonID(d.dataRoot)
 		if err != nil {
 			return fmt.Errorf("ensure daemon instance id: %w", err)
 		}
 		d.daemonInstanceID = instanceID
 	}
+	if err := d.ensureEnrollment(); err != nil {
+		return fmt.Errorf("ensure enrollment record: %w", err)
+	}
 	if d.hubManager == nil {
-		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.publishEndpointSessionsChanged, d.broadcastRawWSMessage, d.logf)
+		d.hubManager = hub.NewManager(
+			d.store,
+			d.broadcastEndpointStatusChanged,
+			d.publishEndpointSessionsChanged,
+			d.broadcastRawWSMessage,
+			d.logf,
+			d.homeDaemonIDForEnrollment,
+		)
 	}
 	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
 	if selectedBackend == "" {
@@ -4217,6 +4228,15 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if routingPathError != "" {
 		health["routing_path_error"] = routingPathError
+	}
+	// Enrollment: "home", or "outpost of <home id>". A daemon that cannot read
+	// its own record says so here rather than guessing.
+	if status, err := d.enrollmentStatus(); err != nil {
+		health["enrollment"] = "unknown"
+		health["enrollment_error"] = err.Error()
+	} else {
+		health["enrollment"] = status.Describe()
+		health["home_daemon_id"] = status.HomeDaemonID
 	}
 
 	setNoStoreHeaders(w.Header())

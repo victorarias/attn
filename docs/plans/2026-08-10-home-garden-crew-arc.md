@@ -77,19 +77,27 @@ addressing errors as an unknown session until it rides the uplink.
 The stage that makes deferral safe. Small; lands before or with the
 garden's first slice.
 
-- [ ] Glossary: home daemon, outpost, enrollment (this PR).
-- [ ] Bootstrap writes the **enrollment record** on the remote — the home's
+- [x] Glossary: home daemon, outpost, enrollment.
+- [x] Bootstrap writes the **enrollment record** on the remote — the home's
       daemon id beside the outpost's own `daemon-id` file, same flock
       mechanics. Bootstrap already installs files there, so this is the
       cheapest first slice of enrollment, and it is exactly what the
-      uplink will check later.
-- [ ] The daemon reads the record at start and reports "outpost of its
-      home" in health and `initial_state`.
-- [ ] A fence helper: garden and crew surfaces call it and, on an outpost,
+      uplink will check later. It writes it by running
+      `attn enrollment enroll --home <id>` over ssh, so the record's rules
+      live in one place (`internal/enrollment`) rather than in a shell
+      script that would drift from them.
+- [x] The daemon reads the record at start and reports "outpost of its
+      home" in health and `initial_state`. It re-reads on every ask, so
+      `attn enrollment leave` and a sync take effect without a restart.
+- [x] A fence helper: garden and crew surfaces call it and, on an outpost,
       fail hard with a named error — the home's id, where the garden
       lives, and a pointer to this plan. The fence *is* the tracking.
-- [ ] Re-home: bootstrap against a remote enrolled to a different home
-      stops and asks, never overwrites.
+      `enrollment.Status.RequireHome`, reached from the daemon through
+      `Daemon.requireHome`; an unreadable record fails it closed.
+- [x] Re-home: bootstrap against a remote enrolled to a different home
+      stops and asks, never overwrites. The ask is answered on the
+      outpost — `attn enrollment leave` makes it a home again, and the
+      second home's sync then enrolls it.
 
 Explicitly unchanged: everything outposts do today — sessions, PTY, PR/git
 flows, local tickets.

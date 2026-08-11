@@ -3152,6 +3152,11 @@ type InitialStateMessage struct {
 	// GithubHosts corresponds to the JSON schema field "github_hosts".
 	GithubHosts []string `json:"github_hosts,omitempty,omitzero"`
 
+	// The daemon id that owns this daemon's home-level state. Equal to
+	// daemon_instance_id on a home daemon; a different id means this daemon is an
+	// outpost of that home.
+	HomeDaemonID *string `json:"home_daemon_id,omitempty,omitzero"`
+
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty,omitzero"`
 

@@ -100,6 +100,11 @@ type Manager struct {
 	onStatus     StatusCallback
 	onSessions   SessionsChangedCallback
 	onRawEvent   RawEventCallback
+	// homeDaemonID answers "which home is dialing?" at the moment a sync runs.
+	// It is a function, not a value, because enrollment is a file that changes
+	// under a live daemon; it returns "" when this daemon is not a home and
+	// therefore has no home-level state to enroll anyone into.
+	homeDaemonID func() string
 	logf         func(format string, args ...interface{})
 
 	mu              sync.RWMutex
@@ -117,9 +122,13 @@ func NewManager(
 	onSessions SessionsChangedCallback,
 	onRawEvent RawEventCallback,
 	logf func(format string, args ...interface{}),
+	homeDaemonID func() string,
 ) *Manager {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
+	}
+	if homeDaemonID == nil {
+		homeDaemonID = func() string { return "" }
 	}
 	m := &Manager{
 		store:           endpointStore,
@@ -127,6 +136,7 @@ func NewManager(
 		onStatus:        onStatus,
 		onSessions:      onSessions,
 		onRawEvent:      onRawEvent,
+		homeDaemonID:    homeDaemonID,
 		logf:            logf,
 		runtimes:        make(map[string]*endpointRuntime),
 		pending:         make(map[string]pendingSessionRoute),
@@ -453,7 +463,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if m.consumeBootstrapFlag(id) {
 			m.updateStatus(id, "bootstrapping", "Installing remote binary", nil, nil)
 			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile)
+			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile, m.homeDaemonID())
 			cancel()
 			if err != nil {
 				m.updateStatus(id, "error", err.Error(), nil, nil)
@@ -472,7 +482,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 			// Daemon appears down — bootstrap then try once more.
 			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
 			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile)
+			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile, m.homeDaemonID())
 			cancel()
 			if bootErr != nil {
 				m.updateStatus(id, "error", bootErr.Error(), nil, nil)
@@ -652,6 +662,9 @@ func (m *Manager) consumeRemote(ctx context.Context, id string, conn *websocket.
 			if fingerMismatch, fingerMsg := fingerprintMismatch(msg.SourceFingerprint); fingerMismatch {
 				activeStatus = "binary_mismatch"
 				activeMsg = fingerMsg
+			}
+			if notice := foreignHomeNotice(m.homeDaemonID(), &msg); notice != "" {
+				m.logf("endpoint %s: %s", id, notice)
 			}
 			m.updateStatus(id, activeStatus, activeMsg, caps, &sessionCount)
 			if changed {
@@ -1415,6 +1428,28 @@ func workspaceLayoutsMatch(left, right protocol.WorkspaceLayout) bool {
 		}
 	}
 	return true
+}
+
+// foreignHomeNotice reports a remote that says it is an outpost of some daemon
+// other than this home. It is not an error — the remote's sessions, PTY, and PR
+// flows are unaffected by enrollment — but it means its garden and crew asks
+// belong elsewhere, so the connection says so out loud rather than leaving a
+// misconfiguration to be discovered by a refusal much later. A remote that is
+// its own home (nobody has enrolled it) is the ordinary case and stays quiet.
+func foreignHomeNotice(homeDaemonID string, msg *protocol.InitialStateMessage) string {
+	if msg == nil || strings.TrimSpace(homeDaemonID) == "" {
+		return ""
+	}
+	remoteHome := strings.TrimSpace(protocol.Deref(msg.HomeDaemonID))
+	remoteSelf := strings.TrimSpace(protocol.Deref(msg.DaemonInstanceID))
+	if remoteHome == "" || remoteHome == homeDaemonID || remoteHome == remoteSelf {
+		return ""
+	}
+	return fmt.Sprintf(
+		"connected daemon %s is an outpost of %s, not of this home (%s); its garden and crew asks belong to that home. "+
+			"To move it here, run `attn enrollment leave` on it and sync again",
+		remoteSelf, remoteHome, homeDaemonID,
+	)
 }
 
 func capabilitiesFromInitialState(msg *protocol.InitialStateMessage) *protocol.EndpointCapabilities {
