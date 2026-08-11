@@ -53,8 +53,16 @@ export class DaemonObserver {
     this.workspacesBySessionId = new Map();
     this.layoutsByWorkspaceId = new Map();
     this.endpointsById = new Map();
+    this.settings = new Map();
     this.connected = false;
     this.initialStateReceived = false;
+  }
+
+  // The daemon's own view of a setting, as carried by initial_state and kept
+  // current by settings_updated. Returns '' for unconfigured, which is the
+  // value that puts a setting back the way it was found.
+  getSetting(key) {
+    return this.settings.get(key) ?? '';
   }
 
   async connect() {
@@ -360,6 +368,15 @@ export class DaemonObserver {
     });
   }
 
+  // A settings payload is the whole map, so it replaces rather than merges —
+  // a key the daemon stopped reporting is a key that is no longer configured.
+  #applySettings(settings) {
+    if (!settings || typeof settings !== 'object') {
+      return;
+    }
+    this.settings = new Map(Object.entries(settings).map(([key, value]) => [key, String(value ?? '')]));
+  }
+
   #handleMessage(data) {
     switch (data.event) {
       case 'initial_state':
@@ -383,6 +400,10 @@ export class DaemonObserver {
         for (const endpoint of data.endpoints || []) {
           this.endpointsById.set(endpoint.id, endpoint);
         }
+        this.#applySettings(data.settings);
+        break;
+      case 'settings_updated':
+        this.#applySettings(data.settings);
         break;
       case 'sessions_updated':
         this.sessionsById.clear();

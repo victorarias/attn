@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
-import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH } from './common.mjs';
+import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH, restoreHarnessSettings } from './common.mjs';
 import { MacOSDriver } from './macosDriver.mjs';
 import { createScenarioRecorder, recordingEnabled } from './windowRecording.mjs';
 
@@ -207,6 +207,18 @@ export function createScenarioRunner(options, {
       return cleanupPromise;
     }
     cleanupPromise = (async () => {
+      // The signal path's restore: beforeExit does not fire on a signal, and
+      // draining the queue makes whichever of the two runs second a no-op.
+      // It talks to the daemon on its own socket, so the app being gone by
+      // now is fine.
+      try {
+        const restored = await restoreHarnessSettings();
+        if (restored > 0) {
+          appendTrace('settings:restored', { count: restored });
+        }
+      } catch (error) {
+        appendTrace('settings:restore_failed', { error: normalizeError(error) });
+      }
       if (cleanupHandlers.length === 0) {
         return;
       }

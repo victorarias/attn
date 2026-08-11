@@ -189,9 +189,10 @@ async function main() {
   runner.registerCleanup('quit_app', () => client.quitApp());
   runner.registerCleanup('restore_auto_settle', () =>
     client.request('set_setting', { key: 'auto_settle_enabled', value: 'false' }).catch(() => {}));
-
   try {
     await runner.step('launch_app', async () => {
+      // Pins the cheap launch model for every agent; see "Which Model a
+      // Scenario Burns" in this directory's guide.
       await launchFreshAppAndConnect(client, observer);
     });
 
@@ -238,8 +239,9 @@ async function main() {
       // arm window elapses — leaving `working` cancels the settle by itself, and
       // an agent that stops before then has a classifier verdict pending, which
       // drops the arm too. The count is deliberately long: it has to outlast the
-      // arm delay plus both keystrokes plus the second arm, on whatever model is
-      // configured, and a fast model answered 200 numbers in five seconds.
+      // arm delay plus both keystrokes plus the second arm, which is ~15s of
+      // working. Measured on the pinned haiku: 77 numbers a second (239 -> 1004
+      // across ten seconds of one run), so 2000 buys ~26s. 200 ran dry in five.
       // Tool-free on purpose — a tool would ask for approval, and a pending
       // approval leaves `working`.
       await submitPrompt(

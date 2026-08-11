@@ -41,6 +41,49 @@ re-derive them. dev/prod are fast-path literals that a drift guard in
 needs `./attn` built (`make dev` / `go build -o ./attn ./cmd/attn`); override the
 binary with `ATTN_HARNESS_BIN`.
 
+## Which Model a Scenario Burns
+
+A scenario that boots a real agent spends real money on it, and nothing in the
+harness caps that. **Never `fable`** — it is the most expensive model available,
+and a scenario fixture asks an agent to count to 2000, not to think. The same
+rule covers every way a scenario runs: a single run, a soak, a matrix leg, and a
+recording. A recorded run is a run.
+
+Unpinned is not neutral. With no pin the launch falls through to the agent's own
+default, which is whatever the machine's owner picked for their day — on the
+maintainer's machine that is fable. So a scenario that says nothing about the
+model has chosen the expensive one.
+
+So the pin is not left to each scenario to remember.
+`launchFreshAppAndConnect` — which every scenario goes through — pins
+`default_model_<agent>` to the cheapest model that agent offers (the catalog's
+"(cheap)" entries: claude `haiku`, codex `gpt-5.4-mini`) as soon as the daemon
+socket is up. A scenario that boots an agent needs to do nothing at all.
+
+It puts the setting back. The prior value arrives on `initial_state`, and the
+run writes it back as the process ends, straight to the daemon over its own
+short-lived socket — scenarios tear down in whatever order suits them, some
+through the runner's cleanup registry and some in their own `finally`, and by
+then the app is usually gone, while the daemon outlives every launch. The
+runner's cleanup calls the same restore for the signal path. Both the pin and
+the restore print a `[harness]` line naming the key and the value they found.
+`dev` is a profile the maintainer also uses by hand; a run that silently leaves
+it pinned is a bug, not a saving.
+
+`ATTN_HARNESS_LAUNCH_MODEL_CLAUDE` / `..._CODEX` override one agent for one run:
+a model id pins that instead, and `inherit` leaves the setting alone. Inheriting
+is the expensive path — that is why it has to be named rather than reached by
+omission.
+
+A scenario that genuinely needs a stronger model pins it after the launch helper
+and says why in a comment beside the pin. An unexplained expensive pin reads as
+an oversight and gets downgraded by whoever touches it next.
+
+Mechanics, if you need them: `default_model_<agent>` pins every interactive
+launch on that daemon; a per-spawn pin and `chief_model_<agent>` outrank it
+(`resolveLaunchModel`, `internal/daemon/ws_settings.go`). Empty means
+unconfigured, which is how the setting goes back.
+
 ## Verdict Line
 
 Every scenario built on `createScenarioRunner` (`scenarioRunner.mjs`), and
