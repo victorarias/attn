@@ -357,13 +357,16 @@ func TestApps_MigrationCarriesRowsWithNoPredecessor(t *testing.T) {
 	s.Close()
 
 	// Rewind to the schema as it stood before 103, with the app rows still there.
+	// The recorded version is the maximum, so every later migration goes too —
+	// dropping 103's row alone would leave the version ahead of it and skip the
+	// migration under test. The later ones re-run, which they tolerate.
 	db, err := OpenDB(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	for _, stmt := range []string{
 		"ALTER TABLE apps DROP COLUMN previous_version_id",
-		"DELETE FROM schema_migrations WHERE version = 103",
+		"DELETE FROM schema_migrations WHERE version >= 103",
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("rewinding with %q: %v", stmt, err)
