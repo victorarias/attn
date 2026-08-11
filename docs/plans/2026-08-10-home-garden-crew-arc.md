@@ -77,19 +77,27 @@ addressing errors as an unknown session until it rides the uplink.
 The stage that makes deferral safe. Small; lands before or with the
 garden's first slice.
 
-- [ ] Glossary: home daemon, outpost, enrollment (this PR).
-- [ ] Bootstrap writes the **enrollment record** on the remote — the home's
+- [x] Glossary: home daemon, outpost, enrollment.
+- [x] Bootstrap writes the **enrollment record** on the remote — the home's
       daemon id beside the outpost's own `daemon-id` file, same flock
       mechanics. Bootstrap already installs files there, so this is the
       cheapest first slice of enrollment, and it is exactly what the
-      uplink will check later.
-- [ ] The daemon reads the record at start and reports "outpost of its
-      home" in health and `initial_state`.
-- [ ] A fence helper: garden and crew surfaces call it and, on an outpost,
+      uplink will check later. It writes it by running
+      `attn enrollment enroll --home <id>` over ssh, so the record's rules
+      live in one place (`internal/enrollment`) rather than in a shell
+      script that would drift from them.
+- [x] The daemon reads the record at start and reports "outpost of its
+      home" in health and `initial_state`. It re-reads on every ask, so
+      `attn enrollment leave` and a sync take effect without a restart.
+- [x] A fence helper: garden and crew surfaces call it and, on an outpost,
       fail hard with a named error — the home's id, where the garden
       lives, and a pointer to this plan. The fence *is* the tracking.
-- [ ] Re-home: bootstrap against a remote enrolled to a different home
-      stops and asks, never overwrites.
+      `enrollment.Status.RequireHome`, reached from the daemon through
+      `Daemon.requireHome`; an unreadable record fails it closed.
+- [x] Re-home: bootstrap against a remote enrolled to a different home
+      stops and asks, never overwrites. The ask is answered on the
+      outpost — `attn enrollment leave` makes it a home again, and the
+      second home's sync then enrolls it.
 
 Explicitly unchanged: everything outposts do today — sessions, PTY, PR/git
 flows, local tickets.
@@ -117,6 +125,14 @@ fully-qualified-ready: `<daemon-id>/<local-id>` minted only at the
 boundary; the docstore id charset forbids `/`
 (`internal/docstore/docstore.go:307`), so qualified forms cannot leak into
 local storage. A seed command on an outpost hits the stage-2 fence.
+
+**Enrolling a machine that has been its own home takes a decision here.**
+Stage 2 enrolls a standalone home silently — right while a home owns nothing
+but its own sessions, and the record is the only thing that moves. Once the
+garden exists, that same sync fences off real state a person put on that
+machine. The state stays on disk and `attn enrollment leave` restores it, but
+the sync must say what it is fencing before it does, not after. Decide that
+wording when this stage opens.
 
 **Ticket retirement is gated on the uplink, not just on "garden usable".**
 Every delegation is ticket-tracked, including on outposts, and outpost

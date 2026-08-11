@@ -395,6 +395,12 @@ identity acts as home. Every daemon has exactly one home; a second home
 dialing an already-enrolled outpost is a loud re-home decision, never silent
 adoption.
 
+The record lives beside the daemon's own `daemon-id` file in its data dir; a
+home writes it on the remote when it syncs one. `attn enrollment` shows it,
+and `attn enrollment leave` is the way out — it makes the daemon a home
+again, and is what has to happen on an outpost before a different home may
+take it.
+
 Until the uplink is built, outposts are **fenced**: garden and crew surfaces
 refuse on an outpost with an error naming the home and the plan tracking the
 gap. Everything outposts do today — sessions, PTY, PR flows, local

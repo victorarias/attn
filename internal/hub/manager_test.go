@@ -26,7 +26,7 @@ func TestManagerRemoteSessionsTagAndSeparateEndpoints(t *testing.T) {
 		t.Fatalf("AddEndpoint(second) error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 
 	if changed := manager.replaceRemoteSessions(first.ID, []protocol.Session{{
 		ID:        "sess-a",
@@ -68,7 +68,7 @@ func TestManagerRemoteSessionsUpsertAndClear(t *testing.T) {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 
 	changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{
 		ID:             "sess-1",
@@ -128,7 +128,7 @@ func TestManagerRemoteWorkspacesTrackAndClear(t *testing.T) {
 		t.Fatalf("AddEndpoint(second) error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 
 	if changed, count := manager.upsertRemoteSession(first.ID, protocol.Session{ID: "sess-a", Directory: "/srv/repo"}); !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession(first) = (%v, %d), want (true, 1)", changed, count)
@@ -243,7 +243,7 @@ func TestManagerStampsEndpointIDOnIngest(t *testing.T) {
 		t.Fatalf("AddEndpoint(first) error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 
 	workspace := protocol.Workspace{
 		ID:         "ws-a",
@@ -291,7 +291,7 @@ func TestManagerIgnoresLayoutUpdatesForRemovedRemoteWorkspaces(t *testing.T) {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	if changed := manager.upsertRemoteWorkspace(record.ID, protocol.Workspace{ID: "ws-1", Directory: "/srv/repo"}); !changed {
 		t.Fatal("upsertRemoteWorkspace() reported no change")
 	}
@@ -325,7 +325,7 @@ func TestManagerForgetSessionLeavesRemoteWorkspaceUntilWorkspaceEvent(t *testing
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	if changed, count := manager.upsertRemoteSession(record.ID, protocol.Session{ID: "sess-1", Directory: "/srv/repo"}); !changed || count != 1 {
 		t.Fatalf("upsertRemoteSession() = (%v, %d), want (true, 1)", changed, count)
 	}
@@ -366,7 +366,7 @@ func TestManagerPendingSessionRouteReservesSpawnEndpoint(t *testing.T) {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	manager.ReservePendingSessionRoute(record.ID, "sess-pending")
 
 	if endpointID, ok := manager.EndpointIDForPTYTarget("sess-pending"); !ok || endpointID != record.ID {
@@ -398,7 +398,7 @@ func TestManagerPendingSessionRouteExpires(t *testing.T) {
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	manager.mu.Lock()
 	manager.pending["sess-expired"] = pendingSessionRoute{
 		endpointID: record.ID,
@@ -418,7 +418,7 @@ func TestManagerEndpointIDForPathMatchesSessionDirectoryAndMainRepo(t *testing.T
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	_, _ = manager.upsertRemoteSession(record.ID, protocol.Session{
 		ID:        "sess-1",
 		Directory: "/srv/projects/worktree-a",
@@ -484,7 +484,7 @@ func TestManagerHandleRemoteSettingsUpdatedRefreshesDynamicAgentAvailability(t *
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	manager.mu.Lock()
 	manager.runtimes[record.ID].info.Capabilities = &protocol.EndpointCapabilities{
 		AgentsAvailable: []string{"codex"},
@@ -518,7 +518,7 @@ func TestManagerHandleRemoteSettingsUpdatedResolvesRemoteWebAction(t *testing.T)
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	manager.mu.Lock()
 	runtime := manager.runtimes[record.ID]
 	runtime.info.Capabilities = &protocol.EndpointCapabilities{
@@ -566,7 +566,7 @@ func TestManagerHandleRemoteSettingsUpdatedIgnoresUnrelatedPendingRemoteWebUpdat
 		t.Fatalf("AddEndpoint() error = %v", err)
 	}
 
-	manager := NewManager(endpointStore, nil, nil, nil, nil)
+	manager := NewManager(endpointStore, nil, nil, nil, nil, nil)
 	manager.mu.Lock()
 	runtime := manager.runtimes[record.ID]
 	runtime.info.Capabilities = &protocol.EndpointCapabilities{
@@ -741,7 +741,7 @@ func TestPublishConnectionAndSendHelloOrdersBeforeForwardedCommands(t *testing.T
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	manager := NewManager(store.New(), nil, nil, nil, nil)
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
 	manager.runtimes["endpoint-1"] = &endpointRuntime{}
 
 	// Fire ForwardEndpointCommand in a tight loop from before the connection
@@ -836,7 +836,7 @@ func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	manager := NewManager(store.New(), nil, nil, nil, nil)
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
 	manager.runtimes["endpoint-1"] = &endpointRuntime{conn: conn}
 	go func() {
 		_, _ = manager.consumeRemote(ctx, "endpoint-1", conn)
@@ -857,7 +857,7 @@ func TestManagerForwardBrowserControlReturnsOwningEndpointResult(t *testing.T) {
 }
 
 func TestManagerBrowserControlResponseMustComeFromOwningEndpoint(t *testing.T) {
-	manager := NewManager(store.New(), nil, nil, nil, nil)
+	manager := NewManager(store.New(), nil, nil, nil, nil, nil)
 	done := make(chan browserControlResult, 1)
 	manager.browserControls["request-1"] = pendingBrowserControl{
 		endpointID: "endpoint-1",

@@ -2910,6 +2910,12 @@ model InitialStateMessage {
   protocol_version?: string;
   source_fingerprint?: string;
   daemon_instance_id?: string;
+  /**
+   * The daemon id that owns this daemon's home-level state. Equal to
+   * daemon_instance_id on a home daemon; a different id means this daemon is an
+   * outpost of that home.
+   */
+  home_daemon_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];
   workspaces?: Workspace[];

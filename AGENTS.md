@@ -391,6 +391,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - `internal/ptyworker`: per-session process; production PTYs run here through
   `internal/pty`, not inside the daemon
 - `internal/store`: SQLite plus in-memory cache
+- `internal/enrollment`: who this daemon is (`daemon-id`) and whose it is
+  (`enrollment.json`) — the two files that decide whether home-level state may
+  live here. `Status.RequireHome` is the fence every garden/crew surface calls;
+  reach it from the daemon through `Daemon.requireHome`, never by reading the
+  record yourself
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
 - `internal/docstore`: document-store query semantics, SQL compilation, and the
   physical naming (no DB handle; `internal/store/documents.go` executes what it

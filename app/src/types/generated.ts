@@ -3374,6 +3374,12 @@ export interface InitialStateMessage {
     endpoints?:          Endpoint[];
     event:               InitialStateMessageEvent;
     github_hosts?:       string[];
+    /**
+     * The daemon id that owns this daemon's home-level state. Equal to
+     * daemon_instance_id on a home daemon; a different id means this daemon is an
+     * outpost of that home.
+     */
+    home_daemon_id?:     string;
     protocol_version?:   string;
     prs?:                PRElement[];
     repos?:              RepoElement[];
@@ -13321,6 +13327,7 @@ const typeMap: any = {
         { json: "endpoints", js: "endpoints", typ: u(undefined, a(r("Endpoint"))) },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
         { json: "github_hosts", js: "github_hosts", typ: u(undefined, a("")) },
+        { json: "home_daemon_id", js: "home_daemon_id", typ: u(undefined, "") },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },

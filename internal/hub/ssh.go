@@ -3,6 +3,7 @@ package hub
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -81,6 +82,28 @@ func remoteAttnCommand(profile string, args ...string) string {
 		bin += " " + shellQuote(arg)
 	}
 	return bin
+}
+
+// runSSHExit runs a remote script and hands back what the remote command said
+// *and* how it ended. runSSH collapses both into one error string, which is
+// enough for scripts that only pass or fail; a remote `attn` subcommand answers
+// in exit codes (a refusal is not a crash), and telling those apart from "this
+// binary has no such command" needs the code itself.
+func runSSHExit(ctx context.Context, target, profile, script string) (stdout, stderr string, exitCode int, err error) {
+	var errBuf bytes.Buffer
+	cmd := exec.CommandContext(ctx, "ssh", append(sshBaseArgs(target), remoteShellCommand(profile, script))...)
+	cmd.Stderr = &errBuf
+	out, runErr := cmd.Output()
+	stdout = strings.TrimSpace(string(out))
+	stderr = strings.TrimSpace(errBuf.String())
+	if runErr == nil {
+		return stdout, stderr, 0, nil
+	}
+	var exitErr *exec.ExitError
+	if errors.As(runErr, &exitErr) {
+		return stdout, stderr, exitErr.ExitCode(), nil
+	}
+	return stdout, stderr, -1, runErr
 }
 
 func runSSH(ctx context.Context, target, profile, script string) (string, error) {

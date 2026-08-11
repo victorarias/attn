@@ -394,7 +394,7 @@ func TestOpenMarkdownTargetsSelectedSession(t *testing.T) {
 func TestOpenMarkdownRejectsBareOpenAfterRemoteSessionSelection(t *testing.T) {
 	d, client, workspaceID := setupMarkdownWorkspace(t)
 	d.setSelectedSession("session-1")
-	d.hubManager = hub.NewManager(d.store, nil, nil, nil, nil)
+	d.hubManager = hub.NewManager(d.store, nil, nil, nil, nil, nil)
 	endpoint, err := d.hubManager.AddEndpoint("remote", "remote.example.test", "")
 	if err != nil {
 		t.Fatalf("add endpoint: %v", err)

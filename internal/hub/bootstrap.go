@@ -3,6 +3,7 @@ package hub
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -15,6 +16,7 @@ import (
 
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/enrollment"
 )
 
 const githubRepo = "victorarias/attn"
@@ -43,7 +45,12 @@ func NewBootstrapper(logf func(format string, args ...interface{})) *Bootstrappe
 	return &Bootstrapper{logf: logf}
 }
 
-func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile string) error {
+// EnsureRemoteReady installs the binary, records the remote's enrollment, and
+// leaves its daemon running. homeDaemonID is the id of the daemon doing the
+// dialing — the home this remote becomes an outpost of. It is empty when the
+// caller is not a home daemon itself, and then no enrollment is written: a
+// daemon that does not own a garden cannot tell another daemon it does.
+func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile, homeDaemonID string) error {
 	platform, err := b.detectRemotePlatform(ctx, sshTarget, profile)
 	if err != nil {
 		return fmt.Errorf("detect remote platform for %s: %w", sshTarget, err)
@@ -92,10 +99,82 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 		binaryUpdated = true
 	}
 
+	// Enroll before the daemon starts, so a remote coming up for the first time
+	// already knows whose outpost it is. A remote enrolled to a different home
+	// refuses, and that refusal stops the sync — re-homing is the operator's
+	// decision to make, on that machine.
+	if err := b.enrollRemote(ctx, sshTarget, profile, homeDaemonID); err != nil {
+		return err
+	}
+
 	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, profile, binaryUpdated); err != nil {
 		return fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
 	}
 	return nil
+}
+
+// enrollmentRefusedExitCode is what `attn enrollment enroll` exits with when the
+// remote is already an outpost of a different home. Any other non-zero code is a
+// remote that could not answer the question — an older binary without the
+// command, a missing data dir — which is logged and does not block the sync,
+// because enrollment is a record, not a precondition for sessions.
+const enrollmentRefusedExitCode = 3
+
+// withoutProfileBanner drops the `[attn profile=… socket=… port=…]` line every
+// remote `attn` command prints on stderr. The refusal below is shown to a person
+// whose endpoint just failed to sync; the remote's socket path is not part of
+// the answer.
+func withoutProfileBanner(message string) string {
+	lines := strings.Split(message, "\n")
+	kept := lines[:0]
+	for _, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "[attn profile=") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.TrimSpace(strings.Join(kept, "\n"))
+}
+
+func remoteEnrollScript(profile, homeDaemonID string) string {
+	return remoteAttnCommand(profile, "enrollment", "enroll", "--home", homeDaemonID, "--json")
+}
+
+func (b *Bootstrapper) enrollRemote(ctx context.Context, sshTarget, profile, homeDaemonID string) error {
+	if strings.TrimSpace(homeDaemonID) == "" {
+		b.logf("skipping enrollment of %s: this daemon is not a home daemon", sshTarget)
+		return nil
+	}
+	stdout, stderr, code, err := runSSHExit(ctx, sshTarget, profile, remoteEnrollScript(profile, homeDaemonID))
+	if err != nil {
+		b.logf("enrollment check on %s could not run: %v", sshTarget, err)
+		return nil
+	}
+	switch code {
+	case 0:
+		var result enrollment.Result
+		if jsonErr := json.Unmarshal([]byte(stdout), &result); jsonErr != nil {
+			b.logf("enrollment on %s returned unreadable output %q", sshTarget, stdout)
+			return nil
+		}
+		if result.Changed() {
+			b.logf("enrolled %s as an outpost of %s", sshTarget, homeDaemonID)
+		}
+		return nil
+	case enrollmentRefusedExitCode:
+		message := stderr
+		if message == "" {
+			message = stdout
+		}
+		return fmt.Errorf("%s is enrolled to another home: %s", sshTarget, withoutProfileBanner(message))
+	default:
+		detail := stderr
+		if detail == "" {
+			detail = stdout
+		}
+		b.logf("enrollment of %s skipped (exit %d): %s", sshTarget, code, detail)
+		return nil
+	}
 }
 
 func shouldInstallRemoteBinary(localVersion, remoteVersion string, preferSourceBuild bool, localHash, remoteHash string) bool {
