@@ -38,6 +38,7 @@ jobs:
             frontend:
               - 'app/src/**'
               - 'app/e2e/**'
+              - 'app/scripts/**'
               - 'app/test-harness/**'
               - 'app/public/**'
               - 'app/index.html'

@@ -95,6 +95,22 @@ describe('startWindowRecording', () => {
     expect(result.failure).toContain('no such window');
   });
 
+  it('treats a non-zero exit with a partial file as a failure', async () => {
+    const { calls, spawnFn } = makeSpawnFn();
+    const outputPath = path.join(tmpDir, 'partial.mp4');
+    const handle = startWindowRecording({ windowId: 7, outputPath, command: FAKE_RECORDER, spawnFn });
+
+    fs.writeFileSync(outputPath, 'headerless-partial-bytes');
+    const stopPromise = handle.stop();
+    calls[0].child.stderr.emit('data', 'writer failed');
+    calls[0].child.emit('exit', 4);
+
+    const result = await stopPromise;
+    expect(result.bytes).toBeGreaterThan(0);
+    expect(result.failure).toContain('exited 4');
+    expect(result.failure).toContain('writer failed');
+  });
+
   it('SIGKILLs a child that ignores SIGINT and names the tripwire', async () => {
     vi.useFakeTimers();
     const { calls, spawnFn } = makeSpawnFn();

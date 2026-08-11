@@ -102,7 +102,9 @@ export function startWindowRecording({ windowId, outputPath, command, spawnFn = 
           ? `recorder ignored SIGINT for ${FINALIZE_TRIPWIRE_MS}ms and was SIGKILLed; the file is likely unplayable`
           : bytes === 0
             ? `recorder exited ${code} with no output${stderr ? `: ${stderr.trim()}` : ''}`
-            : null;
+            : code !== 0
+              ? `recorder exited ${code} leaving a possibly unplayable file${stderr ? `: ${stderr.trim()}` : ''}`
+              : null;
       return { windowId, outputPath, bytes, exitCode: code, failure };
     },
   };
