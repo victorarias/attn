@@ -1,11 +1,10 @@
 # Showing instead of narrating
 
-Guidance for any text another reader must understand — a ticket
-description, a delegation brief, a comment, a status report, workspace
-context, a PR body. The reader is catching up, not watching you work: a
-paragraph makes them reconstruct the shape in their head; a sketch hands
-it to them. Pick the smallest view that makes the key point clear, keep
-the prose beside it short and plain, and skip the preamble.
+Guidance for any text another reader must understand. Make it easy to
+read without losing precision: plain words over jargon, short paragraphs
+over long ones, and a sketch wherever it says more than the sentences it
+replaces. Pick the smallest view that makes the key point clear, and
+skip the preamble.
 
 Every surface this text lands on renders markdown and mermaid, so all of
 these forms work everywhere.
@@ -89,6 +88,3 @@ calls, files, states, and boundaries needed to answer the reader's
 actual question. You may use one of these forms, you may use several;
 it is unlikely you will use all of them. Use your judgement and don't
 overwhelm the reader.
-
-(The forms and examples are adapted from the MIT-licensed `show-me`
-skill in humanlayer/skills.)
