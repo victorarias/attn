@@ -119,6 +119,11 @@ func run(ctx context.Context, opts Options, p prober) Report {
 		caps := agentdriver.EffectiveCapabilities(driver)
 		if launch.Model.Value != "" && !caps.HasModelPin {
 			add(fail("launch.model", fmt.Sprintf("agent %q does not support model pins", launch.Agent.Value), "Remove --model or select an agent that supports model pins."))
+		} else if resolvedModel, err := agentdriver.ResolveLaunchModel(launch.Agent.Value, launch.Model.Value); err != nil {
+			add(fail("launch.model", err.Error(), "Choose one of the listed models or omit --model to use the agent default."))
+		} else {
+			launch.Model.Value = resolvedModel
+			report.Launch.Model.Value = resolvedModel
 		}
 		if launch.Effort.Value != "" && !caps.HasEffortPin {
 			add(fail("launch.effort", fmt.Sprintf("agent %q does not support effort pins", launch.Agent.Value), "Remove --effort or select an agent that supports effort pins."))

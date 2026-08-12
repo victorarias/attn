@@ -137,11 +137,6 @@ func (d *Daemon) resolveDelegationAgent(sourceAgent string, requested *string) (
 	return driver.Name(), nil
 }
 
-// validateDelegationModelEffort rejects --model / --effort for agents whose
-// launch command cannot apply them, so the pin fails fast at delegate time
-// instead of being silently dropped by the spawned session. Values themselves
-// are passed through (aliases, full ids, and new effort levels stay legal
-// without an allowlist to rot); the agent CLI is the authority on them.
 func (d *Daemon) validateDelegationModelEffort(agent, model, effort string) error {
 	if model == "" && effort == "" {
 		return nil
@@ -163,6 +158,48 @@ func (d *Daemon) validateDelegationModelEffort(agent, model, effort string) erro
 		return fmt.Errorf("agent %q does not support --effort", agent)
 	}
 	return nil
+}
+
+// resolveDelegationModelEffort rejects pins the selected driver cannot apply and
+// resolves built-in model aliases through the same catalog preflight uses.
+func (d *Daemon) resolveDelegationModelEffort(agent, model, effort string) (string, error) {
+	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
+		return "", err
+	}
+	if _, plugin := d.ensurePluginRegistry().driver(agent); plugin {
+		return model, nil
+	}
+	resolvedModel, err := agentdriver.ResolveLaunchModel(agent, model)
+	if err != nil {
+		return "", err
+	}
+	return resolvedModel, nil
+}
+
+func resolveDelegationRepository(path, flagName string) (string, error) {
+	root, err := git.GetRepoRoot(path)
+	if err != nil {
+		return "", fmt.Errorf("%s %s is not in a Git repository", flagName, git.CanonicalizePath(path))
+	}
+	return git.ResolveMainRepoPath(root), nil
+}
+
+func validateDelegationRepositoryInputs(cwd string, request *protocol.DelegateWorktreeRequest) error {
+	if request == nil || strings.TrimSpace(cwd) == "" || strings.TrimSpace(protocol.Deref(request.Repo)) == "" {
+		return nil
+	}
+	cwdRepo, err := resolveDelegationRepository(cwd, "--cwd")
+	if err != nil {
+		return err
+	}
+	explicitRepo, err := resolveDelegationRepository(protocol.Deref(request.Repo), "--repo")
+	if err != nil {
+		return err
+	}
+	if git.CanonicalizePath(cwdRepo) == git.CanonicalizePath(explicitRepo) {
+		return nil
+	}
+	return fmt.Errorf("repository placement conflict: --cwd resolves to %s, but --repo resolves to %s; remove --repo to branch from --cwd, or make both flags point to the same repository", cwdRepo, explicitRepo)
 }
 
 func delegationPlacement(msg *protocol.DelegateMessage) string {
@@ -501,6 +538,9 @@ func (d *Daemon) createDelegationWorktree(baseDirectory, inferredRepo string, re
 	}
 	expectedPath = git.CanonicalizePath(expectedPath)
 	if _, statErr := os.Stat(expectedPath); statErr == nil {
+		if pathRepo, pathErr := resolveDelegationRepository(expectedPath, "--worktree-path"); pathErr == nil && git.CanonicalizePath(pathRepo) != git.CanonicalizePath(repo) {
+			return "", false, fmt.Errorf("repository placement conflict: selected repository resolves to %s, but --worktree-path resolves to %s; choose a worktree path from the selected repository or correct --repo/--cwd", repo, pathRepo)
+		}
 		wt := d.discoverWorktree(expectedPath)
 		if wt == nil || strings.TrimSpace(wt.Branch) != branch {
 			return "", false, fmt.Errorf("worktree path already exists and is not branch %q: %s", branch, expectedPath)
@@ -627,7 +667,8 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	}
 	model := strings.TrimSpace(protocol.Deref(msg.Model))
 	effort := strings.TrimSpace(strings.ToLower(protocol.Deref(msg.Effort)))
-	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
+	model, err = d.resolveDelegationModelEffort(agent, model, effort)
+	if err != nil {
 		return nil, err
 	}
 	sessionID := reservedSessionID
@@ -776,12 +817,22 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 				return nil, cwdErr
 			}
 			directory = validatedCwd
+			if repoErr := validateDelegationRepositoryInputs(directory, msg.Worktree); repoErr != nil {
+				return nil, repoErr
+			}
 		}
 		if directory == "" {
 			directory = source.Directory
 		}
 	default:
 		return nil, fmt.Errorf("unsupported placement %q", placement)
+	}
+
+	// Workspace placement decides where the pane appears. Without a worktree or
+	// explicit --cwd checkout, repository placement remains the source session's
+	// current checkout even when --workspace targets a mixed workspace.
+	if msg.Worktree == nil && strings.TrimSpace(protocol.Deref(msg.Cwd)) == "" {
+		directory = source.Directory
 	}
 
 	if err := d.applyDefaultDelegationWorktree(msg, placement, workspaceID, directory, sessionID, name); err != nil {

@@ -40,15 +40,39 @@ func passingProber(t *testing.T) prober {
 }
 
 func TestRunPassesWithConsistentEnvironment(t *testing.T) {
-	report := run(context.Background(), Options{Agent: "codex", Model: "gpt-test", Effort: "high", WorkingDir: t.TempDir()}, passingProber(t))
+	report := run(context.Background(), Options{Agent: "codex", Model: "gpt-5.6-sol", Effort: "high", WorkingDir: t.TempDir()}, passingProber(t))
 	if !report.OK() || report.Status != StatusPass {
 		t.Fatalf("report status = %q, checks=%+v", report.Status, report.Checks)
 	}
-	if report.Launch.Model.Value != "gpt-test" || report.Launch.Effort.Value != "high" {
+	if report.Launch.Model.Value != "gpt-5.6-sol" || report.Launch.Effort.Value != "high" {
 		t.Fatalf("launch = %+v", report.Launch)
 	}
 	assertCheck(t, report, "routing.daemon", StatusPass, "")
 	assertCheck(t, report, "protocol.app_daemon", StatusPass, "")
+}
+
+func TestRunUsesAuthoritativeModelResolution(t *testing.T) {
+	t.Run("resolves alias", func(t *testing.T) {
+		report := run(context.Background(), Options{Agent: "claude", Model: "opus", WorkingDir: t.TempDir()}, passingProber(t))
+		if !report.OK() || report.Launch.Model.Value != "claude-opus-5" {
+			t.Fatalf("report = %+v, want canonical claude-opus-5", report)
+		}
+	})
+
+	for _, test := range []struct {
+		name, agent, model, want string
+	}{
+		{name: "claude shorthand", agent: "claude", model: "opus-5", want: "claude-opus-5"},
+		{name: "codex family", agent: "codex", model: "gpt-5.6", want: "gpt-5.6-sol"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			report := run(context.Background(), Options{Agent: test.agent, Model: test.model, WorkingDir: t.TempDir()}, passingProber(t))
+			if report.OK() {
+				t.Fatalf("report unexpectedly passed: %+v", report)
+			}
+			assertCheck(t, report, "launch.model", StatusFail, test.want)
+		})
+	}
 }
 
 func TestRunReportsRootCausesAndActions(t *testing.T) {

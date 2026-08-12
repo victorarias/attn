@@ -1,0 +1,12 @@
+kind: fixed
+area: cli
+change: >
+  Delegation now rejects unknown built-in model identifiers before launch and
+  resolves supported aliases through the same catalog as preflight. Workspace
+  placement no longer silently chooses a different repository when
+  --no-worktree is used: the source checkout remains authoritative unless
+  --cwd explicitly selects another checkout, and conflicting Git locations
+  report both resolved repositories before any agent starts.
+symptom: >
+  A shorthand model could pass preflight but select an unintended fallback, or
+  --workspace --no-worktree could start an agent in another repository.

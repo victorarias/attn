@@ -670,6 +670,50 @@ func TestDelegateThreadsModelAndEffortIntoSpawn(t *testing.T) {
 	}
 }
 
+func TestDelegateResolvesAliasAndRejectsUnknownModelBeforeSpawn(t *testing.T) {
+	t.Run("alias resolves to canonical model", func(t *testing.T) {
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		backend := &fakeSpawnBackend{}
+		_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+		consumeDelegatedPrompt(t, backend)
+
+		if _, err := d.delegate(&protocol.DelegateMessage{
+			Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID,
+			Brief: "Use the supported alias.", Agent: protocol.Ptr("claude"), Model: protocol.Ptr("opus"),
+		}); err != nil {
+			t.Fatalf("delegate() error = %v", err)
+		}
+		spawn, ok := backend.LastSpawn()
+		if !ok || spawn.Model != "claude-opus-5" {
+			t.Fatalf("spawn = %+v, want canonical claude-opus-5", spawn)
+		}
+	})
+
+	for _, test := range []struct {
+		name, agent, model, want string
+	}{
+		{name: "claude shorthand", agent: "claude", model: "opus-5", want: "claude-opus-5"},
+		{name: "codex family", agent: "codex", model: "gpt-5.6", want: "gpt-5.6-sol"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+			backend := &fakeSpawnBackend{}
+			_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+
+			_, err := d.delegate(&protocol.DelegateMessage{
+				Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID,
+				Brief: "Reject this model before launch.", Agent: protocol.Ptr(test.agent), Model: protocol.Ptr(test.model),
+			})
+			if err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("delegate() error = %v, want guidance containing %q", err, test.want)
+			}
+			if len(backend.spawnOpts) != 1 {
+				t.Fatalf("spawn count = %d, want only source session", len(backend.spawnOpts))
+			}
+		})
+	}
+}
+
 func TestDelegateThreadsModelAndEffortIntoPluginDriver(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
@@ -1314,7 +1358,7 @@ func TestDelegateRejectsNameMatchingSourceSession(t *testing.T) {
 func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	_, sourceSessionID, sourceDir := setupDelegationSource(t, d, backend)
 	consumeDelegatedPrompt(t, backend)
 	targetDir := t.TempDir()
 	targetWorkspaceID := "workspace-target"
@@ -1338,7 +1382,7 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if result.WorkspaceID != targetWorkspaceID || result.Directory != targetDir {
+	if result.WorkspaceID != targetWorkspaceID || result.Directory != sourceDir {
 		t.Fatalf("result = %+v", result)
 	}
 	if workspace := d.store.GetWorkspace(targetWorkspaceID); workspace == nil || !workspace.Muted {
@@ -1349,7 +1393,7 @@ func TestDelegateTargetsExistingWorkspace(t *testing.T) {
 func TestDelegateTargetsPinnedEmptyWorkspace(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	backend := &fakeSpawnBackend{}
-	_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+	_, sourceSessionID, sourceDir := setupDelegationSource(t, d, backend)
 	consumeDelegatedPrompt(t, backend)
 	targetDir := t.TempDir()
 	targetWorkspaceID := "workspace-empty-pinned"
@@ -1373,7 +1417,7 @@ func TestDelegateTargetsPinnedEmptyWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatalf("delegate() error = %v", err)
 	}
-	if result.WorkspaceID != targetWorkspaceID || result.Directory != targetDir {
+	if result.WorkspaceID != targetWorkspaceID || result.Directory != sourceDir {
 		t.Fatalf("result = %+v", result)
 	}
 	if sessions := d.store.SessionsInWorkspace(targetWorkspaceID); len(sessions) != 1 || sessions[0] != result.SessionID {
@@ -1936,6 +1980,83 @@ func TestDelegateWorktreeAmbiguousWorkspaceRepoRequiresRepo(t *testing.T) {
 			t.Fatalf("worktree created at %s despite ambiguous repository", strayPath)
 		}
 	}
+}
+
+func TestDelegateNoWorktreeReusesSourceCheckoutInMixedWorkspace(t *testing.T) {
+	root := t.TempDir()
+	sourceRepo := initDelegationRepo(t, root, "source")
+	repoA := initDelegationRepo(t, root, "repo-a")
+	repoB := initDelegationRepo(t, root, "repo-b")
+
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	backend := &fakeSpawnBackend{}
+	_, sourceSessionID, _ := setupDelegationSourceAt(t, d, backend, sourceRepo)
+	consumeDelegatedPrompt(t, backend)
+
+	targetWorkspaceID := "workspace-mixed"
+	d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
+		Cmd: protocol.CmdRegisterWorkspace, ID: targetWorkspaceID, Title: "Mixed", Directory: repoA,
+	})
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-a", repoA)
+	addWorkspaceSessionAt(t, d, targetWorkspaceID, "session-b", repoB)
+
+	result, err := d.delegate(&protocol.DelegateMessage{
+		Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID,
+		Brief:     "Reuse the checkout this command was invoked from.",
+		Placement: protocol.Ptr(delegationPlacementExisting), WorkspaceID: protocol.Ptr(targetWorkspaceID),
+		AllowWorktreeReuse: protocol.Ptr(true),
+	})
+	if err != nil {
+		t.Fatalf("delegate() error = %v", err)
+	}
+	if result.WorkspaceID != targetWorkspaceID || result.Directory != sourceRepo || protocol.Deref(result.WorktreeCreated) {
+		t.Fatalf("result = %+v, want mixed workspace organization with source checkout %s", result, sourceRepo)
+	}
+}
+
+func TestDelegateRejectsConflictingRepositoryPlacement(t *testing.T) {
+	t.Run("cwd and repo", func(t *testing.T) {
+		root := t.TempDir()
+		repoA := initDelegationRepo(t, root, "repo-a")
+		repoB := initDelegationRepo(t, root, "repo-b")
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		backend := &fakeSpawnBackend{}
+		_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+
+		_, err := d.delegate(&protocol.DelegateMessage{
+			Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID, Brief: "Conflicting repositories.",
+			Placement: protocol.Ptr(delegationPlacementNew), Cwd: protocol.Ptr(repoA),
+			Worktree: &protocol.DelegateWorktreeRequest{Repo: protocol.Ptr(repoB), Branch: "feat/conflict"},
+		})
+		if err == nil || !strings.Contains(err.Error(), repoA) || !strings.Contains(err.Error(), repoB) || !strings.Contains(err.Error(), "remove --repo") {
+			t.Fatalf("delegate() error = %v, want both repositories and correction guidance", err)
+		}
+		if len(backend.spawnOpts) != 1 {
+			t.Fatalf("spawn count = %d, want only source session", len(backend.spawnOpts))
+		}
+	})
+
+	t.Run("selected repo and existing worktree path", func(t *testing.T) {
+		root := t.TempDir()
+		repoA := initDelegationRepo(t, root, "repo-a")
+		repoB := initDelegationRepo(t, root, "repo-b")
+		pathB := filepath.Join(root, "repo-b--shared")
+		runGitDaemon(t, repoB, "worktree", "add", "-b", "feat/shared", pathB)
+		d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+		backend := &fakeSpawnBackend{}
+		_, sourceSessionID, _ := setupDelegationSource(t, d, backend)
+
+		_, err := d.delegate(&protocol.DelegateMessage{
+			Cmd: protocol.CmdDelegate, SourceSessionID: sourceSessionID, Brief: "Conflicting worktree path.",
+			Worktree: &protocol.DelegateWorktreeRequest{
+				Repo: protocol.Ptr(repoA), Branch: "feat/shared", Path: protocol.Ptr(pathB),
+			},
+			AllowWorktreeReuse: protocol.Ptr(true),
+		})
+		if err == nil || !strings.Contains(err.Error(), repoA) || !strings.Contains(err.Error(), repoB) || !strings.Contains(err.Error(), "--worktree-path") {
+			t.Fatalf("delegate() error = %v, want both repositories and --worktree-path guidance", err)
+		}
+	})
 }
 
 // TestDelegateWorktreeExplicitRepoOverridesWorkspaceSessions confirms --repo

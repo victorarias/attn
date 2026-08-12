@@ -742,18 +742,18 @@ task source:
   --ticket <id>               adopt an existing ticket and use its description
   --confirm                   take over a ticket with a non-orphan assignee
 
-placement:
-  (no flags)                 add a pane to the source workspace; Git repositories
-                             get a new worktree automatically
-  --new-workspace            create a workspace using the source directory
-  --workspace <id>           add a pane to an existing workspace
-  --cwd <path>               create a workspace at an existing directory
-  --worktree <branch>        choose the new worktree's branch
-  --no-worktree              reuse the resolved checkout instead
+workspace placement (where the pane appears):
+  (no flags)                 add a pane to the source workspace
+  --new-workspace            create a workspace for the delegated pane
+  --workspace <id>           add a pane to an existing workspace; this does not
+                             choose that workspace's repository
+  --cwd <path>               create a workspace and use this checkout/repository
 
-worktree options:
-  combine with any placement (current, --workspace, or --new-workspace);
-  combining with --cwd creates a worktree of the repo at that directory
+repository placement (where the agent runs):
+  (no flags)                 create a worktree from the source checkout
+  --no-worktree              reuse the source checkout; with --workspace, only
+                             the pane moves to the target workspace
+  --worktree <branch>        choose the new worktree's branch
   --repo <path>              main repository (defaults to the repository the
                              target workspace's sessions are in)
   --from <ref>               branch or ref to start from
@@ -762,8 +762,8 @@ worktree options:
 session options:
 	--request-id <id>          stable retry key (generated and printed when omitted; op- is reserved)
   --agent <name>             configured prompt-capable built-in or plugin agent
-  --model <name>             pin the agent's model (alias or full id, e.g.
-                             "opus" or "claude-opus-4-8"; defaults to the
+  --model <name>             pin a supported model (aliases resolve to canonical
+                             ids, e.g. "opus" to "claude-opus-5"; defaults to the
                              agent's own default)
   --effort <level>           pin the agent's reasoning effort (claude: low,
                              medium, high, xhigh, max; codex: minimal, low,

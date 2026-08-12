@@ -84,7 +84,11 @@ Plugin agents work only when they declare delegated initial-prompt support.
 Copilot delegation is currently unsupported.
 
 `--model` and `--effort` pin the delegated agent's model and reasoning effort
-for that delegation only; omitted, the agent uses its own defaults. `--effort`
+for that delegation only; omitted, the agent uses its own defaults. Built-in
+model aliases resolve to their canonical IDs (`opus` becomes
+`claude-opus-5`), and unknown IDs fail before launch with the supported models
+and a suggestion when one is close. `attn preflight` uses this same resolver.
+`--effort`
 takes the agent's native levels (claude: low, medium, high, xhigh, max; codex:
 minimal, low, medium, high, xhigh). Agents without a native mechanism (e.g.
 copilot) reject these flags.
@@ -112,6 +116,13 @@ workspace that fits its domain rather than creating a new workspace per item.
 If no existing workspace fits: no placement flag adds the session to the
 current workspace, `--new-workspace` creates a separate workspace from the
 source directory, and `--cwd` creates one at an existing directory.
+
+Workspace placement decides where the pane appears; repository placement
+decides where the agent runs. `--workspace` never makes its recorded directory
+the checkout for `--no-worktree`: that combination reuses the source session's
+current checkout. `--cwd` is the explicit checkout override and creates a new
+workspace there. Conflicting explicit repository inputs fail before launch and
+show both resolved repositories.
 
 `attn list` marks sessions in hidden workspaces with `workspace_muted: true`.
 When the source session is the chief of staff, delegating into a muted existing
