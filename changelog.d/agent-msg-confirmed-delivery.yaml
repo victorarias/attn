@@ -1,0 +1,11 @@
+kind: fixed
+area: cli
+change: >
+  `attn agent msg` now says a message was delivered only once the target
+  actually picked it up. A session with something in front of its prompt — a
+  dialog, an overlay, a composer that does not have focus yet — reports the
+  same not-busy title as one waiting for input, and silently swallowed the
+  message while the sender was told it landed. Delivery now waits for the
+  target to start the turn the message asked for, presses Enter once more if
+  the text is sitting unsent, and otherwise keeps the message queued and says
+  so, so it lands on the target's next state change instead of disappearing.

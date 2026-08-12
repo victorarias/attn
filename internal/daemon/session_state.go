@@ -170,6 +170,10 @@ func (d *Daemon) applyState(change sessionStateChange) bool {
 	if profile.broadcast {
 		d.broadcastSessionStateChanged(change.sessionID)
 	}
+	// A target that starts working has taken what was typed into it; this is the
+	// receipt a delivery in flight is waiting on. Before the drain, so a message
+	// still being confirmed is not counted as one owed.
+	d.noteAgentMessageTaken(change.sessionID, change.state)
 	// Last, and only for a target that owes one: a message that could not be
 	// typed when it was sent has no other rail back.
 	d.drainAgentMessagesAfterStateChange(change.sessionID, change.state)

@@ -110,6 +110,12 @@ func TestMain(m *testing.M) {
 	// TestTypeDoorbellDelaysEnterAfterThePaste restores a delay to pin the gap.
 	doorbellSubmitDelay = 0
 
+	// Same reason for the other half of a delivery: a fake PTY never reports
+	// working, so confirmation would time out on every send. Zero trusts the
+	// write, which is what the daemon did before confirmation existed —
+	// TestAgentMsgQueuesWhenTheTargetNeverTakesIt restores a window to pin it.
+	agentMessageTakenWindow = 0
+
 	// Plugin-process helper subprocesses (TestDaemonPluginProcessHelper,
 	// TestPluginDriverFixtureProcess) re-exec this same test binary with a
 	// single -test.run and rely on ATTN_SOCKET_PATH being the exact value

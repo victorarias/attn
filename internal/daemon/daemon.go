@@ -243,6 +243,7 @@ type Daemon struct {
 	agentMessageMu        sync.Mutex
 	queuedAgentMessages   map[string]bool
 	drainingAgentMessages map[string]bool
+	agentMessageTaken     map[string][]chan struct{}
 	agentMessageDrainHook func(sessionID string, delivered int) // tests only; nil in production
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
