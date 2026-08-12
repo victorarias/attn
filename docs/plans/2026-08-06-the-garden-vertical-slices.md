@@ -94,8 +94,9 @@ to fix.
   surface exists to replace. Prose quality for crown bodies and notes is
   an open problem outside this plan's scope — the gate designed for it
   died in calibration; what was measured is in
-  [the first-principles record](2026-08-12-plain-agent-prose-first-principles.md). Live queries, bus change events, and revision-checked writes
-  come free; schema can move fast while the shape settles. Single-writer
+  [the first-principles record](2026-08-12-plain-agent-prose-first-principles.md).
+  Live queries, bus change events, and revision-checked writes come
+  free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
 - **One primitive.** A **plot** is a seed with children and execution
