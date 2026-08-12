@@ -191,6 +191,13 @@ const (
 	// drops a queried field must end the subscriptions using it. No wire entry.
 	FactDocumentCollectionRedeclared = "document.collection.redeclared"
 
+	// FactGardenPlanted: a seed exists. Subject is the seed id — every garden
+	// fact names its seed, which is what lets a future sync engine be nothing but
+	// a durable consumer with a cursor that re-reads the document. Published
+	// after the write it describes has committed, so a consumer that reads it
+	// always finds the seed.
+	FactGardenPlanted = "garden.planted"
+
 	// App registry facts; subject is the app's name.
 	//
 	// Neither has an entry in wireProjections, and that is not an omission: the
@@ -368,6 +375,11 @@ func buildWireProjections() []projection {
 			// Every ticket fact re-pushes the board — the wire shape clients expect.
 			filter: bus.Filter{"ticket.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
+		},
+		{
+			// Every garden fact re-pushes the garden; the panel renders a list.
+			filter: bus.Filter{"garden.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectGardenSeeds() },
 		},
 		{
 			filter: bus.Filter{"pr.*"},
@@ -606,6 +618,7 @@ func (d *Daemon) projectSnapshot(key string, push func()) {
 const (
 	snapshotSessions    = "sessions_updated"
 	snapshotTickets     = "tickets_updated"
+	snapshotGarden      = "garden_seeds_updated"
 	snapshotPRs         = "prs_updated"
 	snapshotRepos       = "repos_updated"
 	snapshotAuthors     = "authors_updated"

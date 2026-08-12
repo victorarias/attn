@@ -248,6 +248,9 @@ func main() {
 	case "enrollment":
 		maybePrintProfileBanner()
 		runEnrollment()
+	case "seed":
+		maybePrintProfileBanner()
+		runSeed()
 	case "doc":
 		maybePrintProfileBanner()
 		runDoc()
@@ -657,6 +660,7 @@ commands:
   db <command>                      database maintenance (restore from backup)
   bus <command>                     event bus: consumer cursors, lag, kill switch
   enrollment <command>              this daemon's home: status, enroll, leave
+  seed <command>                    the garden: plant, ls, show, export
   doc <command>                     document store: collections, documents, live queries
   app <command>                     apps: list, status, enable, disable, remove
   vision-check <image> <question>   answer a question about an image (single LLM call)

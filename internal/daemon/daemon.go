@@ -452,6 +452,8 @@ type Daemon struct {
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
+	gardenBroadcastHook   func([]protocol.Seed)                     // optional, tests only
+	gardenMintID          func() (string, error)                    // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every
@@ -986,6 +988,7 @@ func (d *Daemon) Start() error {
 	if err := d.ensureEnrollment(); err != nil {
 		return fmt.Errorf("ensure enrollment record: %w", err)
 	}
+	d.ensureGardenCollections()
 	if d.hubManager == nil {
 		d.hubManager = hub.NewManager(
 			d.store,
@@ -2721,6 +2724,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	case protocol.CmdAgentMsg: // wire: agent_msg
 		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
+	case protocol.CmdSeedPlant: // wire: seed_plant
+		d.handleSeedPlant(conn, msg.(*protocol.SeedPlantMessage))
+	case protocol.CmdSeedList: // wire: seed_list
+		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
+	case protocol.CmdSeedShow: // wire: seed_show
+		d.handleSeedShow(conn, msg.(*protocol.SeedShowMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

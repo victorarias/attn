@@ -19,6 +19,7 @@ import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import { AutomationsPanel } from './components/AutomationsPanel';
+import { GardenPanel } from './components/GardenPanel';
 import {
   useWorkflowRunsStore,
   selectLatestWorkflowRunForSession,
@@ -212,6 +213,28 @@ function AutomationsIcon() {
         strokeLinejoin="round"
       />
       <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function GardenIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 14V7.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M8 7.4C8 5.3 6.4 3.6 4.2 3.6c0 2.1 1.6 3.8 3.8 3.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 7.4c0-2.1 1.6-3.8 3.8-3.8 0 2.1-1.6 3.8-3.8 3.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -414,6 +437,7 @@ function App() {
     daemonSessions,
     setDaemonSessions,
     setTickets,
+    setSeeds,
     prs,
     setPRs,
     setRepoStates,
@@ -594,6 +618,7 @@ function App() {
       setNotificationsChangeSignal((n) => n + 1);
     },
     onTicketsUpdate: setTickets,
+    onSeedsUpdate: setSeeds,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -1063,7 +1088,7 @@ function AppContent({
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets } = useDaemonStore();
+  const { repoStates, authorStates, tickets, seeds } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1285,7 +1310,7 @@ function AppContent({
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations';
+  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations' | 'garden';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1313,6 +1338,7 @@ function AppContent({
         attention: false,
         ticketDetail: false,
         automations: false,
+        garden: false,
     },
     stack: [],
   });
@@ -1651,6 +1677,7 @@ function AppContent({
   const attentionPanelOpen = openDockPanels.attention;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
   const automationsPanelOpen = openDockPanels.automations;
+  const gardenPanelOpen = openDockPanels.garden;
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
     || settingsOpen
@@ -3565,8 +3592,16 @@ function AppContent({
       active: automationsPanelOpen,
       onClick: () => toggleDockPanel('automations'),
     },
+    {
+      id: 'garden',
+      title: gardenPanelOpen ? 'Hide the garden' : 'Show the garden',
+      icon: <GardenIcon />,
+      active: gardenPanelOpen,
+      onClick: () => toggleDockPanel('garden'),
+    },
   ]), [
     activeSessionId,
+    activeRemoteSession,
     remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,
@@ -3581,6 +3616,7 @@ function AppContent({
     notificationsUnread,
     hasCriticalNotification,
     automationsPanelOpen,
+    gardenPanelOpen,
     toggleNotificationsPanel,
   ]);
 
@@ -4106,6 +4142,20 @@ function AppContent({
                   onOpenTicket={handleOpenTicketDetail}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
+                />
+              ),
+            },
+            {
+              id: 'garden',
+              isOpen: gardenPanelOpen,
+              width: 'clamp(380px, 34vw, 560px)',
+              className: 'dock-panel dock-panel--garden',
+              children: (
+                <GardenPanel
+                  isOpen={gardenPanelOpen}
+                  onClose={() => closeDockPanel('garden')}
+                  seeds={seeds}
+                  workspaceId={activeWorkspaceId ?? null}
                 />
               ),
             },

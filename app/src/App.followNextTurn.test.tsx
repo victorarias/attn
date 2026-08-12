@@ -203,6 +203,7 @@ describe('waiting at home for the next turn', () => {
       prs: [], setPRs: vi.fn(),
       repoStates: [], setRepoStates: vi.fn(),
       authorStates: [], setAuthorStates: vi.fn(),
+      seeds: [], setSeeds: vi.fn(),
     }));
 
     const fn = vi.fn();
