@@ -421,6 +421,21 @@ enough to say out loud, with no character pair anyone confuses, and no `/`, so
 qualifying one with its owning daemon at a federation boundary stays a matter of
 prefixing rather than a re-identification.
 
+A seed's life runs `planted` → `growing` → `harvested` or `withered`, with
+`dormant` off to the side. **Tending** is the atomic claim: it sets the
+**tender** — the session and crew member holding the seed — and starts it
+growing in one move, and a seed has one tender at a time. **Parking** pauses a
+seed deliberately (`dormant`) and lets go of the claim; tending it again picks
+it back up. **Harvesting** closes it as done, with a reason, and **withering**
+closes it as abandoned. **Replanting** reopens a closed seed — a closed seed
+reopens before it moves again, which is why replant is the only verb a
+harvested seed answers.
+
+A **note** is one entry on a seed's trail: what happened and what was learned,
+written for whoever tends that seed next. Notes are anchored to the work and
+routed to nobody — a message with an addressee is a message, not a note — and
+they are read where the tender already looks, in the seed's own `show`.
+
 Plan:
 [docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
 

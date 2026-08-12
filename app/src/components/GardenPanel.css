@@ -79,6 +79,12 @@
   padding: 2px 5px;
 }
 
+.garden-panel__capped {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0 0 8px;
+}
+
 .garden-panel__list {
   display: flex;
   flex-direction: column;
@@ -150,12 +156,52 @@
   background: var(--color-warning);
 }
 
-.garden-seed__title {
+/* Title on top, then the line that says what is happening to it. Two lines
+   rather than one crowded row: state and tender are what the panel is for in
+   slice 2, and they must be readable without expanding a seed. */
+.garden-seed__main {
+  display: flex;
   flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.garden-seed__title {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.garden-seed__line {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.garden-seed__state {
+  color: var(--color-text-secondary);
+  flex: none;
+  font-size: var(--font-size-xs);
+}
+
+.garden-seed.is-growing .garden-seed__state {
+  color: var(--accent);
+}
+
+.garden-seed__tender {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-seed__line .garden-seed__id {
+  margin-left: auto;
 }
 
 .garden-seed__id {

@@ -2939,6 +2939,10 @@ model InitialStateMessage {
   warnings?: DaemonWarning[];
   tickets?: TicketRow[];
   seeds?: Seed[];
+  // How many seeds the garden holds, beside the bounded `seeds`. Carried here
+  // as well as on garden_seeds_updated so a client that connects to an
+  // over-large garden knows it is short before anything moves.
+  seeds_total?: int32;
 }
 
 model EndpointStatusChangedMessage {
@@ -4293,6 +4297,9 @@ model SeedListResult {
   "workspace_id": string;
   // Whether the answer covered the whole garden.
   "all": boolean;
+  // How many seeds the scope holds. Equal to `seeds`'s length until the list
+  // hits its bound, and then the receipt that says a list ended early.
+  "total": int32;
 }
 
 model SeedShowMessage {
@@ -4302,6 +4309,69 @@ model SeedShowMessage {
 
 model SeedShowResult {
   "seed": Seed;
+  // The newest entries on the seed's trail, and how many it holds. Notes ride
+  // the read the tender already runs: a trail nobody is told to look at is the
+  // unread bulletin board this surface replaces. The list is bounded, so
+  // `total` is what makes the shortfall visible rather than silent.
+  "notes": SeedNote[];
+  "notes_total": int32;
+}
+
+// One lifecycle move. The five verbs share a command because they are one state
+// machine: the daemon reads the seed, checks the move against the state it is
+// actually in, and refuses by name — the seed, its state, and the way out.
+model SeedTransitionMessage {
+  "cmd": "seed_transition";
+  "source_session_id"?: string;
+  "seed_id": string;
+  // tend | park | harvest | wither | replant.
+  "verb": string;
+  // Why it closed. Harvest requires one; wither may be wordless.
+  "reason"?: string;
+  // The crew member asking, recorded as the tender on a claim.
+  "member"?: string;
+}
+
+model SeedTransitionResult {
+  "seed": Seed;
+}
+
+// One entry on a seed's trail: what happened and what was learned, written for
+// whoever tends the seed next. A note is anchored to the work and routed to
+// nobody — directed messages are their own surface.
+model SeedNote {
+  "id": string;
+  "seed_id": string;
+  // note today; slice 4 adds handoff.
+  "kind": string;
+  "body": string;
+  "author_session": string;
+  "author_member": string;
+  "created_at": string;
+}
+
+model SeedNoteMessage {
+  "cmd": "seed_note";
+  "source_session_id"?: string;
+  "seed_id": string;
+  "body": string;
+  "member"?: string;
+}
+
+model SeedNoteResult {
+  "note": SeedNote;
+}
+
+// The whole trail, newest first — what `show`'s bounded list points at.
+model SeedNotesMessage {
+  "cmd": "seed_notes";
+  "seed_id": string;
+  "limit"?: int32;
+}
+
+model SeedNotesResult {
+  "notes": SeedNote[];
+  "total": int32;
 }
 
 // The whole garden, re-pushed whenever a seed changes. Clients filter by
@@ -4680,6 +4750,9 @@ model Response {
   seed_plant_result?: SeedPlantResult;
   seed_list_result?: SeedListResult;
   seed_show_result?: SeedShowResult;
+  seed_transition_result?: SeedTransitionResult;
+  seed_note_result?: SeedNoteResult;
+  seed_notes_result?: SeedNotesResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;

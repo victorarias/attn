@@ -126,9 +126,10 @@ describe('useDaemonSocket garden', () => {
   it('seeds the garden from initial_state', async () => {
     const { onSeedsUpdate } = await renderWithGarden([seed('s-aaa111', 'already planted')]);
 
-    expect(onSeedsUpdate).toHaveBeenCalledWith([
-      expect.objectContaining({ id: 's-aaa111', title: 'already planted' }),
-    ]);
+    expect(onSeedsUpdate).toHaveBeenCalledWith(
+      [expect.objectContaining({ id: 's-aaa111', title: 'already planted' })],
+      1,
+    );
   });
 
   it('replaces the garden on every planting broadcast', async () => {
@@ -142,10 +143,10 @@ describe('useDaemonSocket garden', () => {
       });
     });
 
-    expect(onSeedsUpdate).toHaveBeenLastCalledWith([
-      expect.objectContaining({ id: 's-bbb222' }),
-      expect.objectContaining({ id: 's-aaa111' }),
-    ]);
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ id: 's-bbb222' }), expect.objectContaining({ id: 's-aaa111' })],
+      2,
+    );
   });
 
   // An outpost has no garden, and a daemon older than the app sends no seeds at
@@ -154,6 +155,41 @@ describe('useDaemonSocket garden', () => {
   it('reads a garden-less daemon as an empty garden', async () => {
     const { onSeedsUpdate } = await renderWithGarden();
 
-    expect(onSeedsUpdate).toHaveBeenCalledWith([]);
+    expect(onSeedsUpdate).toHaveBeenCalledWith([], 0);
+  });
+
+  // The push is bounded. When the garden outgrows one push the total is what
+  // keeps the shortfall visible, so it has to survive the trip: a callback that
+  // drops it turns a truncated list back into a silent one.
+  it('carries how many seeds the garden holds, not just the ones it sent', async () => {
+    const { ws, onSeedsUpdate } = await renderWithGarden();
+
+    act(() => {
+      ws.emit({
+        event: 'garden_seeds_updated',
+        seeds: [seed('s-bbb222', 'the newest one')],
+        total: 1421,
+      });
+    });
+
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ id: 's-bbb222' })],
+      1421,
+    );
+  });
+
+  // A daemon a version behind sends no total at all. Reading that as zero would
+  // make the panel claim the garden is smaller than the list it is showing.
+  it('reads a total-less push as exactly what it sent', async () => {
+    const { ws, onSeedsUpdate } = await renderWithGarden();
+
+    act(() => {
+      ws.emit({ event: 'garden_seeds_updated', seeds: [seed('s-ccc333', 'no total here')] });
+    });
+
+    expect(onSeedsUpdate).toHaveBeenLastCalledWith(
+      [expect.objectContaining({ id: 's-ccc333' })],
+      1,
+    );
   });
 });

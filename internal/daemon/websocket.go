@@ -794,6 +794,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Warnings:          d.getWarnings(),
 		Tickets:           d.ticketsForBroadcast(),
 		Seeds:             d.seedsForBroadcast(),
+		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

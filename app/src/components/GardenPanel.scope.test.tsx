@@ -33,9 +33,29 @@ describe('GardenPanel scope', () => {
   const elsewhere = seed({ id: 's-away11', title: 'planted elsewhere', workspace_id: 'ws-2' });
   const unplaced = seed({ id: 's-none11', title: 'planted with no workspace' });
 
+  // The push is capped. A list that ends at the cap without saying so reads as
+  // the whole garden, which is the silent truncation the house rule forbids: the
+  // reader has to be told the limit was hit and by how much.
+  it('says what it is not showing when the garden outgrew one push', () => {
+    render(
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={1421} seeds={[here]} workspaceId="ws-1" />,
+    );
+
+    expect(screen.getByText(/holds 1421 seeds/)).toBeInTheDocument();
+    expect(screen.getByText(/newest 1/)).toBeInTheDocument();
+  });
+
+  it('says nothing about a cap when the whole garden fit', () => {
+    render(
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={[here, elsewhere, unplaced]} workspaceId="ws-1" />,
+    );
+
+    expect(screen.queryByText(/holds/)).not.toBeInTheDocument();
+  });
+
   it('shows only this workspace, and the whole garden on request', () => {
     render(
-      <GardenPanel isOpen onClose={vi.fn()} seeds={[here, elsewhere, unplaced]} workspaceId="ws-1" />,
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={[here, elsewhere, unplaced]} workspaceId="ws-1" />,
     );
 
     expect(screen.getByText('planted here')).toBeInTheDocument();
@@ -51,7 +71,7 @@ describe('GardenPanel scope', () => {
   // On the dashboard there is no workspace to scope to. Filtering by an absent id
   // would render an empty garden and read as "nothing is planted".
   it('shows the whole garden when there is no workspace to scope to', () => {
-    render(<GardenPanel isOpen onClose={vi.fn()} seeds={[here, elsewhere]} workspaceId={null} />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={2} seeds={[here, elsewhere]} workspaceId={null} />);
 
     expect(screen.getByText('planted here')).toBeInTheDocument();
     expect(screen.getByText('planted elsewhere')).toBeInTheDocument();
@@ -59,7 +79,7 @@ describe('GardenPanel scope', () => {
   });
 
   it('names the way in when the workspace has nothing planted', () => {
-    render(<GardenPanel isOpen onClose={vi.fn()} seeds={[elsewhere]} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[elsewhere]} workspaceId="ws-1" />);
 
     expect(screen.getByText(/Nothing planted in this workspace yet/)).toBeInTheDocument();
     expect(screen.getByText(/attn seed plant/)).toBeInTheDocument();
@@ -72,7 +92,7 @@ describe('GardenPanel scope', () => {
       workspace_id: 'ws-1',
       body: 'the plan itself',
     });
-    render(<GardenPanel isOpen onClose={vi.fn()} seeds={[withBody, here]} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={2} seeds={[withBody, here]} workspaceId="ws-1" />);
 
     expect(screen.queryByText('the plan itself')).not.toBeInTheDocument();
 

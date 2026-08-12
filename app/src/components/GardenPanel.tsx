@@ -17,6 +17,10 @@ interface GardenPanelProps {
   isOpen: boolean;
   onClose: () => void;
   seeds: Seed[];
+  // How many seeds the garden holds. Larger than seeds.length only when the
+  // garden outgrew one push, and then the panel says so: a list that ends at a
+  // cap without saying it reads as the whole garden.
+  seedsTotal: number;
   // The workspace the user is looking at; null on the dashboard, where the only
   // honest scope is the whole garden.
   workspaceId: string | null;
@@ -50,7 +54,15 @@ function statusClass(status: string): string {
   }
 }
 
-export function GardenPanel({ isOpen, onClose, seeds, workspaceId }: GardenPanelProps) {
+// tenderOf names whoever holds the seed: the crew member if there is one,
+// because that is the name a person says, and the claiming session otherwise. A
+// session id is not pretty, but "somebody holds this" is the fact the panel owes
+// the reader — showing nothing would read as unclaimed.
+function tenderOf(seed: Seed): string {
+  return seed.tender_member || seed.tender_session || '';
+}
+
+export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }: GardenPanelProps) {
   // Whole-garden view. Sticky across workspace switches on purpose: it is a
   // reading mode, not a property of the workspace.
   const [showAll, setShowAll] = useState(false);
@@ -86,6 +98,12 @@ export function GardenPanel({ isOpen, onClose, seeds, workspaceId }: GardenPanel
         </div>
       </div>
 
+      {seedsTotal > seeds.length && (
+        <p className="garden-panel__capped">
+          The garden holds {seedsTotal} seeds; this panel has the newest {seeds.length}.
+        </p>
+      )}
+
       {scoped.length === 0 ? (
         <p className="garden-panel__empty">
           {scopedToWorkspace
@@ -109,16 +127,25 @@ export function GardenPanel({ isOpen, onClose, seeds, workspaceId }: GardenPanel
                   onClick={() => setExpandedId((cur) => (cur === seed.id ? null : seed.id))}
                 >
                   <span className="garden-seed__status" aria-hidden="true" />
-                  <span className="garden-seed__title">{seed.title}</span>
-                  <span className="garden-seed__id">{seed.id}</span>
-                  <span className="garden-seed__planted">{formatPlantedAt(seed.created_at)}</span>
+                  <span className="garden-seed__main">
+                    <span className="garden-seed__title">{seed.title}</span>
+                    <span className="garden-seed__line">
+                      <span className="garden-seed__state">{seed.status}</span>
+                      {tenderOf(seed) && (
+                        <span className="garden-seed__tender">tended by {tenderOf(seed)}</span>
+                      )}
+                      <span className="garden-seed__id">{seed.id}</span>
+                      <span className="garden-seed__planted">{formatPlantedAt(seed.created_at)}</span>
+                    </span>
+                  </span>
                 </button>
                 {expanded && (
                   <div className="garden-seed__detail">
                     <div className="garden-seed__meta">
                       <span>{seed.status}</span>
                       {seed.planter_member && <span>planted by {seed.planter_member}</span>}
-                      {seed.tender_member && <span>tended by {seed.tender_member}</span>}
+                      {tenderOf(seed) && <span>tended by {tenderOf(seed)}</span>}
+                      {seed.reason && <span>{seed.reason}</span>}
                       {seed.template && <span>packet</span>}
                       {seed.gate && <span>gate</span>}
                     </div>

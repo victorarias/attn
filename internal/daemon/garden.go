@@ -14,8 +14,14 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// The garden's daemon half: the collections it lives in, the three commands
-// agents plant and read with, and the snapshot the app's panel renders.
+// The garden's daemon half: the collections it lives in, the commands agents
+// plant, move and read seeds with, and the snapshot the app's panel renders.
+//
+// The daemon is where a lifecycle move is decided. It reads the seed, asks
+// internal/garden whether the move is legal from the state the seed is actually
+// in, and writes the answer against the revision it read — so two sessions
+// racing for the same claim produce one tender and one named refusal, not two
+// winners.
 //
 // Every command passes the enrollment fence first. The garden has exactly one
 // owner — the home daemon — and an outpost holds no part of it, not even a
@@ -98,6 +104,32 @@ func (d *Daemon) plantSeed(schema docstore.CollectionSchema, seed garden.Seed) (
 	return *doc, nil
 }
 
+// writeSeed stores a seed the caller already read and changed, refusing the
+// write if the document moved underneath it. Every lifecycle move goes through
+// here, so the domain fact and the docstore's own change fact are published
+// together, in that order, exactly once.
+func (d *Daemon) writeSeed(schema docstore.CollectionSchema, seed garden.Seed, expected int64, fact string) (docstore.Document, error) {
+	body, err := seed.Encode()
+	if err != nil {
+		return docstore.Document{}, err
+	}
+	changed := documentChangedFact(garden.Namespace, garden.CollectionSeeds, seed.ID, false)
+	written, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+		Schema: schema, ID: seed.ID, Body: body, Expected: &expected,
+	}, changed, time.Now())
+	if err != nil {
+		return docstore.Document{}, err
+	}
+	d.announceCommittedWrite(changed, written.Seq)
+	d.publishFact(fact, seed.ID, nil)
+
+	doc, found, err := d.store.GetDocument(schema, seed.ID)
+	if err != nil || !found {
+		return docstore.Document{ID: seed.ID, Body: body, Rev: written.Rev}, nil
+	}
+	return *doc, nil
+}
+
 // readSeed reads one seed by id, refusing a malformed id before it reaches the
 // store so the caller is told what a seed id looks like.
 func (d *Daemon) readSeed(id string) (garden.Seed, docstore.Document, error) {
@@ -155,15 +187,21 @@ func (d *Daemon) querySeeds(workspaceID string, scoped bool, limit int) ([]proto
 	return out, nil
 }
 
-// countSeeds is what makes a truncated push honest: the panel shows a bounded
-// list and says how many the garden holds.
-func (d *Daemon) countSeeds() int {
+// countSeeds is what makes a truncated read honest: every surface shows a
+// bounded list beside the count of what the same scope holds. It takes the
+// scope querySeeds takes, so a workspace-scoped list is compared against its
+// own workspace and not against the whole garden.
+func (d *Daemon) countSeeds(workspaceID string, scoped bool) int {
 	if d.store == nil {
 		return 0
 	}
-	read, found, err := d.store.CountQuery(docstore.Query{
-		Namespace: garden.Namespace, Collection: garden.CollectionSeeds,
-	})
+	q := docstore.Query{Namespace: garden.Namespace, Collection: garden.CollectionSeeds}
+	if scoped {
+		q.Filters = append(q.Filters, docstore.Filter{
+			Field: "workspace_id", Op: docstore.OpEq, Value: workspaceID,
+		})
+	}
+	read, found, err := d.store.CountQuery(q)
 	if err != nil || !found {
 		return 0
 	}
@@ -241,6 +279,19 @@ func (d *Daemon) seedsForBroadcast() []protocol.Seed {
 	return seeds
 }
 
+// countSeedsForBroadcast is seedsForBroadcast's count, behind the same fence:
+// an outpost pushes no seeds and must report no total either, or the panel
+// would say it is hiding a garden that is not there.
+func (d *Daemon) countSeedsForBroadcast() int {
+	if d.store == nil {
+		return 0
+	}
+	if err := d.requireHome(garden.Surface); err != nil {
+		return 0
+	}
+	return d.countSeeds("", false)
+}
+
 // projectGardenSeeds re-pushes the garden to every client. Like every other
 // whole-list projection it goes through projectSnapshot, so planting a plot puts
 // one garden on the wire instead of one per seed.
@@ -250,15 +301,15 @@ func (d *Daemon) projectGardenSeeds() {
 	}
 	d.projectSnapshot(snapshotGarden, func() {
 		seeds := d.seedsForBroadcast()
-		total := d.countSeeds()
+		total := d.countSeedsForBroadcast()
 		if total > len(seeds) {
-			d.logf("garden: %d seeds, pushing the newest %d (limit %d); the panel reports the rest",
+			d.logf("garden: %d seeds, pushing the newest %d (limit %d); the panel says so",
 				total, len(seeds), gardenSnapshotLimit)
 		}
 		// GardenSeedsUpdatedMessage is its own top-level event, so the wsHub's
 		// WebSocketEvent-only broadcastListener cannot see it; tests use this hook.
 		if d.gardenBroadcastHook != nil {
-			d.gardenBroadcastHook(seeds)
+			d.gardenBroadcastHook(seeds, total)
 		}
 		if d.wsHub == nil {
 			return
@@ -423,7 +474,10 @@ func (d *Daemon) handleSeedList(conn net.Conn, msg *protocol.SeedListMessage) {
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok: true,
 		SeedListResult: &protocol.SeedListResult{
-			Seeds: seeds, WorkspaceID: workspaceID, All: all,
+			Seeds:       seeds,
+			WorkspaceID: workspaceID,
+			All:         all,
+			Total:       d.countSeeds(workspaceID, !all),
 		},
 	})
 }
@@ -438,10 +492,270 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 		d.sendGardenError(conn, "show", err)
 		return
 	}
+	// The trail rides the read the tender already runs. A failure to read it must
+	// not fail the show — the seed is the answer, the notes are the context.
+	notes, total, err := d.readNotes(seed.ID, garden.ShowNotes)
+	if err != nil {
+		d.logf("garden: reading the trail of %s: %v", seed.ID, err)
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok: true,
+		SeedShowResult: &protocol.SeedShowResult{
+			Seed: seedToProtocol(seed, doc), Notes: notes, NotesTotal: total,
+		},
+	})
+}
+
+// gardenFacts is the verb-to-fact table. One fact per transition, each naming
+// its seed, so a future sync engine is a durable consumer with a cursor and
+// nothing else.
+var gardenFacts = map[garden.Verb]string{
+	garden.VerbTend:    FactGardenTended,
+	garden.VerbPark:    FactGardenParked,
+	garden.VerbHarvest: FactGardenHarvested,
+	garden.VerbWither:  FactGardenWithered,
+	garden.VerbReplant: FactGardenReplanted,
+}
+
+func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitionMessage) {
+	verb, err := garden.ParseVerb(msg.Verb)
+	if err != nil {
+		d.sendGardenError(conn, strings.TrimSpace(msg.Verb), err)
+		return
+	}
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, string(verb), err)
+		return
+	}
+	actor := garden.Tender{
+		Session: strings.TrimSpace(protocol.Deref(msg.SourceSessionID)),
+		Member:  strings.TrimSpace(protocol.Deref(msg.Member)),
+	}
+	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, actor, protocol.Deref(msg.Reason))
+	if err != nil {
+		d.sendGardenError(conn, string(verb), err)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok:                   true,
+		SeedTransitionResult: &protocol.SeedTransitionResult{Seed: seedToProtocol(seed, doc)},
+	})
+}
+
+// applySeedTransition is the atomic claim, and the same read-decide-write for
+// every other move: read the seed, ask the garden whether the move is legal,
+// and write against the revision that was read.
+//
+// A conflict is not a refusal — it means the seed moved between the read and
+// the write, so the decision was made against a version that no longer exists.
+// Re-reading is what turns a lost race into the honest answer: the second
+// session to tend finds a tender there and gets told whose it is. Three
+// attempts is a tripwire — two agents contending is one retry, and a seed
+// rewritten three times inside one call is something else entirely.
+func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.Tender, reason string) (garden.Seed, docstore.Document, error) {
+	schema, err := d.seedsCollection()
+	if err != nil {
+		return garden.Seed{}, docstore.Document{}, err
+	}
+	fact, ok := gardenFacts[verb]
+	if !ok {
+		return garden.Seed{}, docstore.Document{}, fmt.Errorf("no bus fact is declared for %q", verb)
+	}
+	const attempts = 3
+	for range attempts {
+		seed, doc, err := d.readSeed(id)
+		if err != nil {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+		next, err := garden.Transition(seed, verb, actor, reason)
+		if err != nil {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+		written, err := d.writeSeed(*schema, next, doc.Rev, fact)
+		if err == nil {
+			return next, written, nil
+		}
+		if !docstore.IsConflict(err) {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+	}
+	return garden.Seed{}, docstore.Document{}, fmt.Errorf(
+		"%s was rewritten under all %d attempts to %s it; read it again with `attn seed show %s` and decide from what it says now",
+		id, attempts, verb, id)
+}
+
+// Notes. The trail is its own collection keyed by seed, so a long-tended seed
+// never bloats its own document, and a note is append-only: nothing edits or
+// deletes one, because the trail is what happened.
+
+func (d *Daemon) notesCollection() (*docstore.CollectionSchema, error) {
+	if d.store == nil {
+		return nil, errors.New("no database")
+	}
+	return d.collectionFor(garden.Namespace, garden.CollectionNotes)
+}
+
+func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
+	if err := garden.ValidateNote(msg.Body); err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
+	// A note on a seed that is not planted is refused by name rather than
+	// written into a trail nobody will ever read.
+	seed, _, err := d.readSeed(msg.SeedID)
+	if err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
+	schema, err := d.notesCollection()
+	if err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
+	note := garden.Note{
+		Seed:          seed.ID,
+		Kind:          garden.NoteKindNote,
+		Body:          msg.Body,
+		AuthorSession: strings.TrimSpace(protocol.Deref(msg.SourceSessionID)),
+		AuthorMember:  strings.TrimSpace(protocol.Deref(msg.Member)),
+	}
+	written, doc, err := d.mintAndWriteNote(*schema, note)
+	if err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:             true,
-		SeedShowResult: &protocol.SeedShowResult{Seed: seedToProtocol(seed, doc)},
+		SeedNoteResult: &protocol.SeedNoteResult{Note: noteToProtocol(written, doc)},
 	})
+}
+
+// mintAndWriteNote writes one trail entry, minting again on a taken id for the
+// same reason planting does: the author did nothing wrong and has nothing to fix.
+func (d *Daemon) mintAndWriteNote(schema docstore.CollectionSchema, note garden.Note) (garden.Note, docstore.Document, error) {
+	const mintAttempts = 3
+	var lastErr error
+	for range mintAttempts {
+		id, err := d.mintNoteID()
+		if err != nil {
+			return note, docstore.Document{}, err
+		}
+		note.ID = id
+		body, err := note.Encode()
+		if err != nil {
+			return note, docstore.Document{}, err
+		}
+		expected := docstore.ExpectAbsent
+		fact := documentChangedFact(garden.Namespace, garden.CollectionNotes, note.ID, false)
+		written, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+			Schema: schema, ID: note.ID, Body: body, Expected: &expected,
+		}, fact, time.Now())
+		if err != nil {
+			if !docstore.IsConflict(err) {
+				return note, docstore.Document{}, err
+			}
+			lastErr = err
+			continue
+		}
+		d.announceCommittedWrite(fact, written.Seq)
+		// Subject is the seed, not the note: every garden fact names the seed it
+		// is about, which is what a change feed reads.
+		d.publishFact(FactGardenNoted, note.Seed, nil)
+
+		doc, found, err := d.store.GetDocument(schema, note.ID)
+		if err != nil || !found {
+			return note, docstore.Document{ID: note.ID, Body: body, Rev: written.Rev}, nil
+		}
+		return note, *doc, nil
+	}
+	return note, docstore.Document{}, fmt.Errorf(
+		"minted %d note ids and every one was taken, which a working random source does not do: %w", mintAttempts, lastErr)
+}
+
+func (d *Daemon) mintNoteID() (string, error) {
+	if d.gardenMintNoteID != nil {
+		return d.gardenMintNoteID()
+	}
+	return garden.NewNoteID()
+}
+
+func (d *Daemon) handleSeedNotes(conn net.Conn, msg *protocol.SeedNotesMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "notes", err)
+		return
+	}
+	seed, _, err := d.readSeed(msg.SeedID)
+	if err != nil {
+		d.sendGardenError(conn, "notes", err)
+		return
+	}
+	limit := gardenSnapshotLimit
+	if msg.Limit != nil && *msg.Limit > 0 {
+		limit = *msg.Limit
+	}
+	notes, total, err := d.readNotes(seed.ID, limit)
+	if err != nil {
+		d.sendGardenError(conn, "notes", err)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok:              true,
+		SeedNotesResult: &protocol.SeedNotesResult{Notes: notes, Total: total},
+	})
+}
+
+// readNotes reads a seed's trail newest first, bounded, and returns how many it
+// holds beside it. The total is what keeps a bounded list from reading as the
+// whole trail.
+func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, error) {
+	if d.store == nil {
+		return nil, 0, errors.New("no database")
+	}
+	filter := docstore.Filter{Field: "seed", Op: docstore.OpEq, Value: seedID}
+	read, _, err := d.runDocQuery(docstore.Query{
+		Namespace:  garden.Namespace,
+		Collection: garden.CollectionNotes,
+		Filters:    []docstore.Filter{filter},
+		Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+		Limit:      limit,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	notes := make([]protocol.SeedNote, 0, len(read.Documents))
+	for _, doc := range read.Documents {
+		note, err := garden.DecodeNote(doc.Body)
+		if err != nil {
+			d.logf("garden: note %s has an unreadable body: %v", doc.ID, err)
+			continue
+		}
+		notes = append(notes, noteToProtocol(note, doc))
+	}
+	total := len(notes)
+	counted, found, err := d.store.CountQuery(docstore.Query{
+		Namespace: garden.Namespace, Collection: garden.CollectionNotes,
+		Filters: []docstore.Filter{filter},
+	})
+	if err == nil && found {
+		total = counted.Count
+	}
+	return notes, total, nil
+}
+
+func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {
+	return protocol.SeedNote{
+		ID:            note.ID,
+		SeedID:        note.Seed,
+		Kind:          note.Kind,
+		Body:          note.Body,
+		AuthorSession: note.AuthorSession,
+		AuthorMember:  note.AuthorMember,
+		CreatedAt:     doc.CreatedAt.UTC().Format(time.RFC3339),
+	}
 }
 
 func (d *Daemon) sendGardenResponse(conn net.Conn, resp protocol.Response) {

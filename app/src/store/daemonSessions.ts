@@ -13,8 +13,11 @@ interface DaemonStore {
 
   // The garden: every seed the home daemon holds, newest first. The panel scopes
   // to the workspace it shows, so switching workspaces needs no round trip.
+  // `seedsTotal` is how many the garden holds; it exceeds seeds.length only when
+  // the garden outgrew one push, and then the panel says what it is missing.
   seeds: Seed[];
-  setSeeds: (seeds: Seed[]) => void;
+  seedsTotal: number;
+  setSeeds: (seeds: Seed[], total: number) => void;
 
   // PRs from daemon
   prs: DaemonPR[];
@@ -47,7 +50,8 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
   setTickets: (tickets) => set({ tickets }),
 
   seeds: [],
-  setSeeds: (seeds) => set({ seeds }),
+  seedsTotal: 0,
+  setSeeds: (seeds, total) => set({ seeds, seedsTotal: total }),
 
   prs: [],
   setPRs: (prs) => set({ prs }),

@@ -234,7 +234,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '233';
+export const PROTOCOL_VERSION = '235';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -609,7 +609,10 @@ interface UseDaemonSocketOptions {
   // Fired with the garden — newest first, every workspace — on initial_state and
   // on every garden_seeds_updated broadcast. The panel filters to the workspace
   // it shows, so switching workspaces costs no round trip.
-  onSeedsUpdate?: (seeds: Seed[]) => void;
+  // `total` is how many seeds the garden holds; it exceeds `seeds.length` only
+  // when the garden outgrew one push, and the panel says so rather than ending
+  // silently at the cap.
+  onSeedsUpdate?: (seeds: Seed[], total: number) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
@@ -1510,7 +1513,10 @@ export function useDaemonSocket({
             sessionsRef.current = nextSessions;
             callbacksRef.current.onSessionsUpdate(nextSessions);
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
-            callbacksRef.current.onSeedsUpdate?.(data.seeds || []);
+            callbacksRef.current.onSeedsUpdate?.(
+              data.seeds || [],
+              data.seeds_total ?? (data.seeds || []).length,
+            );
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1677,7 +1683,10 @@ export function useDaemonSocket({
             break;
 
           case 'garden_seeds_updated':
-            callbacksRef.current.onSeedsUpdate?.(data.seeds || []);
+            callbacksRef.current.onSeedsUpdate?.(
+              data.seeds || [],
+              data.total ?? (data.seeds || []).length,
+            );
             break;
 
           case 'presentation_added':

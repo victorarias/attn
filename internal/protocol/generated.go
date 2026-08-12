@@ -3192,6 +3192,9 @@ type InitialStateMessage struct {
 	// Seeds corresponds to the JSON schema field "seeds".
 	Seeds []Seed `json:"seeds,omitempty,omitzero"`
 
+	// SeedsTotal corresponds to the JSON schema field "seeds_total".
+	SeedsTotal *int `json:"seeds_total,omitempty,omitzero"`
+
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
 
@@ -5215,11 +5218,21 @@ type Response struct {
 	// SeedListResult corresponds to the JSON schema field "seed_list_result".
 	SeedListResult *SeedListResult `json:"seed_list_result,omitempty,omitzero"`
 
+	// SeedNoteResult corresponds to the JSON schema field "seed_note_result".
+	SeedNoteResult *SeedNoteResult `json:"seed_note_result,omitempty,omitzero"`
+
+	// SeedNotesResult corresponds to the JSON schema field "seed_notes_result".
+	SeedNotesResult *SeedNotesResult `json:"seed_notes_result,omitempty,omitzero"`
+
 	// SeedPlantResult corresponds to the JSON schema field "seed_plant_result".
 	SeedPlantResult *SeedPlantResult `json:"seed_plant_result,omitempty,omitzero"`
 
 	// SeedShowResult corresponds to the JSON schema field "seed_show_result".
 	SeedShowResult *SeedShowResult `json:"seed_show_result,omitempty,omitzero"`
+
+	// SeedTransitionResult corresponds to the JSON schema field
+	// "seed_transition_result".
+	SeedTransitionResult *SeedTransitionResult `json:"seed_transition_result,omitempty,omitzero"`
 
 	// SessionInstructionsResult corresponds to the JSON schema field
 	// "session_instructions_result".
@@ -5411,8 +5424,75 @@ type SeedListResult struct {
 	// Seeds corresponds to the JSON schema field "seeds".
 	Seeds []Seed `json:"seeds"`
 
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
+}
+
+type SeedNote struct {
+	// AuthorMember corresponds to the JSON schema field "author_member".
+	AuthorMember string `json:"author_member"`
+
+	// AuthorSession corresponds to the JSON schema field "author_session".
+	AuthorSession string `json:"author_session"`
+
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedNoteMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+}
+
+type SeedNoteResult struct {
+	// Note corresponds to the JSON schema field "note".
+	Note SeedNote `json:"note"`
+}
+
+type SeedNotesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedNotesResult struct {
+	// Notes corresponds to the JSON schema field "notes".
+	Notes []SeedNote `json:"notes"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
 }
 
 type SeedPlantMessage struct {
@@ -5449,6 +5529,37 @@ type SeedShowMessage struct {
 }
 
 type SeedShowResult struct {
+	// Notes corresponds to the JSON schema field "notes".
+	Notes []SeedNote `json:"notes"`
+
+	// NotesTotal corresponds to the JSON schema field "notes_total".
+	NotesTotal int `json:"notes_total"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+}
+
+type SeedTransitionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// Verb corresponds to the JSON schema field "verb".
+	Verb string `json:"verb"`
+}
+
+type SeedTransitionResult struct {
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
 }

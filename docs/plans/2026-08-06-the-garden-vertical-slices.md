@@ -303,19 +303,34 @@ Goal: a seed moves through its life, and the trail is visible.
 
 Ships:
 
-- [ ] `attn seed tend <id>` (atomic claim), `park`, `harvest -m`,
+- [x] `attn seed tend <id>` (atomic claim), `park`, `harvest -m`,
       `wither [-m]`, `replant` — every transition daemon-validated with loud
-      errors.
-- [ ] `attn seed note <id> -m` appends to the trail; `show` renders states,
-      tender, and notes newest-first.
-- [ ] App panel shows state and tender; state changes arrive live.
-- [ ] Bus facts per transition (`garden.tended`, `garden.harvested`, …).
+      errors. The claim is guarded on `tend` alone (2026-08-12): the other four
+      are fate calls, and guarding them would make a tender whose session ended
+      a one-way door with no key.
+- [x] `attn seed note <id> -m` appends to the trail; `show` renders states,
+      tender, and notes newest-first. `show` renders the newest
+      `garden.ShowNotes` and names what it withheld; `attn seed notes <id>`
+      reads the whole trail.
+- [x] App panel shows state and tender; state changes arrive live.
+- [x] Bus facts per transition (`garden.tended`, `garden.harvested`, …), plus
+      `garden.noted` for the trail.
+- [x] Slice 1's seed-list cap finished (Victor, 2026-08-12): the count the push
+      already carried now has consumers — the panel says how many the garden
+      holds when it outgrew one push, and `attn seed ls` names how many seeds it
+      did not show.
+
+Two tenders are the same holder when their session ids match; with no session id
+the crew name is the identity (2026-08-12). A terminal pane runs with no
+`ATTN_SESSION_ID` by design, so `--member` is how a person in a pane claims a
+seed, and comparing sessions alone made every one of them the same person —
+live verification handed alder a seed trellis was holding.
 
 Acceptance:
 
-- [ ] Full life in CLI: plant → tend → note → harvest, then replant → wither;
+- [x] Full life in CLI: plant → tend → note → harvest, then replant → wither;
       each state visible in the app as it happens.
-- [ ] A second session trying to tend an actively-tended seed gets a loud,
+- [x] A second session trying to tend an actively-tended seed gets a loud,
       named refusal (and a `--steal` style override is deliberately absent
       until needed).
 
