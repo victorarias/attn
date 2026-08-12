@@ -42,9 +42,10 @@ is pinned here:
 
 Tables that apply the 150-word floor sit on a subset of pull A: 995 messages
 with the original regex labels (43 complaints, 952 accepted), 1,042 with the
-hand-verified ones (22 complaints, 1,020 accepted). The Go and Python
-tokenizers disagree on two messages at the floor, which is why one table below
-reads 21 complaints and another 22; it never moves a result.
+hand-verified ones (22 complaints, 1,020 accepted). Two tokenizers were used
+across the scratchpad runs, one in Go and one in Python, and they disagree on
+two messages sitting exactly at the floor — the same recomputation reported 21
+complaints from one and 22 from the other. It never moves a result.
 
 **Every gated feature is a coin flip** (pull A, regex labels, 43 complaints and
 952 silently accepted; AUC 0.5 is chance):
