@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  Recorded what four days of measurement found about making agent prose easier
+  to read: nothing cheap predicts when a reader will ask for plainer words, but
+  rewriting and then comparing the two versions does work.
