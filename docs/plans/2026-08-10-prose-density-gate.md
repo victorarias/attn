@@ -31,8 +31,23 @@ notifications, teammate relays, and compaction summaries all arrive as user turn
 and all contain words like "concise" that have nothing to do with the message
 before them. Without that filter the complaint side is ~70% machine text.
 
-**Every gated feature is a coin flip** (43 complaints, 952 silently accepted;
-AUC 0.5 is chance):
+**Which numbers came from which pull.** Counts differ across this document and
+its successor because there were two pulls and two label sets, so every figure
+is pinned here:
+
+| pull | date | files walked | messages | complaint labels |
+| --- | --- | --- | --- | --- |
+| A | 2026-08-11 | 1,675 | 1,217 | 49 by regex, 22 after hand-reading |
+| B — adds the conversation each message was read in | 2026-08-11, later | 2,066 | 1,250 | pull A's labels, re-joined by file and line |
+
+Tables that apply the 150-word floor sit on a subset of pull A: 995 messages
+with the original regex labels (43 complaints, 952 accepted), 1,042 with the
+hand-verified ones (22 complaints, 1,020 accepted). The Go and Python
+tokenizers disagree on two messages at the floor, which is why one table below
+reads 21 complaints and another 22; it never moves a result.
+
+**Every gated feature is a coin flip** (pull A, regex labels, 43 complaints and
+952 silently accepted; AUC 0.5 is chance):
 
 | feature | AUC | mean complaint | mean silent |
 | --- | --- | --- | --- |
@@ -178,10 +193,14 @@ and timings under the data dir, which is also the label corpus growing on its
 own. Fail open everywhere: missing binary, timeout (90s tripwire; measured
 max 74s total on ticket text), or any error ships the agent's original text.
 
-**Not yet done**: wire the pipeline into the three gated writes behind the
-setting, unwire the dead deterministic trigger (thresholds, `attn prose
-check`'s verdict mode, calibration tests, the refusal one-shot), and the
-remaining 14 blind pairs if tighter error bars are wanted.
+**Never built.** Nothing routes `ticket new`, `ticket comment` or `delegate`
+through any of this; the pipeline was only ever run offline against saved text.
+Building it would mean writing it from scratch — there is no gate in the
+repository to unwire and no threshold code to delete, only the unmerged
+generation-1 branch described in
+[What was built](#what-was-built-and-where-it-is-not). The one loose measurement
+is the blind test: 6 pairs judged, 14 more available if tighter error bars are
+wanted.
 
 ## Receipts
 
@@ -404,24 +423,40 @@ write still goes through.
   concern before it has earned trust.
 - Nothing rewrites text automatically. The agent rewrites; the gate only checks.
 
-## Implementation Steps
+## What was built, and where it is not
 
-- [x] `internal/prosegate`: `proseOnly` (fences, tables, command lines),
+**None of this is in the repository.** It was written and measured in a session
+scratchpad, and the measurements above are the only thing worth keeping from it.
+Nothing below is a task list; it is a record of what the numbers were produced
+with. Unticked boxes would imply work still owed, and none is.
+
+Two generations of prose code exist, and neither is on `main`:
+
+- **Generation 1**, a rule engine — density, hidden-verb, rhythm and structure
+  rules, accept/reject vocabulary files, golden tests, corpus fixtures — lives
+  unmerged on the branch `feat/prose-check` as `internal/prose` plus
+  `cmd/attn/prose.go`. The corpus measurements killed its design; the branch
+  should be closed.
+- **Generation 2**, described below, was never committed at all. If any of it is
+  ever worth reviving it is the nudge text and the structural counter, both
+  reproduced in full in this document.
+
+- `internal/prosegate`: `proseOnly` (fences, tables, command lines),
       tokenizer, the six gates, `Check`, thresholds as named constants carrying
       their receipts.
-- [x] `internal/prosegate`: `StructureOf` / `Lost` / `Preserved`, with the
+- `internal/prosegate`: `StructureOf` / `Lost` / `Preserved`, with the
       structural counts above.
-- [x] Corpus fixture + calibration test, gated behind `ATTN_PROSE_CORPUS` (the
+- Corpus fixture + calibration test, gated behind `ATTN_PROSE_CORPUS` (the
       corpus is real conversation text and this repo is public). A threshold edit
       that breaks separation fails the test. Bounds are recall ≥70% and false
       positive ≤30%; in-sample reads below the leave-one-out estimate of 80%/20%
       because every accepted document helped set the bar it is judged against.
       `TestRecalibrate` regenerates the numbers through the package's own
       `Measure`, so they can never drift from the shipping code.
-- [x] `attn prose check <file|->`, `--json`.
-- [x] Wire `ticket new`, `ticket comment`, `delegate` through the gate with the
+- `attn prose check <file|->`, `--json`.
+- Wire `ticket new`, `ticket comment`, `delegate` through the gate with the
       one-shot refusal and the dropped-structure warning.
-- [x] Harness (`TestNudgeHarness`): replays every case that clears the word floor.
+- Harness (`TestNudgeHarness`): replays every case that clears the word floor.
       It rebuilds the conversation up to the message Victor objected to, answers
       in his place, and measures what comes back — three arms, `real` (the
       revision he accepted, free), `generic` ("Please simplify.", the control the
@@ -434,7 +469,9 @@ write still goes through.
       ATTN_PROSE_CORPUS=…/corpus_pure.jsonl ATTN_PROSE_HARNESS=…/out \
         go test ./internal/prosegate -run TestNudgeHarness -v -timeout 40m
       ```
-- [x] Changelog fragment; `docs/glossary.md` entry for the prose gate.
+- A changelog fragment and a `docs/glossary.md` entry for the prose gate were
+  drafted alongside the code and went the same way. `docs/glossary.md` on `main`
+  has no prose entry, and should not gain one until something ships.
 
 ## Decisions
 
@@ -448,11 +485,13 @@ write still goes through.
   plan gave: it is the best-evidenced predictor of reading difficulty in the
   literature, and it still has no repair operator — "this word was unexpected"
   tells an agent nothing to do. Runtime cost was never the real objection.
-- **Refuse once per session, not per text** (2026-08-11): keying the one-shot on
-  the text digest looked safe and was not — an agent whose rewrite still trips
-  produces a different digest, gets refused again, and trades versions with the
-  gate forever. Keying it on the record itself means the second write always
-  lands.
+- **The retry always lands** (2026-08-11): keying the one-shot on the text
+  digest looked safe and was not — an agent whose rewrite still trips produces a
+  different digest, gets refused again, and trades versions with the gate
+  forever. Keying it on the record itself guarantees the write after a refusal
+  goes through. Note what it does not guarantee: the gate re-arms after that
+  write, so a later message can be refused again. One refusal per message, not
+  one per session.
 - **Structure is checked, not requested** (Victor, 2026-08-11): a nudge that says
   "be concise" will eventually delete a mermaid diagram. Counting structural
   elements before and after makes preservation a property rather than a hope.

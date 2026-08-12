@@ -6,8 +6,9 @@ This exists so someone can attack the problem fresh without repeating four days
 of dead ends, and without inheriting the framing that produced them.
 
 The attempt that generated these numbers is
-[2026-08-10-prose-density-gate.md](2026-08-10-prose-density-gate.md). None of it
-shipped. It is safe to throw away.
+[2026-08-10-prose-density-gate.md](2026-08-10-prose-density-gate.md). Its design
+is dead; that file now records the autopsy, in more detail than this one. No
+code from it shipped, and none needs reviving.
 
 ## The problem
 
@@ -103,8 +104,16 @@ Worth spelling out, because the obvious reading is wrong:
 ## What we know about the complaints
 
 Where the numbers come from: every agent message over 120 words that the user
-typed a reply to. That is 1,250 messages, pulled from 2,066 transcript files
-covering about a month. Only replies a human actually typed count — task
+typed a reply to, covering about a month. There were two pulls, hours apart, and
+the counts differ, so both are pinned here. The first walked 1,675 transcript
+files and kept 1,217 messages. The second walked 2,066 files, kept 1,250, and
+added the conversation each message was read in; it reuses the first pull's
+labels, matched by file and line. Tables that drop messages under 150 words sit
+on a subset of the first pull: 1,042 messages, of which 22 are complaints. The
+full pinning, including which table uses which label set, is in the
+[companion doc](2026-08-10-prose-density-gate.md#the-trigger-does-not-work).
+
+Only replies a human actually typed count — task
 notifications, teammate relays, and compaction summaries all arrive as user
 turns too, and they are full of words like "concise" that have nothing to do
 with the message before them.
@@ -291,7 +300,19 @@ repo. Everything they produced is summarized above. The data files are
 `tickets.jsonl` (136 real ticket texts, copied read-only from the production
 database).
 
-The only code in the repo is `internal/prosegate`: the instruction text, a
-tokenizer, a `Structure` counter that reports what a rewrite dropped, and a dead
-threshold check that should be deleted. Its `zz_*_test.go` files are uncommitted
-research scaffolding.
+**No prose code is in the repository, on `main` or anywhere else it would be
+found by looking.** Two generations exist and neither shipped:
+
+- **Generation 1** — a rule engine with density, hidden-verb, rhythm and
+  structure rules, accept/reject vocabulary files, and golden tests — sits
+  unmerged on the branch `feat/prose-check`, as `internal/prose` plus
+  `cmd/attn/prose.go`. The measurements above killed its design before it was
+  reviewed. Close the branch.
+- **Generation 2** — the six threshold checks, the rewrite instruction, the
+  one-shot refusal, and a structural counter — was never committed. It lived in
+  a session scratchpad and is gone. The only parts worth reviving are quoted in
+  full in this document: the instruction text above, and the idea of counting
+  code blocks, tables and links before and after a rewrite.
+
+So there is nothing here to delete and nothing to build on. Anyone starting
+fresh starts from the measurements, not from the code.
