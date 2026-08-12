@@ -105,7 +105,14 @@ to fix.
   is just an edge between crowns, and everything that works on a seed works
   on all of them.
 - **IDs are identity; edges are structure.** Short, stable, human-sayable
-  seed ids (readable slug, exact shape decided in slice 1). No dotted
+  seed ids. Shape ruled in slice 1 (2026-08-12): `s-` plus six Crockford
+  base32 characters (`s-7k3f9m`) — the alphabet drops `i`, `l`, `o` and `u`,
+  so no two characters are confusable when read aloud or copied by hand, and
+  six of them is 2^30 ids, which nothing a single garden holds comes near.
+  Minted from crypto/rand rather than derived from the title, because a
+  derived id renames itself when the title is corrected. No `/` anywhere in
+  the alphabet, which is what keeps qualifying an id at a federation boundary
+  a prefixing job (`<daemon-id>/<local-id>`) and not a re-identification. No dotted
   hierarchy: re-parenting a seed must never rename it. `part-of` edges carry
   the hierarchy beads encodes in ids. For addressing *within* a plot, every
   seed carries a **step slug** (auto-derived from title, editable, unique in
@@ -257,27 +264,27 @@ immediately.
 
 Ships:
 
-- [ ] `core/garden` collections registered. The seed document carries the
+- [x] `core/garden` collections registered. The seed document carries the
       full designed schema — status, markdown body, workspace, planter,
       tender, step slug, edges, and the inert template/vars/gate fields —
       even though only a slice of it is behaviorally live.
-- [ ] `attn seed plant "title" [-m body]` → prints the new id;
+- [x] `attn seed plant "title" [-m body]` → prints the new id;
       `attn seed ls`, `attn seed show <id>`; `--json` on all three.
       Workspace stamped from the calling session's context.
-- [ ] Seed id shape decided and documented: short, stable, sayable, unique
+- [x] Seed id shape decided and documented: short, stable, sayable, unique
       in its hub; the daemon prefix stays at the boundary (see the
       server-ready design decision — no local operation ever sees it).
-- [ ] App: a garden panel listing the workspace's seeds live (docstore
+- [x] App: a garden panel listing the workspace's seeds live (docstore
       change events; if the app-side subscription seam wants A3.4 Stage 2,
       ride a snapshot-projection until it lands — the panel's contract is
       "planted seed appears without a refresh", not a particular transport).
-- [ ] Bus facts `garden.planted` with the seed as subject.
-- [ ] Glossary: seed, plant, the garden, plot, crown, packet (the vocabulary
+- [x] Bus facts `garden.planted` with the seed as subject.
+- [x] Glossary: seed, plant, the garden, plot, crown, packet (the vocabulary
       lands together even though plots arrive in slice 5).
-- [ ] `attn seed export <crown>` writes the crown's body (plus the child
+- [x] `attn seed export <crown>` writes the crown's body (plus the child
       ledger as a checklist, once children exist) to markdown stamped as
       generated — the review bridge until slice 6 deletes it.
-- [ ] The first planting is this plan: its crown (this document as the body)
+- [x] The first planting is this plan: its crown (this document as the body)
       and one seed per remaining slice, the day `plant` works. Hierarchy is
       wired as the verbs arrive — edges in slice 3, plot semantics in
       slice 5 — and from slice 2 onward each slice is tended on start and
@@ -285,10 +292,10 @@ Ships:
 
 Acceptance:
 
-- [ ] From inside a live session, planting takes one command and the seed is
+- [x] From inside a live session, planting takes one command and the seed is
       visible in the running app without user action.
-- [ ] `plant` → `ls` → `show` round-trips in JSON.
-- [ ] The garden contains the plan for the garden, visible in the panel.
+- [x] `plant` → `ls` → `show` round-trips in JSON.
+- [x] The garden contains the plan for the garden, visible in the panel.
 
 ### Slice 2 — lifecycle and tending
 
@@ -472,12 +479,20 @@ Acceptance:
 
 ## Open questions
 
-- The app-side transport for the garden panel: docstore subscription surface
-  vs. classic snapshot projection, and whether A3.4 Stage 2 is worth pulling
-  forward for it. Decide in slice 1 with the code in front of us. The panel
-  itself is the first rendering, not a commitment — whether the garden
-  becomes the app's front door is a named question in the vision, decided
-  with the foundational rendering work.
+- ~~The app-side transport for the garden panel: docstore subscription
+  surface vs. classic snapshot projection, and whether A3.4 Stage 2 is worth
+  pulling forward for it.~~ Ruled 2026-08-12 with the code in front of us:
+  the classic snapshot projection. The docstore's live-query surface is
+  IPC-only (`handleDocSubscribe` speaks over `net.Conn`), and the app speaks
+  WebSocket, so riding it would have meant building the app-side subscription
+  seam first — A3.4 Stage 2's whole scope — to deliver a list of at most a
+  few hundred small documents. `garden.planted` projects to one
+  `garden_seeds_updated` push carrying the whole garden, coalesced like every
+  other snapshot; the panel scopes to its workspace client-side, so switching
+  workspaces costs no round trip. Revisit when the garden outgrows one push,
+  not before. The panel itself is the first rendering, not a commitment —
+  whether the garden becomes the app's front door is a named question in the
+  vision, decided with the foundational rendering work.
 - ~~The relay mechanics for remote sessions: how `attn seed …` from a session
   on a remote daemon reaches the hub's garden (relayed command vs. another
   path), and what happens when the hub is unreachable.~~ Answered by the

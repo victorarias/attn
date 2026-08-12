@@ -162,6 +162,7 @@ describe('chief-of-staff session is protected from close', () => {
       prs: [], setPRs: vi.fn(),
       repoStates: [], setRepoStates: vi.fn(),
       authorStates: [], setAuthorStates: vi.fn(),
+      seeds: [], setSeeds: vi.fn(),
     }));
 
     const fn = vi.fn();

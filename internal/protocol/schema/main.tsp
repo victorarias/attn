@@ -2938,6 +2938,7 @@ model InitialStateMessage {
   settings?: Record<string>;
   warnings?: DaemonWarning[];
   tickets?: TicketRow[];
+  seeds?: Seed[];
 }
 
 model EndpointStatusChangedMessage {
@@ -4191,6 +4192,130 @@ model DocSubscribeResult {
 }
 
 // ============================================================================
+// The garden
+// ============================================================================
+//
+// A seed is the unit of work — one document, one id. Everything else in the
+// vocabulary is a seed too: a plot is a seed with children, its root is the
+// crown, a packet is a plot flagged as template. Seeds live in the home
+// daemon's document store under `core/garden`; an outpost refuses every command
+// here, naming its home, until the uplink carries the ask there.
+//
+// Design: docs/plans/2026-08-06-the-garden-vertical-slices.md.
+
+// One seed as every read and every push carries it. The id is short, stable and
+// sayable, and unique within its hub; the fully qualified `<daemon-id>/<id>`
+// form belongs to a future central server and is minted only where an id leaves
+// its daemon, so nothing on this wire carries it.
+//
+// The whole designed schema is here from the first slice even though only part
+// of it moves yet: `tender`, `edges`, `template`, `gate` and `vars` are written
+// and returned, and the slices that give them meaning add behavior, not fields.
+model Seed {
+  "id": string;
+  "title": string;
+  // Markdown. On a crown this is the plan itself.
+  "body": string;
+  // planted | growing | harvested | withered | dormant.
+  "status": string;
+  // The seed's stable name within its plot; derived from the title at planting.
+  "step_slug": string;
+  // The workspace of the session that planted it. Empty means planted outside
+  // any workspace, which is a real state and why `attn seed ls` has an --all.
+  "workspace_id": string;
+  "planter_session": string;
+  "planter_member": string;
+  "tender_session": string;
+  "tender_member": string;
+  "edges": SeedEdge[];
+  "template": boolean;
+  "gate": boolean;
+  "vars": SeedVar[];
+  // Why the seed was harvested or withered.
+  "reason"?: string;
+  // The document's own revision and stamps. `rev` is what a conditional write
+  // hands back; the stamps are the store's, not a copy kept in the body.
+  "rev": safeint;
+  "created_at": string;
+  "updated_at": string;
+}
+
+// A typed relation to another seed. Structure lives in edges rather than in the
+// id, so re-parenting a seed never renames it.
+model SeedEdge {
+  // blocks | part-of | sown-from | discovered-from | relates-to. Additive.
+  "kind": string;
+  "to": string;
+}
+
+// One declared variable on a packet's crown, filled at sow time.
+model SeedVar {
+  "name": string;
+  "description"?: string;
+  "required"?: boolean;
+  "default"?: string;
+  "pattern"?: string;
+  "enum"?: string[];
+}
+
+// Plant a seed. The workspace is stamped from the calling session unless
+// `workspace_id` overrides it, which is why planting costs one line: the daemon
+// already knows who is asking.
+model SeedPlantMessage {
+  "cmd": "seed_plant";
+  "source_session_id"?: string;
+  "title": string;
+  "body"?: string;
+  // Overrides the calling session's workspace. The empty string is not an
+  // override — omit the field to take the session's.
+  "workspace_id"?: string;
+  // The crew member planting, free-string until the crew primitive lands.
+  "member"?: string;
+}
+
+model SeedPlantResult {
+  "seed": Seed;
+}
+
+// List seeds. Scope is the calling session's workspace unless `workspace_id`
+// or `all` says otherwise; a caller with no session and no scope is refused
+// rather than shown an empty list.
+model SeedListMessage {
+  "cmd": "seed_list";
+  "source_session_id"?: string;
+  "workspace_id"?: string;
+  "all"?: boolean;
+}
+
+model SeedListResult {
+  "seeds": Seed[];
+  // The workspace the answer was scoped to; empty when the scope was `all`.
+  "workspace_id": string;
+  // Whether the answer covered the whole garden.
+  "all": boolean;
+}
+
+model SeedShowMessage {
+  "cmd": "seed_show";
+  "seed_id": string;
+}
+
+model SeedShowResult {
+  "seed": Seed;
+}
+
+// The whole garden, re-pushed whenever a seed changes. Clients filter by
+// workspace themselves: the panel's scope is a view, and a client that switches
+// workspaces must not have to ask the daemon again.
+model GardenSeedsUpdatedMessage {
+  event: "garden_seeds_updated";
+  seeds: Seed[];
+  // How many seeds the garden holds. Equal to `seeds`'s length until the
+  // garden outgrows one push, and then the receipt that says so.
+  total: int32;
+}
+
+// ============================================================================
 // App registry
 // ============================================================================
 //
@@ -4552,6 +4677,9 @@ model Response {
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
+  seed_plant_result?: SeedPlantResult;
+  seed_list_result?: SeedListResult;
+  seed_show_result?: SeedShowResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;
@@ -5230,6 +5358,8 @@ model WebSocketEvent {
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
   tickets?: TicketRow[];
+  seeds?: Seed[];
+  total?: int32;
   workspace_contexts?: WorkspaceContext[];
 }
 
@@ -5252,6 +5382,7 @@ alias DaemonEvent =
   | ChiefOfStaffResultMessage
   | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
+  | GardenSeedsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage

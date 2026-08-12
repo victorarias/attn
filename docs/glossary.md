@@ -398,6 +398,32 @@ equally resumable, so what a session was last seen doing is context for the user
 and never the reason it survives or is reaped. A session that cannot be brought
 back is **reaped**: the row and its pane go, rather than lingering as a Reload
 that cannot work.
+## The garden
+
+The **garden** is where work lives: all seeds, and the space they live in. It
+belongs to a home daemon, because one garden shared across a fleet is its whole
+point — an outpost has none and passes its asks home.
+
+A **seed** is the unit of work — one document with one short id, a title, a
+markdown body, and a state. Anything worth handing off, parking, or attributing
+is a seed; in-session scratch is not. **Planting** creates one, and costs a
+single line that returns the id (`attn seed plant "what this is"`), because a
+capture that costs ceremony does not happen.
+
+A **plot** is a seed with children plus the intent to execute them — the whole
+subtree, not just the parent. A plot has no id of its own: its root seed, the
+**crown**, is how it is addressed. A **packet** is a plot flagged as a template
+with declared variables, so a proven shape can be planted again with its blanks
+filled.
+
+Seed ids are `s-` plus six Crockford base32 characters (`s-7k3f9m`) — short
+enough to say out loud, with no character pair anyone confuses, and no `/`, so
+qualifying one with its owning daemon at a federation boundary stays a matter of
+prefixing rather than a re-identification.
+
+Plan:
+[docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
+
 ## Home daemon
 
 A daemon that is **its own home** — standalone, complete, owning its garden,

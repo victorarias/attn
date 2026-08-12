@@ -793,6 +793,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Settings:          d.settingsWithAgentAvailability(),
 		Warnings:          d.getWarnings(),
 		Tickets:           d.ticketsForBroadcast(),
+		Seeds:             d.seedsForBroadcast(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
