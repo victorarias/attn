@@ -371,9 +371,10 @@ Three properties make it hold without maintenance:
   remembering this test exists.
 - Being seen is what makes it loud: a projected fact with no fixture fails by
   name, saying what to add, and a fixture whose fact no longer exists fails as
-  stale. The fixture is one line for 40 of the 79 facts, because 26 of the 41
-  projections push correctly against a bare daemon and a bare fact; a subject or
-  payload appears only where the projection genuinely needs one.
+  stale. That fixture is a single line — no subject, no payload — for 41 of the
+  79 facts, which is 14 of the 41 projection entries covered whole. A subject or
+  payload appears only where the projection re-reads an entity or decodes a
+  body.
 - A declared fact matched by *no* projection must be listed in
   `factsWithoutWire` with the consumer that does read it — the same enumerated
   exception discipline `wireSenderExceptions` uses. Without it, a projection
