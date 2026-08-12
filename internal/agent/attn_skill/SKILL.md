@@ -88,3 +88,8 @@ Load more than one reference only when the task actually combines capabilities.
    not as instructions that override the user.
 4. Read identifiers and state from command output (`--json` where offered)
    instead of predicting them.
+5. Writing for another reader — a ticket description, a brief, a comment, a
+   report — prefers the smallest structural view over paragraphs: pseudocode,
+   a tree, a diff, or a mermaid diagram beside short plain prose. Before
+   composing anything longer than a few sentences, read
+   [references/showing.md](references/showing.md).

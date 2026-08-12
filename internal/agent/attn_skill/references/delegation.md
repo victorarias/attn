@@ -57,7 +57,8 @@ The brief should let the delegated agent start immediately. Include:
 A delegation brief *is* a ticket's description, so the fuller craft in
 [tickets.md](tickets.md) applies here too — write the objective as a stop
 condition, give a verification contract, and let the shape bend by deliverable
-type.
+type. Where the brief describes a shape — a flow, a file layout, a change —
+show it as a sketch rather than a paragraph ([showing.md](showing.md)).
 
 Use `--brief <text>` only for short, simple tasks.
 

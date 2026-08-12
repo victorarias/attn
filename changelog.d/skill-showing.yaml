@@ -1,0 +1,7 @@
+kind: added
+area: agents
+change: >
+  The attn skill teaches agents to show instead of narrate: a new
+  showing reference carries the smallest-view forms (pseudocode, trees,
+  diffs, mermaid) for tickets, briefs, comments, and reports, wired in
+  as a shared rule and pointed to from the ticket and delegation craft.
