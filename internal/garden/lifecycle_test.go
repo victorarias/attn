@@ -2,6 +2,7 @@ package garden
 
 import (
 	"reflect"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -77,7 +78,13 @@ func TestTransitionMatrix(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			before := tc.seed
-			next, err := Transition(tc.seed, tc.verb, mine, "because")
+			// Only the closing moves take a reason; the others refuse one, and
+			// that refusal has its own test below.
+			reason := ""
+			if tc.verb == VerbHarvest || tc.verb == VerbWither {
+				reason = "because"
+			}
+			next, err := Transition(tc.seed, tc.verb, mine, reason)
 			// A move never edits the seed it was handed: the daemon writes the
 			// result against the revision it read, and a mutated input would make
 			// a refused move leave a changed seed behind.
@@ -127,13 +134,38 @@ func TestTransitionMovesTheTender(t *testing.T) {
 		t.Fatalf("tend did not record the tender: %+v", claimed)
 	}
 
-	for _, verb := range []Verb{VerbPark, VerbHarvest, VerbWither} {
-		released, err := Transition(claimed, verb, actor, "done")
+	for _, tc := range []struct {
+		verb   Verb
+		reason string
+	}{{VerbPark, ""}, {VerbHarvest, "done"}, {VerbWither, "done"}} {
+		released, err := Transition(claimed, tc.verb, actor, tc.reason)
 		if err != nil {
-			t.Fatalf("%s: %v", verb, err)
+			t.Fatalf("%s: %v", tc.verb, err)
 		}
 		if released.TenderSession != "" || released.TenderMember != "" {
-			t.Fatalf("%s left the seed claimed: %+v", verb, released)
+			t.Fatalf("%s left the seed claimed: %+v", tc.verb, released)
+		}
+	}
+}
+
+// Three of the five moves record nothing, so a reason handed to one of them
+// would be dropped on the floor. Text somebody wrote never vanishes without a
+// word: the move is refused and the refusal points at the trail.
+func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
+	actor := Tender{Session: me}
+	for _, verb := range []Verb{VerbTend, VerbPark, VerbReplant} {
+		from := StatusPlanted
+		if verb == VerbReplant {
+			from = StatusHarvested
+		}
+		_, err := Transition(seedIn(from, Tender{}), verb, actor, "some words")
+		if err == nil {
+			t.Fatalf("%s swallowed a reason instead of refusing it", verb)
+		}
+		for _, want := range []string{string(verb), "attn seed note", "s-7k3f9m"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Fatalf("%s refusal = %q, want it to say %q", verb, err, want)
+			}
 		}
 	}
 }
@@ -282,8 +314,15 @@ func TestValidateNote(t *testing.T) {
 	}
 	if err := ValidateNote(strings.Repeat("x", MaxNoteBytes+1)); err == nil {
 		t.Fatal("a note past the limit was accepted")
-	} else if !strings.Contains(err.Error(), "65537") {
+	} else if !strings.Contains(err.Error(), strconv.Itoa(MaxNoteBytes+1)) {
 		t.Fatalf("the limit refusal does not name the ask: %v", err)
+	}
+	// The note travels as one JSON object in a single unix-socket frame, and
+	// that frame is 64KiB. A note limit at or above it is answered by the
+	// transport instead — the caller reads a frame-size error rather than the
+	// note limit and where to put the text.
+	if MaxNoteBytes >= 64<<10 {
+		t.Fatalf("MaxNoteBytes is %d, at or past the 64KiB socket frame it travels through", MaxNoteBytes)
 	}
 	if err := ValidateNote("what happened"); err != nil {
 		t.Fatalf("a real note was refused: %v", err)

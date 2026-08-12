@@ -81,6 +81,9 @@ type move struct {
 	// Withering may be wordless — the judgment is often "nobody will ever pick
 	// this up" and there is nothing more to say.
 	needsReason bool
+	// keepsReason marks the two moves that close a seed, the only ones that
+	// record why. The other three refuse a reason rather than drop it.
+	keepsReason bool
 	// resume is what to run to get a seed out of the state this move lands in.
 	// It is what an "already there" refusal offers instead of a dead end.
 	resume string
@@ -102,12 +105,14 @@ var moves = map[Verb]move{
 		to:          StatusHarvested,
 		from:        []string{StatusPlanted, StatusGrowing, StatusDormant},
 		needsReason: true,
+		keepsReason: true,
 		resume:      "attn seed replant",
 	},
 	VerbWither: {
-		to:     StatusWithered,
-		from:   []string{StatusPlanted, StatusGrowing, StatusDormant},
-		resume: "attn seed replant",
+		to:          StatusWithered,
+		from:        []string{StatusPlanted, StatusGrowing, StatusDormant},
+		keepsReason: true,
+		resume:      "attn seed replant",
 	},
 	VerbReplant: {
 		to:     StatusPlanted,
@@ -171,6 +176,14 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string) (Seed, error)
 		return Seed{}, fmt.Errorf(
 			"harvesting %s records what got done: attn seed harvest %s -m \"what got done\"", seed.ID, seed.ID)
 	}
+	// Only the two moves that close a seed keep a reason. The five verbs share a
+	// flag set, so a reason handed to the other three would otherwise be dropped
+	// on the floor — and text somebody wrote must never vanish without a word.
+	if reason != "" && !rule.keepsReason {
+		return Seed{}, fmt.Errorf(
+			"%s records no reason — harvest and wither are the moves that close a seed with one. Put it on the trail instead: attn seed note %s -m \"…\"",
+			verb, seed.ID)
+	}
 	if n := len(reason); n > MaxReasonChars {
 		return Seed{}, fmt.Errorf(
 			"that reason is %d characters and the limit is %d; the detail belongs on the trail (`attn seed note %s -m …`)",
@@ -187,10 +200,10 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string) (Seed, error)
 		next.TenderSession = ""
 		next.TenderMember = ""
 	}
-	switch verb {
-	case VerbHarvest, VerbWither:
+	switch {
+	case rule.keepsReason:
 		next.Reason = reason
-	case VerbReplant:
+	case verb == VerbReplant:
 		// The reason said why it closed. It is reopened, so it no longer applies
 		// and leaving it would read as the reason it is open.
 		next.Reason = ""
@@ -246,13 +259,21 @@ const NoteKindNote = "note"
 //
 // MaxNoteBytes is a tripwire: the longest description in production ~/.attn on
 // 2026-08-12 was 14,920 characters, and a note is a paragraph about what
-// happened, not a document. Sixty-four kilobytes is four times that longest
-// real body.
+// happened, not a document. 32KiB is 2.1x that longest real body.
+//
+// It cannot sit on 64KiB, which is what the note travels through: a note
+// reaches the daemon as one JSON object in a single unix-socket frame, and that
+// frame is capped at exactly 64KiB. JSON escaping grows the body on the way in
+// — measured 2026-08-12, 45KB of ordinary text with light escaping arrives as
+// 75KB — so a limit set at the frame size is answered by the transport first,
+// and the caller reads "initial socket frame exceeds 65536 bytes" instead of
+// being told the note limit and pointed at the trail. Same arithmetic as
+// protocol.AgentMessageMaxChars, which travels the same frame.
 //
 // MaxReasonChars keeps a closing reason to the one line `ls` and the panel
 // show; anything longer is a note, and the refusal says so.
 const (
-	MaxNoteBytes   = 1 << 16
+	MaxNoteBytes   = 32 << 10
 	MaxReasonChars = 400
 	// ShowNotes is how many of a seed's notes `show` renders inline. Five is
 	// what fits above the fold beside the seed's own fields; the rest are
