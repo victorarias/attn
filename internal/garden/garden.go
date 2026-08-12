@@ -144,10 +144,13 @@ func NotesSchema() docstore.CollectionSchema {
 // Seed ids: `s-` plus six characters of Crockford's base32, which drops i, l, o
 // and u — so an id never misreads over a call and never spells a word.
 //
-// Six characters is 32^6 ≈ 1.07e9. At ten thousand seeds (Victor's garden would
-// take twenty-seven years at one a day) the chance any two collide is about
-// 5e-5, and a collision is not a corruption anyway: planting writes create-only,
-// so the store refuses the second and the planter mints again.
+// Six characters is 32^6 = 1,073,741,824. At ten thousand seeds (twenty-seven
+// years at one a day) one mint lands on a taken id with probability 1e4/2^30 ≈
+// 1e-5; across the whole garden's life the chance some pair shares an id is
+// n(n-1)/2N ≈ 4.7%, which is why the daemon mints again on a collision instead
+// of pretending the case away. Neither number is a corruption risk: planting
+// writes create-only, so the store refuses the second write rather than
+// overwriting somebody's seed.
 const (
 	idPrefix    = "s-"
 	idBodyLen   = 6

@@ -295,6 +295,47 @@ func TestGarden_PlantingIsCreateOnly(t *testing.T) {
 	}
 }
 
+// A minted id can land on one already planted. The planter did nothing wrong and
+// has nothing to fix, so the daemon mints again rather than answering a refusal
+// about a coin flip; only a mint source that keeps repeating itself is reported.
+func TestGarden_PlantingMintsAgainWhenAnIDIsTaken(t *testing.T) {
+	d := newGardenDaemon(t)
+	schema, err := d.seedsCollection()
+	if err != nil {
+		t.Fatalf("seedsCollection: %v", err)
+	}
+	if _, err := d.plantSeed(*schema, garden.Seed{ID: "s-7k3f9m", Title: "already here", Status: garden.StatusPlanted}); err != nil {
+		t.Fatalf("seeding the collision: %v", err)
+	}
+	minted := []string{"s-7k3f9m", "s-7k3f9m", "s-fresh1"}
+	d.gardenMintID = func() (string, error) {
+		next := minted[0]
+		minted = minted[1:]
+		return next, nil
+	}
+
+	planted := plant(t, d, protocol.SeedPlantMessage{Title: "planted anyway"})
+	if planted.ID != "s-fresh1" {
+		t.Fatalf("seed id = %q, want the third mint after two taken ones", planted.ID)
+	}
+	if len(minted) != 0 {
+		t.Fatalf("%d mints unused: the retry stopped early", len(minted))
+	}
+
+	// A mint that only ever repeats itself is a broken source, and the refusal
+	// says which rather than blaming the title.
+	d.gardenMintID = func() (string, error) { return "s-7k3f9m", nil }
+	resp := gardenCall(t, func(c net.Conn) {
+		d.handleSeedPlant(c, &protocol.SeedPlantMessage{Cmd: protocol.CmdSeedPlant, Title: "no id left"})
+	})
+	if resp.Ok {
+		t.Fatal("a mint source that never moves was allowed to plant")
+	}
+	if msg := protocol.Deref(resp.Error); !strings.Contains(msg, "random source") {
+		t.Fatalf("refusal = %q, want it to name the mint source", msg)
+	}
+}
+
 func TestGarden_CollectionsAreDeclaredOnStartup(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	t.Cleanup(d.stopEventBus)

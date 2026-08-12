@@ -453,6 +453,7 @@ type Daemon struct {
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 	gardenBroadcastHook   func([]protocol.Seed)                     // optional, tests only
+	gardenMintID          func() (string, error)                    // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every

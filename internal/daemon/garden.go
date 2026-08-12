@@ -304,13 +304,7 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		return
 	}
 
-	id, err := garden.NewID()
-	if err != nil {
-		d.sendGardenError(conn, "plant", err)
-		return
-	}
 	seed := garden.Seed{
-		ID:             id,
 		Title:          title,
 		Body:           body,
 		Status:         garden.StatusPlanted,
@@ -321,7 +315,7 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		Edges:          []garden.Edge{},
 		Vars:           []garden.Var{},
 	}
-	doc, err := d.plantSeed(*schema, seed)
+	seed, doc, err := d.mintAndPlant(*schema, seed)
 	if err != nil {
 		d.sendGardenError(conn, "plant", err)
 		return
@@ -330,6 +324,44 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		Ok:              true,
 		SeedPlantResult: &protocol.SeedPlantResult{Seed: seedToProtocol(seed, doc)},
 	})
+}
+
+// mintAndPlant gives the seed an id and writes it, minting again when that id
+// is already taken. Ids come from crypto/rand rather than a counter, so a
+// collision is possible and its own retry: the write is create-only, and the
+// alternative — telling the planter its seed was refused because of a coin
+// flip — is a refusal nobody can act on. Three tries is a tripwire, not a
+// budget: at a garden of ten thousand seeds a single mint collides with
+// probability ~1e-5, so three in a row is a broken random source, and the
+// refusal says so.
+func (d *Daemon) mintAndPlant(schema docstore.CollectionSchema, seed garden.Seed) (garden.Seed, docstore.Document, error) {
+	const mintAttempts = 3
+	var lastErr error
+	for range mintAttempts {
+		id, err := d.mintSeedID()
+		if err != nil {
+			return seed, docstore.Document{}, err
+		}
+		seed.ID = id
+		doc, err := d.plantSeed(schema, seed)
+		if err == nil {
+			return seed, doc, nil
+		}
+		if !docstore.IsConflict(err) {
+			return seed, docstore.Document{}, err
+		}
+		lastErr = err
+	}
+	return seed, docstore.Document{}, fmt.Errorf(
+		"minted %d seed ids and every one was already planted, which a working random source does not do: %w",
+		mintAttempts, lastErr)
+}
+
+func (d *Daemon) mintSeedID() (string, error) {
+	if d.gardenMintID != nil {
+		return d.gardenMintID()
+	}
+	return garden.NewID()
 }
 
 // gardenWorkspaceFor resolves the workspace a planting is stamped with:
