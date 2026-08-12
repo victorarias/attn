@@ -1167,6 +1167,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         totalRows: () => terminal.getScrollbackLength() + terminal.rows,
         rowText: (row) => selectionLineAtBufferRow(row, 0, terminal.cols),
         rowTextRange: (row, startCol, endCol) => selectionLineAtBufferRow(row, startCol, endCol),
+        hyperlinkUri: (row, col) => {
+          const history = terminal.getScrollbackLength();
+          return row < history
+            ? scrollbackHyperlinkUri(terminal, row, col)
+            : hyperlinkUriAt(terminal, row - history, col);
+        },
       };
     }, [selectionLineAtBufferRow]);
 

@@ -38,6 +38,28 @@ const MESSAGE = 'A soft line wrap moves overflowing text onto the next visual li
 
 const ANCHOR = 'visual line without inserting a real';
 
+const LINKED_MESSAGE = [
+  'The paths below are genuine rejection evidence from the agent.',
+  '',
+  'Examples: [pipeline routing](/Users/tester/src/services-pilot/audiobook-ingestion/ais-pipeline-1/FileProcessingService.java:118), '
+    + '[audio validation](/Users/tester/src/services-pilot/audiobook-ingestion/ais-audio-choreography/AudioServiceImpl.java:227), '
+    + '[image validation](/Users/tester/src/services-pilot/audiobook-ingestion/ais-image-choreography/ImageServiceImpl.java:88), '
+    + '[ZIP handling](/Users/tester/src/services-pilot/audiobook-ingestion/ais-zip-choreography/UnpackerImpl.java:176).',
+  '',
+  'The conclusion after those rendered links must remain independently annotatable.',
+].join('\n');
+
+const LINKED_ROWS = [
+  '• The paths below are genuine rejection evidence from the agent.',
+  '',
+  '  Examples: audiobook-ingestion/ais-pipeline-1/FileProcessingService.java:118,',
+  '  audiobook-ingestion/ais-audio-choreography/AudioServiceImpl.java:227,',
+  '  audiobook-ingestion/ais-image-choreography/ImageServiceImpl.java:88,',
+  '  audiobook-ingestion/ais-zip-choreography/UnpackerImpl.java:176.',
+  '',
+  '  The conclusion after those rendered links must remain independently annotatable.',
+];
+
 // The message with its head scrolled off, under a user turn whose tail repeats
 // the words immediately preceding the visible head.
 const DECOY_ABOVE = [
@@ -123,6 +145,52 @@ describe('rowsForOffsets', () => {
     // Those words are only on the user's row now. Resolving them there would
     // paint a wash over the user's own text and attribute it to the agent.
     expect(rowsForOffsets(alignment, start, end).map((r) => r.row)).not.toContain(0);
+  });
+
+  it('keeps prose on both sides of a run of rendered Markdown links', () => {
+    const alignment = alignMessage(LINKED_MESSAGE, LINKED_ROWS);
+    const before = anchorOffsets(LINKED_MESSAGE, 'genuine rejection evidence');
+    const after = anchorOffsets(LINKED_MESSAGE, 'conclusion after those rendered links');
+
+    expect(rowsForOffsets(alignment, before.start, before.end)).not.toEqual([]);
+    expect(rowsForOffsets(alignment, after.start, after.end)).not.toEqual([]);
+  });
+
+  it('maps a shortened visible path back to the Markdown link destination', () => {
+    const alignment = alignMessage(LINKED_MESSAGE, LINKED_ROWS);
+    const target = anchorOffsets(
+      LINKED_MESSAGE,
+      '/Users/tester/src/services-pilot/audiobook-ingestion/ais-audio-choreography/AudioServiceImpl.java:227',
+    );
+    const ranges = rowsForOffsets(alignment, target.start, target.end);
+
+    expect(ranges).toHaveLength(1);
+    expect(textAt(LINKED_ROWS, 0, ranges)).toContain('AudioServiceImpl.java:227');
+    expect(quotesAnchor(
+      LINKED_MESSAGE.slice(target.start, target.end),
+      textAt(LINKED_ROWS, 0, ranges),
+    )).toBe(true);
+  });
+
+  it('prefers an exact visible link label when OSC 8 also exposes its target', () => {
+    const markdown = 'See [implementation](/Users/tester/src/Thing.java:44) for the invariant.';
+    const rows = ['• See implementation for the invariant.'];
+    const alignment = alignMessage(
+      markdown,
+      rows,
+      0,
+      (_row, col) => (col >= rows[0].indexOf('implementation') ? 'file:///Users/tester/src/Thing.java:44' : null),
+    );
+    const startCol = rows[0].indexOf('implementation');
+    const span = offsetsForSelection(alignment, {
+      startRow: 0,
+      startCol,
+      endRow: 0,
+      endCol: startCol + 'implementation'.length,
+    });
+
+    expect(span).not.toBeNull();
+    expect(markdown.slice(span!.start, span!.end)).toBe('implementation');
   });
 
   it('seeds on the message even when the row above echoes its opening words', () => {
