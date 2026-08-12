@@ -340,26 +340,41 @@ Goal: seeds relate, and "what can I do now" is one flag-free command.
 
 Ships:
 
-- [ ] `attn seed link <a> blocks <b>` and `attn seed link <a> part-of <b>`
+- [x] `attn seed link <a> blocks <b>` and `attn seed link <a> part-of <b>`
       (typed edge list on the seed document; new kinds — `sown-from`,
       `discovered-from`, `relates-to` — are additive), with `unlink`.
-- [ ] `attn seed ready` with inferred scope: the calling session's workspace
+- [x] `attn seed ready` with inferred scope: the calling session's workspace
       by default; `--plot <crown>`, `--workspace <id>`, `--all` override.
-- [ ] `attn seed ls --tree` renders `part-of` hierarchy; `show` lists edges
+- [x] `attn seed ls --tree` renders `part-of` hierarchy; `show` lists edges
       both directions (blocks / blocked-by).
-- [ ] Harvesting a blocker makes the dependent ready at the next query (no
+- [x] Harvesting a blocker makes the dependent ready at the next query (no
       nudge yet — named later).
-- [ ] Priming, interactive side: attn-launched sessions receive the brief
+- [x] Priming, interactive side: attn-launched sessions receive the brief
       garden primer and their workspace's ready count in guidance (the
       chief-guidance injection path).
 
+Three rules decided while building this (2026-08-12):
+
+- A seed something is `part-of` is never itself ready. A crown's work is its
+  children, so a plot with open children would otherwise hand out the crown
+  and every leaf at once. A crown is finished by harvesting it, not by
+  tending it, so this holds even after its children close.
+- A seed sits in at most one plot. The second `part-of` is refused naming the
+  plot it is already in and the `unlink` that moves it, rather than making
+  "which plot is this in" a list.
+- A live tender holds its seed, and liveness is "a session this daemon still
+  knows" — including `recoverable`, which answers the open question below.
+  A tender that names only a crew member always holds: attn has no signal
+  that a person in a terminal pane walked away, and handing their seed to
+  somebody else on a guess is worse than leaving it claimed.
+
 Acceptance:
 
-- [ ] A three-seed chain (A blocks B, B part-of C) round-trips: `ready`
+- [x] A three-seed chain (A blocks B, B part-of C) round-trips: `ready`
       shows only A; harvesting A surfaces B.
-- [ ] Two sessions in different workspaces get different flag-free `ready`
+- [x] Two sessions in different workspaces get different flag-free `ready`
       answers.
-- [ ] Cycle creation is refused loudly, naming both seeds.
+- [x] Cycle creation is refused loudly, naming both seeds.
 
 ### Slice 4 — the seed axis of continuity
 
@@ -518,8 +533,13 @@ Acceptance:
   [docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md).
   Still to build before slice 5's dispatch acceptance can include a remote
   delegate; cross-machine syncing proper stays with the central-server arc.
-- Whether `ready` should exclude seeds whose tender session is dead vs.
-  recoverable (interacts with daemon-owned revive). Slice 3 decides.
+- ~~Whether `ready` should exclude seeds whose tender session is dead vs.
+  recoverable (interacts with daemon-owned revive). Slice 3 decides.~~ Ruled
+  2026-08-12: a session the daemon still knows holds its seed, `recoverable`
+  included — revive brings that session back to the seed it was tending, and
+  releasing it meanwhile would hand the work to somebody else while its
+  tender is on the way back. A session the daemon no longer knows releases
+  it. See slice 3's rules.
 - Crew references: free-string member names are knowingly un-validated
   until the crew primitive lands — acceptable for a single-user garden,
   revisit at the crew arc.

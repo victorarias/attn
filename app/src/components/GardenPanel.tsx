@@ -54,6 +54,61 @@ function statusClass(status: string): string {
   }
 }
 
+// closedStatus is the seed statuses that stop holding anything back. A blocker
+// stops blocking the moment it is harvested or withered; a dormant one still
+// blocks, because parking is a pause, not an answer.
+function closedStatus(status: string): boolean {
+  return status === 'harvested' || status === 'withered';
+}
+
+interface Relation {
+  label: string;
+  seed: Seed;
+}
+
+interface GardenIndex {
+  byID: Map<string, Seed>;
+  // Edges pointing at a seed, already phrased from that seed's side.
+  inbound: Map<string, Relation[]>;
+  // How many open seeds block a seed.
+  blockers: Map<string, number>;
+}
+
+// indexEdges reads the whole pushed garden once. Edges are stored on the seed
+// they point from, so the reverse direction is only knowable by walking every
+// seed — per row that is a scan per row, and this panel renders the garden.
+//
+// The index is built over the unscoped push on purpose: a blocker can live in
+// another workspace, and a panel that only looked at the workspace it shows
+// would tell a blocked seed it is blocked by nothing.
+function indexEdges(seeds: Seed[]): GardenIndex {
+  const index: GardenIndex = { byID: new Map(), inbound: new Map(), blockers: new Map() };
+  for (const seed of seeds) index.byID.set(seed.id, seed);
+  for (const seed of seeds) {
+    for (const edge of seed.edges ?? []) {
+      const label = edge.kind === 'blocks' ? 'blocked by' : edge.kind === 'part-of' ? 'has part' : '';
+      if (!label) continue;
+      index.inbound.set(edge.to, [...(index.inbound.get(edge.to) ?? []), { label, seed }]);
+      if (edge.kind === 'blocks' && !closedStatus(seed.status)) {
+        index.blockers.set(edge.to, (index.blockers.get(edge.to) ?? 0) + 1);
+      }
+    }
+  }
+  return index;
+}
+
+// relationsOf lists a seed's edges in both directions.
+function relationsOf(index: GardenIndex, id: string): Relation[] {
+  const rows: Relation[] = [];
+  for (const edge of index.byID.get(id)?.edges ?? []) {
+    const other = index.byID.get(edge.to);
+    if (!other) continue;
+    if (edge.kind === 'blocks') rows.push({ label: 'blocks', seed: other });
+    if (edge.kind === 'part-of') rows.push({ label: 'part of', seed: other });
+  }
+  return rows.concat(index.inbound.get(id) ?? []);
+}
+
 // tenderOf names whoever holds the seed: the crew member if there is one,
 // because that is the name a person says, and the claiming session otherwise. A
 // session id is not pretty, but "somebody holds this" is the fact the panel owes
@@ -72,6 +127,8 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
     if (showAll || !workspaceId) return seeds;
     return seeds.filter((seed) => seed.workspace_id === workspaceId);
   }, [seeds, showAll, workspaceId]);
+
+  const index = useMemo(() => indexEdges(seeds), [seeds]);
 
   if (!isOpen) return null;
 
@@ -116,6 +173,8 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
         <ul className="garden-panel__list">
           {scoped.map((seed) => {
             const expanded = expandedId === seed.id;
+            const blockers = index.blockers.get(seed.id) ?? 0;
+            const relations = expanded ? relationsOf(index, seed.id) : [];
             return (
               <li
                 key={seed.id}
@@ -131,6 +190,12 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
                     <span className="garden-seed__title">{seed.title}</span>
                     <span className="garden-seed__line">
                       <span className="garden-seed__state">{seed.status}</span>
+                      {seed.ready && <span className="garden-seed__ready">ready</span>}
+                      {blockers > 0 && (
+                        <span className="garden-seed__blocked">
+                          blocked by {blockers}
+                        </span>
+                      )}
                       {tenderOf(seed) && (
                         <span className="garden-seed__tender">tended by {tenderOf(seed)}</span>
                       )}
@@ -149,6 +214,18 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
                       {seed.template && <span>packet</span>}
                       {seed.gate && <span>gate</span>}
                     </div>
+                    {relations.length > 0 && (
+                      <ul className="garden-seed__relations">
+                        {relations.map((relation) => (
+                          <li key={`${relation.label}:${relation.seed.id}`}>
+                            <span className="garden-seed__relation-label">{relation.label}</span>
+                            <span className="garden-seed__relation-title">{relation.seed.title}</span>
+                            <span className="garden-seed__id">{relation.seed.id}</span>
+                            <span className="garden-seed__relation-state">{relation.seed.status}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
                     {seed.body ? (
                       <pre className="garden-seed__body">{seed.body}</pre>
                     ) : (

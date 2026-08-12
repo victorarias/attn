@@ -4235,6 +4235,12 @@ model Seed {
   "template": boolean;
   "gate": boolean;
   "vars": SeedVar[];
+  // Whether this seed can be tended right now: nothing open blocks it, it holds
+  // no live tender, nothing is part of it, and it is neither a packet nor a
+  // gate. Computed by the daemon on every read and every push — readiness is
+  // truth at query time, never a stored flag — so a client renders it rather
+  // than re-deriving a rule it would eventually disagree about.
+  "ready": boolean;
   // Why the seed was harvested or withered.
   "reason"?: string;
   // The document's own revision and stamps. `rev` is what a conditional write
@@ -4315,6 +4321,61 @@ model SeedShowResult {
   // `total` is what makes the shortfall visible rather than silent.
   "notes": SeedNote[];
   "notes_total": int32;
+  // Every edge that touches this seed, in both directions. The seed's own
+  // `edges` carry only what it points at, and "what blocks me" is the half a
+  // tender actually needs.
+  "relations": SeedRelation[];
+}
+
+// One edge as it reads from one seed's point of view: `blocks` and `part-of`
+// outbound, `blocked-by` and `has-part` for the same edges seen from the other
+// end.
+model SeedRelation {
+  "label": string;
+  "seed_id": string;
+  "title": string;
+  "status": string;
+}
+
+// Link or unlink two seeds. Structure lives in edges rather than in ids, so
+// re-parenting a seed never renames it. The daemon refuses what cannot be a
+// relation — an edge onto a seed that is not planted, a second crown, a cycle —
+// naming both seeds and the edge to remove.
+model SeedLinkMessage {
+  "cmd": "seed_link";
+  "seed_id": string;
+  // blocks | part-of.
+  "kind": string;
+  // The seed at the other end: `<seed_id> blocks <to_seed_id>`.
+  "to_seed_id": string;
+  // Remove the edge instead of adding it.
+  "unlink"?: boolean;
+}
+
+model SeedLinkResult {
+  "seed": Seed;
+  // False when the edge was already exactly as asked, so nothing was written.
+  "changed": boolean;
+}
+
+// What can be tended right now. Scope is inferred: the calling session's
+// workspace unless `plot`, `workspace_id` or `all` says otherwise — the daemon
+// knows who is asking, so the common form takes no flags at all.
+model SeedReadyMessage {
+  "cmd": "seed_ready";
+  "source_session_id"?: string;
+  // A crown: the answer is that plot's seeds, crown included.
+  "plot"?: string;
+  "workspace_id"?: string;
+  "all"?: boolean;
+}
+
+model SeedReadyResult {
+  "seeds": Seed[];
+  // What the answer was scoped to: plot | workspace | all, and the id of the
+  // plot or workspace when there is one.
+  "scope": string;
+  "scope_id": string;
 }
 
 // One lifecycle move. The five verbs share a command because they are one state
@@ -4753,6 +4814,8 @@ model Response {
   seed_transition_result?: SeedTransitionResult;
   seed_note_result?: SeedNoteResult;
   seed_notes_result?: SeedNotesResult;
+  seed_link_result?: SeedLinkResult;
+  seed_ready_result?: SeedReadyResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;

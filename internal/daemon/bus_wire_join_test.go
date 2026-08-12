@@ -201,6 +201,8 @@ var wireFixtures = map[string]wireFixture{
 	FactGardenWithered:      {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenReplanted:     {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenNoted:         {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenLinked:        {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenUnlinked:      {events: []string{protocol.EventGardenSeedsUpdated}},
 
 	// PRs and their mute lists.
 	FactPRAppeared:       {events: []string{protocol.EventPRsUpdated}},

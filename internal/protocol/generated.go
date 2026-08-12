@@ -5215,6 +5215,9 @@ type Response struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
+	// SeedLinkResult corresponds to the JSON schema field "seed_link_result".
+	SeedLinkResult *SeedLinkResult `json:"seed_link_result,omitempty,omitzero"`
+
 	// SeedListResult corresponds to the JSON schema field "seed_list_result".
 	SeedListResult *SeedListResult `json:"seed_list_result,omitempty,omitzero"`
 
@@ -5226,6 +5229,9 @@ type Response struct {
 
 	// SeedPlantResult corresponds to the JSON schema field "seed_plant_result".
 	SeedPlantResult *SeedPlantResult `json:"seed_plant_result,omitempty,omitzero"`
+
+	// SeedReadyResult corresponds to the JSON schema field "seed_ready_result".
+	SeedReadyResult *SeedReadyResult `json:"seed_ready_result,omitempty,omitzero"`
 
 	// SeedShowResult corresponds to the JSON schema field "seed_show_result".
 	SeedShowResult *SeedShowResult `json:"seed_show_result,omitempty,omitzero"`
@@ -5361,6 +5367,9 @@ type Seed struct {
 	// PlanterSession corresponds to the JSON schema field "planter_session".
 	PlanterSession string `json:"planter_session"`
 
+	// Ready corresponds to the JSON schema field "ready".
+	Ready bool `json:"ready"`
+
 	// Reason corresponds to the JSON schema field "reason".
 	Reason *string `json:"reason,omitempty,omitzero"`
 
@@ -5401,6 +5410,31 @@ type SeedEdge struct {
 
 	// To corresponds to the JSON schema field "to".
 	To string `json:"to"`
+}
+
+type SeedLinkMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// ToSeedID corresponds to the JSON schema field "to_seed_id".
+	ToSeedID string `json:"to_seed_id"`
+
+	// Unlink corresponds to the JSON schema field "unlink".
+	Unlink *bool `json:"unlink,omitempty,omitzero"`
+}
+
+type SeedLinkResult struct {
+	// Changed corresponds to the JSON schema field "changed".
+	Changed bool `json:"changed"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
 }
 
 type SeedListMessage struct {
@@ -5520,6 +5554,48 @@ type SeedPlantResult struct {
 	Seed Seed `json:"seed"`
 }
 
+type SeedReadyMessage struct {
+	// All corresponds to the JSON schema field "all".
+	All *bool `json:"all,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Plot corresponds to the JSON schema field "plot".
+	Plot *string `json:"plot,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type SeedReadyResult struct {
+	// Scope corresponds to the JSON schema field "scope".
+	Scope string `json:"scope"`
+
+	// ScopeID corresponds to the JSON schema field "scope_id".
+	ScopeID string `json:"scope_id"`
+
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds"`
+}
+
+type SeedRelation struct {
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
 type SeedShowMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -5534,6 +5610,9 @@ type SeedShowResult struct {
 
 	// NotesTotal corresponds to the JSON schema field "notes_total".
 	NotesTotal int `json:"notes_total"`
+
+	// Relations corresponds to the JSON schema field "relations".
+	Relations []SeedRelation `json:"relations"`
 
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`

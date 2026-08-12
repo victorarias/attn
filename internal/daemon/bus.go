@@ -211,6 +211,11 @@ const (
 	// seed, not the note — the trail is the seed's memory of itself, and the
 	// entity anybody reads is the seed.
 	FactGardenNoted = "garden.noted"
+	// FactGardenLinked/FactGardenUnlinked: an edge was added to or removed from
+	// a seed. Subject is the seed the edge is stored on, which is the document
+	// that changed; the seed at the other end is read from that document.
+	FactGardenLinked   = "garden.linked"
+	FactGardenUnlinked = "garden.unlinked"
 
 	// App registry facts; subject is the app's name.
 	//

@@ -110,6 +110,50 @@ func (c *Client) SeedNote(sessionID, seedID, body, member string) (*protocol.See
 	return resp.SeedNoteResult, nil
 }
 
+// SeedLink adds one edge between two seeds, or removes it when unlink is set.
+// The daemon decides what may be linked — an edge onto a seed that is not
+// planted, a second crown, a cycle — so the CLI and the app cannot disagree.
+func (c *Client) SeedLink(seedID, kind, toSeedID string, unlink bool) (*protocol.SeedLinkResult, error) {
+	msg := protocol.SeedLinkMessage{
+		Cmd: protocol.CmdSeedLink, SeedID: seedID, Kind: kind, ToSeedID: toSeedID,
+	}
+	if unlink {
+		msg.Unlink = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedLinkResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the edge but returned no seed")
+	}
+	return resp.SeedLinkResult, nil
+}
+
+// SeedReady asks what can be tended now. Every argument is an override: with
+// none of them the daemon scopes the answer to the calling session's workspace.
+func (c *Client) SeedReady(sessionID, plot string, workspaceID *string, all bool) (*protocol.SeedReadyResult, error) {
+	msg := protocol.SeedReadyMessage{Cmd: protocol.CmdSeedReady}
+	if sessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sessionID)
+	}
+	if plot != "" {
+		msg.Plot = protocol.Ptr(plot)
+	}
+	msg.WorkspaceID = workspaceID
+	if all {
+		msg.All = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedReadyResult == nil {
+		return nil, fmt.Errorf("the daemon answered without a ready list")
+	}
+	return resp.SeedReadyResult, nil
+}
+
 // SeedNotes reads a seed's whole trail, newest first. limit 0 takes the
 // daemon's bound.
 func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult, error) {
