@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  The garden plan no longer hands prose quality for crown bodies and
+  notes to the prose density gate — that design died in calibration.
+  It now points at the first-principles record of what was measured.
