@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  The agent guide's comment discipline now says a comment claims only
+  what this commit does — an intended-but-unbuilt design goes in the
+  plan doc or the PR body, never in a comment.
