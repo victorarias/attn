@@ -253,7 +253,8 @@ Starting points, not recommendations. None of these has been measured.
 - **Fix the writer, not the message.** Everything above steps in after the prose
   exists. The instruction could live in the agent's standing context so the
   first draft comes out plain. Costs nothing. Unknown: whether standing guidance
-  survives a long session — which the replay harness could measure directly.
+  survives a long session — which the replay harness could measure directly
+  (`internal/prosegate/harness_test.go` on `research/prose-gate-generation-2`).
 - **Step in when someone reads, not when an agent writes.** attn owns the
   surface where messages get read. A message that does not land could be
   replaced on demand, with one keystroke, instead of every message being
@@ -288,31 +289,48 @@ Starting points, not recommendations. None of these has been measured.
 - **Idle systems stay idle.** Nothing here may add recurring work. The pipeline
   runs only when someone actually writes.
 - **The data stays out of the repo.** It is the user's private transcripts, and
-  this repository is public. It lives in a session scratchpad. Only the numbers
-  and the short excerpts above are committed.
+  this repository is public. Only the numbers and the short excerpts above are
+  committed. The tools that regenerate it are preserved instead, which costs
+  nothing and keeps the data disposable.
 
 ## Reproducing any of this
 
-The mining and experiment scripts live in the session scratchpad, not in the
-repo. Everything they produced is summarized above. The data files are
-`corpus_pure.jsonl` (17 hand-checked rejected/accepted pairs),
-`silent.jsonl.handlabel` (1,250 messages, 22 hand-checked complaints), and
-`tickets.jsonl` (136 real ticket texts, copied read-only from the production
-database).
+Everything the scripts produced is summarized above, and **the scripts
+themselves are preserved on the branch `research/prose-gate-generation-2`**,
+under `research/prose/`. That branch must never merge — its design is the one
+these measurements rejected — but it makes every number here repeatable.
+`research/prose/README.md` names what each piece answered.
 
-**No prose code is in the repository, on `main` or anywhere else it would be
-found by looking.** Two generations exist and neither shipped:
+**The data is deliberately not preserved, and does not need to be.** It is
+private transcripts and this repository is public. What the branch keeps
+instead are the miners. Pointed at `~/.claude/projects` they rebuild the
+transcript corpus in a couple of minutes — the paired rejected/accepted cases,
+and the 1,250 messages with their replies. The real ticket text comes from the
+database rather than from transcripts, so it has its own miner and one manual
+step: copy `~/.attn/attn.db` first, because production is read-only to agents
+and a live daemon is writing to it. Keeping the tools is what makes the data
+disposable.
+
+One warning carried in that README and worth repeating: the miners label
+complaints by pattern match, and **those labels are wrong more than half the
+time** — 49 flagged, 22 genuine. Every number in this document came from labels
+read by hand. Skipping that step reproduces the mistake, not the result.
+
+**No prose code is on `main`.** Two generations exist, both on unmerged
+branches, and neither shipped:
 
 - **Generation 1** — a rule engine with density, hidden-verb, rhythm and
-  structure rules, accept/reject vocabulary files, and golden tests — sits
-  unmerged on the branch `feat/prose-check`, as `internal/prose` plus
-  `cmd/attn/prose.go`. The measurements above killed its design before it was
-  reviewed. Close the branch.
+  structure rules, accept/reject vocabulary files, and golden tests — sits on
+  `feat/prose-check`, as `internal/prose` plus `cmd/attn/prose.go`. The
+  measurements above killed its design before it was reviewed.
 - **Generation 2** — the six threshold checks, the rewrite instruction, the
-  one-shot refusal, and a structural counter — was never committed. It lived in
-  a session scratchpad and is gone. The only parts worth reviving are quoted in
-  full in this document: the instruction text above, and the idea of counting
-  code blocks, tables and links before and after a rewrite.
+  one-shot refusal, and the structural counter — is the snapshot on
+  `research/prose-gate-generation-2`, alongside the scripts.
 
-So there is nothing here to delete and nothing to build on. Anyone starting
-fresh starts from the measurements, not from the code.
+Neither is a starting point; both are a record. Anyone starting fresh starts
+from the measurements. The one piece worth reusing whatever gets built is the
+replay harness (`internal/prosegate/harness_test.go` on that branch), which
+rebuilds the conversation up to a message the user objected to, answers in
+their place with whatever intervention is being tested, and measures what comes
+back. Every real answer in this document came out of it, and the untried
+framings above are questions it can answer directly.

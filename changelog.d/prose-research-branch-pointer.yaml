@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  Pointed the prose-research plan docs at the branch that now holds the mining
+  and experiment scripts, so the measurements can be repeated without keeping
+  the private transcripts they were taken from.
