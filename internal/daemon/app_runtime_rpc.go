@@ -161,10 +161,10 @@ func (d *Daemon) handleAppRuntimeConnection(conn net.Conn, reader *bufio.Reader,
 			}
 			continue
 		}
-		if msg.Method == appRuntimeEnteredMethod {
+		if msg.Method == appRuntimeEnteredMethod || msg.Method == appRuntimeLeftMethod {
 			// On the read loop on purpose: it is a map write, and its whole value is
 			// the order it arrives in.
-			d.appRuntimeEntered(runtime, msg)
+			d.appRuntimeHandlerMoved(runtime, msg)
 			continue
 		}
 		// Off the read loop: several apps dispatch concurrently over this one
@@ -246,35 +246,44 @@ func (d *Daemon) appRuntimeCrashed(msg jsonRPCMessage) (any, error) {
 	return appRuntimeHelloResult{OK: true}, nil
 }
 
-// appRuntimeEnteredMethod is the host saying it is about to call an app's
-// handler. It is a notification: there is nothing to answer, and the point is
-// that it reaches the daemon *before* the handler runs, so it is still on the
-// wire when a handler that never yields freezes the loop behind it.
+// appRuntimeEnteredMethod and appRuntimeLeftMethod are the host saying it is
+// about to call an app's handler, and that the handler has settled. They are
+// notifications: there is nothing to answer, and the point of the first is that
+// it reaches the daemon *before* the handler runs, so it is already on the wire
+// when a handler that never yields freezes the loop behind it.
 //
-// It is what makes a frozen loop attributable. The daemon's own dispatch order is
-// not the order handlers hold the loop — see attributeWedgedDispatch.
-const appRuntimeEnteredMethod = "app_runtime.entered"
+// Together they are what makes a frozen loop attributable — the daemon's own
+// dispatch order is not the order handlers hold the loop, and nothing the daemon
+// can observe tells it when a handler left. See attributeWedgedDispatch.
+const (
+	appRuntimeEnteredMethod = "app_runtime.entered"
+	appRuntimeLeftMethod    = "app_runtime.left"
+)
 
-type appRuntimeEnteredParams struct {
+type appRuntimeHandlerParams struct {
 	Dispatch string `json:"dispatch"`
 	App      string `json:"app"`
 }
 
-// enteredHandler is one handler the host entered and has not answered for.
-// order is the daemon's receive order, which is the host's entry order: the
-// frames arrive on one socket and are recorded on its read loop.
+// enteredHandler is one handler the host entered and has not left. order is the
+// daemon's receive order, which is the host's entry order: the frames arrive on
+// one socket and are recorded on its read loop.
 type enteredHandler struct {
 	app   string
 	order uint64
 }
 
-func (d *Daemon) appRuntimeEntered(runtime *appRuntimeConnection, msg jsonRPCMessage) {
-	var params appRuntimeEnteredParams
+func (d *Daemon) appRuntimeHandlerMoved(runtime *appRuntimeConnection, msg jsonRPCMessage) {
+	var params appRuntimeHandlerParams
 	if err := json.Unmarshal(msg.Params, &params); err != nil {
-		d.logf("app runtime: decode %s params: %v", appRuntimeEnteredMethod, err)
+		d.logf("app runtime: decode %s params: %v", msg.Method, err)
 		return
 	}
 	if params.Dispatch == "" || params.App == "" {
+		return
+	}
+	if msg.Method == appRuntimeLeftMethod {
+		d.forgetEnteredHandler(params.Dispatch)
 		return
 	}
 	d.noteEnteredHandler(runtime.generation, params.Dispatch, params.App)

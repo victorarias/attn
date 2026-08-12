@@ -170,12 +170,20 @@ export async function runDispatch(
   // later announcement from ever being written. This is the daemon's only witness
   // of which handler is on the event loop, and it needs it exactly when this
   // process has stopped answering everything else.
-  conn.notify("app_runtime.entered", { dispatch: params.dispatch, app: params.app })
+  //
+  // Both halves matter. Without the second, an entry outlives the handler and
+  // names it for a freeze it is no longer part of; the daemon would have to guess
+  // when a handler left, and the only signal it could guess from — the loop still
+  // turning — says nothing about a handler that yielded and never settled.
+  const scope = { dispatch: params.dispatch, app: params.app }
+  conn.notify("app_runtime.entered", scope)
   try {
     await handler(params.event, ctx)
     return { ok: true }
   } catch (err) {
     return { ok: false, error: describeFailure(err) }
+  } finally {
+    conn.notify("app_runtime.left", scope)
   }
 }
 

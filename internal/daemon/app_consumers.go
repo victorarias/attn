@@ -491,10 +491,6 @@ func (d *Daemon) dispatchToAppRuntime(ctx context.Context, plan *appDispatchPlan
 		// The transport failed — the socket died mid-call, or the process did.
 		return appDispatchResult{}, runtimeFailure("%v", err)
 	}
-	// The host answered, so this handler is no longer on the loop. Only an answer
-	// proves that: a dispatch the daemon gave up on is still running in there, and
-	// forgetting it here is what let a victim be charged for it.
-	d.forgetEnteredHandler(dispatch.id)
 	return result, nil
 }
 
@@ -520,18 +516,15 @@ func (d *Daemon) dispatchToAppRuntime(ctx context.Context, plan *appDispatchPlan
 // the culprit is the most recent entry with no answer yet: whoever entered last
 // and never came back is the one on the loop right now.
 //
-// An entry is forgotten when its dispatch is answered, when a ping answers, or
-// when the process dies. Only the first and last of those prove that handler is
-// off the loop: an answered ping proves nothing is *holding* the loop, and a
-// handler that yielded and never settled is still on it. Wiping on a ping is
-// still right, because attribution is moot while the loop turns.
+// The host also announces each handler leaving (appRuntimeLeftMethod), which is
+// what keeps the ledger honest. The daemon has no way to work out when a handler
+// left: the only thing it could infer that from is the loop still turning, and a
+// handler that yielded and never settled is still on a turning loop. Whatever the
+// daemon guessed there would be wrong exactly for the handler that yields, comes
+// back, and then spins — the one this has to name.
 //
-// Known residue, both cheap. If one app freezes the loop, finishes, and a
-// *different* app freezes it again with no ping in between, both entries are
-// present and the second freezer entered later, so it is still the one charged.
-// And if a handler yields, has its entry wiped by a ping, and only then resumes
-// and spins, nothing names it: attribution falls back to charging whoever timed
-// out, until the next dispatch enters and is announced.
+// So the ledger is dropped only on facts, never on inference: an entry goes when
+// the host says that handler left, and all of them go when the process dies.
 func (d *Daemon) attributeWedgedDispatch(ctx context.Context, runtime *appRuntimeConnection, name string) error {
 	pingCtx, cancel := context.WithTimeout(ctx, d.appPingBudget())
 	defer cancel()
@@ -548,9 +541,9 @@ func (d *Daemon) attributeWedgedDispatch(ctx context.Context, runtime *appRuntim
 		name, pingOutcome(err), d.appNow().Sub(asked).Round(time.Microsecond))
 
 	if err == nil {
-		// The loop is turning, so nothing is holding it and there is nothing to
-		// attribute — see the residue note above for what this wipe costs.
-		d.forgetEnteredHandlers()
+		// The loop is turning, so nothing is holding it: this app's own handler is
+		// what did not return. The ledger is left alone — an answered ping says
+		// nothing about which handlers are still on the loop.
 		return context.DeadlineExceeded
 	}
 

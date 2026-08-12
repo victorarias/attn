@@ -137,6 +137,50 @@ func TestAVictimIsNotChargedAfterTheCulpritsDispatchHasGivenUp(t *testing.T) {
 	}
 }
 
+// A handler that yields is still on the loop, and an answered ping does not say
+// otherwise. The daemon must keep naming it if it comes back and spins.
+//
+// This is the case that decides whether the daemon may infer a handler left. It
+// may not: the only thing it could infer from is the loop still turning, and a
+// handler that yielded and never settled is on a turning loop. Dropping entries
+// on an answered ping would leave this freeze named by nobody.
+func TestAHandlerThatYieldedIsStillNamedWhenItComesBackAndSpins(t *testing.T) {
+	d := newAppDaemon(t)
+	d.appDispatchWait = 200 * time.Millisecond
+	d.appPingWait = 100 * time.Millisecond
+	installApp(t, d, "sleeper", subscribing("ticket.*"))
+	installApp(t, d, "latecomer", subscribing("ticket.*"))
+
+	entered := make(chan string, 1)
+	release := make(chan struct{})
+	defer close(release)
+	runtime := startFakeAppRuntime(t, d, enterOnceThenBlock(entered, release))
+
+	// sleeper enters and yields — it never settles, but the loop keeps turning, so
+	// its own dispatch times out against an *answered* ping.
+	err := d.deliverAppEvent(context.Background(), "sleeper", appEvent("ticket.created", "tk-1", 1))
+	if err == nil {
+		t.Fatal("a handler that never returned reported success")
+	}
+	if !strings.Contains(err.Error(), "did not return within") {
+		t.Fatalf("failure = %v, want the hung-handler message on a turning loop", err)
+	}
+
+	// Now it resumes and spins: same handler, same entry, loop stops.
+	runtime.freezeLoop()
+
+	failure := d.deliverAppEvent(context.Background(), "latecomer", appEvent("ticket.created", "tk-2", 2))
+	if failure == nil {
+		t.Fatal("a dispatch into a frozen runtime reported success")
+	}
+	if !strings.Contains(failure.Error(), "sleeper") {
+		t.Fatalf("the handler that yielded and came back is no longer named: %v", failure)
+	}
+	if stall, ok := d.appStallSnapshot("latecomer"); ok {
+		t.Fatalf("latecomer was charged for a loop sleeper froze: %+v", stall)
+	}
+}
+
 // An app that ran and returned is off the loop, and must not be blamed for a
 // freeze it is not part of. When nothing is on the loop the daemon has no culprit
 // to name and charges the app whose dispatch timed out, which is all it knows.

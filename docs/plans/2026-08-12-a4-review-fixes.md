@@ -125,25 +125,31 @@ the earliest dispatch therefore charges the best-behaved app in the common case,
 which is a worse failure than charging everyone.
 
 The daemon cannot work this out; only the host knows which handler it called. So
-the host announces each entry on the socket immediately before invoking the
-handler (`app_runtime.entered`, a notification — nothing to answer), and the
-culprit is the most recent entry with no answer yet. An entry is dropped when its
-dispatch is answered, when a ping answers, or when the process dies.
+the host announces each handler entering and leaving on the socket
+(`app_runtime.entered` / `app_runtime.left`, notifications — nothing to answer),
+entry announced immediately *before* the call, and the culprit is the most recent
+entry that has not left.
 
-An answered ping does not prove no handler is on the loop — a yielded handler
-that never settles is still there. It proves nothing is *holding* it, which is
-what makes the wipe safe: attribution is moot while the loop turns. The cost is
-one corner. If a handler yields, has its entry wiped by a ping, and only then
-resumes and spins, there is no entry naming it and attribution falls back to
-charging whoever timed out, until some new dispatch enters and is announced.
+Both halves are load-bearing. A first pass sent only `entered` and dropped
+entries when a liveness ping answered, which cost two corners: a yielded handler
+that came back and spun was named by nothing, and a stale entry outlived its
+handler. Both came from the same mistake — inferring that a handler left. The
+only thing the daemon can infer that from is the loop still turning, and a
+handler that yielded and never settled is on a turning loop, so the inference is
+wrong exactly for the handler that has to be named. The ledger is now dropped
+only on facts: an entry when the host says that handler left, all of them when
+the process dies. The price is one extra frame per dispatch, against a dispatch
+rate bounded by the bus fact rate.
 
 The receipt this depends on: a Bun socket write issued immediately before a
 synchronous spin reaches the peer at once rather than queueing behind it —
 measured with a 5s spin, the frame arrived ~1ms after the write and ~5s before
-the spin ended. Without that, the announcement would arrive too late to be the
-witness, and the design would not work at all.
+the spin ended. It has to be measured across two processes; a single-process
+probe cannot show it, because one loop cannot read what the spin blocks. Without
+that, the announcement would arrive too late to be the witness, and the design
+would not work at all.
 
-`appRuntimeAPIVersion` goes to 2: the daemon↔host wire gained a frame, and the
+`appRuntimeAPIVersion` goes to 2: the daemon↔host wire gained frames, and the
 two are version-checked at hello because they ship together.
 
 ## 3 — one app's unhandled rejection kills the sidecar for everyone (medium)

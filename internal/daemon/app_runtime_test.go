@@ -186,7 +186,7 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 		f.sendRaw(jsonRPCMessage{
 			JSONRPC: "2.0",
 			Method:  appRuntimeEnteredMethod,
-			Params:  mustMarshalEnteredParams(f.t, appRuntimeEnteredParams{Dispatch: req.Dispatch, App: req.App}),
+			Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
 		})
 		// On its own goroutine: a handler that calls back into the daemon would
 		// otherwise deadlock against this loop, which is the answer's only reader.
@@ -197,16 +197,23 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 					result = appDispatchResult{OK: false, Error: err.Error()}
 				}
 			}
+			// The other half of the announcement, and the reason the daemon never
+			// has to infer that a handler left.
+			f.sendRaw(jsonRPCMessage{
+				JSONRPC: "2.0",
+				Method:  appRuntimeLeftMethod,
+				Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+			})
 			f.sendRaw(jsonRPCResult(id, result))
 		}(msg.ID, req)
 	}
 }
 
-func mustMarshalEnteredParams(t *testing.T, params appRuntimeEnteredParams) json.RawMessage {
+func mustMarshalHandlerParams(t *testing.T, params appRuntimeHandlerParams) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(params)
 	if err != nil {
-		t.Fatalf("marshal %s params: %v", appRuntimeEnteredMethod, err)
+		t.Fatalf("marshal handler-movement params: %v", err)
 	}
 	return data
 }
