@@ -367,4 +367,46 @@ describe('anchorForSelection', () => {
     expect(anchor!.messageKey).toBe('turn-1');
     expect(older.slice(anchor!.start, anchor!.end)).toContain('retry wrapper');
   });
+
+  it('accepts agent prose after a Markdown link was rendered as a shortened path', () => {
+    const markdown = 'Evidence: [source](/Users/tester/src/services-pilot/a/b/Source.java:19). '
+      + 'The conclusion after the source remains annotatable.';
+    const rows = [
+      '• Evidence: a/b/Source.java:19.',
+      '  The conclusion after the source remains annotatable.',
+    ];
+    const store = new TerminalAnnotationStore();
+    store.setMessages([{ key: 'turn-1', markdown }]);
+    const grid = new FakeGrid(rows);
+    const startCol = rows[1].indexOf('conclusion');
+
+    const anchor = store.anchorForSelection(grid, {
+      startRow: 1,
+      startCol,
+      endRow: 1,
+      endCol: startCol + 'conclusion after the source'.length,
+    });
+
+    expect(anchor).not.toBeNull();
+    expect(anchor!.quote).toBe('conclusion after the source');
+  });
+
+  it('keeps the containment gate on reverse selection after sparse alignment', () => {
+    const markdown = 'Evidence: [source](/Users/tester/src/services-pilot/a/b/Source.java:19). '
+      + 'The conclusion after the source remains annotatable.';
+    const store = new TerminalAnnotationStore();
+    store.setMessages([{ key: 'turn-1', markdown }]);
+    const grid = new FakeGrid([
+      '• Evidence: a/b/Source.java:19.',
+      '› conclusion after the source please',
+    ]);
+    const startCol = grid.rows[1].indexOf('conclusion');
+
+    expect(store.anchorForSelection(grid, {
+      startRow: 1,
+      startCol,
+      endRow: 1,
+      endCol: startCol + 'conclusion after the source'.length,
+    })).toBeNull();
+  });
 });

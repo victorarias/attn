@@ -26,6 +26,9 @@ export interface MessageRowAccess {
   // Text between two code-unit columns: the gate reads exactly the cells a wash
   // would cover, so sideways drift is caught.
   rowTextRange(bufferRow: number, startCol: number, endCol: number): string;
+  // Hidden OSC 8 target for a cell. Optional because plain terminal rows and
+  // test grids have no hyperlink metadata; visible text remains sufficient.
+  hyperlinkUri?(bufferRow: number, col: number): string | null;
 }
 
 // One assistant message that can be annotated.
@@ -222,7 +225,7 @@ export class TerminalAnnotationStore {
 
     let { base, end, local } = this.searchWindow(lastSpan, totalRows);
     let rows = readRows(base, end);
-    let alignment = alignMessage(markdown, rows, base);
+    let alignment = alignMessage(markdown, rows, base, access.hyperlinkUri);
 
     // Widen to the whole buffer on a miss, or on an edge hit — the message
     // probably continues outside the window.
@@ -235,7 +238,7 @@ export class TerminalAnnotationStore {
       end = totalRows;
       local = false;
       rows = readRows(base, end);
-      alignment = alignMessage(markdown, rows, base);
+      alignment = alignMessage(markdown, rows, base, access.hyperlinkUri);
     }
 
     const entry: AlignmentCache = {
@@ -320,7 +323,13 @@ export class TerminalAnnotationStore {
       if (!alignment) continue;
       const span = offsetsForSelection(alignment, selection);
       if (!span) continue;
-      return { messageKey: key, start: span.start, end: span.end, quote: markdown.slice(span.start, span.end) };
+      const quote = markdown.slice(span.start, span.end);
+      const rows = rowsForOffsets(alignment, span.start, span.end);
+      const painted = rows
+        .map((range) => access.rowTextRange(range.row, range.startCol, range.endCol))
+        .join('\n');
+      if (!quotesAnchor(quote, painted)) continue;
+      return { messageKey: key, start: span.start, end: span.end, quote };
     }
     return null;
   }
