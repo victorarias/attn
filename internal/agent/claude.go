@@ -43,6 +43,10 @@ const (
 	claudeTranscriptFreshnessSkew = 5 * time.Second
 )
 
+// Claude Code's own cross-session messaging tools, suppressed at launch by
+// BuildCommand.
+var claudePeerTools = []string{"ListAgents", "SendMessage"}
+
 func init() {
 	Register(&Claude{})
 }
@@ -97,6 +101,17 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, "--append-system-prompt", guidance)
 	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
+	}
+
+	// Claude Code publishes its own address book, keyed on each session's working
+	// directory and visible only to other Claude Code sessions; attn's own
+	// (`attn agent list` / `attn agent msg`) names every session as the user named
+	// it and reaches codex too. An agent holding both messages the wrong one, so
+	// only attn's is left standing. Denying removes the tools from the launched
+	// agent's tool list rather than failing the call (measured: 31 tools -> 29,
+	// both absent from the session's init event).
+	if enabled, _ := boolEnv("ATTN_CLAUDE_PEER_MESSAGING"); !enabled {
+		args = append(args, "--disallowed-tools", strings.Join(claudePeerTools, " "))
 	}
 
 	if model := strings.TrimSpace(opts.Model); model != "" {

@@ -1,0 +1,10 @@
+kind: changed
+area: agents
+change: >
+  Claude sessions launched by attn no longer carry Claude Code's own
+  cross-session messaging tools. They offered a second address book — visible
+  only to Claude sessions, naming each one after its working directory rather
+  than the name you gave it — so an agent asked to message another agent found
+  the wrong list. `attn agent list` and `attn agent msg` remain the way across,
+  and they reach codex sessions too. Set ATTN_CLAUDE_PEER_MESSAGING=1 to launch
+  with Claude's tools back.
