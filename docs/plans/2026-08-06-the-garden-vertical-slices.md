@@ -92,8 +92,9 @@ to fix.
   `attn seed notes <id>`"), with the full list pageable and filterable.
   A silent truncation here recreates the unread bulletin board this
   surface exists to replace. Prose quality for crown bodies and notes is
-  the [density gate](2026-08-10-prose-density-gate.md)'s job, not this
-  plan's. Live queries, bus change events, and revision-checked writes
+  an open problem outside this plan's scope — the gate designed for it
+  died in calibration; what was measured is in
+  [the first-principles record](2026-08-12-plain-agent-prose-first-principles.md). Live queries, bus change events, and revision-checked writes
   come free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
