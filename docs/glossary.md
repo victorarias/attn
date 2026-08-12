@@ -226,6 +226,30 @@ artifact attachments accumulate on the ticket's activity thread. Current artifac
 are the files in the ticket's Notebook directory, and the chief watches
 progress from the ticket view and board rather than polling the agent.
 
+## The prose gate
+
+The **prose gate** reads an agent's writing back to it before anyone else has to.
+Ticket descriptions, ticket comments, and delegation briefs pass through it: it
+measures the prose alone — diagrams, tables, code, commands, and links are
+removed before anything is counted — and hands the message back once with a
+request to say it plainly. It is a **trigger, not a critic**: it decides whether
+a rewrite is wanted and never says which words to change.
+
+Every threshold is a tripwire calibrated against real conversation — messages
+that drew a complaint about density, paired with the revisions that answered
+them — and each one sits past the densest accepted prose in that corpus, so
+ordinary writing never feels it exists. A message that legitimately trips one
+means the number is wrong, not the message.
+
+The gate refuses **once per session**, then clears itself: the next write lands
+whatever it says, so an agent can never be stuck trading versions with it. On
+that next write it compares what arrived against what it refused and names
+anything the rewrite dropped — a diagram, a table, a link. Rewriting for
+plainness is exactly when those go missing, and only the author knows whether
+the loss was deliberate, so it reports and never blocks.
+
+`attn prose check <file|->` runs the same check by hand.
+
 ## The raw tier
 
 Machine-internal capture under `.attn/raw/`, the keeper's **input**, never

@@ -255,6 +255,9 @@ func main() {
 		// No banner: output must stay pure (stdout = answer only, or a single
 		// --json line) for machine consumption by the calling agent.
 		runVisionCheck()
+	case "prose":
+		// No banner: stdout is the verdict, read by the agent that wrote the prose.
+		runProse()
 	case "present":
 		maybePrintProfileBanner()
 		runPresent()
@@ -651,6 +654,7 @@ commands:
   bus <command>                     event bus: consumer cursors, lag, kill switch
   doc <command>                     document store: collections, documents, live queries
   vision-check <image> <question>   answer a question about an image (single LLM call)
+  prose check <file|->              say whether prose needs a plain rewrite first
   daemon <command>                  manage the daemon
 	  daemon ensure|stop                ensure the daemon is running, or stop it
   profile <status|resolve|list>     show / resolve the active profile's resources
@@ -684,6 +688,7 @@ func runDelegate() {
 		fmt.Fprintf(os.Stderr, "delegate: %v\n", err)
 		os.Exit(2)
 	}
+	gateProse("delegate", args.sourceSessionID, args.brief)
 	c := client.New("")
 	// Print the caller-owned recovery key before crossing the transport. The
 	// daemon may durably accept the request even if this process never receives
@@ -1100,6 +1105,7 @@ func runTicketNew(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket new: %v\n", err)
 		os.Exit(2)
 	}
+	gateProse("ticket new", source, parsed.Description)
 	result, err := client.New("").CreateTicket(source, parsed.Title, parsed.Description, parsed.ID)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket new: %v\n", err)
@@ -1316,6 +1322,7 @@ func runTicketComment(args []string) {
 		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)
 		os.Exit(2)
 	}
+	gateProse("ticket comment", source, parsed.Comment)
 	result, err := client.New("").CommentTicket(source, parsed.TicketID, parsed.Comment)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ticket comment: %v\n", err)

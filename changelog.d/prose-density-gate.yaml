@@ -1,0 +1,12 @@
+kind: added
+area: cli
+change: >
+  Ticket descriptions, ticket comments, and delegation briefs now get read back
+  to their author before they land. When a message reads densely — long words,
+  long sentences, a pile of prepositions — attn hands it back once and asks for
+  it in plain language. The thresholds come from real conversations: every
+  number sits past the densest prose that was actually accepted, so ordinary
+  writing never feels the gate exists. It refuses at most once per session, so
+  a rewrite always lands, and it names anything the rewrite dropped — a
+  diagram, a table, a link — because rewriting for plainness is exactly when
+  those go missing. `attn prose check <file|->` runs the same check by hand.
