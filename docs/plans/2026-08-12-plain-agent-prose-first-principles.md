@@ -303,11 +303,13 @@ these measurements rejected — but it makes every number here repeatable.
 
 **The data is deliberately not preserved, and does not need to be.** It is
 private transcripts and this repository is public. What the branch keeps
-instead are the miners, which rebuild the whole corpus from
-`~/.claude/projects` in a couple of minutes: the paired
-rejected/accepted cases, the 1,250 messages with their replies, and the real
-ticket text (read out of the production database, read-only). Keeping the tools
-is what makes the data disposable.
+instead are the miners. Pointed at `~/.claude/projects` they rebuild the
+transcript corpus in a couple of minutes — the paired rejected/accepted cases,
+and the 1,250 messages with their replies. The real ticket text comes from the
+database rather than from transcripts, so it has its own miner and one manual
+step: copy `~/.attn/attn.db` first, because production is read-only to agents
+and a live daemon is writing to it. Keeping the tools is what makes the data
+disposable.
 
 One warning carried in that README and worth repeating: the miners label
 complaints by pattern match, and **those labels are wrong more than half the

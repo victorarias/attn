@@ -440,7 +440,8 @@ Two generations of prose code exist, both on unmerged branches:
 - **Generation 2**, described below, is preserved on
   `research/prose-gate-generation-2`, together with every mining and experiment
   script under `research/prose/`. That branch must never merge. It is kept
-  because the miners rebuild the corpus from `~/.claude/projects` on demand,
+  because the miners rebuild the transcript corpus from `~/.claude/projects` on
+  demand (ticket text has its own miner, run against a copy of the database),
   which is what makes the private data disposable, and because the replay
   harness there outlives whatever gets built next. If any of the gate itself is
   ever worth reviving it is the nudge text and the structural counter, both
