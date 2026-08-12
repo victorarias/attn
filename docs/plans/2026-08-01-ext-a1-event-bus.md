@@ -366,12 +366,14 @@ that reached the wire.
 Three properties make it hold without maintenance:
 
 - The fact vocabulary is parsed out of `bus.go` (`Fact…` constants) and the
-  projection table is read at runtime, so a new fact under an existing wildcard
-  (`ticket.*`, `pr.*`, `garden.*`) is covered with no edit at all.
-- A projected fact with no fixture fails by name, and a fixture whose fact no
-  longer exists fails as stale. Most fixtures are one line — 26 of the 41
-  projections push correctly against a bare daemon and a bare fact, so a subject
-  or payload appears only where the projection genuinely needs one.
+  projection table is read at runtime, so a new fact — including one that falls
+  under an existing wildcard like `ticket.*` — is *seen* without anyone
+  remembering this test exists.
+- Being seen is what makes it loud: a projected fact with no fixture fails by
+  name, saying what to add, and a fixture whose fact no longer exists fails as
+  stale. The fixture is one line for 40 of the 79 facts, because 26 of the 41
+  projections push correctly against a bare daemon and a bare fact; a subject or
+  payload appears only where the projection genuinely needs one.
 - A declared fact matched by *no* projection must be listed in
   `factsWithoutWire` with the consumer that does read it — the same enumerated
   exception discipline `wireSenderExceptions` uses. Without it, a projection
