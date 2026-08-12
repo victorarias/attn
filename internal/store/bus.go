@@ -382,6 +382,32 @@ func (s *Store) BusProducers(cutoffs []time.Time) ([]BusProducer, error) {
 	return out, rows.Err()
 }
 
+// BusPendingBytes sums what the log holds above a cursor — one consumer's
+// backlog, weighed the same way BusProducers weighs the whole log so the two
+// numbers are comparable.
+//
+// It walks the seq primary key over the backlog alone, so it costs in proportion
+// to what is being held rather than to the log. Only asked about a consumer
+// already known to be pinning retention past its tripwire: a healthy bus never
+// runs it.
+func (s *Store) BusPendingBytes(above int64) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	var bytes int64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(LENGTH(name) + LENGTH(subject) + LENGTH(payload) + LENGTH(source) + LENGTH(created_at)), 0)
+		FROM bus_events WHERE seq > ?
+	`, above).Scan(&bytes)
+	if err != nil {
+		return 0, err
+	}
+	return bytes, nil
+}
+
 // BusEventTimeAt returns the timestamp of the first event at or above seq, and
 // whether one exists. Both callers ask an age question — how old the log's tail
 // is, and how long a consumer's oldest unread event has been waiting — and both

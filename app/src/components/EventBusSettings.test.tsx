@@ -29,6 +29,8 @@ const consumer = (over: Partial<BusStatus['consumers'][number]> = {}) => ({
   stalled: '',
   oldest_unread_at: '',
   holds_retention_floor: false,
+  pin_alarm: false,
+  pinned_bytes: 0,
   ...over,
 });
 
@@ -44,6 +46,7 @@ const status = (over: Partial<BusStatus> = {}): BusStatus => ({
   recentWindowSeconds: 3600,
   baselineWindowSeconds: 86400,
   surgeRatePerHour: 1000,
+  pinAlarmSeconds: 3600,
   producers: [producer()],
   consumers: [],
   health: [],
@@ -185,6 +188,47 @@ describe('EventBusSettings', () => {
     expect(screen.getByTestId('bus-consumer-pinner')).toHaveTextContent('7d');
     expect(screen.getByTestId('bus-consumer-absent')).toHaveTextContent('Not running');
     expect(screen.getByTestId('bus-consumer-failing')).toHaveTextContent('Stalled');
+  });
+
+  // Holding the floor is the system working; holding it past the tripwire is an
+  // outage. If the page draws the two the same way, opening it after the warning
+  // notification tells the reader nothing they did not already know.
+  it('separates a normal retention floor from one past the tripwire', async () => {
+    renderPane(status({
+      consumers: [
+        consumer({ name: 'ordinary', holds_retention_floor: true, lag: 12 }),
+        consumer({
+          name: 'app:ticketwatch',
+          holds_retention_floor: true,
+          pin_alarm: true,
+          pinned_bytes: 31_000,
+          lag: 41000,
+          oldest_unread_at: '2026-08-03T19:30:00Z',
+        }),
+      ],
+    }));
+    await screen.findByTestId('bus-consumers');
+
+    expect(screen.getByTestId('bus-consumer-ordinary')).toHaveTextContent('Retention floor');
+    expect(screen.getByTestId('bus-consumer-ordinary')).not.toHaveTextContent('Pinning');
+    const alarming = screen.getByTestId('bus-consumer-app:ticketwatch');
+    expect(alarming).toHaveTextContent('Pinning 30.3 KB');
+    expect(alarming).not.toHaveTextContent('Retention floor');
+  });
+
+  // The tripwire is shown so the reader can check the value in force against the
+  // one they set. Rounding 90 seconds to "2m" names a number they cannot set.
+  it('names the tripwire exactly rather than rounding it', async () => {
+    renderPane(status({
+      pinAlarmSeconds: 90,
+      consumers: [
+        consumer({ name: 'app:ticketwatch', holds_retention_floor: true, pin_alarm: true, pinned_bytes: 1024 }),
+      ],
+    }));
+    await screen.findByTestId('bus-consumers');
+
+    const pill = screen.getByTestId('bus-consumer-app:ticketwatch').querySelector('.settings-pill.bad');
+    expect(pill?.getAttribute('title')).toContain('longer than 1m30s');
   });
 
   // `delivering: false` means the snapshot could not know whether a loop is

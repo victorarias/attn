@@ -54,6 +54,41 @@ const (
 	// DefaultRetryCap (2m) apart, so a healthy consumer — even one retrying —
 	// advances well inside this. 5 minutes is 2.5x past the retry cap.
 	StallAge = 5 * time.Minute
+
+	// DefaultPinAlarmAge is how long an enabled consumer may pin the retention
+	// floor before the pin is called an outage rather than the system working.
+	//
+	// Retention never trims past an enabled consumer's cursor, so a consumer that
+	// is enabled and not consuming makes the log grow for as long as the condition
+	// lasts. Nothing in attn ends that on its own: auto-disable fires only on
+	// app-attributed failures, so a parked runtime holds the floor until a person
+	// restarts it.
+	//
+	// The tripwire has to sit past every stall attn resolves BY ITSELF, or it
+	// cries wolf on the system healing. Those are all measured:
+	//
+	//	5s     delivery poll interval (DefaultPollInterval)
+	//	2m     the cap a failing handler retries at (DefaultRetryCap)
+	//	2m02s  a crash-looping supervised child reaching its park (measured live)
+	//	16m0s  an app's 15-minute auto-disable clock firing (measured live; the
+	//	       window is checked at the next delivery and backoff had stretched)
+	//
+	// One hour is 3.75x past the longest of them. What that patience costs is the
+	// log written while nobody is looking, measured over 9.5 days of Victor's
+	// production bus (333,064 facts, 25.2MB, 76 bytes/fact):
+	//
+	//	1,467 facts    111KB   mean hour
+	//	2,700 facts    211KB   busiest day's mean hour (2026-08-09)
+	//	10,121 facts   786KB   busiest hour measured
+	//
+	// Under a megabyte on a 62MB database — noise, and the price of never firing
+	// on something that was about to fix itself.
+	//
+	// This is not a second definition of "stalled". HealthConsumerStalled and
+	// HealthConsumerLagging already report a consumer that is not advancing, at
+	// StallAge, for someone reading the page. This says something else: it is an
+	// hour later, it is still stuck, and it is the one holding the log open.
+	DefaultPinAlarmAge = time.Hour
 )
 
 // ProducerRow is what the Store seam hands back for one fact class: the raw
@@ -127,6 +162,46 @@ type ConsumerStatus struct {
 	// HoldsRetentionFloor marks the enabled consumer whose cursor is the floor
 	// retention stops at — the one pinning the log.
 	HoldsRetentionFloor bool
+	// PinAlarm marks that pin as past DefaultPinAlarmAge: no longer the system
+	// working, but an outage holding the log open.
+	PinAlarm bool
+	// PinnedBytes is what the backlog above its cursor holds, and is read only
+	// for a consumer whose pin is alarming — it is the harm number, and summing
+	// it costs a range scan nobody should pay for a healthy bus.
+	PinnedBytes int64
+}
+
+// Pin is one alarming retention pin, for a caller that wants the finding without
+// the rest of the snapshot. Everything a message needs is here, already read.
+type Pin struct {
+	Consumer string
+	// Cursor is the pinned position. It is what tells one episode from the next:
+	// while the consumer is stuck the cursor cannot move, and when it moves the
+	// episode is over.
+	Cursor int64
+	// Events and Bytes are what the log is holding above that cursor.
+	Events int64
+	Bytes  int64
+	// OldestUnreadAt stamps the oldest event it has not read, and Age is how long
+	// that event has waited.
+	OldestUnreadAt time.Time
+	Age            time.Duration
+	// Threshold is the tripwire this crossed, carried so a message can name the
+	// limit beside the observed value.
+	Threshold time.Duration
+}
+
+// pinAlarmed is the whole predicate, in one place, so the snapshot both surfaces
+// render and the alarm the daemon notifies on can never disagree about which
+// consumer is at fault.
+func pinAlarmed(c ConsumerStatus, now time.Time, threshold time.Duration) bool {
+	if threshold <= 0 || !c.Enabled || !c.HoldsRetentionFloor || c.Lag <= 0 {
+		return false
+	}
+	if c.OldestUnreadAt.IsZero() {
+		return false
+	}
+	return now.Sub(c.OldestUnreadAt) >= threshold
 }
 
 // Health levels, ordered by how much they want attention.
@@ -171,6 +246,8 @@ type Status struct {
 	Delivering bool
 	// RetentionWindow is the age past which retention drops events.
 	RetentionWindow time.Duration
+	// PinAlarmAge is the tripwire a retention pin has to cross to be reported.
+	PinAlarmAge time.Duration
 
 	Producers []Producer
 	Consumers []ConsumerStatus
@@ -208,6 +285,7 @@ func (b *Bus) Status() (Status, error) {
 		Earliest:        earliest,
 		Delivering:      b.delivering(),
 		RetentionWindow: b.retention,
+		PinAlarmAge:     b.pinAlarmAge,
 	}
 	for _, p := range producers {
 		out.Rows += p.Events
@@ -260,6 +338,12 @@ func (b *Bus) Status() (Status, error) {
 			entry.Live = true
 			entry.Stalled = d.stallReason()
 		}
+		if pinAlarmed(entry, now, b.pinAlarmAge) {
+			entry.PinAlarm = true
+			if n, err := b.store.PendingBytes(c.Cursor); err == nil {
+				entry.PinnedBytes = n
+			}
+		}
 		out.Consumers = append(out.Consumers, entry)
 	}
 
@@ -304,20 +388,16 @@ func health(s Status, now time.Time) []Health {
 		}
 	}
 	for _, c := range s.Consumers {
-		// A consumer legitimately holding the floor a little back is the system
-		// working. It is worth saying only when it is also the reason old events
-		// survive: it has fallen behind the retention window itself.
-		if !c.HoldsRetentionFloor || c.OldestUnreadAt.IsZero() {
-			continue
-		}
-		age := now.Sub(c.OldestUnreadAt)
-		if age <= s.RetentionWindow {
+		// A consumer holding the floor a little back is the system working, and
+		// saying so every time would make the finding meaningless. It is worth
+		// reporting once the pin is past the tripwire — see DefaultPinAlarmAge for
+		// why an hour, and for what the wait costs.
+		if !c.PinAlarm {
 			continue
 		}
 		out = append(out, Health{
 			Level: HealthWarn, Kind: HealthRetentionPinned, Subject: c.Name,
-			Message: fmt.Sprintf("consumer %s pins the retention floor at seq %d: its oldest unread event is %s old, past the %s window, so nothing below it can be trimmed",
-				c.Name, c.Cursor, roundDuration(age), roundDuration(s.RetentionWindow)),
+			Message: pinMessage(c.pin(now, s.PinAlarmAge)),
 		})
 	}
 	for _, p := range s.Producers {
@@ -334,6 +414,79 @@ func health(s Status, now time.Time) []Health {
 	})
 	return out
 }
+
+// pin lifts the finding out of a consumer row. Only meaningful once PinAlarm is
+// set: PinnedBytes is not read for anyone else.
+func (c ConsumerStatus) pin(now time.Time, threshold time.Duration) Pin {
+	return Pin{
+		Consumer:       c.Name,
+		Cursor:         c.Cursor,
+		Events:         c.Lag,
+		Bytes:          c.PinnedBytes,
+		OldestUnreadAt: c.OldestUnreadAt,
+		Age:            now.Sub(c.OldestUnreadAt),
+		Threshold:      threshold,
+	}
+}
+
+// pinMessage names what is held, how long it has been held, and the tripwire it
+// crossed — everything needed to act on it without reading this code. What to DO
+// about it is deliberately not here: the way out depends on what the consumer is,
+// which this package does not know.
+func pinMessage(p Pin) string {
+	return fmt.Sprintf("consumer %s has pinned the retention floor at seq %d for %s, past the %s tripwire: nothing below it can be trimmed, and the log is holding %s (%s) it has not read",
+		p.Consumer, p.Cursor, roundDuration(p.Age), limitDuration(p.Threshold),
+		events(p.Events), humanBytes(p.Bytes))
+}
+
+// PinAlarms reports every consumer whose retention pin is past the tripwire, and
+// is the cheap way to ask: a handful of indexed reads over the consumer table and
+// the log's ends, rather than Status's walk of every row (209ms at 945k,
+// measured). It is what the recurring check runs, on a bus that is almost always
+// healthy and should cost nothing to confirm.
+func (b *Bus) PinAlarms() ([]Pin, error) {
+	if b.store == nil || b.pinAlarmAge <= 0 {
+		return nil, nil
+	}
+	now := b.now()
+	_, head, err := b.store.Bounds()
+	if err != nil {
+		return nil, fmt.Errorf("reading log bounds: %w", err)
+	}
+	consumers, err := b.store.ListConsumers()
+	if err != nil {
+		return nil, fmt.Errorf("listing consumers: %w", err)
+	}
+	floor := retentionFloorName(consumers)
+	var out []Pin
+	for _, c := range consumers {
+		entry := ConsumerStatus{
+			Name:                c.Name,
+			Cursor:              c.Cursor,
+			Lag:                 max64(head-c.Cursor, 0),
+			Enabled:             c.Enabled,
+			HoldsRetentionFloor: c.Name == floor,
+		}
+		if entry.Lag > 0 {
+			if t, ok, err := b.store.EventTimeAt(c.Cursor + 1); err == nil && ok {
+				entry.OldestUnreadAt = t
+			}
+		}
+		if !pinAlarmed(entry, now, b.pinAlarmAge) {
+			continue
+		}
+		if n, err := b.store.PendingBytes(c.Cursor); err == nil {
+			entry.PinnedBytes = n
+		}
+		out = append(out, entry.pin(now, b.pinAlarmAge))
+	}
+	return out, nil
+}
+
+// PinMessage renders a finding the same way the status page's health entry does,
+// so the notification a user gets and the page they open to check it say the same
+// thing about the same pin.
+func PinMessage(p Pin) string { return pinMessage(p) }
 
 // surgeMessage names the number, the tripwire it crossed, and the window — the
 // three things an agent needs to act on it without reading this code.
@@ -415,6 +568,19 @@ func humanCount(n int64) string {
 	return out
 }
 
+// humanBytes renders a size at the scale a reader thinks in, matching how `attn
+// bus status` prints the log's own totals.
+func humanBytes(n int64) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 // roundDuration renders a span the way someone says it out loud, so a message
 // reads "24h" and "3d" rather than "24h0m0s" and "72h0m0s".
 func roundDuration(d time.Duration) string {
@@ -430,6 +596,29 @@ func roundDuration(d time.Duration) string {
 		return fmt.Sprintf("%.0fm", d.Minutes())
 	default:
 		return fmt.Sprintf("%.0fs", d.Seconds())
+	}
+}
+
+// limitDuration renders a configured limit exactly, where roundDuration renders
+// an observation. Nobody needs the seconds on an eleven-minute wait, but a limit
+// rounded to "2m" when it was set to 1m30s names a number the reader cannot check
+// their own value against — and checking it is the only reason it is printed.
+func limitDuration(d time.Duration) string {
+	d = d.Round(time.Second)
+	h, m, s := int(d/time.Hour), int(d%time.Hour/time.Minute), int(d%time.Minute/time.Second)
+	switch {
+	case h > 0 && m == 0 && s == 0:
+		return fmt.Sprintf("%dh", h)
+	case h > 0 && s == 0:
+		return fmt.Sprintf("%dh%dm", h, m)
+	case h > 0:
+		return fmt.Sprintf("%dh%dm%ds", h, m, s)
+	case m > 0 && s == 0:
+		return fmt.Sprintf("%dm", m)
+	case m > 0:
+		return fmt.Sprintf("%dm%ds", m, s)
+	default:
+		return fmt.Sprintf("%ds", s)
 	}
 }
 

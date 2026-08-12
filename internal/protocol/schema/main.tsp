@@ -2179,6 +2179,14 @@ model BusConsumerStatus {
   oldest_unread_at: string;
   // Its cursor is the floor retention stops at — it is pinning the log.
   holds_retention_floor: boolean;
+  // That pin is past `pin_alarm_seconds`: no longer the system working, but an
+  // outage holding the log open. The matching `retention_pinned` health entry
+  // carries the sentence to render.
+  pin_alarm: boolean;
+  // What the backlog above its cursor weighs. Read only for a consumer whose
+  // pin is alarming, so `pin_alarm` is what separates "holding nothing" from
+  // "not measured".
+  pinned_bytes: safeint;
 }
 
 // One thing wrong, said in a whole sentence. A client renders `message`; it does
@@ -2213,6 +2221,9 @@ model BusStatusResultMessage {
   recent_window_seconds: float64;
   baseline_window_seconds: float64;
   surge_rate_per_hour: float64;
+  // How long an enabled consumer may pin the retention floor before the pin is
+  // reported. Carried so a client shows the limit beside the observed value.
+  pin_alarm_seconds: float64;
   producers: BusProducerStatus[];
   consumers: BusConsumerStatus[];
   health: BusHealthEntry[];

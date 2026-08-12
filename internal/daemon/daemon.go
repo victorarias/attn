@@ -370,6 +370,12 @@ type Daemon struct {
 	// failing on an event. See appStall.
 	appStallMu sync.Mutex
 	appStalls  map[string]*appStall
+	// busPinEpisodes is the retention-pin alarm's position, one entry per consumer
+	// that is currently holding the event log open. See busPinEpisode.
+	busPinMu       sync.Mutex
+	busPinEpisodes map[string]*busPinEpisode
+	// busPinAge is the resolved tripwire; see busPinAlarmAge.
+	busPinAge time.Duration
 	// appWatchers are the open `app_watch` connections `attn app dev` renders.
 	appWatcherMu sync.Mutex
 	appWatchers  map[*appWatcher]struct{}

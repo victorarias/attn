@@ -125,6 +125,10 @@ func (a *sqlBusStore) EventTimeAt(seq int64) (time.Time, bool, error) {
 	return a.store.BusEventTimeAt(seq)
 }
 
+func (a *sqlBusStore) PendingBytes(above int64) (int64, error) {
+	return a.store.BusPendingBytes(above)
+}
+
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {
 	return bus.Consumer{
 		Name:      r.Name,

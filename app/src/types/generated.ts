@@ -1638,6 +1638,8 @@ export interface BusConsumerStatus {
     live:                  boolean;
     name:                  string;
     oldest_unread_at:      string;
+    pin_alarm:             boolean;
+    pinned_bytes:          number;
     stalled:               string;
     updated_at:            string;
     [property: string]: any;
@@ -1713,6 +1715,7 @@ export interface BusStatusResultMessage {
     health:                  HealthElement[];
     newest_at:               string;
     oldest_at:               string;
+    pin_alarm_seconds:       number;
     producers:               ProducerElement[];
     recent_window_seconds:   number;
     request_id:              string;
@@ -1732,6 +1735,8 @@ export interface ConsumerElement {
     live:                  boolean;
     name:                  string;
     oldest_unread_at:      string;
+    pin_alarm:             boolean;
+    pinned_bytes:          number;
     stalled:               string;
     updated_at:            string;
     [property: string]: any;
@@ -12288,6 +12293,8 @@ const typeMap: any = {
         { json: "live", js: "live", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "oldest_unread_at", js: "oldest_unread_at", typ: "" },
+        { json: "pin_alarm", js: "pin_alarm", typ: true },
+        { json: "pinned_bytes", js: "pinned_bytes", typ: 0 },
         { json: "stalled", js: "stalled", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
@@ -12339,6 +12346,7 @@ const typeMap: any = {
         { json: "health", js: "health", typ: a(r("HealthElement")) },
         { json: "newest_at", js: "newest_at", typ: "" },
         { json: "oldest_at", js: "oldest_at", typ: "" },
+        { json: "pin_alarm_seconds", js: "pin_alarm_seconds", typ: 3.14 },
         { json: "producers", js: "producers", typ: a(r("ProducerElement")) },
         { json: "recent_window_seconds", js: "recent_window_seconds", typ: 3.14 },
         { json: "request_id", js: "request_id", typ: "" },
@@ -12356,6 +12364,8 @@ const typeMap: any = {
         { json: "live", js: "live", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "oldest_unread_at", js: "oldest_unread_at", typ: "" },
+        { json: "pin_alarm", js: "pin_alarm", typ: true },
+        { json: "pinned_bytes", js: "pinned_bytes", typ: 0 },
         { json: "stalled", js: "stalled", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),

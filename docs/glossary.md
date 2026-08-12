@@ -305,6 +305,30 @@ failing plugin takes an integration down; a failing app is disabled while
 everything else keeps running. Different trust, different rate of change,
 different blast radius.
 
+## The retention floor, and the pin alarm
+
+The event log is trimmed by age, but never past the lowest cursor any **enabled**
+durable consumer still holds. That position is the **retention floor**, and the
+consumer sitting on it is said to **pin** the log: nothing at or below its cursor
+can be trimmed, because a durable consumer must not lose an unread fact. A
+disabled consumer does not pin — releasing the floor is exactly what `attn bus
+disable` is for.
+
+Holding the floor is ordinary. Every log has a floor holder and it is usually
+just the consumer that read least recently. What is not ordinary is holding it
+without moving: a consumer that is enabled and not consuming grows the log for as
+long as the condition lasts, and nothing ends that on its own.
+
+The **pin alarm** is the tripwire that separates the two. Past it — an hour by
+default, measured against every stall attn resolves by itself — the pin stops
+being the system working and becomes an outage worth a warning notification.
+Three surfaces report the same finding from the same predicate: the notification,
+`attn bus status`, and the event bus settings page. It is announced once per
+episode, and a new episode begins only after the consumer's cursor moves.
+
+The alarm makes the condition visible; it never resolves it. No pinned event is
+ever dropped and no consumer is ever disabled on its behalf.
+
 ## The document store
 
 attn's **document store** is where an app keeps its own data. Three names

@@ -1286,6 +1286,12 @@ type BusConsumerStatus struct {
 	// OldestUnreadAt corresponds to the JSON schema field "oldest_unread_at".
 	OldestUnreadAt string `json:"oldest_unread_at"`
 
+	// PinAlarm corresponds to the JSON schema field "pin_alarm".
+	PinAlarm bool `json:"pin_alarm"`
+
+	// PinnedBytes corresponds to the JSON schema field "pinned_bytes".
+	PinnedBytes int `json:"pinned_bytes"`
+
 	// Stalled corresponds to the JSON schema field "stalled".
 	Stalled string `json:"stalled"`
 
@@ -1415,6 +1421,9 @@ type BusStatusResultMessage struct {
 
 	// OldestAt corresponds to the JSON schema field "oldest_at".
 	OldestAt string `json:"oldest_at"`
+
+	// PinAlarmSeconds corresponds to the JSON schema field "pin_alarm_seconds".
+	PinAlarmSeconds float64 `json:"pin_alarm_seconds"`
 
 	// Producers corresponds to the JSON schema field "producers".
 	Producers []BusProducerStatus `json:"producers"`

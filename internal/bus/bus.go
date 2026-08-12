@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -87,6 +88,9 @@ type Store interface {
 	Producers(cutoffs []time.Time) ([]ProducerRow, error)
 	// EventTimeAt stamps the first event at or above seq, for age questions.
 	EventTimeAt(seq int64) (time.Time, bool, error)
+	// PendingBytes sums what the log holds above a cursor — the size of one
+	// consumer's backlog, and the cost of the pin it is holding.
+	PendingBytes(above int64) (int64, error)
 }
 
 // Handler receives one event. An error stalls the consumer with backoff and
@@ -104,6 +108,10 @@ type Options struct {
 	PollInterval time.Duration
 	RetryBase    time.Duration
 	RetryCap     time.Duration
+	// PinAlarmAge is how long an enabled consumer may pin the retention floor
+	// before the snapshot reports it; zero falls back to DefaultPinAlarmAge and
+	// a negative value turns the finding off entirely.
+	PinAlarmAge time.Duration
 	// Compactable names fact classes that are pure invalidations, so retention
 	// may keep only the newest per subject (see compact for the cost).
 	Compactable []string
@@ -121,6 +129,7 @@ type Bus struct {
 	pollInterval time.Duration
 	retryBase    time.Duration
 	retryCap     time.Duration
+	pinAlarmAge  time.Duration
 
 	compactable []string
 
@@ -209,9 +218,13 @@ func New(opts Options) *Bus {
 		pollInterval: nonZeroDuration(opts.PollInterval, DefaultPollInterval),
 		retryBase:    nonZeroDuration(opts.RetryBase, DefaultRetryBase),
 		retryCap:     nonZeroDuration(opts.RetryCap, DefaultRetryCap),
-		compactable:  append([]string(nil), opts.Compactable...),
-		ephemeral:    map[int]*ephemeralSub{},
-		retiring:     map[string]struct{}{},
+		// Unlike the other windows, a negative value here is meaningful: it is the
+		// escape hatch that turns the finding off, so it must survive rather than
+		// fall back the way an unset zero does.
+		pinAlarmAge: pinAlarmAgeOrDefault(opts.PinAlarmAge),
+		compactable: append([]string(nil), opts.Compactable...),
+		ephemeral:   map[int]*ephemeralSub{},
+		retiring:    map[string]struct{}{},
 	}
 	if b.now == nil {
 		b.now = time.Now
@@ -1092,6 +1105,53 @@ func backoff(base, ceiling time.Duration, attempt int) time.Duration {
 		return ceiling
 	}
 	return d
+}
+
+// pinAlarmAgeOrDefault keeps a negative age as the off switch, where every other
+// window reads a non-positive value as "unset, use the default".
+func pinAlarmAgeOrDefault(v time.Duration) time.Duration {
+	if v == 0 {
+		return DefaultPinAlarmAge
+	}
+	return v
+}
+
+// PinAlarmAgeEnv overrides the retention-pin tripwire, so the condition can be
+// produced and watched end to end without waiting an hour for it. A duration
+// ("90s", "4m", "2h"); 0 turns the finding off.
+const PinAlarmAgeEnv = "ATTN_BUS_PIN_ALARM_AGE"
+
+// PinAlarmAgeFromEnv resolves the tripwire for one process. It lives here, and
+// not in whichever process happens to want it, because the daemon that raises the
+// alarm and the CLI that reads the same database must draw the line in the same
+// place — a table that says a consumer is fine while a notification says it is not
+// is worse than either surface alone.
+//
+// An unparseable value is refused loudly rather than quietly ignored: a limit
+// nobody can see is worse than no limit.
+func PinAlarmAgeFromEnv(log LogFunc) time.Duration {
+	if log == nil {
+		log = func(string, ...interface{}) {}
+	}
+	raw := strings.TrimSpace(os.Getenv(PinAlarmAgeEnv))
+	if raw == "" {
+		return DefaultPinAlarmAge
+	}
+	age, err := time.ParseDuration(raw)
+	if err != nil {
+		log("bus: %s=%q is not a duration (%v); using the default %s",
+			PinAlarmAgeEnv, raw, err, DefaultPinAlarmAge)
+		return DefaultPinAlarmAge
+	}
+	if age <= 0 {
+		log("bus: %s=%q — the retention-pin alarm is off; a stuck consumer will grow the log unannounced",
+			PinAlarmAgeEnv, raw)
+		// Negative is the off switch inside the bus; zero would read as "unset" and
+		// restore the default.
+		return -1
+	}
+	log("bus: retention-pin alarm set to %s by %s (default %s)", age, PinAlarmAgeEnv, DefaultPinAlarmAge)
+	return age
 }
 
 func nonZeroDuration(v, fallback time.Duration) time.Duration {
