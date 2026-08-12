@@ -38,10 +38,17 @@ func newGardenDaemon(t *testing.T) *Daemon {
 	t.Cleanup(d.stopEventBus)
 	d.ensureGardenCollections()
 	now := string(protocol.TimestampNow())
+	// The session's workspace is left off the stored record deliberately: the
+	// app puts a session in a workspace through the live registry, and the
+	// persisted column only leads while startup rebuilds that registry. A
+	// fixture that stamps the column instead hides every reader that never asks
+	// the registry.
 	d.store.Add(&protocol.Session{
-		ID: "sess-a", Label: "a", WorkspaceID: "ws-1",
+		ID: "sess-a", Label: "a",
 		State: "idle", StateSince: now, StateUpdatedAt: now, LastSeen: now,
 	})
+	d.workspaces.register("ws-1", "a", "/tmp/a", "a0", false, false)
+	d.workspaces.associateSession("sess-a", "ws-1", "a")
 	return d
 }
 

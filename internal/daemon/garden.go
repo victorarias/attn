@@ -347,7 +347,11 @@ func (d *Daemon) gardenWorkspaceFor(sessionID string, override *string) (string,
 	if sessionID == "" {
 		return "", nil
 	}
-	session := d.store.Get(sessionID)
+	// decoratedSession, not store.Get: a session's workspace is decorated at
+	// broadcast time from the live registry, and the persisted column only leads
+	// during startup. Reading the record directly stamps every seed with an empty
+	// workspace and the panel scopes them all away.
+	session := d.decoratedSession(sessionID)
 	if session == nil {
 		return "", nil
 	}
