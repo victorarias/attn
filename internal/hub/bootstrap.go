@@ -25,6 +25,32 @@ const githubRepo = "victorarias/attn"
 const remoteDaemonReadyTimeout = 35 * time.Second
 const remoteHarnessRootMarker = "/.attn/harness/"
 
+// A bootstrap has two duties of very different size, so it has two budgets and
+// spends them in the order that matters: making the remote usable comes first
+// and never waits on the app runtime host behind it.
+//
+// remoteReadyBudget covers platform detection, the version checks, the attn
+// binary itself, enrollment, and the daemon start plus its
+// remoteDaemonReadyTimeout wait. appRuntimeShipBudget covers the sidecar, which
+// is a separate artifact roughly half again the size of the binary and gated on
+// its own content.
+//
+// Both are tripwires sized past the slowest link anyone would sync a remote
+// over — 5 Mbit/s, a bad tether — rather than around a measured happy path,
+// because a budget a healthy case can reach is the bug this pair replaced:
+//
+//	attn binary       58,934,608 B = 471.5 Mbit -> 94s at 5 Mbit/s
+//	app runtime host  93,694,096 B = 749.6 Mbit -> 150s at 5 Mbit/s
+//	daemon readiness  <= 35s (remoteDaemonReadyTimeout)
+//	sha256 of the runtime: 0.17s local, 0.38s remote; source build 0.13s
+//
+// Generosity costs nothing on the broken path: every ssh here carries
+// ConnectTimeout=10, so an unreachable remote fails in seconds either way.
+const (
+	remoteReadyBudget    = 180 * time.Second
+	appRuntimeShipBudget = 300 * time.Second
+)
+
 type RemotePlatform struct {
 	GOOS         string
 	GOARCH       string
@@ -44,13 +70,30 @@ type Bootstrapper struct {
 	versionOnce sync.Once
 	version     string
 	versionErr  error
+
+	// The two phases EnsureRemoteReady orders and budgets. They are fields so a
+	// test can assert that order and those budgets — which is the whole content
+	// of EnsureRemoteReady — without a remote to talk to.
+	makeReady      func(ctx context.Context, sshTarget, profile, homeDaemonID string) (readyRemote, error)
+	shipAppRuntime func(ctx context.Context, sshTarget, profile string, ready readyRemote) error
 }
 
 func NewBootstrapper(logf func(format string, args ...interface{})) *Bootstrapper {
 	if logf == nil {
 		logf = func(string, ...interface{}) {}
 	}
-	return &Bootstrapper{logf: logf}
+	b := &Bootstrapper{logf: logf}
+	b.makeReady = b.makeRemoteReady
+	b.shipAppRuntime = b.shipRemoteAppRuntime
+	return b
+}
+
+// readyRemote is what the first phase learned about the remote and the second
+// phase needs: where files go, and what to build for.
+type readyRemote struct {
+	platform          RemotePlatform
+	version           string
+	remoteInstallPath string
 }
 
 // EnsureRemoteReady installs the binary, records the remote's enrollment, and
@@ -59,19 +102,42 @@ func NewBootstrapper(logf func(format string, args ...interface{})) *Bootstrappe
 // caller is not a home daemon itself, and then no enrollment is written: a
 // daemon that does not own a garden cannot tell another daemon it does.
 func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile, homeDaemonID string) error {
+	readyCtx, cancelReady := context.WithTimeout(ctx, remoteReadyBudget)
+	ready, err := b.makeReady(readyCtx, sshTarget, profile, homeDaemonID)
+	cancelReady()
+	if err != nil {
+		return err
+	}
+
+	// The sidecar ships only once the daemon is up, and out of its own budget.
+	// It is the larger artifact by half again, and a remote that cannot get one
+	// still runs sessions — only apps park — so shipping it must never be what
+	// stops a dead remote from being revived. Its failure is reported, not
+	// returned, for the same reason.
+	shipCtx, cancelShip := context.WithTimeout(ctx, appRuntimeShipBudget)
+	defer cancelShip()
+	if err := b.shipAppRuntime(shipCtx, sshTarget, profile, ready); err != nil {
+		b.logf("%v", err)
+	}
+	return nil
+}
+
+// makeRemoteReady installs the binary, records enrollment, and leaves the
+// daemon running — everything a remote needs to host sessions.
+func (b *Bootstrapper) makeRemoteReady(ctx context.Context, sshTarget, profile, homeDaemonID string) (readyRemote, error) {
 	platform, err := b.detectRemotePlatform(ctx, sshTarget, profile)
 	if err != nil {
-		return fmt.Errorf("detect remote platform for %s: %w", sshTarget, err)
+		return readyRemote{}, fmt.Errorf("detect remote platform for %s: %w", sshTarget, err)
 	}
 
 	localVersion, err := b.localVersion(ctx)
 	if err != nil {
-		return fmt.Errorf("determine local version: %w", err)
+		return readyRemote{}, fmt.Errorf("determine local version: %w", err)
 	}
 
 	remoteVersion, err := b.remoteVersion(ctx, sshTarget, profile)
 	if err != nil {
-		return fmt.Errorf("check remote version on %s: %w", sshTarget, err)
+		return readyRemote{}, fmt.Errorf("check remote version on %s: %w", sshTarget, err)
 	}
 
 	preferSourceBuild := sourceCheckoutAvailable()
@@ -80,7 +146,7 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 	if remoteVersion != localVersion || preferSourceBuild {
 		localBinary, err = b.ensureLocalBinary(ctx, platform, localVersion)
 		if err != nil {
-			return fmt.Errorf("prepare %s binary for %s: %w", platform.ArtifactName, sshTarget, err)
+			return readyRemote{}, fmt.Errorf("prepare %s binary for %s: %w", platform.ArtifactName, sshTarget, err)
 		}
 	}
 
@@ -88,11 +154,11 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 	if !shouldInstall && preferSourceBuild {
 		localHash, err := fileSHA256(localBinary)
 		if err != nil {
-			return fmt.Errorf("hash local binary for %s: %w", sshTarget, err)
+			return readyRemote{}, fmt.Errorf("hash local binary for %s: %w", sshTarget, err)
 		}
 		remoteHash, err := b.remoteBinarySHA256(ctx, sshTarget, profile)
 		if err != nil {
-			return fmt.Errorf("hash remote binary on %s: %w", sshTarget, err)
+			return readyRemote{}, fmt.Errorf("hash remote binary on %s: %w", sshTarget, err)
 		}
 		shouldInstall = shouldInstallRemoteBinary(localVersion, remoteVersion, preferSourceBuild, localHash, remoteHash)
 		if shouldInstall {
@@ -102,28 +168,14 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 
 	remoteInstallPath, err := b.resolveRemoteInstall(ctx, sshTarget, profile)
 	if err != nil {
-		return fmt.Errorf("resolve the install path on %s: %w", sshTarget, err)
+		return readyRemote{}, fmt.Errorf("resolve the install path on %s: %w", sshTarget, err)
 	}
+	ready := readyRemote{platform: platform, version: localVersion, remoteInstallPath: remoteInstallPath}
 
 	if shouldInstall {
 		if err := b.installRemoteBinary(ctx, sshTarget, profile, localBinary, remoteInstallPath); err != nil {
-			return fmt.Errorf("install attn on %s: %w", sshTarget, err)
+			return ready, fmt.Errorf("install attn on %s: %w", sshTarget, err)
 		}
-		binariesUpdated = true
-	}
-
-	// The app runtime host ships beside the binary and is gated on its own
-	// content, so it is checked on every sync rather than only when the binary
-	// moved: the two are built from different trees and an apphost-only change
-	// leaves the attn binary identical. A remote that cannot get one still runs
-	// sessions — only apps park — so this reports and continues.
-	runtimeUpdated, err := b.ensureRemoteAppRuntime(ctx, sshTarget, profile, platform, localVersion, remoteInstallPath)
-	if err != nil {
-		b.logf("%v", err)
-	}
-	if runtimeUpdated {
-		// A replaced sidecar is a new file; the running one keeps the old inode
-		// until something restarts it, and the daemon is what starts it.
 		binariesUpdated = true
 	}
 
@@ -132,12 +184,63 @@ func (b *Bootstrapper) EnsureRemoteReady(ctx context.Context, sshTarget, profile
 	// refuses, and that refusal stops the sync — re-homing is the operator's
 	// decision to make, on that machine.
 	if err := b.enrollRemote(ctx, sshTarget, profile, homeDaemonID); err != nil {
-		return err
+		return ready, err
 	}
 
 	if err := b.ensureRemoteDaemonRunning(ctx, sshTarget, profile, binariesUpdated); err != nil {
-		return fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
+		return ready, fmt.Errorf("ensure remote daemon on %s: %w", sshTarget, err)
 	}
+	return ready, nil
+}
+
+// shipRemoteAppRuntime brings the remote's sidecar up to date with this hub's.
+// It is gated on content rather than on the binary having moved: the two are
+// built from different trees, so an apphost-only change leaves the attn binary
+// byte-identical.
+func (b *Bootstrapper) shipRemoteAppRuntime(ctx context.Context, sshTarget, profile string, ready readyRemote) error {
+	updated, err := b.ensureRemoteAppRuntime(ctx, sshTarget, profile, ready.platform, ready.version, ready.remoteInstallPath)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return nil
+	}
+	// The replacement is a new inode and a sidecar that is already up still holds
+	// the old one, so it has to be bounced to pick the new file up. Only when one
+	// is actually running: the runtime starts lazily on the first fact an app is
+	// due, and starting it from here would put a Bun process on a remote that may
+	// host no enabled app at all.
+	return b.bounceRemoteAppRuntime(ctx, sshTarget, profile)
+}
+
+// bounceRemoteAppRuntime restarts the remote's sidecar when one is running, so
+// it picks up the file that just replaced it.
+//
+// A remote whose runtime has never started needs nothing and must not be
+// started from here, so this asks before it acts. Both halves are best-effort:
+// a remote too old to answer, or one that refuses the restart, keeps serving the
+// previous sidecar rather than failing the sync — the report is what a person
+// acts on.
+func (b *Bootstrapper) bounceRemoteAppRuntime(ctx context.Context, sshTarget, profile string) error {
+	stdout, _, code, err := runSSHExit(ctx, sshTarget, profile, remoteAttnCommand(profile, "app", "runtime", "status", "--json"))
+	if err != nil || code != 0 {
+		return fmt.Errorf("could not ask %s whether its app runtime is running, so the sidecar it just received is not in use yet; `attn app runtime restart` there picks it up", sshTarget)
+	}
+	var status struct {
+		Runtime *struct {
+			Running bool `json:"running"`
+		} `json:"runtime"`
+	}
+	if jsonErr := json.Unmarshal([]byte(stdout), &status); jsonErr != nil {
+		return fmt.Errorf("app runtime status on %s returned unreadable output %q", sshTarget, stdout)
+	}
+	if status.Runtime == nil || !status.Runtime.Running {
+		return nil
+	}
+	if _, _, code, err := runSSHExit(ctx, sshTarget, profile, remoteAttnCommand(profile, "app", "runtime", "restart")); err != nil || code != 0 {
+		return fmt.Errorf("the app runtime on %s is still running the previous sidecar; `attn app runtime restart` there picks up the new one", sshTarget)
+	}
+	b.logf("restarted the app runtime on %s onto the sidecar just installed", sshTarget)
 	return nil
 }
 
@@ -359,9 +462,15 @@ func (b *Bootstrapper) downloadReleaseArtifact(ctx context.Context, version, art
 // per attn build: the sidecar is built from apphost/, which no version or
 // daemon-binary fingerprint covers, so any such key would serve a stale runtime
 // after an apphost-only edit — and the artifact is ~90MB, so a key per build is
-// also a disk leak. The compile is fast enough (~0.4s measured, bun embeds its
-// runtime rather than compiling it) that rebuilding every sync costs nothing. A
-// downloaded release artifact is immutable and does cache per version.
+// also a disk leak. A downloaded release artifact is immutable and does cache
+// per version.
+//
+// Rebuilding unconditionally is deliberate, and it is what makes the sidecar
+// correct after an apphost edit no key would notice. It is affordable because a
+// bootstrap is demand-driven — nothing puts one on a timer — and the whole pass
+// over this artifact is under a second: 0.13s to compile (bun embeds its
+// runtime rather than compiling it), 0.17s to hash locally, 0.38s to hash on the
+// far end. Measured on a 93,694,096-byte linux_arm64 host.
 func appRuntimeCacheDir(home, key string) string {
 	return filepath.Join(home, ".attn", "remotes", "app-runtime", key)
 }
@@ -445,8 +554,8 @@ func (b *Bootstrapper) ensureRemoteAppRuntime(ctx context.Context, sshTarget, pr
 	localPath, err := b.ensureLocalAppRuntime(ctx, platform, version)
 	if err != nil {
 		return false, fmt.Errorf(
-			"the app runtime host is missing from %s at %s: %w. Apps on that daemon park until it is there; run the hub from a source checkout with bun installed, or copy %s there yourself",
-			sshTarget, remotePath, err, platform.RuntimeArtifactName)
+			"the app runtime host is missing from %s at %s: %w. That daemon falls back to an unsuffixed %s beside it and parks its apps only if there is none; run the hub from a source checkout with bun installed, or copy %s there yourself",
+			sshTarget, remotePath, err, apps.RuntimeHostBinaryName, platform.RuntimeArtifactName)
 	}
 
 	localHash, err := fileSHA256(localPath)
@@ -463,8 +572,8 @@ func (b *Bootstrapper) ensureRemoteAppRuntime(ctx context.Context, sshTarget, pr
 
 	if err := b.uploadRemoteFile(ctx, sshTarget, profile, localPath, remotePath); err != nil {
 		return false, fmt.Errorf(
-			"the app runtime host could not be installed on %s at %s: %w. Apps on that daemon park until it is there",
-			sshTarget, remotePath, err)
+			"the app runtime host could not be installed on %s at %s: %w. That daemon keeps whatever host it already resolves — an unsuffixed %s beside it, or none, in which case its apps park",
+			sshTarget, remotePath, err, apps.RuntimeHostBinaryName)
 	}
 	b.logf("installed the app runtime host on %s at %s (%s)", sshTarget, remotePath, localHash[:12])
 	return true, nil
@@ -728,6 +837,24 @@ func (b *Bootstrapper) uploadRemoteFile(ctx context.Context, sshTarget, profile,
 		return fmt.Errorf("open %s: %w", localPath, err)
 	}
 	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return fmt.Errorf("stat %s: %w", localPath, err)
+	}
+
+	// Every path out of here past this point removes the staging file. A dropped
+	// link mid-transfer leaves up to the whole artifact behind, the name carries
+	// a pid and a timestamp so retries never reuse it, and /tmp is RAM on a
+	// systemd remote — an upload that keeps failing must not also keep
+	// accumulating.
+	defer func() {
+		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 15*time.Second)
+		defer cancel()
+		if _, err := runSSH(cleanupCtx, sshTarget, profile, fmt.Sprintf("rm -f %s", shellQuote(remoteTmpPath))); err != nil {
+			b.logf("could not remove the staging file %s on %s: %v", remoteTmpPath, sshTarget, err)
+		}
+	}()
+
 	cmd := exec.CommandContext(
 		ctx,
 		"ssh",
@@ -738,24 +865,31 @@ func (b *Bootstrapper) uploadRemoteFile(ctx context.Context, sshTarget, profile,
 	if err != nil {
 		return fmt.Errorf("copy %s over ssh: %s", filepath.Base(localPath), strings.TrimSpace(string(out)))
 	}
-	if probe, probeErr := runSSH(
+
+	// ssh reports the far end's exit status, which says the shell ran — not that
+	// every byte arrived. A short file here would otherwise be installed and then
+	// refuse to exec, which is a much worse way to learn about it.
+	probe, err := runSSH(
 		ctx,
 		sshTarget,
 		profile,
 		fmt.Sprintf("if [ -f %s ]; then wc -c < %s; else printf MISSING; fi", shellQuote(remoteTmpPath), shellQuote(remoteTmpPath)),
-	); probeErr == nil {
-		b.logf("remote upload probe: target=%s tmp=%s result=%s", sshTarget, remoteTmpPath, strings.TrimSpace(probe))
+	)
+	if err != nil {
+		return fmt.Errorf("check the uploaded size of %s on %s: %w", filepath.Base(localPath), sshTarget, err)
 	}
+	if got := strings.TrimSpace(probe); got != fmt.Sprintf("%d", info.Size()) {
+		return fmt.Errorf(
+			"%s arrived on %s as %s bytes, not %d — the transfer was cut short",
+			filepath.Base(localPath), sshTarget, got, info.Size(),
+		)
+	}
+
 	_, err = runSSH(
 		ctx,
 		sshTarget,
 		profile,
-		fmt.Sprintf(
-			"install -m 755 %s %s && rm -f %s",
-			shellQuote(remoteTmpPath),
-			shellQuote(remotePath),
-			shellQuote(remoteTmpPath),
-		),
+		fmt.Sprintf("install -m 755 %s %s", shellQuote(remoteTmpPath), shellQuote(remotePath)),
 	)
 	return err
 }

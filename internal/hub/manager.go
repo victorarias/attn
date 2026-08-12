@@ -462,9 +462,10 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		// Explicit bootstrap requested (e.g. user clicked Sync) — install binary and start daemon.
 		if m.consumeBootstrapFlag(id) {
 			m.updateStatus(id, "bootstrapping", "Installing remote binary", nil, nil)
-			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			err := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile, m.homeDaemonID())
-			cancel()
+			// The bootstrap owns its own deadlines: it has two phases whose sizes
+			// differ by an artifact, and one budget here could only be wrong for one
+			// of them.
+			err := m.bootstrapper.EnsureRemoteReady(ctx, record.SSHTarget, record.Profile, m.homeDaemonID())
 			if err != nil {
 				m.updateStatus(id, "error", err.Error(), nil, nil)
 				if !sleepOrDone(ctx, backoff) {
@@ -481,9 +482,7 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 		if err != nil {
 			// Daemon appears down — bootstrap then try once more.
 			m.updateStatus(id, "bootstrapping", "Checking remote platform", nil, nil)
-			bootCtx, cancel := context.WithTimeout(ctx, 60*time.Second)
-			bootErr := m.bootstrapper.EnsureRemoteReady(bootCtx, record.SSHTarget, record.Profile, m.homeDaemonID())
-			cancel()
+			bootErr := m.bootstrapper.EnsureRemoteReady(ctx, record.SSHTarget, record.Profile, m.homeDaemonID())
 			if bootErr != nil {
 				m.updateStatus(id, "error", bootErr.Error(), nil, nil)
 				if !sleepOrDone(ctx, backoff) {
