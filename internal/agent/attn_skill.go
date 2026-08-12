@@ -12,6 +12,9 @@ import (
 	"github.com/victorarias/attn/internal/toolhome"
 )
 
+// attn_skill/references/showing.md adapts the show-me skill from
+// github.com/humanlayer/skills (MIT, Copyright (c) HumanLayer).
+//
 //go:embed attn_skill
 var attnSkillFiles embed.FS
 
