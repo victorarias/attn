@@ -1,0 +1,15 @@
+kind: internal
+area: testing
+change: >
+  The daemon's fact-to-wire join is now proved for every projection at once.
+  A projection could stop sending and nothing failed: three features assert
+  against a broadcast hook that fires just before the real send, so deleting
+  the send left the whole package green — measured, by deleting the garden
+  snapshot push and again the ticket board push. TestEveryProjectedFactReachesTheWire
+  publishes each fact that has a projection and reads the bytes the hub
+  actually put on the wire, asserting the exact set of events it produced. It
+  is driven by the live projection table and the fact constants themselves, so
+  a projection added later is covered without anyone editing the test; a fact
+  that reaches no projection has to say why. This is the missing half of
+  TestWireTrafficComesFromProjections, which only ever caught traffic that
+  skipped the bus.

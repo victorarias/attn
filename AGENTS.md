@@ -495,7 +495,13 @@ consumer — runs the matching entry in `wireProjections`
 (`internal/daemon/bus.go`) to produce the wire traffic, often a snapshot
 re-push. Every state-change broadcast goes through it;
 `TestWireTrafficComesFromProjections` fails on a new one that does not, and
-carries the enumerated exception list.
+carries the enumerated exception list. Its mirror,
+`TestEveryProjectedFactReachesTheWire`, publishes every fact that has a
+projection and reads the bytes the hub sent, so a projection that stops sending
+— or sends the wrong event — fails too. Both are driven by the live
+table, so a new projection cannot go unnoticed: it needs a one-line fixture
+naming the events it sends, the test fails by name until it has one, and a fact
+reaching no projection has to name the consumer that does read it.
 
 - A fact without a subject is a snapshot invalidation, not a fact. If the
   producer does not know the entity id, that is the bug to fix — change the
