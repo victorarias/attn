@@ -63,8 +63,22 @@ root as the only argument: `go run ./miners/silent ~/.claude/projects`.
 | `silentctx` | the same, plus the conversation the reader had seen before each message |
 | `features`, `glossary` | one-off feature dumps kept for provenance |
 
-**The complaint labels these produce are regex labels and they are wrong more
-than half the time** — 49 flagged, 22 genuine. Words like "simple" get used
+Ticket text comes from the database rather than from transcripts, so it has its
+own miner, `mine_tickets.py`, and one manual step: production `~/.attn` is
+read-only to agents and a live daemon is writing to it, so copy the database
+first. The script refuses the production path outright.
+
+```
+cp ~/.attn/attn.db /tmp/attn-copy.db
+mkdir -p ../ticketreg && python3 mine_tickets.py /tmp/attn-copy.db > ../ticketreg/tickets.jsonl
+```
+
+That path is where `exp4.py` and `exp5.py` look for it. Those two are the
+ticket-text experiments — the 37% receipt-loss number and the unfinished
+rewriter comparison — and without this step they fail at first open.
+
+**The complaint labels the transcript miners produce are regex labels and they
+are wrong more than half the time** — 49 flagged, 22 genuine. Words like "simple" get used
 constantly for things that are not writing. Every published number came from
 hand-read labels. Do not skip that step.
 
