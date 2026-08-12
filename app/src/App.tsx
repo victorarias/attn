@@ -3601,6 +3601,7 @@ function AppContent({
     },
   ]), [
     activeSessionId,
+    activeRemoteSession,
     remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,

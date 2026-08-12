@@ -24,7 +24,7 @@ interface GardenPanelProps {
 
 // formatPlantedAt renders an RFC3339 created_at as a short relative phrase.
 // Returns '' for an unparseable value rather than printing a broken date.
-export function formatPlantedAt(iso: string): string {
+function formatPlantedAt(iso: string): string {
   if (!iso) return '';
   const t = Date.parse(iso);
   if (Number.isNaN(t)) return '';
