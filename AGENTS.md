@@ -373,9 +373,13 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
 - Comments state what the code cannot show — a constraint, an invariant, a
-  measured receipt — in one or two lines, and move when the code moves. Godoc
-  on an exported symbol is one line. A package header is a few lines plus a
-  link to the design doc, never a retelling of it. Never narrate the next line
+  measured receipt — in one or two lines, and move when the code moves. A
+  comment claims only what this commit does: describing the design you
+  intend, then shipping the part in scope, quietly turns the comment into a
+  lie. An unbuilt intention belongs in the plan doc or as a named gap in the
+  PR body, never in a comment. Godoc on an exported symbol is one line. A
+  package header is a few lines plus a link to the design doc, never a
+  retelling of it. Never narrate the next line
   or argue that the change is correct: that talk belongs in the PR, and a
   comment addressed to the reviewer is a defect.
 - Conventional commit titles with a scope, in plain language:
