@@ -62,8 +62,10 @@ Generosity costs nothing on the broken path: every ssh here carries
 `ConnectTimeout=10`, so an unreachable remote fails in seconds regardless.
 
 `TestRemoteBudgetsCoverTheArtifactsTheyCarry` fails if either budget stops
-covering its artifact, so growing the sidecar again cannot silently re-create
-this bug.
+covering the artifact sizes recorded in it. It does not measure the artifacts, so
+it does not notice one growing by itself — the tripwire is that a sidecar which
+outgrows its budget has to update those constants to pass, and updating them is
+when someone reads the arithmetic.
 
 ### Carried with it
 
@@ -126,8 +128,14 @@ The daemon cannot work this out; only the host knows which handler it called. So
 the host announces each entry on the socket immediately before invoking the
 handler (`app_runtime.entered`, a notification — nothing to answer), and the
 culprit is the most recent entry with no answer yet. An entry is dropped when its
-dispatch is answered, when a ping answers (the loop is turning, so nothing is on
-it), or when the process dies.
+dispatch is answered, when a ping answers, or when the process dies.
+
+An answered ping does not prove no handler is on the loop — a yielded handler
+that never settles is still there. It proves nothing is *holding* it, which is
+what makes the wipe safe: attribution is moot while the loop turns. The cost is
+one corner. If a handler yields, has its entry wiped by a ping, and only then
+resumes and spins, there is no entry naming it and attribution falls back to
+charging whoever timed out, until some new dispatch enters and is announced.
 
 The receipt this depends on: a Bun socket write issued immediately before a
 synchronous spin reaches the peer at once rather than queueing behind it —

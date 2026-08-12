@@ -520,11 +520,18 @@ func (d *Daemon) dispatchToAppRuntime(ctx context.Context, plan *appDispatchPlan
 // the culprit is the most recent entry with no answer yet: whoever entered last
 // and never came back is the one on the loop right now.
 //
-// Known residue: an entry is forgotten when its dispatch is answered, when a ping
-// answers, or when the process dies — each of which proves that handler is off
-// the loop. If one app freezes the loop, finishes, and a *different* app freezes
-// it again with no ping in between, the first entry is stale and both are still
-// present; the second freezer entered later, so it is still the one charged.
+// An entry is forgotten when its dispatch is answered, when a ping answers, or
+// when the process dies. Only the first and last of those prove that handler is
+// off the loop: an answered ping proves nothing is *holding* the loop, and a
+// handler that yielded and never settled is still on it. Wiping on a ping is
+// still right, because attribution is moot while the loop turns.
+//
+// Known residue, both cheap. If one app freezes the loop, finishes, and a
+// *different* app freezes it again with no ping in between, both entries are
+// present and the second freezer entered later, so it is still the one charged.
+// And if a handler yields, has its entry wiped by a ping, and only then resumes
+// and spins, nothing names it: attribution falls back to charging whoever timed
+// out, until the next dispatch enters and is announced.
 func (d *Daemon) attributeWedgedDispatch(ctx context.Context, runtime *appRuntimeConnection, name string) error {
 	pingCtx, cancel := context.WithTimeout(ctx, d.appPingBudget())
 	defer cancel()
@@ -541,8 +548,8 @@ func (d *Daemon) attributeWedgedDispatch(ctx context.Context, runtime *appRuntim
 		name, pingOutcome(err), d.appNow().Sub(asked).Round(time.Microsecond))
 
 	if err == nil {
-		// The loop is turning, so nothing is holding it and every handler the daemon
-		// gave up on has since come off it.
+		// The loop is turning, so nothing is holding it and there is nothing to
+		// attribute — see the residue note above for what this wipe costs.
 		d.forgetEnteredHandlers()
 		return context.DeadlineExceeded
 	}

@@ -121,6 +121,12 @@ func TestEnsureRemoteReadySurvivesASidecarThatCannotBeShipped(t *testing.T) {
 
 // The budgets are tripwires, not fits: a healthy sync must never be near them.
 // The receipts they are sized from live beside their declaration.
+//
+// What this fails on is a budget that stops covering the sizes recorded *here* —
+// it does not measure the artifacts, so it cannot notice one growing on its own.
+// That is deliberate and it is where the tripwire lands: a sidecar that outgrows
+// its budget has to update these constants to make this test pass, and updating
+// them is the moment someone reads the arithmetic below.
 func TestRemoteBudgetsCoverTheArtifactsTheyCarry(t *testing.T) {
 	const slowLinkBitsPerSecond = 5_000_000
 	const attnBinaryBytes = 58_934_608
