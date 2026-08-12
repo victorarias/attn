@@ -431,6 +431,20 @@ closes it as abandoned. **Replanting** reopens a closed seed — a closed seed
 reopens before it moves again, which is why replant is the only verb a
 harvested seed answers.
 
+An **edge** is one typed relation between two seeds, stored on the seed it
+points from. Two kinds carry meaning today: **blocks** (`a blocks b` — b waits
+for a) and **part-of** (`b part-of c` — b is one of the crown c's children, and
+a seed sits in at most one plot). `sown-from`, `discovered-from` and
+`relates-to` are declared and inert. A cycle in either kind is refused when it
+is created, naming both seeds and the edge to remove.
+
+**Ready** is the answer to "what can I pick up right now": an open seed nothing
+blocks, nobody holds, and nothing is part of — a crown's work is its children,
+not the crown. It is computed when asked and never stored, so harvesting a
+blocker frees its dependent at the next call, with nobody clearing anything.
+`attn seed ready` scopes to the calling session's workspace unless told
+otherwise, and every attn-launched agent starts knowing its workspace's count.
+
 A **note** is one entry on a seed's trail: what happened and what was learned,
 written for whoever tends that seed next. Notes are anchored to the work and
 routed to nobody — a message with an addressee is a message, not a note — and

@@ -3086,6 +3086,16 @@ func runAgentDirectly(requestedAgent string) {
 			}
 		}
 	}
+	// The garden primer rides the same launch injection as the guidance above,
+	// for chief and workspace agents alike. The count comes from the daemon
+	// rather than a copy of the rule, so what an agent is primed with and what
+	// `attn seed ready` answers cannot drift apart; a refusal — an outpost, whose
+	// garden lives at its home — primes nothing rather than teaching a loop this
+	// session cannot run.
+	if ready, err := c.SeedReady(sessionID, "", nil, false); err == nil {
+		count := len(ready.Seeds)
+		opts.GardenReady = &count
+	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so
 	// the env var (not a store read) carries the gate here.

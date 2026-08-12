@@ -14,6 +14,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/victorarias/attn/internal/hooks"
 )
 
 // Driver is the core interface every agent must implement.
@@ -245,6 +247,24 @@ type SpawnOpts struct {
 	// TrustWorkingDirectory lets an unattended daemon-owned launch pass the
 	// driver's repository trust gate; interactive launches leave it false.
 	TrustWorkingDirectory bool
+
+	// GardenReady is how many seeds this session's workspace had ready when the
+	// launch resolved it, and nil when the daemon had no answer — no garden
+	// reachable from here. It is what the garden primer is built from.
+	GardenReady *int
+}
+
+// launchGuidance is the system-prompt block for this launch: chief guidance or
+// the workspace agent's, plus the garden primer. hasSelfMonitor is the driver's
+// own capability, which is why the driver composes rather than the caller.
+func (o SpawnOpts) launchGuidance(hasSelfMonitor bool) string {
+	return hooks.Launch{
+		NotebookRoot:         o.NotebookRoot,
+		HasSelfMonitor:       hasSelfMonitor,
+		WorkspaceContextPath: o.WorkspaceContextPath,
+		InjectWorkflow:       o.InjectWorkflowGuidance,
+		GardenReady:          o.GardenReady,
+	}.Instructions()
 }
 
 // --- Optional capability interfaces ---

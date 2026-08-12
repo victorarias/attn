@@ -73,7 +73,7 @@ func TestGenerateHooks_CatchAllPostToolUseIsOneSpawn(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_PostToolUseRecordsEdits(t *testing.T) {
-	overrides := strings.Join(GenerateCodexConfigOverrides("abc123", "/tmp/test.sock", "/tmp/attn", "", "", false), "\n")
+	overrides := strings.Join(GenerateCodexConfigOverrides("abc123", "/tmp/test.sock", "/tmp/attn", Launch{}), "\n")
 
 	if !strings.Contains(overrides, "hooks.PostToolUse=[{ matcher = \"*\", hooks = [{ type = \"command\", command = \"'/tmp/attn' '_hook-tool-use'\"") {
 		t.Fatalf("codex PostToolUse should run _hook-tool-use: %q", overrides)
@@ -203,7 +203,7 @@ func TestGenerateHooks_EnvBlock(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
-	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", "", false)
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", Launch{WorkspaceContextPath: "/tmp/context.md"})
 	joined := strings.Join(overrides, "\n")
 	for _, expected := range []string{
 		`shell_environment_policy.set.ATTN_SESSION_ID="session-1"`,
@@ -251,7 +251,7 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_OmitsEmptySocketButKeepsSessionIdentity(t *testing.T) {
-	overrides := strings.Join(GenerateCodexConfigOverrides("session-2", "", "", "", "", false), "\n")
+	overrides := strings.Join(GenerateCodexConfigOverrides("session-2", "", "", Launch{}), "\n")
 	if !strings.Contains(overrides, `shell_environment_policy.set.ATTN_SESSION_ID="session-2"`) ||
 		!strings.Contains(overrides, `shell_environment_policy.set.ATTN_WRAPPER_PATH="attn"`) {
 		t.Fatalf("codex overrides dropped required attn identity: %q", overrides)
@@ -295,12 +295,12 @@ func TestAgentInstructionsComposition(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
-	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", false), "\n")
+	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md"}), "\n")
 	if strings.Contains(off, "hypercode") {
 		t.Fatalf("workflow guidance injected while disabled: %q", off)
 	}
 
-	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", true), "\n")
+	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md", InjectWorkflow: true}), "\n")
 	if !strings.Contains(on, "developer_instructions=") {
 		t.Fatal("enabled overrides dropped developer_instructions")
 	}
@@ -313,7 +313,7 @@ func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *test
 	}
 
 	// Workflow guidance is injected even without a workspace checkout.
-	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "", "", true), "\n")
+	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{InjectWorkflow: true}), "\n")
 	if !strings.Contains(noCtx, "developer_instructions=") || !strings.Contains(noCtx, "hypercode") {
 		t.Fatalf("workflow guidance not injected without a checkout: %q", noCtx)
 	}
@@ -348,3 +348,60 @@ func TestChiefGuidanceEmptyWithoutRoot(t *testing.T) {
 // NOTE: AskUserQuestion PostToolUse hook was removed because it fires
 // AFTER the user responds, not when the question is displayed.
 // See: https://github.com/anthropics/claude-code/issues/10168
+
+// The primer is what makes an attn-launched agent a gardener: it arrives
+// knowing the vocabulary, the loop, and whether there is anything to pick up.
+func TestGardenPrimer(t *testing.T) {
+	// No garden reachable — an outpost, or a daemon that could not answer.
+	// Telling an agent to run a command that refuses is worse than silence.
+	if got := GardenPrimer(nil); got != "" {
+		t.Fatalf("GardenPrimer(nil) = %q, want nothing", got)
+	}
+
+	counts := map[int]string{
+		0: "Nothing was ready",
+		1: "One seed was ready",
+		4: "4 seeds were ready",
+	}
+	for count, want := range counts {
+		primer := GardenPrimer(&count)
+		if !strings.Contains(primer, want) {
+			t.Fatalf("primer for %d does not say %q:\n%s", count, want, primer)
+		}
+		// The loop, and where the live answer is: the count is a starting
+		// position, composed once at launch.
+		for _, phrase := range []string{"attn seed ready", "attn seed tend", "attn seed harvest", "live answer"} {
+			if !strings.Contains(primer, phrase) {
+				t.Fatalf("primer does not name %q:\n%s", phrase, primer)
+			}
+		}
+	}
+}
+
+// Every attn-launched agent lives in the same garden, so the primer rides with
+// chief guidance and workspace guidance alike — and never replaces either.
+func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
+	count := 2
+
+	workspace := Launch{WorkspaceContextPath: "/tmp/context.md", GardenReady: &count}.Instructions()
+	if want := AgentInstructions("/tmp/context.md", false); !strings.HasPrefix(workspace, want) {
+		t.Fatalf("workspace launch dropped the agent instructions:\n%s", workspace)
+	}
+	if !strings.Contains(workspace, "2 seeds were ready") {
+		t.Fatalf("workspace launch dropped the primer:\n%s", workspace)
+	}
+
+	chief := Launch{NotebookRoot: "/tmp/notebook", GardenReady: &count}.Instructions()
+	if want := ChiefGuidance("/tmp/notebook", false); !strings.HasPrefix(chief, want) {
+		t.Fatalf("chief launch dropped the chief guidance:\n%s", chief)
+	}
+	if !strings.Contains(chief, "2 seeds were ready") {
+		t.Fatalf("chief launch dropped the primer:\n%s", chief)
+	}
+
+	// Nothing to prime with leaves the rest exactly as it was.
+	bare := Launch{WorkspaceContextPath: "/tmp/context.md"}.Instructions()
+	if bare != AgentInstructions("/tmp/context.md", false) {
+		t.Fatalf("a garden-less launch changed the instructions:\n%s", bare)
+	}
+}

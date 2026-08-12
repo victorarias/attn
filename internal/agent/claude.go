@@ -90,12 +90,10 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	// A chief-of-staff launch (NotebookRoot set) gets chief guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
 	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
-	// folded in by hooks.AgentInstructions). Non-chief agents are NOT nudged to
+	// folded in by hooks.Launch). Non-chief agents are NOT nudged to
 	// journal: the keeper narrates each workspace's own work into the journal, and
 	// the chief journals the cross-workspace layer.
-	if guidance := hooks.ChiefGuidance(opts.NotebookRoot, c.Capabilities().HasSelfMonitor); guidance != "" {
-		args = append(args, "--append-system-prompt", guidance)
-	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
+	if instructions := opts.launchGuidance(c.Capabilities().HasSelfMonitor); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 

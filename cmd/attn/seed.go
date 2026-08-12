@@ -45,6 +45,10 @@ func runSeed() {
 		runSeedNote(args)
 	case "notes":
 		runSeedNotes(args)
+	case "link", "unlink":
+		runSeedLink(os.Args[2] == "unlink", args)
+	case "ready":
+		runSeedReady(args)
 	default:
 		fmt.Fprintf(os.Stderr, "seed: unknown command %q\n", os.Args[2])
 		writeSeedHelp(os.Stderr)
@@ -68,13 +72,27 @@ commands:
         on a crown that body is the plan itself. The seed is stamped with the
         workspace of the session you are in; --workspace overrides it.
 
-  ls [--all | --workspace <id>] [--json]
+  ls [--all | --workspace <id>] [--tree] [--json]
         the seeds of the workspace you are in, newest first. --all is the whole
-        garden, including seeds planted outside any workspace.
+        garden, including seeds planted outside any workspace. --tree nests each
+        seed under the crown it is part of.
+
+  ready [--plot <crown> | --workspace <id> | --all] [--json]
+        what you can tend right now, oldest first: nothing open blocks it,
+        nobody is holding it, and it is not a crown — a plot's work is its
+        children. With no flags the scope is the workspace you are in.
+
+  link <a> blocks <b> | link <a> part-of <b>
+        relate two seeds. "a blocks b" keeps b out of ready until a closes;
+        "a part-of b" puts a in b's plot, and b is then the crown. A cycle is
+        refused, naming both seeds and the edge to remove.
+
+  unlink <a> blocks <b>
+        remove the edge. Every link has one.
 
   show <id> [--json]
-        one seed: its state, who tends it, its body, and the newest notes on
-        its trail.
+        one seed: its state, who tends it, every edge that touches it in both
+        directions, its body, and the newest notes on its trail.
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
@@ -109,7 +127,9 @@ commands:
         edit the seed and export again, never the file.
 
 flags:
-  --workspace <id>   the workspace to stamp (plant) or to list (ls)
+  --plot <crown>     scope a ready answer to one plot
+  --tree             nest a listing under its crowns
+  --workspace <id>   the workspace to stamp (plant) or to list (ls, ready)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
@@ -137,6 +157,8 @@ type seedFlags struct {
 	member    *string
 	json      *bool
 	all       *bool
+	tree      *bool
+	plot      *string
 	message   *string
 	out       *string
 	limit     *int
@@ -152,6 +174,8 @@ func newSeedFlags(verb string) *seedFlags {
 		member:    fs.String("member", "", "crew member planting this seed"),
 		json:      fs.Bool("json", false, "print the result as JSON"),
 		all:       fs.Bool("all", false, "the whole garden, not one workspace"),
+		tree:      fs.Bool("tree", false, "nest seeds under the crown they are part of"),
+		plot:      fs.String("plot", "", "scope to one plot, by its crown"),
 		message:   fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
 		out:       fs.String("out", "", "file to write (- for stdout)"),
 		limit:     fs.Int("limit", 0, "how many trail entries to read"),
@@ -250,16 +274,45 @@ func runSeedList(args []string) {
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tSTATUS\tTENDER\tPLANTED\tTITLE")
-	for _, seed := range result.Seeds {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-			seed.ID, seed.Status, orDash(firstNonEmpty(seed.TenderMember, seed.TenderSession)),
-			shortStamp(seed.CreatedAt), seed.Title)
+	for _, row := range seedRows(result.Seeds, *f.tree) {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n",
+			row.seed.ID, row.seed.Status, orDash(firstNonEmpty(row.seed.TenderMember, row.seed.TenderSession)),
+			shortStamp(row.seed.CreatedAt), strings.Repeat("  ", row.depth), row.seed.Title)
 	}
 	w.Flush()
 	if result.Total > len(result.Seeds) {
 		fmt.Printf("\nshowing the newest %d of %d seeds — one read is capped at %d. The %d not shown are the oldest; `attn seed ls --workspace <id>` reaches them in a narrower scope.\n",
 			len(result.Seeds), result.Total, len(result.Seeds), result.Total-len(result.Seeds))
 	}
+}
+
+// seedRow is one printed line: the seed and how deep it sits under its crown.
+type seedRow struct {
+	seed  protocol.Seed
+	depth int
+}
+
+// seedRows orders a listing. Flat keeps the daemon's order; --tree hands the
+// ordering to the garden package, so the CLI and a future in-app tree cannot
+// disagree about what nests under what.
+func seedRows(seeds []protocol.Seed, tree bool) []seedRow {
+	rows := make([]seedRow, 0, len(seeds))
+	if !tree {
+		for _, seed := range seeds {
+			rows = append(rows, seedRow{seed: seed})
+		}
+		return rows
+	}
+	byID := make(map[string]protocol.Seed, len(seeds))
+	domain := make([]garden.Seed, 0, len(seeds))
+	for _, seed := range seeds {
+		byID[seed.ID] = seed
+		domain = append(domain, gardenSeedFromWire(seed))
+	}
+	for _, row := range garden.Tree(domain) {
+		rows = append(rows, seedRow{seed: byID[row.Seed.ID], depth: row.Depth})
+	}
+	return rows
 }
 
 // shortStamp renders a wire timestamp for a terminal column; an unparseable one
@@ -287,9 +340,101 @@ func runSeedShow(args []string) {
 		return
 	}
 	printSeed(result.Seed)
+	if len(result.Relations) > 0 {
+		fmt.Println()
+		printRelations(result.Relations)
+	}
 	if len(result.Notes) > 0 {
 		fmt.Println()
 		printNotes(result.Notes, result.NotesTotal)
+	}
+}
+
+// printRelations renders both directions of a seed's edges. The other seed's
+// state is on the line because "blocked-by s-7k3f9m" is only actionable when the
+// reader can see whether that blocker is still open.
+func printRelations(relations []protocol.SeedRelation) {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	for _, relation := range relations {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", relation.Label, relation.SeedID, relation.Status, relation.Title)
+	}
+	w.Flush()
+}
+
+// runSeedLink relates two seeds, reading `link <a> blocks <b>` as it is said out
+// loud. The daemon owns what may be linked, so a refusal here is only about the
+// shape of the command.
+func runSeedLink(unlink bool, args []string) {
+	verb := "link"
+	if unlink {
+		verb = "unlink"
+	}
+	f := newSeedFlags(verb)
+	positionals := f.parse(verb, args)
+	if len(positionals) != 3 {
+		seedFail(verb, fmt.Errorf("reads as a sentence: `attn seed %s s-7k3f9m %s s-2p4qxv`, where the kind is %s",
+			verb, garden.EdgeBlocks, strings.Join(garden.LinkableKinds, " or ")))
+	}
+	result, err := seedClient().SeedLink(positionals[0], positionals[1], positionals[2], unlink)
+	if err != nil {
+		seedFail(verb, err)
+	}
+	if *f.json {
+		writeJSON(result)
+		return
+	}
+	switch {
+	case unlink:
+		fmt.Printf("%s no longer %s %s\n", positionals[0], positionals[1], positionals[2])
+	case !result.Changed:
+		fmt.Printf("%s already %s %s\n", positionals[0], positionals[1], positionals[2])
+	default:
+		fmt.Printf("%s %s %s\n", positionals[0], positionals[1], positionals[2])
+	}
+}
+
+// runSeedReady is the flag-free question: what can I tend now. Scope comes from
+// the daemon, which knows the session, so an agent asks without naming its own
+// context.
+func runSeedReady(args []string) {
+	f := newSeedFlags("ready")
+	if positionals := f.parse("ready", args); len(positionals) != 0 {
+		seedFail("ready", fmt.Errorf("takes no arguments, got %q; scope it with --plot <crown>, --workspace <id> or --all", positionals[0]))
+	}
+	result, err := seedClient().SeedReady(f.sessionID(), strings.TrimSpace(*f.plot), f.workspaceOverride(), *f.all)
+	if err != nil {
+		seedFail("ready", err)
+	}
+	if *f.json {
+		writeJSON(result)
+		return
+	}
+	if len(result.Seeds) == 0 {
+		fmt.Printf("nothing is ready %s — `attn seed ls` shows what is planted and what holds it\n", readyScopeName(result))
+		return
+	}
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tSTATUS\tPLANTED\tTITLE")
+	for _, seed := range result.Seeds {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", seed.ID, seed.Status, shortStamp(seed.CreatedAt), seed.Title)
+	}
+	w.Flush()
+	fmt.Printf("\n%d ready %s — `attn seed tend <id>` claims one\n", len(result.Seeds), readyScopeName(result))
+}
+
+// readyScopeName says what the answer covered, so an empty answer is never read
+// as an empty garden.
+func readyScopeName(result *protocol.SeedReadyResult) string {
+	switch result.Scope {
+	case "plot":
+		return fmt.Sprintf("in the plot under %s", result.ScopeID)
+	case "workspace":
+		if result.ScopeID == "" {
+			return "outside any workspace"
+		}
+		return "in this workspace"
+	default:
+		return "in the garden"
 	}
 }
 
@@ -310,8 +455,8 @@ func printSeed(seed protocol.Seed) {
 	if seed.Reason != nil && *seed.Reason != "" {
 		fmt.Fprintf(w, "reason\t%s\n", *seed.Reason)
 	}
-	for _, edge := range seed.Edges {
-		fmt.Fprintf(w, "edge\t%s %s\n", edge.Kind, edge.To)
+	if seed.Ready {
+		fmt.Fprintf(w, "ready\tyes\n")
 	}
 	w.Flush()
 	if body := strings.TrimRight(seed.Body, "\n"); body != "" {
@@ -463,9 +608,16 @@ func runSeedExport(args []string) {
 	fmt.Printf("wrote %s from %s — edit the seed, not the file\n", absolute, result.Seed.ID)
 }
 
-// gardenSeedFromWire is the export's only need for the domain type: rendering
-// belongs to the garden package, so the CLI and a future in-app renderer cannot
-// disagree about what a crown looks like.
+// gardenSeedFromWire carries a wire seed back into the domain type, which is
+// where rendering and hierarchy live — so the CLI and a future in-app renderer
+// cannot disagree about what a crown looks like or what nests under it.
 func gardenSeedFromWire(seed protocol.Seed) garden.Seed {
-	return garden.Seed{ID: seed.ID, Title: seed.Title, Body: seed.Body}
+	out := garden.Seed{
+		ID: seed.ID, Title: seed.Title, Body: seed.Body, Status: seed.Status,
+		Edges: make([]garden.Edge, 0, len(seed.Edges)),
+	}
+	for _, edge := range seed.Edges {
+		out.Edges = append(out.Edges, garden.Edge{Kind: edge.Kind, To: edge.To})
+	}
+	return out
 }

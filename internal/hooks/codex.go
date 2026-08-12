@@ -13,7 +13,7 @@ import (
 // attn-managed terminals without mutating user or project Codex config.
 // attn has always owned the resize-reflow value for its embedded renderer:
 // xterm needed it disabled, while Ghostty correctly renders the enabled redraw.
-func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceContextPath, notebookRoot string, injectWorkflow bool) []string {
+func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath string, launch Launch) []string {
 	wrapper := strings.TrimSpace(wrapperPath)
 	if wrapper == "" {
 		wrapper = "attn"
@@ -78,15 +78,13 @@ func GenerateCodexConfigOverrides(sessionID, socketPath, wrapperPath, workspaceC
 			"shell_environment_policy.set.ATTN_SOCKET_PATH="+strconv.Quote(socket),
 		)
 	}
-	// A chief-of-staff launch (notebookRoot set) gets chief guidance instead
+	// A chief-of-staff launch (NotebookRoot set) gets chief guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
 	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
-	// folded in by AgentInstructions). Non-chief agents are NOT nudged to journal:
+	// folded in by Launch). Non-chief agents are NOT nudged to journal:
 	// the keeper narrates each workspace's own work into the journal, and the chief
 	// journals the cross-workspace layer.
-	if guidance := ChiefGuidance(notebookRoot, false); guidance != "" {
-		overrides = append(overrides, "developer_instructions="+strconv.Quote(guidance))
-	} else if instructions := AgentInstructions(workspaceContextPath, injectWorkflow); instructions != "" {
+	if instructions := launch.Instructions(); instructions != "" {
 		overrides = append(overrides, "developer_instructions="+strconv.Quote(instructions))
 	}
 	return overrides

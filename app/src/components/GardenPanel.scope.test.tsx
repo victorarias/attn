@@ -14,6 +14,7 @@ function seed(overrides: Partial<Seed> & { id: string; title: string }): Seed {
     tender_session: '',
     tender_member: '',
     edges: [],
+    ready: false,
     template: false,
     gate: false,
     vars: [],
