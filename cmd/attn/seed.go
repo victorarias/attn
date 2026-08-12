@@ -39,6 +39,12 @@ func runSeed() {
 		runSeedShow(args)
 	case "export":
 		runSeedExport(args)
+	case "tend", "park", "harvest", "wither", "replant":
+		runSeedTransition(os.Args[2], args)
+	case "note":
+		runSeedNote(args)
+	case "notes":
+		runSeedNotes(args)
 	default:
 		fmt.Fprintf(os.Stderr, "seed: unknown command %q\n", os.Args[2])
 		writeSeedHelp(os.Stderr)
@@ -67,7 +73,34 @@ commands:
         garden, including seeds planted outside any workspace.
 
   show <id> [--json]
-        one seed: its state, where it belongs, who planted it, and its body.
+        one seed: its state, who tends it, its body, and the newest notes on
+        its trail.
+
+  tend <id> [--member <name>]
+        claim the seed and start growing it. One tender at a time: tending a
+        seed somebody else holds is refused, naming them.
+
+  park <id>
+        pause the seed deliberately — it goes dormant and lets go of its
+        tender. Tending it again picks it back up.
+
+  harvest <id> -m "<what got done>"
+        close the seed as done. The reason is the point of the record.
+
+  wither <id> [-m "<why>"]
+        close the seed as abandoned. Nobody is picking this up.
+
+  replant <id>
+        reopen a harvested or withered seed. A closed seed reopens before it
+        moves again.
+
+  note <id> -m "<what happened>"
+        append to the seed's trail — what happened and what you learned, for
+        whoever tends it next. - reads stdin.
+
+  notes <id> [--limit <n>] [--json]
+        the whole trail, newest first. show renders the newest few and says
+        how many more are here.
 
   export <id> [--out <path>] [--json]
         write the seed's body to markdown, stamped as generated from the seed —
@@ -77,8 +110,10 @@ commands:
 
 flags:
   --workspace <id>   the workspace to stamp (plant) or to list (ls)
-  --member <name>    the crew member planting, recorded as the planter
+  --member <name>    the crew member asking, recorded as planter, tender or
+                     note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
+  --limit <n>        how many trail entries to read (notes)
   --json             print the result as JSON
 `)
 }
@@ -104,6 +139,7 @@ type seedFlags struct {
 	all       *bool
 	message   *string
 	out       *string
+	limit     *int
 }
 
 func newSeedFlags(verb string) *seedFlags {
@@ -118,7 +154,21 @@ func newSeedFlags(verb string) *seedFlags {
 		all:       fs.Bool("all", false, "the whole garden, not one workspace"),
 		message:   fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
 		out:       fs.String("out", "", "file to write (- for stdout)"),
+		limit:     fs.Int("limit", 0, "how many trail entries to read"),
 	}
+}
+
+// text reads -m, taking stdin when it is "-", so a long body or note can be
+// piped instead of quoted into a shell.
+func (f *seedFlags) text(verb string) string {
+	if *f.message != "-" {
+		return *f.message
+	}
+	raw, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		seedFail(verb, fmt.Errorf("reading stdin: %w", err))
+	}
+	return string(raw)
 }
 
 // parse reads flags interleaved with positionals, the way the rest of the CLI
@@ -165,15 +215,7 @@ func runSeedPlant(args []string) {
 	if len(positionals) != 1 {
 		seedFail("plant", fmt.Errorf(`needs exactly one title, got %d: attn seed plant "what this is" [-m "the detail"]`, len(positionals)))
 	}
-	body := *f.message
-	if body == "-" {
-		raw, err := io.ReadAll(os.Stdin)
-		if err != nil {
-			seedFail("plant", fmt.Errorf("reading stdin: %w", err))
-		}
-		body = string(raw)
-	}
-	result, err := seedClient().SeedPlant(f.sessionID(), positionals[0], body, f.workspaceOverride(), strings.TrimSpace(*f.member))
+	result, err := seedClient().SeedPlant(f.sessionID(), positionals[0], f.text("plant"), f.workspaceOverride(), strings.TrimSpace(*f.member))
 	if err != nil {
 		seedFail("plant", err)
 	}
@@ -207,11 +249,17 @@ func runSeedList(args []string) {
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "ID\tSTATUS\tPLANTED\tTITLE")
+	fmt.Fprintln(w, "ID\tSTATUS\tTENDER\tPLANTED\tTITLE")
 	for _, seed := range result.Seeds {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", seed.ID, seed.Status, shortStamp(seed.CreatedAt), seed.Title)
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			seed.ID, seed.Status, orDash(firstNonEmpty(seed.TenderMember, seed.TenderSession)),
+			shortStamp(seed.CreatedAt), seed.Title)
 	}
 	w.Flush()
+	if result.Total > len(result.Seeds) {
+		fmt.Printf("\nshowing the newest %d of %d seeds — one read is capped at %d. The %d not shown are the oldest; `attn seed ls --workspace <id>` reaches them in a narrower scope.\n",
+			len(result.Seeds), result.Total, len(result.Seeds), result.Total-len(result.Seeds))
+	}
 }
 
 // shortStamp renders a wire timestamp for a terminal column; an unparseable one
@@ -235,10 +283,14 @@ func runSeedShow(args []string) {
 		seedFail("show", err)
 	}
 	if *f.json {
-		writeJSON(result.Seed)
+		writeJSON(result)
 		return
 	}
 	printSeed(result.Seed)
+	if len(result.Notes) > 0 {
+		fmt.Println()
+		printNotes(result.Notes, result.NotesTotal)
+	}
 }
 
 func printSeed(seed protocol.Seed) {
@@ -281,6 +333,93 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+// runSeedTransition drives the five lifecycle verbs. They share everything but
+// their name: the daemon holds the state machine, so the CLI's job is to say
+// which move and hand over who is asking.
+func runSeedTransition(verb string, args []string) {
+	f := newSeedFlags(verb)
+	positionals := f.parse(verb, args)
+	if len(positionals) != 1 {
+		seedFail(verb, fmt.Errorf("needs exactly one seed id, got %d: attn seed %s s-7k3f9m", len(positionals), verb))
+	}
+	result, err := seedClient().SeedTransition(
+		f.sessionID(), positionals[0], verb, f.text(verb), strings.TrimSpace(*f.member))
+	if err != nil {
+		seedFail(verb, err)
+	}
+	if *f.json {
+		writeJSON(result.Seed)
+		return
+	}
+	fmt.Println(transitionLine(result.Seed))
+}
+
+// transitionLine is the one line a move prints: what the seed is now, and who
+// holds it if anybody does. An agent reads it to confirm the claim landed.
+func transitionLine(seed protocol.Seed) string {
+	line := fmt.Sprintf("%s is %s", seed.ID, seed.Status)
+	if tender := firstNonEmpty(seed.TenderMember, seed.TenderSession); tender != "" {
+		line += fmt.Sprintf(", tended by %s", tender)
+	}
+	if seed.Reason != nil && *seed.Reason != "" {
+		line += fmt.Sprintf(" — %s", *seed.Reason)
+	}
+	return line
+}
+
+func runSeedNote(args []string) {
+	f := newSeedFlags("note")
+	positionals := f.parse("note", args)
+	if len(positionals) != 1 {
+		seedFail("note", fmt.Errorf(`needs exactly one seed id, got %d: attn seed note s-7k3f9m -m "what happened"`, len(positionals)))
+	}
+	result, err := seedClient().SeedNote(f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member))
+	if err != nil {
+		seedFail("note", err)
+	}
+	if *f.json {
+		writeJSON(result.Note)
+		return
+	}
+	fmt.Printf("noted on %s\n", result.Note.SeedID)
+}
+
+func runSeedNotes(args []string) {
+	f := newSeedFlags("notes")
+	positionals := f.parse("notes", args)
+	if len(positionals) != 1 {
+		seedFail("notes", fmt.Errorf("needs exactly one seed id, got %d: attn seed notes s-7k3f9m", len(positionals)))
+	}
+	result, err := seedClient().SeedNotes(positionals[0], *f.limit)
+	if err != nil {
+		seedFail("notes", err)
+	}
+	if *f.json {
+		writeJSON(result)
+		return
+	}
+	if len(result.Notes) == 0 {
+		fmt.Printf("nothing on this seed's trail yet — `attn seed note %s -m \"what happened\"` starts it\n", positionals[0])
+		return
+	}
+	printNotes(result.Notes, result.Total)
+}
+
+// printNotes renders a trail newest first, and says what it did not print. A
+// silently short trail reads as a complete one.
+func printNotes(notes []protocol.SeedNote, total int) {
+	for i, note := range notes {
+		if i > 0 {
+			fmt.Println()
+		}
+		fmt.Printf("%s  %s\n", shortStamp(note.CreatedAt), orDash(firstNonEmpty(note.AuthorMember, note.AuthorSession)))
+		fmt.Printf("%s\n", strings.TrimRight(note.Body, "\n"))
+	}
+	if withheld := total - len(notes); withheld > 0 && len(notes) > 0 {
+		fmt.Printf("\n%d more — `attn seed notes %s`\n", withheld, notes[0].SeedID)
+	}
 }
 
 // runSeedExport is the review bridge: it renders a seed to a markdown file so

@@ -4,9 +4,12 @@ import (
 	"encoding/json"
 	"net"
 	"path/filepath"
+	"slices"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
@@ -60,6 +63,314 @@ func plant(t *testing.T, d *Daemon, msg protocol.SeedPlantMessage) protocol.Seed
 		t.Fatalf("plant %q: %v", msg.Title, protocol.Deref(resp.Error))
 	}
 	return resp.SeedPlantResult.Seed
+}
+
+// addGardenSession puts a second real session in the workspace, the way the app
+// does — through the registry, not the stored column.
+func addGardenSession(t *testing.T, d *Daemon, id string) {
+	t.Helper()
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID: id, Label: id, State: "idle",
+		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.workspaces.associateSession(id, "ws-1", id)
+}
+
+// move runs one lifecycle verb and fails the test if it was refused.
+func move(t *testing.T, d *Daemon, session, seedID string, verb garden.Verb, reason, member string) protocol.Seed {
+	t.Helper()
+	resp := transition(t, d, session, seedID, verb, reason, member)
+	if !resp.Ok {
+		t.Fatalf("%s %s: %v", verb, seedID, protocol.Deref(resp.Error))
+	}
+	return resp.SeedTransitionResult.Seed
+}
+
+func transition(t *testing.T, d *Daemon, session, seedID string, verb garden.Verb, reason, member string) protocol.Response {
+	t.Helper()
+	msg := protocol.SeedTransitionMessage{
+		Cmd: protocol.CmdSeedTransition, SeedID: seedID, Verb: string(verb),
+	}
+	if session != "" {
+		msg.SourceSessionID = protocol.Ptr(session)
+	}
+	if reason != "" {
+		msg.Reason = protocol.Ptr(reason)
+	}
+	if member != "" {
+		msg.Member = protocol.Ptr(member)
+	}
+	return gardenCall(t, func(c net.Conn) { d.handleSeedTransition(c, &msg) })
+}
+
+func note(t *testing.T, d *Daemon, session, seedID, body, member string) protocol.SeedNote {
+	t.Helper()
+	msg := protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seedID, Body: body}
+	if session != "" {
+		msg.SourceSessionID = protocol.Ptr(session)
+	}
+	if member != "" {
+		msg.Member = protocol.Ptr(member)
+	}
+	resp := gardenCall(t, func(c net.Conn) { d.handleSeedNote(c, &msg) })
+	if !resp.Ok {
+		t.Fatalf("note on %s: %v", seedID, protocol.Deref(resp.Error))
+	}
+	return resp.SeedNoteResult.Note
+}
+
+func show(t *testing.T, d *Daemon, seedID string) *protocol.SeedShowResult {
+	t.Helper()
+	resp := gardenCall(t, func(c net.Conn) {
+		d.handleSeedShow(c, &protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: seedID})
+	})
+	if !resp.Ok {
+		t.Fatalf("show %s: %v", seedID, protocol.Deref(resp.Error))
+	}
+	return resp.SeedShowResult
+}
+
+// The slice's acceptance, end to end: a seed lives its whole life through the
+// daemon, and every move is one push to the panel.
+func TestGarden_FullLifeIsVisibleAtEveryStep(t *testing.T) {
+	d := newGardenDaemon(t)
+	var pushed [][]protocol.Seed
+	d.gardenBroadcastHook = func(seeds []protocol.Seed, _ int) { pushed = append(pushed, seeds) }
+
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "live a life"})
+
+	tended := move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+	if tended.Status != garden.StatusGrowing || tended.TenderMember != "trellis" || tended.TenderSession != "sess-a" {
+		t.Fatalf("tend did not claim the seed: %+v", tended)
+	}
+
+	note(t, d, "sess-a", seed.ID, "found the seam in internal/daemon", "trellis")
+
+	harvested := move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "shipped it", "trellis")
+	if harvested.Status != garden.StatusHarvested {
+		t.Fatalf("harvest landed in %q", harvested.Status)
+	}
+	if harvested.Reason == nil || *harvested.Reason != "shipped it" {
+		t.Fatalf("harvest did not record why: %+v", harvested)
+	}
+	if harvested.TenderSession != "" || harvested.TenderMember != "" {
+		t.Fatalf("a harvested seed is still claimed: %+v", harvested)
+	}
+
+	replanted := move(t, d, "sess-a", seed.ID, garden.VerbReplant, "", "trellis")
+	if replanted.Status != garden.StatusPlanted || replanted.Reason != nil {
+		t.Fatalf("replant did not reopen the seed cleanly: %+v", replanted)
+	}
+
+	withered := move(t, d, "sess-a", seed.ID, garden.VerbWither, "nobody is picking this up", "trellis")
+	if withered.Status != garden.StatusWithered {
+		t.Fatalf("wither landed in %q", withered.Status)
+	}
+
+	// One planting, one note and four moves: six facts, six pushes, each
+	// carrying the state the panel must render at that moment.
+	if len(pushed) != 6 {
+		t.Fatalf("the life produced %d garden pushes, want one per change", len(pushed))
+	}
+	states := make([]string, 0, len(pushed))
+	for _, garden := range pushed {
+		if len(garden) != 1 {
+			t.Fatalf("a push carried %d seeds, want the one that exists", len(garden))
+		}
+		states = append(states, garden[0].Status)
+	}
+	want := []string{"planted", "growing", "growing", "harvested", "planted", "withered"}
+	if !slices.Equal(states, want) {
+		t.Fatalf("the panel saw %v, want %v", states, want)
+	}
+}
+
+// The showpiece refusal. Two real sessions, one seed: the second is told whose
+// it is and what to do instead — and there is no override flag, deliberately.
+func TestGarden_ASecondSessionCannotTakeALiveClaim(t *testing.T) {
+	d := newGardenDaemon(t)
+	addGardenSession(t, d, "sess-b")
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "contended"})
+
+	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+
+	refused := transition(t, d, "sess-b", seed.ID, garden.VerbTend, "", "alder")
+	if refused.Ok {
+		t.Fatal("a second session took a claim that was already held")
+	}
+	message := protocol.Deref(refused.Error)
+	for _, want := range []string{seed.ID, "trellis", "attn seed note"} {
+		if !strings.Contains(message, want) {
+			t.Fatalf("the refusal does not name %q:\n%s", want, message)
+		}
+	}
+
+	// And the claim did not move: a refused tend must leave the seed exactly
+	// where the first session left it.
+	still := show(t, d, seed.ID).Seed
+	if still.TenderSession != "sess-a" || still.TenderMember != "trellis" {
+		t.Fatalf("the refused claim changed the tender: %+v", still)
+	}
+
+	// The way through is the first session letting go, not a flag.
+	move(t, d, "sess-a", seed.ID, garden.VerbPark, "", "trellis")
+	taken := move(t, d, "sess-b", seed.ID, garden.VerbTend, "", "alder")
+	if taken.TenderSession != "sess-b" {
+		t.Fatalf("a parked seed did not hand over: %+v", taken)
+	}
+}
+
+// Two sessions tending at the same instant is the claim's real test: the write
+// is conditional on the revision that was read, so the loser re-reads and finds
+// a tender rather than overwriting one.
+func TestGarden_ConcurrentClaimsProduceOneTender(t *testing.T) {
+	d := newGardenDaemon(t)
+	addGardenSession(t, d, "sess-b")
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "raced for"})
+
+	type outcome struct {
+		resp    protocol.Response
+		session string
+	}
+	results := make(chan outcome, 2)
+	var start sync.WaitGroup
+	start.Add(1)
+	for _, session := range []string{"sess-a", "sess-b"} {
+		go func() {
+			start.Wait()
+			results <- outcome{transition(t, d, session, seed.ID, garden.VerbTend, "", session), session}
+		}()
+	}
+	start.Done()
+
+	var winners []string
+	var refusals []string
+	for range 2 {
+		got := <-results
+		if got.resp.Ok {
+			winners = append(winners, got.resp.SeedTransitionResult.Seed.TenderSession)
+			continue
+		}
+		refusals = append(refusals, protocol.Deref(got.resp.Error))
+	}
+	if len(winners) != 1 || len(refusals) != 1 {
+		t.Fatalf("two simultaneous claims produced %d winners and %d refusals, want one of each", len(winners), len(refusals))
+	}
+	if !strings.Contains(refusals[0], winners[0]) {
+		t.Fatalf("the loser was not told who won:\n%s", refusals[0])
+	}
+	if held := show(t, d, seed.ID).Seed.TenderSession; held != winners[0] {
+		t.Fatalf("the stored tender is %q but %q was told it won", held, winners[0])
+	}
+}
+
+// Notes are the trail. They read newest first, they say what they withheld, and
+// show carries them because a trail behind a verb nobody runs is not read.
+func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a trail"})
+
+	bodies := []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh"}
+	for _, body := range bodies {
+		note(t, d, "sess-a", seed.ID, body, "trellis")
+	}
+
+	shown := show(t, d, seed.ID)
+	if shown.NotesTotal != len(bodies) {
+		t.Fatalf("show reports %d notes, want %d", shown.NotesTotal, len(bodies))
+	}
+	if len(shown.Notes) != garden.ShowNotes {
+		t.Fatalf("show rendered %d notes inline, want %d", len(shown.Notes), garden.ShowNotes)
+	}
+	if shown.Notes[0].Body != "seventh" {
+		t.Fatalf("the trail leads with %q, want the newest note", shown.Notes[0].Body)
+	}
+	if shown.Notes[0].AuthorMember != "trellis" || shown.Notes[0].AuthorSession != "sess-a" {
+		t.Fatalf("a note does not record who wrote it: %+v", shown.Notes[0])
+	}
+
+	all := gardenCall(t, func(c net.Conn) {
+		d.handleSeedNotes(c, &protocol.SeedNotesMessage{Cmd: protocol.CmdSeedNotes, SeedID: seed.ID})
+	})
+	if !all.Ok {
+		t.Fatalf("notes: %v", protocol.Deref(all.Error))
+	}
+	if len(all.SeedNotesResult.Notes) != len(bodies) || all.SeedNotesResult.Total != len(bodies) {
+		t.Fatalf("the full trail is %d of %d, want all %d", len(all.SeedNotesResult.Notes), all.SeedNotesResult.Total, len(bodies))
+	}
+
+	// A trail belongs to its seed and to no other.
+	elsewhere := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "no trail"})
+	if got := show(t, d, elsewhere.ID); len(got.Notes) != 0 || got.NotesTotal != 0 {
+		t.Fatalf("another seed's trail leaked: %+v", got.Notes)
+	}
+}
+
+func TestGarden_LifecycleRefusalsNameWhatIsWrong(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "refusals"})
+
+	unknown := transition(t, d, "sess-a", seed.ID, "compost", "", "trellis")
+	if unknown.Ok || !strings.Contains(protocol.Deref(unknown.Error), "harvest") {
+		t.Fatalf("an unknown verb was not answered with the ones that exist: %+v", unknown)
+	}
+
+	wordless := transition(t, d, "sess-a", seed.ID, garden.VerbHarvest, "", "trellis")
+	if wordless.Ok || !strings.Contains(protocol.Deref(wordless.Error), "-m") {
+		t.Fatalf("a wordless harvest was not refused with the flag to fix it: %+v", wordless)
+	}
+
+	missing := transition(t, d, "sess-a", "s-zzzzzz", garden.VerbTend, "", "trellis")
+	if missing.Ok || !strings.Contains(protocol.Deref(missing.Error), "s-zzzzzz") {
+		t.Fatalf("a move on an unplanted seed was not refused by name: %+v", missing)
+	}
+
+	emptyNote := gardenCall(t, func(c net.Conn) {
+		d.handleSeedNote(c, &protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seed.ID, Body: "  "})
+	})
+	if emptyNote.Ok || !strings.Contains(protocol.Deref(emptyNote.Error), "attn seed note") {
+		t.Fatalf("an empty note was not refused with the command to fix it: %+v", emptyNote)
+	}
+
+	noSeed := gardenCall(t, func(c net.Conn) {
+		d.handleSeedNote(c, &protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: "s-zzzzzz", Body: "into the void"})
+	})
+	if noSeed.Ok || !strings.Contains(protocol.Deref(noSeed.Error), "s-zzzzzz") {
+		t.Fatalf("a note on an unplanted seed was written or refused vaguely: %+v", noSeed)
+	}
+}
+
+// Every move publishes its own fact, named for what happened. A single
+// `garden.changed` would make a sync engine or a nudge diff documents to find
+// out what a name already says.
+func TestGarden_EveryMovePublishesItsOwnFact(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "facts"})
+
+	var seen []string
+	unsubscribe := d.eventBus.Subscribe(bus.Filter{"garden.*"}, func(ev bus.Event) {
+		if ev.Subject != seed.ID {
+			t.Errorf("fact %s names subject %q, want the seed", ev.Name, ev.Subject)
+		}
+		seen = append(seen, ev.Name)
+	})
+	defer unsubscribe()
+
+	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+	note(t, d, "sess-a", seed.ID, "on the trail", "trellis")
+	move(t, d, "sess-a", seed.ID, garden.VerbPark, "", "trellis")
+	move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "done", "trellis")
+	move(t, d, "sess-a", seed.ID, garden.VerbReplant, "", "trellis")
+	move(t, d, "sess-a", seed.ID, garden.VerbWither, "", "trellis")
+
+	want := []string{
+		FactGardenTended, FactGardenNoted, FactGardenParked,
+		FactGardenHarvested, FactGardenReplanted, FactGardenWithered,
+	}
+	if !slices.Equal(seen, want) {
+		t.Fatalf("the bus saw %v, want %v", seen, want)
+	}
 }
 
 func TestGarden_PlantListShowRoundTrip(t *testing.T) {
@@ -148,6 +459,47 @@ func TestGarden_ListScopesAndAllSeesTheWholeGarden(t *testing.T) {
 	}
 }
 
+// A list carries the count of what its own scope holds. Counting the whole
+// garden against a workspace-scoped list would report a shortfall that is not
+// there — "showing 1 of 2" for a workspace that holds exactly one seed.
+func TestGarden_ListCountsItsOwnScope(t *testing.T) {
+	d := newGardenDaemon(t)
+	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "in my workspace"})
+	plant(t, d, protocol.SeedPlantMessage{Title: "planted outside any workspace"})
+
+	scoped := gardenCall(t, func(c net.Conn) {
+		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, SourceSessionID: protocol.Ptr("sess-a")})
+	}).SeedListResult
+	if scoped.Total != 1 {
+		t.Fatalf("scoped total = %d, want 1: the workspace holds one seed", scoped.Total)
+	}
+
+	all := gardenCall(t, func(c net.Conn) {
+		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, All: protocol.Ptr(true)})
+	}).SeedListResult
+	if all.Total != 2 {
+		t.Fatalf("--all total = %d, want 2", all.Total)
+	}
+}
+
+// The push is bounded and the total is what keeps that honest, so the number on
+// the wire has to be the garden's and not the truncated list's length.
+func TestGarden_PushCarriesTheWholeGardensCount(t *testing.T) {
+	d := newGardenDaemon(t)
+	var totals []int
+	d.gardenBroadcastHook = func(_ []protocol.Seed, total int) { totals = append(totals, total) }
+
+	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "one"})
+	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "two"})
+
+	if len(totals) == 0 {
+		t.Fatal("planting pushed no garden")
+	}
+	if got := totals[len(totals)-1]; got != 2 {
+		t.Fatalf("push total = %d, want 2", got)
+	}
+}
+
 func TestGarden_ListWithNothingToScopeToRefusesLoudly(t *testing.T) {
 	d := newGardenDaemon(t)
 	resp := gardenCall(t, func(c net.Conn) {
@@ -206,6 +558,19 @@ func TestGarden_OutpostRefusesEverySeedCommand(t *testing.T) {
 		"show": func(c net.Conn) {
 			d.handleSeedShow(c, &protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: "s-7k3f9m"})
 		},
+		"tend": func(c net.Conn) {
+			d.handleSeedTransition(c, &protocol.SeedTransitionMessage{
+				Cmd: protocol.CmdSeedTransition, SeedID: "s-7k3f9m", Verb: string(garden.VerbTend),
+			})
+		},
+		"note": func(c net.Conn) {
+			d.handleSeedNote(c, &protocol.SeedNoteMessage{
+				Cmd: protocol.CmdSeedNote, SeedID: "s-7k3f9m", Body: "anything",
+			})
+		},
+		"notes": func(c net.Conn) {
+			d.handleSeedNotes(c, &protocol.SeedNotesMessage{Cmd: protocol.CmdSeedNotes, SeedID: "s-7k3f9m"})
+		},
 	}
 	for verb, call := range calls {
 		resp := gardenCall(t, call)
@@ -233,7 +598,7 @@ func TestGarden_PlantingPushesTheGardenOnce(t *testing.T) {
 
 	var pushes int
 	var last []protocol.Seed
-	d.gardenBroadcastHook = func(seeds []protocol.Seed) {
+	d.gardenBroadcastHook = func(seeds []protocol.Seed, _ int) {
 		pushes++
 		last = seeds
 	}
@@ -253,7 +618,7 @@ func TestGarden_PlantingPushesTheGardenOnce(t *testing.T) {
 func TestGarden_BulkPlantingCoalescesToOnePush(t *testing.T) {
 	d := newGardenDaemon(t)
 	var pushes int
-	d.gardenBroadcastHook = func([]protocol.Seed) { pushes++ }
+	d.gardenBroadcastHook = func([]protocol.Seed, int) { pushes++ }
 
 	// What planting a plot looks like from the outside: several seeds, one
 	// wire message.

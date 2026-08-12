@@ -197,6 +197,20 @@ const (
 	// after the write it describes has committed, so a consumer that reads it
 	// always finds the seed.
 	FactGardenPlanted = "garden.planted"
+	// One fact per lifecycle move, rather than one `garden.changed`: the subject
+	// says which seed and the name says what happened to it, which is what a
+	// change feed and a future nudge both read. All of them project the same way
+	// — the panel re-renders a list — but a consumer that cares only about
+	// harvests must not have to diff documents to find them.
+	FactGardenTended    = "garden.tended"
+	FactGardenParked    = "garden.parked"
+	FactGardenHarvested = "garden.harvested"
+	FactGardenWithered  = "garden.withered"
+	FactGardenReplanted = "garden.replanted"
+	// FactGardenNoted: a note was appended to a seed's trail. Subject is the
+	// seed, not the note — the trail is the seed's memory of itself, and the
+	// entity anybody reads is the seed.
+	FactGardenNoted = "garden.noted"
 
 	// App registry facts; subject is the app's name.
 	//

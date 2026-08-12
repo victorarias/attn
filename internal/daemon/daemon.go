@@ -452,8 +452,9 @@ type Daemon struct {
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
-	gardenBroadcastHook   func([]protocol.Seed)                     // optional, tests only
+	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
+	gardenMintNoteID      func() (string, error)                    // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every
@@ -2730,6 +2731,12 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
 	case protocol.CmdSeedShow: // wire: seed_show
 		d.handleSeedShow(conn, msg.(*protocol.SeedShowMessage))
+	case protocol.CmdSeedTransition: // wire: seed_transition
+		d.handleSeedTransition(conn, msg.(*protocol.SeedTransitionMessage))
+	case protocol.CmdSeedNote: // wire: seed_note
+		d.handleSeedNote(conn, msg.(*protocol.SeedNoteMessage))
+	case protocol.CmdSeedNotes: // wire: seed_notes
+		d.handleSeedNotes(conn, msg.(*protocol.SeedNotesMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

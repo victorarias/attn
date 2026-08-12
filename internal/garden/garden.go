@@ -151,22 +151,28 @@ func NotesSchema() docstore.CollectionSchema {
 // of pretending the case away. Neither number is a corruption risk: planting
 // writes create-only, so the store refuses the second write rather than
 // overwriting somebody's seed.
+// Notes carry the same shape under `n-`, so an id says which collection it
+// addresses without a lookup.
 const (
-	idPrefix    = "s-"
-	idBodyLen   = 6
-	idAlphabet  = "0123456789abcdefghjkmnpqrstvwxyz"
-	idAlphabetN = 32
+	idPrefix     = "s-"
+	noteIDPrefix = "n-"
+	idBodyLen    = 6
+	idAlphabet   = "0123456789abcdefghjkmnpqrstvwxyz"
+	idAlphabetN  = 32
 )
 
-// NewID mints a seed id. 256 is a whole multiple of the alphabet's 32, so the
-// modulo is unbiased and no rejection loop is needed.
-func NewID() (string, error) {
+// NewID mints a seed id.
+func NewID() (string, error) { return mintID(idPrefix) }
+
+// mintID mints one id under a prefix. 256 is a whole multiple of the alphabet's
+// 32, so the modulo is unbiased and no rejection loop is needed.
+func mintID(prefix string) (string, error) {
 	buf := make([]byte, idBodyLen)
 	if _, err := rand.Read(buf); err != nil {
-		return "", fmt.Errorf("mint seed id: %w", err)
+		return "", fmt.Errorf("mint %sid: %w", prefix, err)
 	}
-	out := make([]byte, 0, len(idPrefix)+idBodyLen)
-	out = append(out, idPrefix...)
+	out := make([]byte, 0, len(prefix)+idBodyLen)
+	out = append(out, prefix...)
 	for _, b := range buf {
 		out = append(out, idAlphabet[int(b)%idAlphabetN])
 	}

@@ -1088,7 +1088,7 @@ function AppContent({
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets, seeds } = useDaemonStore();
+  const { repoStates, authorStates, tickets, seeds, seedsTotal } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -4155,6 +4155,7 @@ function AppContent({
                   isOpen={gardenPanelOpen}
                   onClose={() => closeDockPanel('garden')}
                   seeds={seeds}
+                  seedsTotal={seedsTotal}
                   workspaceId={activeWorkspaceId ?? null}
                 />
               ),

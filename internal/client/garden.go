@@ -55,7 +55,7 @@ func (c *Client) SeedList(sessionID string, workspaceID *string, all bool) (*pro
 	return resp.SeedListResult, nil
 }
 
-// SeedShow reads one seed.
+// SeedShow reads one seed and the newest entries on its trail.
 func (c *Client) SeedShow(seedID string) (*protocol.SeedShowResult, error) {
 	resp, err := c.send(protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: seedID})
 	if err != nil {
@@ -65,4 +65,64 @@ func (c *Client) SeedShow(seedID string) (*protocol.SeedShowResult, error) {
 		return nil, fmt.Errorf("the daemon answered without a seed")
 	}
 	return resp.SeedShowResult, nil
+}
+
+// SeedTransition moves a seed through its life. The daemon decides whether the
+// move is legal from the state the seed is in and refuses by name; nothing here
+// pre-judges it, so the CLI and the app cannot disagree about the rules.
+func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) (*protocol.SeedTransitionResult, error) {
+	msg := protocol.SeedTransitionMessage{Cmd: protocol.CmdSeedTransition, SeedID: seedID, Verb: verb}
+	if sessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sessionID)
+	}
+	if reason != "" {
+		msg.Reason = protocol.Ptr(reason)
+	}
+	if member != "" {
+		msg.Member = protocol.Ptr(member)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedTransitionResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the move but returned no seed")
+	}
+	return resp.SeedTransitionResult, nil
+}
+
+// SeedNote appends one entry to a seed's trail.
+func (c *Client) SeedNote(sessionID, seedID, body, member string) (*protocol.SeedNoteResult, error) {
+	msg := protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seedID, Body: body}
+	if sessionID != "" {
+		msg.SourceSessionID = protocol.Ptr(sessionID)
+	}
+	if member != "" {
+		msg.Member = protocol.Ptr(member)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedNoteResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the note but returned nothing")
+	}
+	return resp.SeedNoteResult, nil
+}
+
+// SeedNotes reads a seed's whole trail, newest first. limit 0 takes the
+// daemon's bound.
+func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult, error) {
+	msg := protocol.SeedNotesMessage{Cmd: protocol.CmdSeedNotes, SeedID: seedID}
+	if limit > 0 {
+		msg.Limit = protocol.Ptr(limit)
+	}
+	resp, err := c.send(msg)
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedNotesResult == nil {
+		return nil, fmt.Errorf("the daemon answered without a trail")
+	}
+	return resp.SeedNotesResult, nil
 }
