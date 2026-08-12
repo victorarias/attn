@@ -339,3 +339,70 @@ CLI, app and daemon.
   `setting.changed` fact and one `settings_updated` carrying
   `changed_key=auto_settle_enabled`, while the startup tailscale and backup
   facts pushed settings with no changed key, as before.
+
+## Proving the join, both directions (2026-08-12)
+
+`TestWireTrafficComesFromProjections` only ever closed one direction: it fails a
+function that reaches the hub *without* a fact behind it. Nothing failed a
+projection whose push disappeared. Measured with `go test -overlay`: delete the
+`broadcastMessage` call from the garden snapshot projection and
+`go test ./internal/daemon` is green in 147s; do the same to the ticket board's
+and it is green in 130s.
+
+What made it invisible is a shape, not a feature. A projection whose message is
+its own top-level type (not a `WebSocketEvent`) is unobservable through the
+hub's `broadcastListener`, so garden, the ticket board and the workflow run all
+grew a test-only broadcast hook that fires immediately before the real send.
+Every assertion in those features reads the hook. Delete the send, keep the
+hook, and nothing notices — and each new feature copies the shape.
+
+`TestEveryProjectedFactReachesTheWire` (`internal/daemon/bus_wire_join_test.go`)
+is the mirror. For each fact that a `wireProjections` entry matches, it builds a
+daemon with a seeded session, workspace, layout and presentation, taps
+`wsHub.wireTap` — which sees the marshalled bytes of all five send paths, and no
+hook — publishes that one fact, and asserts the **exact set** of `event` names
+that reached the wire.
+
+Three properties make it hold without maintenance:
+
+- The fact vocabulary is parsed out of `bus.go` (`Fact…` constants) and the
+  projection table is read at runtime, so a new fact under an existing wildcard
+  (`ticket.*`, `pr.*`, `garden.*`) is covered with no edit at all.
+- A projected fact with no fixture fails by name, and a fixture whose fact no
+  longer exists fails as stale. Most fixtures are one line — 26 of the 41
+  projections push correctly against a bare daemon and a bare fact, so a subject
+  or payload appears only where the projection genuinely needs one.
+- A declared fact matched by *no* projection must be listed in
+  `factsWithoutWire` with the consumer that does read it — the same enumerated
+  exception discipline `wireSenderExceptions` uses. Without it, a projection
+  deleted by accident is indistinguishable from a fact that never had one.
+
+**The assertion is the event name, and deliberately nothing deeper.** It has to
+be at least that deep: publishing `workspace.context.changed` with no payload
+decodes to a zero value and pushes a message with an *empty* event field, which
+"pushed something" would accept — and the event name is precisely what
+copy-pasting a projection gets wrong. It should not go deeper here, because
+payload bytes already belong to the wire-trace goldens and to each feature's own
+tests; one table owning every feature's payload would rot on the first field
+added and be regenerated rather than read.
+
+Receipts, all `go test ./internal/daemon -count=1`:
+
+| run | result |
+| --- | --- |
+| garden push deleted, this test absent | ok, 146.9s |
+| garden push deleted, this test present | FAIL — `garden.planted` put nothing on the wire |
+| ticket board push deleted, this test absent | ok, 129.5s |
+| ticket board push deleted, this test present | FAIL — every `ticket.*` fact put nothing on the wire |
+| unmutated | ok, 185.0s |
+
+The third hook-shaped feature, `workflow_broadcast.go`, turned out to be covered
+already: deleting its send fails `TestWireTraceProducerGolden`, because a
+workflow run is one of the producers that golden drives. That is the difference
+between a hand-maintained producer list and a table-complete one — garden was
+merged without an entry in it, and nothing noticed.
+
+Four mutations of the mechanism itself, to show the guard is not vacuous: a
+removed fixture, a fixture for a fact that does not exist, a fixture declaring
+the wrong event, and a deleted `wireProjections` entry each fail with a message
+naming what to fix.
