@@ -1,0 +1,25 @@
+kind: fixed
+area: apps
+change: >
+  When one app breaks the shared runtime every app's handlers run in, attn now
+  works out which app it was instead of blaming whoever was waiting. Two ways it
+  used to get this wrong. A handler that blocks without ever yielding freezes
+  the runtime for everybody, and the apps stuck behind it were each recorded as
+  having taken too long — enough of that and an app was switched off over a
+  handler that was never called. attn now asks the runtime whether it is still
+  answering: if it is, the app whose handler was running really is the one that
+  hung; if it is not, the runtime says which handler it is stuck inside, and
+  that app is charged while everyone else is recorded as having lost the
+  runtime rather than as having failed. The other way was an error an app
+  started and never
+  caught, which takes the whole runtime down. That used to be charged to nobody
+  at all, so the one thing an app can do that stops every other app was the one
+  thing it was never switched off for. The runtime now reads the app's name off
+  the failure before it exits and reports it, and an app that does it three
+  times in fifteen minutes is disabled with a notification saying so —
+  including when the failure surfaces long after that app's own work finished,
+  which is the case that made guessing wrong in the first place. A failure that
+  names no app is still charged to nobody.
+symptom: >
+  An app was disabled, or reported as timing out, because a different app was
+  misbehaving — and the app actually causing the trouble kept running.

@@ -83,10 +83,12 @@ func (d *Daemon) handleAppLogs(conn net.Conn, msg *protocol.AppLogsMessage) {
 // writes it on its first start, and "no lines yet" is exactly what a caller
 // asking before then should hear.
 //
-// It reads the whole file rather than seeking from the end. The file is one
-// daemon's runtime output — bounded by uptime, not by history — and a backwards
-// scan that has to respect line boundaries and a tag filter is a lot of
-// machinery to save milliseconds on a diagnostic command.
+// It reads the whole file rather than seeking from the end. The file is opened
+// O_APPEND and never truncated, so it does carry every restart — but nothing in
+// an app writes to it unless the app's own code prints, and a backwards scan
+// that has to respect line boundaries and a tag filter is a lot of machinery for
+// a diagnostic command. If a chatty app ever makes this cost real, the fix is
+// rotation on the writing side, not a cleverer reader.
 func readAppLog(path, app string, whole bool, limit int) ([]string, bool, error) {
 	file, err := os.Open(path)
 	if err != nil {

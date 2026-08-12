@@ -356,7 +356,12 @@ type Daemon struct {
 	appRuntimeSupervise supervise.Options
 	// appRuntimeWait overrides appRuntimeConnectWait, for the same reason.
 	appRuntimeWait time.Duration
-	appRuntimeConn *appRuntimeConnection
+	// appPingWait and appDispatchWait override appRuntimePingWait and
+	// appDispatchTimeout, for the same reason appRuntimeWait exists: a test about a
+	// wedged event loop must not cost a real minute of waiting.
+	appPingWait     time.Duration
+	appDispatchWait time.Duration
+	appRuntimeConn  *appRuntimeConnection
 	// appRuntimeReady closes when a sidecar connects, and is replaced with a
 	// fresh open channel when one goes away. It is how a delivery waits for a
 	// cold start on a real signal instead of a poll.
@@ -370,6 +375,20 @@ type Daemon struct {
 	// failing on an event. See appStall.
 	appStallMu sync.Mutex
 	appStalls  map[string]*appStall
+	// appEntered is every handler the sidecar named by appEnteredGen has started
+	// and not answered for, by dispatch id, in the order the host entered them.
+	// A frozen event loop is frozen by the last of them, which is a different app
+	// from the earliest dispatch whenever a well-behaved handler yielded first.
+	// See attributeWedgedDispatch.
+	appEnteredMu  sync.Mutex
+	appEntered    map[string]enteredHandler
+	appEnteredGen uint64
+	appEnteredSeq uint64
+	// appCrashes is the other auto-disable clock: when each app was last named as
+	// the cause of a sidecar crash, trimmed to appCrashWindow. In memory for the
+	// same reason appStalls is — it measures what is breaking now.
+	appCrashMu sync.Mutex
+	appCrashes map[string][]time.Time
 	// busPinEpisodes is the retention-pin alarm's position, one entry per consumer
 	// that is currently holding the event log open. See busPinEpisode.
 	busPinMu       sync.Mutex

@@ -540,6 +540,9 @@ type AppStatusResult struct {
 	// Recent corresponds to the JSON schema field "recent".
 	Recent []AppInvocationInfo `json:"recent,omitempty,omitzero"`
 
+	// RecentVersions corresponds to the JSON schema field "recent_versions".
+	RecentVersions []AppVersionInfo `json:"recent_versions,omitempty,omitzero"`
+
 	// Runtime corresponds to the JSON schema field "runtime".
 	Runtime *AppRuntimeInfo `json:"runtime,omitempty,omitzero"`
 

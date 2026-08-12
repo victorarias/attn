@@ -54,6 +54,25 @@ type fakeAppRuntime struct {
 	dispatches []appDispatchRequest
 	pending    map[string]chan jsonRPCMessage
 	nextID     int
+	// loopFrozen models a blocked event loop. A real host does everything off one
+	// loop, so a handler that never yields stops all of it at once: pings go
+	// unanswered, and a dispatch that arrives after the freeze is never read, never
+	// announced, and never run.
+	loopFrozen bool
+}
+
+// freezeLoop stops this sidecar the way a synchronous handler that never yields
+// stops the real one.
+func (f *fakeAppRuntime) freezeLoop() {
+	f.mu.Lock()
+	f.loopFrozen = true
+	f.mu.Unlock()
+}
+
+func (f *fakeAppRuntime) frozen() bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.loopFrozen
 }
 
 // startFakeAppRuntime connects a sidecar to d and waits until the daemon has
@@ -138,8 +157,19 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			}
 			continue
 		}
+		if msg.Method == "app.runtime.ping" {
+			if !f.frozen() {
+				f.sendRaw(jsonRPCResult(msg.ID, appRuntimePingResult{OK: true}))
+			}
+			continue
+		}
+		if f.frozen() {
+			// Nothing reaches app code past this point, so nothing is announced
+			// either: a frozen loop cannot read its own socket.
+			continue
+		}
 		if msg.Method != "app.dispatch" {
-			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch"))
+			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch and app.runtime.ping"))
 			continue
 		}
 		var req appDispatchRequest
@@ -150,6 +180,14 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 		f.mu.Lock()
 		f.dispatches = append(f.dispatches, req)
 		f.mu.Unlock()
+		// Announced here rather than inside the goroutine so the order the daemon
+		// sees is the order dispatches arrived, which is what the real host's single
+		// loop guarantees.
+		f.sendRaw(jsonRPCMessage{
+			JSONRPC: "2.0",
+			Method:  appRuntimeEnteredMethod,
+			Params:  mustMarshalEnteredParams(f.t, appRuntimeEnteredParams{Dispatch: req.Dispatch, App: req.App}),
+		})
 		// On its own goroutine: a handler that calls back into the daemon would
 		// otherwise deadlock against this loop, which is the answer's only reader.
 		go func(id json.RawMessage, req appDispatchRequest) {
@@ -162,6 +200,15 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			f.sendRaw(jsonRPCResult(id, result))
 		}(msg.ID, req)
 	}
+}
+
+func mustMarshalEnteredParams(t *testing.T, params appRuntimeEnteredParams) json.RawMessage {
+	t.Helper()
+	data, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal %s params: %v", appRuntimeEnteredMethod, err)
+	}
+	return data
 }
 
 func (f *fakeAppRuntime) sendRaw(msg jsonRPCMessage) {

@@ -187,10 +187,29 @@ process-per-app (apps are numerous and mostly idle; a process each is memory
 the platform pays all day; the sidecar is one ~tens-of-MB Bun process).
 Isolation between apps is handler-level failure attribution, not OS
 boundaries: an app that throws feeds its own auto-disable counter and cannot
-corrupt the daemon. A sidecar-wide crash is a *runtime* failure class handled
-by supervision, never attributed to an app — a whole-process death cannot
-name a culprit, and blaming whichever app was running would disable
-innocents.
+corrupt the daemon.
+
+> **Overturned 2026-08-12.** This plan ruled that a sidecar-wide crash is a
+> *runtime* failure class handled by supervision and never attributed to an
+> app, because "a whole-process death cannot name a culprit, and blaming
+> whichever app was running would disable innocents."
+>
+> The second half stands and is why the first half was wrong. Taking the
+> runtime down is the worst thing an app can do — it stops every other app —
+> and the rule made that one act the only one structurally exempt from
+> auto-disable. The premise turned out to be false: the host *can* name a
+> culprit without guessing who was running, by matching the loaded bundles'
+> content-addressed paths against the stack of the error that killed it.
+> A floating promise rejects long after its dispatch returned, so the stack is
+> not only available, it is the only honest witness — measured in Bun,
+> `AsyncLocalStorage.getStore()` is undefined in a crash handler and
+> `async_hooks.createHook` fires no callbacks at all.
+>
+> The host now reports the named app before it exits and the daemon charges it
+> (`appCrashStrikes`); a crash whose stack names nobody is still charged to
+> nobody, which is the original rule's real content. See
+> `installCrashReporter` in `apphost/src/index.ts` and
+> `docs/plans/2026-08-12-a4-review-fixes.md`.
 
 The supervisor extracts from `internal/daemon/plugin_supervisor.go` into
 `internal/supervise`, scoped to what its two consumers need today:
@@ -512,8 +531,9 @@ recovery drain, bare-rollback trap):
   `attn` binary so hub-managed remotes can run apps. *Shipped:* the host is
   built for the remote's platform from the checkout (or downloaded from the
   release, which now publishes `attn-app-runtime-linux-{amd64,arm64}`),
-  transferred only when its content hash differs — it is ~90MB and endpoints
-  sync on a timer — and named per profile on the remote, because
+  transferred only when its content hash differs — it is ~90MB and a bootstrap
+  runs every time an endpoint reconnects — and named per profile on the remote,
+  because
   profile-isolated daemons share one `~/.local/bin` and one shared file name
   would have the newest sync replace another profile's runtime.
 - **Bare rollback: previously-serving.** `attn app rollback <name>` without

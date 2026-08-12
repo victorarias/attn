@@ -7,6 +7,7 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/victorarias/attn/internal/appbuild"
 	"github.com/victorarias/attn/internal/apps"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
@@ -110,10 +111,10 @@ commands:
         how far behind the event log its consumer is.
 
   status <name> [--json]
-        one app in full — its current version, its bus consumer, how many
-        versions and invocations it has recorded, and its most recent runs.
-        Reports only what exists: an app with no consumer says so rather than
-        showing a default.
+        one app in full — its current version, its bus consumer, the ids of its
+        recent versions (what rollback takes), and its most recent runs. Reports
+        only what exists: an app with no consumer says so rather than showing a
+        default.
 
   enable <name>
         resume delivery to the app, from wherever its consumer's cursor stands.
@@ -288,6 +289,15 @@ func runAppStatus(args []string) {
 		fmt.Printf("              disables itself at %s unless it succeeds first\n", result.Stall.DisablesAt)
 	}
 	fmt.Printf("  history:    %d version(s), %d invocation(s)\n", result.Versions, result.Invocations)
+	if len(result.RecentVersions) > 0 {
+		// The ids, because `attn app rollback` takes one and its refusals name
+		// them. A count alone leaves the reader with no way to find a target.
+		fmt.Printf("  versions:   %s\n", versionIDList(result.RecentVersions, app.CurrentVersion))
+		if result.Versions > len(result.RecentVersions) {
+			fmt.Printf("              newest %d of %d; older ones are named by a rollback refusal\n",
+				len(result.RecentVersions), result.Versions)
+		}
+	}
 	if len(result.Recent) == 0 {
 		fmt.Println("  recent:     no invocations recorded")
 		return
@@ -331,14 +341,30 @@ func indentBlock(prefix, text string) string {
 	return b.String()
 }
 
-// appRuntimeNeverStarted is what a daemon that has never started a runtime says.
+// versionIDList is the line `attn app rollback` sends people looking for: the
+// ids, marked so the one serving is obvious.
+func versionIDList(versions []protocol.AppVersionInfo, current *protocol.AppVersionInfo) string {
+	parts := make([]string, 0, len(versions))
+	for _, v := range versions {
+		label := fmt.Sprintf("%d (%s)", v.ID, appbuild.ShortHash(v.ContentHash))
+		if current != nil && current.ID == v.ID {
+			label += " ← serving"
+		}
+		parts = append(parts, label)
+	}
+	return strings.Join(parts, ", ")
+}
+
+// appRuntimeNeverStarted is what a daemon with no supervised runtime says.
 //
-// "no *enabled* app", because a disabled app is never due a fact: a daemon whose
-// every app is switched off will never start a runtime, and the sentence has to
-// read as the settled state it is rather than as something that has not happened
-// yet. `attn app runtime status` carries the enabled count in the same answer, so
-// a reader who wants the number has it.
-const appRuntimeNeverStarted = "not started — no enabled app has been due a fact since this daemon came up"
+// It does not name a cause, because from here the two are indistinguishable: a
+// daemon whose apps are all quiet never starts a runtime, and a daemon whose
+// host binary is missing never gets far enough to supervise one — the resolve
+// fails before the supervisor is touched, so both arrive here with nothing to
+// report. Claiming the first would be a lie exactly when an app is failing every
+// dispatch. `attn app runtime status` resolves the binary itself and is where
+// the difference lives.
+const appRuntimeNeverStarted = "not started — nothing has run one on this daemon yet; `attn app runtime status` says whether it can be started"
 
 // appRuntimeCell says where this app's handlers actually run. It is one line
 // because `attn app runtime status` is the full picture; what belongs here is

@@ -120,6 +120,17 @@ export class RpcConnection {
     })
   }
 
+  /**
+   * Tells the daemon something without asking for an answer.
+   *
+   * A closed socket is not an error here: the daemon is what would have listened,
+   * and a notification exists precisely because nothing depends on it arriving.
+   */
+  notify(method: string, params: unknown): void {
+    if (this.closed) return
+    this.socket.write(`${JSON.stringify({ jsonrpc: "2.0", method, params })}\n`)
+  }
+
   respond(id: unknown, result: unknown): void {
     this.write({ jsonrpc: "2.0", id, result })
   }

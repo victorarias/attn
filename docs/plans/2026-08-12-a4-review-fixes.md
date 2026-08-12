@@ -8,9 +8,9 @@ The review report itself — every confirmed finding with its evidence, and the
 refutations, which are the more useful half — is the `a4-arc-review.md` artifact
 on ticket `journey-review`. This doc is only the disposition.
 
-Findings land on `epic/a4-review-fixes` in three PRs, because two of them change
-when an app gets auto-disabled and that is existing behavior worth reviewing as
-one diff.
+Everything lands in one PR to `main`. Two of these change when an app gets
+auto-disabled, which is existing behavior, and splitting them across an epic
+would have meant reviewing the same diff twice.
 
 ## 1 — the hub starved the step that revives a remote (high)
 
@@ -84,7 +84,7 @@ and can never reproduce the failure. The ordering and budget-independence
 properties are therefore unit-tested against the phase seam, and the live run
 covers the real transfer, the cleanup, and the short-copy refusal.
 
-## 2 — the shared runtime blames the wrong app (medium, PR 2)
+## 2 — the shared runtime blames the wrong app (medium)
 
 A non-yielding synchronous handler in one app blocks the Bun event loop for
 every app. The 60s dispatch timeout then fires for apps whose handler was never
@@ -93,9 +93,52 @@ auto-disables innocent apps with a notification telling the user to fix a
 handler that never ran.
 
 `app.runtime.ping` was built for exactly this — "a liveness answer the daemon
-can ask for without running app code" — and has zero callers in Go.
+can ask for without running app code" — and had zero callers in Go.
 
-## 3 — one app's unhandled rejection kills the sidecar for everyone (medium, PR 2)
+**Fix.** A dispatch that hits its timeout now asks before it charges anyone:
+
+- the ping answers → the loop is turning, nothing is in this app's way, and its
+  own handler is what did not return. Charged as before.
+- the ping is silent → the loop is frozen. The handler holding it is charged;
+  everyone else is recorded as a runtime failure with its clock cleared, and
+  their error names the culprit so the reader goes and looks at the right code.
+
+`appRuntimePingWait = 2s` is a tripwire past a localhost round trip measured at
+344µs and 416µs on a live daemon — ~5,000× — and is only ever spent on a dispatch
+that has already burned its whole timeout, so generosity costs nothing that was
+not already lost.
+
+### Which handler is holding the loop is the host's to say
+
+The first build of this answered "the app that entered first", read off the
+daemon's own dispatch order. Live verification falsified it. Three apps were
+dispatched into a runtime frozen by `hog`, a 120s synchronous spin; the daemon
+charged `bystander`, whose handler is `await ctx.collections.seen.put(...)` — the
+documented shape — and let `hog` off with a runtime failure.
+
+Dispatch order is not the order handlers hold the loop. A handler that awaits an
+attn API yields immediately, so it is still unanswered when a spinner dispatched
+after it freezes everything, including that first handler's own reply. Blaming
+the earliest dispatch therefore charges the best-behaved app in the common case,
+which is a worse failure than charging everyone.
+
+The daemon cannot work this out; only the host knows which handler it called. So
+the host announces each entry on the socket immediately before invoking the
+handler (`app_runtime.entered`, a notification — nothing to answer), and the
+culprit is the most recent entry with no answer yet. An entry is dropped when its
+dispatch is answered, when a ping answers (the loop is turning, so nothing is on
+it), or when the process dies.
+
+The receipt this depends on: a Bun socket write issued immediately before a
+synchronous spin reaches the peer at once rather than queueing behind it —
+measured with a 5s spin, the frame arrived ~1ms after the write and ~5s before
+the spin ended. Without that, the announcement would arrive too late to be the
+witness, and the design would not work at all.
+
+`appRuntimeAPIVersion` goes to 2: the daemon↔host wire gained a frame, and the
+two are version-checked at hello because they ship together.
+
+## 3 — one app's unhandled rejection kills the sidecar for everyone (medium)
 
 No `unhandledRejection`/`uncaughtException` handler exists under `apphost/src`,
 and `dispatch.ts` wraps only the awaited frame. A floating rejection answers
@@ -104,20 +147,59 @@ crash is deliberately never attributed to an app — the ruling in the A4 plan
 doc — nothing is ever charged, so the one app the auto-disable rule exists to
 stop is structurally exempt from it.
 
-The daemon-side non-attribution stays; the fix belongs in the host, which knows
-which app's frame was in flight.
+**Fix, and a ruling overturned.** The plan's premise — "a whole-process death
+cannot name a culprit" — is false, and its conclusion made the worst thing an
+app can do the one thing it could never be disabled for. The reversal is
+recorded in the A4 plan doc beside the original ruling.
 
-## 4 — papercuts (PR 3)
+The host installs `unhandledRejection` and `uncaughtException` handlers, names
+the app by matching the loaded bundles' content-addressed paths against the
+error's stack, reports it to the daemon and then exits. The daemon counts
+strikes: `appCrashStrikes = 3` inside `appCrashWindow` (= `appAutoDisableStall`,
+so the auto-disable rule keeps one duration rather than two) disables the app
+through the same three effects as a stall.
 
-- `attn app status` prints "runtime: not started — no enabled app has been due a
-  fact since this daemon came up" on a daemon where the binary is missing and
-  every dispatch is failing. False on both halves.
-- `attn app rollback <name> <bad>` points at `attn app status <name>` to list
-  version ids. It never lists them, and there is no `attn app versions`. The
-  daemon's own refusals already carry the list.
-- Four comments that describe something the code does not do (the runtime log's
+Why the stack and not who was running: a floating promise rejects long after its
+dispatch returned, so "which app is running" routinely names an innocent —
+reproduced with app A's stray rejection surfacing while app B was mid-handler.
+Bun offers nothing else. Measured: `AsyncLocalStorage.getStore()` is `undefined`
+inside both handlers, and `async_hooks.createHook` fires no callbacks at all
+(`init types seen: {}`). The stack does carry the bundle path. A crash whose
+stack names no app is charged to nobody, which is the original ruling's real
+content and survives.
+
+Why three: supervise parks the whole sidecar after `DefaultGiveUpAfter` (10)
+restarts with no stability window — roughly two to three minutes of
+crash-looping — and every app losing its runtime is the harm being prevented, so
+the culprit has to go first. Above one, because a single crash can be a machine
+event whose stack merely passes through an app's bundle.
+`TestCrashStrikesFireBeforeTheSupervisorParksTheRuntime` fails if that ordering
+is ever broken.
+
+The strikes are in memory, for the same reason the stall clock is: they measure
+what is breaking now, and a daemon restart genuinely does grant a fresh window
+against a runtime that has also just restarted. Enabling the app clears them —
+the way back has to actually be a way back.
+
+## 4 — papercuts
+
+- `attn app status` printed "runtime: not started — no enabled app has been due
+  a fact since this daemon came up" on a daemon where the binary is missing and
+  every dispatch is failing. False on both halves. It now names no cause,
+  because from the CLI the two are genuinely indistinguishable — `resolveAppRuntimeHost`
+  fails before the supervisor is touched, so a missing binary and a quiet daemon
+  both arrive with no snapshot — and points at `attn app runtime status`, which
+  resolves the binary itself.
+- `attn app rollback <name> <bad>` pointed at `attn app status <name>` to list
+  version ids, which only ever printed a count. Fixed at the root rather than in
+  the copy: `AppStatusResult` gained `recent_versions` (protocol 233) and status
+  prints the ids with the serving one marked. Capped at ten with the total count
+  beside it — an app under `attn app dev` accumulates versions, and an
+  unbounded list on a status call is the next landmine.
+- Four comments that described something the code does not do (the runtime log's
   bound, what registers a consumer, when `declareAppCollections` runs, whose job
-  collection declaration is).
+  collection declaration is), plus the A4 plan's "endpoints sync on a timer" —
+  no ticker drives a bootstrap; a reconnect does.
 
 ## Deferred, with the reason
 

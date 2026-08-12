@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"strings"
 	"testing"
@@ -363,6 +364,47 @@ func TestAppStatusReportsHistoryAndRecentInvocations(t *testing.T) {
 	}
 	if result.App.Consumer == nil || result.App.Consumer.Enabled {
 		t.Fatalf("consumer = %+v, want a disabled one", result.App.Consumer)
+	}
+}
+
+// Rollback takes a version id and names ids in every refusal, so status is
+// where they have to be readable. A count alone sent the reader looking for a
+// list that did not exist on any surface.
+func TestAppStatusListsTheVersionIdsRollbackTakes(t *testing.T) {
+	d := newDaemonForTest(t)
+	seedApp(t, d, "approval-gate", false)
+
+	now := time.Now().UTC()
+	var ids []int64
+	for i := 0; i < recentVersionLimit+3; i++ {
+		version, _, err := d.store.CommitAppVersion(store.AppVersion{
+			AppName:      "approval-gate",
+			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
+			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
+		}, now)
+		if err != nil {
+			t.Fatalf("commit version %d: %v", i, err)
+		}
+		ids = append(ids, version.ID)
+	}
+
+	result := appStatus(t, d, "approval-gate").AppStatusResult
+	if len(result.RecentVersions) != recentVersionLimit {
+		t.Fatalf("recent_versions = %d, want the %d cap", len(result.RecentVersions), recentVersionLimit)
+	}
+	// Newest first, so the ids a reader is most likely to want are the ones they
+	// get when the list is truncated.
+	if result.RecentVersions[0].ID != int(ids[len(ids)-1]) {
+		t.Fatalf("recent_versions[0].ID = %d, want the newest %d", result.RecentVersions[0].ID, ids[len(ids)-1])
+	}
+	// The count still tells the truth about how many exist, which is what keeps
+	// the capped list honest.
+	if result.Versions != len(ids)+1 {
+		t.Fatalf("versions = %d, want %d", result.Versions, len(ids)+1)
+	}
+	if result.RecentVersions[0].ContentHash == "" || result.RecentVersions[0].CreatedAt == "" {
+		t.Fatalf("recent_versions[0] = %+v, want a hash and a stamp to tell builds apart", result.RecentVersions[0])
 	}
 }
 

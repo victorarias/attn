@@ -252,9 +252,10 @@ func validateEventPattern(pattern string) error {
 // would refuse at write time is refused here instead — at apply, with the
 // manifest in hand.
 //
-// Apply does not create the collections. Declaring them is the runtime's job
-// (slice 5), and creating storage for a version that may never be dispatched
-// would be a state change apply is not allowed to make.
+// This function does not create the collections. The daemon does, in
+// declareAppCollections, once the version is committed and the app is pointed at
+// it — creating storage for a build that may still fail typecheck would be a
+// state change validation is not allowed to make.
 func (m Manifest) checkCollections() error {
 	seen := map[string]bool{}
 	for _, c := range m.Collections {

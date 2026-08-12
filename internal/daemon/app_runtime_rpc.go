@@ -55,6 +55,24 @@ func (c *appRuntimeConnection) dispatch(ctx context.Context, req appDispatchRequ
 	return result, nil
 }
 
+// appRuntimePingResult answers whether the sidecar's event loop is turning. The
+// host serves it without touching app code, so a silent ping means the loop
+// itself is blocked and no app's handler is being run.
+type appRuntimePingResult struct {
+	OK bool `json:"ok"`
+}
+
+func (c *appRuntimeConnection) ping(ctx context.Context) error {
+	var result appRuntimePingResult
+	if err := c.request(ctx, "app runtime", "app.runtime.ping", struct{}{}, &result); err != nil {
+		return err
+	}
+	if !result.OK {
+		return errors.New("the app runtime answered a ping without ok")
+	}
+	return nil
+}
+
 // parseAppRuntimeHello recognizes the sidecar's opening frame.
 //
 // It runs before the plugin hello sniff, because the plugin parser treats any
@@ -143,6 +161,12 @@ func (d *Daemon) handleAppRuntimeConnection(conn net.Conn, reader *bufio.Reader,
 			}
 			continue
 		}
+		if msg.Method == appRuntimeEnteredMethod {
+			// On the read loop on purpose: it is a map write, and its whole value is
+			// the order it arrives in.
+			d.appRuntimeEntered(runtime, msg)
+			continue
+		}
 		// Off the read loop: several apps dispatch concurrently over this one
 		// socket, and a collection read for one must not hold up another app's
 		// answers behind it.
@@ -170,6 +194,9 @@ func (d *Daemon) clearAppRuntimeConnection(runtime *appRuntimeConnection) {
 		d.appRuntimeConn = nil
 	}
 	d.appRuntimeMu.Unlock()
+	// Whatever the daemon gave up waiting for died with the process, so nothing
+	// of it is still holding an event loop that no longer exists.
+	d.forgetEnteredHandlers()
 	d.publishFact(FactAppRuntimeChanged, appRuntimeChildName, nil)
 }
 
@@ -186,6 +213,73 @@ func (d *Daemon) serveAppRuntimeMethod(runtime *appRuntimeConnection, msg jsonRP
 	_ = runtime.send(jsonRPCResult(msg.ID, result))
 }
 
+// appRuntimeCrashedMethod is the host's last frame before it exits: an error
+// escaped every handler and is about to take the process down, and this says
+// whose code it came from.
+//
+// It is a report, not a request for permission — the host exits either way, and
+// waits only briefly for the answer. Losing it costs the culprit a strike, which
+// is why the host sends it before exiting rather than letting the daemon guess
+// from a dead socket.
+const appRuntimeCrashedMethod = "app_runtime.crashed"
+
+type appRuntimeCrashParams struct {
+	// App is empty when the error carried no stack naming a loaded bundle. Nothing
+	// is charged then: guessing which app was running is how innocents get
+	// disabled.
+	App   string `json:"app"`
+	Kind  string `json:"kind"`
+	Error string `json:"error"`
+}
+
+func (d *Daemon) appRuntimeCrashed(msg jsonRPCMessage) (any, error) {
+	var params appRuntimeCrashParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		return nil, fmt.Errorf("decode %s params: %w", appRuntimeCrashedMethod, err)
+	}
+	if params.App == "" {
+		d.logf("app runtime: crashing on an unhandled %s that names no app: %s",
+			params.Kind, firstLine(params.Error))
+		return appRuntimeHelloResult{OK: true}, nil
+	}
+	d.noteAppRuntimeCrash(params.App, params.Kind, params.Error)
+	return appRuntimeHelloResult{OK: true}, nil
+}
+
+// appRuntimeEnteredMethod is the host saying it is about to call an app's
+// handler. It is a notification: there is nothing to answer, and the point is
+// that it reaches the daemon *before* the handler runs, so it is still on the
+// wire when a handler that never yields freezes the loop behind it.
+//
+// It is what makes a frozen loop attributable. The daemon's own dispatch order is
+// not the order handlers hold the loop — see attributeWedgedDispatch.
+const appRuntimeEnteredMethod = "app_runtime.entered"
+
+type appRuntimeEnteredParams struct {
+	Dispatch string `json:"dispatch"`
+	App      string `json:"app"`
+}
+
+// enteredHandler is one handler the host entered and has not answered for.
+// order is the daemon's receive order, which is the host's entry order: the
+// frames arrive on one socket and are recorded on its read loop.
+type enteredHandler struct {
+	app   string
+	order uint64
+}
+
+func (d *Daemon) appRuntimeEntered(runtime *appRuntimeConnection, msg jsonRPCMessage) {
+	var params appRuntimeEnteredParams
+	if err := json.Unmarshal(msg.Params, &params); err != nil {
+		d.logf("app runtime: decode %s params: %v", appRuntimeEnteredMethod, err)
+		return
+	}
+	if params.Dispatch == "" || params.App == "" {
+		return
+	}
+	d.noteEnteredHandler(runtime.generation, params.Dispatch, params.App)
+}
+
 // appCollectionParams is what every collection callback carries. There is
 // deliberately no namespace: the daemon reads it off the dispatch record, so an
 // app cannot name one — its own or anybody else's.
@@ -199,6 +293,10 @@ type appCollectionParams struct {
 }
 
 func (d *Daemon) appRuntimeMethod(msg jsonRPCMessage) (any, error) {
+	if msg.Method == appRuntimeCrashedMethod {
+		return d.appRuntimeCrashed(msg)
+	}
+
 	switch msg.Method {
 	case "app.collection.get", "app.collection.put", "app.collection.delete",
 		"app.collection.query", "app.collection.count":
