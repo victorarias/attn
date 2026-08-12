@@ -61,7 +61,6 @@ function normalizeWord(word: string): string {
 
 const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
 const TRAILING_PATH_NOISE_RE = /[),.;:!?]+$/;
-const LINE_COLUMN_SUFFIX_RE = /:\d{1,7}(?::\d{1,7})?$/;
 
 function decodeTarget(value: string): string {
   const trimmed = value.trim().replace(/^<|>$/g, '');
@@ -74,10 +73,12 @@ function decodeTarget(value: string): string {
 }
 
 // Renderer-independent identities for a path or URL. Codex commonly turns an
-// absolute Markdown destination into a shorter visible repository path; the
-// basename and final two components survive both forms. These are candidates,
-// not proof — uniqueness, monotonicity, row confidence, and the containment
-// gate still decide whether a match is usable.
+// absolute Markdown destination into a shorter visible repository path. At
+// least the final directory and filename must survive: a basename alone is too
+// weak to split alignment or satisfy containment when repositories commonly
+// repeat names such as index.ts. These are candidates, not proof — uniqueness,
+// monotonicity, row confidence, and the containment gate still decide whether a
+// match is usable.
 function targetAliases(value: string): string[] {
   let target = decodeTarget(value).replace(TRAILING_PATH_NOISE_RE, '');
   if (!target.includes('/') && !/^[a-z][a-z0-9+.-]*:/i.test(target)) return [];
@@ -87,11 +88,6 @@ function targetAliases(value: string): string[] {
   const aliases = new Set<string>([`target:${target}`]);
   const withoutQuery = target.replace(/[?#].*$/, '');
   const parts = withoutQuery.split('/').filter(Boolean);
-  const basename = parts[parts.length - 1];
-  if (basename) {
-    aliases.add(`path:${basename}`);
-    aliases.add(`path:${basename.replace(LINE_COLUMN_SUFFIX_RE, '')}`);
-  }
   if (parts.length >= 2) aliases.add(`path2:${parts.slice(-2).join('/')}`);
   return [...aliases];
 }
@@ -193,13 +189,6 @@ export function tokenizeRows(
     }
   }
   return out;
-}
-
-// Word-space form: markdown and grid text differ by exactly what is stripped.
-export function normalizedWords(text: string): string {
-  return tokenizeMarkdown(text)
-    .map((t) => t.norm)
-    .join(' ');
 }
 
 // --- pairing ---------------------------------------------------------------

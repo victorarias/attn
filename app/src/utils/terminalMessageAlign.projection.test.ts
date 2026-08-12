@@ -2,11 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   alignMessage,
   CONFIDENT_ROW,
-  normalizedWords,
   offsetsForSelection,
   quotesAnchor,
   rowConfidence,
   rowsForOffsets,
+  tokenizeMarkdown,
 } from './terminalMessageAlign';
 
 // Renders markdown the way an agent TUI does: a marker glyph on the first row,
@@ -75,6 +75,11 @@ function anchorOffsets(markdown: string, phrase: string) {
 
 function textAt(rows: readonly string[], rowBase: number, ranges: { row: number; startCol: number; endCol: number }[]) {
   return ranges.map((range) => rows[range.row - rowBase].slice(range.startCol, range.endCol)).join('\n');
+}
+
+// Word-space form: markdown and grid text differ by exactly what is stripped.
+function normalizedWords(text: string): string {
+  return tokenizeMarkdown(text).map((token) => token.norm).join(' ');
 }
 
 describe('rowsForOffsets', () => {
@@ -170,6 +175,34 @@ describe('rowsForOffsets', () => {
       LINKED_MESSAGE.slice(target.start, target.end),
       textAt(LINKED_ROWS, 0, ranges),
     )).toBe(true);
+  });
+
+  it('keeps links with the same basename distinct by their parent directory', () => {
+    const markdown = 'Compare [one](/repo/alpha/Shared.java:42) with '
+      + '[two](/repo/beta/Shared.java:42), then keep reading.';
+    const rows = [
+      '• Compare alpha/Shared.java:42 with beta/Shared.java:42, then keep reading.',
+    ];
+    const alignment = alignMessage(markdown, rows);
+
+    for (const target of ['/repo/alpha/Shared.java:42', '/repo/beta/Shared.java:42']) {
+      const offsets = anchorOffsets(markdown, target);
+      const ranges = rowsForOffsets(alignment, offsets.start, offsets.end);
+      expect(ranges).toHaveLength(1);
+      expect(textAt(rows, 0, ranges)).toContain(target.split('/').slice(-2).join('/'));
+    }
+  });
+
+  it('does not treat a basename match under the wrong directory as a path anchor', () => {
+    const markdown = 'Before [source](/repo/right/Shared.java:42), the middle and after stay mapped.';
+    const rows = ['• Before wrong/Shared.java:42, the middle and after stay mapped.'];
+    const alignment = alignMessage(markdown, rows);
+    const target = anchorOffsets(markdown, '/repo/right/Shared.java:42');
+    const after = anchorOffsets(markdown, 'middle and after stay mapped');
+
+    expect(rowsForOffsets(alignment, target.start, target.end)).toEqual([]);
+    expect(rowsForOffsets(alignment, after.start, after.end)).not.toEqual([]);
+    expect(quotesAnchor('/repo/right/Shared.java:42', 'wrong/Shared.java:42')).toBe(false);
   });
 
   it('prefers an exact visible link label when OSC 8 also exposes its target', () => {

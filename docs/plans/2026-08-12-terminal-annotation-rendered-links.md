@@ -57,8 +57,9 @@ type AlignmentToken = {
 ```
 
 Hyperlink metadata is optional. Plain text still aligns, and a shortened path
-falls back to conservative basename/suffix identities. URI matches are stronger
-when the TUI emitted OSC 8.
+falls back to a conservative suffix containing at least the final directory and
+filename. A basename alone is not enough evidence to split alignment or pass
+containment. URI matches are stronger when the TUI emitted OSC 8.
 
 ## Implementation
 
