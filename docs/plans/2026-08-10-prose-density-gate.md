@@ -426,19 +426,23 @@ write still goes through.
 
 ## What was built, and where it is not
 
-**None of this is in the repository.** It was written and measured in a session
-scratchpad, and the measurements above are the only thing worth keeping from it.
-Nothing below is a task list; it is a record of what the numbers were produced
-with. Unticked boxes would imply work still owed, and none is.
+**None of this is on `main`.** The measurements above are the only thing worth
+keeping from it. Nothing below is a task list; it is a record of what the
+numbers were produced with. Unticked boxes would imply work still owed, and
+none is.
 
-Two generations of prose code exist, and neither is on `main`:
+Two generations of prose code exist, both on unmerged branches:
 
 - **Generation 1**, a rule engine — density, hidden-verb, rhythm and structure
   rules, accept/reject vocabulary files, golden tests, corpus fixtures — lives
-  unmerged on the branch `feat/prose-check` as `internal/prose` plus
-  `cmd/attn/prose.go`. The corpus measurements killed its design; the branch
-  should be closed.
-- **Generation 2**, described below, was never committed at all. If any of it is
+  on `feat/prose-check` as `internal/prose` plus `cmd/attn/prose.go`. The
+  corpus measurements killed its design before it was reviewed.
+- **Generation 2**, described below, is preserved on
+  `research/prose-gate-generation-2`, together with every mining and experiment
+  script under `research/prose/`. That branch must never merge. It is kept
+  because the miners rebuild the corpus from `~/.claude/projects` on demand,
+  which is what makes the private data disposable, and because the replay
+  harness there outlives whatever gets built next. If any of the gate itself is
   ever worth reviving it is the nudge text and the structural counter, both
   reproduced in full in this document.
 
