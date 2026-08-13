@@ -1,0 +1,7 @@
+kind: internal
+area: docs
+change: >
+  The garden plan gets a readability pass: design decisions split into
+  one claim per bullet under topic headings, a lifecycle state diagram
+  and a plot sketch, and ruled questions moved out of the open list —
+  every ruling, date, and receipt preserved.
