@@ -114,8 +114,9 @@ so every new reason is a new sentinel; an outcome makes it a map.
 `firesAt` stored beside the timer because `time.Timer` has no deadline
 accessor, a ready-channel publish handshake so a zero-length window does
 not fire against a half-written value, an identity check on fire, and
-stop-and-replace. `auto_settle.go:180` and `snooze.go:163` both say in
-comments that they copied it from `nudge_countdown.go`.
+stop-and-replace. The copying is on the record in comments, in a chain:
+`auto_settle.go:180` cites `nudge_countdown.go`, and `snooze.go:162`
+cites `auto_settle.go`.
 
 The release timer would be copy four, beside a fifth per-session map for
 the deselect stamps.
@@ -154,10 +155,13 @@ instead of adding to it.
 
 The wire already carries this shape twice: `nudge_fires_at` with
 `ticket_unread` as its held companion, and `auto_settle_fires_at` with
-`auto_settle_held`. Rendering is at five sites — `Sidebar.tsx:1200`,
-`QueueBands.tsx:222`, `SessionTerminalWorkspace/index.tsx:995`, and both
-`NudgeIndicator` variants — and `App.tsx:3093` enumerates the fields in
-a `||` chain that a third has to join, as does `cancel_countdown.go`.
+`auto_settle_held`. Rendering has already been written twice:
+`NudgeIndicator.tsx` exports `HeaderNudgeIndicator` and
+`SidebarNudgeBar`, and `SettlingIndicator.tsx` exports
+`HeaderSettlingIndicator` and `SidebarSettlingBar` — the same pair of
+shapes, over the same `CountdownFill`, for the same two surfaces. A third
+countdown writes them a third time, and joins the `||` chain at
+`App.tsx:3097` and the by-name cancel list in `cancel_countdown.go:42`.
 
 `cancel_countdown.go`'s header already names the situation: *"unrelated
 mechanisms with unrelated re-arm rules, but from the user's side they are
