@@ -1,0 +1,6 @@
+kind: internal
+area: docs
+change: >
+  The garden plan's last slice-4 box is ticked: the crew /handoff skill
+  gained its leave-a-seed-handoff step in the maintainer's user config,
+  outside the repo, so the plan records it as landed with the date.
