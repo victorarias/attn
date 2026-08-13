@@ -51,6 +51,54 @@ func TestAgentMsgQueuesWhenTheTargetNeverTakesIt(t *testing.T) {
 	}
 }
 
+// A message typed into a composer and never taken is still sitting in it, so
+// the drain submits it rather than pasting a second copy. Repasting is how a
+// target stuck behind a dialog collects one copy per state change and then
+// reads the same message N times when it clears.
+func TestAgentMsgRedeliveryPressesEnterRatherThanRepasting(t *testing.T) {
+	withAgentMessageTakenWindow(t, 50*time.Millisecond)
+	d, doorbell := newAgentMsgDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	addCharacterizationSession(t, d, "target-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	resp := callAgentMsg(t, d, "target-session-id", "sender-session-id", "the epic is green")
+	if result := resp.AgentMsgResult; result == nil || result.Status != protocol.AgentMsgStatusQueued {
+		t.Fatalf("result = %+v, want queued", result)
+	}
+
+	drained := make(chan int, 1)
+	d.agentMessageDrainHook = func(_ string, delivered int) { drained <- delivered }
+	go func() {
+		// The drain's Enter is what lets this delivery confirm; without the state
+		// change it would report not-taken again.
+		<-time.After(20 * time.Millisecond)
+		d.applyState(sessionStateChange{
+			sessionID: "target-session-id",
+			state:     protocol.StateWorking,
+			cause:     liveSignal{},
+		})
+	}()
+	if !d.applyState(sessionStateChange{
+		sessionID: "target-session-id",
+		state:     protocol.StateIdle,
+		cause:     liveSignal{},
+	}) {
+		t.Fatal("applyState did not apply")
+	}
+
+	select {
+	case delivered := <-drained:
+		if delivered != 1 {
+			t.Fatalf("drain delivered %d, want 1", delivered)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the drain never ran")
+	}
+	if prompts := doorbell.pasted(); len(prompts) != 1 {
+		t.Fatalf("pasted %d times, want 1 — the redelivery retyped the message: %q", len(prompts), prompts)
+	}
+}
+
 // The confirmed path: the target starts working, so the message is delivered
 // and nothing stays queued behind it.
 func TestAgentMsgDeliversWhenTheTargetStartsWorking(t *testing.T) {

@@ -173,16 +173,39 @@ func (d *Daemon) deliverAgentMessage(record store.AgentMessage) error {
 	taken, disarm := d.armAgentMessageTaken(record.TargetSessionID)
 	defer disarm()
 
-	if err := d.typeDoorbell(record.TargetSessionID, d.composeAgentMessage(sender, record)); err != nil {
+	// A row typed into a composer once and never taken is still sitting in it.
+	// Submitting that is the whole redelivery: typing it again would stack a
+	// second copy, and a target stuck behind a dialog would collect one per
+	// state change until it cleared and read them all.
+	if d.agentMessageAwaitsSubmit(record.ID) && agentMessageTakenWindow > 0 {
+		if err := d.submitDoorbell(record.TargetSessionID); err != nil {
+			return err
+		}
+		if awaitSignal(taken, agentMessageTakenWindow) {
+			return d.stampAgentMessageDelivered(record.ID)
+		}
+		d.logf("agent msg still unsubmitted after enter; retyping: id=%s", record.ID)
+	}
+
+	composer, err := d.typeDoorbellRoute(record.TargetSessionID, d.composeAgentMessage(sender, record))
+	if err != nil {
 		return err
 	}
 	if confirmable && !d.awaitAgentMessageTaken(record.TargetSessionID, taken) {
+		if composer {
+			d.noteAgentMessageAwaitsSubmit(record.ID)
+		}
 		return errDoorbellNotTaken
 	}
-	if err := d.store.MarkAgentMessageDelivered(record.ID, time.Now()); err != nil {
+	return d.stampAgentMessageDelivered(record.ID)
+}
+
+func (d *Daemon) stampAgentMessageDelivered(id string) error {
+	d.forgetAgentMessageAwaitsSubmit(id)
+	if err := d.store.MarkAgentMessageDelivered(id, time.Now()); err != nil {
 		// The words already landed; failing to stamp would redeliver them, which
 		// is worse than losing the receipt.
-		d.logf("agent msg delivered but not stamped: id=%s err=%v", record.ID, err)
+		d.logf("agent msg delivered but not stamped: id=%s err=%v", id, err)
 	}
 	return nil
 }
@@ -199,7 +222,10 @@ func (d *Daemon) awaitAgentMessageTaken(sessionID string, taken <-chan struct{})
 		return true
 	}
 	d.logf("agent msg not taken within %s; pressing enter again: session=%s", agentMessageTakenWindow, sessionID)
-	if err := d.writePTY(sessionID, []byte("\r")); err != nil {
+	// Through submitDoorbell rather than a raw write: the wait is long enough for
+	// a dialog to have opened over the composer since the paste, and that is the
+	// one target Enter must not reach.
+	if err := d.submitDoorbell(sessionID); err != nil {
 		d.logf("agent msg re-submit failed: session=%s err=%v", sessionID, err)
 		return false
 	}
@@ -243,6 +269,31 @@ func (d *Daemon) armAgentMessageTaken(sessionID string) (<-chan struct{}, func()
 			delete(d.agentMessageTaken, sessionID)
 		}
 	}
+}
+
+// The rows whose paste reached a composer and was not taken. Memory only, and
+// deliberately: after a restart nothing can know what is still sitting in a
+// target's composer, and retyping is the safe assumption. Bounded by the
+// per-target queue cap, and every stamped delivery clears its own entry.
+func (d *Daemon) noteAgentMessageAwaitsSubmit(id string) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	if d.agentMessagesAwaitingSubmit == nil {
+		d.agentMessagesAwaitingSubmit = make(map[string]bool)
+	}
+	d.agentMessagesAwaitingSubmit[id] = true
+}
+
+func (d *Daemon) agentMessageAwaitsSubmit(id string) bool {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	return d.agentMessagesAwaitingSubmit[id]
+}
+
+func (d *Daemon) forgetAgentMessageAwaitsSubmit(id string) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	delete(d.agentMessagesAwaitingSubmit, id)
 }
 
 // noteAgentMessageTaken is the receipt side: a target that starts working has

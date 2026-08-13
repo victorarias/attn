@@ -162,29 +162,52 @@ func (d *Daemon) nudgeChiefOfStaff(prompt string) bool {
 // composed and never the user's half-typed line. Always a bounded,
 // user-initiated delivery — never arbitrary streamed content.
 func (d *Daemon) typeDoorbell(sessionID, prompt string) error {
+	_, err := d.typeDoorbellRoute(sessionID, prompt)
+	return err
+}
+
+// typeDoorbellRoute is typeDoorbell with the route it took. composer is true
+// only for the paste, the one route that can leave a prompt sitting unsubmitted
+// in a target; a host session and a plugin driver each take the whole message or
+// fail, with nothing left behind to press Enter on.
+func (d *Daemon) typeDoorbellRoute(sessionID, prompt string) (composer bool, err error) {
 	d.doorbellMu.Lock()
 	defer d.doorbellMu.Unlock()
 	session := d.store.Get(sessionID)
 	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
-		return errDoorbellBlockedByApproval
+		return false, errDoorbellBlockedByApproval
 	}
 	if d.isHostSession(sessionID) {
-		return d.deliverToHostSession(sessionID, hostsession.DeliverySteer, prompt)
+		return false, d.deliverToHostSession(sessionID, hostsession.DeliverySteer, prompt)
 	}
 	if delivered, err := d.deliverDoorbellViaPluginDriver(session, prompt); delivered {
-		return err
+		return false, err
 	}
 	input := make([]byte, 0, len(bracketedPasteStart)+len(prompt)+len(bracketedPasteEnd))
 	input = append(input, bracketedPasteStart...)
 	input = append(input, prompt...)
 	input = append(input, bracketedPasteEnd...)
-	return d.withPTYWriteFence(sessionID, func() error {
+	return true, d.withPTYWriteFence(sessionID, func() error {
 		if err := d.ptyBackend.Input(context.Background(), sessionID, input); err != nil {
 			return err
 		}
 		time.Sleep(doorbellSubmitDelay)
 		return d.ptyBackend.Input(context.Background(), sessionID, []byte("\r"))
 	})
+}
+
+// submitDoorbell presses Enter into a target that already has a doorbell's
+// paste sitting in its composer, which is not the same act as typing one: the
+// words are already there, and pasting them again would leave two copies. The
+// gate is the same, because a session that cannot take input must not be poked.
+func (d *Daemon) submitDoorbell(sessionID string) error {
+	d.doorbellMu.Lock()
+	defer d.doorbellMu.Unlock()
+	session := d.store.Get(sessionID)
+	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+		return errDoorbellBlockedByApproval
+	}
+	return d.writePTY(sessionID, []byte("\r"))
 }
 
 // maybeAssignChiefOnSpawn assigns the chief-of-staff role at a session's first
