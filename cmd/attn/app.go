@@ -92,12 +92,17 @@ commands:
 
   rollback <name> [version]
         point the app at a version it already has — the one you name, or with no
-        version, the one that was serving immediately before the current one.
-        That is a recorded pointer, not the next id down. If a broken version
-        was rolled off before the current one was applied, the next id down is
-        that broken version; what was serving is the one you kept running.
-        Rolling back again returns to where you started, because every move
-        records what it replaced.
+        version, one step back through the app's serving history: the version
+        that was serving immediately before the current one. That is recorded
+        history, not the next id down. If a broken version was rolled off before
+        the current one was applied, the next id down is that broken version;
+        what was serving is the one you kept running.
+
+        Bare rollback again goes one step further back, and again, walking the
+        history down until the oldest version on it; past that it refuses and
+        lists the versions. Applying a version — or naming one here — starts the
+        history again from where it lands, so the way back from a fix is
+        whatever you were running when you applied it.
 
         Builds nothing: the artifact is still on disk.
 

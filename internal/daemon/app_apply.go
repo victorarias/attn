@@ -158,7 +158,16 @@ func (d *Daemon) handleAppRollback(conn net.Conn, msg *protocol.AppRollbackMessa
 		d.sendError(conn, err.Error())
 		return
 	}
-	if err := d.store.SetAppCurrentVersion(name, target.ID, time.Now()); err != nil {
+	// The two rollbacks move the pointer differently on purpose. A named version
+	// starts serving history again from where it lands; a bare rollback walks the
+	// existing history down one step, which is what lets the next one walk
+	// further rather than come back here.
+	if msg.VersionID == nil {
+		err = d.store.StepAppVersionBack(name, target.ID, time.Now())
+	} else {
+		err = d.store.SetAppCurrentVersion(name, target.ID, time.Now())
+	}
+	if err != nil {
 		d.sendError(conn, fmt.Sprintf("app rollback %s: %v", name, err))
 		return
 	}
@@ -201,30 +210,31 @@ func pickRollbackTarget(name string, app store.App, versions []store.AppVersion,
 		}
 		return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is not a version of this app; %s", name, id, versionsSentence(versions, app.CurrentVersionID))
 	}
-	// No version named: whatever was serving immediately before the current one,
-	// which the registry records at every pointer move. The numerically previous
-	// id is a different question and answers it wrong exactly when rollback
-	// matters — an app that went good, broken, fixed has the broken one below its
-	// pointer, and that is the version an operator is running from.
+	// No version named: one step back along the app's serving history, which the
+	// registry extends at every pointer move. The numerically previous id is a
+	// different question and answers it wrong exactly when rollback matters — an
+	// app that went good, broken, fixed has the broken one below its pointer, and
+	// that is the version an operator is running from.
 	//
-	// Because the predecessor is rewritten on every move, rolling back twice
-	// returns to where the first rollback started. That flip-flop is the point:
-	// "back" always means the version that was serving a moment ago.
+	// Because walking moves along the chain rather than rewriting one pointer,
+	// each further bare rollback goes one step further back, and the step below
+	// the one the app stands on is always a version that really did serve before
+	// it.
 	if app.CurrentVersionID == 0 {
 		return store.AppVersion{}, fmt.Errorf("app rollback %s: it is not on any version, so there is no back to go to; name one of them. %s",
 			name, versionsSentence(versions, 0))
 	}
-	if app.PreviousVersionID == 0 {
-		return store.AppVersion{}, fmt.Errorf("app rollback %s: nothing is recorded as serving before version %d, so bare rollback has no target; name the version to roll onto. %s",
+	if app.PreviousServingVersionID == 0 {
+		return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is the oldest version in its serving history, so there is no further back to go; name the version to roll onto. %s",
 			name, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
 	}
 	for _, v := range versions {
-		if v.ID == app.PreviousVersionID {
+		if v.ID == app.PreviousServingVersionID {
 			return v, nil
 		}
 	}
 	return store.AppVersion{}, fmt.Errorf("app rollback %s: version %d is recorded as serving before version %d but is not among this app's versions; name the version to roll onto. %s",
-		name, app.PreviousVersionID, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
+		name, app.PreviousServingVersionID, app.CurrentVersionID, versionsSentence(versions, app.CurrentVersionID))
 }
 
 // versionsSentence lists what an app actually has, marking the current one. It

@@ -536,17 +536,30 @@ recovery drain, bare-rollback trap):
   because
   profile-isolated daemons share one `~/.local/bin` and one shared file name
   would have the newest sync replace another profile's runtime.
-- **Bare rollback: previously-serving.** `attn app rollback <name>` without
-  a version returns to the version that was serving before the current one
-  — the registry records the pointer at every flip — and says which version
-  it chose and why. No recorded previous fails loud with the version list.
-  *Shipped* (#858) with undo semantics: the pointer swaps on every move, so
-  a second bare rollback returns to where you started (`cd -`), stated in
-  `--help` and tested. **Open, deliberately until the platform work's end:**
-  Victor leans toward a stack instead — each bare rollback walking one step
-  further back through serving history. Undo was shipped first because its
-  meaning never depends on how many times it has run; revisit once real
-  rollback usage exists to judge against.
+- **Bare rollback: one step back through serving history.** `attn app
+  rollback <name>` without a version returns to the version that was serving
+  before the current one, and says which version it chose and why. Walking
+  past the oldest version fails loud with the version list.
+
+  First shipped (#858) with undo semantics — one recorded pointer, swapped
+  at every move, so a second bare rollback returned to where you started
+  (`cd -`). Victor **ruled for a stack on 2026-08-13**, judging it worth
+  deciding then rather than waiting for the platform work's end: each bare
+  rollback walks one step further back, which is what an operator hunting
+  for the last version that worked actually does. Undo could only ever
+  answer that question once.
+
+  Serving history is now data rather than one pointer: `app_serving_steps`
+  is an append-only chain where a step names the version that started
+  serving and the step it was pushed onto, and `apps.serving_step_id` is
+  where the app stands on it. Applying, or naming a version to roll onto,
+  pushes a step and so restarts the walk from there — which makes the way
+  back from a fix the version that was actually running when it was
+  applied, not the ones the walk had already gone past. A bare rollback
+  moves the cursor down one step and pushes nothing. Migration 105 carries
+  every recorded predecessor into a two-step chain, so a profile upgrading
+  mid-rollback lands exactly where the old rule would have put it and can
+  then keep walking.
 - **Restart must not forget a park.** The park persists and is restored at
   daemon startup before anything can lazy-start the broken host; `attn app
   runtime restart` stays the only unpark and clears the persisted state.
