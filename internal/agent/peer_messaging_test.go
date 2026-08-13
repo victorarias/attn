@@ -15,11 +15,14 @@ func TestClaudeBuildCommand_DeniesPeerMessagingTools(t *testing.T) {
 		Executable: "claude",
 	})
 	i := slices.Index(cmd.Args, "--disallowed-tools")
-	if i < 0 || i+1 >= len(cmd.Args) {
+	if i < 0 {
 		t.Fatalf("args = %#v, want --disallowed-tools", cmd.Args)
 	}
-	if got := cmd.Args[i+1]; got != "ListAgents SendMessage" {
-		t.Fatalf("--disallowed-tools = %q, want %q", got, "ListAgents SendMessage")
+	// One element per rule, the form the flag documents. A joined
+	// "ListAgents SendMessage" parses the same on 2.1.228, but a claude that
+	// tightened parsing would leave the deny inert with this test still green.
+	if got := cmd.Args[i+1:]; len(got) != 2 || got[0] != "ListAgents" || got[1] != "SendMessage" {
+		t.Fatalf("--disallowed-tools = %#v, want two elements ListAgents, SendMessage", got)
 	}
 }
 

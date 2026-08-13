@@ -110,8 +110,12 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	// only attn's is left standing. Denying removes the tools from the launched
 	// agent's tool list rather than failing the call (measured: 31 tools -> 29,
 	// both absent from the session's init event).
+	// One element per rule, the documented form: a single joined element parses
+	// the same today, but a claude that tightened parsing would leave the deny
+	// inert with every test still green.
 	if enabled, _ := boolEnv("ATTN_CLAUDE_PEER_MESSAGING"); !enabled {
-		args = append(args, "--disallowed-tools", strings.Join(claudePeerTools, " "))
+		args = append(args, "--disallowed-tools")
+		args = append(args, claudePeerTools...)
 	}
 
 	if model := strings.TrimSpace(opts.Model); model != "" {
