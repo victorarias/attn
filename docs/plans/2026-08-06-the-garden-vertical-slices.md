@@ -469,22 +469,38 @@ Ships:
 - [ ] Planting under a crown: `attn seed plant --part-of <crown>` (or a
       `plot` convenience that plants crown + children in one JSON payload
       for agents).
-- [ ] Dispatch-at-plot: a delegation carries its crown; inside it,
-      flag-free `ready` scopes to the plot; children are parallel by
-      default, only `blocks` edges sequence.
+- [ ] Dispatch-at-plot: a delegation can be dispatched at a crown and
+      carries it as scope inference, nothing more — inside that
+      session, flag-free `ready` answers with the plot's ready seeds
+      and priming starts from the crown. It is not a fence and not an
+      assignment: the delegate may tend or plant anything, an agent
+      may tend several seeds across plots at once, and who-holds-what
+      stays the per-seed tender. Children are parallel by default;
+      only `blocks` edges sequence.
 - [ ] Priming, delegate side: a delegate dispatched at a crown launches
       already knowing its plot (crown body summary, ready seeds, freshest
       handoffs) — it never has to ask what it was sent to do.
-- [ ] App: the panel groups a plot's seeds under its crown and shows
-      progress (done / growing / ready / blocked counts).
-- [ ] `attn seed show <crown>` includes plot progress; a stale-plot query
-      (`attn seed ls --stale`) exists as a *query*, not an automatic reaper
-      — a person (or later a crew member) decides what withers.
-- [ ] The scope ruling lands: the `workspace_id` stamp and the
-      `--workspace` flag retire from plant/ls/ready; flag-free
-      interactive `ready`/`ls` answer for the whole garden; the panel
-      defaults to whole garden with its toggle scoping by plot; launch
-      priming speaks of the garden, not "your workspace's ready count".
+- [ ] App: the garden is navigable as a first-class experience — the
+      whole garden, root to leaf: drill from a crown into its
+      children, climb back up, cross into the next plot. A crown row
+      shows its plot's progress (done / growing / ready / blocked
+      counts). What the app shows about who works on what is the
+      per-seed tender, never a delegation-to-crown assignment.
+- [ ] `attn seed show <crown>` includes plot progress; a stale query
+      (`attn seed ls --stale`) exists as a *query*, not an automatic
+      reaper — a person (or later a crew member) decides what withers.
+      Stale means a seed claiming attention it is not getting: open,
+      with no trail movement (notes, moves, edges) for a window. The
+      window is a flag with a default that needs a receipt at build
+      time, and the output names the rule and window it applied.
+- [ ] The scope ruling lands, destructively (ruled 2026-08-13): drop
+      the `workspace_id` field and erase any stored values — no
+      compatibility reads, no fallback, no migration shim, because no
+      production install ever held seed data. The `--workspace` flag
+      retires from plant/ls/ready; flag-free interactive `ready`/`ls`
+      answer for the whole garden; the panel defaults to whole garden
+      with its toggle scoping by plot; launch priming speaks of the
+      garden, not "your workspace's ready count".
 
 Acceptance:
 
