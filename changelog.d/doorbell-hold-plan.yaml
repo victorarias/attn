@@ -1,0 +1,19 @@
+kind: internal
+area: docs
+change: >
+  A plan for holding automated doorbells while the user is working in the
+  target session. An agent message types its payload and Enter straight into
+  the target's composer, so one arriving while the user is mid-prompt splices
+  the half-written line and submits it — and a draft keeps sitting in that
+  composer while the user glances at another window, so releasing the moment
+  they switch away is no safer. The rule: an automated doorbell waits while
+  its target is the session on screen, and for two more minutes after the
+  user leaves it; deliveries the user just clicked are exempt. The plan opens
+  with why this does not weave into the daemon as it stands — the delivery
+  gate is pre-checked at nine call sites beside the two inside the doorbell
+  itself, three per-session timers each carry their own copy of the same
+  ready-channel handshake, user presence is spread across three locks in
+  three files, and the third countdown on the wire would cost six edits — so
+  four refactors come first and the feature lands as a predicate and a
+  branch. Also records why auto-settle and snooze wake are left alone: neither
+  writes to the PTY, so neither can touch a draft.
