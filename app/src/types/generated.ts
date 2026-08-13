@@ -968,13 +968,15 @@ export enum AppStatusMessageCmd {
 }
 
 export interface AppStatusResult {
-    app:              App;
-    invocations:      number;
-    recent?:          InvocationElement[];
-    recent_versions?: CurrentVersion[];
-    runtime?:         Runtime;
-    stall?:           Stall;
-    versions:         number;
+    app:                    App;
+    invocations:            number;
+    recent?:                InvocationElement[];
+    recent_versions?:       CurrentVersion[];
+    runtime?:               Runtime;
+    serving_history?:       CurrentVersion[];
+    serving_history_steps?: number;
+    stall?:                 Stall;
+    versions:               number;
     [property: string]: any;
 }
 
@@ -5265,13 +5267,15 @@ export interface AppSetEnabledResultObject {
 }
 
 export interface AppStatusResultObject {
-    app:              App;
-    invocations:      number;
-    recent?:          InvocationElement[];
-    recent_versions?: CurrentVersion[];
-    runtime?:         Runtime;
-    stall?:           Stall;
-    versions:         number;
+    app:                    App;
+    invocations:            number;
+    recent?:                InvocationElement[];
+    recent_versions?:       CurrentVersion[];
+    runtime?:               Runtime;
+    serving_history?:       CurrentVersion[];
+    serving_history_steps?: number;
+    stall?:                 Stall;
+    versions:               number;
     [property: string]: any;
 }
 
@@ -12442,6 +12446,8 @@ const typeMap: any = {
         { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
         { json: "recent_versions", js: "recent_versions", typ: u(undefined, a(r("CurrentVersion"))) },
         { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "serving_history", js: "serving_history", typ: u(undefined, a(r("CurrentVersion"))) },
+        { json: "serving_history_steps", js: "serving_history_steps", typ: u(undefined, 0) },
         { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
         { json: "versions", js: "versions", typ: 0 },
     ], "any"),
@@ -15065,6 +15071,8 @@ const typeMap: any = {
         { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
         { json: "recent_versions", js: "recent_versions", typ: u(undefined, a(r("CurrentVersion"))) },
         { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "serving_history", js: "serving_history", typ: u(undefined, a(r("CurrentVersion"))) },
+        { json: "serving_history_steps", js: "serving_history_steps", typ: u(undefined, 0) },
         { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
         { json: "versions", js: "versions", typ: 0 },
     ], "any"),

@@ -286,6 +286,14 @@ is the same pointer move to an older row. Re-applying byte-identical content
 reuses the version that is already there, which is what keeps "which version
 actually ran" answerable in the invocation log after a long editing session.
 
+An app's **serving history** is the chain of versions it has served, and it is
+what `attn app rollback <name>` walks. Each bare rollback goes one step further
+back, until the oldest version on the chain, where it refuses rather than
+wrapping. Applying a version — or naming one to roll onto — starts the history
+again from there, so the way back from a fix is whatever was running when it was
+applied. The history is not the version list: a version the walk went past is
+still a version, still reachable by name.
+
 **Applying** is how a directory becomes a version: parse the manifest, generate
 the types the handlers are checked against, typecheck, bundle, hash, write the
 artifact, insert the row, move the pointer. Apply never evaluates the app's

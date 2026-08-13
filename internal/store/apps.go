@@ -6,61 +6,94 @@ import (
 	"time"
 )
 
-// The app registry's persistence (migration 102). An app is a manifest-declared,
-// bus-consuming automation running in the shared runtime; this file is the three
-// tables it lives in and nothing else — the lifecycle that stops a delivery loop
-// and the pipeline that builds an artifact are the daemon's.
+// The app registry's persistence (migrations 102 and 105). An app is a
+// manifest-declared, bus-consuming automation running in the shared runtime;
+// this file is the four tables it lives in and nothing else — the lifecycle that
+// stops a delivery loop and the pipeline that builds an artifact are the
+// daemon's.
 //
 // Two absences carry meaning and are load-bearing here:
 //
 //   - There is no enabled bit. An app's enabled state is its bus consumer's
 //     (`app:<name>`), because that one bit both stops delivery and releases the
 //     retention floor. Nothing in this file reads or writes it.
-//   - Removing an app removes its registry row and nothing else. Versions and
-//     invocations are history, and the documents under `app/<name>` are the
-//     user's data; deleting either is a separate, explicit act that does not
-//     exist yet, deliberately.
+//   - Removing an app removes its registry row and nothing else. Versions,
+//     invocations and serving steps are history, and the documents under
+//     `app/<name>` are the user's data; deleting either is a separate, explicit
+//     act that does not exist yet, deliberately.
 //
 // See docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.
 
 // App is one registered app. CurrentVersionID is 0 until a version has been
 // applied — a registry row can exist ahead of its first successful build.
 //
-// PreviousVersionID is what was serving immediately before CurrentVersionID, and
-// it is 0 until the pointer has moved at least once off a real version. It is
-// the fact bare `attn app rollback` follows, so it is maintained by every path
-// that moves the pointer and by nothing else.
+// PreviousServingVersionID is the version one step back along the app's serving
+// chain: what bare `attn app rollback` lands on. It is derived from
+// app_serving_steps at read time rather than stored, so it always agrees with
+// the chain, and it is 0 when the app sits at the bottom of its chain.
 type App struct {
-	Name              string
-	CurrentVersionID  int64
-	PreviousVersionID int64
-	CreatedAt         time.Time
-	UpdatedAt         time.Time
+	Name                     string
+	CurrentVersionID         int64
+	PreviousServingVersionID int64
+	CreatedAt                time.Time
+	UpdatedAt                time.Time
 }
 
-// movePointerSQL sets an app's current version and carries the version it
-// replaced into previous_version_id. Both pointer-moving statements share it, so
-// there is one place the predecessor can be recorded and no way to move the
-// pointer without recording it.
+// appColumnsSQL reads a registry row and derives the version one step back along
+// its serving chain — the current step's parent. Both readers share it so a bare
+// rollback's target is computed one way.
+const appColumnsSQL = `
+	SELECT a.name, a.current_version_id,
+	       (SELECT p.version_id FROM app_serving_steps c
+	          JOIN app_serving_steps p ON p.id = c.parent_id
+	         WHERE c.id = a.serving_step_id),
+	       a.created_at, a.updated_at
+	FROM apps a`
+
+// pushServingStep points an app at a version and records the step it took to get
+// there, inside the caller's transaction. Every path that moves the pointer
+// forward — an apply, a rollback onto a named version — goes through it, so
+// there is no way to move the pointer without extending the chain.
 //
-// The CASE keeps the predecessor unchanged when the move is a no-op — re-applying
-// byte-identical content lands on the version already current, and overwriting
-// the predecessor with itself would make a rollback that changed nothing lose the
-// version it could have gone back to. SQLite evaluates every assignment against
-// the pre-update row, so current_version_id on the right-hand side is the
-// outgoing one.
+// The new step's parent is the step the app was on, which is what makes the
+// chain walkable: bare rollback follows parents down, and applying while already
+// walked back parents the new step where the walk stopped, so the way back from
+// it is the version that was actually serving. Nothing above is deleted; a step
+// nothing points at is simply unreachable.
 //
-// Parameters, in order: the incoming version id (twice), the stamp, the name.
-const movePointerSQL = `
-	UPDATE apps SET
-		previous_version_id = CASE
-			WHEN current_version_id IS NOT NULL AND current_version_id <> ?
-			THEN current_version_id
-			ELSE previous_version_id
-		END,
-		current_version_id = ?,
-		updated_at = ?
-	WHERE name = ?`
+// Landing on the version already current is not a move — re-applying
+// byte-identical content does exactly that — so it pushes nothing and leaves the
+// chain, and the way back, alone.
+func pushServingStep(tx *sql.Tx, name string, versionID int64, stamp string) error {
+	var current, cursor sql.NullInt64
+	err := tx.QueryRow(`SELECT current_version_id, serving_step_id FROM apps WHERE name = ?`, name).
+		Scan(&current, &cursor)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("store: no app named %q", name)
+	}
+	if err != nil {
+		return err
+	}
+	if current.Valid && current.Int64 == versionID {
+		_, err = tx.Exec(`UPDATE apps SET updated_at = ? WHERE name = ?`, stamp, name)
+		return err
+	}
+	res, err := tx.Exec(`
+		INSERT INTO app_serving_steps (app_name, version_id, parent_id, created_at)
+		VALUES (?, ?, ?, ?)
+	`, name, versionID, cursor, stamp)
+	if err != nil {
+		return err
+	}
+	step, err := res.LastInsertId()
+	if err != nil {
+		return err
+	}
+	_, err = tx.Exec(`
+		UPDATE apps SET current_version_id = ?, serving_step_id = ?, updated_at = ? WHERE name = ?
+	`, versionID, step, stamp, name)
+	return err
+}
 
 // AppVersion is an immutable record of one built artifact. ContentHash is the
 // version's identity: applying byte-identical content again reuses this row
@@ -101,8 +134,9 @@ type AppInvocation struct {
 }
 
 // SaveApp creates a registry row, or touches an existing one. It never moves
-// current_version_id: the pointer moves only through CommitAppVersion and
-// SetAppCurrentVersion, so no caller can flip an app onto a version by accident.
+// current_version_id: the pointer moves only through CommitAppVersion,
+// SetAppCurrentVersion and StepAppVersionBack, so no caller can flip an app onto
+// a version by accident.
 func (s *Store) SaveApp(name string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,9 +161,7 @@ func (s *Store) GetApp(name string) (App, bool, error) {
 	if s.db == nil {
 		return App{}, false, nil
 	}
-	app, err := scanApp(s.db.QueryRow(`
-		SELECT name, current_version_id, previous_version_id, created_at, updated_at FROM apps WHERE name = ?
-	`, name))
+	app, err := scanApp(s.db.QueryRow(appColumnsSQL+` WHERE a.name = ?`, name))
 	switch err {
 	case nil:
 		return app, true, nil
@@ -148,9 +180,7 @@ func (s *Store) ListApps() ([]App, error) {
 	if s.db == nil {
 		return nil, nil
 	}
-	rows, err := s.db.Query(`
-		SELECT name, current_version_id, previous_version_id, created_at, updated_at FROM apps ORDER BY name ASC
-	`)
+	rows, err := s.db.Query(appColumnsSQL + ` ORDER BY a.name ASC`)
 	if err != nil {
 		return nil, err
 	}
@@ -167,9 +197,10 @@ func (s *Store) ListApps() ([]App, error) {
 	return out, rows.Err()
 }
 
-// DeleteApp removes a registry row and reports whether one was there. Versions
-// and invocations are untouched: they are the record of what ran, and an
-// uninstall does not rewrite history.
+// DeleteApp removes a registry row and reports whether one was there. Versions,
+// invocations and serving steps are untouched: they are the record of what ran,
+// and an uninstall does not rewrite history. Registering the name again starts a
+// fresh chain — the cursor went with the row, so the old steps are unreachable.
 func (s *Store) DeleteApp(name string) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -250,7 +281,7 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 		return AppVersion{}, false, err
 	}
 
-	if _, err := tx.Exec(movePointerSQL, v.ID, v.ID, stamp, v.AppName); err != nil {
+	if err := pushServingStep(tx, v.AppName, v.ID, stamp); err != nil {
 		return AppVersion{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -259,9 +290,11 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 	return v, created, nil
 }
 
-// SetAppCurrentVersion moves an app onto a version it already has — the pointer
-// move a rollback is. It refuses a version belonging to another app rather than
-// leaving one app pointing into another's history.
+// SetAppCurrentVersion moves an app onto a version it already has, naming that
+// version — what `attn app rollback <name> <version>` does. It extends the
+// serving chain like an apply does, so the walk starts again from where it lands.
+// It refuses a version belonging to another app rather than leaving one app
+// pointing into another's history.
 func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -279,17 +312,108 @@ func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time
 	case owner != name:
 		return fmt.Errorf("store: app version %d belongs to app %q, not %q", versionID, owner, name)
 	}
-	stamp := now.UTC().Format(sortableTimeFormat)
-	res, err := s.db.Exec(movePointerSQL, versionID, versionID, stamp, name)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return err
 	}
-	if n, err := res.RowsAffected(); err != nil {
+	defer func() { _ = tx.Rollback() }()
+	if err := pushServingStep(tx, name, versionID, now.UTC().Format(sortableTimeFormat)); err != nil {
 		return err
-	} else if n == 0 {
-		return fmt.Errorf("store: no app named %q", name)
 	}
-	return nil
+	return tx.Commit()
+}
+
+// StepAppVersionBack walks one step down an app's serving chain — what bare
+// `attn app rollback <name>` does — and is the one writer that does not extend
+// it. Walking is a cursor move, so a second bare rollback steps back again
+// rather than returning to where the first started.
+//
+// target is the version the caller resolved from App.PreviousServingVersionID
+// and reported to the user; the move refuses unless the step below still carries
+// it, so a chain that moved between the two calls cannot land the app somewhere
+// nobody was told about.
+func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	var stepID, versionID int64
+	err := s.db.QueryRow(`
+		SELECT p.id, p.version_id FROM apps a
+			JOIN app_serving_steps c ON c.id = a.serving_step_id
+			JOIN app_serving_steps p ON p.id = c.parent_id
+		WHERE a.name = ?
+	`, name).Scan(&stepID, &versionID)
+	switch {
+	case err == sql.ErrNoRows:
+		return fmt.Errorf("store: app %q has nothing below it in its serving history", name)
+	case err != nil:
+		return err
+	case versionID != target:
+		return fmt.Errorf("store: app %q now has version %d one step back, not the %d this rollback resolved; nothing moved", name, versionID, target)
+	}
+	_, err = s.db.Exec(`
+		UPDATE apps SET current_version_id = ?, serving_step_id = ?, updated_at = ? WHERE name = ?
+	`, versionID, stepID, now.UTC().Format(sortableTimeFormat), name)
+	return err
+}
+
+// ListAppServingHistory returns the versions on an app's serving history,
+// currently-serving first and each next one a bare rollback away, up to limit
+// steps. It is how `attn app status` answers the question the walk otherwise
+// only answers by being run: is there another step, and where does it land.
+//
+// The versions below the first are not "the older versions" — a version the
+// walk went past is off the history but still in the version list, and still
+// reachable by name.
+//
+// The second return is how many steps the whole history has, so a caller that
+// shows a capped list can say it was cut. The walk itself is followed a step at
+// a time and never reads this, so the whole chain is scanned only when someone
+// asks to look at it.
+func (s *Store) ListAppServingHistory(name string, limit int) ([]int64, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, 0, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`
+		WITH RECURSIVE walk(id, version_id, parent_id) AS (
+			SELECT s.id, s.version_id, s.parent_id FROM app_serving_steps s
+				JOIN apps a ON a.serving_step_id = s.id
+			WHERE a.name = ?
+			UNION ALL
+			SELECT s.id, s.version_id, s.parent_id FROM app_serving_steps s
+				JOIN walk w ON s.id = w.parent_id
+		)
+		SELECT version_id FROM walk
+	`, name)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var (
+		out   []int64
+		steps int
+	)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, 0, err
+		}
+		steps++
+		if len(out) < limit {
+			out = append(out, id)
+		}
+	}
+	return out, steps, rows.Err()
 }
 
 // GetAppVersion loads one version row.
@@ -497,7 +621,7 @@ func scanApp(row rowScanner) (App, error) {
 		return App{}, err
 	}
 	app.CurrentVersionID = versionID.Int64
-	app.PreviousVersionID = previousID.Int64
+	app.PreviousServingVersionID = previousID.Int64
 	app.CreatedAt = parseStoreTime(createdAt)
 	app.UpdatedAt = parseStoreTime(updatedAt)
 	return app, nil

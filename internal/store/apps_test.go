@@ -147,10 +147,10 @@ func TestApps_RollbackMovesThePointerOnly(t *testing.T) {
 	}
 }
 
-// Every path that moves the pointer records the version it replaced, and a
-// no-op move leaves that record alone. This is what bare `attn app rollback`
-// reads, so the two writers have to agree.
-func TestApps_PointerMovesRecordWhatTheyReplaced(t *testing.T) {
+// Every path that moves the pointer extends the serving chain, and a no-op move
+// leaves it alone. This is what bare `attn app rollback` walks, so the writers
+// have to agree.
+func TestApps_PointerMovesExtendTheServingChain(t *testing.T) {
 	s := New()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	older, newer := seedApps(t, s, now)
@@ -161,15 +161,15 @@ func TestApps_PointerMovesRecordWhatTheyReplaced(t *testing.T) {
 		if err != nil || !ok {
 			t.Fatalf("%s: get app: %v ok=%t", step, err, ok)
 		}
-		return app.PreviousVersionID
+		return app.PreviousServingVersionID
 	}
 
-	// The first version had nothing before it; the second replaced it.
+	// The first version had nothing before it; the second was pushed onto it.
 	if got := previousOf("after two applies"); got != older.ID {
-		t.Fatalf("previous after the second apply = %d, want %d", got, older.ID)
+		t.Fatalf("one step back after the second apply = %d, want %d", got, older.ID)
 	}
 
-	// Re-applying the version already current moves nothing, so the predecessor
+	// Re-applying the version already current moves nothing, so the step below
 	// must survive — otherwise an idle dev loop erases the way back.
 	if _, _, err := s.CommitAppVersion(AppVersion{
 		AppName:      "approval-gate",
@@ -180,26 +180,176 @@ func TestApps_PointerMovesRecordWhatTheyReplaced(t *testing.T) {
 		t.Fatalf("re-apply: %v", err)
 	}
 	if got := previousOf("after a no-op re-apply"); got != older.ID {
-		t.Fatalf("a no-op re-apply rewrote the predecessor to %d, want %d", got, older.ID)
+		t.Fatalf("a no-op re-apply changed the step below to %d, want %d", got, older.ID)
 	}
 
-	// A rollback is a pointer move like any other and records the same way, which
-	// is what lets a second rollback undo the first.
+	// Naming a version is a pointer move like an apply: it lands on the older
+	// version with the newer one now behind it, so the history reads forward.
 	if err := s.SetAppCurrentVersion("approval-gate", older.ID, now.Add(2*time.Hour)); err != nil {
 		t.Fatalf("rollback: %v", err)
 	}
-	if got := previousOf("after a rollback"); got != newer.ID {
-		t.Fatalf("previous after the rollback = %d, want %d", got, newer.ID)
+	if got := previousOf("after a named rollback"); got != newer.ID {
+		t.Fatalf("one step back after the named rollback = %d, want %d", got, newer.ID)
 	}
 
-	// An app whose pointer has never moved off a real version has no predecessor,
-	// and reports 0 rather than guessing at one.
+	// An app whose pointer has never moved off its first version has nothing
+	// below it, and reports 0 rather than guessing at one.
 	other, _, err := s.GetApp("standup-digest")
 	if err != nil {
 		t.Fatalf("get the single-version app: %v", err)
 	}
-	if other.PreviousVersionID != 0 {
-		t.Fatalf("a first apply invented a predecessor: %d", other.PreviousVersionID)
+	if other.PreviousServingVersionID != 0 {
+		t.Fatalf("a first apply invented a step below: %d", other.PreviousServingVersionID)
+	}
+}
+
+// The stack: each bare rollback walks one step further back, applying starts the
+// history again from where it lands, and the bottom refuses rather than wrapping.
+func TestApps_BareRollbackWalksTheChainDown(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	v := func(n int, at time.Duration) AppVersion {
+		t.Helper()
+		version, _, err := s.CommitAppVersion(AppVersion{
+			AppName:      "approval-gate",
+			ContentHash:  "sha256:" + string(rune('a'+n)),
+			Declaration:  "{}",
+			ArtifactPath: "bundle.js",
+		}, now.Add(at))
+		if err != nil {
+			t.Fatalf("apply v%d: %v", n, err)
+		}
+		return version
+	}
+	standing := func(step string) (current, below int64) {
+		t.Helper()
+		app, ok, err := s.GetApp("approval-gate")
+		if err != nil || !ok {
+			t.Fatalf("%s: get app: %v ok=%t", step, err, ok)
+		}
+		return app.CurrentVersionID, app.PreviousServingVersionID
+	}
+	walk := func(step string, target int64) {
+		t.Helper()
+		if err := s.StepAppVersionBack("approval-gate", target, now.Add(time.Hour)); err != nil {
+			t.Fatalf("%s: %v", step, err)
+		}
+	}
+
+	v1, v2, v3 := v(1, 0), v(2, time.Minute), v(3, 2*time.Minute)
+
+	walk("first bare rollback", v2.ID)
+	if current, below := standing("after one step"); current != v2.ID || below != v1.ID {
+		t.Fatalf("after one step: on %d with %d below, want %d and %d", current, below, v2.ID, v1.ID)
+	}
+	walk("second bare rollback", v1.ID)
+	if current, below := standing("after two steps"); current != v1.ID || below != 0 {
+		t.Fatalf("after two steps: on %d with %d below, want %d and the bottom", current, below, v1.ID)
+	}
+	if err := s.StepAppVersionBack("approval-gate", v1.ID, now.Add(2*time.Hour)); err == nil {
+		t.Fatal("walking past the oldest version was accepted")
+	}
+	if current, _ := standing("after the refused step"); current != v1.ID {
+		t.Fatalf("a refused walk moved the pointer to %d", current)
+	}
+
+	// Applying while walked back starts the history from where the walk stopped:
+	// the way back from the fix is what was actually running when it was applied,
+	// not the versions the walk already rejected.
+	v4 := v(4, 3*time.Minute)
+	if current, below := standing("after applying on top of the walk"); current != v4.ID || below != v1.ID {
+		t.Fatalf("after applying v4: on %d with %d below, want %d and %d", current, below, v4.ID, v1.ID)
+	}
+	walk("rollback off the fix", v1.ID)
+	if current, below := standing("back off the fix"); current != v1.ID || below != 0 {
+		t.Fatalf("off the fix: on %d with %d below, want %d and the bottom", current, below, v1.ID)
+	}
+	// v3 is still a version, still reachable by name — only the walk moved past it.
+	versions, err := s.ListAppVersions("approval-gate")
+	if err != nil || len(versions) != 4 {
+		t.Fatalf("the walk changed the version list: %d (%v)", len(versions), err)
+	}
+	if err := s.SetAppCurrentVersion("approval-gate", v3.ID, now.Add(4*time.Minute)); err != nil {
+		t.Fatalf("naming the version the walk passed: %v", err)
+	}
+	if current, below := standing("after naming v3"); current != v3.ID || below != v1.ID {
+		t.Fatalf("after naming v3: on %d with %d below, want %d and %d", current, below, v3.ID, v1.ID)
+	}
+}
+
+// The history read is what `attn app status` shows: the version serving now
+// first, then each version one bare rollback further back, and a total so a
+// capped answer can say it was cut.
+func TestApps_ServingHistoryReadsTheWalkFromTheTop(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	older, newer := seedApps(t, s, now)
+
+	history, steps, err := s.ListAppServingHistory("approval-gate", 10)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(history) != 2 || history[0] != newer.ID || history[1] != older.ID {
+		t.Fatalf("history = %v, want [%d %d]", history, newer.ID, older.ID)
+	}
+	if steps != 2 {
+		t.Fatalf("steps = %d, want 2", steps)
+	}
+
+	// Walking does not shorten the history; it moves where the app stands on it,
+	// so what is left below is what the next rollback can still reach.
+	if err := s.StepAppVersionBack("approval-gate", older.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	history, steps, err = s.ListAppServingHistory("approval-gate", 10)
+	if err != nil {
+		t.Fatalf("read history after the walk: %v", err)
+	}
+	if len(history) != 1 || history[0] != older.ID || steps != 1 {
+		t.Fatalf("history after the walk = %v (%d steps), want just %d", history, steps, older.ID)
+	}
+
+	// The cap trims what is returned and never the total, so a longer walk is
+	// visible rather than silently ending.
+	if err := s.SetAppCurrentVersion("approval-gate", newer.ID, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("named rollback: %v", err)
+	}
+	history, steps, err = s.ListAppServingHistory("approval-gate", 1)
+	if err != nil {
+		t.Fatalf("read capped history: %v", err)
+	}
+	if len(history) != 1 || history[0] != newer.ID || steps != 2 {
+		t.Fatalf("capped history = %v (%d steps), want one entry of two", history, steps)
+	}
+
+	// An app that has never served has no history at all.
+	if err := s.SaveApp("half-installed", now); err != nil {
+		t.Fatalf("save app: %v", err)
+	}
+	if history, steps, err := s.ListAppServingHistory("half-installed", 10); err != nil || len(history) != 0 || steps != 0 {
+		t.Fatalf("unserved app history = %v (%d steps, %v)", history, steps, err)
+	}
+}
+
+// A walk refuses when the step below is not the version the caller resolved and
+// reported, rather than landing somewhere nobody was told about.
+func TestApps_WalkRefusesAStaleTarget(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	older, newer := seedApps(t, s, now)
+
+	if err := s.StepAppVersionBack("approval-gate", newer.ID, now.Add(time.Hour)); err == nil {
+		t.Fatal("a walk onto a version that is not the step below was accepted")
+	}
+	app, _, err := s.GetApp("approval-gate")
+	if err != nil {
+		t.Fatalf("get app: %v", err)
+	}
+	if app.CurrentVersionID != newer.ID {
+		t.Fatalf("a refused walk moved the pointer to %d", app.CurrentVersionID)
+	}
+	if err := s.StepAppVersionBack("approval-gate", older.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("walk onto the step below: %v", err)
 	}
 }
 
@@ -342,35 +492,43 @@ func TestApps_CommitVersionRefusesAnIncompleteRow(t *testing.T) {
 	}
 }
 
-// A database written before this column existed carries its app rows across the
-// migration with no predecessor rather than inventing one: what was serving
-// before is history the registry never recorded, and deriving it from ids is the
-// bug bare rollback exists to avoid.
-func TestApps_MigrationCarriesRowsWithNoPredecessor(t *testing.T) {
+// A profile that ran the shipped single-pointer rollback carries its recorded
+// predecessor into the chain: the first bare rollback after the upgrade lands
+// where it would have landed before, and the next one continues down instead of
+// bouncing back. An app that never recorded one is carried with nothing below
+// it rather than having a predecessor invented from version ids — the bug bare
+// rollback exists to avoid.
+func TestApps_MigrationCarriesTheRecordedPredecessorIntoTheChain(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "attn.db")
 	s, err := NewWithDB(path)
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
 	now := time.Now().UTC().Truncate(time.Millisecond)
-	seedApps(t, s, now)
+	older, newer := seedApps(t, s, now)
 	s.Close()
 
-	// Rewind to the schema as it stood before 103, with the app rows still there.
-	// The recorded version is the maximum, so every later migration goes too —
-	// dropping 103's row alone would leave the version ahead of it and skip the
-	// migration under test. The later ones re-run, which they tolerate.
+	// Rewind to the schema as it stood after 103 and before 105, with the app
+	// rows carrying exactly what the shipped writer would have left: the newer
+	// version serving, the older one recorded behind it, and the single-version
+	// app with no predecessor at all.
 	db, err := OpenDB(path)
 	if err != nil {
 		t.Fatalf("reopen: %v", err)
 	}
 	for _, stmt := range []string{
-		"ALTER TABLE apps DROP COLUMN previous_version_id",
-		"DELETE FROM schema_migrations WHERE version >= 103",
+		"ALTER TABLE apps ADD COLUMN previous_version_id INTEGER",
+		"ALTER TABLE apps DROP COLUMN serving_step_id",
+		"DROP TABLE app_serving_steps",
+		"DELETE FROM schema_migrations WHERE version >= 105",
 	} {
 		if _, err := db.Exec(stmt); err != nil {
 			t.Fatalf("rewinding with %q: %v", stmt, err)
 		}
+	}
+	if _, err := db.Exec(
+		"UPDATE apps SET previous_version_id = ? WHERE name = 'approval-gate'", older.ID); err != nil {
+		t.Fatalf("seeding the recorded predecessor: %v", err)
 	}
 	db.Close()
 
@@ -383,10 +541,33 @@ func TestApps_MigrationCarriesRowsWithNoPredecessor(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("get app after migration: %v ok=%t", err, ok)
 	}
-	if app.CurrentVersionID == 0 {
+	if app.CurrentVersionID != newer.ID {
+		t.Fatalf("the migration moved the current version to %d, want %d", app.CurrentVersionID, newer.ID)
+	}
+	if app.PreviousServingVersionID != older.ID {
+		t.Fatalf("one step back after the migration = %d, want the recorded %d", app.PreviousServingVersionID, older.ID)
+	}
+	// The carried chain is two steps, so the walk works once and then reports the
+	// bottom — it does not bounce back onto the version it just left.
+	if err := s.StepAppVersionBack("approval-gate", older.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("walking the carried chain: %v", err)
+	}
+	if app, _, err := s.GetApp("approval-gate"); err != nil || app.PreviousServingVersionID != 0 {
+		t.Fatalf("the carried chain has more below the oldest version: %+v (%v)", app, err)
+	}
+	if err := s.StepAppVersionBack("approval-gate", older.ID, now.Add(2*time.Hour)); err == nil {
+		t.Fatal("walking past the bottom of a carried chain was accepted")
+	}
+
+	// An app with no recorded predecessor keeps none.
+	other, _, err := s.GetApp("standup-digest")
+	if err != nil {
+		t.Fatalf("get the single-version app: %v", err)
+	}
+	if other.CurrentVersionID == 0 {
 		t.Fatal("the migration lost the current version pointer")
 	}
-	if app.PreviousVersionID != 0 {
-		t.Fatalf("the migration invented a predecessor: %d", app.PreviousVersionID)
+	if other.PreviousServingVersionID != 0 {
+		t.Fatalf("the migration invented a predecessor: %d", other.PreviousServingVersionID)
 	}
 }

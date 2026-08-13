@@ -408,6 +408,66 @@ func TestAppStatusListsTheVersionIdsRollbackTakes(t *testing.T) {
 	}
 }
 
+// Status is where the serving history is readable, because bare rollback walks
+// it and nothing else says whether another step exists. The list starts at the
+// version serving now, so what follows it is where the next rollbacks go, and
+// the total keeps a capped list honest.
+func TestAppStatusShowsWhereRollbackCanStillGo(t *testing.T) {
+	d := newDaemonForTest(t)
+	seedApp(t, d, "approval-gate", false)
+
+	now := time.Now().UTC()
+	var ids []int64
+	for i := 0; i < recentVersionLimit+3; i++ {
+		version, _, err := d.store.CommitAppVersion(store.AppVersion{
+			AppName:      "approval-gate",
+			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
+			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
+		}, now)
+		if err != nil {
+			t.Fatalf("commit version %d: %v", i, err)
+		}
+		ids = append(ids, version.ID)
+	}
+
+	result := appStatus(t, d, "approval-gate").AppStatusResult
+	if len(result.ServingHistory) != servingHistoryLimit {
+		t.Fatalf("serving_history = %d, want the %d cap", len(result.ServingHistory), servingHistoryLimit)
+	}
+	if result.ServingHistory[0].ID != int(ids[len(ids)-1]) {
+		t.Fatalf("serving_history[0] = %d, want the version serving now, %d",
+			result.ServingHistory[0].ID, ids[len(ids)-1])
+	}
+	if result.ServingHistory[1].ID != int(ids[len(ids)-2]) {
+		t.Fatalf("serving_history[1] = %d, want the next rollback's target %d",
+			result.ServingHistory[1].ID, ids[len(ids)-2])
+	}
+	// One step per version applied, plus the one seedApp left.
+	if steps := protocol.Deref(result.ServingHistorySteps); steps != len(ids)+1 {
+		t.Fatalf("serving_history_steps = %d, want %d", steps, len(ids)+1)
+	}
+
+	// A walk that goes past the newest versions still reports a history: the
+	// versions on it come from the whole list, not the capped recent one.
+	for i := 0; i < recentVersionLimit+1; i++ {
+		if resp := appRollback(t, d, "approval-gate", 0); !resp.Ok {
+			t.Fatalf("rollback %d: %v", i+1, protocol.Deref(resp.Error))
+		}
+	}
+	result = appStatus(t, d, "approval-gate").AppStatusResult
+	if len(result.ServingHistory) == 0 {
+		t.Fatal("a walked-back app reports no serving history")
+	}
+	if result.ServingHistory[0].ID != int(ids[len(ids)-1-(recentVersionLimit+1)]) {
+		t.Fatalf("serving_history[0] = %d, want the walked-to version %d",
+			result.ServingHistory[0].ID, ids[len(ids)-1-(recentVersionLimit+1)])
+	}
+	if result.ServingHistory[0].ContentHash == "" {
+		t.Fatalf("serving_history[0] = %+v, want the hash that tells builds apart", result.ServingHistory[0])
+	}
+}
+
 func TestAppCommandsRefuseAnInvalidName(t *testing.T) {
 	d := newDaemonForTest(t)
 	for _, resp := range []protocol.Response{

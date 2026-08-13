@@ -169,11 +169,11 @@ func runAppRollback(args []string) {
 	}
 	target := fmt.Sprintf("version %d (%s)", result.VersionID, appbuild.ShortHash(result.ContentHash))
 	switch {
-	// Bare rollback follows a recorded pointer rather than the version list, and
-	// the id it lands on can be higher than the one it left — rolling back off a
-	// rollback is exactly that. Saying which version was serving is what makes
-	// the choice checkable, and it is always backwards in time, whatever the ids
-	// did.
+	// Bare rollback walks recorded history rather than the version list, and the
+	// id it lands on can be higher than the one it left — a fix applied on top of
+	// an old version leaves exactly that behind it. Saying which version it was
+	// serving before is what makes the choice checkable, and the walk is always
+	// backwards in time, whatever the ids did.
 	case versionID == 0 && result.PreviousVersionID != nil:
 		fmt.Printf("rolled app %s back to %s, which was serving before version %d\n",
 			result.Name, target, *result.PreviousVersionID)

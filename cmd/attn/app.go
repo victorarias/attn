@@ -92,12 +92,17 @@ commands:
 
   rollback <name> [version]
         point the app at a version it already has — the one you name, or with no
-        version, the one that was serving immediately before the current one.
-        That is a recorded pointer, not the next id down. If a broken version
-        was rolled off before the current one was applied, the next id down is
-        that broken version; what was serving is the one you kept running.
-        Rolling back again returns to where you started, because every move
-        records what it replaced.
+        version, one step back through the app's serving history: the version
+        that was serving immediately before the current one. That is recorded
+        history, not the next id down. If a broken version was rolled off before
+        the current one was applied, the next id down is that broken version;
+        what was serving is the one you kept running.
+
+        Bare rollback again goes one step further back, and again, walking the
+        history down until the oldest version on it; past that it refuses and
+        lists the versions. Applying a version — or naming one here — starts the
+        history again from where it lands, so the way back from a fix is
+        whatever you were running when you applied it.
 
         Builds nothing: the artifact is still on disk.
 
@@ -112,9 +117,9 @@ commands:
 
   status <name> [--json]
         one app in full — its current version, its bus consumer, the ids of its
-        recent versions (what rollback takes), and its most recent runs. Reports
-        only what exists: an app with no consumer says so rather than showing a
-        default.
+        recent versions (what rollback takes), where a bare rollback can still
+        go, and its most recent runs. Reports only what exists: an app with no
+        consumer says so rather than showing a default.
 
   enable <name>
         resume delivery to the app, from wherever its consumer's cursor stands.
@@ -298,6 +303,7 @@ func runAppStatus(args []string) {
 				len(result.RecentVersions), result.Versions)
 		}
 	}
+	fmt.Printf("  rollback:   %s\n", rollbackPath(result))
 	if len(result.Recent) == 0 {
 		fmt.Println("  recent:     no invocations recorded")
 		return
@@ -343,6 +349,28 @@ func indentBlock(prefix, text string) string {
 
 // versionIDList is the line `attn app rollback` sends people looking for: the
 // ids, marked so the one serving is obvious.
+// rollbackPath says where bare `attn app rollback` goes from here, and how far
+// it can keep going — the one question the walk otherwise only answers by being
+// run. The first entry of the serving history is the version serving now, so
+// the path is what follows it.
+func rollbackPath(result *protocol.AppStatusResult) string {
+	if len(result.ServingHistory) < 2 {
+		return "nothing further back — name a version to move onto one the walk went past"
+	}
+	path := result.ServingHistory[1:]
+	parts := make([]string, 0, len(path))
+	for _, v := range path {
+		parts = append(parts, fmt.Sprintf("%d (%s)", v.ID, appbuild.ShortHash(v.ContentHash)))
+	}
+	line := "walks back to " + strings.Join(parts, ", then ")
+	// The history is capped on the wire; saying so is what keeps a walk longer
+	// than the cap from reading as a walk that ends here.
+	if steps := protocol.Deref(result.ServingHistorySteps); steps > len(result.ServingHistory) {
+		line += fmt.Sprintf(", then %d older step(s)", steps-len(result.ServingHistory))
+	}
+	return line
+}
+
 func versionIDList(versions []protocol.AppVersionInfo, current *protocol.AppVersionInfo) string {
 	parts := make([]string, 0, len(versions))
 	for _, v := range versions {

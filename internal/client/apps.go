@@ -72,7 +72,7 @@ func (c *Client) AppApply(name, contentHash, declaration, sourcePath string) (*p
 }
 
 // AppRollback moves an app onto a version it already has. A zero versionID means
-// the version applied before the current one.
+// one step back along the app's serving history.
 func (c *Client) AppRollback(name string, versionID int) (*protocol.AppRollbackResult, error) {
 	msg := protocol.AppRollbackMessage{Cmd: protocol.CmdAppRollback, Name: name}
 	if versionID > 0 {

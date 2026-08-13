@@ -1085,7 +1085,8 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// recorded, and inventing it from ids would reproduce the bug this fixes. An
 	// app carried across this migration has no recorded previous until its next
 	// pointer move, and bare rollback says so rather than guessing.
-	// Applied by applyMigration103, whose ALTER is column-guarded.
+	// Applied by applyMigration103, whose ALTER is column-guarded. Migration 105
+	// replaces the column it adds with a walkable chain.
 	{103, "record the previously-serving version of each app", ``},
 	{104, "remember a parked supervised child across daemon restarts", `CREATE TABLE IF NOT EXISTS supervised_parks (
     child           TEXT PRIMARY KEY,
@@ -1096,6 +1097,18 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
     exit_signal     TEXT NOT NULL DEFAULT '',
     exit_error      TEXT NOT NULL DEFAULT ''
 );`},
+	// An app's serving history, as a chain a bare rollback walks down one step at
+	// a time. A step names the version that started serving and the step it was
+	// pushed onto; apps.serving_step_id is where the app stands on it. One
+	// pointer could only ever express one step back, so a second bare rollback
+	// returned to where the first started; a chain answers "one step further
+	// back" however many times it is asked.
+	//
+	// Applied by applyMigration105, which also carries every recorded
+	// previously-serving version into the chain before dropping the column that
+	// held it — an app on version B with A behind it becomes the two-step chain
+	// A → B, which walks exactly as it did before.
+	{105, "walk an app's serving history as a chain", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1477,6 +1490,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 103 {
 			if err := applyMigration103(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 105 {
+			if err := applyMigration105(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2637,6 +2655,79 @@ func applyMigration103(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE apps ADD COLUMN previous_version_id INTEGER")
+	return err
+}
+
+// applyMigration105 turns each app's single previously-serving pointer into a
+// chain bare rollback can walk down repeatedly.
+//
+// The carry is the whole reason this is Go and not SQL in the table: an app on
+// version B with A recorded behind it becomes the chain A → B standing on B, so
+// the first bare rollback after the upgrade lands exactly where it would have
+// landed before, and the next one continues down instead of bouncing back. An
+// app with no recorded predecessor becomes a one-step chain and says there is
+// nothing below it, as it did. Nothing is invented from version ids.
+//
+// It all runs in the migration's transaction, so a failure anywhere leaves the
+// old column and its data untouched rather than half-carried.
+func applyMigration105(tx *sql.Tx) error {
+	if _, err := tx.Exec(`
+-- No index beyond the primary key: every reader arrives holding a step id —
+-- the registry's cursor, or the parent of the step it is standing on — so the
+-- chain is walked by rowid. app_name is carried to keep a step readable on its
+-- own and for the one-time carry below.
+CREATE TABLE IF NOT EXISTS app_serving_steps (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name   TEXT NOT NULL,
+    version_id INTEGER NOT NULL,
+    parent_id  INTEGER,
+    created_at TEXT NOT NULL
+);`); err != nil {
+		return err
+	}
+	has, err := columnExists(tx, "apps", "serving_step_id")
+	if err != nil || has {
+		return err
+	}
+	if _, err := tx.Exec("ALTER TABLE apps ADD COLUMN serving_step_id INTEGER"); err != nil {
+		return err
+	}
+
+	carried, err := columnExists(tx, "apps", "previous_version_id")
+	if err != nil {
+		return err
+	}
+	if carried {
+		// The bottom step of a carried chain: what was serving before the version
+		// the app is on. The table is empty here, so the next statement can find
+		// this row by app name alone.
+		if _, err := tx.Exec(`
+			INSERT INTO app_serving_steps (app_name, version_id, parent_id, created_at)
+			SELECT name, previous_version_id, NULL, updated_at FROM apps
+			WHERE current_version_id IS NOT NULL
+				AND previous_version_id IS NOT NULL
+				AND previous_version_id <> current_version_id`); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO app_serving_steps (app_name, version_id, parent_id, created_at)
+		SELECT a.name, a.current_version_id,
+		       (SELECT MIN(p.id) FROM app_serving_steps p WHERE p.app_name = a.name),
+		       a.updated_at
+		FROM apps a WHERE a.current_version_id IS NOT NULL`); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE apps SET serving_step_id = (
+			SELECT MAX(s.id) FROM app_serving_steps s WHERE s.app_name = apps.name
+		) WHERE current_version_id IS NOT NULL`); err != nil {
+		return err
+	}
+	if !carried {
+		return nil
+	}
+	_, err = tx.Exec("ALTER TABLE apps DROP COLUMN previous_version_id")
 	return err
 }
 

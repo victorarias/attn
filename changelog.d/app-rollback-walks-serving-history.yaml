@@ -1,0 +1,11 @@
+kind: changed
+area: app
+change: >
+  `attn app rollback <name>` now walks an app's serving history one step at a
+  time: each bare rollback goes one version further back, instead of returning
+  to where the previous one started. Rolling back past the oldest version on the
+  history refuses and lists the versions. Applying a version, or naming one to
+  roll onto, starts the history again from there, so the way back from a fix is
+  whatever was running when you applied it. `attn app status` shows where a bare
+  rollback can still go, so you can see the walk without running it. Apps
+  mid-rollback when they upgrade keep the version they could already go back to.

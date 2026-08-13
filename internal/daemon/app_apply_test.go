@@ -334,15 +334,16 @@ func TestAppRollbackSkipsAVersionThatWasRolledOff(t *testing.T) {
 	}
 }
 
-// Rolling back twice flips between the two most recent serving versions, because
-// every move rewrites the predecessor. It is the consequence of "back means what
-// was serving a moment ago", and it is what makes rollback undoable.
-func TestAppRollbackTwiceFlipsBetweenTwoVersions(t *testing.T) {
+// Each bare rollback walks one step further back, and the oldest version on the
+// history is the bottom: rolling back again refuses and lists the versions
+// rather than wrapping around onto something the operator already rejected.
+func TestAppRollbackWalksOneStepFurtherBackEachTime(t *testing.T) {
 	d := appApplyDaemon(t)
 	first := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "first"), "export default {}\n")
 	second := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "second"), "export default { two: true }\n")
+	applyOK(t, d, "approval-gate", declarationFor("approval-gate", "third"), "export default { three: true }\n")
 
-	for i, want := range []int{first.VersionID, second.VersionID, first.VersionID} {
+	for i, want := range []int{second.VersionID, first.VersionID} {
 		resp := appRollback(t, d, "approval-gate", 0)
 		if !resp.Ok {
 			t.Fatalf("rollback %d: %v", i+1, protocol.Deref(resp.Error))
@@ -351,21 +352,71 @@ func TestAppRollbackTwiceFlipsBetweenTwoVersions(t *testing.T) {
 			t.Fatalf("rollback %d landed on %d, want %d", i+1, got, want)
 		}
 	}
+	resp := appRollback(t, d, "approval-gate", 0)
+	if resp.Ok {
+		t.Fatalf("a third rollback moved to %d, want the bottom of the history to refuse",
+			resp.AppRollbackResult.VersionID)
+	}
+	msg := protocol.Deref(resp.Error)
+	if !strings.Contains(msg, "oldest version in its serving history") {
+		t.Errorf("error does not name the situation: %s", msg)
+	}
+	if !strings.Contains(msg, fmt.Sprint(second.VersionID)) || !strings.Contains(msg, "current") {
+		t.Errorf("error does not list the versions: %s", msg)
+	}
 }
 
-// An app on its first version has no predecessor to follow, and the numerically
-// previous id is not one — there is nothing below it. The refusal has to name the
+// Applying starts the history again from where the walk stopped, so the way back
+// from a fix is what was actually running when it was applied — not the versions
+// the walk already went past.
+func TestAppApplyRestartsTheRollbackWalk(t *testing.T) {
+	d := appApplyDaemon(t)
+	first := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "first"), "export default {}\n")
+	applyOK(t, d, "approval-gate", declarationFor("approval-gate", "second"), "export default { two: true }\n")
+	third := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "third"), "export default { three: true }\n")
+
+	for i := 0; i < 2; i++ {
+		if resp := appRollback(t, d, "approval-gate", 0); !resp.Ok {
+			t.Fatalf("rollback %d: %v", i+1, protocol.Deref(resp.Error))
+		}
+	}
+	fixed := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "fixed"), "export default { fixed: true }\n")
+
+	resp := appRollback(t, d, "approval-gate", 0)
+	if !resp.Ok {
+		t.Fatalf("rollback off the fix: %v", protocol.Deref(resp.Error))
+	}
+	switch got := resp.AppRollbackResult.VersionID; got {
+	case first.VersionID:
+	case third.VersionID:
+		t.Fatalf("rolling back off the fix landed on %d, a version the walk had already gone past", third.VersionID)
+	default:
+		t.Fatalf("rolling back off the fix landed on %d, want the version it was applied over, %d", got, first.VersionID)
+	}
+	if p := resp.AppRollbackResult.PreviousVersionID; p == nil || *p != fixed.VersionID {
+		t.Fatalf("previous = %v, want %d", p, fixed.VersionID)
+	}
+	// One step is all the restarted history has: the versions below belong to the
+	// walk that was left behind.
+	if resp := appRollback(t, d, "approval-gate", 0); resp.Ok {
+		t.Fatalf("a second rollback off the fix moved to %d, want the bottom to refuse",
+			resp.AppRollbackResult.VersionID)
+	}
+}
+
+// An app on its first version has nothing below it on its serving history, and
+// the numerically previous id is not a substitute. The refusal has to name the
 // situation and list the versions, because that is all the caller gets.
-func TestAppRollbackWithoutARecordedPreviousRefusesLoudly(t *testing.T) {
+func TestAppRollbackAtTheBottomOfTheHistoryRefusesLoudly(t *testing.T) {
 	d := appApplyDaemon(t)
 	only := applyOK(t, d, "approval-gate", declarationFor("approval-gate", "first"), "export default {}\n")
 
 	resp := appRollback(t, d, "approval-gate", 0)
 	if resp.Ok {
-		t.Fatal("rollback with no recorded predecessor reported success")
+		t.Fatal("rollback at the bottom of the serving history reported success")
 	}
 	msg := protocol.Deref(resp.Error)
-	if !strings.Contains(msg, "nothing is recorded as serving before") {
+	if !strings.Contains(msg, "oldest version in its serving history") {
 		t.Errorf("error does not name the situation: %s", msg)
 	}
 	if !strings.Contains(msg, fmt.Sprint(only.VersionID)) || !strings.Contains(msg, "current") {
