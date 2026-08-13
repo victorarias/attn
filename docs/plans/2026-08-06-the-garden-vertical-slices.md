@@ -427,11 +427,11 @@ Ships:
       equivalent flag) marking "written to my successor on this seed".
 - [x] `attn seed show` surfaces the freshest handoff note prominently;
       `tend` prints it on claim so pickup primes automatically.
-- [ ] The `/handoff` skill (crew side) gains one step: for each seed you
+- [x] The `/handoff` skill (crew side) gains one step: for each seed you
       tended and are not harvesting, leave a seed handoff note. Member
-      homes stay untouched otherwise — the axes are additive. *Lands
-      outside this repo: the skill is in the maintainer's user config, so
-      it does not ride a repo PR.*
+      homes stay untouched otherwise — the axes are additive. *Landed
+      outside this repo 2026-08-13: the skill lives in the maintainer's
+      user config, so the step shipped there, not in a repo PR.*
 
 One rule fixed while building this (2026-08-12): `ready` and `tend` decided
 "is somebody holding this" separately, so a seed whose tender's session had
