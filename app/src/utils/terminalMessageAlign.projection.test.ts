@@ -60,6 +60,25 @@ const LINKED_ROWS = [
   '  The conclusion after those rendered links must remain independently annotatable.',
 ];
 
+// A URL link, which Codex renders as the label followed by the target in
+// parentheses — two visible words where the Markdown holds one. Trimmed from a
+// real turn whose numbered list stopped being annotatable at exactly this point.
+const URL_MESSAGE = [
+  'My recommendation:',
+  '',
+  '1. Close [ASTERISK-1797](https://spotify.atlassian.net/browse/ASTERISK-1797) as obsolete / won’t do.',
+  '2. Explain that the RFC deliberately preserves the Findaway compatibility format and that migration',
+  '   routing already uses an explicit feed ID.',
+].join('\n');
+
+const URL_ROWS = [
+  '• My recommendation:',
+  '',
+  '  1. Close ASTERISK-1797 (https://spotify.atlassian.net/browse/ASTERISK-1797) as obsolete / won’t do.',
+  '  2. Explain that the RFC deliberately preserves the Findaway compatibility format and that migration',
+  '     routing already uses an explicit feed ID.',
+];
+
 // The message with its head scrolled off, under a user turn whose tail repeats
 // the words immediately preceding the visible head.
 const DECOY_ABOVE = [
@@ -159,6 +178,20 @@ describe('rowsForOffsets', () => {
 
     expect(rowsForOffsets(alignment, before.start, before.end)).not.toEqual([]);
     expect(rowsForOffsets(alignment, after.start, after.end)).not.toEqual([]);
+  });
+
+  it('keeps the list going after a URL rendered as label plus parenthesised target', () => {
+    const alignment = alignMessage(URL_MESSAGE, URL_ROWS);
+    const onTheLinkRow = anchorOffsets(URL_MESSAGE, 'as obsolete');
+    const below = anchorOffsets(URL_MESSAGE, 'preserves the Findaway compatibility format');
+
+    expect(rowsForOffsets(alignment, onTheLinkRow.start, onTheLinkRow.end)).not.toEqual([]);
+    const ranges = rowsForOffsets(alignment, below.start, below.end);
+    expect(ranges).not.toEqual([]);
+    expect(quotesAnchor(
+      URL_MESSAGE.slice(below.start, below.end),
+      textAt(URL_ROWS, 0, ranges),
+    )).toBe(true);
   });
 
   it('maps a shortened visible path back to the Markdown link destination', () => {
