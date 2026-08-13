@@ -15,6 +15,8 @@ context.
   attachment for review. This is what makes "in review" mean something.
 - **Scope + autonomy bounds.** What is explicitly deferred, and what is a real blocker vs.
   a call the worker can make. This is what makes "blocked" a signal and not noise.
+- **Easy to read, nothing lost.** Plain words, short paragraphs, and a sketch
+  wherever it says more than the sentences it replaces: see [showing.md](showing.md).
 
 ## Durable description vs. live steering
 

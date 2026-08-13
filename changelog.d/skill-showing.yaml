@@ -1,0 +1,7 @@
+kind: added
+area: agents
+change: >
+  The attn skill now carries writing guidance for tickets, briefs,
+  comments, and reports: easy to read without losing precision — plain
+  words, short paragraphs, and the smallest structural view (pseudocode,
+  trees, diffs, mermaid) where a sketch says more than sentences.
