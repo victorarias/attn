@@ -11,6 +11,7 @@
 // One word of the markdown; offsets are UTF-16 code units into the ORIGINAL.
 export interface SrcToken {
   norm: string;
+  aliases: string[];
   start: number;
   end: number;
 }
@@ -21,17 +22,29 @@ export interface SrcToken {
 // bounds but never which rows resolve.
 export interface GridToken {
   norm: string;
+  aliases: string[];
   row: number;
   col: number;
   endCol: number;
+  // The first prose token after an assistant marker. This breaks an otherwise
+  // exact tie when the user's prompt quotes the response it requests.
+  assistantLead: boolean;
+  explicitUser: boolean;
+}
+
+interface MatchToken {
+  norm: string;
+  aliases: readonly string[];
 }
 
 // Markdown syntax and TUI chrome, stripped from both sides before comparison.
 const CUT_CHARS = new Set([
   ...'*_`~#|>',
   ...'┌─┬┐│├┼┤└┴┘━┃┏┓┗┛',
-  ...'⏺✻❯⎿·▪●○',
+  ...'⏺✻❯⎿·•▪●○',
 ]);
+const ASSISTANT_MARKERS = new Set(['⏺', '•']);
+const USER_MARKERS = new Set(['❯', '›']);
 
 function isSpace(ch: string): boolean {
   return /\s/.test(ch);
@@ -46,28 +59,107 @@ function normalizeWord(word: string): string {
   return out;
 }
 
-export function tokenizeMarkdown(markdown: string): SrcToken[] {
-  const out: SrcToken[] = [];
+const MARKDOWN_LINK_RE = /\[([^\]\n]+)\]\(([^)\n]+)\)/g;
+const TRAILING_PATH_NOISE_RE = /[),.;:!?]+$/;
+
+function decodeTarget(value: string): string {
+  const trimmed = value.trim().replace(/^<|>$/g, '');
+  const withoutFileScheme = trimmed.replace(/^file:\/\/(?:localhost)?/i, '');
+  try {
+    return decodeURIComponent(withoutFileScheme);
+  } catch {
+    return withoutFileScheme;
+  }
+}
+
+// Renderer-independent identities for a path or URL. Codex commonly turns an
+// absolute Markdown destination into a shorter visible repository path. At
+// least the final directory and filename must survive: a basename alone is too
+// weak to split alignment or satisfy containment when repositories commonly
+// repeat names such as index.ts. These are candidates, not proof — uniqueness,
+// monotonicity, row confidence, and the containment gate still decide whether a
+// match is usable.
+function targetAliases(value: string): string[] {
+  let target = decodeTarget(value).replace(TRAILING_PATH_NOISE_RE, '');
+  if (!target.includes('/') && !/^[a-z][a-z0-9+.-]*:/i.test(target)) return [];
+  target = target.replace(/\\/g, '/').replace(/\/+$/, '');
+  if (!target) return [];
+
+  const aliases = new Set<string>([`target:${target}`]);
+  const withoutQuery = target.replace(/[?#].*$/, '');
+  const parts = withoutQuery.split('/').filter(Boolean);
+  if (parts.length >= 2) aliases.add(`path2:${parts.slice(-2).join('/')}`);
+  return [...aliases];
+}
+
+function tokenKeys(token: MatchToken): readonly string[] {
+  return [token.norm, ...token.aliases];
+}
+
+function tokensMatch(left: MatchToken, right: MatchToken): boolean {
+  const rightKeys = new Set(tokenKeys(right));
+  return tokenKeys(left).some((key) => rightKeys.has(key));
+}
+
+function pushWords(out: SrcToken[], text: string, base: number): void {
   let i = 0;
-  while (i < markdown.length) {
-    if (isSpace(markdown[i])) {
+  while (i < text.length) {
+    if (isSpace(text[i])) {
       i += 1;
       continue;
     }
     let j = i;
-    while (j < markdown.length && !isSpace(markdown[j])) j += 1;
-    const norm = normalizeWord(markdown.slice(i, j));
-    if (norm) out.push({ norm, start: i, end: j });
+    while (j < text.length && !isSpace(text[j])) j += 1;
+    const raw = text.slice(i, j);
+    const norm = normalizeWord(raw);
+    if (norm) out.push({ norm, aliases: targetAliases(raw), start: base + i, end: base + j });
     i = j;
   }
+}
+
+export function tokenizeMarkdown(markdown: string): SrcToken[] {
+  const out: SrcToken[] = [];
+  let cursor = 0;
+  for (const match of markdown.matchAll(MARKDOWN_LINK_RE)) {
+    const start = match.index ?? 0;
+    pushWords(out, markdown.slice(cursor, start), cursor);
+
+    const label = match[1];
+    const target = match[2].trim().split(/\s+['"]/)[0];
+    const labelStart = start + 1;
+    pushWords(out, label, labelStart);
+
+    const targetInMatch = match[0].indexOf(match[2]);
+    const targetStart = start + targetInMatch + match[2].indexOf(target);
+    const norm = normalizeWord(target);
+    if (norm) {
+      out.push({
+        norm,
+        aliases: targetAliases(target),
+        start: targetStart,
+        end: targetStart + target.length,
+      });
+    }
+    cursor = start + match[0].length;
+  }
+  pushWords(out, markdown.slice(cursor), cursor);
   return out;
 }
 
 // `rowBase` is the buffer row of `rows[0]`, so tokens carry absolute rows.
-export function tokenizeRows(rows: readonly string[], rowBase = 0): GridToken[] {
+export function tokenizeRows(
+  rows: readonly string[],
+  rowBase = 0,
+  hyperlinkUriAt?: (row: number, col: number) => string | null,
+): GridToken[] {
   const out: GridToken[] = [];
   for (let r = 0; r < rows.length; r += 1) {
     const row = rows[r];
+    const firstNonSpace = row.search(/\S/);
+    const marker = firstNonSpace >= 0 ? row[firstNonSpace] : '';
+    const assistantRow = ASSISTANT_MARKERS.has(marker);
+    const userRow = USER_MARKERS.has(marker);
+    let emitted = 0;
     let i = 0;
     while (i < row.length) {
       if (isSpace(row[i])) {
@@ -76,19 +168,27 @@ export function tokenizeRows(rows: readonly string[], rowBase = 0): GridToken[] 
       }
       let j = i;
       while (j < row.length && !isSpace(row[j])) j += 1;
-      const norm = normalizeWord(row.slice(i, j));
-      if (norm) out.push({ norm, row: rowBase + r, col: i, endCol: j });
+      const raw = row.slice(i, j);
+      const norm = normalizeWord(raw);
+      if (norm) {
+        const aliases = new Set(targetAliases(raw));
+        const uri = hyperlinkUriAt?.(rowBase + r, i);
+        if (uri) targetAliases(uri).forEach((alias) => aliases.add(alias));
+        out.push({
+          norm,
+          aliases: [...aliases],
+          row: rowBase + r,
+          col: i,
+          endCol: j,
+          assistantLead: assistantRow && emitted === 0,
+          explicitUser: userRow,
+        });
+        emitted += 1;
+      }
       i = j;
     }
   }
   return out;
-}
-
-// Word-space form: markdown and grid text differ by exactly what is stripped.
-export function normalizedWords(text: string): string {
-  return tokenizeMarkdown(text)
-    .map((t) => t.norm)
-    .join(' ');
 }
 
 // --- pairing ---------------------------------------------------------------
@@ -109,9 +209,9 @@ function resync(
   gi: number,
 ): { si: number; gi: number; cost: number } | null {
   for (let d = 1; d <= RESYNC_WINDOW; d += 1) {
-    if (si + d < src.length && src[si + d].norm === grid[gi].norm) return { si: si + d, gi, cost: d };
-    if (gi + d < grid.length && src[si].norm === grid[gi + d].norm) return { si, gi: gi + d, cost: d };
-    if (si + d < src.length && gi + d < grid.length && src[si + d].norm === grid[gi + d].norm) {
+    if (si + d < src.length && tokensMatch(src[si + d], grid[gi])) return { si: si + d, gi, cost: d };
+    if (gi + d < grid.length && tokensMatch(src[si], grid[gi + d])) return { si, gi: gi + d, cost: d };
+    if (si + d < src.length && gi + d < grid.length && tokensMatch(src[si + d], grid[gi + d])) {
       return { si: si + d, gi: gi + d, cost: d };
     }
   }
@@ -121,27 +221,102 @@ function resync(
 function seedScore(src: readonly SrcToken[], grid: readonly GridToken[], gi: number): number {
   let score = 0;
   for (let d = 0; d < SEED_LOOKAHEAD && d < src.length && gi + d < grid.length; d += 1) {
-    if (src[d].norm === grid[gi + d].norm) score += 1;
+    if (tokensMatch(src[d], grid[gi + d])) score += 1;
   }
   return score;
 }
 
-function positionsByNorm(tokens: readonly { norm: string }[]): Map<string, number[]> {
+function positionsByKey(tokens: readonly MatchToken[]): Map<string, number[]> {
   const out = new Map<string, number[]>();
   for (let i = 0; i < tokens.length; i += 1) {
-    const at = out.get(tokens[i].norm);
-    if (at) at.push(i);
-    else out.set(tokens[i].norm, [i]);
+    for (const key of new Set(tokenKeys(tokens[i]))) {
+      const at = out.get(key);
+      if (at) at.push(i);
+      else out.set(key, [i]);
+    }
   }
   return out;
+}
+
+// Unique identities on both sides are hard anchors. Their longest monotone
+// chain divides the message into independent alignment islands, so an arbitrary
+// renderer substitution (a Markdown link becoming a path, for example) leaves
+// a sparse hole rather than cutting off everything after it.
+function monotoneAnchors(src: readonly SrcToken[], grid: readonly GridToken[]): TokenPair[] {
+  const srcPositions = positionsByKey(src);
+  const gridPositions = positionsByKey(grid);
+  type Candidate = TokenPair & { strength: number; score: number; previous: number };
+  const uniquePairs = new Map<string, Candidate>();
+  for (const [key, srcAt] of srcPositions) {
+    if (srcAt.length !== 1) continue;
+    const gridAt = gridPositions.get(key);
+    if (!gridAt || gridAt.length !== 1) continue;
+    const pair = { srcIdx: srcAt[0], gridIdx: gridAt[0] };
+    const strength = src[pair.srcIdx].norm === grid[pair.gridIdx].norm ? 2 : 1;
+    const pairKey = `${pair.srcIdx}:${pair.gridIdx}`;
+    const previous = uniquePairs.get(pairKey);
+    if (!previous || strength > previous.strength) {
+      uniquePairs.set(pairKey, { ...pair, strength, score: 0, previous: -1 });
+    }
+  }
+
+  const candidates = [...uniquePairs.values()].sort(
+    (a, b) => a.srcIdx - b.srcIdx || a.gridIdx - b.gridIdx || b.strength - a.strength,
+  );
+  if (candidates.length === 0) return [];
+
+  // Fenwick maximum over grid positions: query(gridIdx) sees only positions
+  // strictly before gridIdx. Updates are delayed for one source-index batch so
+  // a chain cannot use two alternative identities of the same source token.
+  const fenwick = Array.from(
+    { length: grid.length + 1 },
+    () => ({ score: 0, candidate: -1 }),
+  );
+  const query = (exclusive: number) => {
+    let best = { score: 0, candidate: -1 };
+    for (let at = exclusive; at > 0; at -= at & -at) {
+      if (fenwick[at].score > best.score) best = fenwick[at];
+    }
+    return best;
+  };
+  const update = (position: number, value: { score: number; candidate: number }) => {
+    for (let at = position; at < fenwick.length; at += at & -at) {
+      if (value.score > fenwick[at].score) fenwick[at] = value;
+    }
+  };
+
+  const pairWeight = 2 * candidates.length + 1;
+  let bestCandidate = -1;
+  for (let batchStart = 0; batchStart < candidates.length;) {
+    let batchEnd = batchStart + 1;
+    while (batchEnd < candidates.length && candidates[batchEnd].srcIdx === candidates[batchStart].srcIdx) {
+      batchEnd += 1;
+    }
+    for (let i = batchStart; i < batchEnd; i += 1) {
+      const prior = query(candidates[i].gridIdx);
+      candidates[i].previous = prior.candidate;
+      candidates[i].score = prior.score + pairWeight + candidates[i].strength;
+      if (bestCandidate < 0 || candidates[i].score > candidates[bestCandidate].score) bestCandidate = i;
+    }
+    for (let i = batchStart; i < batchEnd; i += 1) {
+      update(candidates[i].gridIdx + 1, { score: candidates[i].score, candidate: i });
+    }
+    batchStart = batchEnd;
+  }
+
+  const chain: TokenPair[] = [];
+  for (let at = bestCandidate; at >= 0; at = candidates[at].previous) {
+    chain.push({ srcIdx: candidates[at].srcIdx, gridIdx: candidates[at].gridIdx });
+  }
+  return chain.reverse();
 }
 
 // Finds where the message sits in the grid using words unique on BOTH sides:
 // each pins one (src, grid) pair, and the true position is the offset most
 // agree on. Seeding on opening words fails when the head has scrolled away.
 function findSeed(src: readonly SrcToken[], grid: readonly GridToken[]): { si: number; gi: number } | null {
-  const srcPositions = positionsByNorm(src);
-  const gridPositions = positionsByNorm(grid);
+  const srcPositions = positionsByKey(src);
+  const gridPositions = positionsByKey(grid);
 
   const anchors: { si: number; gi: number }[] = [];
   const offsetVotes = new Map<number, number>();
@@ -176,15 +351,62 @@ function findSeed(src: readonly SrcToken[], grid: readonly GridToken[]): { si: n
   // No word unique on both sides: fall back to the opening words.
   let gi = -1;
   let bestScore = 0;
+  let bestAssistantLead = false;
   for (let j = 0; j < grid.length; j += 1) {
-    if (grid[j].norm !== src[0].norm) continue;
+    if (!tokensMatch(src[0], grid[j])) continue;
     const score = seedScore(src, grid, j);
-    if (score > bestScore) {
+    const assistantLead = grid[j].assistantLead;
+    if (score > bestScore || (score === bestScore && assistantLead && !bestAssistantLead)) {
       bestScore = score;
+      bestAssistantLead = assistantLead;
       gi = j;
     }
   }
   return gi >= 0 ? { si: 0, gi } : null;
+}
+
+function greedySegment(
+  src: readonly SrcToken[],
+  grid: readonly GridToken[],
+  srcStart: number,
+  srcEnd: number,
+  gridStart: number,
+  gridEnd: number,
+): TokenPair[] {
+  const pairs: TokenPair[] = [];
+  let si = srcStart;
+  let gi = gridStart;
+  let gaps = 0;
+  const gapBudget = Math.max(RESYNC_WINDOW, Math.ceil((srcEnd - srcStart) * 0.5));
+  while (si < srcEnd && gi < gridEnd) {
+    if (tokensMatch(src[si], grid[gi])) {
+      pairs.push({ srcIdx: si, gridIdx: gi });
+      si += 1;
+      gi += 1;
+      continue;
+    }
+    let next: { si: number; gi: number; cost: number } | null = null;
+    for (let d = 1; d <= RESYNC_WINDOW; d += 1) {
+      if (si + d < srcEnd && tokensMatch(src[si + d], grid[gi])) {
+        next = { si: si + d, gi, cost: d };
+        break;
+      }
+      if (gi + d < gridEnd && tokensMatch(src[si], grid[gi + d])) {
+        next = { si, gi: gi + d, cost: d };
+        break;
+      }
+      if (si + d < srcEnd && gi + d < gridEnd && tokensMatch(src[si + d], grid[gi + d])) {
+        next = { si: si + d, gi: gi + d, cost: d };
+        break;
+      }
+    }
+    if (!next) break;
+    gaps += next.cost;
+    if (gaps > gapBudget) break;
+    si = next.si;
+    gi = next.gi;
+  }
+  return pairs;
 }
 
 // Pairs the two token streams by walking both directions in lockstep from the
@@ -194,6 +416,20 @@ function findSeed(src: readonly SrcToken[], grid: readonly GridToken[]): { si: n
 // before anything is painted.
 export function pairTokens(src: readonly SrcToken[], grid: readonly GridToken[]): TokenPair[] {
   if (src.length === 0 || grid.length === 0) return [];
+  const anchors = monotoneAnchors(src, grid);
+  if (anchors.length > 0) {
+    const pairs: TokenPair[] = [];
+    let srcStart = 0;
+    let gridStart = 0;
+    for (const anchor of anchors) {
+      pairs.push(...greedySegment(src, grid, srcStart, anchor.srcIdx, gridStart, anchor.gridIdx));
+      pairs.push(anchor);
+      srcStart = anchor.srcIdx + 1;
+      gridStart = anchor.gridIdx + 1;
+    }
+    pairs.push(...greedySegment(src, grid, srcStart, src.length, gridStart, grid.length));
+    return pairs;
+  }
   const seed = findSeed(src, grid);
   if (!seed) return [];
 
@@ -205,7 +441,7 @@ export function pairTokens(src: readonly SrcToken[], grid: readonly GridToken[])
   let gi = seed.gi;
   let gaps = 0;
   while (si >= 0 && gi >= 0) {
-    if (src[si].norm === grid[gi].norm) {
+    if (tokensMatch(src[si], grid[gi])) {
       before.push({ srcIdx: si, gridIdx: gi });
       si -= 1;
       gi -= 1;
@@ -213,11 +449,11 @@ export function pairTokens(src: readonly SrcToken[], grid: readonly GridToken[])
     }
     let resynced = false;
     for (let d = 1; d <= RESYNC_WINDOW && !resynced; d += 1) {
-      if (si - d >= 0 && src[si - d].norm === grid[gi].norm) {
+      if (si - d >= 0 && tokensMatch(src[si - d], grid[gi])) {
         si -= d; gaps += d; resynced = true;
-      } else if (gi - d >= 0 && src[si].norm === grid[gi - d].norm) {
+      } else if (gi - d >= 0 && tokensMatch(src[si], grid[gi - d])) {
         gi -= d; gaps += d; resynced = true;
-      } else if (si - d >= 0 && gi - d >= 0 && src[si - d].norm === grid[gi - d].norm) {
+      } else if (si - d >= 0 && gi - d >= 0 && tokensMatch(src[si - d], grid[gi - d])) {
         si -= d; gi -= d; gaps += d; resynced = true;
       }
     }
@@ -231,7 +467,7 @@ export function pairTokens(src: readonly SrcToken[], grid: readonly GridToken[])
   gi = seed.gi + 1;
   gaps = 0;
   while (si < src.length && gi < grid.length) {
-    if (src[si].norm === grid[gi].norm) {
+    if (tokensMatch(src[si], grid[gi])) {
       after.push({ srcIdx: si, gridIdx: gi });
       si += 1;
       gi += 1;
@@ -262,6 +498,7 @@ export interface PlacedWord {
 export interface RowAlignment {
   row: number;
   words: PlacedWord[];
+  explicitUser: boolean;
   // Rows below CONFIDENT_ROW are ignored when bounding and resolving.
   matched: number;
   total: number;
@@ -291,9 +528,10 @@ export function alignMessage(
   markdown: string,
   rows: readonly string[],
   rowBase = 0,
+  hyperlinkUriAt?: (row: number, col: number) => string | null,
 ): MessageAlignment {
   const src = tokenizeMarkdown(markdown);
-  const grid = tokenizeRows(rows, rowBase);
+  const grid = tokenizeRows(rows, rowBase, hyperlinkUriAt);
   const pairs = pairTokens(src, grid);
 
   const totals = new Map<number, number>();
@@ -305,7 +543,13 @@ export function alignMessage(
     const srcToken = src[pair.srcIdx];
     let row = aligned.get(gridToken.row);
     if (!row) {
-      row = { row: gridToken.row, words: [], matched: 0, total: totals.get(gridToken.row) ?? 0 };
+      row = {
+        row: gridToken.row,
+        words: [],
+        explicitUser: gridToken.explicitUser,
+        matched: 0,
+        total: totals.get(gridToken.row) ?? 0,
+      };
       aligned.set(gridToken.row, row);
     }
     row.words.push({
@@ -323,7 +567,7 @@ export function alignMessage(
   let previousStart = -1;
   for (const row of [...aligned.keys()].sort((a, b) => a - b)) {
     const entry = aligned.get(row)!;
-    if (rowConfidence(entry) < CONFIDENT_ROW) continue;
+    if (entry.explicitUser || rowConfidence(entry) < CONFIDENT_ROW) continue;
     const start = entry.words[0].start;
     if (firstRow < 0) firstRow = row;
     lastRow = row;
@@ -360,7 +604,7 @@ export function rowsForOffsets(
 ): RowRange[] {
   const out: RowRange[] = [];
   for (const [row, entry] of alignment.rows) {
-    if (rowConfidence(entry) < CONFIDENT_ROW) continue;
+    if (entry.explicitUser || rowConfidence(entry) < CONFIDENT_ROW) continue;
     let startCol = Number.POSITIVE_INFINITY;
     let endCol = -1;
     for (const word of entry.words) {
@@ -392,7 +636,7 @@ export function offsetsForSelection(
   let end = -1;
   for (const [row, entry] of alignment.rows) {
     if (row < selection.startRow || row > selection.endRow) continue;
-    if (rowConfidence(entry) < CONFIDENT_ROW) continue;
+    if (entry.explicitUser || rowConfidence(entry) < CONFIDENT_ROW) continue;
     const lowCol = row === selection.startRow ? selection.startCol : 0;
     const highCol = row === selection.endRow ? selection.endCol : Number.POSITIVE_INFINITY;
     for (const word of entry.words) {
@@ -414,9 +658,17 @@ export function offsetsForSelection(
 // make a wash disappear for a frame. Containment holds in either direction: a
 // reflow moves words between rows, so the resolved rows can cover more or less.
 export function quotesAnchor(anchoredText: string, paintedText: string): boolean {
-  const want = normalizedWords(anchoredText);
-  if (!want) return false;
-  const got = normalizedWords(paintedText);
-  if (!got) return false;
-  return got.includes(want) || want.includes(got);
+  const want = tokenizeMarkdown(anchoredText);
+  if (want.length === 0) return false;
+  const got = tokenizeRows(paintedText.split('\n'));
+  if (got.length === 0) return false;
+
+  const contains = (whole: readonly MatchToken[], part: readonly MatchToken[]): boolean => {
+    if (part.length > whole.length) return false;
+    for (let start = 0; start <= whole.length - part.length; start += 1) {
+      if (part.every((token, index) => tokensMatch(token, whole[start + index]))) return true;
+    }
+    return false;
+  };
+  return contains(got, want) || contains(want, got);
 }

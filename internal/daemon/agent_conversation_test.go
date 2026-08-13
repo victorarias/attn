@@ -134,7 +134,7 @@ func TestTranscriptWatcherPrefersPersistedNativeConversationAfterRestart(t *test
 		cwd:       cwd,
 		startedAt: now,
 	}
-	if got := d.findTranscriptPathForWatcher(watcher); got != want {
+	if got := d.resolveExactTranscriptPathForWatcher(watcher); got != want {
 		t.Fatalf("restart transcript = %q, want persisted conversation %q", got, want)
 	}
 }

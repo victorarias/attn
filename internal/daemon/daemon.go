@@ -1389,6 +1389,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 
 	if _, ok := d.ptyBackend.(ptybackend.RecoverableRuntime); ok {
 		d.reconcileStartupWorkerSessions(recoveryReport, recoverErr, recoveryStartedAt)
+		d.restoreTranscriptWatchers()
 		d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
 		// Recovery rewrote session states in the store; refresh the cached
 		// workspace rollups so InitialState matches.
@@ -1405,6 +1406,7 @@ func (d *Daemon) performStartupPTYRecovery(recoveryStartedAt time.Time) {
 		)
 	}
 	d.reconcileWorkspaceLayoutsWithPTYBackend(context.Background())
+	d.restoreTranscriptWatchers()
 	// Pruning flipped recovered sessions to idle in the store; refresh the
 	// cached workspace rollups so InitialState matches.
 	d.reseedWorkspaceStatuses()
@@ -3098,12 +3100,10 @@ func (d *Daemon) handleStop(conn net.Conn, msg *protocol.StopMessage) {
 	go d.maybeGenerateSessionTitle(msg.ID, msg.TranscriptPath)
 }
 
-// resolveTranscriptPathForSession resolves a session's transcript by the
-// strongest identity available: the path the agent's own hook reported, then
-// the agent-native resume id synced from hooks, and only then the finder's
-// cwd/time guess. The guess must stay last for codex: several codex processes
-// can share one cwd (a second attn pane, a user's own `codex exec`), and
-// "newest matching cwd" cannot tell them apart.
+// resolveTranscriptPathForSession resolves only exact transcript identities:
+// the path reported by the agent itself, its durable native resume id, or the
+// path owned by this live session's transcript watcher. A cwd/newest guess can
+// return a neighboring session and is therefore never an identity.
 func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, transcriptPath string) string {
 	path := strings.TrimSpace(transcriptPath)
 	if session == nil {
@@ -3128,8 +3128,8 @@ func (d *Daemon) resolveTranscriptPathForSession(session *protocol.Session, tran
 		}
 	}
 
-	if discovered := strings.TrimSpace(tf.FindTranscript(session.ID, session.Directory, time.Now())); discovered != "" {
-		return discovered
+	if watched := d.liveTranscriptPath(session.ID, session.Agent); watched != "" {
+		return watched
 	}
 
 	return path

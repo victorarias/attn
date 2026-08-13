@@ -3182,6 +3182,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
       request_id: sent.request_id,
       session_id: 'session-1',
       success: true,
+      status: 'ready',
       messages: [
         { key: 'turn-1', markdown: 'The first answer.' },
         { key: 'turn-2', markdown: 'The second answer.' },
@@ -3193,6 +3194,8 @@ describe('useDaemonSocket notebook and annotation events', () => {
         { key: 'turn-1', markdown: 'The first answer.' },
         { key: 'turn-2', markdown: 'The second answer.' },
       ],
+      status: 'ready',
+      detail: undefined,
       truncated: true,
     });
     unmount();
@@ -3210,11 +3213,47 @@ describe('useDaemonSocket notebook and annotation events', () => {
       request_id: lastSent(ws).request_id,
       session_id: 'session-1',
       success: true,
+      status: 'ready',
       messages: [],
       truncated: false,
     });
 
-    await expect(promise).resolves.toEqual({ messages: [], truncated: false });
+    await expect(promise).resolves.toEqual({ messages: [], status: 'ready', detail: undefined, truncated: false });
+    unmount();
+  });
+
+  it('routes message-window invalidations only to that session’s subscribers', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+    const first = vi.fn();
+    const second = vi.fn();
+    const unsubscribe = result.current.subscribeSessionMessagesChanged('session-1', first);
+    result.current.subscribeSessionMessagesChanged('session-2', second);
+
+    ws.emit({ event: 'session_messages_changed', session_id: 'session-1' });
+    expect(first).toHaveBeenCalledTimes(1);
+    expect(second).not.toHaveBeenCalled();
+
+    unsubscribe();
+    ws.emit({ event: 'session_messages_changed', session_id: 'session-1' });
+    expect(first).toHaveBeenCalledTimes(1);
+    unmount();
+  });
+
+  it('revalidates subscribed message windows when the socket reconnects', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+    const listener = vi.fn();
+    result.current.subscribeSessionMessagesChanged('session-1', listener);
+    const before = FakeWebSocket.instances.length;
+
+    act(() => {
+      ws.close();
+    });
+
+    await waitFor(() => expect(FakeWebSocket.instances.length).toBeGreaterThan(before), { timeout: 2500 });
+    const replacement = FakeWebSocket.instances[before];
+    await waitFor(() => expect(replacement.readyState).toBe(FakeWebSocket.OPEN));
+    expect(replacement).not.toBe(ws);
+    await waitFor(() => expect(listener).toHaveBeenCalledTimes(1));
     unmount();
   });
 

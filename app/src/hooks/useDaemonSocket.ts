@@ -33,6 +33,7 @@ import type {
   AutomationRunSummary,
   AttachBlock as GeneratedAttachBlock,
 } from '../types/generated';
+import type { SessionMessageWindowStatus } from './daemonSessionAnnotationEvents';
 import {
   emitPtyEvent,
   setPtyBackend,
@@ -138,6 +139,10 @@ export type DaemonWorkspaceContext = GeneratedWorkspaceContext;
 export interface SessionMessageWindow {
   /** Oldest first. Empty when the transcript holds no annotatable prose. */
   messages: DaemonSessionMessage[];
+  /** The live transcript authority's current lifecycle. */
+  status: SessionMessageWindowStatus;
+  /** Actionable reason when status is unavailable. */
+  detail?: string;
   /** Older or oversized messages were left out; the daemon log says which. */
   truncated: boolean;
 }
@@ -234,7 +239,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '236';
+export const PROTOCOL_VERSION = '237';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -994,6 +999,10 @@ export function useDaemonSocket({
   // Markdown-annotation drafts use their own last-writer-wins correlation —
   // see daemonMarkdownAnnotationEvents.ts, not daemonPendingRequests.ts.
   const mdAnnotationsPendingRef = useRef<PendingMarkdownAnnotations>(new Map());
+  // Completed transcript messages invalidate only their own terminal. Keeping
+  // listeners here avoids a global React tick and releases the session entry as
+  // soon as its last pane unmounts.
+  const sessionMessageListenersRef = useRef<Map<string, Set<() => void>>>(new Map());
   // In-flight `get` promises shared per path: two tiles hydrating the same
   // document must share one round-trip, not supersede-reject each other
   // (a rejected hydrate would leave that tile's saves locked until retry).
@@ -1407,6 +1416,14 @@ export function useDaemonSocket({
 
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
+      }
+
+      // An invalidation broadcast while this client was disconnected cannot be
+      // replayed to it. Revalidate mounted message windows on every connection;
+      // the initial mount already fetches, and last-request-wins makes that
+      // harmless on the first open.
+      for (const listeners of sessionMessageListenersRef.current.values()) {
+        for (const listener of listeners) listener();
       }
       if (selectedWorkspaceRef.current) {
         ws.send(JSON.stringify({ cmd: 'workspace_selected', workspace_id: selectedWorkspaceRef.current }));
@@ -2933,7 +2950,11 @@ export function useDaemonSocket({
             if (handleFsDaemonEvent(data, { pending, onFsChanged: callbacksRef.current.onFsChanged })) break;
             if (handleNotebookDaemonEvent(data, { pending, onNotebookChanged: callbacksRef.current.onNotebookChanged })) break;
             if (handleMarkdownAnnotationDaemonEvent(data, mdAnnotationsPendingRef.current)) break;
-            if (handleSessionAnnotationDaemonEvent(data, pending)) break;
+            if (handleSessionAnnotationDaemonEvent(data, pending, (sessionId) => {
+              for (const listener of sessionMessageListenersRef.current.get(sessionId) ?? []) {
+                listener();
+              }
+            })) break;
             if (handleBusDaemonEvent(data, pending)) break;
             break;
           }
@@ -4502,6 +4523,19 @@ export function useDaemonSocket({
     return sendRequest('session_messages_get', { session_id: sessionId }, 'Session message fetch timed out');
   }, [sendRequest]);
 
+  const subscribeSessionMessagesChanged = useCallback((sessionId: string, listener: () => void) => {
+    let listeners = sessionMessageListenersRef.current.get(sessionId);
+    if (!listeners) {
+      listeners = new Set();
+      sessionMessageListenersRef.current.set(sessionId, listeners);
+    }
+    listeners.add(listener);
+    return () => {
+      listeners?.delete(listener);
+      if (listeners?.size === 0) sessionMessageListenersRef.current.delete(sessionId);
+    };
+  }, []);
+
   // Read a session's persisted annotations. `generation` is the floor a save
   // has to beat, which the caller seeds its counter from.
   const sendSessionAnnotationsGet = useCallback((sessionId: string): Promise<SessionAnnotationSet> => {
@@ -5418,6 +5452,7 @@ export function useDaemonSocket({
     sendNotebookList,
     sendNotebookRead,
     sendSessionMessagesGet,
+    subscribeSessionMessagesChanged,
     sendSessionAnnotationsGet,
     sendSessionAnnotationsSave,
     sendSessionAnnotationsClear,

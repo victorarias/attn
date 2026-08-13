@@ -36,8 +36,11 @@ const (
 	FactSessionRenamed      = "session.renamed"
 	FactSessionUnregistered = "session.unregistered"
 	FactSessionTodosChanged = "session.todos.changed"
-	FactSessionRespawned    = "session.respawned"
-	FactSessionPTYResized   = "session.pty.resized"
+	// FactSessionAssistantWindowChanged: the canonical annotatable window for
+	// this session changed. It is a pure invalidation and compactable by subject.
+	FactSessionAssistantWindowChanged = "session.assistant_window.changed"
+	FactSessionRespawned              = "session.respawned"
+	FactSessionPTYResized             = "session.pty.resized"
 	// FactSessionTerminated: a session going away in a bulk operation. Not
 	// FactSessionUnregistered — these paths only ever re-push the list.
 	FactSessionTerminated = "session.terminated"
@@ -251,8 +254,9 @@ const (
 )
 
 // CompactableFacts are the fact classes retention may reduce to one row per
-// subject — store-backed invalidations where only the newest carries
-// information. Session and ticket facts are deliberately absent.
+// subject — invalidations where only the newest carries information. Document
+// facts re-read the store; the assistant-window fact reads the current watcher
+// snapshot. Historical session and ticket facts are deliberately absent.
 //
 // The three loudest classes in a real log are session.state.changed (74%),
 // pr.updated (17%) and plugin.health.changed. All three are subject-only with a
@@ -263,7 +267,7 @@ const (
 // exactly the evidence that catches a producer flapping. Compaction bounds the
 // log by the data it describes; these classes are the ones whose write rate is
 // itself the signal. Bound them by fixing the producer, not by hiding the rows.
-var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared}
+var CompactableFacts = []string{FactDocumentChanged, FactDocumentCollectionRemoved, FactDocumentCollectionRedeclared, FactSessionAssistantWindowChanged}
 
 // projection maps facts to the wire traffic they produce.
 type projection struct {
@@ -322,6 +326,14 @@ func buildWireProjections() []projection {
 			filter: bus.Filter{FactSessionTodosChanged},
 			apply: func(d *Daemon, ev bus.Event) {
 				d.projectSessionEvent(protocol.EventSessionTodosUpdated, ev.Subject)
+			},
+		},
+		{
+			filter: bus.Filter{FactSessionAssistantWindowChanged},
+			apply: func(d *Daemon, ev bus.Event) {
+				d.wsHub.BroadcastValue(&protocol.SessionMessagesChangedMessage{
+					Event: protocol.EventSessionMessagesChanged, SessionID: ev.Subject,
+				})
 			},
 		},
 		{

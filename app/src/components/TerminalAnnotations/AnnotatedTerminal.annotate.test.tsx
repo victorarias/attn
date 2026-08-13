@@ -19,7 +19,6 @@ import type {
   TerminalAnnotation,
   TerminalAnnotationStore,
 } from '../../utils/terminalAnnotations';
-import type { UISessionState } from '../../types/sessionState';
 
 interface CapturedProps {
   annotations?: TerminalAnnotationStore;
@@ -84,6 +83,16 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
   submitRejection: Error | null = null;
   // Held open to drive the in-flight window: resolve it to let the send answer.
   releaseSubmit: (() => void) | null = null;
+  messageListeners = new Set<() => void>();
+
+  subscribeMessagesChanged = (_sessionId: string, listener: () => void) => {
+    this.messageListeners.add(listener);
+    return () => this.messageListeners.delete(listener);
+  };
+
+  notifyMessagesChanged() {
+    for (const listener of this.messageListeners) listener();
+  }
 
   submitAnnotations = async (_sessionId: string, text: string) => {
     this.submitted.push(text);
@@ -99,9 +108,9 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
     return { status: this.nextSubmitStatus };
   };
 
-  fetchMessages = async (_sessionId: string) => {
+  fetchMessages: SessionAnnotationApi['fetchMessages'] = async (_sessionId: string) => {
     this.calls.fetchMessages += 1;
-    return { messages: this.messages.map((message) => ({ ...message })), truncated: this.truncated };
+    return { messages: this.messages.map((message) => ({ ...message })), status: 'ready' as const, truncated: this.truncated };
   };
 
   fetchAnnotations = async (_sessionId: string) => {
@@ -150,13 +159,11 @@ class FakeAnnotationDaemon implements SessionAnnotationApi {
 }
 
 function props(overrides: {
-  state?: UISessionState;
   api?: SessionAnnotationApi;
   paneActive?: boolean;
 }) {
   return {
     sessionId: 'session-1',
-    sessionState: overrides.state ?? ('idle' as UISessionState),
     annotationApi: overrides.api,
     paneActive: overrides.paneActive ?? false,
     fontSize: 13,
@@ -168,16 +175,14 @@ function props(overrides: {
 }
 
 function renderTerminal(overrides: {
-  state?: UISessionState;
   api?: FakeAnnotationDaemon;
   paneActive?: boolean;
 } = {}) {
   const daemon = overrides.api ?? new FakeAnnotationDaemon();
   const view = render(<AnnotatedTerminal {...props({ ...overrides, api: daemon })} />);
-  const rerender = (next: { state?: UISessionState; paneActive?: boolean } = {}) =>
+  const rerender = (next: { paneActive?: boolean } = {}) =>
     view.rerender(
       <AnnotatedTerminal {...props({
-        state: next.state ?? overrides.state,
         paneActive: next.paneActive ?? overrides.paneActive,
         api: daemon,
       })} />,
@@ -242,7 +247,7 @@ afterEach(() => {
 });
 
 describe('AnnotatedTerminal', () => {
-  it('hands the terminal the annotatable window once the turn has settled', async () => {
+  it('hands the terminal the current annotatable window on mount', async () => {
     const { daemon } = renderTerminal();
 
     await windowReady('turn-1');
@@ -250,24 +255,56 @@ describe('AnnotatedTerminal', () => {
     expect(daemon.calls.fetchMessages).toBe(1);
   });
 
-  it('does not read a message the agent is still writing', async () => {
-    // Mid-turn the newest message is incomplete, and every offset taken against
-    // it would address text that is about to be replaced.
-    const { daemon } = renderTerminal({ state: 'working' });
+  it('refreshes completed commentary while the agent remains working', async () => {
+    const daemon = new FakeAnnotationDaemon();
+    daemon.messages = [];
+    renderTerminal({ api: daemon });
+    await waitFor(() => expect(daemon.calls.fetchMessages).toBe(1));
 
-    await act(async () => {});
-    expect(daemon.calls.fetchMessages).toBe(0);
+    daemon.messages = [{ key: 'turn-1', markdown: TURN_1 }];
+    act(() => daemon.notifyMessagesChanged());
+
+    await windowReady('turn-1');
+    expect(daemon.calls.fetchMessages).toBe(2);
+  });
+
+  it('does not let an older refresh replace a newer message window', async () => {
+    const daemon = new FakeAnnotationDaemon();
+    const resolveFetches: Array<(result: {
+      messages: AnnotatableMessage[];
+      status: 'discovering' | 'ready' | 'unavailable';
+      truncated: boolean;
+    }) => void> = [];
+    daemon.fetchMessages = async () => new Promise((resolve) => resolveFetches.push(resolve));
+    renderTerminal({ api: daemon });
+    await waitFor(() => expect(resolveFetches).toHaveLength(1));
+
+    act(() => daemon.notifyMessagesChanged());
+    await waitFor(() => expect(resolveFetches).toHaveLength(2));
+    await act(async () => {
+      resolveFetches[1]({
+        messages: [{ key: 'turn-2', markdown: TURN_2 }], status: 'ready', truncated: false,
+      });
+    });
+    await windowReady('turn-2');
+
+    await act(async () => {
+      resolveFetches[0]({
+        messages: [{ key: 'turn-1', markdown: TURN_1 }], status: 'ready', truncated: false,
+      });
+    });
+    expect(terminal.annotations?.messageKeys()).toEqual(['turn-2']);
   });
 
   it('keeps annotations when a re-fetch returns the same window', async () => {
-    const { rerender, daemon } = renderTerminal();
+    const { daemon } = renderTerminal();
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
     fireEvent.click(screen.getByLabelText('Show the receipt'));
     expect(stored()).toHaveLength(1);
 
-    rerender({ state: 'waiting_input' });
+    act(() => daemon.notifyMessagesChanged());
 
     await waitFor(() => expect(daemon.calls.fetchMessages).toBe(2));
     expect(stored()).toHaveLength(1);
@@ -277,7 +314,7 @@ describe('AnnotatedTerminal', () => {
     // The whole point of anchoring to the transcript. A new turn extends the
     // window; the annotation on the previous one addresses a key that is still
     // in it, so it keeps its quote, its place in the panel, and its wash.
-    const { rerender, daemon } = renderTerminal();
+    const { daemon } = renderTerminal();
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
@@ -288,7 +325,7 @@ describe('AnnotatedTerminal', () => {
       { key: 'turn-1', markdown: TURN_1 },
       { key: 'turn-2', markdown: TURN_2 },
     ];
-    rerender({ state: 'waiting_input' });
+    act(() => daemon.notifyMessagesChanged());
 
     await windowReady('turn-1', 'turn-2');
     expect(stored()).toHaveLength(1);
@@ -299,14 +336,14 @@ describe('AnnotatedTerminal', () => {
   it('keeps an annotation whose turn has scrolled out of the window', async () => {
     // Losing the user's work because a turn aged out is the same bug as losing
     // it on a new turn. It stops painting; it does not stop existing.
-    const { rerender, daemon } = renderTerminal();
+    const { daemon } = renderTerminal();
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
     fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     daemon.messages = [{ key: 'turn-2', markdown: TURN_2 }];
-    rerender({ state: 'waiting_input' });
+    act(() => daemon.notifyMessagesChanged());
 
     await windowReady('turn-2');
     expect(stored()).toHaveLength(1);
@@ -877,7 +914,7 @@ describe('AnnotatedTerminal sending', () => {
     // pending_approval is annotatable — an approval prompt is exactly when a
     // user wants to push back — but it is also where the submitting Enter would
     // answer the prompt. The daemon refuses; the marks have to survive it.
-    const { daemon } = renderTerminal({ state: 'pending_approval' as UISessionState });
+    const { daemon } = renderTerminal();
     daemon.nextSubmitStatus = 'skipped_pending_approval';
     await windowReady('turn-1');
 
@@ -1180,33 +1217,20 @@ describe('AnnotatedTerminal persistence', () => {
     });
 
     it('names the unreadable transcript rather than blaming the selection', async () => {
-      // The daemon's own path: resolveTranscriptPathForSession found nothing, so
-      // there is no window and never will be for this session.
       const daemon = new FakeAnnotationDaemon();
-      daemon.fetchMessages = async () => {
-        throw new Error('session_messages_get: no transcript for session session-1');
-      };
-      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const fetch = vi.fn(async () => ({
+        messages: [],
+        status: 'unavailable' as const,
+        detail: 'No exact transcript is available for this session.',
+        truncated: false,
+      }));
+      daemon.fetchMessages = fetch;
       renderTerminal({ api: daemon });
-      await waitFor(() => expect(warn).toHaveBeenCalled());
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
 
       miss('no-messages');
 
-      expect(notice()).toContain('No transcript could be read');
-      // The sentence is for the user; the daemon's wording is what makes the
-      // cause searchable afterwards.
-      expect(warn.mock.calls[0][0]).toContain('no transcript for session session-1');
-      warn.mockRestore();
-    });
-
-    it('points at the running turn when the window was never fetched', async () => {
-      // Not an error at all: nothing is anchored mid-turn by design, and the
-      // user has only to wait.
-      renderTerminal({ state: 'working' });
-
-      miss('no-messages');
-
-      expect(notice()).toContain('once the agent stops talking');
+      expect(notice()).toContain('No exact transcript is available');
     });
 
     it('says the agent has not spoken when the window came back empty', async () => {
@@ -1218,6 +1242,18 @@ describe('AnnotatedTerminal persistence', () => {
       miss('no-messages');
 
       expect(notice()).toContain('has not written a message');
+    });
+
+    it('describes transcript startup as discovering rather than broken', async () => {
+      const daemon = new FakeAnnotationDaemon();
+      const fetch = vi.fn(async () => ({ messages: [], status: 'discovering' as const, truncated: false }));
+      daemon.fetchMessages = fetch;
+      renderTerminal({ api: daemon });
+      await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+      miss('no-messages');
+
+      expect(notice()).toContain('still being recorded');
     });
 
     it('clears itself once an annotation actually lands', async () => {

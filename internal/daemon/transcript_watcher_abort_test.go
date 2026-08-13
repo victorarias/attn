@@ -20,9 +20,8 @@ type haltedTurnCase struct {
 	name  string
 	agent protocol.SessionAgent
 	// seed writes the transcript the watcher must discover, and returns its path.
-	// Discovery is per-agent — claude names the file after the session id it was
-	// launched with, codex and copilot are found by cwd and start time — so the
-	// fixture has to satisfy the real finder.
+	// Discovery is per-agent, and the watcher resolves the agent-native id through
+	// each real finder, so the fixture has to satisfy that exact lookup.
 	seed func(t *testing.T, home, dir, sessionID string) string
 	// abort is the captured line each agent writes when the user hits ESC, dated
 	// at `at`. The date is part of the contract: an undated halt is thrown away.
@@ -133,6 +132,7 @@ func TestTheWatcherSettlesATurnTheUserHalted(t *testing.T) {
 
 				startedAt := time.Now()
 				path := tc.seed(t, home, session.Directory, id)
+				d.store.SetResumeSessionID(id, id)
 				d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
 				t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 
@@ -156,6 +156,122 @@ func TestTheWatcherSettlesATurnTheUserHalted(t *testing.T) {
 			})
 		})
 	}
+}
+
+func TestWatcherInvalidatesMessagesWhileSessionStaysWorking(t *testing.T) {
+	t.Setenv(toolhome.EnvVar, t.TempDir())
+	home, _ := toolhome.Dir()
+	d := newTraceDaemon(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		id := "sess-working-commentary"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+		session := d.store.Get(id)
+
+		var seed func(t *testing.T, home, dir, sessionID string) string
+		for _, tc := range haltedTurnCases() {
+			if tc.name == "codex" {
+				seed = tc.seed
+			}
+		}
+		path := seed(t, home, session.Directory, id)
+		d.store.SetResumeSessionID(id, id)
+		d.startTranscriptWatcher(id, protocol.SessionAgentCodex, session.Directory, time.Now())
+		requireTranscriptDiscovery(t, d, id)
+		baseline, err := d.store.BusEventsSince(0, 100)
+		if err != nil {
+			t.Fatalf("BusEventsSince baseline: %v", err)
+		}
+		var afterSeq int64
+		if len(baseline) > 0 {
+			afterSeq = baseline[len(baseline)-1].Seq
+		}
+
+		// Codex can write the same completed prose in paired native records. One
+		// transcript poll invalidates once, not once per line.
+		writeLine(t, path, `{"type":"event_msg","payload":{"type":"agent_message","message":"Checking the current renderer."}}`)
+		writeLine(t, path, `{"type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Checking the current renderer."}]}}`)
+		advancePolls(2)
+
+		events, err := d.store.BusEventsSince(afterSeq, 10)
+		if err != nil {
+			t.Fatalf("BusEventsSince: %v", err)
+		}
+		var invalidations int
+		for _, event := range events {
+			if event.Name == FactSessionAssistantWindowChanged && event.Subject == id {
+				invalidations++
+			}
+		}
+		if invalidations != 1 {
+			t.Fatalf("assistant-message invalidations = %d, want 1; events=%+v", invalidations, events)
+		}
+		if state := d.store.Get(id).State; state != protocol.SessionStateWorking {
+			t.Fatalf("state = %q, want working throughout", state)
+		}
+	})
+}
+
+func TestWatcherLifecycleRequiresExactNativeTranscriptIdentity(t *testing.T) {
+	t.Setenv(toolhome.EnvVar, t.TempDir())
+	home, _ := toolhome.Dir()
+	d := newTraceDaemon(t)
+
+	synctest.Test(t, func(t *testing.T) {
+		stopDaemonBackground(t, d)
+		id := "sess-exact-lifecycle"
+		nativeID := "native-exact-lifecycle"
+		addCharacterizationSession(t, d, id, protocol.SessionAgentCodex, protocol.SessionStateWorking)
+		session := d.store.Get(id)
+
+		// A rollout in the same cwd is not authority for this session.
+		var seed func(t *testing.T, home, dir, sessionID string) string
+		for _, tc := range haltedTurnCases() {
+			if tc.name == "codex" {
+				seed = tc.seed
+			}
+		}
+		seed(t, home, session.Directory, "neighboring-native-session")
+
+		d.startTranscriptWatcher(id, protocol.SessionAgentCodex, session.Directory, time.Now())
+		d.watchersMu.Lock()
+		watcher := d.transcriptWatch[id]
+		d.watchersMu.Unlock()
+		if got := watcher.snapshot().Status; got != protocol.SessionMessageWindowStatusDiscovering {
+			t.Fatalf("initial status = %q, want discovering", got)
+		}
+
+		advancePolls(5)
+		if got := watcher.snapshot(); got.Status != protocol.SessionMessageWindowStatusUnavailable || len(got.Messages) != 0 {
+			t.Fatalf("without native identity = %+v, want unavailable and empty", got)
+		}
+
+		path := seed(t, home, session.Directory, nativeID)
+		writeLine(t, path, `{"type":"event_msg","payload":{"type":"agent_message","message":"Exact live commentary."}}`)
+		d.store.SetResumeSessionID(id, nativeID)
+		advancePolls(2)
+		ready := watcher.snapshot()
+		if ready.Status != protocol.SessionMessageWindowStatusReady || len(ready.Messages) != 1 || ready.Messages[0].Content != "Exact live commentary." {
+			t.Fatalf("exact transcript snapshot = %+v", ready)
+		}
+
+		if err := os.Remove(path); err != nil {
+			t.Fatal(err)
+		}
+		advancePolls(1)
+		if got := watcher.snapshot(); got.Status != protocol.SessionMessageWindowStatusUnavailable || len(got.Messages) != 0 {
+			t.Fatalf("after transcript disappearance = %+v, want unavailable and empty", got)
+		}
+
+		d.stopTranscriptWatcher(id)
+		synctest.Wait()
+		select {
+		case <-watcher.doneCh:
+		default:
+			t.Fatal("watcher did not stop")
+		}
+	})
 }
 
 // The watcher re-reads history as a matter of course — it rewinds a bootstrap
@@ -183,6 +299,7 @@ func TestAHaltFromBeforeTheSessionStartedIsIgnored(t *testing.T) {
 				path := tc.seed(t, home, session.Directory, id)
 				writeLine(t, path, tc.abort(startedAt.Add(-2*time.Hour)))
 
+				d.store.SetResumeSessionID(id, id)
 				d.startTranscriptWatcher(id, tc.agent, session.Directory, startedAt)
 				t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 				requireTranscriptDiscovery(t, d, id)
@@ -227,6 +344,7 @@ func TestAnUndatedHaltIsIgnored(t *testing.T) {
 		path := filepath.Join(projects, id+".jsonl")
 		writeLine(t, path, `{"type":"user","message":{"role":"user","content":"write an essay"}}`)
 
+		d.store.SetResumeSessionID(id, id)
 		d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
 		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 		requireTranscriptDiscovery(t, d, id)
@@ -307,6 +425,7 @@ func TestACopilotAbortNobodyAskedForStillClosesTheTurn(t *testing.T) {
 		}
 		path := seed(t, home, session.Directory, id)
 
+		d.store.SetResumeSessionID(id, id)
 		d.startTranscriptWatcher(id, protocol.SessionAgentCopilot, session.Directory, time.Now())
 		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 		requireTranscriptDiscovery(t, d, id)
@@ -367,6 +486,7 @@ func TestATranscriptLineThatMerelyMentionsTheMarkerIsNotAHalt(t *testing.T) {
 		path := filepath.Join(projects, id+".jsonl")
 		writeLine(t, path, `{"type":"user","message":{"role":"user","content":"why do i see [Request interrupted by user] in my logs?"}}`)
 
+		d.store.SetResumeSessionID(id, id)
 		d.startTranscriptWatcher(id, protocol.SessionAgentClaude, session.Directory, time.Now())
 		t.Cleanup(func() { d.stopTranscriptWatcher(id) })
 		requireTranscriptDiscovery(t, d, id)
@@ -410,7 +530,7 @@ func requireTranscriptDiscovery(t *testing.T, d *Daemon, sessionID string) {
 	d.watchersMu.Lock()
 	watcher := d.transcriptWatch[sessionID]
 	d.watchersMu.Unlock()
-	if watcher == nil || d.findTranscriptPathForWatcher(watcher) == "" {
+	if watcher == nil || watcher.snapshot().Status != protocol.SessionMessageWindowStatusReady {
 		t.Fatal("watcher never discovered the transcript")
 	}
 }

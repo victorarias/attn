@@ -62,9 +62,9 @@ func TestResolveTranscriptPathForSession_PrefersCodexNativeSessionID(t *testing.
 	}
 }
 
-// Without a synced native id the cwd guess is still the fallback: resolution
-// degrades to the finder's pick instead of returning nothing.
-func TestResolveTranscriptPathForSession_FallsBackToCWDGuessWithoutNativeID(t *testing.T) {
+// Without an exact native or live-watcher identity, a neighboring rollout in
+// the same cwd must never be returned.
+func TestResolveTranscriptPathForSession_RejectsCWDGuessWithoutNativeID(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 
@@ -72,7 +72,7 @@ func TestResolveTranscriptPathForSession_FallsBackToCWDGuessWithoutNativeID(t *t
 	cwd := "/repo/project"
 	now := time.Now()
 
-	newest := writeCodexInteractiveRollout(t, codexHome, "native-only", cwd, now.Add(-time.Minute))
+	neighbor := writeCodexInteractiveRollout(t, codexHome, "native-only", cwd, now.Add(-time.Minute))
 
 	d.store.Add(&protocol.Session{
 		ID:        "sess",
@@ -82,7 +82,7 @@ func TestResolveTranscriptPathForSession_FallsBackToCWDGuessWithoutNativeID(t *t
 	})
 
 	got := d.resolveTranscriptPathForSession(d.store.Get("sess"), "")
-	if got != newest {
-		t.Fatalf("resolveTranscriptPathForSession() = %q, want cwd-guess rollout %q", got, newest)
+	if got != "" {
+		t.Fatalf("resolveTranscriptPathForSession() = %q, want no exact path (neighbor=%q)", got, neighbor)
 	}
 }

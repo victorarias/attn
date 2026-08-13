@@ -1,0 +1,18 @@
+kind: fixed
+area: terminal
+change: >
+  Agent commentary can now be annotated as soon as it appears, without waiting
+  for the whole turn to finish.
+symptom: >
+  Selecting completed Codex commentary during a running turn could say “Only
+  what the agent wrote can be annotated” even though the selected text was
+  written by the agent. A session whose transcript had not been created yet
+  could also leave a misleading warning until the agent stopped.
+notes: >
+  Completed transcript messages now invalidate only that session's annotatable
+  window. Mounted terminals re-read the canonical bounded message list on the
+  invalidation and on remount. Transcript discovery is now an explicit live
+  lifecycle, and a session without an exact agent-native transcript identity is
+  reported as unavailable instead of guessing from nearby transcript files.
+  Codex assistant markers also disambiguate agent prose from an identical copy
+  quoted in the user's prompt.

@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"sync"
@@ -13,6 +14,33 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
+
+func TestAssistantWindowFactProjectsOneSessionInvalidation(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopEventBus)
+	trace := wireRecorder(d)
+
+	d.publishFact(FactSessionAssistantWindowChanged, "sess-1", nil)
+
+	if got := trace.EventNames(); len(got) != 1 || got[0] != protocol.EventSessionMessagesChanged {
+		t.Fatalf("wire events = %v, want one %s", got, protocol.EventSessionMessagesChanged)
+	}
+	var message protocol.SessionMessagesChangedMessage
+	if err := json.Unmarshal(trace.Payloads()[0], &message); err != nil {
+		t.Fatalf("decode invalidation: %v", err)
+	}
+	if message.SessionID != "sess-1" {
+		t.Fatalf("session_id = %q, want sess-1", message.SessionID)
+	}
+
+	logged, err := d.store.BusEventsSince(0, 10)
+	if err != nil {
+		t.Fatalf("BusEventsSince: %v", err)
+	}
+	if len(logged) != 1 || logged[0].Name != FactSessionAssistantWindowChanged || logged[0].Subject != "sess-1" {
+		t.Fatalf("expected one subject-carrying assistant-window fact, got %+v", logged)
+	}
+}
 
 // These tests exercise the bus against the REAL sqlBusStore, not the in-memory
 // fake internal/bus uses. A green run in internal/bus only proves the delivery

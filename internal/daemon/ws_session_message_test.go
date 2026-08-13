@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/transcript"
 )
 
 // writeCodexRollout lays down a codex rollout under CODEX_HOME for `cwd`, so
@@ -66,7 +67,7 @@ func codexSessionDaemon(t *testing.T, messages ...string) (*Daemon, string) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 	cwd := t.TempDir()
-	writeCodexRollout(t, codexHome, "pane-rollout", cwd, "cli", messages...)
+	path := writeCodexRollout(t, codexHome, "pane-rollout", cwd, "cli", messages...)
 
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.store.Add(&protocol.Session{
@@ -76,7 +77,24 @@ func codexSessionDaemon(t *testing.T, messages ...string) (*Daemon, string) {
 		Directory: cwd,
 		State:     protocol.StateIdle,
 	})
+	seedAssistantWindow(t, d, "session-1", protocol.SessionAgentCodex, cwd, path)
 	return d, "session-1"
+}
+
+func seedAssistantWindow(t *testing.T, d *Daemon, sessionID string, agent protocol.SessionAgent, cwd, path string) {
+	t.Helper()
+	watcher := newTranscriptWatcher(sessionID, agent, cwd, time.Now(), nil)
+	follower, err := transcript.NewFollower(path, string(agent), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := follower.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	watcher.resetSource(protocol.SessionMessageWindowStatusReady, path, "", false)
+	watcher.applyEvents(batch.Events)
+	d.transcriptWatch[sessionID] = watcher
 }
 
 func TestSessionMessagesGet_ReturnsPastTurnsOldestFirst(t *testing.T) {
@@ -88,6 +106,9 @@ func TestSessionMessagesGet_ReturnsPastTurnsOldestFirst(t *testing.T) {
 
 	if !result.Success {
 		t.Fatalf("success = false, error = %v", protocol.Deref(result.Error))
+	}
+	if result.Status != protocol.SessionMessageWindowStatusReady {
+		t.Fatalf("status = %q, want ready", result.Status)
 	}
 	want := []string{"An earlier answer.", "The answer under annotation."}
 	if got := markdowns(result.Messages); !sameMarkdowns(got, want) {
@@ -139,6 +160,38 @@ func TestSessionMessagesGet_EmptyTranscriptIsNotAnError(t *testing.T) {
 	}
 	if len(result.Messages) != 0 {
 		t.Errorf("messages = %q, want none", markdowns(result.Messages))
+	}
+}
+
+func TestSessionMessagesGet_LiveTranscriptStartupIsDiscovering(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	t.Cleanup(d.stopEventBus)
+	d.store.Add(&protocol.Session{
+		ID: "session-1", Agent: protocol.SessionAgentCodex, Directory: t.TempDir(),
+		State: protocol.SessionStateWorking,
+	})
+	d.transcriptWatch["session-1"] = newTranscriptWatcher("session-1", protocol.SessionAgentCodex, t.TempDir(), time.Now(), nil)
+
+	result := sessionMessagesGet(t, d, "session-1")
+
+	if !result.Success || result.Status != protocol.SessionMessageWindowStatusDiscovering || result.Error != nil {
+		t.Fatalf("result = %+v, want successful discovering window", result)
+	}
+	if len(result.Messages) != 0 || result.Truncated {
+		t.Fatalf("discovering result carried a window: %+v", result)
+	}
+}
+
+func TestSessionMessagesGet_NoLiveTranscriptAuthorityIsUnavailable(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	d.store.Add(&protocol.Session{ID: "session-1", Agent: protocol.SessionAgentCodex, Directory: t.TempDir(), State: protocol.StateIdle})
+
+	result := sessionMessagesGet(t, d, "session-1")
+
+	if !result.Success || result.Status != protocol.SessionMessageWindowStatusUnavailable || protocol.Deref(result.Detail) == "" {
+		t.Fatalf("result = %+v, want successful unavailable status with detail", result)
 	}
 }
 
@@ -204,7 +257,7 @@ func TestSessionMessagesGet_IgnoresHeadlessExecRollouts(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
 	cwd := t.TempDir()
-	writeCodexRollout(t, codexHome, "pane", cwd, "cli", "What the agent said to the user.")
+	panePath := writeCodexRollout(t, codexHome, "pane", cwd, "cli", "What the agent said to the user.")
 	writeCodexRollout(t, codexHome, "classifier", cwd, "exec", `{"verdict":"DONE"}`)
 
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
@@ -214,11 +267,33 @@ func TestSessionMessagesGet_IgnoresHeadlessExecRollouts(t *testing.T) {
 		Directory: cwd,
 		State:     protocol.StateIdle,
 	})
+	seedAssistantWindow(t, d, "session-1", protocol.SessionAgentCodex, cwd, panePath)
 
 	result := sessionMessagesGet(t, d, "session-1")
 
 	if got := markdowns(result.Messages); !sameMarkdowns(got, []string{"What the agent said to the user."}) {
 		t.Errorf("messages = %q, want the interactive pane's message", got)
+	}
+}
+
+func TestSessionMessagesGet_SameDirectorySessionsKeepExactTranscriptIdentity(t *testing.T) {
+	codexHome := t.TempDir()
+	t.Setenv("CODEX_HOME", codexHome)
+	cwd := t.TempDir()
+	firstPath := writeCodexRollout(t, codexHome, "first", cwd, "cli", "first session")
+	secondPath := writeCodexRollout(t, codexHome, "second", cwd, "cli", "second session")
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	for _, id := range []string{"first", "second"} {
+		d.store.Add(&protocol.Session{ID: id, Agent: protocol.SessionAgentCodex, Directory: cwd, State: protocol.StateIdle})
+	}
+	seedAssistantWindow(t, d, "first", protocol.SessionAgentCodex, cwd, firstPath)
+	seedAssistantWindow(t, d, "second", protocol.SessionAgentCodex, cwd, secondPath)
+
+	if got := markdowns(sessionMessagesGet(t, d, "first").Messages); !sameMarkdowns(got, []string{"first session"}) {
+		t.Fatalf("first session messages = %q", got)
+	}
+	if got := markdowns(sessionMessagesGet(t, d, "second").Messages); !sameMarkdowns(got, []string{"second session"}) {
+		t.Fatalf("second session messages = %q", got)
 	}
 }
 

@@ -1,0 +1,10 @@
+kind: fixed
+area: terminal annotations
+change: >
+  Completed agent answers remain annotatable across Markdown links that the
+  terminal renders as labels or shortened file paths, instead of becoming
+  unannotatable after the first rewritten link.
+symptom: >
+  In a long Codex answer with source links, only one portion of the agent's last
+  message could be annotated. Selecting other agent-written prose incorrectly
+  said that only what the agent wrote could be annotated.

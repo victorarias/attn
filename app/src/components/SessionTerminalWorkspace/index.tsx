@@ -1054,7 +1054,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 <AnnotatedTerminal
                   ref={terminalRefForPane(agentPane.id)}
                   sessionId={agentPane.sessionId}
-                  sessionState={paneSession?.state}
                   annotationApi={annotationApi}
                   // Gates the annotation send shortcut. The focused leaf of the
                   // visible session, so ⌘Enter belongs to at most one pane and

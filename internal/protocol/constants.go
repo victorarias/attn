@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "236"
+const ProtocolVersion = "237"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -454,6 +454,7 @@ const (
 	EventWorkspaceTileContent            = "workspace_tile_content"
 	EventOpenMarkdownResult              = "open_markdown_result"
 	EventSessionMessagesGetResult        = "session_messages_get_result"
+	EventSessionMessagesChanged          = "session_messages_changed"
 	EventPastConversationsResult         = "past_conversations_result"
 	EventBusStatusResult                 = "bus_status_result"
 	EventBusSetConsumerEnabledResult     = "bus_set_consumer_enabled_result"
