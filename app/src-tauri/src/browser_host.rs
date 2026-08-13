@@ -252,25 +252,36 @@ fn native_position(window: &tauri::Window, x: f64, y: f64) -> LogicalPosition<f6
     LogicalPosition::new((x + inset.0).max(0.0), (y + inset.1).max(0.0))
 }
 
-fn set_geometry(
-    webview: &tauri::Webview,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    visible: bool,
-) -> Result<(), String> {
-    if !visible {
+// Where a browser webview sits and whether it shows. One value because the five
+// numbers only ever travel together, and a caller that could pass four of them
+// is a caller that can pass them in the wrong order.
+#[derive(Debug, Clone, Copy, Deserialize)]
+pub struct Geometry {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    pub visible: bool,
+}
+
+impl Geometry {
+    fn size(&self) -> LogicalSize<f64> {
+        LogicalSize::new(self.width.max(1.0), self.height.max(1.0))
+    }
+}
+
+fn set_geometry(webview: &tauri::Webview, geometry: Geometry) -> Result<(), String> {
+    if !geometry.visible {
         clear_browser_focus_for(webview.label());
     }
     let window = webview.window();
     webview
-        .set_position(native_position(&window, x, y))
+        .set_position(native_position(&window, geometry.x, geometry.y))
         .map_err(|error| format!("position browser webview: {error}"))?;
     webview
-        .set_size(LogicalSize::new(width.max(1.0), height.max(1.0)))
+        .set_size(geometry.size())
         .map_err(|error| format!("resize browser webview: {error}"))?;
-    if visible {
+    if geometry.visible {
         webview.show()
     } else {
         webview.hide()
@@ -284,11 +295,7 @@ pub async fn browser_host_mount(
     app: AppHandle,
     label: String,
     url: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    visible: bool,
+    geometry: Geometry,
 ) -> Result<(), String> {
     validate_label(&label)?;
     let url = parse_url(&url)?;
@@ -296,7 +303,7 @@ pub async fn browser_host_mount(
         webview
             .navigate(url)
             .map_err(|error| format!("navigate browser webview: {error}"))?;
-        return set_geometry(&webview, x, y, width, height, visible);
+        return set_geometry(&webview, geometry);
     }
 
     let window = app
@@ -333,8 +340,8 @@ pub async fn browser_host_mount(
     let webview = window
         .add_child(
             builder,
-            native_position(&window, x, y),
-            LogicalSize::new(width.max(1.0), height.max(1.0)),
+            native_position(&window, geometry.x, geometry.y),
+            geometry.size(),
         )
         .map_err(|error| format!("create browser webview: {error}"))?;
     register_focus_handler(&webview)?;
@@ -344,7 +351,7 @@ pub async fn browser_host_mount(
     webview
         .navigate(url)
         .map_err(|error| format!("navigate browser webview: {error}"))?;
-    set_geometry(&webview, x, y, width, height, visible)
+    set_geometry(&webview, geometry)
 }
 
 #[tauri::command]
@@ -352,17 +359,13 @@ pub fn browser_host_update(
     _caller: TrustedMainWebview,
     app: AppHandle,
     label: String,
-    x: f64,
-    y: f64,
-    width: f64,
-    height: f64,
-    visible: bool,
+    geometry: Geometry,
 ) -> Result<(), String> {
     validate_label(&label)?;
     let webview = app
         .get_webview(&label)
         .ok_or_else(|| "browser webview is not mounted".to_string())?;
-    set_geometry(&webview, x, y, width, height, visible)
+    set_geometry(&webview, geometry)
 }
 
 #[tauri::command]
