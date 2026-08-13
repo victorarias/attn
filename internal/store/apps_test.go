@@ -277,6 +277,60 @@ func TestApps_BareRollbackWalksTheChainDown(t *testing.T) {
 	}
 }
 
+// The history read is what `attn app status` shows: the version serving now
+// first, then each version one bare rollback further back, and a total so a
+// capped answer can say it was cut.
+func TestApps_ServingHistoryReadsTheWalkFromTheTop(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	older, newer := seedApps(t, s, now)
+
+	history, steps, err := s.ListAppServingHistory("approval-gate", 10)
+	if err != nil {
+		t.Fatalf("read history: %v", err)
+	}
+	if len(history) != 2 || history[0] != newer.ID || history[1] != older.ID {
+		t.Fatalf("history = %v, want [%d %d]", history, newer.ID, older.ID)
+	}
+	if steps != 2 {
+		t.Fatalf("steps = %d, want 2", steps)
+	}
+
+	// Walking does not shorten the history; it moves where the app stands on it,
+	// so what is left below is what the next rollback can still reach.
+	if err := s.StepAppVersionBack("approval-gate", older.ID, now.Add(time.Hour)); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	history, steps, err = s.ListAppServingHistory("approval-gate", 10)
+	if err != nil {
+		t.Fatalf("read history after the walk: %v", err)
+	}
+	if len(history) != 1 || history[0] != older.ID || steps != 1 {
+		t.Fatalf("history after the walk = %v (%d steps), want just %d", history, steps, older.ID)
+	}
+
+	// The cap trims what is returned and never the total, so a longer walk is
+	// visible rather than silently ending.
+	if err := s.SetAppCurrentVersion("approval-gate", newer.ID, now.Add(2*time.Hour)); err != nil {
+		t.Fatalf("named rollback: %v", err)
+	}
+	history, steps, err = s.ListAppServingHistory("approval-gate", 1)
+	if err != nil {
+		t.Fatalf("read capped history: %v", err)
+	}
+	if len(history) != 1 || history[0] != newer.ID || steps != 2 {
+		t.Fatalf("capped history = %v (%d steps), want one entry of two", history, steps)
+	}
+
+	// An app that has never served has no history at all.
+	if err := s.SaveApp("half-installed", now); err != nil {
+		t.Fatalf("save app: %v", err)
+	}
+	if history, steps, err := s.ListAppServingHistory("half-installed", 10); err != nil || len(history) != 0 || steps != 0 {
+		t.Fatalf("unserved app history = %v (%d steps, %v)", history, steps, err)
+	}
+}
+
 // A walk refuses when the step below is not the version the caller resolved and
 // reported, rather than landing somewhere nobody was told about.
 func TestApps_WalkRefusesAStaleTarget(t *testing.T) {

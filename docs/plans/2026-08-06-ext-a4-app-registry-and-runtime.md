@@ -556,7 +556,9 @@ recovery drain, bare-rollback trap):
   pushes a step and so restarts the walk from there — which makes the way
   back from a fix the version that was actually running when it was
   applied, not the ones the walk had already gone past. A bare rollback
-  moves the cursor down one step and pushes nothing. Migration 105 carries
+  moves the cursor down one step and pushes nothing. `attn app status` shows
+  the history, so "is there another step and where does it land" is answerable
+  without running the rollback. Migration 105 carries
   every recorded predecessor into a two-step chain, so a profile upgrading
   mid-rollback lands exactly where the old rule would have put it and can
   then keep walking.

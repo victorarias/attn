@@ -546,6 +546,13 @@ type AppStatusResult struct {
 	// Runtime corresponds to the JSON schema field "runtime".
 	Runtime *AppRuntimeInfo `json:"runtime,omitempty,omitzero"`
 
+	// ServingHistory corresponds to the JSON schema field "serving_history".
+	ServingHistory []AppVersionInfo `json:"serving_history,omitempty,omitzero"`
+
+	// ServingHistorySteps corresponds to the JSON schema field
+	// "serving_history_steps".
+	ServingHistorySteps *int `json:"serving_history_steps,omitempty,omitzero"`
+
 	// Stall corresponds to the JSON schema field "stall".
 	Stall *AppStallInfo `json:"stall,omitempty,omitzero"`
 

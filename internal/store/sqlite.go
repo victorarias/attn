@@ -2672,16 +2672,17 @@ func applyMigration103(tx *sql.Tx) error {
 // old column and its data untouched rather than half-carried.
 func applyMigration105(tx *sql.Tx) error {
 	if _, err := tx.Exec(`
+-- No index beyond the primary key: every reader arrives holding a step id —
+-- the registry's cursor, or the parent of the step it is standing on — so the
+-- chain is walked by rowid. app_name is carried to keep a step readable on its
+-- own and for the one-time carry below.
 CREATE TABLE IF NOT EXISTS app_serving_steps (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
     app_name   TEXT NOT NULL,
     version_id INTEGER NOT NULL,
     parent_id  INTEGER,
     created_at TEXT NOT NULL
-);
--- One app's chain, and the walk down it: both start from a step and follow
--- parent_id, and the registry reads the newest steps of one app.
-CREATE INDEX IF NOT EXISTS idx_app_serving_steps_app ON app_serving_steps(app_name, id DESC);`); err != nil {
+);`); err != nil {
 		return err
 	}
 	has, err := columnExists(tx, "apps", "serving_step_id")

@@ -39,6 +39,15 @@ const recentInvocationLimit = 10
 // invocations.
 const recentVersionLimit = 10
 
+// servingHistoryLimit is how many steps of an app's serving history
+// `attn app status` carries back, on the same wire budget and for the same
+// reason as recentVersionLimit above. Ten is far past any real walk: a step is
+// pushed only when the serving version actually changes, and an operator
+// hunting for the version that worked gives up long before ten bare rollbacks.
+// The list says when it was cut, so a longer chain is visible rather than
+// silently ending.
+const servingHistoryLimit = 10
+
 // appEnabledChanged is FactAppEnabledChanged's payload.
 type appEnabledChanged struct {
 	Name     string `json:"name"`
@@ -128,11 +137,17 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		d.sendError(conn, fmt.Sprintf("reading invocations of app %q: %v", name, err))
 		return
 	}
-	recentVersions, err := d.store.ListAppVersions(name)
+	allVersions, err := d.store.ListAppVersions(name)
 	if err != nil {
 		d.sendError(conn, fmt.Sprintf("reading versions of app %q: %v", name, err))
 		return
 	}
+	history, steps, err := d.store.ListAppServingHistory(name, servingHistoryLimit)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("reading the serving history of app %q: %v", name, err))
+		return
+	}
+	recentVersions := allVersions
 	if len(recentVersions) > recentVersionLimit {
 		recentVersions = recentVersions[:recentVersionLimit]
 	}
@@ -145,6 +160,27 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 			ArtifactPath: version.ArtifactPath,
 			CreatedAt:    stampForWire(version.CreatedAt),
 		})
+	}
+	// The history walks past the newest versions once an app has been rolled
+	// back, so its rows come from the whole list rather than the capped one.
+	byID := make(map[int64]store.AppVersion, len(allVersions))
+	for _, version := range allVersions {
+		byID[version.ID] = version
+	}
+	for _, id := range history {
+		version, ok := byID[id]
+		if !ok {
+			continue
+		}
+		result.ServingHistory = append(result.ServingHistory, protocol.AppVersionInfo{
+			ID:           int(version.ID),
+			ContentHash:  version.ContentHash,
+			ArtifactPath: version.ArtifactPath,
+			CreatedAt:    stampForWire(version.CreatedAt),
+		})
+	}
+	if steps > 0 {
+		result.ServingHistorySteps = protocol.Ptr(steps)
 	}
 	for _, inv := range recent {
 		result.Recent = append(result.Recent, appInvocationForWire(inv.ID, inv))

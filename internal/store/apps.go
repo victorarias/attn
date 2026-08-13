@@ -134,8 +134,9 @@ type AppInvocation struct {
 }
 
 // SaveApp creates a registry row, or touches an existing one. It never moves
-// current_version_id: the pointer moves only through CommitAppVersion and
-// SetAppCurrentVersion, so no caller can flip an app onto a version by accident.
+// current_version_id: the pointer moves only through CommitAppVersion,
+// SetAppCurrentVersion and StepAppVersionBack, so no caller can flip an app onto
+// a version by accident.
 func (s *Store) SaveApp(name string, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -357,6 +358,62 @@ func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) err
 		UPDATE apps SET current_version_id = ?, serving_step_id = ?, updated_at = ? WHERE name = ?
 	`, versionID, stepID, now.UTC().Format(sortableTimeFormat), name)
 	return err
+}
+
+// ListAppServingHistory returns the versions on an app's serving history,
+// currently-serving first and each next one a bare rollback away, up to limit
+// steps. It is how `attn app status` answers the question the walk otherwise
+// only answers by being run: is there another step, and where does it land.
+//
+// The versions below the first are not "the older versions" — a version the
+// walk went past is off the history but still in the version list, and still
+// reachable by name.
+//
+// The second return is how many steps the whole history has, so a caller that
+// shows a capped list can say it was cut. The walk itself is followed a step at
+// a time and never reads this, so the whole chain is scanned only when someone
+// asks to look at it.
+func (s *Store) ListAppServingHistory(name string, limit int) ([]int64, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return nil, 0, nil
+	}
+	if limit <= 0 {
+		limit = 10
+	}
+	rows, err := s.db.Query(`
+		WITH RECURSIVE walk(id, version_id, parent_id) AS (
+			SELECT s.id, s.version_id, s.parent_id FROM app_serving_steps s
+				JOIN apps a ON a.serving_step_id = s.id
+			WHERE a.name = ?
+			UNION ALL
+			SELECT s.id, s.version_id, s.parent_id FROM app_serving_steps s
+				JOIN walk w ON s.id = w.parent_id
+		)
+		SELECT version_id FROM walk
+	`, name)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var (
+		out   []int64
+		steps int
+	)
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, 0, err
+		}
+		steps++
+		if len(out) < limit {
+			out = append(out, id)
+		}
+	}
+	return out, steps, rows.Err()
 }
 
 // GetAppVersion loads one version row.

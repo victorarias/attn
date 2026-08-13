@@ -4554,6 +4554,16 @@ model AppStatusResult {
   // read them, so a status that carried only a count sent the reader looking for
   // a list that does not exist.
   "recent_versions"?: AppVersionInfo[];
+  // The app's serving history: the version it serves now, then each version one
+  // bare rollback further back, capped. It is the only way to see whether a
+  // rollback has anywhere left to go without running it. A version missing from
+  // here is not gone — the walk went past it and it is still in
+  // "recent_versions", reachable by name.
+  "serving_history"?: AppVersionInfo[];
+  // How many steps that history has in total — "serving_history" carries the
+  // newest of them, so a walk longer than the cap is visible rather than
+  // silently ending.
+  "serving_history_steps"?: safeint;
   // The most recent invocations, newest first, when any have been recorded.
   "recent"?: AppInvocationInfo[];
   // The shared runtime every app's handlers execute in. Absent until it has been
