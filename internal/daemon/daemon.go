@@ -240,10 +240,12 @@ type Daemon struct {
 	// Which sessions owe an agent-message delivery, and which are draining one
 	// right now. The first keeps the state-report path off the database when
 	// nothing is queued, which is nearly always — see agent_msg.go.
-	agentMessageMu        sync.Mutex
-	queuedAgentMessages   map[string]bool
-	drainingAgentMessages map[string]bool
-	agentMessageDrainHook func(sessionID string, delivered int) // tests only; nil in production
+	agentMessageMu              sync.Mutex
+	queuedAgentMessages         map[string]bool
+	drainingAgentMessages       map[string]bool
+	agentMessageTaken           map[string][]chan struct{}
+	agentMessagesAwaitingSubmit map[string]bool
+	agentMessageDrainHook       func(sessionID string, delivered int) // tests only; nil in production
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
