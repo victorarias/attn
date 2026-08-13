@@ -10,7 +10,7 @@ func TestGenerateHooks(t *testing.T) {
 	sessionID := "abc123"
 	socketPath := "/home/user/.claude-manager.sock"
 
-	settings := Generate(sessionID, socketPath, "/tmp/attn")
+	settings := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	// Verify it's valid JSON
 	var parsed map[string]interface{}
@@ -52,7 +52,7 @@ func TestGenerateHooks(t *testing.T) {
 // it stays a single spawn: _hook-tool-use resets the working state AND records
 // any markdown the call wrote, instead of a second hook entry doing the latter.
 func TestGenerateHooks_CatchAllPostToolUseIsOneSpawn(t *testing.T) {
-	settings := Generate("abc123", "/tmp/test.sock", "/tmp/attn")
+	settings := Generate("abc123", "/tmp/test.sock", "/tmp/attn", nil)
 
 	var parsed SettingsConfig
 	if err := json.Unmarshal([]byte(settings), &parsed); err != nil {
@@ -73,7 +73,7 @@ func TestGenerateHooks_CatchAllPostToolUseIsOneSpawn(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_PostToolUseRecordsEdits(t *testing.T) {
-	overrides := strings.Join(GenerateCodexConfigOverrides("abc123", "/tmp/test.sock", "/tmp/attn", "", "", false), "\n")
+	overrides := strings.Join(GenerateCodexConfigOverrides("abc123", "/tmp/test.sock", "/tmp/attn", Launch{}), "\n")
 
 	if !strings.Contains(overrides, "hooks.PostToolUse=[{ matcher = \"*\", hooks = [{ type = \"command\", command = \"'/tmp/attn' '_hook-tool-use'\"") {
 		t.Fatalf("codex PostToolUse should run _hook-tool-use: %q", overrides)
@@ -89,7 +89,7 @@ func TestGenerateHooks_ContainsSessionID(t *testing.T) {
 	sessionID := "unique-session-id-12345"
 	socketPath := "/tmp/test.sock"
 
-	hooks := Generate(sessionID, socketPath, "/tmp/attn")
+	hooks := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, sessionID) {
 		t.Error("generated hooks should contain session ID")
@@ -100,7 +100,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 	sessionID := "test"
 	socketPath := "/custom/path/to/socket.sock"
 
-	hooks := Generate(sessionID, socketPath, "/tmp/attn")
+	hooks := Generate(sessionID, socketPath, "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, socketPath) {
 		t.Error("generated hooks should contain socket path")
@@ -108,7 +108,7 @@ func TestGenerateHooks_ContainsSocketPath(t *testing.T) {
 }
 
 func TestGenerateHooks_HasStopHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, "Stop") {
 		t.Error("hooks should include Stop event for waiting state")
@@ -116,7 +116,7 @@ func TestGenerateHooks_HasStopHook(t *testing.T) {
 }
 
 func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	for _, expected := range []string{
 		"SessionStart",
@@ -134,7 +134,7 @@ func TestGenerateHooks_HasSessionStartHook(t *testing.T) {
 // evidence silently absent rather than failing anything.
 func TestGenerateHooks_HasNotificationHook(t *testing.T) {
 	var parsed SettingsConfig
-	if err := json.Unmarshal([]byte(Generate("abc123", "/tmp/test.sock", "/tmp/attn")), &parsed); err != nil {
+	if err := json.Unmarshal([]byte(Generate("abc123", "/tmp/test.sock", "/tmp/attn", nil)), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v", err)
 	}
 
@@ -148,7 +148,7 @@ func TestGenerateHooks_HasNotificationHook(t *testing.T) {
 }
 
 func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/tmp/attn", nil)
 
 	if !strings.Contains(hooks, "UserPromptSubmit") {
 		t.Error("hooks should include UserPromptSubmit event for working state")
@@ -156,7 +156,7 @@ func TestGenerateHooks_HasUserPromptSubmitHook(t *testing.T) {
 }
 
 func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "/Users/testuser/Applications/attn.app/Contents/MacOS/attn")
+	hooks := Generate("test", "/tmp/test.sock", "/Users/testuser/Applications/attn.app/Contents/MacOS/attn", nil)
 
 	if !strings.Contains(hooks, "'/Users/testuser/Applications/attn.app/Contents/MacOS/attn' _hook-stop") {
 		t.Error("hooks should include wrapper path in stop hook command")
@@ -164,15 +164,46 @@ func TestGenerateHooks_UsesWrapperPath(t *testing.T) {
 }
 
 func TestGenerateHooks_DefaultsWrapperToAttn(t *testing.T) {
-	hooks := Generate("test", "/tmp/test.sock", "")
+	hooks := Generate("test", "/tmp/test.sock", "", nil)
 
 	if !strings.Contains(hooks, "'attn' _hook-stop") {
 		t.Error("hooks should default wrapper path to 'attn'")
 	}
 }
 
+func TestGenerateHooks_EnvBlock(t *testing.T) {
+	decode := func(t *testing.T, content string) map[string]any {
+		t.Helper()
+		var parsed map[string]any
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			t.Fatalf("invalid JSON: %v", err)
+		}
+		return parsed
+	}
+
+	t.Run("carries the supplied env", func(t *testing.T) {
+		parsed := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", map[string]string{"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "128000"}))
+		env, ok := parsed["env"].(map[string]any)
+		if !ok {
+			t.Fatalf("env block missing: %#v", parsed)
+		}
+		if got := env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != "128000" {
+			t.Fatalf("env cap = %v, want \"128000\"", got)
+		}
+	})
+
+	t.Run("omits an empty env", func(t *testing.T) {
+		if _, present := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", nil))["env"]; present {
+			t.Error("nil env should not emit an env block")
+		}
+		if _, present := decode(t, Generate("test", "/tmp/test.sock", "/tmp/attn", map[string]string{}))["env"]; present {
+			t.Error("empty env should not emit an env block")
+		}
+	})
+}
+
 func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
-	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", "/tmp/context.md", "", false)
+	overrides := GenerateCodexConfigOverrides("session-1", "/tmp/attn.sock", "/tmp/attn", Launch{WorkspaceContextPath: "/tmp/context.md"})
 	joined := strings.Join(overrides, "\n")
 	for _, expected := range []string{
 		`shell_environment_policy.set.ATTN_SESSION_ID="session-1"`,
@@ -220,7 +251,7 @@ func TestGenerateCodexConfigOverrides_UsesStableEnvBasedCommands(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_OmitsEmptySocketButKeepsSessionIdentity(t *testing.T) {
-	overrides := strings.Join(GenerateCodexConfigOverrides("session-2", "", "", "", "", false), "\n")
+	overrides := strings.Join(GenerateCodexConfigOverrides("session-2", "", "", Launch{}), "\n")
 	if !strings.Contains(overrides, `shell_environment_policy.set.ATTN_SESSION_ID="session-2"`) ||
 		!strings.Contains(overrides, `shell_environment_policy.set.ATTN_WRAPPER_PATH="attn"`) {
 		t.Fatalf("codex overrides dropped required attn identity: %q", overrides)
@@ -264,12 +295,12 @@ func TestAgentInstructionsComposition(t *testing.T) {
 }
 
 func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *testing.T) {
-	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", false), "\n")
+	off := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md"}), "\n")
 	if strings.Contains(off, "hypercode") {
 		t.Fatalf("workflow guidance injected while disabled: %q", off)
 	}
 
-	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "/tmp/context.md", "", true), "\n")
+	on := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{WorkspaceContextPath: "/tmp/context.md", InjectWorkflow: true}), "\n")
 	if !strings.Contains(on, "developer_instructions=") {
 		t.Fatal("enabled overrides dropped developer_instructions")
 	}
@@ -282,7 +313,7 @@ func TestGenerateCodexConfigOverrides_InjectsWorkflowGuidanceWhenEnabled(t *test
 	}
 
 	// Workflow guidance is injected even without a workspace checkout.
-	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", "", "", true), "\n")
+	noCtx := strings.Join(GenerateCodexConfigOverrides("s", "/sock", "/attn", Launch{InjectWorkflow: true}), "\n")
 	if !strings.Contains(noCtx, "developer_instructions=") || !strings.Contains(noCtx, "hypercode") {
 		t.Fatalf("workflow guidance not injected without a checkout: %q", noCtx)
 	}
@@ -317,3 +348,60 @@ func TestChiefGuidanceEmptyWithoutRoot(t *testing.T) {
 // NOTE: AskUserQuestion PostToolUse hook was removed because it fires
 // AFTER the user responds, not when the question is displayed.
 // See: https://github.com/anthropics/claude-code/issues/10168
+
+// The primer is what makes an attn-launched agent a gardener: it arrives
+// knowing the vocabulary, the loop, and whether there is anything to pick up.
+func TestGardenPrimer(t *testing.T) {
+	// No garden reachable — an outpost, or a daemon that could not answer.
+	// Telling an agent to run a command that refuses is worse than silence.
+	if got := GardenPrimer(nil); got != "" {
+		t.Fatalf("GardenPrimer(nil) = %q, want nothing", got)
+	}
+
+	counts := map[int]string{
+		0: "Nothing was ready",
+		1: "One seed was ready",
+		4: "4 seeds were ready",
+	}
+	for count, want := range counts {
+		primer := GardenPrimer(&count)
+		if !strings.Contains(primer, want) {
+			t.Fatalf("primer for %d does not say %q:\n%s", count, want, primer)
+		}
+		// The loop, and where the live answer is: the count is a starting
+		// position, composed once at launch.
+		for _, phrase := range []string{"attn seed ready", "attn seed tend", "attn seed harvest", "live answer"} {
+			if !strings.Contains(primer, phrase) {
+				t.Fatalf("primer does not name %q:\n%s", phrase, primer)
+			}
+		}
+	}
+}
+
+// Every attn-launched agent lives in the same garden, so the primer rides with
+// chief guidance and workspace guidance alike — and never replaces either.
+func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
+	count := 2
+
+	workspace := Launch{WorkspaceContextPath: "/tmp/context.md", GardenReady: &count}.Instructions()
+	if want := AgentInstructions("/tmp/context.md", false); !strings.HasPrefix(workspace, want) {
+		t.Fatalf("workspace launch dropped the agent instructions:\n%s", workspace)
+	}
+	if !strings.Contains(workspace, "2 seeds were ready") {
+		t.Fatalf("workspace launch dropped the primer:\n%s", workspace)
+	}
+
+	chief := Launch{NotebookRoot: "/tmp/notebook", GardenReady: &count}.Instructions()
+	if want := ChiefGuidance("/tmp/notebook", false); !strings.HasPrefix(chief, want) {
+		t.Fatalf("chief launch dropped the chief guidance:\n%s", chief)
+	}
+	if !strings.Contains(chief, "2 seeds were ready") {
+		t.Fatalf("chief launch dropped the primer:\n%s", chief)
+	}
+
+	// Nothing to prime with leaves the rest exactly as it was.
+	bare := Launch{WorkspaceContextPath: "/tmp/context.md"}.Instructions()
+	if bare != AgentInstructions("/tmp/context.md", false) {
+		t.Fatalf("a garden-less launch changed the instructions:\n%s", bare)
+	}
+}

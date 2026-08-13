@@ -60,6 +60,16 @@ commands:
         filter, enabled bit, and lag (head - cursor, plus how long its oldest
         unread event has waited); and what is wrong with any of it.
 
+        Whichever enabled consumer sits lowest is tagged "(retention floor)".
+        Once it has held that position past the alarm's tripwire it is tagged
+        "(PINNING <size>)" instead, and the same crossing writes a warning
+        notification — the log is growing for as long as that lasts.
+
+        ATTN_BUS_PIN_ALARM_AGE moves that tripwire (a duration, or 0 to turn it
+        off). The daemon reads it to decide when to warn; this command reads it
+        from its own environment to decide what to tag, so set it for both when
+        you move it, or the table and the notification will disagree.
+
   trim
         run one retention pass now instead of waiting for the daemon's hourly
         tick: drop events past the age window, and reduce the compactable fact
@@ -96,15 +106,18 @@ type busStatusJSON struct {
 	// Delivering is false when the snapshot was read from the database rather
 	// than from the daemon that owns the delivery loops, which is what makes
 	// each consumer's `live` field meaningless.
-	Delivering        bool                `json:"delivering"`
-	RetentionSeconds  float64             `json:"retention_seconds"`
-	SurgeRatePerHour  float64             `json:"surge_rate_per_hour"`
-	SurgeWindowSecs   float64             `json:"surge_window_seconds"`
-	RecentWindowSecs  float64             `json:"recent_window_seconds"`
-	BaselineWindowSec float64             `json:"baseline_window_seconds"`
-	Producers         []busProducerReport `json:"producers"`
-	Consumers         []busConsumerReport `json:"consumers"`
-	Health            []busHealthReport   `json:"health"`
+	Delivering        bool    `json:"delivering"`
+	RetentionSeconds  float64 `json:"retention_seconds"`
+	SurgeRatePerHour  float64 `json:"surge_rate_per_hour"`
+	SurgeWindowSecs   float64 `json:"surge_window_seconds"`
+	RecentWindowSecs  float64 `json:"recent_window_seconds"`
+	BaselineWindowSec float64 `json:"baseline_window_seconds"`
+	// PinAlarmSeconds is the tripwire a retention pin crosses to be reported, so
+	// a script reads the limit beside the value rather than assuming the default.
+	PinAlarmSeconds float64             `json:"pin_alarm_seconds"`
+	Producers       []busProducerReport `json:"producers"`
+	Consumers       []busConsumerReport `json:"consumers"`
+	Health          []busHealthReport   `json:"health"`
 }
 
 type busProducerReport struct {
@@ -134,6 +147,11 @@ type busConsumerReport struct {
 	Stalled             string `json:"stalled,omitempty"`
 	OldestUnreadAt      string `json:"oldest_unread_at,omitempty"`
 	HoldsRetentionFloor bool   `json:"holds_retention_floor"`
+	// PinAlarm says that pin is past the tripwire, and PinnedBytes is what the
+	// backlog weighs — read only for a consumer that is alarming, so a script can
+	// tell "0 bytes held" from "not measured" by the flag beside it.
+	PinAlarm    bool  `json:"pin_alarm"`
+	PinnedBytes int64 `json:"pinned_bytes"`
 }
 
 type busHealthReport struct {
@@ -157,6 +175,7 @@ func busStatusReport(s bus.Status) busStatusJSON {
 		SurgeWindowSecs:   bus.SurgeWindow.Seconds(),
 		RecentWindowSecs:  bus.RecentWindow.Seconds(),
 		BaselineWindowSec: bus.BaselineWindow.Seconds(),
+		PinAlarmSeconds:   s.PinAlarmAge.Seconds(),
 		Producers:         []busProducerReport{},
 		Consumers:         []busConsumerReport{},
 		Health:            []busHealthReport{},
@@ -177,6 +196,8 @@ func busStatusReport(s bus.Status) busStatusJSON {
 			Live: c.Live, Stalled: c.Stalled,
 			OldestUnreadAt:      formatBusTime(c.OldestUnreadAt),
 			HoldsRetentionFloor: c.HoldsRetentionFloor,
+			PinAlarm:            c.PinAlarm,
+			PinnedBytes:         c.PinnedBytes,
 		})
 	}
 	for _, h := range s.Health {
@@ -216,7 +237,15 @@ func runBusStatus(args []string) {
 	// against the same database. This bus registers no consumer and is never
 	// started: it is here to read, so Live and Stalled stay unset and the
 	// snapshot says so (delivering=false).
-	b := bus.New(bus.Options{Store: daemon.NewBusStore(s), Compactable: daemon.CompactableFacts})
+	// The retention-pin tripwire comes from this process's environment for the
+	// same reason it does in the daemon: the two must draw the line in the same
+	// place, or this table calls a consumer fine while a notification calls it
+	// stuck. Anything it has to say goes to stderr, so --json stays machine-clean.
+	b := bus.New(bus.Options{
+		Store:       daemon.NewBusStore(s),
+		Compactable: daemon.CompactableFacts,
+		PinAlarmAge: bus.PinAlarmAgeFromEnv(busStderrLog),
+	})
 	status, err := b.Status()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bus status: %v\n", err)
@@ -295,7 +324,12 @@ func writeBusStatus(w io.Writer, s bus.Status, now time.Time) {
 		fmt.Fprintln(tw, "CONSUMER\tCURSOR\tLAG\tOLDEST UNREAD\tENABLED\tFILTER")
 		for _, c := range s.Consumers {
 			name := c.Name
-			if c.HoldsRetentionFloor {
+			switch {
+			// Holding the floor is normal; holding it past the tripwire is the
+			// thing to act on, so the two must not read alike in the table.
+			case c.PinAlarm:
+				name += fmt.Sprintf(" (PINNING %s)", humanBytes(c.PinnedBytes))
+			case c.HoldsRetentionFloor:
 				name += " (retention floor)"
 			}
 			unread := "-"
@@ -363,7 +397,7 @@ func runBusTrim(args []string) {
 	b := bus.New(bus.Options{
 		Store:       daemon.NewBusStore(s),
 		Compactable: daemon.CompactableFacts,
-		Log:         func(format string, args ...interface{}) { fmt.Fprintf(os.Stderr, format+"\n", args...) },
+		Log:         busStderrLog,
 	})
 	removed, passErr := b.Trim()
 	after, bytes, err := s.BusLogSize()
@@ -414,11 +448,22 @@ func runBusSetEnabled(args []string, enabled bool) {
 		fmt.Fprintf(os.Stderr, "bus %s: no consumer named %q (see `attn bus status`)\n", verb, name)
 		os.Exit(1)
 	}
-	if err := s.SetBusConsumerEnabled(name, enabled, time.Now()); err != nil {
+	flipped, err := s.SetBusConsumerEnabled(name, enabled, time.Now())
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "bus %s: %v\n", verb, err)
 		os.Exit(1)
 	}
+	if !flipped {
+		fmt.Fprintf(os.Stderr, "bus %s: consumer %q was removed while this command ran, so nothing was changed (see `attn bus status`)\n", verb, name)
+		os.Exit(1)
+	}
 	fmt.Printf("consumer %q %sd\n", name, verb)
+}
+
+// busStderrLog is what the bus says to a person running a bus command: stderr,
+// so it never lands in the middle of --json output someone is parsing.
+func busStderrLog(format string, args ...interface{}) {
+	fmt.Fprintf(os.Stderr, format+"\n", args...)
 }
 
 func openBusStore() (*store.Store, func()) {

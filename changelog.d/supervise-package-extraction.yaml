@@ -1,0 +1,28 @@
+kind: internal
+area: daemon
+change: >
+  Process supervision moved out of the plugin runtime into internal/supervise,
+  a package that knows nothing about what it supervises: a consumer names a
+  child and hands over a start function, and the package owns restart backoff
+  (250ms to 30s over eight steps), generation fencing against stale processes
+  and timers, the 60-second stability window that resets the backoff, and the
+  5-second grace in which a started child must dial the daemon back or be
+  killed. The plugin runtime moves onto it in the same change, so the extraction
+  is proven by a consumer that already worked; the app runtime's Bun sidecar is
+  the second consumer.
+  Two capabilities arrive with the move. A child that keeps dying without ever
+  running stably is now parked instead of retried forever — after ten restarts,
+  roughly two to three minutes of crash-looping — and parking is loud: a daemon
+  log line, a durable notification naming the plugin and its last exit, and a
+  parked runtime phase in the plugins list. Reinstalling the plugin, or
+  restarting attn, revives it with a clean restart budget. And a plugin's stdout and
+  stderr, which went to /dev/null, are now captured to an append-only
+  per-plugin log file under the profile's plugin-log directory, with a start
+  marker per generation so a crash loop leaves a readable trail.
+notes: >
+  Slice 2 of docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md. The
+  give-up count is a tripwire, not a receipt: no healthy child restarts twice,
+  let alone ten times, and the plan's estimate is corrected there with the
+  backoff arithmetic (121.75s of waiting plus up to five seconds of grace per
+  attempt that never connects). runtime_phase is a free-form string on the
+  wire, so the new parked value needs no protocol change.

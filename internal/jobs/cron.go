@@ -80,15 +80,24 @@ func (r *Runner) armCronKind(kind string, interval time.Duration) {
 // alone: re-arming every boot would starve a daemon restarted more often than the
 // interval. A terminal record is revived — a build that missed the registration
 // killed it as unknown-kind, and nothing else selects it.
+//
+// A record scheduled FURTHER OUT than the current interval allows is not on
+// schedule, it is on an old one — the interval was shortened since it was armed,
+// and left alone it would keep the previous configuration forever. Pulling it in
+// never pushes a fire out, so it cannot starve the entry it is fixing.
 func (r *Runner) writeCronEntry(kind string, interval time.Duration) error {
 	existing, err := r.GetByKey(kind, CronKey)
 	if err != nil {
 		return fmt.Errorf("read cron entry: %w", err)
 	}
 	if existing != nil && !existing.State.Terminal() {
-		return nil
-	}
-	if existing != nil {
+		wait := existing.ScheduledAt.Sub(r.now())
+		if wait <= interval {
+			return nil
+		}
+		r.log("jobs: cron %s was armed for %s out, past its %s interval; pulling it in",
+			kind, wait.Round(time.Second), interval)
+	} else if existing != nil {
 		r.log("jobs: cron entry for %s was %s (%s); reviving it", kind, existing.State, existing.LastError)
 	}
 	// Enqueue coalesces, so a revive resets that row rather than minting a second.

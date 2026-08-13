@@ -1,0 +1,16 @@
+kind: changed
+area: app
+change: >
+  A parked plugin runtime and a parked app runtime now raise critical
+  notifications, so they get the ambient surface — the sidebar strip and the red
+  bell — instead of sitting quietly in the feed. An auto-disabled app raises a
+  warning. All three now reach an open app the moment they happen.
+notes: >
+  Nothing retries a parked runtime, so the notification announcing it is the last
+  word the user gets: while it is parked no app's handlers run and no plugin is
+  restarted, and the only way back is a person running `attn app runtime restart`
+  or reinstalling the plugin. That is what critical is for. An auto-disabled app
+  is one app off with everything else still running, which is a warning. The app
+  runtime's parked notification and the auto-disable notification were also
+  written to the database without publishing `notification.created`, so they only
+  reached an open app whenever something else happened to re-push the feed.

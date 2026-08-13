@@ -245,9 +245,18 @@ func main() {
 	case "bus":
 		maybePrintProfileBanner()
 		runBus()
+	case "enrollment":
+		maybePrintProfileBanner()
+		runEnrollment()
+	case "seed":
+		maybePrintProfileBanner()
+		runSeed()
 	case "doc":
 		maybePrintProfileBanner()
 		runDoc()
+	case "app":
+		maybePrintProfileBanner()
+		runApp()
 	case "journal":
 		maybePrintProfileBanner()
 		runJournal()
@@ -650,7 +659,10 @@ commands:
   debug <command>                   probe debug artifacts (incidents, logs)
   db <command>                      database maintenance (restore from backup)
   bus <command>                     event bus: consumer cursors, lag, kill switch
+  enrollment <command>              this daemon's home: status, enroll, leave
+  seed <command>                    the garden: plant, tend, harvest, note, ls
   doc <command>                     document store: collections, documents, live queries
+  app <command>                     apps: list, status, enable, disable, remove
   vision-check <image> <question>   answer a question about an image (single LLM call)
   daemon <command>                  manage the daemon
 	  daemon ensure|stop                ensure the daemon is running, or stop it
@@ -3074,6 +3086,16 @@ func runAgentDirectly(requestedAgent string) {
 			}
 		}
 	}
+	// The garden primer rides the same launch injection as the guidance above,
+	// for chief and workspace agents alike. The count comes from the daemon
+	// rather than a copy of the rule, so what an agent is primed with and what
+	// `attn seed ready` answers cannot drift apart; a refusal — an outpost, whose
+	// garden lives at its home — primes nothing rather than teaching a loop this
+	// session cannot run.
+	if ready, err := c.SeedReady(sessionID, "", nil, false); err == nil {
+		count := len(ready.Seeds)
+		opts.GardenReady = &count
+	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so
 	// the env var (not a store read) carries the gate here.
@@ -3108,7 +3130,7 @@ func runAgentDirectly(requestedAgent string) {
 		opts.ConfigOverrides = cp.GenerateConfigOverrides(opts)
 	}
 	if hp, ok := agentdriver.GetHookProvider(driver); ok {
-		content := hp.GenerateHooksConfig(sessionID, opts.SocketPath, opts.WrapperPath)
+		content := hp.GenerateHooksConfig(opts)
 		settingsPath, err := wrapper.WriteSettingsConfig(os.TempDir(), sessionID, content)
 		if err != nil {
 			cleanup()

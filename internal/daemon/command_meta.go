@@ -44,6 +44,14 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdStateExplain:               commandMetadata(ScopeSession, false, true),
 	protocol.CmdAgentPeek:                  commandMetadata(ScopeSession, false, true),
 	protocol.CmdAgentMsg:                   commandMetadata(ScopeSession, false, true),
+	protocol.CmdSeedPlant:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedList:                   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedShow:                   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedTransition:             commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedNote:                   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedNotes:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedLink:                   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedReady:                  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdStop:                       commandMetadata(ScopeSession, false, true),
 	protocol.CmdTodos:                      commandMetadata(ScopeSession, false, true),
 	protocol.CmdFilesEdited:                commandMetadata(ScopeSession, false, true),
@@ -186,6 +194,21 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDocQuery:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocCount:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocSubscribe:   commandMetadata(ScopeHubLocal, false, true),
+	// The app registry is the daemon's own database and its own bus, so a hub
+	// answers these itself. None touches a PTY, so none blocks during recovery.
+	protocol.CmdAppList:       commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppStatus:     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppSetEnabled: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRemove:     commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppApply:      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRollback:   commandMetadata(ScopeHubLocal, false, true),
+	// The shared runtime is the hub's own child process, so these are hub-local
+	// for the same reason. app_watch holds its connection open for as long as the
+	// caller wants invocations, so it is logged once at open like the rest.
+	protocol.CmdAppLogs:           commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRuntimeStatus:  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppRuntimeRestart: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppWatch:          commandMetadata(ScopeHubLocal, false, true),
 }
 
 func shouldLogWSCommand(cmd string) bool {

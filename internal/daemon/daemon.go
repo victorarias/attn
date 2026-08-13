@@ -26,6 +26,7 @@ import (
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/diag"
+	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/fsdoc"
 	"github.com/victorarias/attn/internal/git"
 	"github.com/victorarias/attn/internal/github"
@@ -40,6 +41,7 @@ import (
 	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/statetrace"
 	"github.com/victorarias/attn/internal/store"
+	"github.com/victorarias/attn/internal/supervise"
 	"github.com/victorarias/attn/internal/transcript"
 	"github.com/victorarias/attn/internal/workspacelayout"
 )
@@ -280,10 +282,13 @@ type Daemon struct {
 	autoSettleFireMu sync.Mutex
 
 	// autoSettleMu guards both auto-settle maps: the pending timers and the
-	// standing user cancels. See auto_settle.go.
-	autoSettleMu         sync.Mutex
-	autoSettleTimers     map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
-	autoSettleSuppressed map[string]bool             // sessions whose countdown the user cancelled, until they leave `working`
+	// standing user dismissals. See auto_settle.go.
+	autoSettleMu     sync.Mutex
+	autoSettleTimers map[string]*autoSettleTimer // presence == an arm delay or countdown is pending
+	// autoSettleDismissals: presence == the user has answered this session's next
+	// auto-settle and it will not run; the value says whether the `working`
+	// stretch it is spent on has begun. See answerAutoSettleByUser.
+	autoSettleDismissals map[string]bool
 	autoSettleFireHook   func(sessionID, outcome string)
 	// Called inside the fire-time decision, between confirming the turn is still
 	// owed and settling it. Tests only; nil in production. See auto_settle.go.
@@ -299,10 +304,11 @@ type Daemon struct {
 	// snooze can land in. Tests only; nil in production. See snooze.go.
 	snoozeWakeGapHook func(sessionID string)
 
-	recoveryMu    sync.RWMutex
-	recovering    bool
-	notebookMu    sync.Mutex
-	notebookStore *notebook.Store
+	recoveryMu      sync.RWMutex
+	recovering      bool
+	recoverySettled chan struct{}
+	notebookMu      sync.Mutex
+	notebookStore   *notebook.Store
 	// notebookWatcher observes notebook.root for external edits; guarded by its
 	// own mutex (distinct from notebookMu) so notebookStoreFor can start it
 	// without nesting locks. Lazily started on first notebook use.
@@ -334,6 +340,48 @@ type Daemon struct {
 	pluginExits         map[string]ptybackend.ExitInfo
 	pluginDir           string
 	bundledPluginDir    string
+	// appsDir is the app artifact store, `<data-dir>/apps`. It is derived from
+	// the data directory rather than the socket path because the CLI that builds
+	// an artifact derives it the same way: a socket relocated by
+	// ATTN_SOCKET_PATH would leave the two looking in different places.
+	appsDir string
+	// The shared app runtime. appRuntimeMu guards the supervisor and the live
+	// sidecar connection together: "is there a process" and "is it reachable"
+	// are read as one answer by `attn app runtime status` and by every dispatch.
+	appRuntimeMu         sync.Mutex
+	appRuntimeSupervisor *supervise.Supervisor
+	// appRuntimeSupervise is the tunable half of that supervision — the clock
+	// and the give-up tripwire. A test sets it so a crash loop can be watched
+	// without waiting out the real backoff; production leaves it zero.
+	appRuntimeSupervise supervise.Options
+	// appRuntimeWait overrides appRuntimeConnectWait, for the same reason.
+	appRuntimeWait time.Duration
+	appRuntimeConn *appRuntimeConnection
+	// appRuntimeReady closes when a sidecar connects, and is replaced with a
+	// fresh open channel when one goes away. It is how a delivery waits for a
+	// cold start on a real signal instead of a poll.
+	appRuntimeReady chan struct{}
+	// appDispatches is what is running right now, by dispatch id. A collection
+	// callback resolves its app through this and nowhere else.
+	appDispatchMu  sync.Mutex
+	appDispatches  map[string]*appDispatch
+	appDispatchSeq uint64
+	// appStalls is the auto-disable clock, one entry per app that is currently
+	// failing on an event. See appStall.
+	appStallMu sync.Mutex
+	appStalls  map[string]*appStall
+	// busPinEpisodes is the retention-pin alarm's position, one entry per consumer
+	// that is currently holding the event log open. See busPinEpisode.
+	busPinMu       sync.Mutex
+	busPinEpisodes map[string]*busPinEpisode
+	// busPinAge is the resolved tripwire; see busPinAlarmAge.
+	busPinAge time.Duration
+	// appWatchers are the open `app_watch` connections `attn app dev` renders.
+	appWatcherMu sync.Mutex
+	appWatchers  map[*appWatcher]struct{}
+	// appClock is the clock every app-runtime duration is measured against.
+	// Injected by tests so the fifteen-minute stall window costs no wall time.
+	appClock            func() time.Time
 	removePlugin        func(pluginDir, name string) error
 	pluginActionMu      sync.Mutex
 	bundledPluginMu     sync.Mutex
@@ -404,6 +452,9 @@ type Daemon struct {
 	workflowEngineConn    map[string]workflowEngineSink
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
+	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
+	gardenMintID          func() (string, error)                    // optional, tests only
+	gardenMintNoteID      func() (string, error)                    // optional, tests only
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every
@@ -570,6 +621,12 @@ func (d *Daemon) setRecovering(value bool) {
 	var pending []*wsClient
 
 	d.recoveryMu.Lock()
+	if value && !d.recovering {
+		d.recoverySettled = make(chan struct{})
+	}
+	if !value && d.recovering && d.recoverySettled != nil {
+		close(d.recoverySettled)
+	}
 	d.recovering = value
 	if !value {
 		pending = make([]*wsClient, 0, len(d.pendingInitialWS))
@@ -591,6 +648,21 @@ func (d *Daemon) isRecovering() bool {
 	d.recoveryMu.RLock()
 	defer d.recoveryMu.RUnlock()
 	return d.recovering
+}
+
+var recoveryAlreadySettled = func() <-chan struct{} {
+	settled := make(chan struct{})
+	close(settled)
+	return settled
+}()
+
+func (d *Daemon) recoverySettledSignal() <-chan struct{} {
+	d.recoveryMu.RLock()
+	defer d.recoveryMu.RUnlock()
+	if !d.recovering || d.recoverySettled == nil {
+		return recoveryAlreadySettled
+	}
+	return d.recoverySettled
 }
 
 func (d *Daemon) scheduleInitialState(client *wsClient) {
@@ -757,6 +829,7 @@ func New(socketPath string) *Daemon {
 		pluginHealthEnabled: true,
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		spawnLocks:          make(map[string]*spawnLock),
 	}
@@ -799,6 +872,7 @@ func NewForTesting(socketPath string) *Daemon {
 		plugins:             newPluginRegistry(),
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		workflowDirty:       make(map[string]bool),
 		workflowEngineConn:  make(map[string]workflowEngineSink),
@@ -845,6 +919,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		plugins:             newPluginRegistry(),
 		pluginDir:           pluginDirForSocket(socketPath),
 		bundledPluginDir:    bundledPluginDirForExecutable(),
+		appsDir:             config.AppsDir(),
 		workspaces:          newWorkspaceRegistry(),
 		workflowDirty:       make(map[string]bool),
 		workflowEngineConn:  make(map[string]workflowEngineSink),
@@ -905,14 +980,25 @@ func (d *Daemon) Start() error {
 	// forever, because the drain decides from memory.
 	d.seedQueuedAgentMessages()
 	if d.daemonInstanceID == "" {
-		instanceID, err := ensureDaemonInstanceID(d.dataRoot)
+		instanceID, err := enrollment.EnsureDaemonID(d.dataRoot)
 		if err != nil {
 			return fmt.Errorf("ensure daemon instance id: %w", err)
 		}
 		d.daemonInstanceID = instanceID
 	}
+	if err := d.ensureEnrollment(); err != nil {
+		return fmt.Errorf("ensure enrollment record: %w", err)
+	}
+	d.ensureGardenCollections()
 	if d.hubManager == nil {
-		d.hubManager = hub.NewManager(d.store, d.broadcastEndpointStatusChanged, d.publishEndpointSessionsChanged, d.broadcastRawWSMessage, d.logf)
+		d.hubManager = hub.NewManager(
+			d.store,
+			d.broadcastEndpointStatusChanged,
+			d.publishEndpointSessionsChanged,
+			d.broadcastRawWSMessage,
+			d.logf,
+			d.homeDaemonIDForEnrollment,
+		)
 	}
 	selectedBackend := strings.TrimSpace(strings.ToLower(os.Getenv("ATTN_PTY_BACKEND")))
 	if selectedBackend == "" {
@@ -1011,6 +1097,14 @@ func (d *Daemon) Start() error {
 	d.listener = listener
 	d.log("daemon started")
 	d.startInstalledPlugins()
+	// A give-up outlives the daemon that made it, and this is where it is read
+	// back — before the consumers that would otherwise lazy-start the runtime on
+	// their first due fact.
+	d.restoreAppRuntimePark()
+	// Apps get their consumers here, not their runtime: the sidecar starts on the
+	// first fact an app is actually due, so a user with installed-but-quiet apps
+	// pays nothing for them.
+	d.registerAppConsumers()
 
 	// Start WebSocket hub with daemon's logger
 	d.wsHub.logf = d.logf
@@ -1749,6 +1843,7 @@ func (d *Daemon) Stop() {
 		d.hubManager.Stop()
 	}
 	d.stopInstalledPlugins()
+	d.stopAppRuntime()
 	d.stopAllTranscriptWatchers()
 	d.stopNudgeCountdowns()
 	d.stopAutoSettleTimers()
@@ -2476,6 +2571,18 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		return
 	}
 
+	// The app runtime is sniffed first: the plugin parser treats every JSON-RPC
+	// frame as a plugin's, so it would refuse this one with a true sentence about
+	// the wrong protocol.
+	if runtimeHelloID, runtimeParams, runtimeMode, err := parseAppRuntimeHello(data); runtimeMode {
+		if err != nil {
+			_ = json.NewEncoder(conn).Encode(jsonRPCFailure(runtimeHelloID, jsonRPCInvalidRequest, err.Error()))
+			return
+		}
+		d.handleAppRuntimeConnection(conn, reader, runtimeHelloID, runtimeParams)
+		return
+	}
+
 	helloID, helloParams, pluginMode, err := parsePluginHello(data)
 	if pluginMode {
 		if err != nil {
@@ -2542,6 +2649,26 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 	// caller disconnects, rather than answering once.
 	case protocol.CmdDocSubscribe: // wire: doc_subscribe
 		d.handleDocSubscribe(conn, msg.(*protocol.DocSubscribeMessage))
+	case protocol.CmdAppList: // wire: app_list
+		d.handleAppList(conn, msg.(*protocol.AppListMessage))
+	case protocol.CmdAppStatus: // wire: app_status
+		d.handleAppStatus(conn, msg.(*protocol.AppStatusMessage))
+	case protocol.CmdAppSetEnabled: // wire: app_set_enabled
+		d.handleAppSetEnabled(conn, msg.(*protocol.AppSetEnabledMessage))
+	case protocol.CmdAppRemove: // wire: app_remove
+		d.handleAppRemove(conn, msg.(*protocol.AppRemoveMessage))
+	case protocol.CmdAppApply: // wire: app_apply
+		d.handleAppApply(conn, msg.(*protocol.AppApplyMessage))
+	case protocol.CmdAppRollback: // wire: app_rollback
+		d.handleAppRollback(conn, msg.(*protocol.AppRollbackMessage))
+	case protocol.CmdAppLogs: // wire: app_logs
+		d.handleAppLogs(conn, msg.(*protocol.AppLogsMessage))
+	case protocol.CmdAppRuntimeStatus: // wire: app_runtime_status
+		d.handleAppRuntimeStatus(conn, msg.(*protocol.AppRuntimeStatusMessage))
+	case protocol.CmdAppRuntimeRestart: // wire: app_runtime_restart
+		d.handleAppRuntimeRestart(conn, msg.(*protocol.AppRuntimeRestartMessage))
+	case protocol.CmdAppWatch: // wire: app_watch
+		d.handleAppWatch(conn, msg.(*protocol.AppWatchMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment
@@ -2600,6 +2727,22 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 
 	case protocol.CmdAgentMsg: // wire: agent_msg
 		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
+	case protocol.CmdSeedPlant: // wire: seed_plant
+		d.handleSeedPlant(conn, msg.(*protocol.SeedPlantMessage))
+	case protocol.CmdSeedList: // wire: seed_list
+		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
+	case protocol.CmdSeedShow: // wire: seed_show
+		d.handleSeedShow(conn, msg.(*protocol.SeedShowMessage))
+	case protocol.CmdSeedTransition: // wire: seed_transition
+		d.handleSeedTransition(conn, msg.(*protocol.SeedTransitionMessage))
+	case protocol.CmdSeedNote: // wire: seed_note
+		d.handleSeedNote(conn, msg.(*protocol.SeedNoteMessage))
+	case protocol.CmdSeedNotes: // wire: seed_notes
+		d.handleSeedNotes(conn, msg.(*protocol.SeedNotesMessage))
+	case protocol.CmdSeedLink: // wire: seed_link
+		d.handleSeedLink(conn, msg.(*protocol.SeedLinkMessage))
+	case protocol.CmdSeedReady: // wire: seed_ready
+		d.handleSeedReady(conn, msg.(*protocol.SeedReadyMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos
@@ -4118,6 +4261,15 @@ func (d *Daemon) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 	if routingPathError != "" {
 		health["routing_path_error"] = routingPathError
+	}
+	// Enrollment: "home", or "outpost of <home id>". A daemon that cannot read
+	// its own record says so here rather than guessing.
+	if status, err := d.enrollmentStatus(); err != nil {
+		health["enrollment"] = "unknown"
+		health["enrollment_error"] = err.Error()
+	} else {
+		health["enrollment"] = status.Describe()
+		health["home_daemon_id"] = status.HomeDaemonID
 	}
 
 	setNoStoreHeaders(w.Header())

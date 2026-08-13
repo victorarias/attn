@@ -21,6 +21,7 @@ import type {
   Notification as GeneratedNotification,
   Ticket as GeneratedTicket,
   TicketRow as GeneratedTicketRow,
+  Seed as GeneratedSeed,
   MarkdownAnnotation,
   Presentation,
   PresentationRound,
@@ -117,6 +118,9 @@ export type Ticket = GeneratedTicket;
 // The board feed's row. Slimmer than Ticket on purpose: the brief, the history
 // thread and the artifacts come from a read by id, not from a whole-board push.
 export type TicketRow = GeneratedTicketRow;
+// A seed as the garden pushes it: the whole document, because a seed is small
+// and the panel renders its body without a second round trip.
+export type Seed = GeneratedSeed;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -235,7 +239,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '228';
+export const PROTOCOL_VERSION = '237';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -607,6 +611,13 @@ interface UseDaemonSocketOptions {
   // Fired with the non-archived ticket board (slim rows) on initial_state and on
   // every tickets_updated broadcast. The detail view fetches full records itself.
   onTicketsUpdate?: (tickets: TicketRow[]) => void;
+  // Fired with the garden — newest first, every workspace — on initial_state and
+  // on every garden_seeds_updated broadcast. The panel filters to the workspace
+  // it shows, so switching workspaces costs no round trip.
+  // `total` is how many seeds the garden holds; it exceeds `seeds.length` only
+  // when the garden outgrew one push, and the panel says so rather than ending
+  // silently at the cap.
+  onSeedsUpdate?: (seeds: Seed[], total: number) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
@@ -907,6 +918,7 @@ export function useDaemonSocket({
   onNotificationsUpdated,
   onFsChanged,
   onTicketsUpdate,
+  onSeedsUpdate,
   onPresentationAdded,
   onPresentationUpdated,
   onWorkspacesUpdate,
@@ -940,6 +952,7 @@ export function useDaemonSocket({
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
+    onSeedsUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -962,6 +975,7 @@ export function useDaemonSocket({
     onNotificationsUpdated,
     onFsChanged,
     onTicketsUpdate,
+    onSeedsUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -1516,6 +1530,10 @@ export function useDaemonSocket({
             sessionsRef.current = nextSessions;
             callbacksRef.current.onSessionsUpdate(nextSessions);
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
+            callbacksRef.current.onSeedsUpdate?.(
+              data.seeds || [],
+              data.seeds_total ?? (data.seeds || []).length,
+            );
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1679,6 +1697,13 @@ export function useDaemonSocket({
 
           case 'tickets_updated':
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
+            break;
+
+          case 'garden_seeds_updated':
+            callbacksRef.current.onSeedsUpdate?.(
+              data.seeds || [],
+              data.total ?? (data.seeds || []).length,
+            );
             break;
 
           case 'presentation_added':

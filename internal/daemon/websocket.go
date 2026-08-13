@@ -770,11 +770,19 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (d *Daemon) sendInitialState(client *wsClient) {
+	// home_daemon_id equals daemon_instance_id on a home daemon; a different id
+	// tells the client — the app, or a home's relay — that it is talking to an
+	// outpost, whose garden and crew asks belong to that home.
+	homeDaemonID := ""
+	if status, err := d.enrollmentStatus(); err == nil {
+		homeDaemonID = status.HomeDaemonID
+	}
 	event := &protocol.InitialStateMessage{
 		Event:             protocol.EventInitialState,
 		ProtocolVersion:   protocol.Ptr(protocol.ProtocolVersion),
 		SourceFingerprint: protocol.Ptr(buildinfo.SourceFingerprint),
 		DaemonInstanceID:  protocol.Ptr(d.daemonInstanceID),
+		HomeDaemonID:      protocol.Ptr(homeDaemonID),
 		Sessions:          d.mergedSessionsForBroadcast(),
 		Endpoints:         d.listEndpointInfos(),
 		Workspaces:        d.listWorkspaces(),
@@ -785,6 +793,8 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Settings:          d.settingsWithAgentAvailability(),
 		Warnings:          d.getWarnings(),
 		Tickets:           d.ticketsForBroadcast(),
+		Seeds:             d.seedsForBroadcast(),
+		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

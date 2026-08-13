@@ -57,8 +57,8 @@ func TestAnnounceDeliversWhatTheLogGainedWithoutPublish(t *testing.T) {
 	defer stop()
 
 	now := time.Now()
-	first := s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
-	second := s.appendOutOfBand("document.changed", "ext/x/requests/b", now)
+	first := s.appendOutOfBand("document.changed", "app/x/requests/a", now)
+	second := s.appendOutOfBand("document.changed", "app/x/requests/b", now)
 
 	b.Announce()
 
@@ -77,7 +77,7 @@ func TestAnnouncingTwiceDeliversOnce(t *testing.T) {
 	seen, stop := watchAll(b)
 	defer stop()
 
-	s.appendOutOfBand("document.changed", "ext/x/requests/a", time.Now())
+	s.appendOutOfBand("document.changed", "app/x/requests/a", time.Now())
 	b.Announce()
 	b.Announce()
 	b.Announce()
@@ -93,8 +93,8 @@ func TestAnnouncingTwiceDeliversOnce(t *testing.T) {
 func TestAnnounceDoesNotReplayWhatWasThereBeforeTheBus(t *testing.T) {
 	s := newMemStore()
 	now := time.Now()
-	s.appendOutOfBand("document.changed", "ext/x/requests/old", now)
-	s.appendOutOfBand("document.changed", "ext/x/requests/older", now)
+	s.appendOutOfBand("document.changed", "app/x/requests/old", now)
+	s.appendOutOfBand("document.changed", "app/x/requests/older", now)
 
 	b := testBus(t, s)
 	seen, stop := watchAll(b)
@@ -105,7 +105,7 @@ func TestAnnounceDoesNotReplayWhatWasThereBeforeTheBus(t *testing.T) {
 		t.Fatalf("a fresh bus replayed %d historical fact(s)", len(got))
 	}
 
-	fresh := s.appendOutOfBand("document.changed", "ext/x/requests/new", now)
+	fresh := s.appendOutOfBand("document.changed", "app/x/requests/new", now)
 	b.Announce()
 	got := seqsOf(seen())
 	if len(got) != 1 || got[0] != fresh {
@@ -140,7 +140,7 @@ func TestRacingWritersDeliverTheLogsOrderExactlyOnce(t *testing.T) {
 				// Commit, then announce — the shape of a composite write. The
 				// gap between the two is where the ordering race lives.
 				if w%2 == 0 {
-					s.appendOutOfBand("document.changed", "ext/x/requests/a", time.Now())
+					s.appendOutOfBand("document.changed", "app/x/requests/a", time.Now())
 					b.Announce()
 					continue
 				}
@@ -194,7 +194,7 @@ func TestTrimCompactsTheNamesTheBusDeclared(t *testing.T) {
 
 	now := time.Now()
 	for range 10 {
-		s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
+		s.appendOutOfBand("document.changed", "app/x/requests/a", now)
 	}
 	for range 3 {
 		s.appendOutOfBand("session.state.changed", "sess-1", now)
@@ -229,7 +229,7 @@ func TestTrimCompactsNothingWhenNoNameWasDeclared(t *testing.T) {
 
 	now := time.Now()
 	for range 10 {
-		s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
+		s.appendOutOfBand("document.changed", "app/x/requests/a", now)
 	}
 
 	if removed, err := b.Trim(); err != nil || removed != 0 {
@@ -252,7 +252,7 @@ func TestABusThatCouldNotFindTheHeadDoesNotReplayTheLog(t *testing.T) {
 	s := newMemStore()
 	now := time.Now()
 	for range 5 {
-		s.appendOutOfBand("document.changed", "ext/x/requests/old", now)
+		s.appendOutOfBand("document.changed", "app/x/requests/old", now)
 	}
 	s.setBoundsErr(errors.New("the log would not say where it stands"))
 
@@ -281,7 +281,7 @@ func TestABusThatCouldNotFindTheHeadDoesNotReplayTheLog(t *testing.T) {
 	if got := seen(); len(got) != 1 {
 		t.Fatalf("placing the mark replayed history: %d event(s) delivered", len(got))
 	}
-	fresh := s.appendOutOfBand("document.changed", "ext/x/requests/new", now)
+	fresh := s.appendOutOfBand("document.changed", "app/x/requests/new", now)
 	b.Announce()
 	got := seen()
 	if len(got) != 2 || got[1].Seq != fresh {
@@ -301,7 +301,7 @@ func TestTrimReportsAPassThatCouldNotRun(t *testing.T) {
 	})
 	now := time.Now()
 	for range 4 {
-		s.appendOutOfBand("document.changed", "ext/x/requests/a", now)
+		s.appendOutOfBand("document.changed", "app/x/requests/a", now)
 	}
 
 	// consumerFloor reads the bounds when no enabled consumer is registered, so

@@ -61,6 +61,15 @@ func (f Filter) Matches(name string) bool {
 	return false
 }
 
+// MatchPattern reports whether one pattern selects an event name.
+//
+// Exported because a subscriber sometimes has to answer a second question about
+// the same patterns — the app runtime resolves which of an app's declared
+// subscriptions a delivered fact came from, so it can name the handler to run.
+// A private copy of this rule in that caller would be free to drift from the
+// filter that decided the delivery in the first place.
+func MatchPattern(pattern, name string) bool { return matchPattern(pattern, name) }
+
 func matchPattern(pattern, name string) bool {
 	switch {
 	case pattern == "*" || pattern == "":

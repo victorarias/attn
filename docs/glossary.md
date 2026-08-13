@@ -145,6 +145,17 @@ one; in particular, looking at an agent is not acting on it. `turn_owed` is deri
 at broadcast from the persisted `turn_opened_at`/`turn_settled_at` stamps and is
 never stored. The predicates live in `internal/attention`.
 
+**Auto-settle** closes a turn the user already dealt with by steering the agent
+back to work: the session holds `working` through an invisible arm delay, then a
+visible countdown, then the turn settles. It applies only to sessions the queue
+includes — the exclusions below are also the exclusions here.
+
+A **standing dismissal** is the user answering that settle, whether the countdown
+is on screen or has not started yet: the session's next auto-settle does not run.
+It is spent at the end of the `working` stretch it covers, so the turn after that
+is a fresh decision, and it is off the wire as `auto_settle_dismiss_armed` while
+it stands. Neither of those is settling — the turn stays owed either way.
+
 The **queue** is the sidebar arrangement built on turns (queue mode; off by
 default). Its standing order is the chief's anchored slot, the turns you owe
 (oldest first), the settled rest, pinned agents, pinned workspaces, muted.
@@ -243,15 +254,91 @@ The raw tier is physically unreachable through the user-facing notebook APIs
 happens; the keeper's narration is best-effort on top of it, so nothing is lost if
 narration never runs.
 
+## App
+
+An **app** is automation built on attn's platform: it declares what it does in a
+manifest, consumes domain facts from the event bus, keeps its state in its own
+document-store namespace, and runs inside attn's one shared supervised runtime.
+Apps are written by agents, applied while attn runs, and are meant to be cheap
+and numerous.
+
+An app has exactly one name, and that name is its whole identity: registry key,
+bus consumer `app:<name>`, document namespace `app/<name>`, directory
+convention. Nothing stores those separately, so they cannot drift apart.
+
+Two consequences of that single identity are worth stating outright, because
+they are what the lifecycle verbs mean:
+
+- An app's **enabled** state *is* its bus consumer's enabled bit. There is no
+  second copy. Flipping it is the one act that both stops delivery and releases
+  the event log's retention floor, and because the bit lives in the database,
+  `attn bus disable app:<name>` kills an app whether or not the daemon is
+  listening.
+- **Removing** an app stops and deletes its bus consumer and deletes its
+  registry row — and nothing else. Its version history, its invocation log, and
+  every document under `app/<name>` survive. Deleting a user's data is a
+  separate, explicit act, and uninstalling is not it.
+
+A **version** is one built artifact, identified by its content hash and frozen
+together with the declaration the manifest carried when it was built. Versions
+are never rewritten: applying is an insert plus a pointer move, and rolling back
+is the same pointer move to an older row. Re-applying byte-identical content
+reuses the version that is already there, which is what keeps "which version
+actually ran" answerable in the invocation log after a long editing session.
+
+**Applying** is how a directory becomes a version: parse the manifest, generate
+the types the handlers are checked against, typecheck, bundle, hash, write the
+artifact, insert the row, move the pointer. Apply never evaluates the app's
+code — nothing is imported and nothing is run — so every way an apply can fail
+happens before the pointer moves, with the previous version still serving. That
+is what makes applying safe to do repeatedly while attn is running, and it is
+why `attn app dev` can re-apply on every save.
+
+## Plugin
+
+A **plugin** integrates the outside world into attn: agent drivers, worktree
+hooks. It runs as its own supervised process, dials the daemon, is installed
+rarely, and is effectively part of the platform — a device driver.
+
+App and plugin are deliberately different mechanisms, not two words for one. A
+failing plugin takes an integration down; a failing app is disabled while
+everything else keeps running. Different trust, different rate of change,
+different blast radius.
+
+## The retention floor, and the pin alarm
+
+The event log is trimmed by age, but never past the lowest cursor any **enabled**
+durable consumer still holds. That position is the **retention floor**, and the
+consumer sitting on it is said to **pin** the log: nothing at or below its cursor
+can be trimmed, because a durable consumer must not lose an unread fact. A
+disabled consumer does not pin — releasing the floor is exactly what `attn bus
+disable` is for.
+
+Holding the floor is ordinary. Every log has a floor holder and it is usually
+just the consumer that read least recently. What is not ordinary is holding it
+without moving: a consumer that is enabled and not consuming grows the log for as
+long as the condition lasts, and nothing ends that on its own.
+
+The **pin alarm** is the tripwire that separates the two. Past it — an hour by
+default, measured against every stall attn resolves by itself — the pin stops
+being the system working and becomes an outage worth a warning notification.
+Three surfaces report the same finding from the same predicate: the notification,
+`attn bus status`, and the event bus settings page. It is announced once per
+episode, and a new episode begins only after the consumer's cursor moves.
+
+The alarm makes the condition visible; it never resolves it. No pinned event is
+ever dropped and no consumer is ever disabled on its behalf.
+
 ## The document store
 
-attn's **document store** is where an extension keeps its own data. Three names
+attn's **document store** is where an app keeps its own data. Three names
 locate every record:
 
-- **Namespace** — `owner/name`, e.g. `ext/approval-gate`. A namespace is granted
-  to exactly one author and is the isolation boundary: nothing an extension does
+- **Namespace** — `owner/name`, e.g. `app/approval-gate`. A namespace is granted
+  to exactly one author and is the isolation boundary: nothing an app does
   can read or write another namespace, and two namespaces may use the same
-  collection name without meeting.
+  collection name without meeting. `app/` is the owner segment apps are granted;
+  `core/` is attn's own.
 - **Collection** — a named set of documents inside a namespace, e.g. `requests`.
 - **Document** — one JSON object with a caller-chosen **id**, unique within its
   collection. The body is stored byte for byte and nothing ever rewrites it, so
@@ -311,6 +398,108 @@ equally resumable, so what a session was last seen doing is context for the user
 and never the reason it survives or is reaped. A session that cannot be brought
 back is **reaped**: the row and its pane go, rather than lingering as a Reload
 that cannot work.
+## The garden
+
+The **garden** is where work lives: all seeds, and the space they live in. It
+belongs to a home daemon, because one garden shared across a fleet is its whole
+point — an outpost has none and passes its asks home.
+
+A **seed** is the unit of work — one document with one short id, a title, a
+markdown body, and a state. Anything worth handing off, parking, or attributing
+is a seed; in-session scratch is not. **Planting** creates one, and costs a
+single line that returns the id (`attn seed plant "what this is"`), because a
+capture that costs ceremony does not happen.
+
+A **plot** is a seed with children plus the intent to execute them — the whole
+subtree, not just the parent. A plot has no id of its own: its root seed, the
+**crown**, is how it is addressed. A **packet** is a plot flagged as a template
+with declared variables, so a proven shape can be planted again with its blanks
+filled.
+
+Seed ids are `s-` plus six Crockford base32 characters (`s-7k3f9m`) — short
+enough to say out loud, with no character pair anyone confuses, and no `/`, so
+qualifying one with its owning daemon at a federation boundary stays a matter of
+prefixing rather than a re-identification.
+
+A seed's life runs `planted` → `growing` → `harvested` or `withered`, with
+`dormant` off to the side. **Tending** is the atomic claim: it sets the
+**tender** — the session and crew member holding the seed — and starts it
+growing in one move, and a seed has one tender at a time. **Parking** pauses a
+seed deliberately (`dormant`) and lets go of the claim; tending it again picks
+it back up. **Harvesting** closes it as done, with a reason, and **withering**
+closes it as abandoned. **Replanting** reopens a closed seed — a closed seed
+reopens before it moves again, which is why replant is the only verb a
+harvested seed answers.
+
+An **edge** is one typed relation between two seeds, stored on the seed it
+points from. Two kinds carry meaning today: **blocks** (`a blocks b` — b waits
+for a) and **part-of** (`b part-of c` — b is one of the crown c's children, and
+a seed sits in at most one plot). `sown-from`, `discovered-from` and
+`relates-to` are declared and inert. A cycle in either kind is refused when it
+is created, naming both seeds and the edge to remove.
+
+**Ready** is the answer to "what can I pick up right now": an open seed nothing
+blocks, nobody holds, and nothing is part of — a crown's work is its children,
+not the crown. It is computed when asked and never stored, so harvesting a
+blocker frees its dependent at the next call, with nobody clearing anything.
+`attn seed ready` scopes to the calling session's workspace unless told
+otherwise, and every attn-launched agent starts knowing its workspace's count.
+
+A **note** is one entry on a seed's trail: what happened and what was learned,
+written for whoever tends that seed next. Notes are anchored to the work and
+routed to nobody — a message with an addressee is a message, not a note — and
+they are read where the tender already looks, in the seed's own `show`.
+
+Plan:
+[docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
+
+## Home daemon
+
+A daemon that is **its own home** — standalone, complete, owning its garden,
+its crew, and every other piece of user-level shared state. Every fresh
+install starts as a home daemon, and the user's app talks to one. "Home" is
+not a rank or a different binary: it is the default state of any daemon that
+nobody has enrolled, and the one that may have enrolled others.
+
+The ownership rule underneath: **every piece of state has exactly one owner
+daemon; everyone else is a client of it.** Sessions are owned by the daemon
+where they run — including on outposts; the garden and the crew are owned by
+a home daemon, because one board and one roster are their whole point.
+
+The central server (closed, operated, optional) connects **home daemons to
+each other** — federation, a different relationship from home↔outpost
+ownership. Outposts never meet the server; a home represents its whole
+fleet. Plan:
+[docs/plans/2026-08-10-home-garden-crew-arc.md](plans/2026-08-10-home-garden-crew-arc.md).
+
+## Outpost
+
+A daemon **enrolled to a home**: it keeps owning its own sessions, but
+garden and crew asks pass to its home over the **uplink** (the generic
+outpost-asks-home intent channel). An outpost holds no garden state at all —
+not a copy, not a cache; reads pass through like writes.
+
+**Enrollment** is the recorded, mutual act that makes an outpost: the
+outpost persists its home's daemon id, and only a connection presenting that
+identity acts as home. Every daemon has exactly one home; a second home
+dialing an already-enrolled outpost is a loud re-home decision, never silent
+adoption.
+
+The record lives beside the daemon's own `daemon-id` file in its data dir; a
+home writes it on the remote when it syncs one. `attn enrollment` shows it,
+and `attn enrollment leave` is the way out — it makes the daemon a home
+again, and is what has to happen on an outpost before a different home may
+take it.
+
+Until the uplink is built, outposts are **fenced**: garden and crew surfaces
+refuse on an outpost with an error naming the home and the plan tracking the
+gap. Everything outposts do today — sessions, PTY, PR flows, local
+tickets — is unaffected.
+
+The transport vocabulary is older than these words and stays: **hub** (the
+code's name for the dialing side), **endpoint** (a stored SSH target), and
+**remote** (the dialed machine) describe the plumbing; home and outpost
+describe the ownership relationship carried over it.
 
 ## Conversation session
 

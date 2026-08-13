@@ -33,13 +33,16 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 		if err != nil {
 			return nil, rollback, fmt.Errorf("prepare chief notebook: %w", err)
 		}
-		content := hooks.ChiefGuidance(root, d.sessionHasSelfMonitor(sessionID))
-		if strings.TrimSpace(content) == "" {
+		if strings.TrimSpace(root) == "" {
 			return nil, rollback, fmt.Errorf("prepare chief guidance: notebook root is empty")
 		}
 		return &pluginLaunchInstructions{
-			Kind:         pluginInstructionKindChief,
-			Content:      content,
+			Kind: pluginInstructionKindChief,
+			Content: hooks.Launch{
+				NotebookRoot:   root,
+				HasSelfMonitor: d.sessionHasSelfMonitor(sessionID),
+				GardenReady:    d.gardenReadyForLaunch(workspaceID),
+			}.Instructions(),
 			WorkspaceID:  workspaceID,
 			NotebookRoot: root,
 		}, rollback, nil
@@ -61,10 +64,25 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 		rollback = func() { _ = os.RemoveAll(workspaceContextCheckoutDir(d.dataRoot, sessionID)) }
 	}
 	return &pluginLaunchInstructions{
-		Kind:            pluginInstructionKindWorkspace,
-		Content:         hooks.AgentInstructions(result.Path, parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled))),
+		Kind: pluginInstructionKindWorkspace,
+		Content: hooks.Launch{
+			WorkspaceContextPath: result.Path,
+			InjectWorkflow:       parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
+			GardenReady:          d.gardenReadyForLaunch(workspaceID),
+		}.Instructions(),
 		WorkspaceID:     workspaceID,
 		ContextPath:     result.Path,
 		ContextRevision: result.CanonicalRevision,
 	}, rollback, nil
+}
+
+// gardenReadyForLaunch is the ready count a launching agent is primed with, or
+// nil when this daemon has no garden to prime from — an outpost, where every
+// seed command refuses, must not hand its agents a loop they cannot run.
+func (d *Daemon) gardenReadyForLaunch(workspaceID string) *int {
+	count, err := d.gardenReadyCount(workspaceID)
+	if err != nil {
+		return nil
+	}
+	return &count
 }

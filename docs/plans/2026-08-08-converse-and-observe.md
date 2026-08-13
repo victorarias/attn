@@ -2,6 +2,11 @@
 
 ## Goal
 
+Stage 1 of the **home–garden–crew arc**
+([2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md));
+message state is daemon-local by design, so this vertical needs no fence
+and cross-daemon addressing waits for the arc's uplink.
+
 First vertical through the **agents converse and observe** rock in
 [docs/vision/friendly-home-for-agents.md](../vision/friendly-home-for-agents.md):
 an attn-living agent inspects what another session is doing without
@@ -116,8 +121,18 @@ CLI exemplars to mimic: `cmd/attn/state_explain.go` (read, session-scoped,
 
 ## Implementation Steps
 
-### Slice 1 — peek
+Each slice is its own PR, against main, peek first (Victor, 2026-08-10):
+slice 1 is read-only and merges fast, proving the protocol plumbing before
+the heavier slice lands on top.
 
+### Slice 1 — peek and list
+
+- [ ] `attn agent list`: sessions on this daemon — short id, name,
+      workspace, state, turn-owed — served from the same store the app
+      snapshot reads. Read-only, no PTY contact. This is the address
+      book: session ids are not exposed anywhere a user or agent
+      otherwise sees, so list is the only source of the ids every other
+      `attn agent` command takes.
 - [ ] Protocol: `AgentPeekMessage` / `AgentPeekResult` in `main.tsp`,
       `make generate-types`, version bump, `CommandMeta` (`ScopeSession`),
       decoder case.
@@ -131,15 +146,17 @@ CLI exemplars to mimic: `cmd/attn/state_explain.go` (read, session-scoped,
 - [ ] Tests: store-backed daemon test (state+todos), transcript fixture,
       snapshot-less degrade; CLI output golden.
 
-Acceptance: from session A, `attn agent peek B` shows B's state, todos,
-last assistant message, and screen while B is mid-turn — and B's transcript
-shows no reaction of any kind.
+Acceptance: from session A, `attn agent list` names B and its id;
+`attn agent peek B` shows B's state, todos, last assistant message, and
+screen while B is mid-turn — and B's transcript shows no reaction of any
+kind.
 
 ### Slice 2 — msg
 
 - [ ] Migration: create `agent_messages`, drop
-      `chief_of_staff_dispatch_messages` (never written; check
-      `MAX(version)` in real DBs before numbering).
+      `chief_of_staff_dispatch_messages` (never written; drop approved by
+      Victor 2026-08-10 — state that in the PR, no further receipts
+      needed; check `MAX(version)` in real DBs before numbering).
 - [ ] Protocol: `AgentMsgMessage` / `AgentMsgResult` (`delivered | queued`),
       version bump.
 - [ ] Daemon: `handleAgentMsg` — persist row, compose attributed prompt,
@@ -175,6 +192,14 @@ shows no reaction of any kind.
       first (bracketed paste of multi-KB text through the fence), set the
       tripwire past it, and make the error name the limit, its value, and
       the ask.
+- [ ] Discoverability: `attn agent` group joins `writeHelp`, and the
+      embedded attn skill (`internal/agent/attn_skill/`) gets a
+      converse-and-observe reference plus its capability-index line —
+      agents read errors, help, and skills, never our code, and the skill
+      is the only surface that teaches the verbs *before* first contact
+      (the composed prompt teaches the reply path after). Ships in this
+      slice, not before: the skill advertises the verbs only once both
+      exist.
 - [ ] Tests: delivery mid-idle, queue-then-deliver across a state change,
       attribution format (boundary line included), self-msg, cap error,
       guard verdicts (dedupe repeat, rate throttle, full queue — each
@@ -263,6 +288,15 @@ only channel.
   deference to "from trellis", the envelope never changes — and granting
   weight to a name is safe only because attribution is daemon-composed
   and unforgeable.
+- **Deliver whenever the guard allows** (Victor, 2026-08-10): no
+  prefer-idle politeness in v1 — waiting for idle means a message to an
+  agent grinding a long turn arrives after the moment that made it worth
+  sending. The socket-transport follow-up makes mid-turn delivery polite
+  for claude targets instead of making polite delivery late.
+- **Discovery ships with the primitives** (Victor, 2026-08-10): `attn
+  agent list` lands in slice 1 beside peek — both prior arts shipped the
+  pair, and ids exist nowhere else — and help + embedded-skill
+  discoverability closes slice 2.
 - **Loop guard ships in v1** (Victor, 2026-08-08; reverses the ping-pong
   open question in the first draft of this plan). The draft ruling — no
   rate machinery, single-user garden, visible panes — fell to evidence:
@@ -272,16 +306,14 @@ only channel.
 
 ## Open Questions
 
-- **`working`-state delivery for claude targets**: mid-turn injection is
-  memory-safe for claude and queued-by-doorbell for codex, but whether msg
-  should *prefer* waiting for idle (politeness) over immediate delivery is
-  a product feel question — v1 delivers whenever the guard allows, matching
-  ticket nudges. The socket transport follow-up is the likely long-term
-  answer for claude targets: it makes mid-turn delivery polite instead of
-  making polite delivery late.
 - Whether peek's screen text should ever travel to remote/hub sessions
   (relay is a text pipe, so mechanically fine) — out of v1 scope, noted for
-  the server-as-client arc.
+  the server-as-client arc. Cross-daemon msg and peek more broadly hit the
+  missing remote→hub direction the central-server ground pass mapped; when
+  they leave one daemon, they ride the generic "remote daemon asks its hub"
+  channel from
+  [2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md),
+  not a bespoke path.
 
 ## Follow-ups
 
@@ -297,8 +329,6 @@ only channel.
   socket's wire format, and hold behavior for attn-launched sessions
   (bypass-class receivers hold unattributed posts unless
   `crossSessionInbound: accept`, which attn's managed settings could set).
-- `attn agent` group joins `writeHelp` once both subcommands exist
-  (`ticket` precedent: wired before advertised).
 - Glossary entries for *peek* and *message* when the vocabulary survives
   first contact.
 - Crew addressing (`attn agent msg trellis`) after the daemon crew

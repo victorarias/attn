@@ -11,6 +11,8 @@ on:
       - "go.sum"
       - "cmd/**"
       - "internal/**"
+      - "apphost/**"
+      - "scripts/build-app-runtime-host.sh"
   workflow_dispatch:
 
 jobs:
@@ -58,6 +60,24 @@ jobs:
             exit 1
           fi
           file ${{ matrix.output }}
+
+      # The release publishes the app runtime host beside the daemon, because a
+      # hub installed from a release has no way to build one for a Linux remote.
+      # Building it here is what keeps that step from being first exercised on
+      # release day.
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Build app runtime host
+        run: |
+          bash ./scripts/build-app-runtime-host.sh /tmp/app-runtime-${{ matrix.label }}
+          file /tmp/app-runtime-${{ matrix.label }}/attn-app-runtime
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4

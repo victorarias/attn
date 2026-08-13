@@ -9,7 +9,7 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
-// The document store's facts are a contract: extensions read this log, and a
+// The document store's facts are a contract: apps read this log, and a
 // consumer that parses `document.changed` must keep working across releases.
 // These pin the name, the subject's shape, the payload, and — the part that is
 // not visible from either side alone — that the fact and the write it describes

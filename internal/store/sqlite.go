@@ -964,7 +964,8 @@ CREATE TABLE IF NOT EXISTS document_collections (
 	// generator that a session has written nothing new and needs no run at all.
 	// Applied by applyMigration97. See docs/plans/2026-08-07-session-activity.md.
 	{97, "add the activity line and its transcript cursor to sessions", ``},
-	// 98 is burned on another branch (the app registry); do not reuse it.
+	// 98 is burned: the app registry held it on the A4 epic branch until this
+	// ladder overtook it. Do not reuse it.
 	//
 	// Participation earned by acting as a durable role belongs to the ROLE, not
 	// to the session that filled it at the time. The event now says so directly:
@@ -1016,6 +1017,85 @@ CREATE TABLE IF NOT EXISTS document_collections (
 			ON agent_messages(sender_session_id, target_session_id, created_at);
 		DROP TABLE IF EXISTS chief_of_staff_dispatch_messages;
 	`},
+	// The app registry (A4). Three tables, and their absences are as decided as
+	// their columns:
+	//
+	//   - apps has NO enabled column. An app's enabled state IS its bus
+	//     consumer's enabled bit, which is what both stops delivery and releases
+	//     the retention floor. A mirrored column here would be a drift class
+	//     with no job to do.
+	//   - app_versions rows are immutable. Apply inserts, rollback moves
+	//     apps.current_version_id; nothing rewrites a version, and removing an
+	//     app leaves its versions behind as history.
+	//   - app_invocations records the version that actually ran, not the pointer
+	//     the app happens to be on now, so the log stays honest across a
+	//     rollback.
+	//
+	// UNIQUE(app_name, content_hash) is what makes "re-applying byte-identical
+	// content mints no new row" a property of the database rather than a
+	// convention in the apply pipeline.
+	//
+	// Numbered 96, then 97, then 98, then 101 on the epic branch, and now 102:
+	// each main sync found the number taken. A hole is not a free slot — the
+	// runner keeps one scalar version and skips anything at or below it, so a
+	// database that already ran 99 and 100 would never have created these
+	// tables from 98.
+	{102, "create the app registry", `CREATE TABLE IF NOT EXISTS apps (
+    name               TEXT PRIMARY KEY,
+    current_version_id INTEGER,
+    created_at         TEXT NOT NULL,
+    updated_at         TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS app_versions (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name      TEXT NOT NULL,
+    content_hash  TEXT NOT NULL,
+    declaration   TEXT NOT NULL,
+    artifact_path TEXT NOT NULL,
+    created_at    TEXT NOT NULL,
+    UNIQUE(app_name, content_hash)
+);
+-- History for one app, newest first: the rollback picker's access path.
+CREATE INDEX IF NOT EXISTS idx_app_versions_app ON app_versions(app_name, id DESC);
+CREATE TABLE IF NOT EXISTS app_invocations (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name      TEXT NOT NULL,
+    version_id    INTEGER NOT NULL,
+    event_seq     INTEGER NOT NULL,
+    event_name    TEXT NOT NULL DEFAULT '',
+    event_subject TEXT NOT NULL DEFAULT '',
+    handler       TEXT NOT NULL DEFAULT '',
+    status        TEXT NOT NULL,
+    error         TEXT NOT NULL DEFAULT '',
+    duration_ms   INTEGER NOT NULL DEFAULT 0,
+    started_at    TEXT NOT NULL
+);
+-- One app's recent invocations, and the age window retention trims by. Both
+-- read this index; started_at is written fixed-width so text order is time
+-- order.
+CREATE INDEX IF NOT EXISTS idx_app_invocations_app ON app_invocations(app_name, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(started_at);`},
+	// What was serving immediately before the version an app is on now. Bare
+	// `attn app rollback <name>` follows it, because "the version before this
+	// one" is the operator's get-me-back-to-what-worked, and the numerically
+	// previous id is a different question with a different answer — the app that
+	// went good, broken, fixed rolls back onto the broken one under the old rule.
+	//
+	// Nothing backfills it: what was serving before is history the registry never
+	// recorded, and inventing it from ids would reproduce the bug this fixes. An
+	// app carried across this migration has no recorded previous until its next
+	// pointer move, and bare rollback says so rather than guessing.
+	// Applied by applyMigration103, whose ALTER is column-guarded.
+	{103, "record the previously-serving version of each app", ``},
+	{104, "remember a parked supervised child across daemon restarts", `CREATE TABLE IF NOT EXISTS supervised_parks (
+    child           TEXT PRIMARY KEY,
+    parked_at       TEXT NOT NULL,
+    restart_attempt INTEGER NOT NULL DEFAULT 0,
+    exit_at         TEXT NOT NULL DEFAULT '',
+    exit_code       INTEGER,
+    exit_signal     TEXT NOT NULL DEFAULT '',
+    exit_error      TEXT NOT NULL DEFAULT ''
+);`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1392,6 +1472,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 100 {
 			if err := applyMigration100(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 103 {
+			if err := applyMigration103(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2539,6 +2624,19 @@ func applyMigration100(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE notifications ADD COLUMN severity TEXT NOT NULL DEFAULT 'info'")
+	return err
+}
+
+// applyMigration103 adds the previously-serving version pointer to the app
+// registry. Guarded on the column, and NULL is the honest carried value: an app
+// that existed before this migration has no recorded predecessor until its next
+// pointer move.
+func applyMigration103(tx *sql.Tx) error {
+	has, err := columnExists(tx, "apps", "previous_version_id")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE apps ADD COLUMN previous_version_id INTEGER")
 	return err
 }
 

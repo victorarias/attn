@@ -2,6 +2,13 @@
 
 ## Alignment
 
+Stage 3 of the **home–garden–crew arc**
+([docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md)),
+which owns the sequencing around this plan: the home/outpost vocabulary,
+the fence that keeps these slices home-only, the uplink that later unfences
+outposts (and gates ticket retirement), and the central server. This plan
+owns the garden itself.
+
 First vertical through
 [docs/vision/friendly-home-for-agents.md](../vision/friendly-home-for-agents.md):
 the fine-grained, addressable work graph — **seeds** — for any attn-living
@@ -71,10 +78,25 @@ to fix.
 ## Design decisions (cross-slice)
 
 - **Storage: docstore, `core/garden` namespace.** Collections `seeds` and
-  `notes` (audit/progress entries keyed by seed id — a separate collection,
-  not an embedded array, so a long-tended seed never bloats its own
-  document). Live queries, bus change events, and revision-checked writes
-  come free; schema can move fast while the shape settles. Single-writer
+  `notes` (keyed by seed id — a separate collection, not an embedded array,
+  so a long-tended seed never bloats its own document). Notes are the
+  general historical-context surface, not just machine audit (Victor,
+  2026-08-10): an agent writes what happened and what it learned, addressed
+  to whoever tends that seed next; a note scoped to the whole effort goes on
+  the crown, which works with no extra machinery because a crown is a seed.
+  The read side is part of the surface (Victor, 2026-08-10): notes appear
+  where the tender already looks — a seed's show includes its recent notes
+  and, when the seed sits in a plot, the crown's — never behind a verb
+  nobody is told to run. Volume stays under the agent's control: the
+  default shows the most recent few and names what it withheld ("12 more —
+  `attn seed notes <id>`"), with the full list pageable and filterable.
+  A silent truncation here recreates the unread bulletin board this
+  surface exists to replace. Prose quality for crown bodies and notes is
+  an open problem outside this plan's scope — the gate designed for it
+  died in calibration; what was measured is in
+  [the first-principles record](2026-08-12-plain-agent-prose-first-principles.md).
+  Live queries, bus change events, and revision-checked writes come
+  free; schema can move fast while the shape settles. Single-writer
   invariants (one active tender) are enforced in daemon code, the
   `applyState` way — not by table constraints.
 - **One primitive.** A **plot** is a seed with children and execution
@@ -83,7 +105,14 @@ to fix.
   is just an edge between crowns, and everything that works on a seed works
   on all of them.
 - **IDs are identity; edges are structure.** Short, stable, human-sayable
-  seed ids (readable slug, exact shape decided in slice 1). No dotted
+  seed ids. Shape ruled in slice 1 (2026-08-12): `s-` plus six Crockford
+  base32 characters (`s-7k3f9m`) — the alphabet drops `i`, `l`, `o` and `u`,
+  so no two characters are confusable when read aloud or copied by hand, and
+  six of them is 2^30 ids, which nothing a single garden holds comes near.
+  Minted from crypto/rand rather than derived from the title, because a
+  derived id renames itself when the title is corrected. No `/` anywhere in
+  the alphabet, which is what keeps qualifying an id at a federation boundary
+  a prefixing job (`<daemon-id>/<local-id>`) and not a re-identification. No dotted
   hierarchy: re-parenting a seed must never rename it. `part-of` edges carry
   the hierarchy beads encodes in ids. For addressing *within* a plot, every
   seed carries a **step slug** (auto-derived from title, editable, unique in
@@ -93,8 +122,14 @@ to fix.
   the daemon the app talks to. A garden per daemon is a split brain: a remote
   delegate asking its own daemon would see an empty garden, and remotely
   planted seeds would never reach the panel. So a remote session's seed
-  commands must reach the hub's garden over the relay, the way PR flows
-  already do. Cross-machine and offline syncing is real and wanted, and rides
+  commands must reach the hub's garden over the relay. (An earlier draft said
+  "the way PR flows already do" — the 2026-08-09 central-server ground pass
+  found that analogy backwards: PR flows travel hub → remote, keyed on ids
+  the hub already knows, while seed commands need remote → hub, a direction
+  with no path today. The shape that fixes it — an inverted request/response
+  over the existing relay connection — is in
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md).)
+  Cross-machine and offline syncing is real and wanted, and rides
   the central-server arc (see the vision's blindspot) — hub-local is the
   honest first version, not the end state.
 - **Server-ready, not server-dependent.** The future central server (closed,
@@ -229,27 +264,27 @@ immediately.
 
 Ships:
 
-- [ ] `core/garden` collections registered. The seed document carries the
+- [x] `core/garden` collections registered. The seed document carries the
       full designed schema — status, markdown body, workspace, planter,
       tender, step slug, edges, and the inert template/vars/gate fields —
       even though only a slice of it is behaviorally live.
-- [ ] `attn seed plant "title" [-m body]` → prints the new id;
+- [x] `attn seed plant "title" [-m body]` → prints the new id;
       `attn seed ls`, `attn seed show <id>`; `--json` on all three.
       Workspace stamped from the calling session's context.
-- [ ] Seed id shape decided and documented: short, stable, sayable, unique
+- [x] Seed id shape decided and documented: short, stable, sayable, unique
       in its hub; the daemon prefix stays at the boundary (see the
       server-ready design decision — no local operation ever sees it).
-- [ ] App: a garden panel listing the workspace's seeds live (docstore
+- [x] App: a garden panel listing the workspace's seeds live (docstore
       change events; if the app-side subscription seam wants A3.4 Stage 2,
       ride a snapshot-projection until it lands — the panel's contract is
       "planted seed appears without a refresh", not a particular transport).
-- [ ] Bus facts `garden.planted` with the seed as subject.
-- [ ] Glossary: seed, plant, the garden, plot, crown, packet (the vocabulary
+- [x] Bus facts `garden.planted` with the seed as subject.
+- [x] Glossary: seed, plant, the garden, plot, crown, packet (the vocabulary
       lands together even though plots arrive in slice 5).
-- [ ] `attn seed export <crown>` writes the crown's body (plus the child
+- [x] `attn seed export <crown>` writes the crown's body (plus the child
       ledger as a checklist, once children exist) to markdown stamped as
       generated — the review bridge until slice 6 deletes it.
-- [ ] The first planting is this plan: its crown (this document as the body)
+- [x] The first planting is this plan: its crown (this document as the body)
       and one seed per remaining slice, the day `plant` works. Hierarchy is
       wired as the verbs arrive — edges in slice 3, plot semantics in
       slice 5 — and from slice 2 onward each slice is tended on start and
@@ -257,10 +292,10 @@ Ships:
 
 Acceptance:
 
-- [ ] From inside a live session, planting takes one command and the seed is
+- [x] From inside a live session, planting takes one command and the seed is
       visible in the running app without user action.
-- [ ] `plant` → `ls` → `show` round-trips in JSON.
-- [ ] The garden contains the plan for the garden, visible in the panel.
+- [x] `plant` → `ls` → `show` round-trips in JSON.
+- [x] The garden contains the plan for the garden, visible in the panel.
 
 ### Slice 2 — lifecycle and tending
 
@@ -268,19 +303,34 @@ Goal: a seed moves through its life, and the trail is visible.
 
 Ships:
 
-- [ ] `attn seed tend <id>` (atomic claim), `park`, `harvest -m`,
+- [x] `attn seed tend <id>` (atomic claim), `park`, `harvest -m`,
       `wither [-m]`, `replant` — every transition daemon-validated with loud
-      errors.
-- [ ] `attn seed note <id> -m` appends to the trail; `show` renders states,
-      tender, and notes newest-first.
-- [ ] App panel shows state and tender; state changes arrive live.
-- [ ] Bus facts per transition (`garden.tended`, `garden.harvested`, …).
+      errors. The claim is guarded on `tend` alone (2026-08-12): the other four
+      are fate calls, and guarding them would make a tender whose session ended
+      a one-way door with no key.
+- [x] `attn seed note <id> -m` appends to the trail; `show` renders states,
+      tender, and notes newest-first. `show` renders the newest
+      `garden.ShowNotes` and names what it withheld; `attn seed notes <id>`
+      reads the whole trail.
+- [x] App panel shows state and tender; state changes arrive live.
+- [x] Bus facts per transition (`garden.tended`, `garden.harvested`, …), plus
+      `garden.noted` for the trail.
+- [x] Slice 1's seed-list cap finished (Victor, 2026-08-12): the count the push
+      already carried now has consumers — the panel says how many the garden
+      holds when it outgrew one push, and `attn seed ls` names how many seeds it
+      did not show.
+
+Two tenders are the same holder when their session ids match; with no session id
+the crew name is the identity (2026-08-12). A terminal pane runs with no
+`ATTN_SESSION_ID` by design, so `--member` is how a person in a pane claims a
+seed, and comparing sessions alone made every one of them the same person —
+live verification handed alder a seed trellis was holding.
 
 Acceptance:
 
-- [ ] Full life in CLI: plant → tend → note → harvest, then replant → wither;
+- [x] Full life in CLI: plant → tend → note → harvest, then replant → wither;
       each state visible in the app as it happens.
-- [ ] A second session trying to tend an actively-tended seed gets a loud,
+- [x] A second session trying to tend an actively-tended seed gets a loud,
       named refusal (and a `--steal` style override is deliberately absent
       until needed).
 
@@ -290,26 +340,41 @@ Goal: seeds relate, and "what can I do now" is one flag-free command.
 
 Ships:
 
-- [ ] `attn seed link <a> blocks <b>` and `attn seed link <a> part-of <b>`
+- [x] `attn seed link <a> blocks <b>` and `attn seed link <a> part-of <b>`
       (typed edge list on the seed document; new kinds — `sown-from`,
       `discovered-from`, `relates-to` — are additive), with `unlink`.
-- [ ] `attn seed ready` with inferred scope: the calling session's workspace
+- [x] `attn seed ready` with inferred scope: the calling session's workspace
       by default; `--plot <crown>`, `--workspace <id>`, `--all` override.
-- [ ] `attn seed ls --tree` renders `part-of` hierarchy; `show` lists edges
+- [x] `attn seed ls --tree` renders `part-of` hierarchy; `show` lists edges
       both directions (blocks / blocked-by).
-- [ ] Harvesting a blocker makes the dependent ready at the next query (no
+- [x] Harvesting a blocker makes the dependent ready at the next query (no
       nudge yet — named later).
-- [ ] Priming, interactive side: attn-launched sessions receive the brief
+- [x] Priming, interactive side: attn-launched sessions receive the brief
       garden primer and their workspace's ready count in guidance (the
       chief-guidance injection path).
 
+Three rules decided while building this (2026-08-12):
+
+- A seed something is `part-of` is never itself ready. A crown's work is its
+  children, so a plot with open children would otherwise hand out the crown
+  and every leaf at once. A crown is finished by harvesting it, not by
+  tending it, so this holds even after its children close.
+- A seed sits in at most one plot. The second `part-of` is refused naming the
+  plot it is already in and the `unlink` that moves it, rather than making
+  "which plot is this in" a list.
+- A live tender holds its seed, and liveness is "a session this daemon still
+  knows" — including `recoverable`, which answers the open question below.
+  A tender that names only a crew member always holds: attn has no signal
+  that a person in a terminal pane walked away, and handing their seed to
+  somebody else on a guess is worse than leaving it claimed.
+
 Acceptance:
 
-- [ ] A three-seed chain (A blocks B, B part-of C) round-trips: `ready`
+- [x] A three-seed chain (A blocks B, B part-of C) round-trips: `ready`
       shows only A; harvesting A surfaces B.
-- [ ] Two sessions in different workspaces get different flag-free `ready`
+- [x] Two sessions in different workspaces get different flag-free `ready`
       answers.
-- [ ] Cycle creation is refused loudly, naming both seeds.
+- [x] Cycle creation is refused loudly, naming both seeds.
 
 ### Slice 4 — the seed axis of continuity
 
@@ -444,19 +509,37 @@ Acceptance:
 
 ## Open questions
 
-- The app-side transport for the garden panel: docstore subscription surface
-  vs. classic snapshot projection, and whether A3.4 Stage 2 is worth pulling
-  forward for it. Decide in slice 1 with the code in front of us. The panel
-  itself is the first rendering, not a commitment — whether the garden
-  becomes the app's front door is a named question in the vision, decided
-  with the foundational rendering work.
-- The relay mechanics for remote sessions: how `attn seed …` from a session
+- ~~The app-side transport for the garden panel: docstore subscription
+  surface vs. classic snapshot projection, and whether A3.4 Stage 2 is worth
+  pulling forward for it.~~ Ruled 2026-08-12 with the code in front of us:
+  the classic snapshot projection. The docstore's live-query surface is
+  IPC-only (`handleDocSubscribe` speaks over `net.Conn`), and the app speaks
+  WebSocket, so riding it would have meant building the app-side subscription
+  seam first — A3.4 Stage 2's whole scope — to deliver a list of at most a
+  few hundred small documents. `garden.planted` projects to one
+  `garden_seeds_updated` push carrying the whole garden, coalesced like every
+  other snapshot; the panel scopes to its workspace client-side, so switching
+  workspaces costs no round trip. Revisit when the garden outgrows one push,
+  not before. The panel itself is the first rendering, not a commitment —
+  whether the garden becomes the app's front door is a named question in the
+  vision, decided with the foundational rendering work.
+- ~~The relay mechanics for remote sessions: how `attn seed …` from a session
   on a remote daemon reaches the hub's garden (relayed command vs. another
-  path), and what happens when the hub is unreachable. Must be answered
-  before slice 5's dispatch acceptance can include a remote delegate;
-  cross-machine syncing proper stays with the central-server arc.
-- Whether `ready` should exclude seeds whose tender session is dead vs.
-  recoverable (interacts with daemon-owned revive). Slice 3 decides.
+  path), and what happens when the hub is unreachable.~~ Answered by the
+  2026-08-09 central-server ground pass: an inverted request/response over
+  the existing relay (remote daemon pushes an intent event to its connected
+  hub-kind client; the hub applies and the result returns), and a loud
+  refusal when no hub is connected — see
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](2026-08-10-home-garden-crew-arc.md).
+  Still to build before slice 5's dispatch acceptance can include a remote
+  delegate; cross-machine syncing proper stays with the central-server arc.
+- ~~Whether `ready` should exclude seeds whose tender session is dead vs.
+  recoverable (interacts with daemon-owned revive). Slice 3 decides.~~ Ruled
+  2026-08-12: a session the daemon still knows holds its seed, `recoverable`
+  included — revive brings that session back to the seed it was tending, and
+  releasing it meanwhile would hand the work to somebody else while its
+  tender is on the way back. A session the daemon no longer knows releases
+  it. See slice 3's rules.
 - Crew references: free-string member names are knowingly un-validated
   until the crew primitive lands — acceptable for a single-user garden,
   revisit at the crew arc.

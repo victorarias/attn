@@ -45,7 +45,7 @@ func TestChurningOneSubjectLeavesOneFact(t *testing.T) {
 
 	var last int64
 	for i := range 200 {
-		seq, err := s.AppendBusEvent(changeOf("ext/x/requests/a"), now.Add(time.Duration(i)*time.Second))
+		seq, err := s.AppendBusEvent(changeOf("app/x/requests/a"), now.Add(time.Duration(i)*time.Second))
 		if err != nil {
 			t.Fatalf("append %d: %v", i, err)
 		}
@@ -73,7 +73,7 @@ func TestCompactionKeepsTheNewestOfEverySubjectItTouches(t *testing.T) {
 
 	newest := map[string]int64{}
 	for i := range 30 {
-		for _, subject := range []string{"ext/x/requests/a", "ext/x/requests/b"} {
+		for _, subject := range []string{"app/x/requests/a", "app/x/requests/b"} {
 			seq, err := s.AppendBusEvent(changeOf(subject), now.Add(time.Duration(i)*time.Second))
 			if err != nil {
 				t.Fatalf("append: %v", err)
@@ -83,7 +83,7 @@ func TestCompactionKeepsTheNewestOfEverySubjectItTouches(t *testing.T) {
 		// A fact nobody declared compactable, on a subject that also carries
 		// compactable ones — the name is what decides, not the subject.
 		if _, err := s.AppendBusEvent(BusEvent{
-			Name: "session.state.changed", Subject: "ext/x/requests/a", Source: "test",
+			Name: "session.state.changed", Subject: "app/x/requests/a", Source: "test",
 		}, now.Add(time.Duration(i)*time.Second)); err != nil {
 			t.Fatalf("append: %v", err)
 		}
@@ -131,7 +131,7 @@ func TestAConsumerParkedBelowTheFloorPinsEveryFactItHasNotRead(t *testing.T) {
 
 	var seqs []int64
 	for i := range 10 {
-		seq, err := s.AppendBusEvent(changeOf("ext/x/requests/a"), now.Add(time.Duration(i)*time.Second))
+		seq, err := s.AppendBusEvent(changeOf("app/x/requests/a"), now.Add(time.Duration(i)*time.Second))
 		if err != nil {
 			t.Fatalf("append: %v", err)
 		}
@@ -170,7 +170,7 @@ func TestCompactingNoNamesRemovesNothing(t *testing.T) {
 	s := New()
 	now := time.Date(2026, 8, 5, 9, 0, 0, 0, time.UTC)
 	for range 5 {
-		if _, err := s.AppendBusEvent(changeOf("ext/x/requests/a"), now); err != nil {
+		if _, err := s.AppendBusEvent(changeOf("app/x/requests/a"), now); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
@@ -199,7 +199,7 @@ func TestACompactedLogIsNoLargerThanWhatItDescribes(t *testing.T) {
 	step := 0
 	appendChange := func(id string, deleted bool) {
 		step++
-		if _, err := s.AppendBusEvent(changeOf("ext/x/requests/"+id), now.Add(time.Duration(step)*time.Second)); err != nil {
+		if _, err := s.AppendBusEvent(changeOf("app/x/requests/"+id), now.Add(time.Duration(step)*time.Second)); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 		if deleted {
@@ -255,7 +255,7 @@ func TestTheLogReportsItsOwnWeight(t *testing.T) {
 	}
 
 	for range 4 {
-		if _, err := s.AppendBusEvent(changeOf("ext/x/requests/a"), now); err != nil {
+		if _, err := s.AppendBusEvent(changeOf("app/x/requests/a"), now); err != nil {
 			t.Fatalf("append: %v", err)
 		}
 	}
@@ -266,7 +266,7 @@ func TestTheLogReportsItsOwnWeight(t *testing.T) {
 	if rows != 4 {
 		t.Fatalf("log holds %d row(s), want 4", rows)
 	}
-	one := changeOf("ext/x/requests/a")
+	one := changeOf("app/x/requests/a")
 	if want := int64(4 * (len(one.Name) + len(one.Subject) + len(one.Payload) + len(one.Source))); bytes <= want {
 		t.Fatalf("4 facts weigh %d byte(s), want more than the %d of their own text", bytes, want)
 	}

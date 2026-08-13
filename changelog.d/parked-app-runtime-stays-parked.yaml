@@ -1,0 +1,13 @@
+kind: fixed
+area: app
+change: >
+  A parked app runtime now stays parked. Delivering an event to an app no longer
+  restarts a runtime that attn has given up on: the delivery fails with an error
+  naming the state and `attn app runtime restart`, which is still the way back.
+notes: >
+  Every delivery attempt went through the same call that `attn app runtime
+  restart` uses, and the bus retries a failing delivery forever, so a broken
+  runtime was handed a fresh restart budget every couple of minutes and parking
+  never held. Measured on a host binary that exits immediately: three parkings
+  and three critical notifications in five and a half minutes, which the ambient
+  surface would have turned into a permanent alarm.

@@ -91,6 +91,37 @@ func TestBusBoundsTracksTheLiveWindow(t *testing.T) {
 	}
 }
 
+// A caller flips the kill switch a moment after reading the registration, and in
+// that gap the consumer can be unregistered — one operator disabling an app while
+// another removes it. The write must say it found nothing, or the caller reports
+// a state change that never happened.
+func TestSetBusConsumerEnabledReportsAVanishedConsumer(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.SaveBusConsumer(BusConsumer{Name: "app:approval-gate", Cursor: 0, Filter: "*", Enabled: true}, busBase); err != nil {
+		t.Fatalf("SaveBusConsumer: %v", err)
+	}
+	flipped, err := s.SetBusConsumerEnabled("app:approval-gate", false, busBase.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("SetBusConsumerEnabled: %v", err)
+	}
+	if !flipped {
+		t.Fatal("flipping a registered consumer reported no row")
+	}
+
+	if err := s.DeleteBusConsumer("app:approval-gate"); err != nil {
+		t.Fatalf("DeleteBusConsumer: %v", err)
+	}
+	flipped, err = s.SetBusConsumerEnabled("app:approval-gate", true, busBase.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("SetBusConsumerEnabled after delete: %v", err)
+	}
+	if flipped {
+		t.Fatal("flipping a consumer that no longer exists reported success")
+	}
+}
+
 // Re-registering an existing consumer refreshes its filter but must not rewind
 // its cursor or resurrect it after the kill switch — daemon restart re-registers
 // every consumer, and neither of those may be a side effect of starting up.
@@ -104,7 +135,7 @@ func TestSaveBusConsumerPreservesCursorAndEnabled(t *testing.T) {
 	if err := s.SetBusConsumerCursor("wshub", 42, busBase.Add(time.Minute)); err != nil {
 		t.Fatalf("SetBusConsumerCursor: %v", err)
 	}
-	if err := s.SetBusConsumerEnabled("wshub", false, busBase.Add(2*time.Minute)); err != nil {
+	if _, err := s.SetBusConsumerEnabled("wshub", false, busBase.Add(2*time.Minute)); err != nil {
 		t.Fatalf("SetBusConsumerEnabled: %v", err)
 	}
 
@@ -126,6 +157,46 @@ func TestSaveBusConsumerPreservesCursorAndEnabled(t *testing.T) {
 	}
 	if got.Filter != "session.*" {
 		t.Fatalf("filter not refreshed: %q", got.Filter)
+	}
+}
+
+// Deleting a registration is what ends its hold on the retention floor: while the
+// row exists and is enabled, events it has not read cannot be trimmed, however
+// long ago whoever served it went away.
+func TestDeleteBusConsumerReleasesTheRetentionFloor(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	appendBus(t, s, "a.happened", "", busBase)
+	appendBus(t, s, "b.happened", "", busBase.Add(time.Minute))
+
+	if err := s.SaveBusConsumer(BusConsumer{Name: "app:ghost", Cursor: 0, Filter: "*", Enabled: true}, busBase); err != nil {
+		t.Fatalf("SaveBusConsumer: %v", err)
+	}
+	if n, err := s.TrimBusEvents(busBase.Add(time.Hour)); err != nil || n != 0 {
+		t.Fatalf("trimmed %d event(s) (err=%v); an enabled row must pin the log", n, err)
+	}
+
+	if err := s.DeleteBusConsumer("app:ghost"); err != nil {
+		t.Fatalf("DeleteBusConsumer: %v", err)
+	}
+	if _, ok, err := s.GetBusConsumer("app:ghost"); err != nil || ok {
+		t.Fatalf("the row survived deletion (found=%v, err=%v)", ok, err)
+	}
+	if n, err := s.TrimBusEvents(busBase.Add(time.Hour)); err != nil || n != 2 {
+		t.Fatalf("trimmed %d event(s) (err=%v) after the row went, want 2", n, err)
+	}
+}
+
+// Deleting a row that is not there is success: the caller is an uninstall path,
+// and an uninstall that fails the second time it runs is a worse surface than one
+// that says nothing.
+func TestDeleteBusConsumerMissingIsSuccess(t *testing.T) {
+	s := New()
+	t.Cleanup(func() { _ = s.Close() })
+
+	if err := s.DeleteBusConsumer("nobody"); err != nil {
+		t.Fatalf("DeleteBusConsumer of an unknown name: %v", err)
 	}
 }
 
@@ -224,7 +295,7 @@ func TestTrimBusEventsIgnoresDisabledConsumers(t *testing.T) {
 	if err := s.SaveBusConsumer(BusConsumer{Name: "killed", Cursor: 0, Filter: "*", Enabled: true}, busBase); err != nil {
 		t.Fatalf("SaveBusConsumer: %v", err)
 	}
-	if err := s.SetBusConsumerEnabled("killed", false, busBase); err != nil {
+	if _, err := s.SetBusConsumerEnabled("killed", false, busBase); err != nil {
 		t.Fatalf("SetBusConsumerEnabled: %v", err)
 	}
 

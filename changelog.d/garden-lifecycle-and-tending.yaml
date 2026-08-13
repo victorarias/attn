@@ -1,0 +1,17 @@
+kind: added
+area: cli
+change: >
+  Seeds now live a life. `attn seed tend <id>` claims a seed and starts it
+  growing, `attn seed park <id>` pauses it, `attn seed harvest <id> -m "what
+  got done"` closes it as done, `attn seed wither <id>` closes it as abandoned,
+  and `attn seed replant <id>` reopens a closed one. A seed has one tender at a
+  time: tending a seed somebody else is holding is refused by name, telling you
+  who has it. `attn seed note <id> -m "what happened"` leaves an entry on the
+  seed's trail for whoever tends it next; `attn seed show` renders the newest
+  ones and says how many more there are, and `attn seed notes <id>` reads the
+  whole trail. The garden panel shows each seed's state and tender, and moves
+  as the moves happen. A garden too large to read in one go now says so instead
+  of ending quietly at the cap: `attn seed ls` names how many seeds it did not
+  show, and the panel says how many the garden holds. `attn seed show --json`
+  now answers with the seed and its notes together, the way `ls --json` already
+  answered with its result.

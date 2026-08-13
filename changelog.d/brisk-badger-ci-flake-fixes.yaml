@@ -1,0 +1,9 @@
+kind: internal
+area: tests
+change: >
+  Closed the remaining false-attribution paths in the active CI flake ledger.
+  End-to-end daemon startup now follows Unix socket creation and child exit
+  instead of racing a fixed deadline, with isolated daemon logs attached to an
+  early failure. Startup-recovery tests now wait for the daemon's real recovery
+  completion signal before asserting pruned state instead of querying while the
+  recovery goroutine is still running.

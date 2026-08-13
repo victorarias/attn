@@ -16,10 +16,10 @@ import (
 // logged and forgotten.
 
 func changeFact(id string, deleted bool) BusEvent {
-	payload := fmt.Sprintf(`{"namespace":"ext/approval-gate","collection":"requests","id":%q,"deleted":%t}`, id, deleted)
+	payload := fmt.Sprintf(`{"namespace":"app/approval-gate","collection":"requests","id":%q,"deleted":%t}`, id, deleted)
 	return BusEvent{
 		Name:    "document.changed",
-		Subject: "ext/approval-gate/requests/" + id,
+		Subject: "app/approval-gate/requests/" + id,
 		Payload: payload,
 	}
 }
@@ -59,7 +59,7 @@ func TestACommittedWriteReportsWhereItsFactLanded(t *testing.T) {
 	if events[0].Seq != written.Seq {
 		t.Fatalf("fact is at seq %d, write reported %d", events[0].Seq, written.Seq)
 	}
-	if events[0].Subject != "ext/approval-gate/requests/a" {
+	if events[0].Subject != "app/approval-gate/requests/a" {
 		t.Fatalf("subject = %q", events[0].Subject)
 	}
 }
@@ -209,11 +209,11 @@ func TestAnAnswerCarriesThePositionItWasTrueAt(t *testing.T) {
 func TestReadingAnUndeclaredCollectionSaysSo(t *testing.T) {
 	s, _ := storeWithRequests(t, map[string]string{})
 
-	if _, declared, err := s.ReadDocument("ext/approval-gate", "nothing-here", "a"); err != nil || declared {
+	if _, declared, err := s.ReadDocument("app/approval-gate", "nothing-here", "a"); err != nil || declared {
 		t.Fatalf("get on an undeclared collection: declared=%v err=%v", declared, err)
 	}
 	if _, declared, err := s.CountQuery(docstore.Query{
-		Namespace: "ext/approval-gate", Collection: "nothing-here",
+		Namespace: "app/approval-gate", Collection: "nothing-here",
 	}); err != nil || declared {
 		t.Fatalf("count on an undeclared collection: declared=%v err=%v", declared, err)
 	}
@@ -292,7 +292,7 @@ func TestACountAfterACursorCountsWhatIsLeft(t *testing.T) {
 		"c": `{"attempts":3}`,
 	})
 	q := docstore.Query{
-		Namespace: "ext/approval-gate", Collection: "requests",
+		Namespace: "app/approval-gate", Collection: "requests",
 		Sort: &docstore.Sort{Field: "attempts"}, After: "a", Limit: docstore.MaxLimit,
 	}
 	count, found, err := s.CountQuery(q)

@@ -2,7 +2,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { assertPackagedAppBuildMatchesCurrentSource } from './buildPreflight.mjs';
-import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH } from './common.mjs';
+import { createRunContext, emitVerdict, FIRST_FAILURE_MAX_LENGTH, restoreHarnessSettings } from './common.mjs';
+import { MacOSDriver } from './macosDriver.mjs';
+import { createScenarioRecorder, recordingEnabled } from './windowRecording.mjs';
 
 // Collapse to a single line and cap length so the verdict's firstFailure field
 // can never break the one-line ATTN_VERDICT contract regardless of what the
@@ -186,11 +188,37 @@ export function createScenarioRunner(options, {
     process.stdout.write(line);
   };
 
+  // ATTN_HARNESS_RECORD=1 records the app window to runDir/recording-NN.mp4,
+  // one segment per app launch. The recorder follows the window by polling, so
+  // no scenario has to wire anything; when disabled nothing runs at all.
+  let recorder = null;
+  if (recordingEnabled()) {
+    const recordingDriver = new MacOSDriver({ appPath: options.appPath });
+    recorder = createScenarioRecorder({
+      runDir,
+      resolveWindowId: () => recordingDriver.mainWindowId(),
+      log: appendTrace,
+    });
+    recorder.start();
+  }
+
   const runRegisteredCleanup = async (reason) => {
     if (cleanupPromise) {
       return cleanupPromise;
     }
     cleanupPromise = (async () => {
+      // The signal path's restore: beforeExit does not fire on a signal, and
+      // draining the queue makes whichever of the two runs second a no-op.
+      // It talks to the daemon on its own socket, so the app being gone by
+      // now is fine.
+      try {
+        const restored = await restoreHarnessSettings();
+        if (restored > 0) {
+          appendTrace('settings:restored', { count: restored });
+        }
+      } catch (error) {
+        appendTrace('settings:restore_failed', { error: normalizeError(error) });
+      }
       if (cleanupHandlers.length === 0) {
         return;
       }
@@ -218,6 +246,10 @@ export function createScenarioRunner(options, {
       return;
     }
     finalized = true;
+    // Not awaited: the recorder's screencapture child keeps the event loop
+    // alive until it has finalized its file, and an orphaned recorder (signal
+    // path exits immediately) finalizes on its own after the SIGINT.
+    void recorder?.stop();
     releaseScenarioLock?.();
     process.removeListener('exit', exitHandler);
     for (const [signal, handler] of signalHandlers.entries()) {

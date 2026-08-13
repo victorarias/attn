@@ -337,6 +337,7 @@
 .endpoint-status-badge.status-error,
 .endpoint-status-badge.status-disconnected,
 .plugin-health-badge.unhealthy,
+.plugin-status-badge.parked,
 .agent-capability-pill.disabled {
   color: #ff746c;
   border-color: rgba(255, 116, 108, 0.42);

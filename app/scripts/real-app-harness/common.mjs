@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import WebSocket from 'ws';
 import { waitForFirstWorkspacePane, waitForPaneVisible } from './scenarioAssertions.mjs';
 import {
   assertProductionRunAllowed,
@@ -215,6 +216,139 @@ export async function sweepStaleHarnessSessions(observer, {
   return { swept: stale.length };
 }
 
+// The cheapest model each agent offers — the catalog's "(cheap)" entries in
+// app/src/components/automations/launchCatalog.ts. A scenario fixture asks an
+// agent to count, not to think, and nothing here caps what a run spends.
+const CHEAP_LAUNCH_MODELS = { claude: 'haiku', codex: 'gpt-5.4-mini' };
+
+// Per-agent escape hatch: ATTN_HARNESS_LAUNCH_MODEL_CLAUDE=sonnet pins that
+// instead, and =inherit leaves the setting alone. Inheriting is the expensive
+// option — an unpinned launch takes the machine owner's own default — so it
+// has to be asked for by name.
+function launchModelFor(agent) {
+  const override = (process.env[`ATTN_HARNESS_LAUNCH_MODEL_${agent.toUpperCase()}`] || '').trim();
+  if (override === 'inherit') {
+    return null;
+  }
+  return override || CHEAP_LAUNCH_MODELS[agent];
+}
+
+// Restores queued by pinCheapLaunchModels. They go back to the daemon
+// directly rather than through the app: scenarios tear down in whatever order
+// suits them — some through the runner's cleanup registry, some in their own
+// `finally` — and by the time the last of them has run the app is usually
+// gone. The daemon owns the setting and outlives every app launch, so it is
+// the one party guaranteed to still be there.
+const pendingSettingRestores = [];
+
+// Pins every agent's launch model on the daemon the scenarios drive, and
+// records what was there first so the run leaves the profile as it found it —
+// dev is a profile the maintainer also uses by hand.
+async function pinCheapLaunchModels(client, observer) {
+  for (const agent of Object.keys(CHEAP_LAUNCH_MODELS)) {
+    const model = launchModelFor(agent);
+    if (!model) {
+      continue;
+    }
+    const key = `default_model_${agent}`;
+    const previous = observer.getSetting(key);
+    if (previous === model) {
+      continue;
+    }
+    await client.request('set_setting', { key, value: model });
+    console.log(`[harness] pinned ${key}=${model} (was ${previous ? previous : 'unconfigured'})`);
+    // Only the first pin of a key is worth remembering: a relaunch re-pins over
+    // the harness's own value, and going back to that would leave the pin in
+    // place. Keeping the earliest means the value the run started with wins.
+    if (!pendingSettingRestores.some((restore) => restore.key === key)) {
+      pendingSettingRestores.push({ key, value: previous });
+    }
+  }
+  installSettingRestoreHook();
+}
+
+// beforeExit fires when the scenario's work is done and the loop drains, which
+// is every normal end — pass or fail. It does not fire on a signal, so the
+// runner calls the restore from its signal path too; draining the queue makes
+// the second call a no-op.
+let settingRestoreHookInstalled = false;
+function installSettingRestoreHook() {
+  if (settingRestoreHookInstalled) {
+    return;
+  }
+  settingRestoreHookInstalled = true;
+  process.once('beforeExit', () => {
+    // No await before the socket exists: a beforeExit handler only holds the
+    // process open through a real handle, so anything the restore waits on
+    // first (a dynamic import, say) lets the run end with the pin still on.
+    void restoreHarnessSettings().catch((error) => {
+      process.stderr.write(`[harness] could not restore pinned settings: ${error?.message || error}\n`);
+    });
+  });
+}
+
+// write is injectable so the pin/restore bookkeeping can be tested without a
+// daemon; nothing in the harness passes it.
+export async function restoreHarnessSettings({ write = writeDaemonSettings } = {}) {
+  const restores = pendingSettingRestores.splice(0, pendingSettingRestores.length);
+  if (restores.length === 0) {
+    return 0;
+  }
+  await write(restores);
+  for (const { key, value } of restores) {
+    console.log(`[harness] restored ${key}=${value ? value : 'unconfigured'}`);
+  }
+  return restores.length;
+}
+
+// A short-lived daemon connection that writes settings and waits for the
+// daemon to echo each one back, so the process cannot exit mid-write.
+async function writeDaemonSettings(entries, { wsUrl = defaultWSURLForProfile(), timeoutMs = 10_000 } = {}) {
+  const ws = new WebSocket(wsUrl);
+  const pending = new Set(entries.map((entry) => entry.key));
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`timed out writing settings to ${wsUrl}`)), timeoutMs);
+      const settle = (error) => {
+        clearTimeout(timer);
+        if (error) reject(error); else resolve();
+      };
+      ws.on('error', settle);
+      ws.on('close', (code, reason) => settle(pending.size > 0
+        ? new Error(`daemon closed before writing ${[...pending].join(', ')} (code ${code}${reason?.length ? `: ${reason}` : ''})`)
+        : undefined));
+      ws.on('open', () => {
+        // The daemon refuses commands from a client that has not claimed
+        // workspace_sessions, and says so on the way out.
+        ws.send(JSON.stringify({
+          cmd: 'client_hello',
+          client_kind: 'harness-observer',
+          version: 'real-app-harness',
+          capabilities: ['workspace_sessions'],
+        }));
+        for (const { key, value } of entries) {
+          ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));
+        }
+      });
+      ws.on('message', (raw) => {
+        let data;
+        try {
+          data = JSON.parse(raw.toString());
+        } catch {
+          return;
+        }
+        if (data.event !== 'settings_updated' || !data.changed_key) {
+          return;
+        }
+        pending.delete(data.changed_key);
+        if (pending.size === 0) settle();
+      });
+    });
+  } finally {
+    ws.close();
+  }
+}
+
 export async function launchFreshAppAndConnect(client, observer, { sweepStaleSessions = true } = {}) {
   await client.launchFreshApp();
   await client.waitForManifest(20_000);
@@ -224,6 +358,8 @@ export async function launchFreshAppAndConnect(client, observer, { sweepStaleSes
   // swallows native HID clicks; dismiss it so scenarios start on a clean UI.
   await client.request('dismiss_whats_new', {}).catch(() => {});
   await observer.connect();
+  // After connect: the prior values ride in on initial_state.
+  await pinCheapLaunchModels(client, observer);
   if (sweepStaleSessions) {
     await sweepStaleHarnessSessions(observer);
   }

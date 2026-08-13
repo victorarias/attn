@@ -52,6 +52,14 @@ builders.
   primitives, and the extensibility mechanism lets each user grow their own.
 - **Grown, not bolted on.** The crew generalizes the chief. The work graph grows
   from tickets, the store, and the bus. Nothing here starts from a blank page.
+- **Every durable surface names its reader.** A surface earns existence by
+  naming who reads it and when: a handoff is read by the successor at wake,
+  a seed note by the next tender, a ticket by its participants. Writers
+  without an addressed reader produce narration into a drawer. The receipt
+  (2026-08-10): workspace context was never written in 4 of 6 live
+  workspaces, and the two that used it were hand-maintaining crown-shaped
+  documents the garden makes native; the Notebook-as-journal had all its
+  writers turned off and nothing was missed.
 - **Retire what does not carry weight.** Machinery that scratched the wrong itch
   is removed once its replacement proves itself — not preserved out of sunk
   cost, and not removed before the replacement earns it.
@@ -249,8 +257,13 @@ Blindspots — flag for a `ground` pass before their first chunk:
   is a union routed by daemon prefix, never a merge — fully qualified seed
   ids (`<daemon-id>/<local-id>`, prefix minted only at the boundary) make
   identity collisions impossible by construction, and every seed has one
-  home hub that applies its writes. The ground pass owns the sync and
-  transport mechanics and the smallest honest first version.
+  home hub that applies its writes. ~~The ground pass owns the sync and
+  transport mechanics and the smallest honest first version.~~ Ground pass
+  done 2026-08-09, and grown on 2026-08-10 into the arc's spine plan: the
+  verified map of the hub/relay, the **home daemon / outpost / enrollment**
+  concepts the pass surfaced, the fence that defers the multi-machine
+  price, and the smallest honest first version of the server all live in
+  [docs/plans/2026-08-10-home-garden-crew-arc.md](../plans/2026-08-10-home-garden-crew-arc.md).
 - **Seed grain and schema.** ~~Study the beads *UX* specifically (not its
   implementation) before committing a schema.~~ Ground pass done 2026-08-06;
   findings and the resulting schema decisions (ids are identity, edges are

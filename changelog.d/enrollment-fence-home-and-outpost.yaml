@@ -1,0 +1,19 @@
+kind: added
+area: daemon
+change: >
+  Every daemon now records which home it belongs to. A fresh install is its own
+  home — it owns its garden and its crew — and a machine you sync from that home
+  is recorded as its outpost: it keeps its own sessions, PTY, and PR flows
+  exactly as before, but home-level state belongs to the home. `attn enrollment`
+  shows the relationship, `attn enrollment leave` makes a daemon a home again,
+  and health output and the app's initial state report it.
+notes: >
+  Nothing user-visible changes on a single machine: sessions, tickets, and remote
+  work are untouched, and one daemon on its own is a home. What lands here is the
+  record and the fence around it, so the garden and the crew can be built
+  home-only without owing a migration later — asking for home-level state on an
+  outpost refuses with an error naming the home, both ways forward, and the plan.
+  Re-homing is never silent: a second home syncing an already-enrolled machine
+  stops and says what to run on that machine to release it. Protocol 229 adds
+  `home_daemon_id` to `initial_state`.
+  Design: docs/plans/2026-08-10-home-garden-crew-arc.md.

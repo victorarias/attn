@@ -90,12 +90,10 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	// A chief-of-staff launch (NotebookRoot set) gets chief guidance instead
 	// of the workspace-context checkout guidance. Every other workspace agent gets
 	// its workspace-context guidance (plus workflow-trigger guidance when enabled,
-	// folded in by hooks.AgentInstructions). Non-chief agents are NOT nudged to
+	// folded in by hooks.Launch). Non-chief agents are NOT nudged to
 	// journal: the keeper narrates each workspace's own work into the journal, and
 	// the chief journals the cross-workspace layer.
-	if guidance := hooks.ChiefGuidance(opts.NotebookRoot, c.Capabilities().HasSelfMonitor); guidance != "" {
-		args = append(args, "--append-system-prompt", guidance)
-	} else if instructions := hooks.AgentInstructions(opts.WorkspaceContextPath, opts.InjectWorkflowGuidance); instructions != "" {
+	if instructions := opts.launchGuidance(c.Capabilities().HasSelfMonitor); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 
@@ -139,6 +137,8 @@ func (c *Claude) BuildEnv(opts SpawnOpts) []string {
 	// Cap the effective context window so auto-compaction fires at the configured
 	// threshold. The daemon owns the policy of who gets a cap (chief setting vs
 	// default_context_window_cap_<agent>); this only applies what it resolved.
+	// The spawn environment alone does not settle it — the user's settings can
+	// overwrite this key, so claudeSettingsEnv repeats it in the --settings file.
 	if opts.AutoCompactWindow > 0 {
 		env = append(env, "CLAUDE_CODE_AUTO_COMPACT_WINDOW="+strconv.Itoa(opts.AutoCompactWindow))
 	}
@@ -540,8 +540,23 @@ func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
 
 // --- HookProvider ---
 
-func (c *Claude) GenerateHooksConfig(sessionID, socketPath, wrapperPath string) string {
-	return hooks.Generate(sessionID, socketPath, wrapperPath)
+func (c *Claude) GenerateHooksConfig(opts SpawnOpts) string {
+	return hooks.Generate(opts.SessionID, opts.SocketPath, opts.WrapperPath, claudeSettingsEnv(opts))
+}
+
+// claudeSettingsEnv is the `env` block of the --settings file attn writes for a
+// launch. Only knobs that must outrank the user's own configuration belong here:
+// Claude Code copies each settings file's env onto its process environment,
+// so `"env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "300000"}` in
+// ~/.claude/settings.json silently replaces the value attn exported at spawn.
+// The --settings scope is applied after the user's, so the cap set here holds.
+func claudeSettingsEnv(opts SpawnOpts) map[string]string {
+	if opts.AutoCompactWindow <= 0 {
+		return nil
+	}
+	return map[string]string{
+		"CLAUDE_CODE_AUTO_COMPACT_WINDOW": strconv.Itoa(opts.AutoCompactWindow),
+	}
 }
 
 // --- TranscriptFinder ---

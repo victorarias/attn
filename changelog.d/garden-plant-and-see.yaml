@@ -1,0 +1,13 @@
+kind: added
+area: cli
+change: >
+  The garden: work now has a home of its own. `attn seed plant "what this is"`
+  creates a seed — one short id, a title, and an optional markdown body — and
+  prints the id, stamped with the workspace of the session you ran it from.
+  `attn seed ls` reads the workspace's seeds (`--all` for the whole garden),
+  `attn seed show <id>` reads one, and every one of them takes `--json`.
+  `attn seed export <id>` writes a seed's body to markdown so today's review
+  and annotation surfaces work on it. A new garden panel in the app lists the
+  seeds of the workspace you are looking at, and a seed planted from a terminal
+  appears there without a refresh. The garden belongs to your home daemon; on
+  an outpost every seed command names the home to run it on.

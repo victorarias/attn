@@ -266,6 +266,7 @@ func TestAgentMsgSizeRefusalsSurviveTheSocket(t *testing.T) {
 	go d.Start()
 	defer d.Stop()
 	waitForSocket(t, sockPath, 5*time.Second)
+	waitForRecovery(t, d)
 	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 	addCharacterizationSession(t, d, "target-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
 

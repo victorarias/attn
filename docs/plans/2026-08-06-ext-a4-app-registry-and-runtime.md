@@ -154,6 +154,18 @@ At-least-once, stall-don't-skip, cursor-after-handler semantics are untouched
 — apps are the first production durable consumers, and the point is to
 consume that machinery, not fork it.
 
+**Slice 1, as built.** `Register` is callable after `Start` and launches that
+consumer's delivery loop at once; `Unregister(name)` cancels the consumer, waits
+for its loop to exit, and only then deletes the row. Each consumer holds its own
+context, a child of the bus context, and both of the loop's waits — the idle
+select and the retry sleep — watch it, so unregistering a consumer stalled at the
+retry cap does not wait that cap out. The delete-last order is what keeps a live
+loop from reading a registration that disappeared, an error path that would retry
+forever; a handler that completes after the unregister has its cursor advance and
+its failure record dropped silently. `Unregister` is idempotent and deletes rows
+this process never registered, so an orphan an earlier daemon left behind — the
+thing that pins retention against a consumer nobody serves — is clearable.
+
 Per-handler cursors: considered, deferred. Per-app gives up independent
 progress across an app's subscriptions and partial survival of a poisoned
 event. Per-handler costs cross-handler ordering — one cursor means handlers
@@ -189,10 +201,12 @@ The supervisor extracts from `internal/daemon/plugin_supervisor.go` into
 - **Give-up state** (new — today it retries forever): a child that keeps
   dying without reaching stability gets parked, loudly — fact + durable
   notification + `attn app status`. Initial tripwire: parked after 10
-  consecutive restarts with no stability window (~3.5 minutes of
-  crash-looping at the existing backoff numbers). Tripwire, not a receipt —
-  recalibrate during this stage's verification and record the measurement
-  here.
+  consecutive restarts with no stability window. Tripwire, not a receipt —
+  recalibrate if a legitimate child ever reaches it. **Slice 2 correction to
+  the estimate:** ten restarts at the pinned backoff cost 121.75s of waiting
+  (0.25+0.5+1+2+4+8+16+30+30+30), plus up to the 5s disconnect grace per
+  attempt for a child that starts and never calls back — so a crash-looping
+  child is parked after roughly two to three minutes, not ~3.5.
 - **Log capture** (new — plugin stdout/stderr goes to /dev/null today, a
   hole `attn app logs` cannot live with): per-child append-only log file
   (`<data-dir>/apps/log/runtime.log`, the ptyworker per-session pattern),
@@ -207,6 +221,29 @@ authenticates as the app runtime, receives handler dispatches (event + app +
 version), and calls back over the same socket for SDK operations. Byte
 streams stay off the bus per the standing rule; dispatch and results are
 socket RPC, and only domain facts ride the log.
+
+**How the daemon finds the sidecar (decided 2026-08-09, spiked):** the host
+ships as a `bun build --compile` standalone binary, built by attn's own
+pipeline with the repo-pinned bun — the bundled-plugin mechanism
+(`scripts/build-bundled-plugins.sh`, which carries the bun ≥1.3.14
+signability guard). The Bun runtime is embedded in the executable, so a
+GUI-spawned daemon needs no PATH resolution and a user's machine needs no
+toolchain to *run* apps (bun is required only by `apply`, which builds
+CLI-side — slice 4's receipt that `~/.asdf/shims/bun` is invisible to
+`pathutil.EnsureGUIPath()` is what forced the choice). There is no
+PATH-resolution fallback, deliberately: one mechanism, no second failure
+class. Spike receipts: a compiled host dynamic-imports arbitrary absolute
+bundle paths (two in sequence — the hot-reload shape; content-addressed
+version paths make a stale module cache structurally impossible) and
+bundles using node builtins, all under `env -i`.
+
+**The host binary is per-platform, and Linux is in scope for A4**: the
+daemon runs on Linux remotes, so the stage is not done until the host
+cross-compiles (`bun build --compile --target=bun-linux-x64|arm64`) beside
+the Go daemon's existing `build-linux-{amd64,arm64}` targets and the
+runtime is witnessed on a Linux remote (the OrbStack VM) before the
+epic→main merge. A silently darwin-only runtime is a defect, not a
+deferral.
 
 ### Handler contract and SDK (runtime half only)
 
@@ -281,24 +318,228 @@ fully-CI'd, fully-reviewed merge at the end.
 1. **Bus consumer lifecycle** — post-`Start` register, `Unregister`, row
    deletion, tests for the pin-the-log orphan case.
 2. **Supervisor extraction** — `internal/supervise`, pluginSupervisor moves
-   onto it, give-up state + log capture.
+   onto it, give-up state + log capture. *Shipped:* a consumer names a child
+   and hands over a `StartFunc`, so the package carries no manifest, no
+   environment and no protocol; `Ensure` doubles as the un-park (it revives a
+   parked child with a clean restart budget), which is why no separate restart
+   entry point exists yet. `parked` is a new `runtime_phase` value — the field
+   is a free-form string on the wire, so no protocol bump. Plugin logs land in
+   `<data-dir>/plugin-log/<name>.log`, deliberately outside
+   `<data-dir>/plugins` because everything under there is scanned for
+   manifests.
 3. **Registry + store + CLI skeleton** — `app_*` tables,
    list/status/enable/disable/remove against them, glossary entries (app,
    plugin), `ext/` → `app/` namespace rename.
 4. **Apply pipeline + scaffold + codegen** — manifest parse, codegen, tsc,
    `Bun.build`, content-addressed versions, pointer flip,
-   `new`/`apply`/`rollback`/`dev`.
+   `new`/`apply`/`rollback`/`dev`. *Shipped:* the build runs **CLI-side**, in
+   `internal/appbuild`, and the daemon only records. bun lives on a developer
+   PATH (`~/.asdf/shims/bun` here) that `pathutil.EnsureGUIPath()` does not
+   reconstruct, so a daemon spawned by the app cannot reliably find it — and a
+   build is a foreground activity with output a person is waiting on, not
+   daemon work. The daemon keeps the atomicity it must own: `app_apply` carries
+   only `(name, content_hash, declaration)`, never a path. It re-derives the
+   artifact path from the name and the hash, re-hashes the bytes on disk, and
+   refuses the apply if they disagree — so a lying client cannot point the
+   registry at a file the pipeline did not produce. The content hash covers the
+   **declaration and the bundle**, not the bundle alone: a manifest-only edit
+   changes what the version means, and hashing only code would reuse a row
+   whose frozen declaration is stale. Typechecking uses a pinned TypeScript
+   (5.8.3) installed lazily on first apply under `<data-dir>/apps/toolchain`
+   and shared by every app, behind an `flock` so concurrent applies install it
+   once; invoking `tsc` directly rather than through `bun x` was measured at
+   0.77s against 2.1s. The SDK ships as an **ambient module declaration**
+   written into the app (`src/attn-app.d.ts`, declaring
+   `@victorarias/attn-app`), which gives handlers a typed surface with no
+   package published and no npm dependency in a scaffolded app — the eventual
+   published package can take over the same specifier without touching app
+   code. Staging lives inside the artifact store (`apps/.staging`) because a
+   rename out of `/tmp` crosses filesystems on Linux. The protocol gains
+   `app_apply`/`app_rollback` (shipped as 219; the epic's protocol and
+   migration numbers renumber at each main sync — the tree is authoritative); the flip publishes `app.version.changed`
+   (payload carries the previous id so the slice-5 runtime need not race the
+   pointer), and like the other app facts it has no projection. `attn app dev`
+   streams apply results and build errors only — invocation streaming needs
+   slice 5, and the command's banner says so.
 5. **Runtime sidecar** — dispatch, handler context, invocation log, per-app
-   consumers wired to slice 1, auto-disable, `logs`.
+   consumers wired to slice 1, auto-disable, `logs`. The compiled host
+   binary cross-compiles for linux amd64/arm64 beside the Go daemon's
+   existing cross targets — tracked here so the stage cannot close
+   darwin-only. *Shipped:* see "Slice 5 receipts" below.
 6. **Exit proof** — the roadmap's exit, run live: an agent writes a real app
    in a scaffolded directory, applies it, sees invocations in the log,
    breaks it and watches auto-disable park it, fixes and re-enables it,
-   rolls it back. Recorded as receipts on the epic→main PR.
+   rolls it back. Recorded as receipts on the epic→main PR. Includes the
+   Linux witness: the runtime dispatching on a Linux remote (the OrbStack
+   VM), so the cross-compiled host is proven, not just built.
 
 Verification: A4 touches daemon lifecycle, protocol, and background runners
 — live verification in a running non-production app is mandatory for slices
 3–6; slices 1–2 are daemon-internal and carry harness tests plus the live
 proof at slice 6.
+
+### Slice 5 receipts
+
+Measured 2026-08-09 on an M-series Mac, throwaway profile `a4rt5` installed
+from the branch, against a scaffolded app (`ticketwatch`) subscribing to
+`ticket.*` and writing a document per fact.
+
+**Cold start — `appRuntimeConnectWait = 10s`.** The runtime starts lazily, on
+the first fact an app is due, so the first dispatch after a daemon start pays
+the whole cold start. First invocation end to end — spawn the compiled host,
+connect back over the unix socket, hello, import the bundle, run the handler,
+write a document — was **77ms**. The ten-second wait is ~130× that. A delivery
+that hits it stalls and retries rather than failing anything permanently.
+
+**Handler duration — `appDispatchTimeout = 60s`.** Warm invocations of the
+same document-writing handler ran at **0–1ms** (n=10, one burst), and the
+in-`app dev` measurement agreed at 1ms. Sixty seconds is between four and five
+orders of magnitude past that, which is the point: the timeout exists only so a
+handler awaiting something that never resolves becomes a failure the app owns,
+instead of holding its delivery open forever and pinning the log's retention
+floor for everybody.
+
+**Invocation log size — `AppInvocationRetention = 30d` *and*
+`AppInvocationsPerApp = 20,000`.** Measured over 7.5 days of Victor's
+production event log (275,845 facts): the loudest fact by a wide margin is
+`session.state.changed` at **1,141/hour** — and it is what a scaffolded app
+subscribes to out of the box. Thirty days of that is ~820,000 invocation rows,
+well over a hundred megabytes for a single app, on a database that is 51MB
+today. The quietest domain an app would realistically watch, `ticket.*`, runs
+at **27/day** — three orders of magnitude below.
+
+So the age window cannot bound this table on its own, and a second limit is not
+redundancy: the age window says when a row stops being *useful* (an invocation
+whose event has aged off the durable log cannot be re-read against it, which is
+why it matches the bus's own `DefaultRetention`), and the per-app cap says how
+large the log is allowed to *get*. 20,000 rows is ~17 hours of the loudest
+possible app — a whole working day of "what did it do this morning" — and about
+4MB. At the ticket rate it is two years, so for anything quiet the age window
+trims first and the cap is never felt.
+
+**Backoff, observed rather than asserted.** A handler made to throw produced
+attempts at 22:57:07, :11, :19 and :35 on the same event seq — 4s, 8s, 16s —
+with the consumer's cursor parked one behind throughout, then version 4 of the
+app succeeded on that same seq and the cursor advanced. Stall-don't-skip, live.
+
+**Fixed on the way through**, both found by doing the verification rather than
+by a test:
+
+- `UNAME_S` was referenced by three Makefile recipes and defined by none, so it
+  expanded to empty and `make install-daemon` skipped code signing entirely.
+  The copied binary kept its ad-hoc linker signature inside a properly signed
+  bundle and macOS answered `daemon ensure` with `Killed: 9`. The daemon-only
+  install tier did not work for anyone; now it does.
+- `scripts/build-app-runtime-host.sh` resolved a relative `stage_dir` against
+  the wrong directory: it `cd`s to `apphost/` before invoking bun, and bun
+  reads `--outfile` from its own cwd. Both Linux cross-builds reported success
+  and left an empty tree, writing the ELF under `apphost/dist/` instead. The
+  native build was unaffected because its default stage dir is absolute — which
+  is exactly how a cross-only break stays invisible.
+
+### Slice 6 receipts — the exit proof, run
+
+Run 2026-08-10/11 on an M-series Mac plus the OrbStack aarch64 VM, on a
+throwaway profile installed from the epic. The full transcript is on the
+epic→main PR; what belongs here is what it decided.
+
+**It ran end to end.** An app scaffolded, applied (version 1, 558 bytes), its
+consumer registered at head rather than at the start of the log, the sidecar
+started lazily on the first fact the app was due, cold start 41ms and warm
+invocations at 0-1ms — matching slice 5's 77ms/0-1ms. A broken version stalled
+the consumer without skipping the event, the auto-disable clock ran out in real
+time (16m0s across 15 attempts — the window is measured at the next delivery,
+and the bus's backoff had stretched to a minute by then), the fix applied as a
+new version and `attn app enable` brought it back with the stall clock cleared.
+Rollback moved a pointer and built nothing. The Linux witness dispatched on the
+VM against the cross-compiled sidecar.
+
+**The migration renumber, proved both ways.** The app registry moved 98 → 101 →
+102, one step per main sync. Measured at 101, before the last sync moved it
+again: a database at main's head opened by this build reached 101 and had the
+three `app_*` tables; the same database opened by a build identical except for
+the number stayed at 100 with no tables, and `attn app list` failed with `no
+such table: apps`. The runner keeps one scalar version and skips anything at or
+below it, so the hole was never a free slot.
+
+**One defect, found and fixed (#842).** Parking did not hold. Dispatch called
+the same `supervise.Ensure` that `attn app runtime restart` calls, and `Ensure`
+un-parks; the bus retries a failing delivery forever, so a runtime attn had
+given up on got a fresh ten-attempt budget every couple of minutes — seven
+parkings and seven critical notifications in fourteen minutes, measured. Now
+dispatch uses `EnsureUnlessParked` and answers a runtime failure naming the way
+back. Re-verified: one parking, then eight minutes of traffic with the
+generation unchanged and no second notification.
+
+**A second defect, found and fixed after A4 landed.** The park lived only in
+the supervisor's memory, so a daemon restart — an upgrade, a crash, a reboot —
+forgot it, lazy-started the still-broken host on the first due fact, re-armed
+the whole crash loop, and raised a second critical notification for one outage.
+The give-up is now a `supervised_parks` row (migration 104) written when it
+happens and handed back to the supervisor by `supervise.AdoptParked` inside
+`ensureAppRuntimeSupervisor`, so every way to reach the supervisor finds the
+park already applied. `attn app runtime restart` deletes the row along with the
+park; nothing else does, and a runtime binary that changed since the park stays
+parked until someone asks for it.
+
+**Three things observed and deliberately not changed**, each a decision rather
+than a defect:
+
+- A hub-managed remote endpoint never gets a sidecar.
+  `internal/hub/bootstrap.go` (`installRemoteBinary`) streams exactly one file,
+  the `attn` binary, and nothing under `internal/hub/` mentions
+  `attn-app-runtime`. Such a remote hits "the app runtime binary is not
+  installed" forever. Shipping the second file is small, but it is new
+  behavior in the bootstrap path.
+- Bare `attn app rollback <name>` picks the numerically previous version id,
+  not the previously-running one. With history 1 good / 2 broken / 3 fixed, it
+  rolls to the broken one. Naming the version explicitly is always correct.
+  "The previous version" has two honest readings and choosing one is a product
+  call.
+- While the runtime is down, deliveries record `runtime_error` and clear the
+  app's stall clock — the app is not charged for an outage that is not its
+  fault — so nothing disables it and its consumer holds the retention floor for
+  as long as the outage lasts. Whether a parked runtime should start a clock of
+  its own is the open question A4 leaves; the roadmap gate did not ask for one.
+
+### Rulings on the four (2026-08-11)
+
+Victor ruled on all four after re-running the failure loop live on the
+merged head (lazy start, missing-binary path, crash-loop park, held park,
+recovery drain, bare-rollback trap):
+
+- **Hub sidecar: fix.** Bootstrap uploads `attn-app-runtime` beside the
+  `attn` binary so hub-managed remotes can run apps. *Shipped:* the host is
+  built for the remote's platform from the checkout (or downloaded from the
+  release, which now publishes `attn-app-runtime-linux-{amd64,arm64}`),
+  transferred only when its content hash differs — it is ~90MB and endpoints
+  sync on a timer — and named per profile on the remote, because
+  profile-isolated daemons share one `~/.local/bin` and one shared file name
+  would have the newest sync replace another profile's runtime.
+- **Bare rollback: previously-serving.** `attn app rollback <name>` without
+  a version returns to the version that was serving before the current one
+  — the registry records the pointer at every flip — and says which version
+  it chose and why. No recorded previous fails loud with the version list.
+  *Shipped* (#858) with undo semantics: the pointer swaps on every move, so
+  a second bare rollback returns to where you started (`cd -`), stated in
+  `--help` and tested. **Open, deliberately until the platform work's end:**
+  Victor leans toward a stack instead — each bare rollback walking one step
+  further back through serving history. Undo was shipped first because its
+  meaning never depends on how many times it has run; revisit once real
+  rollback usage exists to judge against.
+- **Restart must not forget a park.** The park persists and is restored at
+  daemon startup before anything can lazy-start the broken host; `attn app
+  runtime restart` stays the only unpark and clears the persisted state.
+  The original critical notification stands; a restore adds no second one.
+- **Retention floor: still no clock, but never silent.** Events pinned by an
+  enabled consumer are never dropped and no expiry exists — that stands.
+  What changes: a recurring check emits one warning notification per episode
+  when a consumer pins the floor past a threshold measured from healthy
+  data, and `attn bus status` and the settings page mark the consumer the
+  same way. Visibility instead of a clock.
+
+Each ruling was delegated for implementation the same day; this section
+records the decisions, and the PRs that land them carry their own receipts.
 
 ## Out of scope
 

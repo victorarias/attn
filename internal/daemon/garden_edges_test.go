@@ -1,0 +1,329 @@
+package daemon
+
+import (
+	"net"
+	"strings"
+	"testing"
+
+	"github.com/victorarias/attn/internal/garden"
+	"github.com/victorarias/attn/internal/protocol"
+)
+
+// link runs one `attn seed link`/`unlink` over the pipe.
+func link(t *testing.T, d *Daemon, from, kind, to string, unlink bool) protocol.Response {
+	t.Helper()
+	msg := protocol.SeedLinkMessage{Cmd: protocol.CmdSeedLink, SeedID: from, Kind: kind, ToSeedID: to}
+	if unlink {
+		msg.Unlink = protocol.Ptr(true)
+	}
+	return gardenCall(t, func(c net.Conn) { d.handleSeedLink(c, &msg) })
+}
+
+func mustLink(t *testing.T, d *Daemon, from, kind, to string) protocol.SeedLinkResult {
+	t.Helper()
+	resp := link(t, d, from, kind, to, false)
+	if !resp.Ok {
+		t.Fatalf("link %s %s %s: %v", from, kind, to, protocol.Deref(resp.Error))
+	}
+	return *resp.SeedLinkResult
+}
+
+func ready(t *testing.T, d *Daemon, msg protocol.SeedReadyMessage) protocol.SeedReadyResult {
+	t.Helper()
+	msg.Cmd = protocol.CmdSeedReady
+	resp := gardenCall(t, func(c net.Conn) { d.handleSeedReady(c, &msg) })
+	if !resp.Ok {
+		t.Fatalf("ready: %v", protocol.Deref(resp.Error))
+	}
+	return *resp.SeedReadyResult
+}
+
+func readyIDs(result protocol.SeedReadyResult) []string {
+	out := make([]string, 0, len(result.Seeds))
+	for _, seed := range result.Seeds {
+		out = append(out, seed.ID)
+	}
+	return out
+}
+
+// The slice's acceptance, end to end: the plan's three-seed chain, the one seed
+// it leaves ready, and the dependent surfacing the moment its blocker is
+// harvested — nothing nudged, nothing cleared by hand.
+func TestGardenEdges_HarvestingABlockerSurfacesTheDependent(t *testing.T) {
+	d := newGardenDaemon(t)
+	a := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "first"})
+	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
+	c := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "the plot"})
+
+	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
+	mustLink(t, d, b.ID, garden.EdgePartOf, c.ID)
+
+	first := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
+	if got := readyIDs(first); len(got) != 1 || got[0] != a.ID {
+		t.Fatalf("ready = %v, want only the unblocked seed %s", got, a.ID)
+	}
+	if first.Scope != "workspace" || first.ScopeID != "ws-1" {
+		t.Fatalf("flag-free ready scoped to %s/%s, want the session's workspace", first.Scope, first.ScopeID)
+	}
+
+	move(t, d, "sess-a", a.ID, garden.VerbTend, "", "trellis")
+	move(t, d, "sess-a", a.ID, garden.VerbHarvest, "done", "trellis")
+
+	second := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
+	if got := readyIDs(second); len(got) != 1 || got[0] != b.ID {
+		t.Fatalf("after harvesting the blocker, ready = %v, want %s", got, b.ID)
+	}
+}
+
+// Readiness is computed per read and carried on the wire, so the panel renders
+// the same answer the CLI gives instead of deriving its own.
+func TestGardenEdges_ReadyRidesTheSeedOnTheWire(t *testing.T) {
+	d := newGardenDaemon(t)
+	var pushed []protocol.Seed
+	d.gardenBroadcastHook = func(seeds []protocol.Seed, _ int) { pushed = seeds }
+
+	blocker := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "blocker"})
+	blocked := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "blocked"})
+	mustLink(t, d, blocker.ID, garden.EdgeBlocks, blocked.ID)
+
+	states := map[string]bool{}
+	for _, seed := range pushed {
+		states[seed.ID] = seed.Ready
+	}
+	if len(pushed) != 2 {
+		t.Fatalf("linking pushed %d seeds, want the whole garden", len(pushed))
+	}
+	if !states[blocker.ID] || states[blocked.ID] {
+		t.Fatalf("the push carries ready=%v, want the blocker ready and the blocked one not", states)
+	}
+}
+
+// An edge is stored on one side, so `show` has to read the garden to answer the
+// other: what blocks this, and what is part of it.
+func TestGardenEdges_ShowListsBothDirections(t *testing.T) {
+	d := newGardenDaemon(t)
+	a := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "first"})
+	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
+	c := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "the plot"})
+	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
+	mustLink(t, d, b.ID, garden.EdgePartOf, c.ID)
+
+	relations := show(t, d, b.ID).Relations
+	got := map[string]string{}
+	for _, relation := range relations {
+		got[relation.Label] = relation.SeedID
+		if relation.Title == "" || relation.Status == "" {
+			t.Fatalf("relation %+v carries no title or status; a bare id is not readable", relation)
+		}
+	}
+	if got[garden.EdgePartOf] != c.ID || got["blocked-by"] != a.ID || len(relations) != 2 {
+		t.Fatalf("show relations = %+v", relations)
+	}
+
+	if got := show(t, d, a.ID).Relations; len(got) != 1 || got[0].Label != garden.EdgeBlocks || got[0].SeedID != b.ID {
+		t.Fatalf("the blocking side reads %+v, want one outbound blocks edge", got)
+	}
+}
+
+func TestGardenEdges_UnlinkPutsTheSeedBack(t *testing.T) {
+	d := newGardenDaemon(t)
+	a := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "first"})
+	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
+	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
+
+	// Linking the same edge twice is not a refusal and not a write: the garden
+	// did not move, and the caller is told so.
+	if again := mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID); again.Changed {
+		t.Fatal("re-linking the same edge reported a change")
+	}
+
+	resp := link(t, d, a.ID, garden.EdgeBlocks, b.ID, true)
+	if !resp.Ok {
+		t.Fatalf("unlink: %v", protocol.Deref(resp.Error))
+	}
+	if len(resp.SeedLinkResult.Seed.Edges) != 0 {
+		t.Fatalf("unlink left %+v", resp.SeedLinkResult.Seed.Edges)
+	}
+	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 2 {
+		t.Fatalf("after unlinking, ready = %v, want both seeds", got)
+	}
+}
+
+func TestGardenEdges_RefusalsNameBothSeeds(t *testing.T) {
+	d := newGardenDaemon(t)
+	a := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "first"})
+	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
+	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
+
+	cycle := link(t, d, b.ID, garden.EdgeBlocks, a.ID, false)
+	if cycle.Ok {
+		t.Fatal("a blocks cycle was accepted")
+	}
+	// Loud means the caller can fix it without reading the garden: both seeds,
+	// what it would do, and the edge to remove.
+	for _, want := range []string{a.ID, b.ID, "deadlock", "attn seed unlink"} {
+		if !strings.Contains(protocol.Deref(cycle.Error), want) {
+			t.Fatalf("cycle refusal does not name %q: %s", want, protocol.Deref(cycle.Error))
+		}
+	}
+
+	kind := link(t, d, a.ID, "sort-of", b.ID, false)
+	if kind.Ok || !strings.Contains(protocol.Deref(kind.Error), "blocks and part-of") {
+		t.Fatalf("an unknown kind was not refused with the kinds that exist: %+v", kind)
+	}
+
+	missing := link(t, d, a.ID, garden.EdgeBlocks, "s-zzzzzz", false)
+	if missing.Ok || !strings.Contains(protocol.Deref(missing.Error), "s-zzzzzz") {
+		t.Fatalf("an unknown seed was not refused by name: %+v", missing)
+	}
+
+	malformed := link(t, d, a.ID, garden.EdgeBlocks, "nope", false)
+	if malformed.Ok || !strings.Contains(protocol.Deref(malformed.Error), "seed id") {
+		t.Fatalf("a malformed id was not refused by shape: %+v", malformed)
+	}
+
+	stray := link(t, d, a.ID, garden.EdgePartOf, b.ID, true)
+	if stray.Ok || !strings.Contains(protocol.Deref(stray.Error), "does not part-of") {
+		t.Fatalf("unlinking an edge that is not there was not refused: %+v", stray)
+	}
+}
+
+// Two real sessions in two workspaces. The flag-free form is the common one, so
+// what it infers has to be the caller's own workspace and nobody else's.
+func TestGardenEdges_ReadyDiffersPerSessionWorkspace(t *testing.T) {
+	d := newGardenDaemon(t)
+	d.workspaces.register("ws-2", "b", "/tmp/b", "b0", false, false)
+	now := string(protocol.TimestampNow())
+	d.store.Add(&protocol.Session{
+		ID: "sess-b", Label: "b", State: "idle",
+		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	d.workspaces.associateSession("sess-b", "ws-2", "b")
+
+	here := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "mine"})
+	there := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-b"), Title: "theirs"})
+
+	mine := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
+	if got := readyIDs(mine); len(got) != 1 || got[0] != here.ID {
+		t.Fatalf("sess-a ready = %v, want %s", got, here.ID)
+	}
+	theirs := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-b")})
+	if got := readyIDs(theirs); len(got) != 1 || got[0] != there.ID {
+		t.Fatalf("sess-b ready = %v, want %s", got, there.ID)
+	}
+	if theirs.ScopeID != "ws-2" {
+		t.Fatalf("sess-b scoped to %q, want ws-2", theirs.ScopeID)
+	}
+
+	// A blocker in another workspace still blocks: the edge is a property of the
+	// garden, not of the workspace the reader happens to be in.
+	mustLink(t, d, there.ID, garden.EdgeBlocks, here.ID)
+	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 0 {
+		t.Fatalf("ready = %v, want nothing: the only seed here is blocked from another workspace", got)
+	}
+
+	whole := ready(t, d, protocol.SeedReadyMessage{All: protocol.Ptr(true)})
+	if got := readyIDs(whole); len(got) != 1 || got[0] != there.ID || whole.Scope != "all" {
+		t.Fatalf("--all ready = %v (scope %s), want the blocker", got, whole.Scope)
+	}
+}
+
+func TestGardenEdges_ReadyScopesToAPlot(t *testing.T) {
+	d := newGardenDaemon(t)
+	crown := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "the plot"})
+	inside := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "inside"})
+	deeper := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "deeper"})
+	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "outside"})
+	mustLink(t, d, inside.ID, garden.EdgePartOf, crown.ID)
+	mustLink(t, d, deeper.ID, garden.EdgePartOf, inside.ID)
+
+	result := ready(t, d, protocol.SeedReadyMessage{Plot: protocol.Ptr(crown.ID)})
+	// The crown and the middle seed both have children, so the leaf is the only
+	// thing in this plot anybody can pick up.
+	if got := readyIDs(result); len(got) != 1 || got[0] != deeper.ID {
+		t.Fatalf("plot ready = %v, want the one leaf %s", got, deeper.ID)
+	}
+	if result.Scope != "plot" || result.ScopeID != crown.ID {
+		t.Fatalf("plot scope = %s/%s", result.Scope, result.ScopeID)
+	}
+
+	missing := gardenCall(t, func(c net.Conn) {
+		d.handleSeedReady(c, &protocol.SeedReadyMessage{Cmd: protocol.CmdSeedReady, Plot: protocol.Ptr("s-zzzzzz")})
+	})
+	if missing.Ok || !strings.Contains(protocol.Deref(missing.Error), "s-zzzzzz") {
+		t.Fatalf("an unknown plot was not refused by name: %+v", missing)
+	}
+}
+
+// Oldest first, against the newest-first order every other read uses: ready is a
+// work queue, and the seed that has waited longest is the one to hand over.
+func TestGardenEdges_ReadyHandsOverTheOldestFirst(t *testing.T) {
+	d := newGardenDaemon(t)
+	first := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "waited longest"})
+	second := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "just planted"})
+
+	got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")}))
+	if len(got) != 2 || got[0] != first.ID || got[1] != second.ID {
+		t.Fatalf("ready order = %v, want %s before %s", got, first.ID, second.ID)
+	}
+}
+
+// A tender holds its seed only while its session is one the daemon knows. A
+// session that is gone must not park work forever.
+func TestGardenEdges_ReadyReleasesASeedWhoseSessionIsGone(t *testing.T) {
+	d := newGardenDaemon(t)
+	addGardenSession(t, d, "sess-b")
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "held"})
+	move(t, d, "sess-b", seed.ID, garden.VerbTend, "", "")
+
+	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 0 {
+		t.Fatalf("ready = %v, want nothing: a live session holds the seed", got)
+	}
+
+	d.store.Remove("sess-b")
+	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 1 {
+		t.Fatalf("ready = %v, want the seed back once its session is gone", got)
+	}
+}
+
+// The count an agent is primed with at launch is the same answer `attn seed
+// ready` gives with no flags — one computation, so guidance and the CLI cannot
+// drift apart.
+func TestGardenEdges_LaunchPrimerCountsTheSameReady(t *testing.T) {
+	d := newGardenDaemon(t)
+	a := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "first"})
+	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
+	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
+
+	count, err := d.gardenReadyCount("ws-1")
+	if err != nil {
+		t.Fatalf("gardenReadyCount: %v", err)
+	}
+	if want := len(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")}).Seeds); count != want {
+		t.Fatalf("primer count = %d, want %d", count, want)
+	}
+	if count != 1 {
+		t.Fatalf("primer count = %d, want 1", count)
+	}
+}
+
+// An outpost has no garden, so it must not answer these two either — and the
+// primer must hand a launching agent nothing rather than a loop it cannot run.
+func TestGardenEdges_OutpostRefusesLinkAndReady(t *testing.T) {
+	d := newEnrolledDaemon(t, "d-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	t.Cleanup(d.stopEventBus)
+	d.ensureGardenCollections()
+
+	if resp := link(t, d, "s-7k3f9m", garden.EdgeBlocks, "s-7k3f9n", false); resp.Ok {
+		t.Fatal("seed link answered on an outpost")
+	}
+	resp := gardenCall(t, func(c net.Conn) {
+		d.handleSeedReady(c, &protocol.SeedReadyMessage{Cmd: protocol.CmdSeedReady, All: protocol.Ptr(true)})
+	})
+	if resp.Ok || !strings.Contains(protocol.Deref(resp.Error), garden.Surface) {
+		t.Fatalf("seed ready on an outpost: %+v", resp)
+	}
+	if primer := d.gardenReadyForLaunch("ws-1"); primer != nil {
+		t.Fatalf("an outpost primed a launching agent with %d ready seeds", *primer)
+	}
+}

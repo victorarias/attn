@@ -193,6 +193,64 @@ const (
 	// FactDocumentCollectionRedeclared: subject is the collection. A redeclare that
 	// drops a queried field must end the subscriptions using it. No wire entry.
 	FactDocumentCollectionRedeclared = "document.collection.redeclared"
+
+	// FactGardenPlanted: a seed exists. Subject is the seed id — every garden
+	// fact names its seed, which is what lets a future sync engine be nothing but
+	// a durable consumer with a cursor that re-reads the document. Published
+	// after the write it describes has committed, so a consumer that reads it
+	// always finds the seed.
+	FactGardenPlanted = "garden.planted"
+	// One fact per lifecycle move, rather than one `garden.changed`: the subject
+	// says which seed and the name says what happened to it, which is what a
+	// change feed and a future nudge both read. All of them project the same way
+	// — the panel re-renders a list — but a consumer that cares only about
+	// harvests must not have to diff documents to find them.
+	FactGardenTended    = "garden.tended"
+	FactGardenParked    = "garden.parked"
+	FactGardenHarvested = "garden.harvested"
+	FactGardenWithered  = "garden.withered"
+	FactGardenReplanted = "garden.replanted"
+	// FactGardenNoted: a note was appended to a seed's trail. Subject is the
+	// seed, not the note — the trail is the seed's memory of itself, and the
+	// entity anybody reads is the seed.
+	FactGardenNoted = "garden.noted"
+	// FactGardenLinked/FactGardenUnlinked: an edge was added to or removed from
+	// a seed. Subject is the seed the edge is stored on, which is the document
+	// that changed; the seed at the other end is read from that document.
+	FactGardenLinked   = "garden.linked"
+	FactGardenUnlinked = "garden.unlinked"
+
+	// App registry facts; subject is the app's name.
+	//
+	// Neither has an entry in wireProjections, and that is not an omission: the
+	// app registry has no UI surface, so these produce no WebSocket traffic. They
+	// exist because the runtime has to hear about a state change it did not make
+	// — an app disabled from the CLI, or by the auto-disable clock, has to reach
+	// the loop that dispatches its handlers, and the log is how one part of the
+	// daemon tells another something happened.
+	//
+	// FactAppEnabledChanged: the app's bus consumer bit was flipped. The payload
+	// carries which way, so a consumer of this fact does not have to read back a
+	// bit that may already have moved again.
+	FactAppEnabledChanged = "app.enabled.changed"
+	// FactAppRemoved: the app was uninstalled — consumer stopped and deleted,
+	// registry row gone. It carries a payload rather than only a subject because
+	// the entity it describes no longer exists to be read.
+	FactAppRemoved = "app.removed"
+	// FactAppVersionChanged: the app now points at a different version. One fact
+	// for both ways of getting there — an apply and a rollback are the same
+	// pointer move, and a runtime that reloads on one must reload on the other.
+	// The payload names the version moved to and the one moved from, so a
+	// consumer that has to drain the outgoing version's handlers knows which one
+	// that is without racing the pointer it would otherwise read back.
+	FactAppVersionChanged = "app.version.changed"
+	// FactAppRuntimeChanged: the shared app runtime's supervision state moved —
+	// started, connected, backing off, parked, stopped. Subject is the runtime's
+	// child name rather than an app's, because the entity that moved is the one
+	// process every app shares. It carries no payload: the state is the
+	// supervisor's and a reader asks it (`attn app runtime status`) rather than
+	// trusting a copy that was true when the fact was written.
+	FactAppRuntimeChanged = "app.runtime.changed"
 )
 
 // CompactableFacts are the fact classes retention may reduce to one row per
@@ -350,6 +408,11 @@ func buildWireProjections() []projection {
 			apply:  func(d *Daemon, _ bus.Event) { d.projectTicketsUpdated() },
 		},
 		{
+			// Every garden fact re-pushes the garden; the panel renders a list.
+			filter: bus.Filter{"garden.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectGardenSeeds() },
+		},
+		{
 			filter: bus.Filter{"pr.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectPRsUpdated() },
 		},
@@ -459,7 +522,12 @@ func (d *Daemon) ensureEventBus() {
 	if d.store != nil {
 		backing = d.newSQLBusStore()
 	}
-	d.eventBus = bus.New(bus.Options{Store: backing, Log: d.logf, Compactable: CompactableFacts})
+	d.eventBus = bus.New(bus.Options{
+		Store:       backing,
+		Log:         d.logf,
+		Compactable: CompactableFacts,
+		PinAlarmAge: d.busPinAlarmAge(),
+	})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)
 	d.subscribeDocumentFacts()
 	d.subscribeAgentConversationFacts()
@@ -581,6 +649,7 @@ func (d *Daemon) projectSnapshot(key string, push func()) {
 const (
 	snapshotSessions    = "sessions_updated"
 	snapshotTickets     = "tickets_updated"
+	snapshotGarden      = "garden_seeds_updated"
 	snapshotPRs         = "prs_updated"
 	snapshotRepos       = "repos_updated"
 	snapshotAuthors     = "authors_updated"

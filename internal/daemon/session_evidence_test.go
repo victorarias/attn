@@ -50,6 +50,30 @@ func TestHeartbeatEvidenceKeepsItsObservationTime(t *testing.T) {
 	}
 }
 
+// An unreadable title is liveness and nothing else. Filing it as a level would
+// let a subprocess's title settle a running turn; dropping it is what let a
+// changed spinner glyph run a working session into `unknown`.
+func TestAnUnclassifiedTitleMovesEvidenceWithoutClaimingALevel(t *testing.T) {
+	d := newTraceDaemon(t)
+	id := "sess-hb-unclassified"
+	addCharacterizationSession(t, d, id, protocol.SessionAgentClaude, protocol.SessionStateWorking)
+	busyAt := time.Now().Add(-2 * time.Minute)
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "busy", At: busyAt})
+
+	d.recordPTYEvidence(id, pty.Observation{Source: pty.SourceHeartbeat, Claim: "unclassified", Detail: "htop", At: time.Now()})
+
+	got := evidenceOf(t, d, id)
+	if got.Heartbeat == nil || got.Heartbeat.Claim != sessionstate.ClaimBusy {
+		t.Fatalf("heartbeat %+v, want the busy level to still stand", got.Heartbeat)
+	}
+	if !got.LastBusyAt.Equal(busyAt) {
+		t.Fatalf("LastBusyAt %s, want it left at %s", got.LastBusyAt, busyAt)
+	}
+	if !got.LastMovement.After(busyAt) {
+		t.Fatalf("LastMovement %s, want it advanced past %s", got.LastMovement, busyAt)
+	}
+}
+
 func TestNotBusyHeartbeatEvidenceIsSettled(t *testing.T) {
 	d := newTraceDaemon(t)
 	id := "sess-hb-settled"

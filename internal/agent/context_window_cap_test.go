@@ -1,6 +1,7 @@
 package agent
 
 import (
+	"encoding/json"
 	"slices"
 	"strings"
 	"testing"
@@ -50,6 +51,50 @@ func TestClaudeBuildEnv_ContextWindowCap(t *testing.T) {
 			if env := (&Claude{}).BuildEnv(opts); envHasCap(env) {
 				t.Fatalf("uncapped env unexpectedly carried the cap: %#v", env)
 			}
+		}
+	})
+}
+
+// The spawn environment alone does not settle the cap: Claude Code copies each
+// settings file's `env` block over its own process environment, so a user with
+// "env": {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": ...} in ~/.claude/settings.json
+// replaces whatever attn exported. The generated --settings file is applied
+// after the user's, so the cap must appear there too.
+func TestClaudeGenerateHooksConfig_ContextWindowCap(t *testing.T) {
+	parseEnv := func(t *testing.T, content string) map[string]string {
+		t.Helper()
+		var parsed struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.Unmarshal([]byte(content), &parsed); err != nil {
+			t.Fatalf("settings config is not valid JSON: %v", err)
+		}
+		return parsed.Env
+	}
+
+	t.Run("capped launch pins the window in the settings file", func(t *testing.T) {
+		content := (&Claude{}).GenerateHooksConfig(SpawnOpts{
+			SessionID:         "sess-1",
+			SocketPath:        "/tmp/attn.sock",
+			WrapperPath:       "/tmp/attn",
+			AutoCompactWindow: 200000,
+		})
+		if got := parseEnv(t, content)["CLAUDE_CODE_AUTO_COMPACT_WINDOW"]; got != "200000" {
+			t.Fatalf("settings env cap = %q, want %q; content: %s", got, "200000", content)
+		}
+	})
+
+	t.Run("uncapped launch writes no env block", func(t *testing.T) {
+		content := (&Claude{}).GenerateHooksConfig(SpawnOpts{
+			SessionID:   "sess-1",
+			SocketPath:  "/tmp/attn.sock",
+			WrapperPath: "/tmp/attn",
+		})
+		if env := parseEnv(t, content); len(env) != 0 {
+			t.Fatalf("uncapped settings unexpectedly carried env %#v", env)
+		}
+		if strings.Contains(content, "CLAUDE_CODE_AUTO_COMPACT_WINDOW") {
+			t.Fatalf("uncapped settings mentioned the cap: %s", content)
 		}
 	})
 }

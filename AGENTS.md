@@ -175,6 +175,35 @@ output as product evidence.
 - On failure, inspect captured pane text and native screenshots before diagnosis.
 - Remote scenarios target the local OrbStack VM (`attn-remote@orb`); provision with `pnpm --dir app run real-app:provision-remote`.
 
+### Evidence recordings
+
+A PR with a visible change carries a recording of the live verification in its
+description. Record the run, publish, paste the emitted markdown:
+
+```bash
+./scripts/pr-evidence.sh record --profile <name> --seconds 20 --out clip.mp4
+./scripts/pr-evidence.sh publish clip.mp4   # pushes mp4+gif to victorarias/attn-pr-evidence, prints the markdown
+```
+
+`record` captures the window of the named profile's app (`attn-<name>.app`) —
+pass the profile you installed for this verification, the same name you will
+`profile clean` later. `--app <owner>` overrides for a non-attn window.
+
+Harness runs record themselves: `ATTN_HARNESS_RECORD=1` makes every
+`createScenarioRunner` scenario (and each serial-matrix or soak leg) write
+`recording-NN.mp4` segments into its artifacts dir, publishable with the same
+`publish` command. Details in `app/scripts/real-app-harness/CLAUDE.md`.
+
+The evidence repo is public and the clip shows whatever the window shows —
+session names, transcripts, tickets. Watch the recording before publishing;
+re-record rather than push something that should not be on the open internet.
+
+The GIF renders inline in the PR; the mp4 beside it is the full-quality
+master. GitHub never inline-plays a repo-hosted mp4 — only the GIF embeds —
+and images render only under 10MB, so keep clips around 20s (the script warns
+past the limit). Rendering receipts, one section per embed form:
+[attn-pr-evidence#1](https://github.com/victorarias/attn-pr-evidence/issues/1).
+
 ## Hit every surface
 
 The most common defect is a change that works on the path you tested and is
@@ -344,9 +373,13 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
 - Comments state what the code cannot show — a constraint, an invariant, a
-  measured receipt — in one or two lines, and move when the code moves. Godoc
-  on an exported symbol is one line. A package header is a few lines plus a
-  link to the design doc, never a retelling of it. Never narrate the next line
+  measured receipt — in one or two lines, and move when the code moves. A
+  comment claims only what this commit does: describing the design you
+  intend, then shipping the part in scope, quietly turns the comment into a
+  lie. An unbuilt intention belongs in the plan doc or as a named gap in the
+  PR body, never in a comment. Godoc on an exported symbol is one line. A
+  package header is a few lines plus a link to the design doc, never a
+  retelling of it. Never narrate the next line
   or argue that the change is correct: that talk belongs in the PR, and a
   comment addressed to the reviewer is a defect.
 - Conventional commit titles with a scope, in plain language:
@@ -362,6 +395,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - `internal/ptyworker`: per-session process; production PTYs run here through
   `internal/pty`, not inside the daemon
 - `internal/store`: SQLite plus in-memory cache
+- `internal/enrollment`: who this daemon is (`daemon-id`) and whose it is
+  (`enrollment.json`) — the two files that decide whether home-level state may
+  live here. `Status.RequireHome` is the fence every garden/crew surface calls;
+  reach it from the daemon through `Daemon.requireHome`, never by reading the
+  record yourself
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
 - `internal/docstore`: document-store query semantics, SQL compilation, and the
   physical naming (no DB handle; `internal/store/documents.go` executes what it
@@ -371,6 +409,17 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   field name — never from caller text
 - `internal/jobs`: durable job queue (retry/backoff, coalescing, commit fence,
   cron entries) — every background duty and every periodic tick runs on it
+- `internal/apps`: an app's identity — the name rule, and the bus consumer
+  (`app:<name>`) and document namespace (`app/<name>`) derived from it. An app's
+  enabled state IS its consumer's enabled bit; there is no registry column for
+  it, and nothing stores the derived names. Registry tables and the lifecycle
+  handlers live in `internal/store/apps.go` and `internal/daemon/apps.go`; see
+  `docs/glossary.md` for app vs plugin
+- `internal/supervise`: process supervision for long-lived daemon children
+  (restart backoff, generation fencing, stability window, disconnect grace,
+  give-up parking, per-child log capture). Consumers name a child and hand over
+  a start function; the package knows nothing about what it supervises. The
+  plugin runtime is one consumer, the app runtime's sidecar is the other
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
@@ -446,7 +495,13 @@ consumer — runs the matching entry in `wireProjections`
 (`internal/daemon/bus.go`) to produce the wire traffic, often a snapshot
 re-push. Every state-change broadcast goes through it;
 `TestWireTrafficComesFromProjections` fails on a new one that does not, and
-carries the enumerated exception list.
+carries the enumerated exception list. Its mirror,
+`TestEveryProjectedFactReachesTheWire`, publishes every fact that has a
+projection and reads the bytes the hub sent, so a projection that stops sending
+— or sends the wrong event — fails too. Both are driven by the live
+table, so a new projection cannot go unnoticed: it needs a one-line fixture
+naming the events it sends, the test fails by name until it has one, and a fact
+reaching no projection has to name the consumer that does read it.
 
 - A fact without a subject is a snapshot invalidation, not a fact. If the
   producer does not know the entity id, that is the bug to fix — change the
@@ -472,6 +527,19 @@ carries the enumerated exception list.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor. Disabled consumers do not pin the log; they resume at head with a
   logged gap.
+- An enabled consumer that stops consuming therefore grows the log until someone
+  intervenes, so past `bus.DefaultPinAlarmAge` the pin is reported: a warning
+  notification, a `(PINNING …)` tag in `attn bus status`, and a badge on the
+  settings page, all from one predicate in `internal/bus`. Announced once per
+  episode — the cursor moving is what ends one. `ATTN_BUS_PIN_ALARM_AGE` moves
+  the tripwire (0 turns it off), which is also how the condition is demonstrated
+  without waiting an hour.
+- A durable consumer can register and unregister while the daemon runs.
+  `Unregister` cancels that consumer alone, waits for its delivery loop to exit,
+  and only then deletes the row: deleting first leaves a live loop reading a
+  registration that disappeared and retrying that error forever. It is
+  idempotent, and every uninstall path must call it — an abandoned enabled row
+  holds the retention floor down against a consumer nobody serves.
 - Operator surface: `attn bus status`, `attn bus disable|enable <consumer>`.
   The enabled bit is database-only on purpose — the kill switch must not depend
   on the daemon it kills.

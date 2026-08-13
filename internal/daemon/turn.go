@@ -118,6 +118,18 @@ func (d *Daemon) decorateSessionWithTurn(session *protocol.Session) {
 	session.TurnOwed = nil
 	session.TurnOpenedAt = nil
 
+	in := d.attentionInputFor(session)
+	if !attention.Owed(in) {
+		return
+	}
+	session.TurnOwed = protocol.Ptr(true)
+	session.TurnOpenedAt = protocol.Ptr(in.OpenedAt.UTC().Format(time.RFC3339Nano))
+}
+
+// attentionInputFor reads the queue's whole view of one session. The chief flag
+// and the workspace id it reads are decorations, absent on a stored record, so
+// callers pass a broadcast-decorated clone.
+func (d *Daemon) attentionInputFor(session *protocol.Session) attention.Input {
 	stamps := d.store.TurnStamps(session.ID)
 	in := attention.Input{
 		OpenedAt:      stamps.OpenedAt,
@@ -130,9 +142,5 @@ func (d *Daemon) decorateSessionWithTurn(session *protocol.Session) {
 		in.WorkspacePinned = workspace.Pinned
 		in.WorkspaceMuted = workspace.Muted
 	}
-	if !attention.Owed(in) {
-		return
-	}
-	session.TurnOwed = protocol.Ptr(true)
-	session.TurnOpenedAt = protocol.Ptr(stamps.OpenedAt.UTC().Format(time.RFC3339Nano))
+	return in
 }

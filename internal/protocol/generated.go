@@ -230,6 +230,370 @@ type AgentToolDetailMessage struct {
 	ID string `json:"id"`
 }
 
+type AppApplyMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Declaration corresponds to the JSON schema field "declaration".
+	Declaration string `json:"declaration"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// SourcePath corresponds to the JSON schema field "source_path".
+	SourcePath *string `json:"source_path,omitempty,omitzero"`
+}
+
+type AppApplyResult struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// PreviousVersionID corresponds to the JSON schema field "previous_version_id".
+	PreviousVersionID *int `json:"previous_version_id,omitempty,omitzero"`
+
+	// VersionCreated corresponds to the JSON schema field "version_created".
+	VersionCreated bool `json:"version_created"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+}
+
+type AppConsumerInfo struct {
+	// Cursor corresponds to the JSON schema field "cursor".
+	Cursor int `json:"cursor"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Filter corresponds to the JSON schema field "filter".
+	Filter string `json:"filter"`
+
+	// Lag corresponds to the JSON schema field "lag".
+	Lag int `json:"lag"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppInvocationInfo struct {
+	// DurationMs corresponds to the JSON schema field "duration_ms".
+	DurationMs int `json:"duration_ms"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// EventName corresponds to the JSON schema field "event_name".
+	EventName string `json:"event_name"`
+
+	// EventSeq corresponds to the JSON schema field "event_seq".
+	EventSeq int `json:"event_seq"`
+
+	// EventSubject corresponds to the JSON schema field "event_subject".
+	EventSubject string `json:"event_subject"`
+
+	// Handler corresponds to the JSON schema field "handler".
+	Handler string `json:"handler"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+
+	// StartedAt corresponds to the JSON schema field "started_at".
+	StartedAt string `json:"started_at"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+}
+
+type AppListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type AppListResult struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppSummary `json:"apps"`
+}
+
+type AppLogsMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Lines corresponds to the JSON schema field "lines".
+	Lines *int `json:"lines,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppLogsResult struct {
+	// Lines corresponds to the JSON schema field "lines".
+	Lines []string `json:"lines"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Path corresponds to the JSON schema field "path".
+	Path string `json:"path"`
+
+	// Truncated corresponds to the JSON schema field "truncated".
+	Truncated bool `json:"truncated"`
+}
+
+type AppRemoveMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppRemoveResult struct {
+	// ConsumerRemoved corresponds to the JSON schema field "consumer_removed".
+	ConsumerRemoved bool `json:"consumer_removed"`
+
+	// InvocationsKept corresponds to the JSON schema field "invocations_kept".
+	InvocationsKept int `json:"invocations_kept"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// NamespaceKept corresponds to the JSON schema field "namespace_kept".
+	NamespaceKept string `json:"namespace_kept"`
+
+	// VersionsKept corresponds to the JSON schema field "versions_kept".
+	VersionsKept int `json:"versions_kept"`
+}
+
+type AppRollbackMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID *int `json:"version_id,omitempty,omitzero"`
+}
+
+type AppRollbackResult struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// PreviousVersionID corresponds to the JSON schema field "previous_version_id".
+	PreviousVersionID *int `json:"previous_version_id,omitempty,omitzero"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+}
+
+type AppRuntimeInfo struct {
+	// Connected corresponds to the JSON schema field "connected".
+	Connected bool `json:"connected"`
+
+	// ConnectedAt corresponds to the JSON schema field "connected_at".
+	ConnectedAt *string `json:"connected_at,omitempty,omitzero"`
+
+	// Desired corresponds to the JSON schema field "desired".
+	Desired string `json:"desired"`
+
+	// Generation corresponds to the JSON schema field "generation".
+	Generation int `json:"generation"`
+
+	// LastExit corresponds to the JSON schema field "last_exit".
+	LastExit *string `json:"last_exit,omitempty,omitzero"`
+
+	// NextRestartAt corresponds to the JSON schema field "next_restart_at".
+	NextRestartAt *string `json:"next_restart_at,omitempty,omitzero"`
+
+	// ParkedAt corresponds to the JSON schema field "parked_at".
+	ParkedAt *string `json:"parked_at,omitempty,omitzero"`
+
+	// Phase corresponds to the JSON schema field "phase".
+	Phase string `json:"phase"`
+
+	// Pid corresponds to the JSON schema field "pid".
+	Pid *int `json:"pid,omitempty,omitzero"`
+
+	// RestartAttempt corresponds to the JSON schema field "restart_attempt".
+	RestartAttempt int `json:"restart_attempt"`
+
+	// Running corresponds to the JSON schema field "running".
+	Running bool `json:"running"`
+
+	// StartedAt corresponds to the JSON schema field "started_at".
+	StartedAt *string `json:"started_at,omitempty,omitzero"`
+}
+
+type AppRuntimeRestartMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type AppRuntimeRestartResult struct {
+	// Runtime corresponds to the JSON schema field "runtime".
+	Runtime AppRuntimeInfo `json:"runtime"`
+
+	// Was corresponds to the JSON schema field "was".
+	Was string `json:"was"`
+}
+
+type AppRuntimeStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type AppRuntimeStatusResult struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps int `json:"apps"`
+
+	// AppsEnabled corresponds to the JSON schema field "apps_enabled".
+	AppsEnabled int `json:"apps_enabled"`
+
+	// HostError corresponds to the JSON schema field "host_error".
+	HostError *string `json:"host_error,omitempty,omitzero"`
+
+	// HostPath corresponds to the JSON schema field "host_path".
+	HostPath *string `json:"host_path,omitempty,omitzero"`
+
+	// LogPath corresponds to the JSON schema field "log_path".
+	LogPath string `json:"log_path"`
+
+	// Runtime corresponds to the JSON schema field "runtime".
+	Runtime *AppRuntimeInfo `json:"runtime,omitempty,omitzero"`
+}
+
+type AppSetEnabledMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppSetEnabledResult struct {
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer string `json:"consumer"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppStallInfo struct {
+	// Attempts corresponds to the JSON schema field "attempts".
+	Attempts int `json:"attempts"`
+
+	// DisablesAt corresponds to the JSON schema field "disables_at".
+	DisablesAt string `json:"disables_at"`
+
+	// EventName corresponds to the JSON schema field "event_name".
+	EventName string `json:"event_name"`
+
+	// EventSeq corresponds to the JSON schema field "event_seq".
+	EventSeq int `json:"event_seq"`
+
+	// LastError corresponds to the JSON schema field "last_error".
+	LastError string `json:"last_error"`
+
+	// Since corresponds to the JSON schema field "since".
+	Since string `json:"since"`
+}
+
+type AppStatusMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppStatusResult struct {
+	// App corresponds to the JSON schema field "app".
+	App AppSummary `json:"app"`
+
+	// Invocations corresponds to the JSON schema field "invocations".
+	Invocations int `json:"invocations"`
+
+	// Recent corresponds to the JSON schema field "recent".
+	Recent []AppInvocationInfo `json:"recent,omitempty,omitzero"`
+
+	// Runtime corresponds to the JSON schema field "runtime".
+	Runtime *AppRuntimeInfo `json:"runtime,omitempty,omitzero"`
+
+	// Stall corresponds to the JSON schema field "stall".
+	Stall *AppStallInfo `json:"stall,omitempty,omitzero"`
+
+	// Versions corresponds to the JSON schema field "versions".
+	Versions int `json:"versions"`
+}
+
+type AppSummary struct {
+	// Consumer corresponds to the JSON schema field "consumer".
+	Consumer *AppConsumerInfo `json:"consumer,omitempty,omitzero"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// CurrentVersion corresponds to the JSON schema field "current_version".
+	CurrentVersion *AppVersionInfo `json:"current_version,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+}
+
+type AppVersionInfo struct {
+	// ArtifactPath corresponds to the JSON schema field "artifact_path".
+	ArtifactPath string `json:"artifact_path"`
+
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash string `json:"content_hash"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID int `json:"id"`
+}
+
+type AppWatchMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppWatchResult struct {
+	// Invocation corresponds to the JSON schema field "invocation".
+	Invocation AppInvocationInfo `json:"invocation"`
+}
+
 type ApprovePRMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -922,6 +1286,12 @@ type BusConsumerStatus struct {
 	// OldestUnreadAt corresponds to the JSON schema field "oldest_unread_at".
 	OldestUnreadAt string `json:"oldest_unread_at"`
 
+	// PinAlarm corresponds to the JSON schema field "pin_alarm".
+	PinAlarm bool `json:"pin_alarm"`
+
+	// PinnedBytes corresponds to the JSON schema field "pinned_bytes".
+	PinnedBytes int `json:"pinned_bytes"`
+
 	// Stalled corresponds to the JSON schema field "stalled".
 	Stalled string `json:"stalled"`
 
@@ -1051,6 +1421,9 @@ type BusStatusResultMessage struct {
 
 	// OldestAt corresponds to the JSON schema field "oldest_at".
 	OldestAt string `json:"oldest_at"`
+
+	// PinAlarmSeconds corresponds to the JSON schema field "pin_alarm_seconds".
+	PinAlarmSeconds float64 `json:"pin_alarm_seconds"`
 
 	// Producers corresponds to the JSON schema field "producers".
 	Producers []BusProducerStatus `json:"producers"`
@@ -2397,6 +2770,17 @@ type FsWriteResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type GardenSeedsUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
+}
+
 type GetDefaultBranchMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -2791,6 +3175,11 @@ type InitialStateMessage struct {
 	// GithubHosts corresponds to the JSON schema field "github_hosts".
 	GithubHosts []string `json:"github_hosts,omitempty,omitzero"`
 
+	// The daemon id that owns this daemon's home-level state. Equal to
+	// daemon_instance_id on a home daemon; a different id means this daemon is an
+	// outpost of that home.
+	HomeDaemonID *string `json:"home_daemon_id,omitempty,omitzero"`
+
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty,omitzero"`
 
@@ -2799,6 +3188,12 @@ type InitialStateMessage struct {
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
+
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds,omitempty,omitzero"`
+
+	// SeedsTotal corresponds to the JSON schema field "seeds_total".
+	SeedsTotal *int `json:"seeds_total,omitempty,omitzero"`
 
 	// Sessions corresponds to the JSON schema field "sessions".
 	Sessions []Session `json:"sessions,omitempty,omitzero"`
@@ -4705,6 +5100,39 @@ type Response struct {
 	// AgentPeekResult corresponds to the JSON schema field "agent_peek_result".
 	AgentPeekResult *AgentPeekResult `json:"agent_peek_result,omitempty,omitzero"`
 
+	// AppApplyResult corresponds to the JSON schema field "app_apply_result".
+	AppApplyResult *AppApplyResult `json:"app_apply_result,omitempty,omitzero"`
+
+	// AppListResult corresponds to the JSON schema field "app_list_result".
+	AppListResult *AppListResult `json:"app_list_result,omitempty,omitzero"`
+
+	// AppLogsResult corresponds to the JSON schema field "app_logs_result".
+	AppLogsResult *AppLogsResult `json:"app_logs_result,omitempty,omitzero"`
+
+	// AppRemoveResult corresponds to the JSON schema field "app_remove_result".
+	AppRemoveResult *AppRemoveResult `json:"app_remove_result,omitempty,omitzero"`
+
+	// AppRollbackResult corresponds to the JSON schema field "app_rollback_result".
+	AppRollbackResult *AppRollbackResult `json:"app_rollback_result,omitempty,omitzero"`
+
+	// AppRuntimeRestartResult corresponds to the JSON schema field
+	// "app_runtime_restart_result".
+	AppRuntimeRestartResult *AppRuntimeRestartResult `json:"app_runtime_restart_result,omitempty,omitzero"`
+
+	// AppRuntimeStatusResult corresponds to the JSON schema field
+	// "app_runtime_status_result".
+	AppRuntimeStatusResult *AppRuntimeStatusResult `json:"app_runtime_status_result,omitempty,omitzero"`
+
+	// AppSetEnabledResult corresponds to the JSON schema field
+	// "app_set_enabled_result".
+	AppSetEnabledResult *AppSetEnabledResult `json:"app_set_enabled_result,omitempty,omitzero"`
+
+	// AppStatusResult corresponds to the JSON schema field "app_status_result".
+	AppStatusResult *AppStatusResult `json:"app_status_result,omitempty,omitzero"`
+
+	// AppWatchResult corresponds to the JSON schema field "app_watch_result".
+	AppWatchResult *AppWatchResult `json:"app_watch_result,omitempty,omitzero"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
 
@@ -4786,6 +5214,31 @@ type Response struct {
 
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
+
+	// SeedLinkResult corresponds to the JSON schema field "seed_link_result".
+	SeedLinkResult *SeedLinkResult `json:"seed_link_result,omitempty,omitzero"`
+
+	// SeedListResult corresponds to the JSON schema field "seed_list_result".
+	SeedListResult *SeedListResult `json:"seed_list_result,omitempty,omitzero"`
+
+	// SeedNoteResult corresponds to the JSON schema field "seed_note_result".
+	SeedNoteResult *SeedNoteResult `json:"seed_note_result,omitempty,omitzero"`
+
+	// SeedNotesResult corresponds to the JSON schema field "seed_notes_result".
+	SeedNotesResult *SeedNotesResult `json:"seed_notes_result,omitempty,omitzero"`
+
+	// SeedPlantResult corresponds to the JSON schema field "seed_plant_result".
+	SeedPlantResult *SeedPlantResult `json:"seed_plant_result,omitempty,omitzero"`
+
+	// SeedReadyResult corresponds to the JSON schema field "seed_ready_result".
+	SeedReadyResult *SeedReadyResult `json:"seed_ready_result,omitempty,omitzero"`
+
+	// SeedShowResult corresponds to the JSON schema field "seed_show_result".
+	SeedShowResult *SeedShowResult `json:"seed_show_result,omitempty,omitzero"`
+
+	// SeedTransitionResult corresponds to the JSON schema field
+	// "seed_transition_result".
+	SeedTransitionResult *SeedTransitionResult `json:"seed_transition_result,omitempty,omitzero"`
 
 	// SessionInstructionsResult corresponds to the JSON schema field
 	// "session_instructions_result".
@@ -4892,6 +5345,324 @@ type RuntimeRespawnedMessage struct {
 	ID string `json:"id"`
 }
 
+type Seed struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// Edges corresponds to the JSON schema field "edges".
+	Edges []SeedEdge `json:"edges"`
+
+	// Gate corresponds to the JSON schema field "gate".
+	Gate bool `json:"gate"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// PlanterMember corresponds to the JSON schema field "planter_member".
+	PlanterMember string `json:"planter_member"`
+
+	// PlanterSession corresponds to the JSON schema field "planter_session".
+	PlanterSession string `json:"planter_session"`
+
+	// Ready corresponds to the JSON schema field "ready".
+	Ready bool `json:"ready"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// Rev corresponds to the JSON schema field "rev".
+	Rev int `json:"rev"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// StepSlug corresponds to the JSON schema field "step_slug".
+	StepSlug string `json:"step_slug"`
+
+	// Template corresponds to the JSON schema field "template".
+	Template bool `json:"template"`
+
+	// TenderMember corresponds to the JSON schema field "tender_member".
+	TenderMember string `json:"tender_member"`
+
+	// TenderSession corresponds to the JSON schema field "tender_session".
+	TenderSession string `json:"tender_session"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// UpdatedAt corresponds to the JSON schema field "updated_at".
+	UpdatedAt string `json:"updated_at"`
+
+	// Vars corresponds to the JSON schema field "vars".
+	Vars []SeedVar `json:"vars"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type SeedEdge struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// To corresponds to the JSON schema field "to".
+	To string `json:"to"`
+}
+
+type SeedLinkMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// ToSeedID corresponds to the JSON schema field "to_seed_id".
+	ToSeedID string `json:"to_seed_id"`
+
+	// Unlink corresponds to the JSON schema field "unlink".
+	Unlink *bool `json:"unlink,omitempty,omitzero"`
+}
+
+type SeedLinkResult struct {
+	// Changed corresponds to the JSON schema field "changed".
+	Changed bool `json:"changed"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+}
+
+type SeedListMessage struct {
+	// All corresponds to the JSON schema field "all".
+	All *bool `json:"all,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type SeedListResult struct {
+	// All corresponds to the JSON schema field "all".
+	All bool `json:"all"`
+
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type SeedNote struct {
+	// AuthorMember corresponds to the JSON schema field "author_member".
+	AuthorMember string `json:"author_member"`
+
+	// AuthorSession corresponds to the JSON schema field "author_session".
+	AuthorSession string `json:"author_session"`
+
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// CreatedAt corresponds to the JSON schema field "created_at".
+	CreatedAt string `json:"created_at"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedNoteMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+}
+
+type SeedNoteResult struct {
+	// Note corresponds to the JSON schema field "note".
+	Note SeedNote `json:"note"`
+}
+
+type SeedNotesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Limit corresponds to the JSON schema field "limit".
+	Limit *int `json:"limit,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedNotesResult struct {
+	// Notes corresponds to the JSON schema field "notes".
+	Notes []SeedNote `json:"notes"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
+}
+
+type SeedPlantMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body *string `json:"body,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type SeedPlantResult struct {
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+}
+
+type SeedReadyMessage struct {
+	// All corresponds to the JSON schema field "all".
+	All *bool `json:"all,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Plot corresponds to the JSON schema field "plot".
+	Plot *string `json:"plot,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
+type SeedReadyResult struct {
+	// Scope corresponds to the JSON schema field "scope".
+	Scope string `json:"scope"`
+
+	// ScopeID corresponds to the JSON schema field "scope_id".
+	ScopeID string `json:"scope_id"`
+
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds"`
+}
+
+type SeedRelation struct {
+	// Label corresponds to the JSON schema field "label".
+	Label string `json:"label"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// Status corresponds to the JSON schema field "status".
+	Status string `json:"status"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type SeedShowMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedShowResult struct {
+	// Notes corresponds to the JSON schema field "notes".
+	Notes []SeedNote `json:"notes"`
+
+	// NotesTotal corresponds to the JSON schema field "notes_total".
+	NotesTotal int `json:"notes_total"`
+
+	// Relations corresponds to the JSON schema field "relations".
+	Relations []SeedRelation `json:"relations"`
+
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+}
+
+type SeedTransitionMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// Reason corresponds to the JSON schema field "reason".
+	Reason *string `json:"reason,omitempty,omitzero"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// Verb corresponds to the JSON schema field "verb".
+	Verb string `json:"verb"`
+}
+
+type SeedTransitionResult struct {
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
+}
+
+type SeedVar struct {
+	// Default corresponds to the JSON schema field "default".
+	Default *string `json:"default,omitempty,omitzero"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Enum corresponds to the JSON schema field "enum".
+	Enum []string `json:"enum,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// Pattern corresponds to the JSON schema field "pattern".
+	Pattern *string `json:"pattern,omitempty,omitzero"`
+
+	// Required corresponds to the JSON schema field "required".
+	Required *bool `json:"required,omitempty,omitzero"`
+}
+
 type Session struct {
 	// Activity corresponds to the JSON schema field "activity".
 	Activity *string `json:"activity,omitempty,omitzero"`
@@ -4901,6 +5672,10 @@ type Session struct {
 
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
+
+	// AutoSettleDismissArmed corresponds to the JSON schema field
+	// "auto_settle_dismiss_armed".
+	AutoSettleDismissArmed *bool `json:"auto_settle_dismiss_armed,omitempty,omitzero"`
 
 	// AutoSettleFiresAt corresponds to the JSON schema field "auto_settle_fires_at".
 	AutoSettleFiresAt *string `json:"auto_settle_fires_at,omitempty,omitzero"`
@@ -6633,6 +7408,9 @@ type WebSocketEvent struct {
 	// "scrollback_truncated".
 	ScrollbackTruncated *bool `json:"scrollback_truncated,omitempty,omitzero"`
 
+	// Seeds corresponds to the JSON schema field "seeds".
+	Seeds []Seed `json:"seeds,omitempty,omitzero"`
+
 	// Seq corresponds to the JSON schema field "seq".
 	Seq *int `json:"seq,omitempty,omitzero"`
 
@@ -6677,6 +7455,9 @@ type WebSocketEvent struct {
 
 	// TileKind corresponds to the JSON schema field "tile_kind".
 	TileKind *string `json:"tile_kind,omitempty,omitzero"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total *int `json:"total,omitempty,omitzero"`
 
 	// Unstaged corresponds to the JSON schema field "unstaged".
 	Unstaged []GitFileChange `json:"unstaged,omitempty,omitzero"`

@@ -1,0 +1,23 @@
+kind: added
+area: cli
+change: >
+  `attn app new <path>` scaffolds an app that applies with no edits, and
+  `attn app apply <path>` installs it — parse the manifest, generate the types
+  your handlers are checked against, typecheck, bundle, hash, and record the
+  result as an immutable version. `attn app rollback <name> [version]` moves the
+  app back to a version it already ran, and `attn app dev <path>` re-applies on
+  every save.
+notes: >
+  Applying an app never evaluates its code. The pipeline parses, generates,
+  typechecks, bundles, hashes and records; nothing in the app is imported and
+  nothing is run, so a broken app fails before anything changes and the version
+  you were running is still the version you are running. A version is its
+  content: `attn-app.toml` declares the events an app subscribes to and the
+  document collections it keeps, codegen turns that into a `Handlers` type the
+  compiler holds your entrypoint to, and the manifest and the bundle together
+  make the content hash. Applying the same app twice records nothing the second
+  time — same hash, same version, no new row. Rollback is a pointer, so it
+  builds nothing and every version stays on disk. Typechecking uses a pinned TypeScript that
+  attn installs once, on the first apply, and shares across apps; bundling uses
+  bun, which must be on your PATH.
+  Design: docs/plans/2026-08-06-ext-a4-app-registry-and-runtime.md.

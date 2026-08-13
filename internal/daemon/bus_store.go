@@ -77,6 +77,10 @@ func (a *sqlBusStore) SaveConsumer(c bus.Consumer, now time.Time) error {
 	}, now)
 }
 
+func (a *sqlBusStore) DeleteConsumer(name string) error {
+	return a.store.DeleteBusConsumer(name)
+}
+
 func (a *sqlBusStore) SetCursor(name string, cursor int64, now time.Time) error {
 	return a.store.SetBusConsumerCursor(name, cursor, now)
 }
@@ -119,6 +123,10 @@ func (a *sqlBusStore) Producers(cutoffs []time.Time) ([]bus.ProducerRow, error) 
 
 func (a *sqlBusStore) EventTimeAt(seq int64) (time.Time, bool, error) {
 	return a.store.BusEventTimeAt(seq)
+}
+
+func (a *sqlBusStore) PendingBytes(above int64) (int64, error) {
+	return a.store.BusPendingBytes(above)
 }
 
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {

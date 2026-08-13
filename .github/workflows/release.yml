@@ -296,6 +296,32 @@ jobs:
         run: |
           gh release upload "${RELEASE_TAG}" /tmp/attn-linux-amd64 --clobber
 
+      # The app runtime host travels with the daemon: a hub installed from a
+      # release has no source checkout to build one from, so without this asset
+      # it can never give a Linux remote a runtime and every app there parks.
+      # Built natively on this runner rather than cross-compiled — the runner is
+      # the target platform.
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Build Linux amd64 app runtime host
+        run: |
+          bash ./scripts/build-app-runtime-host.sh /tmp/app-runtime-amd64
+          mv /tmp/app-runtime-amd64/attn-app-runtime /tmp/attn-app-runtime-linux-amd64
+          file /tmp/attn-app-runtime-linux-amd64
+
+      - name: Upload Linux amd64 app runtime host
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" /tmp/attn-app-runtime-linux-amd64 --clobber
+
   linux-arm64:
     name: Linux arm64 daemon
     needs: tauri
@@ -343,6 +369,32 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release upload "${RELEASE_TAG}" /tmp/attn-linux-arm64 --clobber
+
+      # The app runtime host travels with the daemon: a hub installed from a
+      # release has no source checkout to build one from, so without this asset
+      # it can never give a Linux remote a runtime and every app there parks.
+      # Built natively on this runner rather than cross-compiled — the runner is
+      # the target platform.
+      - name: Read bun pin
+        id: bun
+        run: echo "version=$(awk '/^bun / { print $2 }' .tool-versions)" >> "$GITHUB_OUTPUT"
+
+      - name: Set up bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: ${{ steps.bun.outputs.version }}
+
+      - name: Build Linux arm64 app runtime host
+        run: |
+          bash ./scripts/build-app-runtime-host.sh /tmp/app-runtime-arm64
+          mv /tmp/app-runtime-arm64/attn-app-runtime /tmp/attn-app-runtime-linux-arm64
+          file /tmp/attn-app-runtime-linux-arm64
+
+      - name: Upload Linux arm64 app runtime host
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload "${RELEASE_TAG}" /tmp/attn-app-runtime-linux-arm64 --clobber
 
   # Nothing is public until every gate above has passed and every asset is
   # attached. A failure anywhere leaves the draft for inspection: fix it, re-run

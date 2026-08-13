@@ -22,6 +22,13 @@ type Hook struct {
 // SettingsConfig represents Claude Code settings with hooks
 type SettingsConfig struct {
 	Hooks map[string][]HookEntry `json:"hooks"`
+	// Env carries launch knobs that must beat the user's own configuration.
+	// Claude Code copies every settings file's `env` block onto its own
+	// process environment at startup, overwriting what the parent exported, so
+	// a knob attn only sets in the spawn environment loses to the same key in
+	// ~/.claude/settings.json. This file is passed with --settings, whose scope
+	// is applied last of the non-managed scopes, so what lands here wins.
+	Env map[string]string `json:"env,omitempty"`
 }
 
 type sessionStartHookSpecificOutput struct {
@@ -103,6 +110,57 @@ func AgentInstructions(workspaceContextPath string, injectWorkflow bool) string 
 	return strings.Join(blocks, "\n\n")
 }
 
+// GardenPrimer is the standing garden block: the vocabulary, the loop, and how
+// many seeds this session's workspace had ready when it launched. ready is nil
+// when the daemon had no answer — no garden here, or none this session can
+// reach — and then nothing is injected, because an agent told to run a command
+// that refuses is worse off than one that was never told.
+//
+// The count is a starting position, not a live number: guidance is composed once
+// at launch, so the block says where the live answer is.
+func GardenPrimer(ready *int) string {
+	if ready == nil {
+		return ""
+	}
+	standing := "Nothing was ready in this workspace when you started"
+	if *ready == 1 {
+		standing = "One seed was ready in this workspace when you started"
+	} else if *ready > 1 {
+		standing = fmt.Sprintf("%d seeds were ready in this workspace when you started", *ready)
+	}
+	return fmt.Sprintf(`attn keeps work in **the garden**. A **seed** is one unit of work — a short id (`+"`s-7k3f9m`"+`), a title, a markdown body, and a state. Anything worth handing off, parking, or attributing is a seed; in-session scratch is not.
+
+The loop is ready → tend → harvest. `+"`attn seed ready`"+` says what you can pick up right now in this workspace: nothing open blocks it and nobody holds it. `+"`attn seed tend <id>`"+` claims one — one tender at a time, so the claim is how other agents know it is taken. `+"`attn seed note <id> -m \"…\"`"+` records what happened and what you learned, for whoever tends it next. `+"`attn seed harvest <id> -m \"what got done\"`"+` closes it as done; `+"`attn seed wither`"+` closes one nobody will pick up, and `+"`attn seed park`"+` puts it down without giving up on it. Plant with `+"`attn seed plant \"what this is\"`"+`, which prints the id. `+"`attn seed --help`"+` has the rest.
+
+%s. Run `+"`attn seed ready`"+` for the live answer — readiness is computed when you ask, so a blocker somebody harvests since then shows up on your next call.`, standing)
+}
+
+// Launch is everything attn injects into an agent's system prompt at launch. A
+// chief-of-staff session (NotebookRoot set) gets chief guidance in place of the
+// workspace-context guidance; the garden primer rides along with either, because
+// every attn-launched agent lives in the same garden.
+type Launch struct {
+	NotebookRoot         string
+	HasSelfMonitor       bool
+	WorkspaceContextPath string
+	InjectWorkflow       bool
+	GardenReady          *int
+}
+
+// Instructions composes the blocks, joined by a blank line.
+func (l Launch) Instructions() string {
+	blocks := make([]string, 0, 2)
+	if chief := ChiefGuidance(l.NotebookRoot, l.HasSelfMonitor); chief != "" {
+		blocks = append(blocks, chief)
+	} else {
+		blocks = append(blocks, AgentInstructions(l.WorkspaceContextPath, l.InjectWorkflow))
+	}
+	if primer := GardenPrimer(l.GardenReady); primer != "" {
+		blocks = append(blocks, primer)
+	}
+	return strings.Join(blocks, "\n\n")
+}
+
 // WorkspaceContextSessionStartOutput returns hook output used when an agent
 // could not receive workspace context guidance at launch. It carries the
 // workspace-context guidance the launch path injects for a non-chief agent, so
@@ -153,8 +211,10 @@ func ChiefGuidance(root string, hasSelfMonitor bool) string {
 - %[5]s`, root, ticketWaitingGuidance, wakeBoundary, delegationBoundary, TicketAwarenessGuidance())
 }
 
-// Generate generates settings configuration with hooks for a session
-func Generate(sessionID, socketPath, wrapperPath string) string {
+// Generate generates settings configuration with hooks for a session. env, when
+// non-empty, becomes the file's `env` block — see SettingsConfig.Env for why a
+// launch knob has to travel here rather than only in the spawn environment.
+func Generate(sessionID, socketPath, wrapperPath string, env map[string]string) string {
 	wrapper := strings.TrimSpace(wrapperPath)
 	if wrapper == "" {
 		wrapper = "attn"
@@ -163,6 +223,7 @@ func Generate(sessionID, socketPath, wrapperPath string) string {
 	socketCmd := shellQuote(strings.TrimSpace(socketPath))
 
 	config := SettingsConfig{
+		Env: env,
 		Hooks: map[string][]HookEntry{
 			"SessionStart": {
 				{

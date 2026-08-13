@@ -82,7 +82,7 @@ func (d *Daemon) handleBusSetConsumerEnabled(client *wsClient, msg *protocol.Bus
 		d.sendToClient(client, result)
 		return
 	}
-	if err := d.store.SetBusConsumerEnabled(name, msg.Enabled, time.Now()); err != nil {
+	if _, err := d.store.SetBusConsumerEnabled(name, msg.Enabled, time.Now()); err != nil {
 		result.Error = protocol.Ptr(err.Error())
 		d.sendToClient(client, result)
 		return
@@ -110,6 +110,7 @@ func fillBusStatusResult(out *protocol.BusStatusResultMessage, s bus.Status) {
 	out.RecentWindowSeconds = bus.RecentWindow.Seconds()
 	out.BaselineWindowSeconds = bus.BaselineWindow.Seconds()
 	out.SurgeRatePerHour = bus.SurgeRatePerHour
+	out.PinAlarmSeconds = s.PinAlarmAge.Seconds()
 
 	out.Producers = make([]protocol.BusProducerStatus, 0, len(s.Producers))
 	for _, p := range s.Producers {
@@ -140,6 +141,8 @@ func fillBusStatusResult(out *protocol.BusStatusResultMessage, s bus.Status) {
 			Stalled:             c.Stalled,
 			OldestUnreadAt:      formatBusStamp(c.OldestUnreadAt),
 			HoldsRetentionFloor: c.HoldsRetentionFloor,
+			PinAlarm:            c.PinAlarm,
+			PinnedBytes:         int(c.PinnedBytes),
 		})
 	}
 	out.Health = make([]protocol.BusHealthEntry, 0, len(s.Health))

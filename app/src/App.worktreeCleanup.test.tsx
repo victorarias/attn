@@ -309,6 +309,8 @@ describe('worktree cleanup prompt', () => {
       setRepoStates: vi.fn(),
       authorStates: [],
       setAuthorStates: vi.fn(),
+      seeds: [],
+      setSeeds: vi.fn(),
     };
     mockUseDaemonStore.mockReturnValue(mockDaemonStoreReturn);
 
@@ -746,6 +748,8 @@ describe('worktree cleanup prompt', () => {
       setRepoStates: vi.fn(),
       authorStates: [],
       setAuthorStates: vi.fn(),
+      seeds: [],
+      setSeeds: vi.fn(),
     });
 
     render(<App />);

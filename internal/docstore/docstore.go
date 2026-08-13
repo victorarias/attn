@@ -5,6 +5,11 @@
 // physical naming (TableName, FieldColumn); the store builds its DDL from
 // those names and invents none.
 //
+// Query semantics and physical naming live here (TableName, FieldColumn);
+// internal/store executes what this package compiles and never invents an
+// identifier. Namespaces are opaque `owner/name` strings — write authority is
+// enforced where a namespace is granted, not here.
+//
 // See docs/plans/2026-08-03-ext-a3-doc-store.md and
 // docs/plans/2026-08-03-ext-a3.1-doc-store-physical-schema.md.
 package docstore
@@ -58,6 +63,12 @@ const (
 )
 
 var opSQL = map[Op]string{OpEq: "=", OpLt: "<", OpLte: "<=", OpGt: ">", OpGte: ">="}
+
+// FilterOps is the operator set, in a stable order, for surfaces that have to
+// render it — an error message listing what was accepted, or generated SDK
+// types. Callers get it from here rather than writing the list out, so an
+// operator added above cannot leave a stale copy behind.
+func FilterOps() []Op { return []Op{OpEq, OpLt, OpLte, OpGt, OpGte} }
 
 // FieldSpec declares one queryable field of a collection.
 type FieldSpec struct {
@@ -211,7 +222,7 @@ type Compiled struct {
 
 var (
 	// A namespace is `owner/name`: the owner segment is the isolation class a
-	// grant hands out (`ext`, `core`), the name segment identifies the holder.
+	// grant hands out (`app`, `core`), the name segment identifies the holder.
 	namePart      = `[a-z0-9][a-z0-9_-]*`
 	namespaceRe   = regexp.MustCompile(`^` + namePart + `/` + namePart + `$`)
 	collectionRe  = regexp.MustCompile(`^` + namePart + `$`)
@@ -283,10 +294,10 @@ func quoteIdent(name string) string {
 // not this package's concern.
 func ValidateNamespace(ns string) error {
 	if ns == "" {
-		return fmt.Errorf("docstore: namespace is required, as owner/name (for example ext/approval-gate)")
+		return fmt.Errorf("docstore: namespace is required, as owner/name (for example app/approval-gate)")
 	}
 	if !namespaceRe.MatchString(ns) {
-		return fmt.Errorf("docstore: namespace %q is not owner/name, where each part is lowercase letters, digits, - or _ (for example ext/approval-gate)", ns)
+		return fmt.Errorf("docstore: namespace %q is not owner/name, where each part is lowercase letters, digits, - or _ (for example app/approval-gate)", ns)
 	}
 	return nil
 }

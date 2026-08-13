@@ -1,0 +1,10 @@
+kind: fixed
+area: sessions
+change: >
+  A context-window cap now holds even when ~/.claude/settings.json sets
+  CLAUDE_CODE_AUTO_COMPACT_WINDOW in its env block. Claude Code copies a
+  settings file's env over the environment it was launched with, so the cap
+  attn exported at spawn was silently replaced and the session compacted at
+  the user's global value instead of the configured one. attn now also writes
+  the cap into the settings file it passes to the launch, which Claude Code
+  applies after the user's own.

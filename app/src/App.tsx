@@ -19,6 +19,7 @@ import { TicketDetailPanel } from './components/TicketDetailPanel';
 import { TicketBoardSurface } from './components/TicketBoardSurface';
 import { WorkflowRunView } from './components/WorkflowRunView';
 import { AutomationsPanel } from './components/AutomationsPanel';
+import { GardenPanel } from './components/GardenPanel';
 import {
   useWorkflowRunsStore,
   selectLatestWorkflowRunForSession,
@@ -212,6 +213,28 @@ function AutomationsIcon() {
         strokeLinejoin="round"
       />
       <circle cx="8" cy="8" r="1.3" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
+function GardenIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true">
+      <path d="M8 14V7.4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M8 7.4C8 5.3 6.4 3.6 4.2 3.6c0 2.1 1.6 3.8 3.8 3.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M8 7.4c0-2.1 1.6-3.8 3.8-3.8 0 2.1-1.6 3.8-3.8 3.8Z"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.4"
+        strokeLinejoin="round"
+      />
     </svg>
   );
 }
@@ -414,6 +437,7 @@ function App() {
     daemonSessions,
     setDaemonSessions,
     setTickets,
+    setSeeds,
     prs,
     setPRs,
     setRepoStates,
@@ -594,6 +618,7 @@ function App() {
       setNotificationsChangeSignal((n) => n + 1);
     },
     onTicketsUpdate: setTickets,
+    onSeedsUpdate: setSeeds,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -1064,7 +1089,7 @@ function AppContent({
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets } = useDaemonStore();
+  const { repoStates, authorStates, tickets, seeds, seedsTotal } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1241,6 +1266,7 @@ function AppContent({
       parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
+      autoSettleDismissArmed: daemonSession?.auto_settle_dismiss_armed ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -1285,7 +1311,7 @@ function AppContent({
     void connect();
   }, [connect]);
 
-  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations';
+  type DockPanelId = 'workflowRun' | 'attention' | 'ticketDetail' | 'automations' | 'garden';
 
   // Muted section expansion (controlled by Dashboard click)
   const [sidebarMutedExpanded, setSidebarMutedExpanded] = useState(false);
@@ -1313,6 +1339,7 @@ function AppContent({
         attention: false,
         ticketDetail: false,
         automations: false,
+        garden: false,
     },
     stack: [],
   });
@@ -1651,6 +1678,7 @@ function AppContent({
   const attentionPanelOpen = openDockPanels.attention;
   const ticketDetailPanelOpen = openDockPanels.ticketDetail;
   const automationsPanelOpen = openDockPanels.automations;
+  const gardenPanelOpen = openDockPanels.garden;
   const blockingOverlayOpen = locationPickerOpen
     || whatsNew.isOpen
     || settingsOpen
@@ -3070,15 +3098,33 @@ function AppContent({
     }
     return ids;
   }, [enrichedLocalSessions, onScreenSessionIds]);
-  // Undefined when nothing visible is counting down, which unregisters the
-  // shortcut entirely: pressing it then falls through as a no-op rather than
-  // firing at a session picked by guesswork.
-  const handleCancelCountdown = useMemo(
-    () => (visibleCountdownSessionIds.length > 0
-      ? () => visibleCountdownSessionIds.forEach(sendCancelCountdown)
-      : undefined),
-    [visibleCountdownSessionIds, sendCancelCountdown],
+  // Who a press answers when nothing is counting down: the focused session, and
+  // only while its own tile is on screen.
+  //
+  // One session rather than all of them, because arming is not cancelling. A
+  // countdown pill announces the key that stops it, so a press that stops every
+  // pill you can see is answering what each of them asked. Nothing asks for an
+  // arm — it is the user getting ahead of a settle that has not been announced —
+  // so it goes where they are looking and nowhere else.
+  const armDismissSessionId = useMemo(
+    () => (activeSessionId && onScreenSessionIds.has(activeSessionId) ? activeSessionId : undefined),
+    [activeSessionId, onScreenSessionIds],
   );
+  // Undefined only when there is neither a visible countdown nor a session to
+  // arm, which unregisters the shortcut entirely: pressing it then falls through
+  // as a no-op rather than firing at a session picked by guesswork.
+  const handleCancelCountdown = useMemo(() => {
+    // What is on screen and running wins: the user is answering the thing that
+    // announced itself, not getting ahead of the next one.
+    if (visibleCountdownSessionIds.length > 0) {
+      return () => visibleCountdownSessionIds.forEach(sendCancelCountdown);
+    }
+    if (!armDismissSessionId) return undefined;
+    // The daemon decides between arming and disarming: it is the one that knows
+    // whether a dismissal is already standing, and whether this session has an
+    // auto-settle coming at all.
+    return () => sendCancelCountdown(armDismissSessionId);
+  }, [visibleCountdownSessionIds, armDismissSessionId, sendCancelCountdown]);
 
   const warmWorkspaceIds = useMemo(
     () => computeWarmWorkspaceIds(
@@ -3548,8 +3594,16 @@ function AppContent({
       active: automationsPanelOpen,
       onClick: () => toggleDockPanel('automations'),
     },
+    {
+      id: 'garden',
+      title: gardenPanelOpen ? 'Hide the garden' : 'Show the garden',
+      icon: <GardenIcon />,
+      active: gardenPanelOpen,
+      onClick: () => toggleDockPanel('garden'),
+    },
   ]), [
     activeSessionId,
+    activeRemoteSession,
     remoteEditorAvailable,
     attentionCount,
     attentionPanelOpen,
@@ -3564,6 +3618,7 @@ function AppContent({
     notificationsUnread,
     hasCriticalNotification,
     automationsPanelOpen,
+    gardenPanelOpen,
     toggleNotificationsPanel,
   ]);
 
@@ -3911,6 +3966,7 @@ function AppContent({
                       nudgeFiresAt: entry.nudgeFiresAt,
                       autoSettleFiresAt: entry.autoSettleFiresAt,
                       autoSettleHeld: entry.autoSettleHeld,
+                      autoSettleDismissArmed: entry.autoSettleDismissArmed,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
@@ -4088,6 +4144,21 @@ function AppContent({
                   onOpenTicket={handleOpenTicketDetail}
                   onSelectSession={handleSelectSession}
                   onFocusPane={(sessionId, paneId) => focusSessionPane(sessionId, paneId, 40)}
+                />
+              ),
+            },
+            {
+              id: 'garden',
+              isOpen: gardenPanelOpen,
+              width: 'clamp(380px, 34vw, 560px)',
+              className: 'dock-panel dock-panel--garden',
+              children: (
+                <GardenPanel
+                  isOpen={gardenPanelOpen}
+                  onClose={() => closeDockPanel('garden')}
+                  seeds={seeds}
+                  seedsTotal={seedsTotal}
+                  workspaceId={activeWorkspaceId ?? null}
                 />
               ),
             },

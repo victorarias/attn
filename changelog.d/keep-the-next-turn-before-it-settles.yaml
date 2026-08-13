@@ -1,0 +1,10 @@
+kind: added
+area: queue
+change: >
+  Cmd+. now works before there is anything to stop. Press it while you are still
+  typing the message that sends an agent back to work and attn will not
+  auto-settle that turn — the pane header says "Turn kept" for as long as the
+  answer stands, and pressing Cmd+. again (or clicking the chip) undoes it. It
+  covers the next stretch of work only; the turn after that is a fresh decision.
+  Pressing it while a countdown is actually running still stops that countdown,
+  exactly as before.

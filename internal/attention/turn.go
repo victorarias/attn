@@ -77,8 +77,16 @@ type Input struct {
 
 // Owed reports whether the user owes this session a turn.
 func Owed(in Input) bool {
-	if in.IsShell || in.ChiefOfStaff || in.SessionPinned || in.WorkspacePinned || in.WorkspaceMuted {
+	if Excluded(in) {
 		return false
 	}
 	return in.OpenedAt.After(in.SettledAt)
+}
+
+// Excluded reports whether this session is out of the queue whatever its stamps
+// say. Separated from Owed because the stamps move constantly and the exclusions
+// do not: a caller asking "could this session ever owe a turn?" — anything that
+// only acts on queued sessions — is asking this half.
+func Excluded(in Input) bool {
+	return in.IsShell || in.ChiefOfStaff || in.SessionPinned || in.WorkspacePinned || in.WorkspaceMuted
 }

@@ -1,0 +1,17 @@
+kind: added
+area: cli
+change: >
+  Seeds now relate, and the garden answers "what can I do right now". `attn
+  seed link <a> blocks <b>` makes b wait for a, `attn seed link <b> part-of
+  <c>` puts b in the plot c crowns, and `attn seed unlink` takes either back.
+  `attn seed ready` lists what you can pick up in the workspace you are in:
+  open, nothing blocking it, nobody holding it — with `--plot <crown>`,
+  `--workspace <id>` and `--all` when you want a different scope. The answer is
+  worked out when you ask, so harvesting a blocker frees whatever was waiting
+  on it the next time anyone looks. `attn seed ls --tree` draws the plot
+  hierarchy, `attn seed show` lists a seed's edges in both directions, and the
+  garden panel marks the ready seeds and says how many blockers the others are
+  waiting on. Linking two seeds into a cycle is refused, naming both seeds and
+  the edge to remove. Agents attn launches now start knowing the garden's
+  vocabulary, the ready → tend → harvest loop, and how many seeds their
+  workspace had ready.

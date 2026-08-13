@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -19,6 +19,32 @@
 //   const agentPromptMessage = Convert.toAgentPromptMessage(json);
 //   const agentSetModelMessage = Convert.toAgentSetModelMessage(json);
 //   const agentToolDetailMessage = Convert.toAgentToolDetailMessage(json);
+//   const appApplyMessage = Convert.toAppApplyMessage(json);
+//   const appApplyResult = Convert.toAppApplyResult(json);
+//   const appConsumerInfo = Convert.toAppConsumerInfo(json);
+//   const appInvocationInfo = Convert.toAppInvocationInfo(json);
+//   const appListMessage = Convert.toAppListMessage(json);
+//   const appListResult = Convert.toAppListResult(json);
+//   const appLogsMessage = Convert.toAppLogsMessage(json);
+//   const appLogsResult = Convert.toAppLogsResult(json);
+//   const appRemoveMessage = Convert.toAppRemoveMessage(json);
+//   const appRemoveResult = Convert.toAppRemoveResult(json);
+//   const appRollbackMessage = Convert.toAppRollbackMessage(json);
+//   const appRollbackResult = Convert.toAppRollbackResult(json);
+//   const appRuntimeInfo = Convert.toAppRuntimeInfo(json);
+//   const appRuntimeRestartMessage = Convert.toAppRuntimeRestartMessage(json);
+//   const appRuntimeRestartResult = Convert.toAppRuntimeRestartResult(json);
+//   const appRuntimeStatusMessage = Convert.toAppRuntimeStatusMessage(json);
+//   const appRuntimeStatusResult = Convert.toAppRuntimeStatusResult(json);
+//   const appSetEnabledMessage = Convert.toAppSetEnabledMessage(json);
+//   const appSetEnabledResult = Convert.toAppSetEnabledResult(json);
+//   const appStallInfo = Convert.toAppStallInfo(json);
+//   const appStatusMessage = Convert.toAppStatusMessage(json);
+//   const appStatusResult = Convert.toAppStatusResult(json);
+//   const appSummary = Convert.toAppSummary(json);
+//   const appVersionInfo = Convert.toAppVersionInfo(json);
+//   const appWatchMessage = Convert.toAppWatchMessage(json);
+//   const appWatchResult = Convert.toAppWatchResult(json);
 //   const approvePRMessage = Convert.toApprovePRMessage(json);
 //   const attachBlock = Convert.toAttachBlock(json);
 //   const attachPolicy = Convert.toAttachPolicy(json);
@@ -159,6 +185,7 @@
 //   const fSWriteMessage = Convert.toFSWriteMessage(json);
 //   const fSWriteResult = Convert.toFSWriteResult(json);
 //   const fSWriteResultMessage = Convert.toFSWriteResultMessage(json);
+//   const gardenSeedsUpdatedMessage = Convert.toGardenSeedsUpdatedMessage(json);
 //   const getDefaultBranchMessage = Convert.toGetDefaultBranchMessage(json);
 //   const getDefaultBranchResultMessage = Convert.toGetDefaultBranchResultMessage(json);
 //   const getFileDiffMessage = Convert.toGetFileDiffMessage(json);
@@ -311,6 +338,27 @@
 //   const response = Convert.toResponse(json);
 //   const reviewComment = Convert.toReviewComment(json);
 //   const runtimeRespawnedMessage = Convert.toRuntimeRespawnedMessage(json);
+//   const seed = Convert.toSeed(json);
+//   const seedEdge = Convert.toSeedEdge(json);
+//   const seedLinkMessage = Convert.toSeedLinkMessage(json);
+//   const seedLinkResult = Convert.toSeedLinkResult(json);
+//   const seedListMessage = Convert.toSeedListMessage(json);
+//   const seedListResult = Convert.toSeedListResult(json);
+//   const seedNote = Convert.toSeedNote(json);
+//   const seedNoteMessage = Convert.toSeedNoteMessage(json);
+//   const seedNoteResult = Convert.toSeedNoteResult(json);
+//   const seedNotesMessage = Convert.toSeedNotesMessage(json);
+//   const seedNotesResult = Convert.toSeedNotesResult(json);
+//   const seedPlantMessage = Convert.toSeedPlantMessage(json);
+//   const seedPlantResult = Convert.toSeedPlantResult(json);
+//   const seedReadyMessage = Convert.toSeedReadyMessage(json);
+//   const seedReadyResult = Convert.toSeedReadyResult(json);
+//   const seedRelation = Convert.toSeedRelation(json);
+//   const seedShowMessage = Convert.toSeedShowMessage(json);
+//   const seedShowResult = Convert.toSeedShowResult(json);
+//   const seedTransitionMessage = Convert.toSeedTransitionMessage(json);
+//   const seedTransitionResult = Convert.toSeedTransitionResult(json);
+//   const seedVar = Convert.toSeedVar(json);
 //   const session = Convert.toSession(json);
 //   const sessionAnnotation = Convert.toSessionAnnotation(json);
 //   const sessionAnnotationsClearMessage = Convert.toSessionAnnotationsClearMessage(json);
@@ -669,6 +717,320 @@ export interface AgentToolDetailMessage {
 
 export enum AgentToolDetailMessageCmd {
     AgentToolDetail = "agent_tool_detail",
+}
+
+export interface AppApplyMessage {
+    cmd:          AppApplyMessageCmd;
+    content_hash: string;
+    declaration:  string;
+    name:         string;
+    source_path?: string;
+    [property: string]: any;
+}
+
+export enum AppApplyMessageCmd {
+    AppApply = "app_apply",
+}
+
+export interface AppApplyResult {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_created:      boolean;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppConsumerInfo {
+    cursor:  number;
+    enabled: boolean;
+    filter:  string;
+    lag:     number;
+    name:    string;
+    [property: string]: any;
+}
+
+export interface AppInvocationInfo {
+    duration_ms:   number;
+    error:         string;
+    event_name:    string;
+    event_seq:     number;
+    event_subject: string;
+    handler:       string;
+    id:            number;
+    started_at:    string;
+    status:        string;
+    version_id:    number;
+    [property: string]: any;
+}
+
+export interface AppListMessage {
+    cmd: AppListMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppListMessageCmd {
+    AppList = "app_list",
+}
+
+export interface AppListResult {
+    apps: App[];
+    [property: string]: any;
+}
+
+export interface App {
+    consumer?:        Consumer;
+    created_at:       string;
+    current_version?: CurrentVersion;
+    name:             string;
+    updated_at:       string;
+    [property: string]: any;
+}
+
+export interface Consumer {
+    cursor:  number;
+    enabled: boolean;
+    filter:  string;
+    lag:     number;
+    name:    string;
+    [property: string]: any;
+}
+
+export interface CurrentVersion {
+    artifact_path: string;
+    content_hash:  string;
+    created_at:    string;
+    id:            number;
+    [property: string]: any;
+}
+
+export interface AppLogsMessage {
+    cmd:    AppLogsMessageCmd;
+    lines?: number;
+    name:   string;
+    [property: string]: any;
+}
+
+export enum AppLogsMessageCmd {
+    AppLogs = "app_logs",
+}
+
+export interface AppLogsResult {
+    lines:     string[];
+    name:      string;
+    path:      string;
+    truncated: boolean;
+    [property: string]: any;
+}
+
+export interface AppRemoveMessage {
+    cmd:  AppRemoveMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppRemoveMessageCmd {
+    AppRemove = "app_remove",
+}
+
+export interface AppRemoveResult {
+    consumer_removed: boolean;
+    invocations_kept: number;
+    name:             string;
+    namespace_kept:   string;
+    versions_kept:    number;
+    [property: string]: any;
+}
+
+export interface AppRollbackMessage {
+    cmd:         AppRollbackMessageCmd;
+    name:        string;
+    version_id?: number;
+    [property: string]: any;
+}
+
+export enum AppRollbackMessageCmd {
+    AppRollback = "app_rollback",
+}
+
+export interface AppRollbackResult {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppRuntimeInfo {
+    connected:        boolean;
+    connected_at?:    string;
+    desired:          string;
+    generation:       number;
+    last_exit?:       string;
+    next_restart_at?: string;
+    parked_at?:       string;
+    phase:            string;
+    pid?:             number;
+    restart_attempt:  number;
+    running:          boolean;
+    started_at?:      string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeRestartMessage {
+    cmd: AppRuntimeRestartMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppRuntimeRestartMessageCmd {
+    AppRuntimeRestart = "app_runtime_restart",
+}
+
+export interface AppRuntimeRestartResult {
+    runtime: Runtime;
+    was:     string;
+    [property: string]: any;
+}
+
+export interface Runtime {
+    connected:        boolean;
+    connected_at?:    string;
+    desired:          string;
+    generation:       number;
+    last_exit?:       string;
+    next_restart_at?: string;
+    parked_at?:       string;
+    phase:            string;
+    pid?:             number;
+    restart_attempt:  number;
+    running:          boolean;
+    started_at?:      string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeStatusMessage {
+    cmd: AppRuntimeStatusMessageCmd;
+    [property: string]: any;
+}
+
+export enum AppRuntimeStatusMessageCmd {
+    AppRuntimeStatus = "app_runtime_status",
+}
+
+export interface AppRuntimeStatusResult {
+    apps:         number;
+    apps_enabled: number;
+    host_error?:  string;
+    host_path?:   string;
+    log_path:     string;
+    runtime?:     Runtime;
+    [property: string]: any;
+}
+
+export interface AppSetEnabledMessage {
+    cmd:     AppSetEnabledMessageCmd;
+    enabled: boolean;
+    name:    string;
+    [property: string]: any;
+}
+
+export enum AppSetEnabledMessageCmd {
+    AppSetEnabled = "app_set_enabled",
+}
+
+export interface AppSetEnabledResult {
+    consumer: string;
+    enabled:  boolean;
+    name:     string;
+    [property: string]: any;
+}
+
+export interface AppStallInfo {
+    attempts:    number;
+    disables_at: string;
+    event_name:  string;
+    event_seq:   number;
+    last_error:  string;
+    since:       string;
+    [property: string]: any;
+}
+
+export interface AppStatusMessage {
+    cmd:  AppStatusMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppStatusMessageCmd {
+    AppStatus = "app_status",
+}
+
+export interface AppStatusResult {
+    app:         App;
+    invocations: number;
+    recent?:     InvocationElement[];
+    runtime?:    Runtime;
+    stall?:      Stall;
+    versions:    number;
+    [property: string]: any;
+}
+
+export interface InvocationElement {
+    duration_ms:   number;
+    error:         string;
+    event_name:    string;
+    event_seq:     number;
+    event_subject: string;
+    handler:       string;
+    id:            number;
+    started_at:    string;
+    status:        string;
+    version_id:    number;
+    [property: string]: any;
+}
+
+export interface Stall {
+    attempts:    number;
+    disables_at: string;
+    event_name:  string;
+    event_seq:   number;
+    last_error:  string;
+    since:       string;
+    [property: string]: any;
+}
+
+export interface AppSummary {
+    consumer?:        Consumer;
+    created_at:       string;
+    current_version?: CurrentVersion;
+    name:             string;
+    updated_at:       string;
+    [property: string]: any;
+}
+
+export interface AppVersionInfo {
+    artifact_path: string;
+    content_hash:  string;
+    created_at:    string;
+    id:            number;
+    [property: string]: any;
+}
+
+export interface AppWatchMessage {
+    cmd:  AppWatchMessageCmd;
+    name: string;
+    [property: string]: any;
+}
+
+export enum AppWatchMessageCmd {
+    AppWatch = "app_watch",
+}
+
+export interface AppWatchResult {
+    invocation: InvocationElement;
+    [property: string]: any;
 }
 
 export interface ApprovePRMessage {
@@ -1131,36 +1493,37 @@ export enum BranchChangedMessageEvent {
 }
 
 export interface SessionObject {
-    activity?:             string;
-    activity_at?:          string;
-    agent:                 string;
-    auto_settle_fires_at?: string;
-    auto_settle_held?:     boolean;
-    branch?:               string;
-    chief_of_staff?:       boolean;
-    context_window_cap?:   number;
-    delegated_from_chief?: boolean;
-    directory:             string;
-    endpoint_id?:          string;
-    id:                    string;
-    is_worktree?:          boolean;
-    label:                 string;
-    last_seen:             string;
-    main_repo?:            string;
-    nudge_fires_at?:       string;
-    parent_session_id?:    string;
-    pinned_at?:            string;
-    state:                 SessionState;
-    state_reason?:         string;
-    state_since:           string;
-    state_updated_at:      string;
-    ticket_unread?:        boolean;
-    todos?:                string[];
-    turn_opened_at?:       string;
-    turn_owed?:            boolean;
-    turn_snoozed_until?:   string;
-    workspace_id:          string;
-    workspace_muted?:      boolean;
+    activity?:                  string;
+    activity_at?:               string;
+    agent:                      string;
+    auto_settle_dismiss_armed?: boolean;
+    auto_settle_fires_at?:      string;
+    auto_settle_held?:          boolean;
+    branch?:                    string;
+    chief_of_staff?:            boolean;
+    context_window_cap?:        number;
+    delegated_from_chief?:      boolean;
+    directory:                  string;
+    endpoint_id?:               string;
+    id:                         string;
+    is_worktree?:               boolean;
+    label:                      string;
+    last_seen:                  string;
+    main_repo?:                 string;
+    nudge_fires_at?:            string;
+    parent_session_id?:         string;
+    pinned_at?:                 string;
+    state:                      SessionState;
+    state_reason?:              string;
+    state_since:                string;
+    state_updated_at:           string;
+    ticket_unread?:             boolean;
+    todos?:                     string[];
+    turn_opened_at?:            string;
+    turn_owed?:                 boolean;
+    turn_snoozed_until?:        string;
+    workspace_id:               string;
+    workspace_muted?:           boolean;
     [property: string]: any;
 }
 
@@ -1299,6 +1662,8 @@ export interface BusConsumerStatus {
     live:                  boolean;
     name:                  string;
     oldest_unread_at:      string;
+    pin_alarm:             boolean;
+    pinned_bytes:          number;
     stalled:               string;
     updated_at:            string;
     [property: string]: any;
@@ -1374,6 +1739,7 @@ export interface BusStatusResultMessage {
     health:                  HealthElement[];
     newest_at:               string;
     oldest_at:               string;
+    pin_alarm_seconds:       number;
     producers:               ProducerElement[];
     recent_window_seconds:   number;
     request_id:              string;
@@ -1393,6 +1759,8 @@ export interface ConsumerElement {
     live:                  boolean;
     name:                  string;
     oldest_unread_at:      string;
+    pin_alarm:             boolean;
+    pinned_bytes:          number;
     stalled:               string;
     updated_at:            string;
     [property: string]: any;
@@ -2623,6 +2991,56 @@ export interface FSWriteResultMessageResult {
     [property: string]: any;
 }
 
+export interface GardenSeedsUpdatedMessage {
+    event: GardenSeedsUpdatedMessageEvent;
+    seeds: SeedElement[];
+    total: number;
+    [property: string]: any;
+}
+
+export enum GardenSeedsUpdatedMessageEvent {
+    GardenSeedsUpdated = "garden_seeds_updated",
+}
+
+export interface SeedElement {
+    body:            string;
+    created_at:      string;
+    edges:           EdgeElement[];
+    gate:            boolean;
+    id:              string;
+    planter_member:  string;
+    planter_session: string;
+    ready:           boolean;
+    reason?:         string;
+    rev:             number;
+    status:          string;
+    step_slug:       string;
+    template:        boolean;
+    tender_member:   string;
+    tender_session:  string;
+    title:           string;
+    updated_at:      string;
+    vars:            VarElement[];
+    workspace_id:    string;
+    [property: string]: any;
+}
+
+export interface EdgeElement {
+    kind: string;
+    to:   string;
+    [property: string]: any;
+}
+
+export interface VarElement {
+    default?:     string;
+    description?: string;
+    enum?:        string[];
+    name:         string;
+    pattern?:     string;
+    required?:    boolean;
+    [property: string]: any;
+}
+
 export interface GetDefaultBranchMessage {
     cmd:  GetDefaultBranchMessageCmd;
     repo: string;
@@ -3038,9 +3456,17 @@ export interface InitialStateMessage {
     endpoints?:          Endpoint[];
     event:               InitialStateMessageEvent;
     github_hosts?:       string[];
+    /**
+     * The daemon id that owns this daemon's home-level state. Equal to
+     * daemon_instance_id on a home daemon; a different id means this daemon is an
+     * outpost of that home.
+     */
+    home_daemon_id?:     string;
     protocol_version?:   string;
     prs?:                PRElement[];
     repos?:              RepoElement[];
+    seeds?:              SeedElement[];
+    seeds_total?:        number;
     sessions?:           SessionObject[];
     settings?:           { [key: string]: string };
     source_fingerprint?: string;
@@ -4675,6 +5101,16 @@ export interface Response {
     activity_status_result?:               ActivityStatusResultObject;
     agent_msg_result?:                     AgentMsgResultObject;
     agent_peek_result?:                    AgentPeekResultObject;
+    app_apply_result?:                     AppApplyResultObject;
+    app_list_result?:                      AppListResultObject;
+    app_logs_result?:                      AppLogsResultObject;
+    app_remove_result?:                    AppRemoveResultObject;
+    app_rollback_result?:                  AppRollbackResultObject;
+    app_runtime_restart_result?:           AppRuntimeRestartResultObject;
+    app_runtime_status_result?:            AppRuntimeStatusResultObject;
+    app_set_enabled_result?:               AppSetEnabledResultObject;
+    app_status_result?:                    AppStatusResultObject;
+    app_watch_result?:                     AppWatchResultObject;
     authors?:                              AuthorElement[];
     data?:                                 string;
     delegate_result?:                      DelegateResultObject;
@@ -4701,6 +5137,14 @@ export interface Response {
     present_open_result?:                  PresentOpenResultObject;
     prs?:                                  PRElement[];
     repos?:                                RepoElement[];
+    seed_link_result?:                     SeedLinkResultObject;
+    seed_list_result?:                     SeedListResultObject;
+    seed_note_result?:                     SeedNoteResultObject;
+    seed_notes_result?:                    SeedNotesResultObject;
+    seed_plant_result?:                    SeedPlantResultObject;
+    seed_ready_result?:                    SeedReadyResultObject;
+    seed_show_result?:                     SeedShowResultObject;
+    seed_transition_result?:               SeedTransitionResultObject;
     session_instructions_result?:          SessionInstructionsResultObject;
     session_transcript_result?:            SessionTranscriptResultObject;
     sessions?:                             SessionObject[];
@@ -4752,6 +5196,85 @@ export interface AgentPeekResultObject {
     turn_owed?:              boolean;
     workspace_id:            string;
     workspace_title?:        string;
+    [property: string]: any;
+}
+
+export interface AppApplyResultObject {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_created:      boolean;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppListResultObject {
+    apps: App[];
+    [property: string]: any;
+}
+
+export interface AppLogsResultObject {
+    lines:     string[];
+    name:      string;
+    path:      string;
+    truncated: boolean;
+    [property: string]: any;
+}
+
+export interface AppRemoveResultObject {
+    consumer_removed: boolean;
+    invocations_kept: number;
+    name:             string;
+    namespace_kept:   string;
+    versions_kept:    number;
+    [property: string]: any;
+}
+
+export interface AppRollbackResultObject {
+    artifact_path:        string;
+    content_hash:         string;
+    name:                 string;
+    previous_version_id?: number;
+    version_id:           number;
+    [property: string]: any;
+}
+
+export interface AppRuntimeRestartResultObject {
+    runtime: Runtime;
+    was:     string;
+    [property: string]: any;
+}
+
+export interface AppRuntimeStatusResultObject {
+    apps:         number;
+    apps_enabled: number;
+    host_error?:  string;
+    host_path?:   string;
+    log_path:     string;
+    runtime?:     Runtime;
+    [property: string]: any;
+}
+
+export interface AppSetEnabledResultObject {
+    consumer: string;
+    enabled:  boolean;
+    name:     string;
+    [property: string]: any;
+}
+
+export interface AppStatusResultObject {
+    app:         App;
+    invocations: number;
+    recent?:     InvocationElement[];
+    runtime?:    Runtime;
+    stall?:      Stall;
+    versions:    number;
+    [property: string]: any;
+}
+
+export interface AppWatchResultObject {
+    invocation: InvocationElement;
     [property: string]: any;
 }
 
@@ -4858,6 +5381,75 @@ export interface PresentOpenResultObject {
     seq:             number;
     title:           string;
     warnings?:       string[];
+    [property: string]: any;
+}
+
+export interface SeedLinkResultObject {
+    changed: boolean;
+    seed:    SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedListResultObject {
+    all:          boolean;
+    seeds:        SeedElement[];
+    total:        number;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export interface SeedNoteResultObject {
+    note: Note;
+    [property: string]: any;
+}
+
+export interface Note {
+    author_member:  string;
+    author_session: string;
+    body:           string;
+    created_at:     string;
+    id:             string;
+    kind:           string;
+    seed_id:        string;
+    [property: string]: any;
+}
+
+export interface SeedNotesResultObject {
+    notes: Note[];
+    total: number;
+    [property: string]: any;
+}
+
+export interface SeedPlantResultObject {
+    seed: SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedReadyResultObject {
+    scope:    string;
+    scope_id: string;
+    seeds:    SeedElement[];
+    [property: string]: any;
+}
+
+export interface SeedShowResultObject {
+    notes:       Note[];
+    notes_total: number;
+    relations:   RelationElement[];
+    seed:        SeedElement;
+    [property: string]: any;
+}
+
+export interface RelationElement {
+    label:   string;
+    seed_id: string;
+    status:  string;
+    title:   string;
+    [property: string]: any;
+}
+
+export interface SeedTransitionResultObject {
+    seed: SeedElement;
     [property: string]: any;
 }
 
@@ -5125,37 +5717,246 @@ export enum RuntimeRespawnedMessageEvent {
     RuntimeRespawned = "runtime_respawned",
 }
 
+export interface Seed {
+    body:            string;
+    created_at:      string;
+    edges:           EdgeElement[];
+    gate:            boolean;
+    id:              string;
+    planter_member:  string;
+    planter_session: string;
+    ready:           boolean;
+    reason?:         string;
+    rev:             number;
+    status:          string;
+    step_slug:       string;
+    template:        boolean;
+    tender_member:   string;
+    tender_session:  string;
+    title:           string;
+    updated_at:      string;
+    vars:            VarElement[];
+    workspace_id:    string;
+    [property: string]: any;
+}
+
+export interface SeedEdge {
+    kind: string;
+    to:   string;
+    [property: string]: any;
+}
+
+export interface SeedLinkMessage {
+    cmd:        SeedLinkMessageCmd;
+    kind:       string;
+    seed_id:    string;
+    to_seed_id: string;
+    unlink?:    boolean;
+    [property: string]: any;
+}
+
+export enum SeedLinkMessageCmd {
+    SeedLink = "seed_link",
+}
+
+export interface SeedLinkResult {
+    changed: boolean;
+    seed:    SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedListMessage {
+    all?:               boolean;
+    cmd:                SeedListMessageCmd;
+    source_session_id?: string;
+    workspace_id?:      string;
+    [property: string]: any;
+}
+
+export enum SeedListMessageCmd {
+    SeedList = "seed_list",
+}
+
+export interface SeedListResult {
+    all:          boolean;
+    seeds:        SeedElement[];
+    total:        number;
+    workspace_id: string;
+    [property: string]: any;
+}
+
+export interface SeedNote {
+    author_member:  string;
+    author_session: string;
+    body:           string;
+    created_at:     string;
+    id:             string;
+    kind:           string;
+    seed_id:        string;
+    [property: string]: any;
+}
+
+export interface SeedNoteMessage {
+    body:               string;
+    cmd:                SeedNoteMessageCmd;
+    member?:            string;
+    seed_id:            string;
+    source_session_id?: string;
+    [property: string]: any;
+}
+
+export enum SeedNoteMessageCmd {
+    SeedNote = "seed_note",
+}
+
+export interface SeedNoteResult {
+    note: Note;
+    [property: string]: any;
+}
+
+export interface SeedNotesMessage {
+    cmd:     SeedNotesMessageCmd;
+    limit?:  number;
+    seed_id: string;
+    [property: string]: any;
+}
+
+export enum SeedNotesMessageCmd {
+    SeedNotes = "seed_notes",
+}
+
+export interface SeedNotesResult {
+    notes: Note[];
+    total: number;
+    [property: string]: any;
+}
+
+export interface SeedPlantMessage {
+    body?:              string;
+    cmd:                SeedPlantMessageCmd;
+    member?:            string;
+    source_session_id?: string;
+    title:              string;
+    workspace_id?:      string;
+    [property: string]: any;
+}
+
+export enum SeedPlantMessageCmd {
+    SeedPlant = "seed_plant",
+}
+
+export interface SeedPlantResult {
+    seed: SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedReadyMessage {
+    all?:               boolean;
+    cmd:                SeedReadyMessageCmd;
+    plot?:              string;
+    source_session_id?: string;
+    workspace_id?:      string;
+    [property: string]: any;
+}
+
+export enum SeedReadyMessageCmd {
+    SeedReady = "seed_ready",
+}
+
+export interface SeedReadyResult {
+    scope:    string;
+    scope_id: string;
+    seeds:    SeedElement[];
+    [property: string]: any;
+}
+
+export interface SeedRelation {
+    label:   string;
+    seed_id: string;
+    status:  string;
+    title:   string;
+    [property: string]: any;
+}
+
+export interface SeedShowMessage {
+    cmd:     SeedShowMessageCmd;
+    seed_id: string;
+    [property: string]: any;
+}
+
+export enum SeedShowMessageCmd {
+    SeedShow = "seed_show",
+}
+
+export interface SeedShowResult {
+    notes:       Note[];
+    notes_total: number;
+    relations:   RelationElement[];
+    seed:        SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedTransitionMessage {
+    cmd:                SeedTransitionMessageCmd;
+    member?:            string;
+    reason?:            string;
+    seed_id:            string;
+    source_session_id?: string;
+    verb:               string;
+    [property: string]: any;
+}
+
+export enum SeedTransitionMessageCmd {
+    SeedTransition = "seed_transition",
+}
+
+export interface SeedTransitionResult {
+    seed: SeedElement;
+    [property: string]: any;
+}
+
+export interface SeedVar {
+    default?:     string;
+    description?: string;
+    enum?:        string[];
+    name:         string;
+    pattern?:     string;
+    required?:    boolean;
+    [property: string]: any;
+}
+
 export interface Session {
-    activity?:             string;
-    activity_at?:          string;
-    agent:                 string;
-    auto_settle_fires_at?: string;
-    auto_settle_held?:     boolean;
-    branch?:               string;
-    chief_of_staff?:       boolean;
-    context_window_cap?:   number;
-    delegated_from_chief?: boolean;
-    directory:             string;
-    endpoint_id?:          string;
-    id:                    string;
-    is_worktree?:          boolean;
-    label:                 string;
-    last_seen:             string;
-    main_repo?:            string;
-    nudge_fires_at?:       string;
-    parent_session_id?:    string;
-    pinned_at?:            string;
-    state:                 SessionState;
-    state_reason?:         string;
-    state_since:           string;
-    state_updated_at:      string;
-    ticket_unread?:        boolean;
-    todos?:                string[];
-    turn_opened_at?:       string;
-    turn_owed?:            boolean;
-    turn_snoozed_until?:   string;
-    workspace_id:          string;
-    workspace_muted?:      boolean;
+    activity?:                  string;
+    activity_at?:               string;
+    agent:                      string;
+    auto_settle_dismiss_armed?: boolean;
+    auto_settle_fires_at?:      string;
+    auto_settle_held?:          boolean;
+    branch?:                    string;
+    chief_of_staff?:            boolean;
+    context_window_cap?:        number;
+    delegated_from_chief?:      boolean;
+    directory:                  string;
+    endpoint_id?:               string;
+    id:                         string;
+    is_worktree?:               boolean;
+    label:                      string;
+    last_seen:                  string;
+    main_repo?:                 string;
+    nudge_fires_at?:            string;
+    parent_session_id?:         string;
+    pinned_at?:                 string;
+    state:                      SessionState;
+    state_reason?:              string;
+    state_since:                string;
+    state_updated_at:           string;
+    ticket_unread?:             boolean;
+    todos?:                     string[];
+    turn_opened_at?:            string;
+    turn_owed?:                 boolean;
+    turn_snoozed_until?:        string;
+    workspace_id:               string;
+    workspace_muted?:           boolean;
     [property: string]: any;
 }
 
@@ -6361,6 +7162,7 @@ export interface WebSocketEvent {
     screen_rows?:              number;
     screen_snapshot?:          string;
     scrollback_truncated?:     boolean;
+    seeds?:                    SeedElement[];
     seq?:                      number;
     session?:                  SessionObject;
     session_id?:               string;
@@ -6376,6 +7178,7 @@ export interface WebSocketEvent {
     tickets?:                  TicketElement[];
     tile_id?:                  string;
     tile_kind?:                string;
+    total?:                    number;
     unstaged?:                 StagedElement[];
     untracked?:                StagedElement[];
     warnings?:                 WarningElement[];
@@ -7177,6 +7980,214 @@ export class Convert {
 
     public static agentToolDetailMessageToJson(value: AgentToolDetailMessage): string {
         return JSON.stringify(uncast(value, r("AgentToolDetailMessage")), null, 2);
+    }
+
+    public static toAppApplyMessage(json: string): AppApplyMessage {
+        return cast(JSON.parse(json), r("AppApplyMessage"));
+    }
+
+    public static appApplyMessageToJson(value: AppApplyMessage): string {
+        return JSON.stringify(uncast(value, r("AppApplyMessage")), null, 2);
+    }
+
+    public static toAppApplyResult(json: string): AppApplyResult {
+        return cast(JSON.parse(json), r("AppApplyResult"));
+    }
+
+    public static appApplyResultToJson(value: AppApplyResult): string {
+        return JSON.stringify(uncast(value, r("AppApplyResult")), null, 2);
+    }
+
+    public static toAppConsumerInfo(json: string): AppConsumerInfo {
+        return cast(JSON.parse(json), r("AppConsumerInfo"));
+    }
+
+    public static appConsumerInfoToJson(value: AppConsumerInfo): string {
+        return JSON.stringify(uncast(value, r("AppConsumerInfo")), null, 2);
+    }
+
+    public static toAppInvocationInfo(json: string): AppInvocationInfo {
+        return cast(JSON.parse(json), r("AppInvocationInfo"));
+    }
+
+    public static appInvocationInfoToJson(value: AppInvocationInfo): string {
+        return JSON.stringify(uncast(value, r("AppInvocationInfo")), null, 2);
+    }
+
+    public static toAppListMessage(json: string): AppListMessage {
+        return cast(JSON.parse(json), r("AppListMessage"));
+    }
+
+    public static appListMessageToJson(value: AppListMessage): string {
+        return JSON.stringify(uncast(value, r("AppListMessage")), null, 2);
+    }
+
+    public static toAppListResult(json: string): AppListResult {
+        return cast(JSON.parse(json), r("AppListResult"));
+    }
+
+    public static appListResultToJson(value: AppListResult): string {
+        return JSON.stringify(uncast(value, r("AppListResult")), null, 2);
+    }
+
+    public static toAppLogsMessage(json: string): AppLogsMessage {
+        return cast(JSON.parse(json), r("AppLogsMessage"));
+    }
+
+    public static appLogsMessageToJson(value: AppLogsMessage): string {
+        return JSON.stringify(uncast(value, r("AppLogsMessage")), null, 2);
+    }
+
+    public static toAppLogsResult(json: string): AppLogsResult {
+        return cast(JSON.parse(json), r("AppLogsResult"));
+    }
+
+    public static appLogsResultToJson(value: AppLogsResult): string {
+        return JSON.stringify(uncast(value, r("AppLogsResult")), null, 2);
+    }
+
+    public static toAppRemoveMessage(json: string): AppRemoveMessage {
+        return cast(JSON.parse(json), r("AppRemoveMessage"));
+    }
+
+    public static appRemoveMessageToJson(value: AppRemoveMessage): string {
+        return JSON.stringify(uncast(value, r("AppRemoveMessage")), null, 2);
+    }
+
+    public static toAppRemoveResult(json: string): AppRemoveResult {
+        return cast(JSON.parse(json), r("AppRemoveResult"));
+    }
+
+    public static appRemoveResultToJson(value: AppRemoveResult): string {
+        return JSON.stringify(uncast(value, r("AppRemoveResult")), null, 2);
+    }
+
+    public static toAppRollbackMessage(json: string): AppRollbackMessage {
+        return cast(JSON.parse(json), r("AppRollbackMessage"));
+    }
+
+    public static appRollbackMessageToJson(value: AppRollbackMessage): string {
+        return JSON.stringify(uncast(value, r("AppRollbackMessage")), null, 2);
+    }
+
+    public static toAppRollbackResult(json: string): AppRollbackResult {
+        return cast(JSON.parse(json), r("AppRollbackResult"));
+    }
+
+    public static appRollbackResultToJson(value: AppRollbackResult): string {
+        return JSON.stringify(uncast(value, r("AppRollbackResult")), null, 2);
+    }
+
+    public static toAppRuntimeInfo(json: string): AppRuntimeInfo {
+        return cast(JSON.parse(json), r("AppRuntimeInfo"));
+    }
+
+    public static appRuntimeInfoToJson(value: AppRuntimeInfo): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeInfo")), null, 2);
+    }
+
+    public static toAppRuntimeRestartMessage(json: string): AppRuntimeRestartMessage {
+        return cast(JSON.parse(json), r("AppRuntimeRestartMessage"));
+    }
+
+    public static appRuntimeRestartMessageToJson(value: AppRuntimeRestartMessage): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeRestartMessage")), null, 2);
+    }
+
+    public static toAppRuntimeRestartResult(json: string): AppRuntimeRestartResult {
+        return cast(JSON.parse(json), r("AppRuntimeRestartResult"));
+    }
+
+    public static appRuntimeRestartResultToJson(value: AppRuntimeRestartResult): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeRestartResult")), null, 2);
+    }
+
+    public static toAppRuntimeStatusMessage(json: string): AppRuntimeStatusMessage {
+        return cast(JSON.parse(json), r("AppRuntimeStatusMessage"));
+    }
+
+    public static appRuntimeStatusMessageToJson(value: AppRuntimeStatusMessage): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeStatusMessage")), null, 2);
+    }
+
+    public static toAppRuntimeStatusResult(json: string): AppRuntimeStatusResult {
+        return cast(JSON.parse(json), r("AppRuntimeStatusResult"));
+    }
+
+    public static appRuntimeStatusResultToJson(value: AppRuntimeStatusResult): string {
+        return JSON.stringify(uncast(value, r("AppRuntimeStatusResult")), null, 2);
+    }
+
+    public static toAppSetEnabledMessage(json: string): AppSetEnabledMessage {
+        return cast(JSON.parse(json), r("AppSetEnabledMessage"));
+    }
+
+    public static appSetEnabledMessageToJson(value: AppSetEnabledMessage): string {
+        return JSON.stringify(uncast(value, r("AppSetEnabledMessage")), null, 2);
+    }
+
+    public static toAppSetEnabledResult(json: string): AppSetEnabledResult {
+        return cast(JSON.parse(json), r("AppSetEnabledResult"));
+    }
+
+    public static appSetEnabledResultToJson(value: AppSetEnabledResult): string {
+        return JSON.stringify(uncast(value, r("AppSetEnabledResult")), null, 2);
+    }
+
+    public static toAppStallInfo(json: string): AppStallInfo {
+        return cast(JSON.parse(json), r("AppStallInfo"));
+    }
+
+    public static appStallInfoToJson(value: AppStallInfo): string {
+        return JSON.stringify(uncast(value, r("AppStallInfo")), null, 2);
+    }
+
+    public static toAppStatusMessage(json: string): AppStatusMessage {
+        return cast(JSON.parse(json), r("AppStatusMessage"));
+    }
+
+    public static appStatusMessageToJson(value: AppStatusMessage): string {
+        return JSON.stringify(uncast(value, r("AppStatusMessage")), null, 2);
+    }
+
+    public static toAppStatusResult(json: string): AppStatusResult {
+        return cast(JSON.parse(json), r("AppStatusResult"));
+    }
+
+    public static appStatusResultToJson(value: AppStatusResult): string {
+        return JSON.stringify(uncast(value, r("AppStatusResult")), null, 2);
+    }
+
+    public static toAppSummary(json: string): AppSummary {
+        return cast(JSON.parse(json), r("AppSummary"));
+    }
+
+    public static appSummaryToJson(value: AppSummary): string {
+        return JSON.stringify(uncast(value, r("AppSummary")), null, 2);
+    }
+
+    public static toAppVersionInfo(json: string): AppVersionInfo {
+        return cast(JSON.parse(json), r("AppVersionInfo"));
+    }
+
+    public static appVersionInfoToJson(value: AppVersionInfo): string {
+        return JSON.stringify(uncast(value, r("AppVersionInfo")), null, 2);
+    }
+
+    public static toAppWatchMessage(json: string): AppWatchMessage {
+        return cast(JSON.parse(json), r("AppWatchMessage"));
+    }
+
+    public static appWatchMessageToJson(value: AppWatchMessage): string {
+        return JSON.stringify(uncast(value, r("AppWatchMessage")), null, 2);
+    }
+
+    public static toAppWatchResult(json: string): AppWatchResult {
+        return cast(JSON.parse(json), r("AppWatchResult"));
+    }
+
+    public static appWatchResultToJson(value: AppWatchResult): string {
+        return JSON.stringify(uncast(value, r("AppWatchResult")), null, 2);
     }
 
     public static toApprovePRMessage(json: string): ApprovePRMessage {
@@ -8297,6 +9308,14 @@ export class Convert {
 
     public static fSWriteResultMessageToJson(value: FSWriteResultMessage): string {
         return JSON.stringify(uncast(value, r("FSWriteResultMessage")), null, 2);
+    }
+
+    public static toGardenSeedsUpdatedMessage(json: string): GardenSeedsUpdatedMessage {
+        return cast(JSON.parse(json), r("GardenSeedsUpdatedMessage"));
+    }
+
+    public static gardenSeedsUpdatedMessageToJson(value: GardenSeedsUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("GardenSeedsUpdatedMessage")), null, 2);
     }
 
     public static toGetDefaultBranchMessage(json: string): GetDefaultBranchMessage {
@@ -9513,6 +10532,174 @@ export class Convert {
 
     public static runtimeRespawnedMessageToJson(value: RuntimeRespawnedMessage): string {
         return JSON.stringify(uncast(value, r("RuntimeRespawnedMessage")), null, 2);
+    }
+
+    public static toSeed(json: string): Seed {
+        return cast(JSON.parse(json), r("Seed"));
+    }
+
+    public static seedToJson(value: Seed): string {
+        return JSON.stringify(uncast(value, r("Seed")), null, 2);
+    }
+
+    public static toSeedEdge(json: string): SeedEdge {
+        return cast(JSON.parse(json), r("SeedEdge"));
+    }
+
+    public static seedEdgeToJson(value: SeedEdge): string {
+        return JSON.stringify(uncast(value, r("SeedEdge")), null, 2);
+    }
+
+    public static toSeedLinkMessage(json: string): SeedLinkMessage {
+        return cast(JSON.parse(json), r("SeedLinkMessage"));
+    }
+
+    public static seedLinkMessageToJson(value: SeedLinkMessage): string {
+        return JSON.stringify(uncast(value, r("SeedLinkMessage")), null, 2);
+    }
+
+    public static toSeedLinkResult(json: string): SeedLinkResult {
+        return cast(JSON.parse(json), r("SeedLinkResult"));
+    }
+
+    public static seedLinkResultToJson(value: SeedLinkResult): string {
+        return JSON.stringify(uncast(value, r("SeedLinkResult")), null, 2);
+    }
+
+    public static toSeedListMessage(json: string): SeedListMessage {
+        return cast(JSON.parse(json), r("SeedListMessage"));
+    }
+
+    public static seedListMessageToJson(value: SeedListMessage): string {
+        return JSON.stringify(uncast(value, r("SeedListMessage")), null, 2);
+    }
+
+    public static toSeedListResult(json: string): SeedListResult {
+        return cast(JSON.parse(json), r("SeedListResult"));
+    }
+
+    public static seedListResultToJson(value: SeedListResult): string {
+        return JSON.stringify(uncast(value, r("SeedListResult")), null, 2);
+    }
+
+    public static toSeedNote(json: string): SeedNote {
+        return cast(JSON.parse(json), r("SeedNote"));
+    }
+
+    public static seedNoteToJson(value: SeedNote): string {
+        return JSON.stringify(uncast(value, r("SeedNote")), null, 2);
+    }
+
+    public static toSeedNoteMessage(json: string): SeedNoteMessage {
+        return cast(JSON.parse(json), r("SeedNoteMessage"));
+    }
+
+    public static seedNoteMessageToJson(value: SeedNoteMessage): string {
+        return JSON.stringify(uncast(value, r("SeedNoteMessage")), null, 2);
+    }
+
+    public static toSeedNoteResult(json: string): SeedNoteResult {
+        return cast(JSON.parse(json), r("SeedNoteResult"));
+    }
+
+    public static seedNoteResultToJson(value: SeedNoteResult): string {
+        return JSON.stringify(uncast(value, r("SeedNoteResult")), null, 2);
+    }
+
+    public static toSeedNotesMessage(json: string): SeedNotesMessage {
+        return cast(JSON.parse(json), r("SeedNotesMessage"));
+    }
+
+    public static seedNotesMessageToJson(value: SeedNotesMessage): string {
+        return JSON.stringify(uncast(value, r("SeedNotesMessage")), null, 2);
+    }
+
+    public static toSeedNotesResult(json: string): SeedNotesResult {
+        return cast(JSON.parse(json), r("SeedNotesResult"));
+    }
+
+    public static seedNotesResultToJson(value: SeedNotesResult): string {
+        return JSON.stringify(uncast(value, r("SeedNotesResult")), null, 2);
+    }
+
+    public static toSeedPlantMessage(json: string): SeedPlantMessage {
+        return cast(JSON.parse(json), r("SeedPlantMessage"));
+    }
+
+    public static seedPlantMessageToJson(value: SeedPlantMessage): string {
+        return JSON.stringify(uncast(value, r("SeedPlantMessage")), null, 2);
+    }
+
+    public static toSeedPlantResult(json: string): SeedPlantResult {
+        return cast(JSON.parse(json), r("SeedPlantResult"));
+    }
+
+    public static seedPlantResultToJson(value: SeedPlantResult): string {
+        return JSON.stringify(uncast(value, r("SeedPlantResult")), null, 2);
+    }
+
+    public static toSeedReadyMessage(json: string): SeedReadyMessage {
+        return cast(JSON.parse(json), r("SeedReadyMessage"));
+    }
+
+    public static seedReadyMessageToJson(value: SeedReadyMessage): string {
+        return JSON.stringify(uncast(value, r("SeedReadyMessage")), null, 2);
+    }
+
+    public static toSeedReadyResult(json: string): SeedReadyResult {
+        return cast(JSON.parse(json), r("SeedReadyResult"));
+    }
+
+    public static seedReadyResultToJson(value: SeedReadyResult): string {
+        return JSON.stringify(uncast(value, r("SeedReadyResult")), null, 2);
+    }
+
+    public static toSeedRelation(json: string): SeedRelation {
+        return cast(JSON.parse(json), r("SeedRelation"));
+    }
+
+    public static seedRelationToJson(value: SeedRelation): string {
+        return JSON.stringify(uncast(value, r("SeedRelation")), null, 2);
+    }
+
+    public static toSeedShowMessage(json: string): SeedShowMessage {
+        return cast(JSON.parse(json), r("SeedShowMessage"));
+    }
+
+    public static seedShowMessageToJson(value: SeedShowMessage): string {
+        return JSON.stringify(uncast(value, r("SeedShowMessage")), null, 2);
+    }
+
+    public static toSeedShowResult(json: string): SeedShowResult {
+        return cast(JSON.parse(json), r("SeedShowResult"));
+    }
+
+    public static seedShowResultToJson(value: SeedShowResult): string {
+        return JSON.stringify(uncast(value, r("SeedShowResult")), null, 2);
+    }
+
+    public static toSeedTransitionMessage(json: string): SeedTransitionMessage {
+        return cast(JSON.parse(json), r("SeedTransitionMessage"));
+    }
+
+    public static seedTransitionMessageToJson(value: SeedTransitionMessage): string {
+        return JSON.stringify(uncast(value, r("SeedTransitionMessage")), null, 2);
+    }
+
+    public static toSeedTransitionResult(json: string): SeedTransitionResult {
+        return cast(JSON.parse(json), r("SeedTransitionResult"));
+    }
+
+    public static seedTransitionResultToJson(value: SeedTransitionResult): string {
+        return JSON.stringify(uncast(value, r("SeedTransitionResult")), null, 2);
+    }
+
+    public static toSeedVar(json: string): SeedVar {
+        return cast(JSON.parse(json), r("SeedVar"));
+    }
+
+    public static seedVarToJson(value: SeedVar): string {
+        return JSON.stringify(uncast(value, r("SeedVar")), null, 2);
     }
 
     public static toSession(json: string): Session {
@@ -11080,6 +12267,216 @@ const typeMap: any = {
         { json: "full", js: "full", typ: u(undefined, true) },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "AppApplyMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppApplyMessageCmd") },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "declaration", js: "declaration", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "source_path", js: "source_path", typ: u(undefined, "") },
+    ], "any"),
+    "AppApplyResult": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_created", js: "version_created", typ: true },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppConsumerInfo": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "filter", js: "filter", typ: "" },
+        { json: "lag", js: "lag", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppInvocationInfo": o([
+        { json: "duration_ms", js: "duration_ms", typ: 0 },
+        { json: "error", js: "error", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_subject", js: "event_subject", typ: "" },
+        { json: "handler", js: "handler", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppListMessageCmd") },
+    ], "any"),
+    "AppListResult": o([
+        { json: "apps", js: "apps", typ: a(r("App")) },
+    ], "any"),
+    "App": o([
+        { json: "consumer", js: "consumer", typ: u(undefined, r("Consumer")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_version", js: "current_version", typ: u(undefined, r("CurrentVersion")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "Consumer": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "filter", js: "filter", typ: "" },
+        { json: "lag", js: "lag", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "CurrentVersion": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+    ], "any"),
+    "AppLogsMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppLogsMessageCmd") },
+        { json: "lines", js: "lines", typ: u(undefined, 0) },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppLogsResult": o([
+        { json: "lines", js: "lines", typ: a("") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "truncated", js: "truncated", typ: true },
+    ], "any"),
+    "AppRemoveMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRemoveMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppRemoveResult": o([
+        { json: "consumer_removed", js: "consumer_removed", typ: true },
+        { json: "invocations_kept", js: "invocations_kept", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "namespace_kept", js: "namespace_kept", typ: "" },
+        { json: "versions_kept", js: "versions_kept", typ: 0 },
+    ], "any"),
+    "AppRollbackMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRollbackMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+        { json: "version_id", js: "version_id", typ: u(undefined, 0) },
+    ], "any"),
+    "AppRollbackResult": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppRuntimeInfo": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "connected_at", js: "connected_at", typ: u(undefined, "") },
+        { json: "desired", js: "desired", typ: "" },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
+        { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "parked_at", js: "parked_at", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: "" },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "restart_attempt", js: "restart_attempt", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+    ], "any"),
+    "AppRuntimeRestartMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRuntimeRestartMessageCmd") },
+    ], "any"),
+    "AppRuntimeRestartResult": o([
+        { json: "runtime", js: "runtime", typ: r("Runtime") },
+        { json: "was", js: "was", typ: "" },
+    ], "any"),
+    "Runtime": o([
+        { json: "connected", js: "connected", typ: true },
+        { json: "connected_at", js: "connected_at", typ: u(undefined, "") },
+        { json: "desired", js: "desired", typ: "" },
+        { json: "generation", js: "generation", typ: 0 },
+        { json: "last_exit", js: "last_exit", typ: u(undefined, "") },
+        { json: "next_restart_at", js: "next_restart_at", typ: u(undefined, "") },
+        { json: "parked_at", js: "parked_at", typ: u(undefined, "") },
+        { json: "phase", js: "phase", typ: "" },
+        { json: "pid", js: "pid", typ: u(undefined, 0) },
+        { json: "restart_attempt", js: "restart_attempt", typ: 0 },
+        { json: "running", js: "running", typ: true },
+        { json: "started_at", js: "started_at", typ: u(undefined, "") },
+    ], "any"),
+    "AppRuntimeStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppRuntimeStatusMessageCmd") },
+    ], "any"),
+    "AppRuntimeStatusResult": o([
+        { json: "apps", js: "apps", typ: 0 },
+        { json: "apps_enabled", js: "apps_enabled", typ: 0 },
+        { json: "host_error", js: "host_error", typ: u(undefined, "") },
+        { json: "host_path", js: "host_path", typ: u(undefined, "") },
+        { json: "log_path", js: "log_path", typ: "" },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+    ], "any"),
+    "AppSetEnabledMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppSetEnabledMessageCmd") },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppSetEnabledResult": o([
+        { json: "consumer", js: "consumer", typ: "" },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStallInfo": o([
+        { json: "attempts", js: "attempts", typ: 0 },
+        { json: "disables_at", js: "disables_at", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "last_error", js: "last_error", typ: "" },
+        { json: "since", js: "since", typ: "" },
+    ], "any"),
+    "AppStatusMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppStatusMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStatusResult": o([
+        { json: "app", js: "app", typ: r("App") },
+        { json: "invocations", js: "invocations", typ: 0 },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
+        { json: "versions", js: "versions", typ: 0 },
+    ], "any"),
+    "InvocationElement": o([
+        { json: "duration_ms", js: "duration_ms", typ: 0 },
+        { json: "error", js: "error", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_subject", js: "event_subject", typ: "" },
+        { json: "handler", js: "handler", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "Stall": o([
+        { json: "attempts", js: "attempts", typ: 0 },
+        { json: "disables_at", js: "disables_at", typ: "" },
+        { json: "event_name", js: "event_name", typ: "" },
+        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "last_error", js: "last_error", typ: "" },
+        { json: "since", js: "since", typ: "" },
+    ], "any"),
+    "AppSummary": o([
+        { json: "consumer", js: "consumer", typ: u(undefined, r("Consumer")) },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "current_version", js: "current_version", typ: u(undefined, r("CurrentVersion")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+    ], "any"),
+    "AppVersionInfo": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+    ], "any"),
+    "AppWatchMessage": o([
+        { json: "cmd", js: "cmd", typ: r("AppWatchMessageCmd") },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppWatchResult": o([
+        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
+    ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
         { json: "id", js: "id", typ: "" },
@@ -11362,6 +12759,7 @@ const typeMap: any = {
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
+        { json: "auto_settle_dismiss_armed", js: "auto_settle_dismiss_armed", typ: u(undefined, true) },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -11468,6 +12866,8 @@ const typeMap: any = {
         { json: "live", js: "live", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "oldest_unread_at", js: "oldest_unread_at", typ: "" },
+        { json: "pin_alarm", js: "pin_alarm", typ: true },
+        { json: "pinned_bytes", js: "pinned_bytes", typ: 0 },
         { json: "stalled", js: "stalled", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
@@ -11519,6 +12919,7 @@ const typeMap: any = {
         { json: "health", js: "health", typ: a(r("HealthElement")) },
         { json: "newest_at", js: "newest_at", typ: "" },
         { json: "oldest_at", js: "oldest_at", typ: "" },
+        { json: "pin_alarm_seconds", js: "pin_alarm_seconds", typ: 3.14 },
         { json: "producers", js: "producers", typ: a(r("ProducerElement")) },
         { json: "recent_window_seconds", js: "recent_window_seconds", typ: 3.14 },
         { json: "request_id", js: "request_id", typ: "" },
@@ -11536,6 +12937,8 @@ const typeMap: any = {
         { json: "live", js: "live", typ: true },
         { json: "name", js: "name", typ: "" },
         { json: "oldest_unread_at", js: "oldest_unread_at", typ: "" },
+        { json: "pin_alarm", js: "pin_alarm", typ: true },
+        { json: "pinned_bytes", js: "pinned_bytes", typ: 0 },
         { json: "stalled", js: "stalled", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
     ], "any"),
@@ -12267,6 +13670,44 @@ const typeMap: any = {
         { json: "hash", js: "hash", typ: u(undefined, "") },
         { json: "path", js: "path", typ: "" },
     ], "any"),
+    "GardenSeedsUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("GardenSeedsUpdatedMessageEvent") },
+        { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "total", js: "total", typ: 0 },
+    ], "any"),
+    "SeedElement": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "edges", js: "edges", typ: a(r("EdgeElement")) },
+        { json: "gate", js: "gate", typ: true },
+        { json: "id", js: "id", typ: "" },
+        { json: "planter_member", js: "planter_member", typ: "" },
+        { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "ready", js: "ready", typ: true },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "rev", js: "rev", typ: 0 },
+        { json: "status", js: "status", typ: "" },
+        { json: "step_slug", js: "step_slug", typ: "" },
+        { json: "template", js: "template", typ: true },
+        { json: "tender_member", js: "tender_member", typ: "" },
+        { json: "tender_session", js: "tender_session", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "vars", js: "vars", typ: a(r("VarElement")) },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "EdgeElement": o([
+        { json: "kind", js: "kind", typ: "" },
+        { json: "to", js: "to", typ: "" },
+    ], "any"),
+    "VarElement": o([
+        { json: "default", js: "default", typ: u(undefined, "") },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "enum", js: "enum", typ: u(undefined, a("")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "pattern", js: "pattern", typ: u(undefined, "") },
+        { json: "required", js: "required", typ: u(undefined, true) },
+    ], "any"),
     "GetDefaultBranchMessage": o([
         { json: "cmd", js: "cmd", typ: r("GetDefaultBranchMessageCmd") },
         { json: "repo", js: "repo", typ: "" },
@@ -12514,9 +13955,12 @@ const typeMap: any = {
         { json: "endpoints", js: "endpoints", typ: u(undefined, a(r("Endpoint"))) },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
         { json: "github_hosts", js: "github_hosts", typ: u(undefined, a("")) },
+        { json: "home_daemon_id", js: "home_daemon_id", typ: u(undefined, "") },
         { json: "protocol_version", js: "protocol_version", typ: u(undefined, "") },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "seeds", js: "seeds", typ: u(undefined, a(r("SeedElement"))) },
+        { json: "seeds_total", js: "seeds_total", typ: u(undefined, 0) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionObject"))) },
         { json: "settings", js: "settings", typ: u(undefined, m("")) },
         { json: "source_fingerprint", js: "source_fingerprint", typ: u(undefined, "") },
@@ -13469,6 +14913,16 @@ const typeMap: any = {
         { json: "activity_status_result", js: "activity_status_result", typ: u(undefined, r("ActivityStatusResultObject")) },
         { json: "agent_msg_result", js: "agent_msg_result", typ: u(undefined, r("AgentMsgResultObject")) },
         { json: "agent_peek_result", js: "agent_peek_result", typ: u(undefined, r("AgentPeekResultObject")) },
+        { json: "app_apply_result", js: "app_apply_result", typ: u(undefined, r("AppApplyResultObject")) },
+        { json: "app_list_result", js: "app_list_result", typ: u(undefined, r("AppListResultObject")) },
+        { json: "app_logs_result", js: "app_logs_result", typ: u(undefined, r("AppLogsResultObject")) },
+        { json: "app_remove_result", js: "app_remove_result", typ: u(undefined, r("AppRemoveResultObject")) },
+        { json: "app_rollback_result", js: "app_rollback_result", typ: u(undefined, r("AppRollbackResultObject")) },
+        { json: "app_runtime_restart_result", js: "app_runtime_restart_result", typ: u(undefined, r("AppRuntimeRestartResultObject")) },
+        { json: "app_runtime_status_result", js: "app_runtime_status_result", typ: u(undefined, r("AppRuntimeStatusResultObject")) },
+        { json: "app_set_enabled_result", js: "app_set_enabled_result", typ: u(undefined, r("AppSetEnabledResultObject")) },
+        { json: "app_status_result", js: "app_status_result", typ: u(undefined, r("AppStatusResultObject")) },
+        { json: "app_watch_result", js: "app_watch_result", typ: u(undefined, r("AppWatchResultObject")) },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
@@ -13495,6 +14949,14 @@ const typeMap: any = {
         { json: "present_open_result", js: "present_open_result", typ: u(undefined, r("PresentOpenResultObject")) },
         { json: "prs", js: "prs", typ: u(undefined, a(r("PRElement"))) },
         { json: "repos", js: "repos", typ: u(undefined, a(r("RepoElement"))) },
+        { json: "seed_link_result", js: "seed_link_result", typ: u(undefined, r("SeedLinkResultObject")) },
+        { json: "seed_list_result", js: "seed_list_result", typ: u(undefined, r("SeedListResultObject")) },
+        { json: "seed_note_result", js: "seed_note_result", typ: u(undefined, r("SeedNoteResultObject")) },
+        { json: "seed_notes_result", js: "seed_notes_result", typ: u(undefined, r("SeedNotesResultObject")) },
+        { json: "seed_plant_result", js: "seed_plant_result", typ: u(undefined, r("SeedPlantResultObject")) },
+        { json: "seed_ready_result", js: "seed_ready_result", typ: u(undefined, r("SeedReadyResultObject")) },
+        { json: "seed_show_result", js: "seed_show_result", typ: u(undefined, r("SeedShowResultObject")) },
+        { json: "seed_transition_result", js: "seed_transition_result", typ: u(undefined, r("SeedTransitionResultObject")) },
         { json: "session_instructions_result", js: "session_instructions_result", typ: u(undefined, r("SessionInstructionsResultObject")) },
         { json: "session_transcript_result", js: "session_transcript_result", typ: u(undefined, r("SessionTranscriptResultObject")) },
         { json: "sessions", js: "sessions", typ: u(undefined, a(r("SessionObject"))) },
@@ -13540,6 +15002,65 @@ const typeMap: any = {
         { json: "turn_owed", js: "turn_owed", typ: u(undefined, true) },
         { json: "workspace_id", js: "workspace_id", typ: "" },
         { json: "workspace_title", js: "workspace_title", typ: u(undefined, "") },
+    ], "any"),
+    "AppApplyResultObject": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_created", js: "version_created", typ: true },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppListResultObject": o([
+        { json: "apps", js: "apps", typ: a(r("App")) },
+    ], "any"),
+    "AppLogsResultObject": o([
+        { json: "lines", js: "lines", typ: a("") },
+        { json: "name", js: "name", typ: "" },
+        { json: "path", js: "path", typ: "" },
+        { json: "truncated", js: "truncated", typ: true },
+    ], "any"),
+    "AppRemoveResultObject": o([
+        { json: "consumer_removed", js: "consumer_removed", typ: true },
+        { json: "invocations_kept", js: "invocations_kept", typ: 0 },
+        { json: "name", js: "name", typ: "" },
+        { json: "namespace_kept", js: "namespace_kept", typ: "" },
+        { json: "versions_kept", js: "versions_kept", typ: 0 },
+    ], "any"),
+    "AppRollbackResultObject": o([
+        { json: "artifact_path", js: "artifact_path", typ: "" },
+        { json: "content_hash", js: "content_hash", typ: "" },
+        { json: "name", js: "name", typ: "" },
+        { json: "previous_version_id", js: "previous_version_id", typ: u(undefined, 0) },
+        { json: "version_id", js: "version_id", typ: 0 },
+    ], "any"),
+    "AppRuntimeRestartResultObject": o([
+        { json: "runtime", js: "runtime", typ: r("Runtime") },
+        { json: "was", js: "was", typ: "" },
+    ], "any"),
+    "AppRuntimeStatusResultObject": o([
+        { json: "apps", js: "apps", typ: 0 },
+        { json: "apps_enabled", js: "apps_enabled", typ: 0 },
+        { json: "host_error", js: "host_error", typ: u(undefined, "") },
+        { json: "host_path", js: "host_path", typ: u(undefined, "") },
+        { json: "log_path", js: "log_path", typ: "" },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+    ], "any"),
+    "AppSetEnabledResultObject": o([
+        { json: "consumer", js: "consumer", typ: "" },
+        { json: "enabled", js: "enabled", typ: true },
+        { json: "name", js: "name", typ: "" },
+    ], "any"),
+    "AppStatusResultObject": o([
+        { json: "app", js: "app", typ: r("App") },
+        { json: "invocations", js: "invocations", typ: 0 },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
+        { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
+        { json: "versions", js: "versions", typ: 0 },
+    ], "any"),
+    "AppWatchResultObject": o([
+        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
     ], "any"),
     "DocCollectionsResultObject": o([
         { json: "collections", js: "collections", typ: a(r("Schema")) },
@@ -13618,6 +15139,55 @@ const typeMap: any = {
         { json: "seq", js: "seq", typ: 0 },
         { json: "title", js: "title", typ: "" },
         { json: "warnings", js: "warnings", typ: u(undefined, a("")) },
+    ], "any"),
+    "SeedLinkResultObject": o([
+        { json: "changed", js: "changed", typ: true },
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedListResultObject": o([
+        { json: "all", js: "all", typ: true },
+        { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "total", js: "total", typ: 0 },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "SeedNoteResultObject": o([
+        { json: "note", js: "note", typ: r("Note") },
+    ], "any"),
+    "Note": o([
+        { json: "author_member", js: "author_member", typ: "" },
+        { json: "author_session", js: "author_session", typ: "" },
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "seed_id", js: "seed_id", typ: "" },
+    ], "any"),
+    "SeedNotesResultObject": o([
+        { json: "notes", js: "notes", typ: a(r("Note")) },
+        { json: "total", js: "total", typ: 0 },
+    ], "any"),
+    "SeedPlantResultObject": o([
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedReadyResultObject": o([
+        { json: "scope", js: "scope", typ: "" },
+        { json: "scope_id", js: "scope_id", typ: "" },
+        { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+    ], "any"),
+    "SeedShowResultObject": o([
+        { json: "notes", js: "notes", typ: a(r("Note")) },
+        { json: "notes_total", js: "notes_total", typ: 0 },
+        { json: "relations", js: "relations", typ: a(r("RelationElement")) },
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "RelationElement": o([
+        { json: "label", js: "label", typ: "" },
+        { json: "seed_id", js: "seed_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedTransitionResultObject": o([
+        { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SessionInstructionsResultObject": o([
         { json: "answer", js: "answer", typ: "" },
@@ -13807,10 +15377,145 @@ const typeMap: any = {
         { json: "event", js: "event", typ: r("RuntimeRespawnedMessageEvent") },
         { json: "id", js: "id", typ: "" },
     ], "any"),
+    "Seed": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "edges", js: "edges", typ: a(r("EdgeElement")) },
+        { json: "gate", js: "gate", typ: true },
+        { json: "id", js: "id", typ: "" },
+        { json: "planter_member", js: "planter_member", typ: "" },
+        { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "ready", js: "ready", typ: true },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "rev", js: "rev", typ: 0 },
+        { json: "status", js: "status", typ: "" },
+        { json: "step_slug", js: "step_slug", typ: "" },
+        { json: "template", js: "template", typ: true },
+        { json: "tender_member", js: "tender_member", typ: "" },
+        { json: "tender_session", js: "tender_session", typ: "" },
+        { json: "title", js: "title", typ: "" },
+        { json: "updated_at", js: "updated_at", typ: "" },
+        { json: "vars", js: "vars", typ: a(r("VarElement")) },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "SeedEdge": o([
+        { json: "kind", js: "kind", typ: "" },
+        { json: "to", js: "to", typ: "" },
+    ], "any"),
+    "SeedLinkMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SeedLinkMessageCmd") },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "seed_id", js: "seed_id", typ: "" },
+        { json: "to_seed_id", js: "to_seed_id", typ: "" },
+        { json: "unlink", js: "unlink", typ: u(undefined, true) },
+    ], "any"),
+    "SeedLinkResult": o([
+        { json: "changed", js: "changed", typ: true },
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedListMessage": o([
+        { json: "all", js: "all", typ: u(undefined, true) },
+        { json: "cmd", js: "cmd", typ: r("SeedListMessageCmd") },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "SeedListResult": o([
+        { json: "all", js: "all", typ: true },
+        { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "total", js: "total", typ: 0 },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "SeedNote": o([
+        { json: "author_member", js: "author_member", typ: "" },
+        { json: "author_session", js: "author_session", typ: "" },
+        { json: "body", js: "body", typ: "" },
+        { json: "created_at", js: "created_at", typ: "" },
+        { json: "id", js: "id", typ: "" },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "seed_id", js: "seed_id", typ: "" },
+    ], "any"),
+    "SeedNoteMessage": o([
+        { json: "body", js: "body", typ: "" },
+        { json: "cmd", js: "cmd", typ: r("SeedNoteMessageCmd") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "seed_id", js: "seed_id", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+    ], "any"),
+    "SeedNoteResult": o([
+        { json: "note", js: "note", typ: r("Note") },
+    ], "any"),
+    "SeedNotesMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SeedNotesMessageCmd") },
+        { json: "limit", js: "limit", typ: u(undefined, 0) },
+        { json: "seed_id", js: "seed_id", typ: "" },
+    ], "any"),
+    "SeedNotesResult": o([
+        { json: "notes", js: "notes", typ: a(r("Note")) },
+        { json: "total", js: "total", typ: 0 },
+    ], "any"),
+    "SeedPlantMessage": o([
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("SeedPlantMessageCmd") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "SeedPlantResult": o([
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedReadyMessage": o([
+        { json: "all", js: "all", typ: u(undefined, true) },
+        { json: "cmd", js: "cmd", typ: r("SeedReadyMessageCmd") },
+        { json: "plot", js: "plot", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
+    "SeedReadyResult": o([
+        { json: "scope", js: "scope", typ: "" },
+        { json: "scope_id", js: "scope_id", typ: "" },
+        { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+    ], "any"),
+    "SeedRelation": o([
+        { json: "label", js: "label", typ: "" },
+        { json: "seed_id", js: "seed_id", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedShowMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SeedShowMessageCmd") },
+        { json: "seed_id", js: "seed_id", typ: "" },
+    ], "any"),
+    "SeedShowResult": o([
+        { json: "notes", js: "notes", typ: a(r("Note")) },
+        { json: "notes_total", js: "notes_total", typ: 0 },
+        { json: "relations", js: "relations", typ: a(r("RelationElement")) },
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedTransitionMessage": o([
+        { json: "cmd", js: "cmd", typ: r("SeedTransitionMessageCmd") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: u(undefined, "") },
+        { json: "seed_id", js: "seed_id", typ: "" },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "verb", js: "verb", typ: "" },
+    ], "any"),
+    "SeedTransitionResult": o([
+        { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedVar": o([
+        { json: "default", js: "default", typ: u(undefined, "") },
+        { json: "description", js: "description", typ: u(undefined, "") },
+        { json: "enum", js: "enum", typ: u(undefined, a("")) },
+        { json: "name", js: "name", typ: "" },
+        { json: "pattern", js: "pattern", typ: u(undefined, "") },
+        { json: "required", js: "required", typ: u(undefined, true) },
+    ], "any"),
     "Session": o([
         { json: "activity", js: "activity", typ: u(undefined, "") },
         { json: "activity_at", js: "activity_at", typ: u(undefined, "") },
         { json: "agent", js: "agent", typ: "" },
+        { json: "auto_settle_dismiss_armed", js: "auto_settle_dismiss_armed", typ: u(undefined, true) },
         { json: "auto_settle_fires_at", js: "auto_settle_fires_at", typ: u(undefined, "") },
         { json: "auto_settle_held", js: "auto_settle_held", typ: u(undefined, true) },
         { json: "branch", js: "branch", typ: u(undefined, "") },
@@ -14530,6 +16235,7 @@ const typeMap: any = {
         { json: "screen_rows", js: "screen_rows", typ: u(undefined, 0) },
         { json: "screen_snapshot", js: "screen_snapshot", typ: u(undefined, "") },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: u(undefined, true) },
+        { json: "seeds", js: "seeds", typ: u(undefined, a(r("SeedElement"))) },
         { json: "seq", js: "seq", typ: u(undefined, 0) },
         { json: "session", js: "session", typ: u(undefined, r("SessionObject")) },
         { json: "session_id", js: "session_id", typ: u(undefined, "") },
@@ -14545,6 +16251,7 @@ const typeMap: any = {
         { json: "tickets", js: "tickets", typ: u(undefined, a(r("TicketElement"))) },
         { json: "tile_id", js: "tile_id", typ: u(undefined, "") },
         { json: "tile_kind", js: "tile_kind", typ: u(undefined, "") },
+        { json: "total", js: "total", typ: u(undefined, 0) },
         { json: "unstaged", js: "unstaged", typ: u(undefined, a(r("StagedElement"))) },
         { json: "untracked", js: "untracked", typ: u(undefined, a(r("StagedElement"))) },
         { json: "warnings", js: "warnings", typ: u(undefined, a(r("WarningElement"))) },
@@ -14957,6 +16664,36 @@ const typeMap: any = {
     "AgentToolDetailMessageCmd": [
         "agent_tool_detail",
     ],
+    "AppApplyMessageCmd": [
+        "app_apply",
+    ],
+    "AppListMessageCmd": [
+        "app_list",
+    ],
+    "AppLogsMessageCmd": [
+        "app_logs",
+    ],
+    "AppRemoveMessageCmd": [
+        "app_remove",
+    ],
+    "AppRollbackMessageCmd": [
+        "app_rollback",
+    ],
+    "AppRuntimeRestartMessageCmd": [
+        "app_runtime_restart",
+    ],
+    "AppRuntimeStatusMessageCmd": [
+        "app_runtime_status",
+    ],
+    "AppSetEnabledMessageCmd": [
+        "app_set_enabled",
+    ],
+    "AppStatusMessageCmd": [
+        "app_status",
+    ],
+    "AppWatchMessageCmd": [
+        "app_watch",
+    ],
     "ApprovePRMessageCmd": [
         "approve_pr",
     ],
@@ -15281,6 +17018,9 @@ const typeMap: any = {
     ],
     "FSWriteResultMessageEvent": [
         "fs_write_result",
+    ],
+    "GardenSeedsUpdatedMessageEvent": [
+        "garden_seeds_updated",
     ],
     "GetDefaultBranchMessageCmd": [
         "get_default_branch",
@@ -15682,6 +17422,30 @@ const typeMap: any = {
     ],
     "RuntimeRespawnedMessageEvent": [
         "runtime_respawned",
+    ],
+    "SeedLinkMessageCmd": [
+        "seed_link",
+    ],
+    "SeedListMessageCmd": [
+        "seed_list",
+    ],
+    "SeedNoteMessageCmd": [
+        "seed_note",
+    ],
+    "SeedNotesMessageCmd": [
+        "seed_notes",
+    ],
+    "SeedPlantMessageCmd": [
+        "seed_plant",
+    ],
+    "SeedReadyMessageCmd": [
+        "seed_ready",
+    ],
+    "SeedShowMessageCmd": [
+        "seed_show",
+    ],
+    "SeedTransitionMessageCmd": [
+        "seed_transition",
     ],
     "SessionAnnotationsClearMessageCmd": [
         "session_annotations_clear",

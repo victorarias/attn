@@ -168,3 +168,59 @@ func producerRow(t *testing.T, out, name string) string {
 	t.Fatalf("no table row for %q in:\n%s", name, out)
 	return ""
 }
+
+// Holding the retention floor is normal and holding it past the tripwire is an
+// outage. The table has to read differently for the two, or someone acting on
+// the warning opens the CLI and cannot tell which consumer it meant.
+func TestBusStatusRenderingSeparatesANormalFloorFromAnAlarmingOne(t *testing.T) {
+	s := busStatusFixture()
+	s.PinAlarmAge = time.Hour
+	s.Consumers = []bus.ConsumerStatus{
+		{Name: "ordinary", Cursor: 990, Lag: 10, Enabled: true, HoldsRetentionFloor: true},
+		{
+			Name: "app:ticketwatch", Cursor: 120, Lag: 880, Enabled: true,
+			HoldsRetentionFloor: true, PinAlarm: true, PinnedBytes: 31_000,
+			OldestUnreadAt: busRenderNow.Add(-3 * time.Hour),
+		},
+	}
+
+	out := renderBusStatus(s)
+	if !strings.Contains(out, "ordinary (retention floor)") {
+		t.Errorf("a healthy floor holder lost its tag:\n%s", out)
+	}
+	if !strings.Contains(out, "app:ticketwatch (PINNING 30.3 KB)") {
+		t.Errorf("an alarming pin is not marked, or does not say what it holds:\n%s", out)
+	}
+}
+
+// A script acting on the crossing needs the limit beside the value, and needs to
+// tell "holding nothing" from "not measured" — which is what the flag is for.
+func TestBusStatusJSONCarriesTheTripwireAndWhatIsHeld(t *testing.T) {
+	s := busStatusFixture()
+	s.PinAlarmAge = 90 * time.Minute
+	s.Consumers = []bus.ConsumerStatus{{
+		Name: "app:ticketwatch", Cursor: 120, Lag: 880, Enabled: true,
+		HoldsRetentionFloor: true, PinAlarm: true, PinnedBytes: 31_000,
+	}}
+
+	raw, err := json.Marshal(busStatusReport(s))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got struct {
+		PinAlarmSeconds float64 `json:"pin_alarm_seconds"`
+		Consumers       []struct {
+			PinAlarm    bool  `json:"pin_alarm"`
+			PinnedBytes int64 `json:"pinned_bytes"`
+		} `json:"consumers"`
+	}
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if got.PinAlarmSeconds != 5400 {
+		t.Errorf("pin_alarm_seconds = %v, want the tripwire in effect", got.PinAlarmSeconds)
+	}
+	if len(got.Consumers) != 1 || !got.Consumers[0].PinAlarm || got.Consumers[0].PinnedBytes != 31_000 {
+		t.Errorf("consumer report = %+v", got.Consumers)
+	}
+}

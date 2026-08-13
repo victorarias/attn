@@ -1,0 +1,304 @@
+.garden-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  color: var(--color-text-primary);
+  background: var(--color-bg-panel);
+  font-size: var(--font-size-sm);
+}
+
+.garden-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--color-border);
+  padding-bottom: 8px;
+}
+
+.garden-panel__kicker {
+  font-size: var(--font-size-xl);
+  font-weight: 600;
+}
+
+.garden-panel__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.garden-panel__scope {
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  padding: 4px 10px;
+  white-space: nowrap;
+}
+
+.garden-panel__scope:hover {
+  border-color: var(--accent);
+  color: var(--color-text-primary);
+}
+
+.garden-panel__count {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.garden-panel__close {
+  background: transparent;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-md);
+  line-height: 1;
+  padding: 4px;
+}
+
+.garden-panel__close:hover {
+  color: var(--color-text-primary);
+}
+
+.garden-panel__empty {
+  color: var(--color-text-tertiary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.garden-panel__empty code {
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  padding: 2px 5px;
+}
+
+.garden-panel__capped {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  margin: 0 0 8px;
+}
+
+.garden-panel__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.garden-seed {
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.garden-seed:hover {
+  border-color: var(--color-border);
+}
+
+.garden-seed.is-expanded {
+  border-color: var(--accent);
+}
+
+.garden-seed__head {
+  align-items: baseline;
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 8px;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.garden-seed__head:hover {
+  background: var(--color-bg-elevated);
+}
+
+/* The status pip. Colors are the shared functional tokens, so a seed's state
+   reads the same as every other state surface in the app. */
+.garden-seed__status {
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+  align-self: center;
+  background: var(--color-text-muted);
+}
+
+.garden-seed.is-planted .garden-seed__status {
+  background: var(--color-accent);
+}
+
+.garden-seed.is-growing .garden-seed__status {
+  background: var(--accent);
+}
+
+.garden-seed.is-harvested .garden-seed__status {
+  background: var(--color-text-tertiary);
+}
+
+.garden-seed.is-withered .garden-seed__status {
+  background: var(--color-error);
+}
+
+.garden-seed.is-dormant .garden-seed__status {
+  background: var(--color-warning);
+}
+
+/* Title on top, then the line that says what is happening to it. Two lines
+   rather than one crowded row: state and tender are what the panel is for in
+   slice 2, and they must be readable without expanding a seed. */
+.garden-seed__main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.garden-seed__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-seed__line {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.garden-seed__state {
+  color: var(--color-text-secondary);
+  flex: none;
+  font-size: var(--font-size-xs);
+}
+
+.garden-seed.is-growing .garden-seed__state {
+  color: var(--accent);
+}
+
+.garden-seed__tender {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-seed__line .garden-seed__id {
+  margin-left: auto;
+}
+
+.garden-seed__id {
+  color: var(--color-text-muted);
+  flex: none;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--font-size-xs);
+}
+
+.garden-seed__planted {
+  color: var(--color-text-tertiary);
+  flex: none;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.garden-seed__detail {
+  border-top: 1px solid var(--color-border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+}
+
+.garden-seed__meta {
+  color: var(--color-text-tertiary);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 10px;
+}
+
+.garden-seed__ready {
+  color: var(--accent);
+  flex: none;
+  font-size: var(--font-size-xs);
+}
+
+.garden-seed__blocked {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.garden-seed__relations {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.garden-seed__relations li {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  min-width: 0;
+}
+
+.garden-seed__relation-label {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-xs);
+}
+
+.garden-seed__relation-title {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-seed__relation-state {
+  color: var(--color-text-tertiary);
+  flex: none;
+  font-size: var(--font-size-xs);
+  margin-left: auto;
+}
+
+.garden-seed__body {
+  background: var(--color-bg-elevated);
+  border-radius: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  margin: 0;
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.garden-seed__nobody {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}

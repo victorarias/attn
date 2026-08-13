@@ -172,21 +172,50 @@ func (s *Store) SetBusConsumerCursor(name string, cursor int64, now time.Time) e
 	return err
 }
 
-// SetBusConsumerEnabled flips the kill switch for a consumer.
-func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) error {
+// SetBusConsumerEnabled flips the kill switch for a consumer, and reports
+// whether there was a row to flip.
+//
+// The report is what a caller checks a moment after reading the registration:
+// between the read and this write the consumer may have been unregistered, and
+// an UPDATE that matches nothing is indistinguishable from a successful flip
+// without it. A caller that answers "disabled" for a consumer that no longer
+// exists has told its user something untrue.
+func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return false, nil
+	}
+	flag := 0
+	if enabled {
+		flag = 1
+	}
+	res, err := s.db.Exec(`
+		UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?
+	`, flag, formatTicketTime(now), name)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// DeleteBusConsumer removes a registration. Deleting a row that is not there is
+// success, not an error: the caller is an uninstall path, and an uninstall that
+// fails the second time it runs is a worse surface than one that says nothing.
+//
+// An abandoned row is not harmless. While it exists and is enabled it holds the
+// cursor floor down, so retention and compaction cannot pass it — forever, for a
+// consumer nobody serves. Deleting the row is what ends that.
+func (s *Store) DeleteBusConsumer(name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	if s.db == nil {
 		return nil
 	}
-	flag := 0
-	if enabled {
-		flag = 1
-	}
-	_, err := s.db.Exec(`
-		UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?
-	`, flag, formatTicketTime(now), name)
+	_, err := s.db.Exec(`DELETE FROM bus_consumers WHERE name = ?`, name)
 	return err
 }
 
@@ -351,6 +380,32 @@ func (s *Store) BusProducers(cutoffs []time.Time) ([]BusProducer, error) {
 		out = append(out, p)
 	}
 	return out, rows.Err()
+}
+
+// BusPendingBytes sums what the log holds above a cursor — one consumer's
+// backlog, weighed the same way BusProducers weighs the whole log so the two
+// numbers are comparable.
+//
+// It walks the seq primary key over the backlog alone, so it costs in proportion
+// to what is being held rather than to the log. Only asked about a consumer
+// already known to be pinning retention past its tripwire: a healthy bus never
+// runs it.
+func (s *Store) BusPendingBytes(above int64) (int64, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	var bytes int64
+	err := s.db.QueryRow(`
+		SELECT COALESCE(SUM(LENGTH(name) + LENGTH(subject) + LENGTH(payload) + LENGTH(source) + LENGTH(created_at)), 0)
+		FROM bus_events WHERE seq > ?
+	`, above).Scan(&bytes)
+	if err != nil {
+		return 0, err
+	}
+	return bytes, nil
 }
 
 // BusEventTimeAt returns the timestamp of the first event at or above seq, and

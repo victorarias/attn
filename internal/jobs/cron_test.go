@@ -422,3 +422,86 @@ func TestCronFiringDoesNotReportAChange(t *testing.T) {
 		}
 	})
 }
+
+// The interval is configuration, and a record armed under the old one is not on
+// schedule — it is on a schedule nobody asked for any more. Shortening the
+// interval has to take effect, or the knob that sets it is half inert.
+func TestShorteningTheIntervalPullsAnArmedEntryIn(t *testing.T) {
+	store := newMemStore()
+	clock := newFakeClock()
+	opts := func() Options {
+		return Options{Store: store, Now: clock.now, PollInterval: testPoll, Log: func(string, ...interface{}) {}}
+	}
+	noop := func(context.Context, *Job) (any, error) { return nil, nil }
+
+	first := New(opts())
+	if err := first.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("register cron: %v", err)
+	}
+	mustStart(t, first)
+	armed, err := first.CronEntry(cronKind)
+	if err != nil || armed == nil {
+		t.Fatalf("cron entry: %v (%+v)", err, armed)
+	}
+	first.Stop()
+
+	// Same kind, a minute apart now.
+	second := New(opts())
+	if err := second.RegisterCron(cronKind, time.Minute, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("re-register cron: %v", err)
+	}
+	mustStart(t, second)
+	t.Cleanup(second.Stop)
+
+	after, err := second.CronEntry(cronKind)
+	if err != nil || after == nil {
+		t.Fatalf("cron entry after restart: %v (%+v)", err, after)
+	}
+	if !after.ScheduledAt.Before(armed.ScheduledAt) {
+		t.Fatalf("a shortened interval left the fire at %s (was %s)", after.ScheduledAt, armed.ScheduledAt)
+	}
+	if wait := after.ScheduledAt.Sub(clock.now()); wait > time.Minute {
+		t.Fatalf("next fire is %s out, past the new %s interval", wait, time.Minute)
+	}
+	// Coalescing means it is still the one recurring record, not a second one.
+	if after.ID != armed.ID {
+		t.Fatalf("pulling the entry in minted a second cron record (%s then %s)", armed.ID, after.ID)
+	}
+}
+
+// The mirror of the rule above: a LENGTHENED interval must not push an armed
+// fire out, and a daemon restarted more often than its interval must still tick.
+func TestLengtheningTheIntervalLeavesAnArmedEntryAlone(t *testing.T) {
+	store := newMemStore()
+	clock := newFakeClock()
+	opts := func() Options {
+		return Options{Store: store, Now: clock.now, PollInterval: testPoll, Log: func(string, ...interface{}) {}}
+	}
+	noop := func(context.Context, *Job) (any, error) { return nil, nil }
+
+	first := New(opts())
+	if err := first.RegisterCron(cronKind, time.Hour, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("register cron: %v", err)
+	}
+	mustStart(t, first)
+	armed, err := first.CronEntry(cronKind)
+	if err != nil || armed == nil {
+		t.Fatalf("cron entry: %v (%+v)", err, armed)
+	}
+	first.Stop()
+
+	second := New(opts())
+	if err := second.RegisterCron(cronKind, 6*time.Hour, noop, HandlerConfig{}); err != nil {
+		t.Fatalf("re-register cron: %v", err)
+	}
+	mustStart(t, second)
+	t.Cleanup(second.Stop)
+
+	after, err := second.CronEntry(cronKind)
+	if err != nil || after == nil {
+		t.Fatalf("cron entry after restart: %v (%+v)", err, after)
+	}
+	if !after.ScheduledAt.Equal(armed.ScheduledAt) {
+		t.Fatalf("a lengthened interval moved the next fire from %s to %s", armed.ScheduledAt, after.ScheduledAt)
+	}
+}

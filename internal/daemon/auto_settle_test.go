@@ -225,6 +225,155 @@ func TestAutoSettle_CancelKeepsTheTurnAndDoesNotReArm(t *testing.T) {
 	}
 }
 
+// dismissArmed reads the flag as a client would, off the broadcast clone.
+func dismissArmed(d *Daemon, sessionID string) bool {
+	return protocol.Deref(d.sessionForBroadcast(d.store.Get(sessionID)).AutoSettleDismissArmed)
+}
+
+// The moment the user knows they want the turn kept is while they are still
+// typing the steer — before the agent is working, so before anything is counting
+// down. Pressing then has to reach the settle that has not been armed yet.
+func TestAutoSettle_ArmedBeforeTheSteerDismissesTheNextSettle(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+
+	if !dismissArmed(d, id) {
+		t.Fatal("no standing dismissal after pressing with nothing counting down")
+	}
+	// The resolver re-reports the state the user armed in while they finish
+	// typing. Retiring the dismissal on one of those would drop the answer in the
+	// gap between the press and the steer.
+	d.syncAutoSettle(id, protocol.StateWaitingInput)
+	if !dismissArmed(d, id) {
+		t.Fatal("the dismissal was retired by a re-reported waiting_input, before it covered anything")
+	}
+
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	if _, ok := autoSettlePending(d, id); ok {
+		t.Fatal("the steer armed a settle the user had already dismissed")
+	}
+	if !dismissArmed(d, id) {
+		t.Fatal("the dismissal did not survive into the stretch it answers")
+	}
+
+	// Spent with the stretch it covered: the next turn is a new decision, and the
+	// chip announcing it has to go.
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWaitingInput, cause: liveSignal{}}) {
+		t.Fatal("applyState(waiting_input) = false")
+	}
+	if dismissArmed(d, id) {
+		t.Fatal("the dismissal outlived the working stretch it was spent on")
+	}
+	if !turnIsOwed(d, id) {
+		t.Fatal("the turn was settled despite a standing dismissal")
+	}
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	if _, ok := autoSettlePending(d, id); !ok {
+		t.Fatal("no fresh arm on the next steer; the dismissal answered one settle, not all of them")
+	}
+}
+
+// A standing dismissal outlives the thing it answered, so it is the one
+// countdown answer that needs a way back out.
+func TestAutoSettle_PressingAgainDisarms(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+
+	if dismissArmed(d, id) {
+		t.Fatal("pressing again did not disarm the standing dismissal")
+	}
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	if _, ok := autoSettlePending(d, id); !ok {
+		t.Fatal("no settle armed after the disarm; the steer must be back to ordinary")
+	}
+}
+
+// Disarming mid-stretch has to hand the session back to the ordinary rule. No
+// state change is coming to do it — the session is already working — so without
+// an arm here the user would sit in a limbo neither answer put them in.
+func TestAutoSettle_DisarmingWhileWorkingReArmsTheSettle(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	if !d.applyState(sessionStateChange{sessionID: id, state: protocol.StateWorking, cause: liveSignal{}}) {
+		t.Fatal("applyState(working) = false")
+	}
+	fireAutoSettleNow(t, d, id)
+
+	// The cancel of a countdown on screen arms the same standing dismissal: it is
+	// what keeps the next re-reported `working` from re-arming what was cancelled.
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+	if !dismissArmed(d, id) {
+		t.Fatal("cancelling a running countdown left no standing dismissal")
+	}
+
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+
+	if dismissArmed(d, id) {
+		t.Fatal("the standing dismissal survived the disarm")
+	}
+	entry, ok := autoSettlePending(d, id)
+	if !ok || entry.phase != autoSettleArming {
+		t.Fatalf("after disarming mid-stretch: pending=%v entry=%+v, want the arm delay back", ok, entry)
+	}
+}
+
+// Arming against a settle that was never coming would be a chip promising to
+// stop nothing.
+func TestAutoSettle_NothingToDismissDoesNotArm(t *testing.T) {
+	t.Run("feature off", func(t *testing.T) {
+		d, id := newAutoSettleDaemon(t)
+		d.store.SetSetting(SettingAutoSettleEnabled, "false")
+
+		d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+
+		if dismissArmed(d, id) {
+			t.Fatal("armed a dismissal with auto-settle switched off")
+		}
+	})
+
+	t.Run("session outside the queue", func(t *testing.T) {
+		d, _ := newAutoSettleDaemon(t)
+		shellID := "shell"
+		d.store.Add(&protocol.Session{
+			ID:        shellID,
+			Label:     shellID,
+			Agent:     protocol.SessionAgentShell,
+			Directory: t.TempDir(),
+			State:     protocol.SessionStateIdle,
+		})
+
+		d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: shellID})
+
+		if dismissArmed(d, shellID) {
+			t.Fatal("armed a dismissal on a shell; a session outside the queue never auto-settles")
+		}
+	})
+}
+
+// Switching the feature off takes the standing dismissals with it: they answer a
+// settle that can no longer happen.
+func TestAutoSettle_DisablingClearsAStandingDismissal(t *testing.T) {
+	d, id := newAutoSettleDaemon(t)
+	d.handleCancelCountdown(&protocol.CancelCountdownMessage{SessionID: id})
+	if !dismissArmed(d, id) {
+		t.Fatal("precondition: nothing armed")
+	}
+
+	d.cancelAllAutoSettle()
+
+	if dismissArmed(d, id) {
+		t.Fatal("a standing dismissal survived auto-settle being switched off")
+	}
+}
+
 // Off is off: no timer arms at all, which is what makes the default a true no-op.
 func TestAutoSettle_DisabledNeverArms(t *testing.T) {
 	d, id := newAutoSettleDaemon(t)
@@ -835,8 +984,8 @@ func TestAutoSettle_HoldExpiresWhereCancelStands(t *testing.T) {
 	fireAutoSettleNow(t, d, id)
 	typeInto(d, id)
 
-	if d.autoSettleSuppressedFor(id) {
-		t.Fatal("typing set the cancel suppression; a hold must expire on its own")
+	if d.autoSettleDismissalArmed(id) {
+		t.Fatal("typing armed a standing dismissal; a hold must expire on its own")
 	}
 	goQuiet(d, id)
 	fireAutoSettleNow(t, d, id)

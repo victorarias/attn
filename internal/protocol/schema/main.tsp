@@ -141,6 +141,7 @@ model Session {
   turn_snoozed_until?: string;  // ISO timestamp a live snooze runs to. Present only while the deferral holds; its presence is what puts the row in the sidebar's snoozed section, and while it is set no state can open a turn for this session except one that breaks through.
   auto_settle_fires_at?: string; // ISO timestamp the auto-settle countdown will close this session's turn. Present only while the countdown is running, which is the whole contract: it is what the terminal tile animates against, and its absence is what says nothing is pending. Absent during the arm delay, when auto-settle is off, and after a cancel.
   auto_settle_held?: boolean;   // True while the auto-settle countdown is frozen because the user is typing or moving the pointer in this session. Mutually exclusive with auto_settle_fires_at by construction: a frozen countdown has no deadline to animate against, so the tile draws a full paused bar and waits. It clears on its own five quiet seconds after the last interaction, when a fresh deadline replaces it.
+  auto_settle_dismiss_armed?: boolean; // True while a standing dismissal covers this session's next auto-settle, whether the user armed it during a countdown or ahead of one. Excludes the other two by construction: arming is what stops a pending timer. It is spent at the end of the `working` stretch it covers, and pressing the cancel-countdown shortcut again while nothing is counting down disarms it.
   pinned_at?: string;           // ISO timestamp this session was individually pinned out of the queue. Presence is the pin, and the instant is the pinned band's sort key. Like a pinned workspace it filters at read: the turn stamps keep accruing underneath, so unpinning surfaces whatever was outstanding at its true age.
   context_window_cap?: int32;   // Per-session context-window cap in tokens, set by the user on this one session. Absent means no pin — the launch falls back to the chief or per-agent default settings. A pin outranks both, and takes effect at the next launch of the agent (the daemon reloads a live session in place when the pin changes).
   parent_session_id?: string;   // The agent session a shell was split from. Spawn-time provenance resolved by the daemon, always an agent id and never another shell's, so there is no chain to walk. Whether the link is live is judged at read (parent present in the same workspace), so the field itself is never cleared.
@@ -475,7 +476,7 @@ model PluginInfo {
   running: boolean;
   availability: string; // "bundled" | "user"
   installation_state: string; // "available" | "installed"
-  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded"
+  runtime_state: string; // "stopped" | "starting" | "connected" | "degraded" | "parked"
   can_install: boolean;
   can_uninstall: boolean;
   // "starting" | "connected" | "backoff" | "stopped". Plain string keeps
@@ -2178,6 +2179,14 @@ model BusConsumerStatus {
   oldest_unread_at: string;
   // Its cursor is the floor retention stops at — it is pinning the log.
   holds_retention_floor: boolean;
+  // That pin is past `pin_alarm_seconds`: no longer the system working, but an
+  // outage holding the log open. The matching `retention_pinned` health entry
+  // carries the sentence to render.
+  pin_alarm: boolean;
+  // What the backlog above its cursor weighs. Read only for a consumer whose
+  // pin is alarming, so `pin_alarm` is what separates "holding nothing" from
+  // "not measured".
+  pinned_bytes: safeint;
 }
 
 // One thing wrong, said in a whole sentence. A client renders `message`; it does
@@ -2212,6 +2221,9 @@ model BusStatusResultMessage {
   recent_window_seconds: float64;
   baseline_window_seconds: float64;
   surge_rate_per_hour: float64;
+  // How long an enabled consumer may pin the retention floor before the pin is
+  // reported. Carried so a client shows the limit beside the observed value.
+  pin_alarm_seconds: float64;
   producers: BusProducerStatus[];
   consumers: BusConsumerStatus[];
   health: BusHealthEntry[];
@@ -2927,6 +2939,12 @@ model InitialStateMessage {
   protocol_version?: string;
   source_fingerprint?: string;
   daemon_instance_id?: string;
+  /**
+   * The daemon id that owns this daemon's home-level state. Equal to
+   * daemon_instance_id on a home daemon; a different id means this daemon is an
+   * outpost of that home.
+   */
+  home_daemon_id?: string;
   sessions?: Session[];
   endpoints?: EndpointInfo[];
   workspaces?: Workspace[];
@@ -2937,6 +2955,11 @@ model InitialStateMessage {
   settings?: Record<string>;
   warnings?: DaemonWarning[];
   tickets?: TicketRow[];
+  seeds?: Seed[];
+  // How many seeds the garden holds, beside the bounded `seeds`. Carried here
+  // as well as on garden_seeds_updated so a client that connects to an
+  // over-large garden knows it is short before anything moves.
+  seeds_total?: int32;
 }
 
 model EndpointStatusChangedMessage {
@@ -4190,6 +4213,566 @@ model DocSubscribeResult {
 }
 
 // ============================================================================
+// The garden
+// ============================================================================
+//
+// A seed is the unit of work — one document, one id. Everything else in the
+// vocabulary is a seed too: a plot is a seed with children, its root is the
+// crown, a packet is a plot flagged as template. Seeds live in the home
+// daemon's document store under `core/garden`; an outpost refuses every command
+// here, naming its home, until the uplink carries the ask there.
+//
+// Design: docs/plans/2026-08-06-the-garden-vertical-slices.md.
+
+// One seed as every read and every push carries it. The id is short, stable and
+// sayable, and unique within its hub; the fully qualified `<daemon-id>/<id>`
+// form belongs to a future central server and is minted only where an id leaves
+// its daemon, so nothing on this wire carries it.
+//
+// The whole designed schema is here from the first slice even though only part
+// of it moves yet: `tender`, `edges`, `template`, `gate` and `vars` are written
+// and returned, and the slices that give them meaning add behavior, not fields.
+model Seed {
+  "id": string;
+  "title": string;
+  // Markdown. On a crown this is the plan itself.
+  "body": string;
+  // planted | growing | harvested | withered | dormant.
+  "status": string;
+  // The seed's stable name within its plot; derived from the title at planting.
+  "step_slug": string;
+  // The workspace of the session that planted it. Empty means planted outside
+  // any workspace, which is a real state and why `attn seed ls` has an --all.
+  "workspace_id": string;
+  "planter_session": string;
+  "planter_member": string;
+  "tender_session": string;
+  "tender_member": string;
+  "edges": SeedEdge[];
+  "template": boolean;
+  "gate": boolean;
+  "vars": SeedVar[];
+  // Whether this seed can be tended right now: nothing open blocks it, it holds
+  // no live tender, nothing is part of it, and it is neither a packet nor a
+  // gate. Computed by the daemon on every read and every push — readiness is
+  // truth at query time, never a stored flag — so a client renders it rather
+  // than re-deriving a rule it would eventually disagree about.
+  "ready": boolean;
+  // Why the seed was harvested or withered.
+  "reason"?: string;
+  // The document's own revision and stamps. `rev` is what a conditional write
+  // hands back; the stamps are the store's, not a copy kept in the body.
+  "rev": safeint;
+  "created_at": string;
+  "updated_at": string;
+}
+
+// A typed relation to another seed. Structure lives in edges rather than in the
+// id, so re-parenting a seed never renames it.
+model SeedEdge {
+  // blocks | part-of | sown-from | discovered-from | relates-to. Additive.
+  "kind": string;
+  "to": string;
+}
+
+// One declared variable on a packet's crown, filled at sow time.
+model SeedVar {
+  "name": string;
+  "description"?: string;
+  "required"?: boolean;
+  "default"?: string;
+  "pattern"?: string;
+  "enum"?: string[];
+}
+
+// Plant a seed. The workspace is stamped from the calling session unless
+// `workspace_id` overrides it, which is why planting costs one line: the daemon
+// already knows who is asking.
+model SeedPlantMessage {
+  "cmd": "seed_plant";
+  "source_session_id"?: string;
+  "title": string;
+  "body"?: string;
+  // Overrides the calling session's workspace. The empty string is not an
+  // override — omit the field to take the session's.
+  "workspace_id"?: string;
+  // The crew member planting, free-string until the crew primitive lands.
+  "member"?: string;
+}
+
+model SeedPlantResult {
+  "seed": Seed;
+}
+
+// List seeds. Scope is the calling session's workspace unless `workspace_id`
+// or `all` says otherwise; a caller with no session and no scope is refused
+// rather than shown an empty list.
+model SeedListMessage {
+  "cmd": "seed_list";
+  "source_session_id"?: string;
+  "workspace_id"?: string;
+  "all"?: boolean;
+}
+
+model SeedListResult {
+  "seeds": Seed[];
+  // The workspace the answer was scoped to; empty when the scope was `all`.
+  "workspace_id": string;
+  // Whether the answer covered the whole garden.
+  "all": boolean;
+  // How many seeds the scope holds. Equal to `seeds`'s length until the list
+  // hits its bound, and then the receipt that says a list ended early.
+  "total": int32;
+}
+
+model SeedShowMessage {
+  "cmd": "seed_show";
+  "seed_id": string;
+}
+
+model SeedShowResult {
+  "seed": Seed;
+  // The newest entries on the seed's trail, and how many it holds. Notes ride
+  // the read the tender already runs: a trail nobody is told to look at is the
+  // unread bulletin board this surface replaces. The list is bounded, so
+  // `total` is what makes the shortfall visible rather than silent.
+  "notes": SeedNote[];
+  "notes_total": int32;
+  // Every edge that touches this seed, in both directions. The seed's own
+  // `edges` carry only what it points at, and "what blocks me" is the half a
+  // tender actually needs.
+  "relations": SeedRelation[];
+}
+
+// One edge as it reads from one seed's point of view: `blocks` and `part-of`
+// outbound, `blocked-by` and `has-part` for the same edges seen from the other
+// end.
+model SeedRelation {
+  "label": string;
+  "seed_id": string;
+  "title": string;
+  "status": string;
+}
+
+// Link or unlink two seeds. Structure lives in edges rather than in ids, so
+// re-parenting a seed never renames it. The daemon refuses what cannot be a
+// relation — an edge onto a seed that is not planted, a second crown, a cycle —
+// naming both seeds and the edge to remove.
+model SeedLinkMessage {
+  "cmd": "seed_link";
+  "seed_id": string;
+  // blocks | part-of.
+  "kind": string;
+  // The seed at the other end: `<seed_id> blocks <to_seed_id>`.
+  "to_seed_id": string;
+  // Remove the edge instead of adding it.
+  "unlink"?: boolean;
+}
+
+model SeedLinkResult {
+  "seed": Seed;
+  // False when the edge was already exactly as asked, so nothing was written.
+  "changed": boolean;
+}
+
+// What can be tended right now. Scope is inferred: the calling session's
+// workspace unless `plot`, `workspace_id` or `all` says otherwise — the daemon
+// knows who is asking, so the common form takes no flags at all.
+model SeedReadyMessage {
+  "cmd": "seed_ready";
+  "source_session_id"?: string;
+  // A crown: the answer is that plot's seeds, crown included.
+  "plot"?: string;
+  "workspace_id"?: string;
+  "all"?: boolean;
+}
+
+model SeedReadyResult {
+  "seeds": Seed[];
+  // What the answer was scoped to: plot | workspace | all, and the id of the
+  // plot or workspace when there is one.
+  "scope": string;
+  "scope_id": string;
+}
+
+// One lifecycle move. The five verbs share a command because they are one state
+// machine: the daemon reads the seed, checks the move against the state it is
+// actually in, and refuses by name — the seed, its state, and the way out.
+model SeedTransitionMessage {
+  "cmd": "seed_transition";
+  "source_session_id"?: string;
+  "seed_id": string;
+  // tend | park | harvest | wither | replant.
+  "verb": string;
+  // Why it closed. Harvest requires one; wither may be wordless.
+  "reason"?: string;
+  // The crew member asking, recorded as the tender on a claim.
+  "member"?: string;
+}
+
+model SeedTransitionResult {
+  "seed": Seed;
+}
+
+// One entry on a seed's trail: what happened and what was learned, written for
+// whoever tends the seed next. A note is anchored to the work and routed to
+// nobody — directed messages are their own surface.
+model SeedNote {
+  "id": string;
+  "seed_id": string;
+  // note today; slice 4 adds handoff.
+  "kind": string;
+  "body": string;
+  "author_session": string;
+  "author_member": string;
+  "created_at": string;
+}
+
+model SeedNoteMessage {
+  "cmd": "seed_note";
+  "source_session_id"?: string;
+  "seed_id": string;
+  "body": string;
+  "member"?: string;
+}
+
+model SeedNoteResult {
+  "note": SeedNote;
+}
+
+// The whole trail, newest first — what `show`'s bounded list points at.
+model SeedNotesMessage {
+  "cmd": "seed_notes";
+  "seed_id": string;
+  "limit"?: int32;
+}
+
+model SeedNotesResult {
+  "notes": SeedNote[];
+  "total": int32;
+}
+
+// The whole garden, re-pushed whenever a seed changes. Clients filter by
+// workspace themselves: the panel's scope is a view, and a client that switches
+// workspaces must not have to ask the daemon again.
+model GardenSeedsUpdatedMessage {
+  event: "garden_seeds_updated";
+  seeds: Seed[];
+  // How many seeds the garden holds. Equal to `seeds`'s length until the
+  // garden outgrows one push, and then the receipt that says so.
+  total: int32;
+}
+
+// ============================================================================
+// App registry
+// ============================================================================
+//
+// An app is a manifest-declared automation running in attn's shared runtime: it
+// consumes facts from the durable bus as its own consumer `app:<name>`, keeps
+// state in the document namespace `app/<name>`, and is versioned by the content
+// hash of its built artifact. A plugin is the other thing entirely — an
+// integration with its own process — and the two never share a surface.
+//
+// Scaffolding an app is a local act with no daemon in it — `attn app new` writes
+// a directory. Building is the caller's too: it runs the developer's bun and the
+// TypeScript attn keeps under its data dir, and only the finished result crosses
+// this surface. What the daemon owns is the part that must be atomic and
+// observed — recording the version, moving the pointer, publishing the fact.
+
+// One app as `attn app list` shows it: the registry row, plus the consumer that
+// carries its enabled state. There is no enabled field on the app itself —
+// enabled IS the consumer's bit, and a second copy here would be a value that
+// can disagree with the one the bus actually reads.
+model AppSummary {
+  "name": string;
+  // The version this app currently runs. Absent when no version has been
+  // applied yet: a registry row can exist ahead of its first successful build.
+  "current_version"?: AppVersionInfo;
+  "created_at": string;
+  "updated_at": string;
+  // Absent when the app has no `app:<name>` consumer registered. That is a real
+  // state, not a gap in the answer: it means nothing is delivering facts to
+  // this app.
+  "consumer"?: AppConsumerInfo;
+}
+
+model AppVersionInfo {
+  "id": safeint;
+  // The content hash of the built artifact — the version's identity, which is
+  // why re-applying byte-identical content reports this same version.
+  "content_hash": string;
+  "artifact_path": string;
+  "created_at": string;
+}
+
+// The bus consumer behind an app. `enabled` is the app's enabled state, `lag` is
+// head minus cursor: how many facts the app has yet to be delivered.
+model AppConsumerInfo {
+  "name": string;
+  "enabled": boolean;
+  "cursor": safeint;
+  "lag": safeint;
+  "filter": string;
+}
+
+model AppListMessage {
+  "cmd": "app_list";
+}
+
+model AppListResult {
+  "apps": AppSummary[];
+}
+
+model AppStatusMessage {
+  "cmd": "app_status";
+  "name": string;
+}
+
+// What is known about one app, and only what is known: the registry row, the
+// consumer if there is one, the invocations recorded so far, and the shared
+// runtime's state. An app's status must not claim a health it cannot observe, so
+// every field the runtime owns is absent when there is no runtime.
+model AppStatusResult {
+  "app": AppSummary;
+  "versions": safeint;
+  "invocations": safeint;
+  // The most recent invocations, newest first, when any have been recorded.
+  "recent"?: AppInvocationInfo[];
+  // The shared runtime every app's handlers execute in. Absent until it has been
+  // started once — a daemon with quiet apps starts no sidecar, and reporting a
+  // "stopped" runtime that was never asked to run would read as a fault.
+  "runtime"?: AppRuntimeInfo;
+  // What this app is currently stuck on, when it is stuck. Present only while a
+  // handler is failing on the same event; a successful delivery clears it.
+  "stall"?: AppStallInfo;
+}
+
+// The shared app runtime as the supervisor sees it. One process for every app —
+// isolation between apps is failure attribution, not an OS boundary — so this
+// answer is the same whichever app's status asked for it.
+model AppRuntimeInfo {
+  // "starting" | "connected" | "backoff" | "stopped" | "parked". Parked is the
+  // one that needs acting on: it means attn gave up restarting and no app's
+  // handlers are running until `attn app runtime restart`.
+  "phase": string;
+  // "running" | "stopped" — what attn is trying to achieve, as opposed to where
+  // it currently is.
+  "desired": string;
+  "running": boolean;
+  "connected": boolean;
+  // Increments on every start. The supervisor fences stale processes by it, so a
+  // generation that keeps climbing is a crash loop in one number.
+  "generation": safeint;
+  "restart_attempt": int32;
+  // The connected runtime's process id. Absent when nothing is connected.
+  "pid"?: safeint;
+  "started_at"?: string;
+  "connected_at"?: string;
+  // When the next restart fires, while backing off.
+  "next_restart_at"?: string;
+  // When attn gave up restarting. Present only while parked, and it survives a
+  // daemon restart: a park has one timestamp for as long as it lasts, so a
+  // reader can tell a runtime that has been down since this morning from one
+  // that just crash-looped.
+  "parked_at"?: string;
+  // How the last process ended, rendered. Absent when it has never exited.
+  "last_exit"?: string;
+}
+
+// An app that has failed on the same event long enough to be on the clock.
+//
+// `disables_at` is the whole point of reporting this: an app stalled on one
+// event holds the durable log's retention floor open for every other consumer,
+// so attn disables it, and the reader is entitled to know when.
+model AppStallInfo {
+  "event_seq": safeint;
+  "event_name": string;
+  // When the app first failed on this event.
+  "since": string;
+  "attempts": int32;
+  "last_error": string;
+  "disables_at": string;
+}
+
+// The shared runtime's own surface, addressed as `runtime` rather than as an app
+// — which is why no app may be called that.
+model AppRuntimeStatusMessage {
+  "cmd": "app_runtime_status";
+}
+
+model AppRuntimeStatusResult {
+  // Absent when the runtime has never been started in this daemon.
+  "runtime"?: AppRuntimeInfo;
+  // How many apps are registered, and how many of those are enabled — the answer
+  // to "should anything be running at all".
+  "apps": safeint;
+  "apps_enabled": safeint;
+  // The binary that gets launched. Absent, with `host_error` set, when it cannot
+  // be found: a runtime that will never start must say so before it is asked to.
+  "host_path"?: string;
+  "host_error"?: string;
+  // Where the runtime's captured output lands. `attn app logs` reads it.
+  "log_path": string;
+}
+
+// Restart the shared runtime: kill the current process if there is one, and
+// start a fresh generation. It is also the way out of `parked` — a crash-looped
+// runtime is not retried until somebody asks.
+//
+// It takes no app name, deliberately. There is one runtime for every app, so
+// naming one would suggest a per-app restart that does not exist.
+model AppRuntimeRestartMessage {
+  "cmd": "app_runtime_restart";
+}
+
+model AppRuntimeRestartResult {
+  // The phase the runtime was in before the restart, so the answer says what
+  // actually changed — reviving a parked runtime and bouncing a healthy one are
+  // different acts with the same verb.
+  "was": string;
+  "runtime": AppRuntimeInfo;
+}
+
+// The shared runtime's captured stdout and stderr, filtered to one app.
+//
+// Every app's handlers print to the same process's output, so the runtime tags
+// each line with the app that wrote it and this reads the tag back. `runtime` as
+// the name means the whole log, untagged lines included — the runtime's own
+// output, which is where a startup failure appears.
+model AppLogsMessage {
+  "cmd": "app_logs";
+  "name": string;
+  // How many matching lines to return, newest last. 0 means the default.
+  "lines"?: int32;
+}
+
+model AppLogsResult {
+  "name": string;
+  "path": string;
+  // Matching lines in the order they were written, with the app tag removed.
+  "lines": string[];
+  // True when older matching lines were dropped to honour the limit.
+  "truncated": boolean;
+}
+
+// Stream an app's invocations as they are recorded. The connection stays open
+// and one result is written per invocation, which is what `attn app dev` renders
+// beside its apply results: an app author editing a handler sees the handler run.
+model AppWatchMessage {
+  "cmd": "app_watch";
+  "name": string;
+}
+
+model AppWatchResult {
+  "invocation": AppInvocationInfo;
+}
+
+model AppInvocationInfo {
+  "id": safeint;
+  // The version that actually ran, which is not necessarily the one the app
+  // points at now — a rollback does not rewrite what happened.
+  "version_id": safeint;
+  "event_seq": safeint;
+  "event_name": string;
+  "event_subject": string;
+  "handler": string;
+  "status": string;
+  "error": string;
+  "duration_ms": safeint;
+  "started_at": string;
+}
+
+// Flip an app's enabled state, which is its bus consumer's enabled bit and
+// nothing else. Refused when the app has no consumer: there is no state to flip,
+// and inventing one would leave the app looking enabled while nothing delivers
+// to it.
+model AppSetEnabledMessage {
+  "cmd": "app_set_enabled";
+  "name": string;
+  "enabled": boolean;
+}
+
+model AppSetEnabledResult {
+  "name": string;
+  "consumer": string;
+  "enabled": boolean;
+}
+
+// Uninstall an app: stop and delete its bus consumer, then delete its registry
+// row. What survives is deliberate — version history, the invocation log, and
+// every document under `app/<name>`. The result counts them so the answer says
+// what was kept rather than leaving the caller to guess.
+model AppRemoveMessage {
+  "cmd": "app_remove";
+  "name": string;
+}
+
+model AppRemoveResult {
+  "name": string;
+  "consumer_removed": boolean;
+  "versions_kept": safeint;
+  "invocations_kept": safeint;
+  "namespace_kept": string;
+}
+
+// Record a built version and point the app at it — the whole of what an apply
+// changes, in one transaction.
+//
+// The caller has already parsed the manifest, regenerated the derived types,
+// typechecked, bundled and placed the artifact in the content-addressed store;
+// everything that could be refused has been. The daemon does not take that on
+// trust: it re-derives the hash from the declaration and the bytes on disk
+// before recording anything, so a version row never names content that is not
+// what it says it is.
+model AppApplyMessage {
+  "cmd": "app_apply";
+  "name": string;
+  // The version's identity: the frozen declaration and the built bundle hashed
+  // together. The bundle alone would be wrong — generated types are erased at
+  // build time, so a manifest edit can leave the bundle byte-identical while
+  // changing what the app declares.
+  "content_hash": string;
+  // The manifest's snapshot as JSON, frozen onto the version row so what an old
+  // version declared survives editing the file.
+  "declaration": string;
+  // Where it was built from. Logged, never stored: attn does not remember where
+  // an app's source lives.
+  "source_path"?: string;
+}
+
+model AppApplyResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  // False when this exact content was already a version of this app. Applying
+  // byte-identical content mints no row — the hash is the version's identity —
+  // so the pointer simply lands back on the version that already was.
+  "version_created": boolean;
+  // What the app pointed at before this apply. Absent when it pointed at
+  // nothing, which is every app's first apply.
+  "previous_version_id"?: safeint;
+}
+
+// Move an app onto a version it already has. Rollback builds nothing: a version
+// is an immutable row and an artifact that is still on disk, so going back is a
+// pointer move and nothing else.
+model AppRollbackMessage {
+  "cmd": "app_rollback";
+  "name": string;
+  // Absent means the version applied before the current one.
+  "version_id"?: safeint;
+}
+
+model AppRollbackResult {
+  "name": string;
+  "version_id": safeint;
+  "content_hash": string;
+  "artifact_path": string;
+  "previous_version_id"?: safeint;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -4242,6 +4825,14 @@ model Response {
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
+  seed_plant_result?: SeedPlantResult;
+  seed_list_result?: SeedListResult;
+  seed_show_result?: SeedShowResult;
+  seed_transition_result?: SeedTransitionResult;
+  seed_note_result?: SeedNoteResult;
+  seed_notes_result?: SeedNotesResult;
+  seed_link_result?: SeedLinkResult;
+  seed_ready_result?: SeedReadyResult;
   doc_define_result?: DocDefineResult;
   doc_undefine_result?: DocUndefineResult;
   doc_collections_result?: DocCollectionsResult;
@@ -4251,6 +4842,16 @@ model Response {
   doc_query_result?: DocQueryResult;
   doc_count_result?: DocCountResult;
   doc_subscribe_result?: DocSubscribeResult;
+  app_list_result?: AppListResult;
+  app_status_result?: AppStatusResult;
+  app_set_enabled_result?: AppSetEnabledResult;
+  app_remove_result?: AppRemoveResult;
+  app_apply_result?: AppApplyResult;
+  app_rollback_result?: AppRollbackResult;
+  app_logs_result?: AppLogsResult;
+  app_runtime_status_result?: AppRuntimeStatusResult;
+  app_runtime_restart_result?: AppRuntimeRestartResult;
+  app_watch_result?: AppWatchResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an
@@ -4910,6 +5511,8 @@ model WebSocketEvent {
   workspace_context_result?: WorkspaceContextResult;
   ticket?: Ticket;
   tickets?: TicketRow[];
+  seeds?: Seed[];
+  total?: int32;
   workspace_contexts?: WorkspaceContext[];
 }
 
@@ -4932,6 +5535,7 @@ alias DaemonEvent =
   | ChiefOfStaffResultMessage
   | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
+  | GardenSeedsUpdatedMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage
