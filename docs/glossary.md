@@ -412,7 +412,10 @@ capture that costs ceremony does not happen.
 
 A **plot** is a seed with children plus the intent to execute them — the whole
 subtree, not just the parent. A plot has no id of its own: its root seed, the
-**crown**, is how it is addressed. A **packet** is a plot flagged as a template
+**crown**, is how it is addressed. Picture a garden bed with a labeled plant
+at its head: the bed is the plot, the head plant is the crown, and its label —
+the crown's body — says what the bed grows. You never point at the bed; you
+point at the labeled plant. A **packet** is a plot flagged as a template
 with declared variables, so a proven shape can be planted again with its blanks
 filled.
 
@@ -442,8 +445,10 @@ is created, naming both seeds and the edge to remove.
 blocks, nobody holds, and nothing is part of — a crown's work is its children,
 not the crown. It is computed when asked and never stored, so harvesting a
 blocker frees its dependent at the next call, with nobody clearing anything.
-`attn seed ready` scopes to the calling session's workspace unless told
-otherwise, and every attn-launched agent starts knowing its workspace's count.
+`attn seed ready` answers for the whole garden unless told otherwise — a
+delegation dispatched at a crown is the exception, scoped to its plot — and
+every attn-launched agent starts knowing the garden's count (ruled 2026-08-13;
+slice 5 repoints the shipped workspace scoping).
 
 "Nobody holds it" is one rule, shared by `ready` and by the claim `tend` makes,
 so a seed offered by one is accepted by the other. A tender whose session the
