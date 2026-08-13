@@ -5498,6 +5498,9 @@ type SeedNoteMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
+	// Kind corresponds to the JSON schema field "kind".
+	Kind *string `json:"kind,omitempty,omitzero"`
+
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
 
@@ -5608,6 +5611,9 @@ type SeedShowMessage struct {
 }
 
 type SeedShowResult struct {
+	// Handoff corresponds to the JSON schema field "handoff".
+	Handoff *SeedNote `json:"handoff,omitempty,omitzero"`
+
 	// Notes corresponds to the JSON schema field "notes".
 	Notes []SeedNote `json:"notes"`
 
@@ -5642,6 +5648,9 @@ type SeedTransitionMessage struct {
 }
 
 type SeedTransitionResult struct {
+	// Handoff corresponds to the JSON schema field "handoff".
+	Handoff *SeedNote `json:"handoff,omitempty,omitzero"`
+
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
 }

@@ -564,6 +564,7 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 			Notes:      notes,
 			NotesTotal: total,
 			Relations:  gardenRelations(read, seed.ID),
+			Handoff:    d.gardenHandoff(seed.ID),
 		},
 	})
 }
@@ -799,10 +800,13 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 		d.sendGardenError(conn, string(verb), err)
 		return
 	}
-	d.sendGardenResponse(conn, protocol.Response{
-		Ok:                   true,
-		SeedTransitionResult: &protocol.SeedTransitionResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])},
-	})
+	result := &protocol.SeedTransitionResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])}
+	// Tending is the pickup, so it is the move that primes: whoever just claimed
+	// the seed reads what the last tender wrote to them before doing any work.
+	if verb == garden.VerbTend {
+		result.Handoff = d.gardenHandoff(seed.ID)
+	}
+	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedTransitionResult: result})
 }
 
 // applySeedTransition is the atomic claim, and the same read-decide-write for
@@ -830,7 +834,7 @@ func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.T
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}
-		next, err := garden.Transition(seed, verb, actor, reason)
+		next, err := garden.Transition(seed, verb, actor, reason, d.sessionExists)
 		if err != nil {
 			return garden.Seed{}, docstore.Document{}, err
 		}
@@ -867,6 +871,11 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
+	kind, err := garden.ParseNoteKind(protocol.Deref(msg.Kind))
+	if err != nil {
+		d.sendGardenError(conn, "note", err)
+		return
+	}
 	// A note on a seed that is not planted is refused by name rather than
 	// written into a trail nobody will ever read.
 	seed, _, err := d.readSeed(msg.SeedID)
@@ -881,7 +890,7 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 	}
 	note := garden.Note{
 		Seed:          seed.ID,
-		Kind:          garden.NoteKindNote,
+		Kind:          kind,
 		Body:          msg.Body,
 		AuthorSession: strings.TrimSpace(protocol.Deref(msg.SourceSessionID)),
 		AuthorMember:  strings.TrimSpace(protocol.Deref(msg.Member)),
@@ -1007,6 +1016,55 @@ func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, 
 		total = counted.Count
 	}
 	return notes, total, nil
+}
+
+// freshestHandoff reads the one handoff a tender must see: the newest note of
+// kind `handoff` on this seed. It is its own query rather than a scan of the
+// notes `show` already read, because a handoff older than the newest few trail
+// entries is exactly the one that would fall out of that window — and a
+// continuity surface that goes quiet once the trail gets busy is worse than
+// none.
+//
+// A read failure is not a refusal. The caller is claiming or reading a seed;
+// losing the handoff is worth a log line, never a failed tend.
+func (d *Daemon) freshestHandoff(seedID string) (*protocol.SeedNote, error) {
+	if d.store == nil {
+		return nil, errors.New("no database")
+	}
+	read, _, err := d.runDocQuery(docstore.Query{
+		Namespace:  garden.Namespace,
+		Collection: garden.CollectionNotes,
+		Filters: []docstore.Filter{
+			{Field: "seed", Op: docstore.OpEq, Value: seedID},
+			{Field: "kind", Op: docstore.OpEq, Value: garden.NoteKindHandoff},
+		},
+		Sort:  &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+		Limit: 1,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if len(read.Documents) == 0 {
+		return nil, nil
+	}
+	doc := read.Documents[0]
+	note, err := garden.DecodeNote(doc.Body)
+	if err != nil {
+		return nil, fmt.Errorf("note %s has an unreadable body: %w", doc.ID, err)
+	}
+	wire := noteToProtocol(note, doc)
+	return &wire, nil
+}
+
+// gardenHandoff is freshestHandoff for the two surfaces that render it, with the
+// logging their contract wants: they answer with the seed either way.
+func (d *Daemon) gardenHandoff(seedID string) *protocol.SeedNote {
+	handoff, err := d.freshestHandoff(seedID)
+	if err != nil {
+		d.logf("garden: reading the freshest handoff on %s: %v", seedID, err)
+		return nil
+	}
+	return handoff
 }
 
 func noteToProtocol(note garden.Note, doc docstore.Document) protocol.SeedNote {

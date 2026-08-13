@@ -91,14 +91,18 @@ func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) 
 	return resp.SeedTransitionResult, nil
 }
 
-// SeedNote appends one entry to a seed's trail.
-func (c *Client) SeedNote(sessionID, seedID, body, member string) (*protocol.SeedNoteResult, error) {
+// SeedNote appends one entry to a seed's trail. An empty kind is the plain
+// entry; `handoff` writes it to whoever tends the seed next.
+func (c *Client) SeedNote(sessionID, seedID, body, member, kind string) (*protocol.SeedNoteResult, error) {
 	msg := protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seedID, Body: body}
 	if sessionID != "" {
 		msg.SourceSessionID = protocol.Ptr(sessionID)
 	}
 	if member != "" {
 		msg.Member = protocol.Ptr(member)
+	}
+	if kind != "" {
+		msg.Kind = protocol.Ptr(kind)
 	}
 	resp, err := c.send(msg)
 	if err != nil {

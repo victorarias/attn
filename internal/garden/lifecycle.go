@@ -69,6 +69,29 @@ func (t Tender) Is(other Tender) bool {
 	return mine == theirs && strings.TrimSpace(t.Member) == strings.TrimSpace(other.Member)
 }
 
+// Holds reports whether this tender still holds its seed, given a way to ask
+// whether a session is one the daemon still knows.
+//
+// It is the one rule `ready` and `tend` both read. They used to decide
+// separately, and a seed whose tender's session had ended was offered by
+// `ready` and then refused by `tend` naming a session that no longer exists —
+// an answer nobody can act on.
+//
+// A tender that names only a crew member always holds: attn has no signal that
+// a person in a terminal pane walked away, and handing their seed to somebody
+// else on a guess is worse than leaving it claimed. A tender with a session
+// holds while the daemon still knows it, `recoverable` included — revive brings
+// that session back to the seed it was tending.
+func (t Tender) Holds(sessionLive func(sessionID string) bool) bool {
+	if !t.Named() {
+		return false
+	}
+	if session := strings.TrimSpace(t.Session); session != "" {
+		return sessionLive(session)
+	}
+	return true
+}
+
 // move is one verb's rule: which states it accepts, where it lands, and what it
 // does to the tender.
 type move struct {
@@ -150,7 +173,11 @@ func ParseVerb(raw string) (Verb, error) {
 // abandoning — and a seed whose tender walked away must stay reachable by
 // somebody; guarding those too would make an ended session a one-way door with
 // no key, which is worse than a rude harvest that the trail records anyway.
-func Transition(seed Seed, verb Verb, actor Tender, reason string) (Seed, error) {
+//
+// sessionLive is how the claim asks whether the tender is still around, and it
+// is the same predicate `ready` reads: a seed `ready` offers must be one `tend`
+// accepts.
+func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive func(sessionID string) bool) (Seed, error) {
 	rule, ok := moves[verb]
 	if !ok {
 		return Seed{}, fmt.Errorf("%q is not something a seed does", verb)
@@ -165,7 +192,7 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string) (Seed, error)
 			return Seed{}, fmt.Errorf(
 				"tending %s records who holds it and this call named nobody; run it from an attn session, or pass --member <name>", seed.ID)
 		}
-		if held := seed.Tender(); held.Named() && !held.Is(actor) {
+		if held := seed.Tender(); held.Holds(sessionLive) && !held.Is(actor) {
 			return Seed{}, fmt.Errorf(
 				"%s is being tended by %s, and a seed has one tender at a time.\n"+
 					"Wait for %s to harvest or park it, or say what you need on the trail: attn seed note %s -m \"…\"",
@@ -243,17 +270,40 @@ func refuseState(seed Seed, verb Verb, rule move) error {
 type Note struct {
 	ID   string `json:"id"`
 	Seed string `json:"seed"`
-	// Kind is `note` today; slice 4 adds `handoff`, addressed to the next tender.
+	// Kind is `note` or `handoff`; the notes collection indexes it, which is what
+	// makes "the freshest handoff on this seed" one query.
 	Kind          string `json:"kind"`
 	Body          string `json:"body"`
 	AuthorSession string `json:"author_session"`
 	AuthorMember  string `json:"author_member"`
 }
 
-// NoteKindNote is the plain trail entry. Declared as a constant rather than
-// written as a literal because the notes collection indexes `kind`, and slice
-// 4's handoff is a filter over it.
-const NoteKindNote = "note"
+// The kinds a note may carry. A plain note is the seed's memory of itself; a
+// handoff is written to whoever tends the seed next, which is why `show` and
+// `tend` put the freshest one in front of them instead of leaving it in the
+// trail to be scrolled past.
+const (
+	NoteKindNote    = "note"
+	NoteKindHandoff = "handoff"
+)
+
+// NoteKinds is every kind, in the order they are offered to a caller that named
+// one that is not a kind.
+var NoteKinds = []string{NoteKindNote, NoteKindHandoff}
+
+// ParseNoteKind reads a wire kind, naming the whole set when it is not one. An
+// empty kind is the plain trail entry: a caller that never heard of kinds writes
+// a note, which is what `attn seed note` has always done.
+func ParseNoteKind(raw string) (string, error) {
+	kind := strings.TrimSpace(strings.ToLower(raw))
+	if kind == "" {
+		return NoteKindNote, nil
+	}
+	if slices.Contains(NoteKinds, kind) {
+		return kind, nil
+	}
+	return "", fmt.Errorf("%q is not a kind of note; the kinds are %s", raw, strings.Join(NoteKinds, ", "))
+}
 
 // Note limits.
 //

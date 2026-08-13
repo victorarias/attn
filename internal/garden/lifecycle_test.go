@@ -12,6 +12,14 @@ const (
 	other = "sess-you"
 )
 
+// alive is a daemon that still knows every session. Most of these cases are
+// about the state machine, not about who walked away; the cases that are name
+// their own predicate.
+func alive(string) bool { return true }
+
+// gone is a daemon that knows no session at all.
+func gone(string) bool { return false }
+
 func seedIn(status string, tender Tender) Seed {
 	return Seed{
 		ID: "s-7k3f9m", Title: "a seed", Status: status,
@@ -84,7 +92,7 @@ func TestTransitionMatrix(t *testing.T) {
 			if tc.verb == VerbHarvest || tc.verb == VerbWither {
 				reason = "because"
 			}
-			next, err := Transition(tc.seed, tc.verb, mine, reason)
+			next, err := Transition(tc.seed, tc.verb, mine, reason, alive)
 			// A move never edits the seed it was handed: the daemon writes the
 			// result against the revision it read, and a mutated input would make
 			// a refused move leave a changed seed behind.
@@ -126,7 +134,7 @@ func TestTransitionMatrix(t *testing.T) {
 func TestTransitionMovesTheTender(t *testing.T) {
 	actor := Tender{Session: me, Member: "trellis"}
 
-	claimed, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, actor, "")
+	claimed, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, actor, "", alive)
 	if err != nil {
 		t.Fatalf("tend: %v", err)
 	}
@@ -138,7 +146,7 @@ func TestTransitionMovesTheTender(t *testing.T) {
 		verb   Verb
 		reason string
 	}{{VerbPark, ""}, {VerbHarvest, "done"}, {VerbWither, "done"}} {
-		released, err := Transition(claimed, tc.verb, actor, tc.reason)
+		released, err := Transition(claimed, tc.verb, actor, tc.reason, alive)
 		if err != nil {
 			t.Fatalf("%s: %v", tc.verb, err)
 		}
@@ -158,7 +166,7 @@ func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
 		if verb == VerbReplant {
 			from = StatusHarvested
 		}
-		_, err := Transition(seedIn(from, Tender{}), verb, actor, "some words")
+		_, err := Transition(seedIn(from, Tender{}), verb, actor, "some words", alive)
 		if err == nil {
 			t.Fatalf("%s swallowed a reason instead of refusing it", verb)
 		}
@@ -175,14 +183,14 @@ func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
 // seed is open.
 func TestReplantClearsTheClosingReason(t *testing.T) {
 	actor := Tender{Session: me}
-	harvested, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, actor, "shipped it")
+	harvested, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, actor, "shipped it", alive)
 	if err != nil {
 		t.Fatalf("harvest: %v", err)
 	}
 	if harvested.Reason != "shipped it" {
 		t.Fatalf("harvest did not record the reason: %+v", harvested)
 	}
-	replanted, err := Transition(harvested, VerbReplant, actor, "")
+	replanted, err := Transition(harvested, VerbReplant, actor, "", alive)
 	if err != nil {
 		t.Fatalf("replant: %v", err)
 	}
@@ -195,7 +203,7 @@ func TestReplantClearsTheClosingReason(t *testing.T) {
 // which seed, who holds it, and what to do instead.
 func TestTendRefusalNamesTheTenderAndTheWayForward(t *testing.T) {
 	held := seedIn(StatusGrowing, Tender{Session: other, Member: "alder"})
-	_, err := Transition(held, VerbTend, Tender{Session: me, Member: "trellis"}, "")
+	_, err := Transition(held, VerbTend, Tender{Session: me, Member: "trellis"}, "", alive)
 	if err == nil {
 		t.Fatal("a second session was allowed to take a live claim")
 	}
@@ -217,14 +225,14 @@ func TestTendRefusalNamesTheTenderAndTheWayForward(t *testing.T) {
 func TestTendRefusesAnotherMemberWhenNeitherCarriesASession(t *testing.T) {
 	held := Seed{ID: "s-abc123", Status: StatusGrowing, TenderMember: "trellis"}
 
-	if _, err := Transition(held, VerbTend, Tender{Member: "alder"}, ""); err == nil {
+	if _, err := Transition(held, VerbTend, Tender{Member: "alder"}, "", alive); err == nil {
 		t.Fatal("a different member took a live claim; the seed has one tender at a time")
 	} else if !strings.Contains(err.Error(), "trellis") {
 		t.Fatalf("refusal does not name who holds it: %v", err)
 	}
 
 	// The same name is the same person picking their own work back up.
-	if _, err := Transition(held, VerbTend, Tender{Member: "trellis"}, ""); err != nil {
+	if _, err := Transition(held, VerbTend, Tender{Member: "trellis"}, "", alive); err != nil {
 		t.Fatalf("trellis was refused their own claim: %v", err)
 	}
 }
@@ -234,40 +242,72 @@ func TestTendRefusesAnotherMemberWhenNeitherCarriesASession(t *testing.T) {
 func TestTendIdentifiesASessionByItsIDNotItsLabel(t *testing.T) {
 	held := Seed{ID: "s-abc123", Status: StatusGrowing, TenderSession: "sess-a", TenderMember: "trellis"}
 
-	if _, err := Transition(held, VerbTend, Tender{Session: "sess-a", Member: "keel"}, ""); err != nil {
+	if _, err := Transition(held, VerbTend, Tender{Session: "sess-a", Member: "keel"}, "", alive); err != nil {
 		t.Fatalf("the holding session was refused its own claim: %v", err)
 	}
 	// And a session arriving at a claim nobody attached a session to is somebody
 	// else, whatever it calls itself.
 	memberOnly := Seed{ID: "s-abc123", Status: StatusGrowing, TenderMember: "trellis"}
-	if _, err := Transition(memberOnly, VerbTend, Tender{Session: "sess-a", Member: "trellis"}, ""); err == nil {
+	if _, err := Transition(memberOnly, VerbTend, Tender{Session: "sess-a", Member: "trellis"}, "", alive); err == nil {
 		t.Fatal("a session took a claim held with no session id")
+	}
+}
+
+// `ready` and `tend` read one rule, so a seed offered by one is accepted by the
+// other. They used to decide separately: a tender whose session had ended
+// released the seed into `ready` and then refused the claim, naming a session
+// that no longer exists — an answer nobody can act on, and the wall the
+// handoff flow hits, since leaving a handoff and ending is exactly what a
+// successor picks up from.
+func TestTendReleasesASeedWhoseTenderSessionIsGone(t *testing.T) {
+	held := seedIn(StatusGrowing, Tender{Session: other, Member: "alder"})
+
+	if got := held.Tender().Holds(gone); got {
+		t.Fatal("a tender whose session the daemon no longer knows still holds its seed")
+	}
+	claimed, err := Transition(held, VerbTend, Tender{Session: me, Member: "trellis"}, "", gone)
+	if err != nil {
+		t.Fatalf("a successor was refused a seed whose tender's session ended: %v", err)
+	}
+	if claimed.TenderSession != me || claimed.TenderMember != "trellis" {
+		t.Fatalf("the claim did not move to the successor: %+v", claimed)
+	}
+
+	// A tender that names only a member always holds: attn has no signal that a
+	// person in a terminal pane walked away, so an ended-session rule must not
+	// reach them.
+	pane := Seed{ID: "s-abc123", Status: StatusGrowing, TenderMember: "trellis"}
+	if !pane.Tender().Holds(gone) {
+		t.Fatal("a member-only tender was released by a session rule that cannot see them")
+	}
+	if _, err := Transition(pane, VerbTend, Tender{Member: "alder"}, "", gone); err == nil {
+		t.Fatal("a member-only claim was taken because no session was alive")
 	}
 }
 
 func TestTendRefusalFallsBackToTheSessionID(t *testing.T) {
 	held := seedIn(StatusGrowing, Tender{Session: other})
-	_, err := Transition(held, VerbTend, Tender{Session: me}, "")
+	_, err := Transition(held, VerbTend, Tender{Session: me}, "", alive)
 	if err == nil || !strings.Contains(err.Error(), other) {
 		t.Fatalf("a member-less tender did not hold the claim by name: %v", err)
 	}
 }
 
 func TestTendNeedsSomebodyToRecord(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, Tender{}, "")
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbTend, Tender{}, "", alive)
 	if err == nil || !strings.Contains(err.Error(), "--member") {
 		t.Fatalf("a tend that names nobody was accepted or refused unhelpfully: %v", err)
 	}
 }
 
 func TestHarvestNeedsAReason(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, "  ")
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, "  ", alive)
 	if err == nil || !strings.Contains(err.Error(), "-m") {
 		t.Fatalf("a wordless harvest was accepted or refused unhelpfully: %v", err)
 	}
 	// Withering may be wordless: often there is nothing to say beyond "nobody
 	// will pick this up".
-	withered, err := Transition(seedIn(StatusPlanted, Tender{}), VerbWither, Tender{Session: me}, "")
+	withered, err := Transition(seedIn(StatusPlanted, Tender{}), VerbWither, Tender{Session: me}, "", alive)
 	if err != nil {
 		t.Fatalf("a wordless wither was refused: %v", err)
 	}
@@ -277,7 +317,7 @@ func TestHarvestNeedsAReason(t *testing.T) {
 }
 
 func TestReasonLimitNamesItselfAndPointsAtTheTrail(t *testing.T) {
-	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, strings.Repeat("x", MaxReasonChars+1))
+	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, strings.Repeat("x", MaxReasonChars+1), alive)
 	if err == nil {
 		t.Fatal("an oversized reason was accepted")
 	}
@@ -326,6 +366,31 @@ func TestValidateNote(t *testing.T) {
 	}
 	if err := ValidateNote("what happened"); err != nil {
 		t.Fatalf("a real note was refused: %v", err)
+	}
+}
+
+func TestParseNoteKindNamesTheWholeSet(t *testing.T) {
+	// An unnamed kind is the plain trail entry: `attn seed note` wrote one
+	// before kinds existed and must keep writing one.
+	if got, err := ParseNoteKind(""); err != nil || got != NoteKindNote {
+		t.Fatalf("ParseNoteKind(\"\") = %q, %v; want the plain note", got, err)
+	}
+	for _, kind := range NoteKinds {
+		if got, err := ParseNoteKind(kind); err != nil || got != kind {
+			t.Fatalf("ParseNoteKind(%q) = %q, %v", kind, got, err)
+		}
+	}
+	if got, err := ParseNoteKind(" HANDOFF "); err != nil || got != NoteKindHandoff {
+		t.Fatalf("a kind is read case- and space-insensitively: %q, %v", got, err)
+	}
+	_, err := ParseNoteKind("farewell")
+	if err == nil {
+		t.Fatal("an unknown note kind was accepted")
+	}
+	for _, kind := range NoteKinds {
+		if !strings.Contains(err.Error(), kind) {
+			t.Fatalf("the refusal does not offer %q: %s", kind, err)
+		}
 	}
 }
 

@@ -1,0 +1,17 @@
+kind: added
+area: cli
+change: >
+  A seed can now be handed over. `attn seed note <id> -m "…" --handoff` writes
+  a note to whoever tends that seed next, and it is put in front of them
+  instead of being left in the trail to be found: `attn seed show` renders the
+  freshest handoff above the seed, and `attn seed tend` prints it the moment
+  the claim lands. So a session that leaves a handoff and ends primes the next
+  one before it does any work — a handoff written months and a hundred notes
+  ago still surfaces, because it is looked up rather than scanned for. A seed
+  whose tender's session has ended can now be tended by somebody else: it was
+  already listed by `attn seed ready`, and the claim used to refuse it, naming
+  a session that no longer exists. A tender who gave only `--member` still
+  holds their seed — attn has no way to know a person walked away from a
+  terminal. `attn seed tend|park|harvest|wither|replant --json` now answer with
+  the whole result rather than the seed alone, which is what carries the
+  handoff.
