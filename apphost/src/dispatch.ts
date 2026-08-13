@@ -55,6 +55,28 @@ type Handler = (event: DispatchParams["event"], ctx: unknown) => unknown
  */
 const modules = new Map<string, Promise<Record<string, Handler>>>()
 
+/**
+ * Which app each loaded bundle belongs to. It is how an error that escaped every
+ * handler is traced back to whose code it came from: a rejection can surface long
+ * after the dispatch that started it returned, so "which app is running" names an
+ * innocent, while the stack still carries the content-addressed bundle path.
+ */
+const appByArtifact = new Map<string, string>()
+
+/**
+ * The app whose bundle appears in this stack, if any.
+ *
+ * Empty when nothing matches — a rejection from the host's own code, or a reason
+ * that is not an Error and carries no stack at all. Nothing is charged then;
+ * guessing is worse than not knowing.
+ */
+export function appForStack(stack: string): string {
+  for (const [artifact, app] of appByArtifact) {
+    if (stack.includes(artifact)) return app
+  }
+  return ""
+}
+
 async function loadHandlers(artifact: string): Promise<Record<string, Handler>> {
   let pending = modules.get(artifact)
   if (!pending) {
@@ -116,6 +138,8 @@ export async function runDispatch(
   conn: RpcConnection,
   params: DispatchParams,
 ): Promise<DispatchResult> {
+  appByArtifact.set(params.artifact, params.app)
+
   let handlers: Record<string, Handler>
   try {
     handlers = await loadHandlers(params.artifact)
@@ -142,11 +166,24 @@ export async function runDispatch(
     version: params.version_id,
     collections: collectionsFor(conn, params.dispatch, params.collections),
   }
+  // Announced before the call, because a handler that never yields would keep any
+  // later announcement from ever being written. This is the daemon's only witness
+  // of which handler is on the event loop, and it needs it exactly when this
+  // process has stopped answering everything else.
+  //
+  // Both halves matter. Without the second, an entry outlives the handler and
+  // names it for a freeze it is no longer part of; the daemon would have to guess
+  // when a handler left, and the only signal it could guess from — the loop still
+  // turning — says nothing about a handler that yielded and never settled.
+  const scope = { dispatch: params.dispatch, app: params.app }
+  conn.notify("app_runtime.entered", scope)
   try {
     await handler(params.event, ctx)
     return { ok: true }
   } catch (err) {
     return { ok: false, error: describeFailure(err) }
+  } finally {
+    conn.notify("app_runtime.left", scope)
   }
 }
 

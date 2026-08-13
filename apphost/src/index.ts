@@ -3,9 +3,10 @@
 // One supervised Bun process runs the handlers of every installed app. It is not
 // a sandbox and does not pretend to be one: isolation between apps is failure
 // attribution, not an OS boundary. What it owes the daemon is an honest answer
-// per dispatch — this app's handler threw, or it did not — because a whole-process
-// death cannot name a culprit and must never be charged to whichever app happened
-// to be running.
+// per dispatch — this app's handler threw, or it did not — and, when an error
+// escapes every handler and takes the process down with it, the name of the app
+// whose code it came from. Never whichever app happened to be running: see
+// installCrashReporter.
 //
 // It ships as a `bun build --compile` standalone binary. The Bun runtime is inside
 // the executable, so a daemon launched by the macOS app needs no PATH resolution
@@ -16,14 +17,14 @@
 
 import { AsyncLocalStorage } from "node:async_hooks"
 import { RpcConnection, RPC_METHOD_NOT_FOUND, describe, type RpcRequest } from "./rpc.ts"
-import { runDispatch, type DispatchParams } from "./dispatch.ts"
+import { appForStack, runDispatch, type DispatchParams } from "./dispatch.ts"
 
 /**
  * The runtime contract this host speaks. The daemon refuses a host that does not
  * match, because a version skew between the daemon and a binary inside an old app
  * bundle is exactly the case a silent mismatch would turn into wrong behavior.
  */
-const APP_RUNTIME_API_VERSION = 1
+const APP_RUNTIME_API_VERSION = 2
 
 /**
  * Which app a line of output came from.
@@ -68,6 +69,60 @@ function render(value: unknown): string {
   } catch {
     return String(value)
   }
+}
+
+/**
+ * How long the daemon gets to acknowledge a crash report before the process
+ * exits anyway.
+ *
+ * A tripwire past a localhost round trip on a socket that is already open and
+ * whose peer answers this method with a constant. The same shape measured on a
+ * live daemon — its liveness ping — costs 344–416µs, so a second is ~2,500× the
+ * real cost and only a daemon that is itself in trouble reaches it. The wait is
+ * bounded because the exit must not be conditional on the daemon: an unreported
+ * crash costs the culprit a strike, a hung exit costs every app the runtime.
+ */
+const CRASH_REPORT_WAIT_MS = 1000
+
+/**
+ * Reports the app whose code took the process down, then exits.
+ *
+ * A rejection nobody handled kills the sidecar for every app, so the app that
+ * caused it is precisely the one the auto-disable rule exists to stop — and
+ * until this existed it was the one thing structurally exempt from it, because a
+ * dead process was charged to nobody.
+ *
+ * The stack is the only honest witness. Bun offers no other: async_hooks
+ * createHook fires no callbacks at all here, and AsyncLocalStorage.getStore() is
+ * undefined inside these handlers, both measured. It is also the *right* witness
+ * — a floating promise rejects long after the dispatch that started it returned,
+ * so "which app is running" routinely names an innocent, while the bundle path
+ * in the stack names the author.
+ *
+ * Nothing before the daemon connection is covered, and nothing needs to be: no
+ * app code has loaded yet, so a crash there is a startup failure the supervisor
+ * already owns.
+ */
+function installCrashReporter(connection: RpcConnection): void {
+  let crashing = false
+  const crash = (kind: string, reason: unknown): void => {
+    // A second crash while reporting the first must not restart the wait.
+    if (crashing) return
+    crashing = true
+
+    const error = render(reason)
+    const app = appForStack(error)
+    process.stderr.write(
+      `${tag(app || undefined)}unhandled ${kind}${app ? ` in app ${app}` : ""}, stopping the app runtime: ${error}\n`,
+    )
+
+    const reported = connection.call("app_runtime.crashed", { app, kind, error }).catch(() => {})
+    const bounded = new Promise((resolve) => setTimeout(resolve, CRASH_REPORT_WAIT_MS))
+    void Promise.race([reported, bounded]).then(() => process.exit(1))
+  }
+
+  process.on("unhandledRejection", (reason) => crash("unhandledRejection", reason))
+  process.on("uncaughtException", (err) => crash("uncaughtException", err))
 }
 
 /** Says why the process cannot start, then stops. The supervisor restarts it. */
@@ -133,6 +188,8 @@ async function main(): Promise<void> {
   } catch (err) {
     fatal(`the daemon refused this app runtime: ${describe(err)}`)
   }
+
+  installCrashReporter(connection)
 
   console.log(`app runtime ready (generation ${generation}, pid ${process.pid})`)
 

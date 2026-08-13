@@ -1,0 +1,14 @@
+kind: fixed
+area: apps
+change: >
+  `attn app status <name>` now lists the app's recent version ids, marking the
+  one currently serving. `attn app rollback` takes one of those ids and its
+  refusals name them, but nothing had ever printed the list — status showed only
+  how many versions existed, so a wrong id sent you to a command that could not
+  answer. The newest ten are shown; the count beside them still says how many
+  there are in total. The runtime line no longer claims nobody has needed the
+  runtime yet when the truth is that it could not be started at all — it now
+  points at `attn app runtime status`, which is where that difference lives.
+symptom: >
+  `attn app rollback <name> <id>` told you to run `attn app status` to find the
+  version ids, and `attn app status` never showed them.

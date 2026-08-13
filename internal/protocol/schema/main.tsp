@@ -4536,6 +4536,11 @@ model AppStatusResult {
   "app": AppSummary;
   "versions": safeint;
   "invocations": safeint;
+  // The most recent versions, newest first, capped — "versions" above says how
+  // many exist. Rollback names ids in its refusals and there is nowhere else to
+  // read them, so a status that carried only a count sent the reader looking for
+  // a list that does not exist.
+  "recent_versions"?: AppVersionInfo[];
   // The most recent invocations, newest first, when any have been recorded.
   "recent"?: AppInvocationInfo[];
   // The shared runtime every app's handlers execute in. Absent until it has been

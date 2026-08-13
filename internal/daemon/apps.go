@@ -29,6 +29,16 @@ import (
 // more.
 const recentInvocationLimit = 10
 
+// recentVersionLimit is how many version ids `attn app status` carries back.
+//
+// Rollback names ids in its refusals and nothing else lists them, so status has
+// to. Ten because it is the same answer shape as the invocations above and a
+// rollback target is a version the operator still remembers applying; the count
+// beside the list is what keeps a truncated answer honest. An AppVersionInfo is
+// ~200 bytes on the wire, so ten is ~2KB on a call that already carries ten
+// invocations.
+const recentVersionLimit = 10
+
 // appEnabledChanged is FactAppEnabledChanged's payload.
 type appEnabledChanged struct {
 	Name     string `json:"name"`
@@ -118,7 +128,24 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		d.sendError(conn, fmt.Sprintf("reading invocations of app %q: %v", name, err))
 		return
 	}
+	recentVersions, err := d.store.ListAppVersions(name)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("reading versions of app %q: %v", name, err))
+		return
+	}
+	if len(recentVersions) > recentVersionLimit {
+		recentVersions = recentVersions[:recentVersionLimit]
+	}
+
 	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations}
+	for _, version := range recentVersions {
+		result.RecentVersions = append(result.RecentVersions, protocol.AppVersionInfo{
+			ID:           int(version.ID),
+			ContentHash:  version.ContentHash,
+			ArtifactPath: version.ArtifactPath,
+			CreatedAt:    stampForWire(version.CreatedAt),
+		})
+	}
 	for _, inv := range recent {
 		result.Recent = append(result.Recent, appInvocationForWire(inv.ID, inv))
 	}
@@ -171,7 +198,7 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 	} else if !ok {
 		d.sendError(conn, fmt.Sprintf(
 			"app %q has no bus consumer (%s), so there is no enabled bit to %s: nothing is delivering facts to it. "+
-				"A consumer is registered when the app runtime loads a version of the app; `attn app status %s` shows what exists.",
+				"A consumer is registered when a version is applied or rolled onto, and again when the daemon starts; `attn app status %s` shows what exists.",
 			name, consumer, verb, name))
 		return
 	}
@@ -190,10 +217,11 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 		return
 	}
 	if msg.Enabled {
-		// Enabling is the way back from an auto-disable, so it clears the streak
-		// that caused one. Without this the app would be disabled again on its very
+		// Enabling is the way back from an auto-disable, so it clears both streaks
+		// that cause one. Without this the app would be disabled again on its very
 		// next failure, against a clock it never got to restart.
 		d.clearAppStall(name)
+		d.clearAppCrashes(name)
 	}
 	d.publishFact(FactAppEnabledChanged, name, appEnabledChanged{
 		Name: name, Consumer: consumer, Enabled: msg.Enabled,

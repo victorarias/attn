@@ -32,11 +32,16 @@ func TestRuntimeCellDistinguishesNeverStartedFromParked(t *testing.T) {
 	if !strings.Contains(got, "not started") {
 		t.Fatalf("a runtime that has never run renders as %q", got)
 	}
-	// A disabled app is never due a fact, so a daemon whose apps are all off will
-	// never start a runtime. Saying "no app has been due a fact" reads as
-	// not-yet when it is in fact settled.
-	if !strings.Contains(got, "no enabled app") {
-		t.Fatalf("the never-started sentence is not honest about disabled apps: %q", got)
+	// It must not claim a cause. A daemon whose apps are quiet and a daemon whose
+	// runtime binary is missing both arrive here with no snapshot — the host is
+	// resolved before the supervisor is touched — so naming the first would be a
+	// lie exactly when every dispatch is failing. It points at the surface that
+	// can tell them apart instead.
+	if !strings.Contains(got, "attn app runtime status") {
+		t.Fatalf("the never-started sentence does not point at what can answer: %q", got)
+	}
+	if strings.Contains(got, "due a fact") {
+		t.Fatalf("the never-started sentence still claims a cause it cannot know: %q", got)
 	}
 	parked := appRuntimeCell(&protocol.AppRuntimeInfo{Phase: "parked", Generation: 4})
 	if !strings.Contains(parked, "PARKED") || !strings.Contains(parked, "attn app runtime restart") {

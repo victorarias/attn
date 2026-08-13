@@ -1,0 +1,22 @@
+kind: fixed
+area: hub
+change: >
+  A remote endpoint whose daemon had stopped now comes back even on a slow
+  connection. Getting a remote ready and giving it the shared app runtime were
+  sharing one 60-second budget, and the runtime — roughly 93MB, half again the
+  size of the attn binary — was sent first. On a link slower than about
+  20 Mbit/s the transfer used the whole budget, so the step that starts the
+  remote's daemon was never reached: the endpoint retried about every 90
+  seconds and never recovered, leaving a partial copy behind in the remote's
+  /tmp each time. The daemon is now started first, the runtime is sent
+  afterwards on a budget of its own, and a runtime that cannot be sent is
+  reported without failing the sync — that remote still runs sessions. Both
+  budgets are now sized for a 5 Mbit/s link rather than for a fast one. An
+  interrupted upload cleans up after itself, a copy that arrives short is
+  refused instead of installed, and a runtime that replaces one already running
+  restarts just that runtime instead of the whole remote daemon.
+symptom: >
+  A remote endpoint stayed stuck on "bootstrapping" or kept reporting an error
+  and never reconnected, most often after its daemon had been stopped or the
+  machine rebooted, and its /tmp slowly filled with attn-app-runtime temp
+  files.

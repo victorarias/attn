@@ -50,7 +50,7 @@ const (
 	// case this guards is an old binary inside a stale app bundle meeting a new
 	// daemon, where every symptom of the skew would otherwise appear later and
 	// somewhere else.
-	appRuntimeAPIVersion = 1
+	appRuntimeAPIVersion = 2
 )
 
 // appRuntimeHostOverride lets a test — and a developer running a checkout's
