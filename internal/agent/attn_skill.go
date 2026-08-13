@@ -13,7 +13,8 @@ import (
 )
 
 // attn_skill/references/showing.md adapts the show-me skill from
-// github.com/humanlayer/skills (MIT, Copyright (c) HumanLayer).
+// github.com/humanlayer/skills (MIT, Copyright (c) 2026 HumanLayer);
+// the shipped notice lives in app/src-tauri/THIRD_PARTY_NOTICES.md.
 //
 //go:embed attn_skill
 var attnSkillFiles embed.FS

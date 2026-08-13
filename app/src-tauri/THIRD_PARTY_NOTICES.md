@@ -14,3 +14,16 @@ and does not depend on the plugin at build or runtime.
 Copyright (c) 2026 Vladimir Pankratov
 
 Licensed under the MIT License. See `LICENSE.tauri-plugin-webdriver`.
+
+## show-me (humanlayer/skills)
+
+The attn agent skill's showing reference
+(`internal/agent/attn_skill/references/showing.md`, embedded in the attn
+binary and installed into agent skill directories) adapts the forms and
+examples of the `show-me` skill:
+
+https://github.com/humanlayer/skills
+
+Copyright (c) 2026 HumanLayer
+
+Licensed under the MIT License. See `LICENSE.humanlayer-skills`.
