@@ -133,6 +133,7 @@ crown s-a1b2c3           body = the plan
   a plot, a seed's **step slug** (auto-derived from title, editable,
   unique in its plot) is what packets, bond points, and narrative
   cross-references name — it survives sowing.
+
 ### One garden, and the server
 
 - **One garden, at the hub.** The garden lives in the hub daemon's
@@ -182,6 +183,7 @@ crown s-a1b2c3           body = the plan
   override. Ready = no open `blocks` edges, not dormant, no live tender,
   not a template, and — once gates exist — not a gate. Truth at query time;
   nudging a tender when its blocker falls is named-later work.
+
 ### Plans and review
 
 - **The crown's body is the plan, and the crown is authoritative.** Seed
@@ -227,19 +229,27 @@ crown s-a1b2c3           body = the plan
   records its planter the same way.
 - **Lifecycle vocabulary** (from the vision). Every door is two-way, every
   end carries a reason, and transitions are daemon-validated — an invalid
-  transition names the seed, its state, and the ask.
+  transition names the seed, its state, and the ask. Only `tend` is
+  guarded by the claim; `park`, `harvest`, and `wither` are fate calls
+  open to anybody from any open state (the slice-2 ruling — a tender who
+  walked away never locks a seed shut). The diagram matches the shipped
+  matrix (`internal/garden/lifecycle_test.go`):
 
 ```mermaid
 stateDiagram-v2
-    [*] --> planted: plant
-    planted --> growing: tend
-    growing --> dormant: park
-    dormant --> growing: tend
-    growing --> harvested: harvest (done, with reason)
-    growing --> withered: wither (abandoned, with reason)
+    state "open" as open {
+        [*] --> planted: plant
+        planted --> growing: tend
+        dormant --> growing: tend
+        growing --> dormant: park
+        planted --> dormant: park
+    }
+    open --> harvested: harvest (done, with reason)
+    open --> withered: wither (abandoned, with reason)
     harvested --> planted: replant
     withered --> planted: replant
 ```
+
 - **CLI-first, seconds to plant.** Agents live in the CLI; the app renders.
   Every command takes `--json`. Planting must cost one line and return the
   id.
