@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  The garden drops location scoping: Victor ruled plots are the only
+  grouping, after the receipt that every production workspace is a
+  worktree of the same project. The scope-rethink doc records the
+  options and ruling, a desktops note captures the wider workspace
+  untangle, and the garden plan repoints its decisions and slice 5.
