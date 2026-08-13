@@ -313,7 +313,10 @@ jobs:
           go-version: '1.22'
 
       - name: Set up Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95.0'
+          components: clippy, rustfmt
 
       - name: Build attn binary
         run: |
@@ -327,6 +330,11 @@ jobs:
 
       - name: Cargo fmt
         run: cargo fmt -- --check
+
+      # The pre-commit hook has always run clippy; CI never did, so a lint that
+      # only the hook rejects reached main and blocked every local commit.
+      - name: Cargo clippy
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Cargo test
         run: cargo test

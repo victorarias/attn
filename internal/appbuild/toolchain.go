@@ -39,6 +39,31 @@ const (
 	toolchainStamp = ".attn-typescript-version"
 )
 
+// DefaultNPMRegistry is where attn fetches its own pinned packages from.
+//
+// Set explicitly rather than inherited: a work machine commonly exports
+// NPM_CONFIG_REGISTRY for a corporate mirror, and attn's build then depends on
+// that mirror's credentials, availability, and VPN. Measured here as a 401 on
+// every install. ATTN_NPM_REGISTRY overrides it for anyone who does need one.
+const DefaultNPMRegistry = "https://registry.npmjs.org/"
+
+// npmRegistryEnv is the environment an attn-owned package install runs in: the
+// caller's, with the registry decided here.
+func npmRegistryEnv(environ []string) []string {
+	registry := strings.TrimSpace(os.Getenv("ATTN_NPM_REGISTRY"))
+	if registry == "" {
+		registry = DefaultNPMRegistry
+	}
+	out := make([]string, 0, len(environ)+1)
+	for _, entry := range environ {
+		if strings.HasPrefix(entry, "NPM_CONFIG_REGISTRY=") || strings.HasPrefix(entry, "npm_config_registry=") {
+			continue
+		}
+		out = append(out, entry)
+	}
+	return append(out, "NPM_CONFIG_REGISTRY="+registry)
+}
+
 // Toolchain is the resolved location of every external tool an apply runs.
 type Toolchain struct {
 	Bun string
@@ -95,6 +120,7 @@ func ensureTypeScript(bun, dir string, log func(string)) (string, error) {
 	}
 	cmd := exec.Command(bun, "install", "--no-save")
 	cmd.Dir = dir
+	cmd.Env = npmRegistryEnv(os.Environ())
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return "", fmt.Errorf("installing TypeScript %s into %s failed (%v); apply needs a typechecker and this is the one it uses. Output:\n%s",
 			TypeScriptVersion, dir, err, strings.TrimSpace(string(out)))

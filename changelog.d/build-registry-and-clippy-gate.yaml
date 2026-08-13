@@ -1,0 +1,9 @@
+kind: internal
+area: build
+change: >
+  attn's own package installs pin the public npm registry instead of
+  inheriting a machine's NPM_CONFIG_REGISTRY, so a corporate mirror no
+  longer 401s an app apply or a bundled-plugin build; ATTN_NPM_REGISTRY
+  overrides it. The Rust toolchain is pinned and CI now runs the clippy
+  gate the pre-commit hook has always enforced, which is what let a lint
+  only the hook rejects reach main.

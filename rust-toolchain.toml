@@ -1,0 +1,7 @@
+# Pinned so `cargo clippy -D warnings` means the same thing in CI, in the
+# pre-commit hook, and on a contributor's machine. Without a pin the hook
+# enforces whichever lint set rustup last installed, and a stricter release
+# turns a green main red locally with no CI signal.
+[toolchain]
+channel = "1.95.0"
+components = ["clippy", "rustfmt"]
