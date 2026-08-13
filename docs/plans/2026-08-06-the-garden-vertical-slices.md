@@ -172,15 +172,22 @@ crown s-a1b2c3           body = the plan
 
 ### Scope and lifecycle
 
-- **Every seed belongs somewhere.** A seed is stamped with the workspace of
-  the session that planted it (overridable with `--workspace`); a seed
-  planted outside any workspace context carries none and surfaces only under
-  `--all`. Workspace is the default human scope; the plot is the default
-  delegate scope.
+- **Plots are the only grouping (ruled 2026-08-13, superseding "every
+  seed belongs somewhere").** The workspace stamp recorded which
+  checkout the planter stood in, and every production workspace turned
+  out to be a worktree of the same project — the stamp scattered one
+  project's ideas across checkouts. Receipt and priced options:
+  [the scope rethink](2026-08-13-garden-scope-rethink.md). The garden
+  is one space; standing plots ("attn", "home") play the area role as
+  ordinary crowns. The seed schema's `workspace_id` field retires in
+  slice 5, before any production install holds seed data. Directory
+  claims on plots (buying the zero-flag inference back) stay shelved
+  until flag-typing actually stings.
 - **`ready` infers its scope from the caller.** The daemon knows the
-  session: a delegation dispatched at a crown sees its plot's ready seeds; an
-  interactive session sees its workspace's. `--plot`, `--workspace`, `--all`
-  override. Ready = no open `blocks` edges, not dormant, no live tender,
+  session: a delegation dispatched at a crown sees its plot's ready
+  seeds; an interactive session sees the whole garden (per the
+  2026-08-13 scope ruling). `--plot` narrows; `--workspace` retires
+  with the stamp. Ready = no open `blocks` edges, not dormant, no live tender,
   not a template, and — once gates exist — not a gate. Truth at query time;
   nudging a tender when its blocker falls is named-later work.
 
@@ -258,8 +265,10 @@ stateDiagram-v2
   launcher — the chief-guidance injection path is the donor). Two layers:
   a brief garden primer (vocabulary + the ready→tend→harvest loop) injected
   into any attn-launched agent's guidance once the garden is live, and
-  context priming at launch — an interactive session learns its workspace's
-  ready count; a delegate dispatched at a crown starts knowing its plot,
+  context priming at launch — an interactive session learns the garden's
+  ready count (repointed from the workspace's by the 2026-08-13 scope
+  ruling; slice 5 does the repointing); a delegate dispatched at a
+  crown starts knowing its plot,
   its ready seeds, and the freshest handoffs. No agent should have to
   discover the garden exists.
 - **Audit trail = revisions + notes + facts.** Docstore revisions record
@@ -471,6 +480,11 @@ Ships:
 - [ ] `attn seed show <crown>` includes plot progress; a stale-plot query
       (`attn seed ls --stale`) exists as a *query*, not an automatic reaper
       — a person (or later a crew member) decides what withers.
+- [ ] The scope ruling lands: the `workspace_id` stamp and the
+      `--workspace` flag retire from plant/ls/ready; flag-free
+      interactive `ready`/`ls` answer for the whole garden; the panel
+      defaults to whole garden with its toggle scoping by plot; launch
+      priming speaks of the garden, not "your workspace's ready count".
 
 Acceptance:
 
