@@ -91,12 +91,14 @@ commands:
         remove the edge. Every link has one.
 
   show <id> [--json]
-        one seed: its state, who tends it, every edge that touches it in both
-        directions, its body, and the newest notes on its trail.
+        one seed: the freshest handoff left on it, its state, who tends it,
+        every edge that touches it in both directions, its body, and the newest
+        notes on its trail.
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
-        seed somebody else holds is refused, naming them.
+        seed somebody else holds is refused, naming them. The freshest handoff
+        prints on the claim, so picking a seed up primes you.
 
   park <id>
         pause the seed deliberately — it goes dormant and lets go of its
@@ -112,9 +114,11 @@ commands:
         reopen a harvested or withered seed. A closed seed reopens before it
         moves again.
 
-  note <id> -m "<what happened>"
+  note <id> -m "<what happened>" [--handoff]
         append to the seed's trail — what happened and what you learned, for
-        whoever tends it next. - reads stdin.
+        whoever tends it next. - reads stdin. --handoff addresses it to your
+        successor on this seed: show renders the freshest one first and tend
+        prints it on the claim, so it is read before any work.
 
   notes <id> [--limit <n>] [--json]
         the whole trail, newest first. show renders the newest few and says
@@ -130,6 +134,7 @@ flags:
   --plot <crown>     scope a ready answer to one plot
   --tree             nest a listing under its crowns
   --workspace <id>   the workspace to stamp (plant) or to list (ls, ready)
+  --handoff          write a note to whoever tends the seed next (note)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
@@ -162,6 +167,7 @@ type seedFlags struct {
 	message   *string
 	out       *string
 	limit     *int
+	handoff   *bool
 }
 
 func newSeedFlags(verb string) *seedFlags {
@@ -179,7 +185,17 @@ func newSeedFlags(verb string) *seedFlags {
 		message:   fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
 		out:       fs.String("out", "", "file to write (- for stdout)"),
 		limit:     fs.Int("limit", 0, "how many trail entries to read"),
+		handoff:   fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
 	}
+}
+
+// noteKind reads --handoff. The plain trail entry is the default, so a note
+// written the way it always was stays one.
+func (f *seedFlags) noteKind() string {
+	if *f.handoff {
+		return garden.NoteKindHandoff
+	}
+	return ""
 }
 
 // text reads -m, taking stdin when it is "-", so a long body or note can be
@@ -339,22 +355,64 @@ func runSeedShow(args []string) {
 		writeJSON(result)
 		return
 	}
-	printSeed(result.Seed)
+	fprintSeedShow(os.Stdout, result)
+}
+
+// fprintSeedShow renders one seed for a reader. The handoff comes before the
+// seed, not after it: it was written to whoever is reading this, and a
+// continuity note under the body is a note nobody reads.
+func fprintSeedShow(w io.Writer, result *protocol.SeedShowResult) {
+	fprintHandoff(w, result.Handoff)
+	fprintSeed(w, result.Seed)
 	if len(result.Relations) > 0 {
-		fmt.Println()
-		printRelations(result.Relations)
+		fmt.Fprintln(w)
+		fprintRelations(w, result.Relations)
 	}
-	if len(result.Notes) > 0 {
-		fmt.Println()
-		printNotes(result.Notes, result.NotesTotal)
+	// The handoff is already above; repeating it in the trail would print the
+	// same paragraph twice on one screen. What was withheld is counted against
+	// the window the daemon read, not against what is printed here, so dropping
+	// it does not turn one shown note into one hidden note.
+	trail := withoutNote(result.Notes, result.Handoff)
+	if len(trail) > 0 {
+		fmt.Fprintln(w)
+		fprintNotes(w, trail, result.Seed.ID, result.NotesTotal-len(result.Notes))
 	}
 }
 
-// printRelations renders both directions of a seed's edges. The other seed's
+// fprintHandoff renders the freshest handoff as its own block. Nothing prints
+// when there is none — a seed nobody handed over says nothing about handoffs.
+func fprintHandoff(w io.Writer, handoff *protocol.SeedNote) {
+	if handoff == nil {
+		return
+	}
+	fmt.Fprintf(w, "handoff — %s, %s\n",
+		orDash(firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)), shortStamp(handoff.CreatedAt))
+	for _, line := range strings.Split(strings.TrimRight(handoff.Body, "\n"), "\n") {
+		fmt.Fprintf(w, "  %s\n", line)
+	}
+	fmt.Fprintln(w)
+}
+
+// withoutNote drops one note from a trail by id, so a note rendered elsewhere on
+// the same screen is not printed twice.
+func withoutNote(notes []protocol.SeedNote, drop *protocol.SeedNote) []protocol.SeedNote {
+	if drop == nil {
+		return notes
+	}
+	out := make([]protocol.SeedNote, 0, len(notes))
+	for _, note := range notes {
+		if note.ID != drop.ID {
+			out = append(out, note)
+		}
+	}
+	return out
+}
+
+// fprintRelations renders both directions of a seed's edges. The other seed's
 // state is on the line because "blocked-by s-7k3f9m" is only actionable when the
 // reader can see whether that blocker is still open.
-func printRelations(relations []protocol.SeedRelation) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func fprintRelations(out io.Writer, relations []protocol.SeedRelation) {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	for _, relation := range relations {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", relation.Label, relation.SeedID, relation.Status, relation.Title)
 	}
@@ -438,8 +496,8 @@ func readyScopeName(result *protocol.SeedReadyResult) string {
 	}
 }
 
-func printSeed(seed protocol.Seed) {
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+func fprintSeed(out io.Writer, seed protocol.Seed) {
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "%s\t%s\n", seed.ID, seed.Title)
 	fmt.Fprintf(w, "status\t%s\n", seed.Status)
 	fmt.Fprintf(w, "step\t%s\n", seed.StepSlug)
@@ -495,10 +553,23 @@ func runSeedTransition(verb string, args []string) {
 		seedFail(verb, err)
 	}
 	if *f.json {
-		writeJSON(result.Seed)
+		// The whole result, not just the seed: a tend carries the handoff, and a
+		// --json caller that only ever saw the seed would never be primed.
+		writeJSON(result)
 		return
 	}
-	fmt.Println(transitionLine(result.Seed))
+	fprintTransition(os.Stdout, result)
+}
+
+// fprintTransition renders what a move did, and then the handoff when the move
+// was the pickup. The claim is confirmed first — the tender needs to know it
+// landed — and the note it primes with follows on the same screen.
+func fprintTransition(w io.Writer, result *protocol.SeedTransitionResult) {
+	fmt.Fprintln(w, transitionLine(result.Seed))
+	if result.Handoff != nil {
+		fmt.Fprintln(w)
+		fprintHandoff(w, result.Handoff)
+	}
 }
 
 // transitionLine is the one line a move prints: what the seed is now, and who
@@ -520,12 +591,17 @@ func runSeedNote(args []string) {
 	if len(positionals) != 1 {
 		seedFail("note", fmt.Errorf(`needs exactly one seed id, got %d: attn seed note s-7k3f9m -m "what happened"`, len(positionals)))
 	}
-	result, err := seedClient().SeedNote(f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member))
+	result, err := seedClient().SeedNote(
+		f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member), f.noteKind())
 	if err != nil {
 		seedFail("note", err)
 	}
 	if *f.json {
 		writeJSON(result.Note)
+		return
+	}
+	if result.Note.Kind == garden.NoteKindHandoff {
+		fmt.Printf("handoff left on %s — whoever tends it next reads this first\n", result.Note.SeedID)
 		return
 	}
 	fmt.Printf("noted on %s\n", result.Note.SeedID)
@@ -549,22 +625,32 @@ func runSeedNotes(args []string) {
 		fmt.Printf("nothing on this seed's trail yet — `attn seed note %s -m \"what happened\"` starts it\n", positionals[0])
 		return
 	}
-	printNotes(result.Notes, result.Total)
+	fprintNotes(os.Stdout, result.Notes, positionals[0], result.Total-len(result.Notes))
 }
 
-// printNotes renders a trail newest first, and says what it did not print. A
+// fprintNotes renders a trail newest first, and says what it did not print. A
 // silently short trail reads as a complete one.
-func printNotes(notes []protocol.SeedNote, total int) {
+func fprintNotes(w io.Writer, notes []protocol.SeedNote, seedID string, withheld int) {
 	for i, note := range notes {
 		if i > 0 {
-			fmt.Println()
+			fmt.Fprintln(w)
 		}
-		fmt.Printf("%s  %s\n", shortStamp(note.CreatedAt), orDash(firstNonEmpty(note.AuthorMember, note.AuthorSession)))
-		fmt.Printf("%s\n", strings.TrimRight(note.Body, "\n"))
+		fmt.Fprintf(w, "%s  %s%s\n", shortStamp(note.CreatedAt),
+			orDash(firstNonEmpty(note.AuthorMember, note.AuthorSession)), noteKindSuffix(note.Kind))
+		fmt.Fprintf(w, "%s\n", strings.TrimRight(note.Body, "\n"))
 	}
-	if withheld := total - len(notes); withheld > 0 && len(notes) > 0 {
-		fmt.Printf("\n%d more — `attn seed notes %s`\n", withheld, notes[0].SeedID)
+	if withheld > 0 {
+		fmt.Fprintf(w, "\n%d more — `attn seed notes %s`\n", withheld, seedID)
 	}
+}
+
+// noteKindSuffix labels a trail entry that is not a plain note, so a handoff
+// read in the trail is recognisable as one written to a successor.
+func noteKindSuffix(kind string) string {
+	if kind == "" || kind == garden.NoteKindNote {
+		return ""
+	}
+	return "  " + kind
 }
 
 // runSeedExport is the review bridge: it renders a seed to a markdown file so

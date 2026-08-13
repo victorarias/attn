@@ -71,6 +71,11 @@ export const scenarioCatalog = [
     timeoutMs: 240_000,
   },
   {
+    id: 'garden-seed-handoff',
+    label: 'Garden seed handoff: one session leaves a handoff and ends, the next is primed on tend',
+    command: ['pnpm', 'run', 'real-app:scenario-garden-seed-handoff'],
+  },
+  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],

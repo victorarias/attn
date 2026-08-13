@@ -175,10 +175,9 @@ func reaches(seeds []Seed, start, kind, target string) []string {
 // person and opens a turn, which is its own later slice), and no live tender
 // holds it.
 //
-// sessionLive answers whether a tender's session is still one the daemon knows.
-// A tender that names only a crew member is always held: attn has no signal that
-// a person in a terminal pane walked away, and handing their seed to somebody
-// else on a guess is worse than leaving it claimed.
+// sessionLive answers whether a tender's session is still one the daemon knows;
+// Tender.Holds is the rule it feeds, shared with the claim `tend` makes, so a
+// seed offered here is one `tend` accepts.
 func Ready(seeds []Seed, sessionLive func(sessionID string) bool) []Seed {
 	index := byID(seeds)
 	blocked := blockedIDs(seeds)
@@ -193,10 +192,8 @@ func Ready(seeds []Seed, sessionLive func(sessionID string) bool) []Seed {
 		case underTemplate(index, seed):
 			continue
 		}
-		if held := seed.Tender(); held.Named() {
-			if held.Session == "" || sessionLive(held.Session) {
-				continue
-			}
+		if seed.Tender().Holds(sessionLive) {
+			continue
 		}
 		ready = append(ready, seed)
 	}

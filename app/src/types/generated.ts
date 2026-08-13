@@ -5433,6 +5433,7 @@ export interface SeedReadyResultObject {
 }
 
 export interface SeedShowResultObject {
+    handoff?:    Note;
     notes:       Note[];
     notes_total: number;
     relations:   RelationElement[];
@@ -5449,7 +5450,8 @@ export interface RelationElement {
 }
 
 export interface SeedTransitionResultObject {
-    seed: SeedElement;
+    handoff?: Note;
+    seed:     SeedElement;
     [property: string]: any;
 }
 
@@ -5799,6 +5801,7 @@ export interface SeedNote {
 export interface SeedNoteMessage {
     body:               string;
     cmd:                SeedNoteMessageCmd;
+    kind?:              string;
     member?:            string;
     seed_id:            string;
     source_session_id?: string;
@@ -5889,6 +5892,7 @@ export enum SeedShowMessageCmd {
 }
 
 export interface SeedShowResult {
+    handoff?:    Note;
     notes:       Note[];
     notes_total: number;
     relations:   RelationElement[];
@@ -5911,7 +5915,8 @@ export enum SeedTransitionMessageCmd {
 }
 
 export interface SeedTransitionResult {
-    seed: SeedElement;
+    handoff?: Note;
+    seed:     SeedElement;
     [property: string]: any;
 }
 
@@ -15175,6 +15180,7 @@ const typeMap: any = {
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
     ], "any"),
     "SeedShowResultObject": o([
+        { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },
         { json: "relations", js: "relations", typ: a(r("RelationElement")) },
@@ -15187,6 +15193,7 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
     ], "any"),
     "SeedTransitionResultObject": o([
+        { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SessionInstructionsResultObject": o([
@@ -15437,6 +15444,7 @@ const typeMap: any = {
     "SeedNoteMessage": o([
         { json: "body", js: "body", typ: "" },
         { json: "cmd", js: "cmd", typ: r("SeedNoteMessageCmd") },
+        { json: "kind", js: "kind", typ: u(undefined, "") },
         { json: "member", js: "member", typ: u(undefined, "") },
         { json: "seed_id", js: "seed_id", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
@@ -15487,6 +15495,7 @@ const typeMap: any = {
         { json: "seed_id", js: "seed_id", typ: "" },
     ], "any"),
     "SeedShowResult": o([
+        { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },
         { json: "relations", js: "relations", typ: a(r("RelationElement")) },
@@ -15501,6 +15510,7 @@ const typeMap: any = {
         { json: "verb", js: "verb", typ: "" },
     ], "any"),
     "SeedTransitionResult": o([
+        { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SeedVar": o([

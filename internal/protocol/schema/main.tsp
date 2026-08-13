@@ -4342,6 +4342,11 @@ model SeedShowResult {
   // `edges` carry only what it points at, and "what blocks me" is the half a
   // tender actually needs.
   "relations": SeedRelation[];
+  // The freshest handoff on this seed, absent when nobody left one. It rides
+  // beside `notes` rather than being found in them: a handoff is written to
+  // whoever tends the seed next, so it is rendered before the seed itself and
+  // not left to be recognised in a trail.
+  "handoff"?: SeedNote;
 }
 
 // One edge as it reads from one seed's point of view: `blocks` and `part-of`
@@ -4412,6 +4417,10 @@ model SeedTransitionMessage {
 
 model SeedTransitionResult {
   "seed": Seed;
+  // The freshest handoff, carried on `tend` alone: tending is the pickup, so it
+  // is the one move whose answer has to prime the tender. The other four are
+  // fate calls and nobody is picking the seed up.
+  "handoff"?: SeedNote;
 }
 
 // One entry on a seed's trail: what happened and what was learned, written for
@@ -4420,7 +4429,8 @@ model SeedTransitionResult {
 model SeedNote {
   "id": string;
   "seed_id": string;
-  // note today; slice 4 adds handoff.
+  // note or handoff. A handoff is written to whoever tends the seed next, and
+  // the freshest one is put in front of them by show and tend.
   "kind": string;
   "body": string;
   "author_session": string;
@@ -4434,6 +4444,9 @@ model SeedNoteMessage {
   "seed_id": string;
   "body": string;
   "member"?: string;
+  // Omitted is a plain trail entry, so a caller that never heard of kinds
+  // writes a note. An unknown kind is refused, naming the whole set.
+  "kind"?: string;
 }
 
 model SeedNoteResult {

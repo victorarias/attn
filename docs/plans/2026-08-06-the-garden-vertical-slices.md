@@ -383,17 +383,30 @@ two-axis rule, seed side.
 
 Ships:
 
-- [ ] A note kind `handoff`: `attn seed note <id> -m --handoff` (or
+- [x] A note kind `handoff`: `attn seed note <id> -m --handoff` (or
       equivalent flag) marking "written to my successor on this seed".
-- [ ] `attn seed show` surfaces the freshest handoff note prominently;
+- [x] `attn seed show` surfaces the freshest handoff note prominently;
       `tend` prints it on claim so pickup primes automatically.
 - [ ] The `/handoff` skill (crew side) gains one step: for each seed you
       tended and are not harvesting, leave a seed handoff note. Member
-      homes stay untouched otherwise — the axes are additive.
+      homes stay untouched otherwise — the axes are additive. *Lands
+      outside this repo: the skill is in the maintainer's user config, so
+      it does not ride a repo PR.*
+
+One rule fixed while building this (2026-08-12): `ready` and `tend` decided
+"is somebody holding this" separately, so a seed whose tender's session had
+ended was offered by `ready` and then refused by `tend` — naming a session that
+no longer exists, which is an answer nobody can act on. It is also exactly the
+wall this slice hits, since leaving a handoff and ending is what a successor
+picks up from. Both now read `Tender.Holds`.
+
+The handoff is not on the wire Seed and so not in the panel: the plan gives
+slice 4 no app line, and the panel renders no notes of any kind today. Whichever
+slice teaches it the trail teaches it handoffs in the same move.
 
 Acceptance:
 
-- [ ] Session A tends a seed, files a handoff note, ends. Session B (a
+- [x] Session A tends a seed, files a handoff note, ends. Session B (a
       fresh errand) runs `tend` and the note is in its face before any
       work.
 

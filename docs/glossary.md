@@ -445,10 +445,25 @@ blocker frees its dependent at the next call, with nobody clearing anything.
 `attn seed ready` scopes to the calling session's workspace unless told
 otherwise, and every attn-launched agent starts knowing its workspace's count.
 
+"Nobody holds it" is one rule, shared by `ready` and by the claim `tend` makes,
+so a seed offered by one is accepted by the other. A tender whose session the
+daemon no longer knows has let go — which is how a successor picks up a seed
+somebody tended and then ended on. A tender that names only a crew member
+always holds: attn has no signal that a person in a terminal pane walked away.
+
 A **note** is one entry on a seed's trail: what happened and what was learned,
 written for whoever tends that seed next. Notes are anchored to the work and
 routed to nobody — a message with an addressee is a message, not a note — and
 they are read where the tender already looks, in the seed's own `show`.
+
+A **handoff** is a note kind: one written to your successor on this seed
+(`attn seed note <id> -m "…" --handoff`). It is still a note on the trail and
+still routed to nobody, but the freshest one is put in front of whoever picks
+the seed up — `attn seed show` renders it above the seed, and `attn seed tend`
+prints it on the claim — so pickup primes without anybody being told to go
+looking. This is continuity along the *seed*: a crew member's handoff, filed in
+their home when they wrap, is continuity along the *member*, and the two are
+independent.
 
 Plan:
 [docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
