@@ -198,15 +198,10 @@ func (d *Daemon) appFilter(name string) (bus.Filter, error) {
 	}
 	patterns := manifest.EventPatterns()
 	if len(patterns) == 0 {
-		return bus.Filter{appNoSubscriptionsPattern}, nil
+		return bus.Filter{apps.NoSubscriptionsPattern}, nil
 	}
 	return bus.Filter(patterns), nil
 }
-
-// appNoSubscriptionsPattern is a fact name nothing publishes, used as the filter
-// of an app that declared no subscriptions. A filter has to be *something*, and
-// every other candidate — empty, "*" — means "everything" somewhere in the bus.
-const appNoSubscriptionsPattern = "app.subscribes.to.nothing"
 
 // appDeclaration loads an app's current version and the manifest frozen into it.
 // The zero AppVersion with a nil error means the app exists but has no version.

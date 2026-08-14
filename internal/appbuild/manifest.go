@@ -53,6 +53,7 @@ type Manifest struct {
 	Entrypoint  string       `toml:"entrypoint" json:"entrypoint"`
 	Subscribe   []Subscribe  `toml:"subscribe" json:"subscribe,omitempty"`
 	Collections []Collection `toml:"collections" json:"collections,omitempty"`
+	Views       []View       `toml:"views" json:"views,omitempty"`
 }
 
 // Subscribe is one `[[subscribe]]` block: the event patterns that wake this app.
@@ -69,10 +70,48 @@ type Collection struct {
 	Fields []string `toml:"fields" json:"fields,omitempty"`
 }
 
+// View is one `[[views]]` block: a named component this app offers attn to
+// render, and the title the UI puts on it.
+//
+// A view is what the app declares; a tile is a place in a workspace layout.
+// Keeping the two words apart is what makes a second mount surface an addition
+// rather than a rework — a later kind changes the accepted set below and the
+// component that mounts it, and nothing between here and the artifact moves.
+type View struct {
+	Name string `toml:"name" json:"name"`
+	// Kind is where attn is willing to put this view. Optional in app api 1 and
+	// resolved to ViewKindTile before the declaration is frozen, so a default
+	// that changes later cannot rewrite what an old version meant.
+	Kind       string      `toml:"kind" json:"kind"`
+	Title      string      `toml:"title" json:"title"`
+	Entrypoint string      `toml:"entrypoint" json:"entrypoint"`
+	Params     *ViewParams `toml:"params" json:"params,omitempty"`
+}
+
+// ViewParams is the optional `params = { … }` declaration: it makes the dock UI
+// ask for one line of text before placing the view, and that string is what
+// makes two tiles of one view show different things.
+//
+// The string is opaque to attn — no schema, no types — exactly as a markdown
+// tile's file path is opaque to the layout. An app that needs richer input
+// renders it inside its own view.
+type ViewParams struct {
+	Label       string `toml:"label" json:"label"`
+	Placeholder string `toml:"placeholder" json:"placeholder,omitempty"`
+}
+
+// ViewKindTile is the only mount surface this attn builds. Panels and windows
+// are designed for and unbuilt; a manifest naming one is refused by name rather
+// than installed as a view nothing can render.
+const ViewKindTile = "tile"
+
+// viewKinds is what `kind` may say, and what a refusal lists.
+var viewKinds = []string{ViewKindTile}
+
 // knownTables is what a manifest may declare, named in the error an unknown
 // table produces. Future stages add entries here as they add the runtime that
-// honors them — A5 `[[tiles]]`, C1 `[[hooks]]`, B2 `[[workflows]]`.
-var knownTables = []string{"subscribe", "collections"}
+// honors them — C1 `[[hooks]]`, B2 `[[workflows]]`.
+var knownTables = []string{"subscribe", "collections", "views"}
 
 // LoadManifest reads and validates the manifest in dir.
 func LoadManifest(dir string) (Manifest, error) {
@@ -130,6 +169,12 @@ func ParseManifest(text string) (Manifest, error) {
 		return Manifest{}, fmt.Errorf("entrypoint %q must be relative to the app directory", m.Entrypoint)
 	}
 	if err := m.checkSubscriptions(); err != nil {
+		return Manifest{}, err
+	}
+	if err := m.checkViews(); err != nil {
+		return Manifest{}, err
+	}
+	if err := m.checkSomethingRuns(); err != nil {
 		return Manifest{}, err
 	}
 	if err := m.checkCollections(); err != nil {
@@ -199,7 +244,6 @@ func (m Manifest) checkAPIVersion() error {
 // they declared twice and can only bind once.
 func (m Manifest) checkSubscriptions() error {
 	seen := map[string]bool{}
-	total := 0
 	for _, block := range m.Subscribe {
 		for _, raw := range block.Events {
 			pattern := strings.TrimSpace(raw)
@@ -210,15 +254,23 @@ func (m Manifest) checkSubscriptions() error {
 				return fmt.Errorf("subscribes to %q twice; each event pattern binds one handler, so list it once", pattern)
 			}
 			seen[pattern] = true
-			total++
 		}
 	}
-	if total == 0 {
-		// An app with no subscriptions has no way to run: nothing dispatches to
-		// it, and it would install as a version that can never execute.
-		return fmt.Errorf("declares no subscriptions, so nothing would ever run it; add a [[subscribe]] block with events = [\"session.state.changed\"] (patterns end in .* to match a family)")
-	}
 	return nil
+}
+
+// checkSomethingRuns refuses an app nothing would ever reach.
+//
+// A subscription is one way in and a view is the other: a view renders when
+// somebody docks it, so an app that is all view and no handler is a whole app —
+// a tile that only reads the document store is the shape this exists to allow.
+// What is still refused is a manifest declaring neither, which would install as
+// a version that can never execute and never render.
+func (m Manifest) checkSomethingRuns() error {
+	if len(m.EventPatterns()) > 0 || len(m.Views) > 0 {
+		return nil
+	}
+	return fmt.Errorf("declares neither a subscription nor a view, so nothing would ever run it; add a [[subscribe]] block with events = [\"session.state.changed\"] (patterns end in .* to match a family), or a [[views]] block naming a component to render")
 }
 
 // validateEventPattern accepts what internal/bus can match: an exact dotted fact
@@ -242,6 +294,55 @@ func validateEventPattern(pattern string) error {
 		}
 		if strings.Contains(segment, "*") {
 			return fmt.Errorf("subscribes to %q; a wildcard is only valid as a trailing .* (session.* matches session.state.changed)", pattern)
+		}
+	}
+	return nil
+}
+
+// checkViews validates every `[[views]]` block and resolves each one's kind.
+//
+// Resolving here rather than at render time is what makes the frozen
+// declaration honest: it records the kind this attn understood the view to
+// have, so a default that changes in a later api version cannot rewrite what an
+// old version meant.
+func (m *Manifest) checkViews() error {
+	seen := map[string]bool{}
+	for i := range m.Views {
+		v := &m.Views[i]
+		v.Name = strings.TrimSpace(v.Name)
+		v.Kind = strings.TrimSpace(v.Kind)
+		v.Title = strings.TrimSpace(v.Title)
+		v.Entrypoint = strings.TrimSpace(v.Entrypoint)
+
+		if err := apps.ValidateViewName(v.Name); err != nil {
+			return err
+		}
+		if seen[v.Name] {
+			return fmt.Errorf("declares view %q twice; a view name addresses one component, so name each one once", v.Name)
+		}
+		seen[v.Name] = true
+		if v.Kind == "" {
+			v.Kind = ViewKindTile
+		}
+		if v.Kind != ViewKindTile {
+			return fmt.Errorf("view %q is of kind %q, which this attn cannot mount anywhere; it mounts %s",
+				v.Name, v.Kind, strings.Join(quoteAll(viewKinds), ", "))
+		}
+		if v.Title == "" {
+			return fmt.Errorf("view %q has no title, and the title is what the tile header and the dock picker show; add title = \"Pending approvals\"", v.Name)
+		}
+		if v.Entrypoint == "" {
+			return fmt.Errorf("view %q has no entrypoint; add one as a path relative to the app directory (for example entrypoint = \"src/views/%s.tsx\")", v.Name, v.Name)
+		}
+		if filepath.IsAbs(v.Entrypoint) {
+			return fmt.Errorf("view %q has entrypoint %q, which must be relative to the app directory", v.Name, v.Entrypoint)
+		}
+		if v.Params != nil {
+			v.Params.Label = strings.TrimSpace(v.Params.Label)
+			v.Params.Placeholder = strings.TrimSpace(v.Params.Placeholder)
+			if v.Params.Label == "" {
+				return fmt.Errorf("view %q declares params with no label, and the label is what the dock picker puts on the field it asks for; add label = \"Repository\", or drop params to take none", v.Name)
+			}
 		}
 	}
 	return nil
@@ -281,23 +382,36 @@ func (m Manifest) checkCollections() error {
 	return nil
 }
 
-// checkEntrypoint is the one rule that needs the directory: the file has to be
-// there, inside the app, and a file.
+// checkEntrypoint is the one rule that needs the directory: every entrypoint the
+// manifest names — the app's own and one per view — has to be there, inside the
+// app, and a file.
 func (m Manifest) checkEntrypoint(dir string) error {
-	abs := filepath.Clean(filepath.Join(dir, m.Entrypoint))
+	if err := checkEntrypointFile(dir, m.Entrypoint, "entrypoint"); err != nil {
+		return err
+	}
+	for _, v := range m.Views {
+		if err := checkEntrypointFile(dir, v.Entrypoint, fmt.Sprintf("view %q's entrypoint", v.Name)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func checkEntrypointFile(dir, entrypoint, what string) error {
+	abs := filepath.Clean(filepath.Join(dir, entrypoint))
 	root := filepath.Clean(dir)
 	if abs != root && !strings.HasPrefix(abs, root+string(os.PathSeparator)) {
-		return fmt.Errorf("entrypoint %q points outside the app directory", m.Entrypoint)
+		return fmt.Errorf("%s %q points outside the app directory", what, entrypoint)
 	}
 	info, err := os.Stat(abs)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return fmt.Errorf("entrypoint %q does not exist (looked for %s)", m.Entrypoint, abs)
+			return fmt.Errorf("%s %q does not exist (looked for %s)", what, entrypoint, abs)
 		}
-		return fmt.Errorf("entrypoint %q: %w", m.Entrypoint, err)
+		return fmt.Errorf("%s %q: %w", what, entrypoint, err)
 	}
 	if !info.Mode().IsRegular() {
-		return fmt.Errorf("entrypoint %q is not a regular file", m.Entrypoint)
+		return fmt.Errorf("%s %q is not a regular file", what, entrypoint)
 	}
 	return nil
 }
@@ -313,6 +427,35 @@ func (m Manifest) EventPatterns() []string {
 		}
 	}
 	return out
+}
+
+// ViewNames is every declared view, in declaration order — one artifact each.
+func (m Manifest) ViewNames() []string {
+	out := make([]string, 0, len(m.Views))
+	for _, v := range m.Views {
+		out = append(out, v.Name)
+	}
+	return out
+}
+
+// DeclaredViewNames reads the views back out of a frozen declaration. The daemon
+// uses it to know which artifacts a version is made of before it has a manifest
+// — the declaration is the only description of a version it ever holds.
+func DeclaredViewNames(declaration string) ([]string, error) {
+	var snapshot struct {
+		Views []View `json:"views"`
+	}
+	if err := json.Unmarshal([]byte(declaration), &snapshot); err != nil {
+		return nil, fmt.Errorf("reading the views of a declaration snapshot: %w", err)
+	}
+	out := make([]string, 0, len(snapshot.Views))
+	for _, v := range snapshot.Views {
+		if err := apps.ValidateViewName(v.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, v.Name)
+	}
+	return out, nil
 }
 
 // Declaration is the frozen snapshot stored on the version row: what this

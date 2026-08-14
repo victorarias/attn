@@ -116,7 +116,7 @@ func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
 	var state string
 	switch {
 	case result.VersionCreated:
-		state = fmt.Sprintf("new, %d bytes", res.BundleBytes)
+		state = fmt.Sprintf("new, %d bytes", totalArtifactBytes(res))
 	case moved:
 		state = "this content already had a version; nothing new was recorded"
 	default:
@@ -128,6 +128,25 @@ func printApplied(result *protocol.AppApplyResult, res appbuild.Result) {
 		fmt.Printf("  was on version %d\n", *result.PreviousVersionID)
 	}
 	fmt.Printf("  artifact %s\n", result.ArtifactPath)
+	// A version made of several artifacts gets each one's size named. There is no
+	// bundle size cap — nothing measured yet would justify a number — so making
+	// the numbers visible is what apply owes an author instead.
+	if len(res.ViewBytes) > 0 {
+		fmt.Printf("    %s  %d bytes\n", appbuild.ArtifactName, res.BundleBytes)
+		for _, v := range res.ViewBytes {
+			fmt.Printf("    views/%s.js  %d bytes\n", v.Name, v.Bytes)
+		}
+	}
+}
+
+// totalArtifactBytes is everything a version holds: the handler bundle and one
+// module per view.
+func totalArtifactBytes(res appbuild.Result) int64 {
+	total := res.BundleBytes
+	for _, v := range res.ViewBytes {
+		total += v.Bytes
+	}
+	return total
 }
 
 func runAppRollback(args []string) {

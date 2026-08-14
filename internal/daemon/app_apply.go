@@ -80,10 +80,25 @@ func (d *Daemon) handleAppApply(conn net.Conn, msg *protocol.AppApplyMessage) {
 			name, path, err, d.appsDir))
 		return
 	}
-	if actual := appbuild.VersionHash(declaration, bundle); actual != hash {
+	// A version is its handler bundle *and* one module per declared view, so the
+	// check reads all of them. The declaration is the only description of the
+	// version the daemon holds, which is what names the views to look for.
+	viewNames, err := appbuild.DeclaredViewNames(declaration)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("app apply %s: %v", name, err))
+		return
+	}
+	views, err := appbuild.ReadViewArtifacts(d.appsDir, name, hash, viewNames)
+	if err != nil {
 		d.sendError(conn, fmt.Sprintf(
-			"app apply %s: the artifact at %s hashes to %s, not the %s this apply claims; nothing was recorded",
-			name, path, actual, hash))
+			"app apply %s: %v; the build places every declared view beside the bundle before asking the daemon to record it, so this apply was not built by this attn's data directory (%s)",
+			name, err, d.appsDir))
+		return
+	}
+	if actual := appbuild.VersionHash(declaration, bundle, views); actual != hash {
+		d.sendError(conn, fmt.Sprintf(
+			"app apply %s: the artifacts at %s hash to %s, not the %s this apply claims; nothing was recorded",
+			name, appbuild.ArtifactDir(d.appsDir, name, hash), actual, hash))
 		return
 	}
 

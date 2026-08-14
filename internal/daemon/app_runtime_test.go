@@ -846,7 +846,7 @@ func TestAppWithNoSubscriptionsSubscribesToNothing(t *testing.T) {
 	if err != nil {
 		t.Fatalf("appFilter: %v", err)
 	}
-	if len(filter) != 1 || filter[0] != appNoSubscriptionsPattern {
+	if len(filter) != 1 || filter[0] != apps.NoSubscriptionsPattern {
 		t.Fatalf("filter = %v, want the nothing-matches pattern", filter)
 	}
 	for _, name := range []string{"ticket.created", "session.state.changed", "app.enabled.changed"} {
