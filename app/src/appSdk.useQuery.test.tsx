@@ -31,6 +31,7 @@ function fakeRuntime() {
         unsubscribes += 1
       }
     },
+    command: async () => undefined,
   }
   return {
     runtime,

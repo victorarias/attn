@@ -1,5 +1,7 @@
+// @types/node isn't a direct dependency of this package (only a transitive peer
+// of vite/vitest), matching terminalOsc133.parity.test.ts's pattern.
+// @ts-expect-error -- see above
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { ReactElement } from 'react';
 import { describe, expect, it } from 'vitest';
 import { render } from '@testing-library/react';
@@ -21,11 +23,9 @@ import {
 // fails on one the stylesheet does not define.
 
 // Read rather than imported: vitest stubs a CSS import, and this test is about
-// the file's contents. The path is from the app root, which is vitest's cwd.
-const css = readFileSync(
-  resolve(process.cwd(), 'src/components/appViews/appSdkComponents.css'),
-  'utf8',
-);
+// the file's contents. Relative to the vitest root (app/); import.meta.url is
+// not a file: URL here.
+const css: string = readFileSync('src/components/appViews/appSdkComponents.css', 'utf8');
 
 const defined = new Set(
   [...css.matchAll(/\.(attn-app-[a-z0-9-]+)/g)].map((match) => match[1]),
