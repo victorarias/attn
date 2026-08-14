@@ -161,6 +161,17 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 		d.recordAppInvocation(invocation)
 		return nil, fmt.Errorf("%s threw running command %q: %s", name, command, firstLine(result.Error))
 
+	case len(result.Payload) > appCommandPayloadLimit:
+		// The same limit, kept on the way back: a handler answering with a
+		// megabyte would otherwise reach the tile unbounded, which is the
+		// direction nobody checks until a view is slow and nothing says why.
+		invocation.Status = appInvocationStatusError
+		invocation.Error = fmt.Sprintf("the answer is %d bytes, over the %d-byte limit", len(result.Payload), appCommandPayloadLimit)
+		d.recordAppInvocation(invocation)
+		return nil, fmt.Errorf(
+			"the handler for command %q of app %s answered with %d bytes, over the %d-byte limit for one command; a command is an action, and anything larger belongs in a document the view reads",
+			command, name, len(result.Payload), appCommandPayloadLimit)
+
 	default:
 		invocation.Status = appInvocationStatusOK
 		d.recordAppInvocation(invocation)

@@ -190,6 +190,28 @@ func TestAppCommandRefusesAPayloadOverTheLimit(t *testing.T) {
 	mustFail(t, result, "approve", "reviewer", "262144", "document")
 }
 
+// The same limit in the other direction: what the handler answers with is
+// bounded too, or the advertised limit is only half a limit.
+func TestAppCommandRefusesAnAnswerOverTheLimit(t *testing.T) {
+	d := newAppDaemon(t)
+	installApp(t, d, "reviewer", commandManifest(appbuild.Command{Name: "approve"}))
+	runtime := startFakeAppRuntime(t, d, nil)
+	runtime.command = func(*fakeAppRuntime, appCommandRequest) (json.RawMessage, error) {
+		return json.RawMessage(`{"note":"` + strings.Repeat("x", appCommandPayloadLimit) + `"}`), nil
+	}
+
+	result := newAppCommandCaller().invoke(t, d, "reviewer", "approve", "")
+
+	mustFail(t, result, "approve", "reviewer", "262144", "document")
+	if result.Payload != nil {
+		t.Fatalf("the oversized answer reached the caller anyway")
+	}
+	rows := invocationsOf(t, d, "reviewer")
+	if len(rows) != 1 || rows[0].Status != appInvocationStatusError {
+		t.Fatalf("invocations = %+v, want one recorded failure", rows)
+	}
+}
+
 func TestAppCommandRefusesAPayloadThatIsNotJSON(t *testing.T) {
 	d := newAppDaemon(t)
 	installApp(t, d, "reviewer", commandManifest(appbuild.Command{Name: "approve"}))
