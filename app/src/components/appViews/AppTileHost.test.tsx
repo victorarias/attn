@@ -145,6 +145,33 @@ describe('a view that throws while rendering', () => {
     expect(report.error).toContain('cannot read properties of undefined');
     consoleError.mockRestore();
   });
+
+  it('drops the crashed component on Reload rather than reporting the same crash again', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    loadAppView.mockResolvedValue(() => {
+      throw new Error('cannot read properties of undefined');
+    });
+
+    const sendAppViewCrash = renderHost([entry()]);
+    await screen.findByText(/crashed while rendering/);
+    await waitFor(() => expect(sendAppViewCrash).toHaveBeenCalledTimes(1));
+
+    // Held open so the assertion lands in the window the bug lived in: after the
+    // boundary's reset key changed, before the fresh module resolved.
+    let resolveSecond: (component: unknown) => void = () => {};
+    loadAppView.mockReturnValue(new Promise((resolve) => { resolveSecond = resolve; }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+
+    await screen.findByText(/Loading reviewer\/approvals/);
+    expect(sendAppViewCrash).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveSecond(() => <div>approvals body</div>);
+    });
+    await screen.findByText('approvals body');
+    expect(sendAppViewCrash).toHaveBeenCalledTimes(1);
+    consoleError.mockRestore();
+  });
 });
 
 describe('a version that moves under a docked tile', () => {

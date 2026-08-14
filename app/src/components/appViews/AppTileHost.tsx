@@ -48,8 +48,8 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
   // lands while the user is typing in this tile waits for them to leave.
   const [mounted, setMounted] = useState<Mounted | null>(null);
   const [loadError, setLoadError] = useState<AppViewLoadError | null>(null);
-  // Bumped by Retry and by Reload. Both mean "do the load again from scratch",
-  // which for Reload also means a fresh boundary above a fresh component.
+  // Bumped by `reload` below, and part of the boundary's reset key so a second
+  // attempt gets a fresh boundary rather than the one holding the last error.
   const [attempt, setAttempt] = useState(0);
   const [holdsFocus, setHoldsFocus] = useState(false);
 
@@ -97,6 +97,17 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
       error: `${errorText(error)}\n\nComponent stack:${componentStack}`,
     });
   }, [app, view, tileId, mounted, sendAppViewCrash]);
+
+  // Retry and Reload both mean "do the load again from scratch". Dropping what
+  // is mounted is the load-bearing half: the boundary's reset key changes the
+  // instant this runs, so a crashed component left in place would be re-rendered
+  // against a fresh boundary, throw again, and report the same crash a second
+  // time — before the new module has even resolved.
+  const reload = useCallback(() => {
+    setMounted(null);
+    setLoadError(null);
+    setAttempt((n) => n + 1);
+  }, []);
 
   const handleFocus = useCallback(() => setHoldsFocus(true), []);
   const handleBlur = useCallback((event: ReactFocusEvent<HTMLDivElement>) => {
@@ -156,7 +167,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
           kind="load-error"
           title={loadError.message}
           detail={loadError.detail}
-          action={{ label: 'Retry', onClick: () => setAttempt((n) => n + 1) }}
+          action={{ label: 'Retry', onClick: reload }}
         />
       );
     }
@@ -173,7 +184,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
             kind="crashed"
             title={`${app}/${view} crashed while rendering.`}
             detail={`${error.message}\n\nThe full error is recorded against this app — \`attn app logs ${app}\` has it.`}
-            action={{ label: 'Reload', onClick: () => setAttempt((n) => n + 1) }}
+            action={{ label: 'Reload', onClick: reload }}
           />
         )}
       >
