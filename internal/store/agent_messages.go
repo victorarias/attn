@@ -45,6 +45,22 @@ func (s *Store) EnqueueAgentMessage(msg AgentMessage) error {
 	return nil
 }
 
+// DeleteQueuedAgentMessage rolls back a delivery whose target could not be
+// launched. It deletes only an undelivered row: once a target took the message,
+// a late cleanup must not erase its receipt.
+func (s *Store) DeleteQueuedAgentMessage(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	_, err := s.db.Exec(`
+		DELETE FROM agent_messages WHERE id = ? AND delivered_at = ''
+	`, id)
+	if err != nil {
+		return fmt.Errorf("failed to delete queued agent message: %w", err)
+	}
+	return nil
+}
+
 // UndeliveredAgentMessages returns the target's queued messages, oldest first —
 // the order the drain delivers them in.
 func (s *Store) UndeliveredAgentMessages(targetSessionID string) ([]AgentMessage, error) {

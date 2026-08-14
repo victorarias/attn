@@ -255,7 +255,12 @@ type Daemon struct {
 	drainingAgentMessages       map[string]bool
 	agentMessageTaken           map[string][]chan struct{}
 	agentMessagesAwaitingSubmit map[string]bool
-	agentMessageDrainHook       func(sessionID string, delivered int) // tests only; nil in production
+	// A message-triggered crew wake carries the attributed message as the new
+	// day's initial prompt. The row stays queued until a prompt-submit hook
+	// proves the agent took it; across a daemon restart the ordinary queue drain
+	// is the conservative fallback, so the message can duplicate but not vanish.
+	agentMessageInitialPrompt map[string]string                     // session id -> message id
+	agentMessageDrainHook     func(sessionID string, delivered int) // tests only; nil in production
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
@@ -3043,6 +3048,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 // refreshing — was reachable only by a source that did not write state itself.
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("hook evidence: id=%s state=%s", msg.ID, msg.State)
+	d.noteInitialAgentMessageSubmitted(msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordBracketEvidence(msg.ID, msg.State)
