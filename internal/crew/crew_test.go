@@ -254,3 +254,17 @@ func TestDisplayName_StillResolvesToItsMember(t *testing.T) {
 		t.Fatalf("the resolved id is not a member id: %v", err)
 	}
 }
+
+// Where a holder can be either a member or a bare session, only the member
+// branch is a name: a session id is never dressed up as one.
+func TestHolderName_NamesTheMemberAndLeavesASessionAlone(t *testing.T) {
+	if got := HolderName("trellis", "sess-a"); got != "Trellis" {
+		t.Errorf("HolderName(trellis, sess-a) = %q, want Trellis", got)
+	}
+	if got := HolderName("", "sess-a"); got != "sess-a" {
+		t.Errorf("HolderName(\"\", sess-a) = %q, want the session id untouched", got)
+	}
+	if got := HolderName("  ", "  "); got != "" {
+		t.Errorf("an unheld thing displays as %q, want empty", got)
+	}
+}

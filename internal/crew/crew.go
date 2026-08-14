@@ -169,6 +169,17 @@ func DisplayName(id string) string {
 	return string(unicode.ToUpper(first)) + id[size:]
 }
 
+// HolderName is how something's holder is written for a reader when it can be
+// either a member or a bare session: the member reads as the name it is, and a
+// session id is left exactly as it is rather than dressed up as one. The
+// garden's tenders, planters and note authors are all this shape.
+func HolderName(member, session string) string {
+	if strings.TrimSpace(member) != "" {
+		return DisplayName(member)
+	}
+	return strings.TrimSpace(session)
+}
+
 // Resolve finds the registered member a free-string name addresses, folding
 // case so `Trellis` reaches `trellis`. The second return is false when nothing
 // is registered under that name — which is a normal answer, not an error: the

@@ -17,3 +17,13 @@ export function crewDisplayName(id: string): string {
   const [first] = trimmed;
   return first.toUpperCase() + trimmed.slice(first.length);
 }
+
+/**
+ * How something's holder is written when it can be either a member or a bare
+ * session: the member reads as the name it is, and a session id is left exactly
+ * as it is rather than dressed up as one. The daemon keeps the same rule in
+ * `internal/crew.HolderName`.
+ */
+export function crewHolderName(member: string | undefined, session: string | undefined): string {
+  return member?.trim() ? crewDisplayName(member) : session?.trim() ?? '';
+}

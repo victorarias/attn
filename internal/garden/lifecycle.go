@@ -54,12 +54,7 @@ func (t Tender) Name() string {
 // DisplayName is Name() written for a person to read: a crew member reads as
 // the name it is, and a bare session id is left exactly as it is. Separate from
 // Name() because that one doubles as an identity and emptiness test.
-func (t Tender) DisplayName() string {
-	if member := strings.TrimSpace(t.Member); member != "" {
-		return crew.DisplayName(member)
-	}
-	return strings.TrimSpace(t.Session)
-}
+func (t Tender) DisplayName() string { return crew.HolderName(t.Member, t.Session) }
 
 // Named reports whether this tender identifies anybody at all.
 func (t Tender) Named() bool { return t.Name() != "" }
