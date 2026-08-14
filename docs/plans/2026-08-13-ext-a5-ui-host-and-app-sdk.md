@@ -532,6 +532,16 @@ the namespace as given — the WebSocket client is attn's own frontend, at the
 same trust level as the IPC socket, and pretending otherwise would be
 theatre on a local single-user surface.
 
+That containment is an assumption about *who holds the socket*, not a
+property of the protocol, and it is worth naming because it is the thing
+that stops being true first. A relayed subscription over the hub, or an
+`attn web` client that grows tiles, puts a namespace on the wire from
+somewhere the frontend did not compose — and at that point the daemon has to
+decide what a client is allowed to read, which is a trust-model change
+rather than "relay one more message". Whoever lifts the remote restriction
+inherits that question, and it is theirs to answer, not A5's to have
+answered.
+
 **A tripwire with a receipt: 64 live subscriptions per client.** Measured
 against Victor's production database on 2026-08-13: seven live workspaces,
 of which three hold exactly one docked tile and four hold none. A view can
@@ -579,7 +589,7 @@ added once" meant.
 Protocol drill per repo policy: `main.tsp` → `make generate-types` →
 `internal/protocol/constants.go` + `ProtocolVersion` increment, and the
 third lockstep spot, `PROTOCOL_VERSION` in `app/src/hooks/useDaemonSocket.ts`
-(238 as of this writing). Taken per slice; numbers renumber at each main
+(241 as of this writing). Taken per slice; numbers renumber at each main
 sync, and the tree is authoritative.
 
 The three app facts are published today and read by nobody on the wire, so
