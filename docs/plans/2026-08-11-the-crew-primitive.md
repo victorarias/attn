@@ -107,9 +107,10 @@ never do. The primitive builds that world:
   session-activity generation is its consumer today. The crew
   lifecycle becomes the second consumer and adds what presence lacks:
   per-session context-cache state, session cost, and a measured
-  "true inactivity" threshold — the existing 90s presence-idle limit
-  is an unmeasured guess tuned for a different purpose, so auto-sleep
-  gets its own receipt.
+  "true inactivity" threshold — the existing idle knobs (the
+  `activity.presence_idle_seconds` setting and the ten-minute
+  watching cap) are unmeasured guesses tuned for session-activity
+  generation, so auto-sleep gets its own receipt.
 
 ```mermaid
 stateDiagram-v2
@@ -233,7 +234,8 @@ sequenceDiagram
   one per quiet hour of user activity → a dollar or two per member per
   working day. Letting the cache lapse and continuing the same session
   = re-writing 100k to cache ≈ **$3.00**, twenty heartbeats' worth.
-  Sleeping instead = fresh priming at ~10k tokens ≈ **$0.03** — but
+  Sleeping instead = fresh priming at ~10k tokens ≈ **$0.30** with
+  the 2× cache write — a tenth of the lapse, not a hundredth — but
   costs the ceremony and the day's live context. So: heartbeat while
   the user is active (5% of the lapse price), sleep when truly away
   (heartbeating through a long absence buys warmth for nobody). The
