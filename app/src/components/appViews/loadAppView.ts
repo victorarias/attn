@@ -74,7 +74,13 @@ export async function loadAppView(url: string, timeoutMs = APP_VIEW_LOAD_TIMEOUT
   return component as AppViewComponent;
 }
 
+// What a crash report leads with. WebKit's `stack` is frames only — no message
+// line, unlike V8 — so a report built from the stack alone names the line that
+// threw and never what was thrown, which is the half the author needs first.
 export function errorText(error: unknown): string {
-  if (error instanceof Error) return error.stack || `${error.name}: ${error.message}`;
-  return String(error);
+  if (!(error instanceof Error)) return String(error);
+  const headline = `${error.name}: ${error.message}`;
+  const stack = error.stack ?? '';
+  if (!stack) return headline;
+  return stack.startsWith(error.name) ? stack : `${headline}\n${stack}`;
 }
