@@ -35,9 +35,10 @@ const Surface = "the garden"
 // seeds and notes are separate collections because a long-tended seed must not
 // bloat its own document with its trail.
 const (
-	Namespace       = "core/garden"
-	CollectionSeeds = "seeds"
-	CollectionNotes = "notes"
+	Namespace            = "core/garden"
+	CollectionSeeds      = "seeds"
+	CollectionNotes      = "notes"
+	CollectionDispatches = "dispatches"
 )
 
 // Lifecycle states. `planted` → `growing` when someone tends it → `harvested`
@@ -75,22 +76,24 @@ type Var struct {
 // Seed is a seed's stored body — the document, without the store's own envelope
 // (id-in-the-table, revision, timestamps). Every declared field is written
 // unconditionally, empty string and all: a field a query filters on must exist
-// in every body, or `workspace_id = ""` would not match the seeds that have no
-// workspace.
+// in every body, or `tender_session = ""` would not match the seeds nobody
+// holds.
 //
 // The whole designed schema is here from the first slice even though only part
 // of it moves: adding a field later costs nothing (bodies are never rewritten),
 // but a seed planted today that a later slice cannot read would.
+//
+// There is no workspace field. The garden is one space and plots are its only
+// grouping (ruled 2026-08-13): the workspace stamp scattered one project's
+// seeds across its worktrees, and it retired destructively in slice 5 — no
+// compatibility reads, because no production install ever held seed data.
 type Seed struct {
 	ID    string `json:"id"`
 	Title string `json:"title"`
 	// Body is markdown. On a crown it is the plan.
-	Body     string `json:"body"`
-	Status   string `json:"status"`
-	StepSlug string `json:"step_slug"`
-	// WorkspaceID is the workspace of the session that planted it; empty means
-	// planted outside any workspace, which is why `ls` has an --all.
-	WorkspaceID    string `json:"workspace_id"`
+	Body           string `json:"body"`
+	Status         string `json:"status"`
+	StepSlug       string `json:"step_slug"`
 	PlanterSession string `json:"planter_session"`
 	PlanterMember  string `json:"planter_member"`
 	// TenderSession/TenderMember are who holds it now. Set by `tend` (slice 2);
@@ -117,7 +120,6 @@ func SeedsSchema() docstore.CollectionSchema {
 		Collection: CollectionSeeds,
 		Fields: []docstore.FieldSpec{
 			{Name: "status", Type: docstore.FieldString},
-			{Name: "workspace_id", Type: docstore.FieldString},
 			{Name: "step_slug", Type: docstore.FieldString},
 			{Name: "tender_session", Type: docstore.FieldString},
 			{Name: "template", Type: docstore.FieldBool},
@@ -139,6 +141,41 @@ func NotesSchema() docstore.CollectionSchema {
 			{Name: "author_member", Type: docstore.FieldString},
 		},
 	}
+}
+
+// Dispatch records that a session was dispatched at a crown. It is scope
+// inference, nothing more: flag-free `ready` inside that session answers with
+// the plot's ready seeds and launch priming starts from the crown — never a
+// fence (the session may tend or plant anything) and never an assignment
+// (who-holds-what stays the per-seed tender, which is why no surface renders
+// this record). Keyed by session id: a session is dispatched at one crown.
+type Dispatch struct {
+	SessionID string `json:"session_id"`
+	Crown     string `json:"crown"`
+}
+
+// DispatchesSchema declares the dispatch collection. `crown` is declared so
+// "which sessions were dispatched here" stays one query.
+func DispatchesSchema() docstore.CollectionSchema {
+	return docstore.CollectionSchema{
+		Namespace:  Namespace,
+		Collection: CollectionDispatches,
+		Fields: []docstore.FieldSpec{
+			{Name: "crown", Type: docstore.FieldString},
+		},
+	}
+}
+
+// EncodeDispatch renders a dispatch as its stored body.
+func (d Dispatch) Encode() ([]byte, error) { return json.Marshal(d) }
+
+// DecodeDispatch reads a stored dispatch body.
+func DecodeDispatch(body []byte) (Dispatch, error) {
+	var dispatch Dispatch
+	if err := json.Unmarshal(body, &dispatch); err != nil {
+		return Dispatch{}, fmt.Errorf("this dispatch's stored body is not readable: %w", err)
+	}
+	return dispatch, nil
 }
 
 // Seed ids: `s-` plus six characters of Crockford's base32, which drops i, l, o

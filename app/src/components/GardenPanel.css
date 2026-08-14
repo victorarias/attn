@@ -302,3 +302,97 @@
   font-size: var(--font-size-xs);
   margin: 0;
 }
+
+/* Where you are, and the way back. Every level is its own target so climbing
+   several plots is one click. */
+.garden-panel__trail {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.garden-panel__trail-segment {
+  align-items: baseline;
+  display: flex;
+  gap: 4px;
+  min-width: 0;
+}
+
+.garden-panel__trail-sep {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+}
+
+.garden-panel__trail-step {
+  background: none;
+  border: none;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: var(--font-size-xs);
+  max-width: 220px;
+  overflow: hidden;
+  padding: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.garden-panel__trail-step:hover:not(:disabled) {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}
+
+.garden-panel__trail-step:disabled {
+  color: var(--color-text-primary);
+  cursor: default;
+}
+
+.garden-panel__crown {
+  align-items: baseline;
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 8px;
+}
+
+.garden-panel__crown-progress {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+}
+
+/* A crown's plot, on its row: the counts that say whether it is draining, and
+   the way in. */
+.garden-seed__plot {
+  align-items: baseline;
+  background: none;
+  border: none;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  display: flex;
+  font-size: var(--font-size-xs);
+  gap: 6px;
+  padding: 0 12px 6px 30px;
+  text-align: left;
+  width: 100%;
+}
+
+.garden-seed__plot:hover {
+  color: var(--color-text-primary);
+}
+
+.garden-seed__plot-arrow {
+  margin-left: auto;
+}
+
+.garden-seed__relation-link {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  text-align: left;
+}
+
+.garden-seed__relation-link:hover {
+  color: var(--color-text-primary);
+  text-decoration: underline;
+}

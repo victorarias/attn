@@ -598,6 +598,13 @@ func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID,
 	if effort != "" {
 		spawnMsg.Effort = protocol.Ptr(effort)
 	}
+	// Recorded before the spawn, because the launch primer reads it: a delegate
+	// dispatched at a crown must launch already knowing its plot.
+	if crown := strings.TrimSpace(protocol.Deref(msg.Plot)); crown != "" {
+		if err := d.recordGardenDispatch(sessionID, crown); err != nil {
+			return fmt.Errorf("dispatch %s at %s: %w", sessionID, crown, err)
+		}
+	}
 	spawnClient := newInternalWSClient()
 	d.handleSpawnSession(spawnClient, spawnMsg)
 	_, err := readInternalActionResult(spawnClient)
@@ -628,6 +635,11 @@ func (d *Daemon) delegateOperation(msg *protocol.DelegateMessage, operationID, r
 	model := strings.TrimSpace(protocol.Deref(msg.Model))
 	effort := strings.TrimSpace(strings.ToLower(protocol.Deref(msg.Effort)))
 	if err := d.validateDelegationModelEffort(agent, model, effort); err != nil {
+		return nil, err
+	}
+	// The crown is resolved before any worktree or runtime side effect: a
+	// delegation aimed at nothing should refuse, not launch unaimed.
+	if err := d.validateDispatchCrown(strings.TrimSpace(protocol.Deref(msg.Plot))); err != nil {
 		return nil, err
 	}
 	sessionID := reservedSessionID

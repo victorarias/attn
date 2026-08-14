@@ -466,10 +466,10 @@ children, dispatch a delegation at it, watch it drain.
 
 Ships:
 
-- [ ] Planting under a crown: `attn seed plant --part-of <crown>` (or a
+- [x] Planting under a crown: `attn seed plant --part-of <crown>` (or a
       `plot` convenience that plants crown + children in one JSON payload
       for agents).
-- [ ] Dispatch-at-plot: a delegation can be dispatched at a crown and
+- [x] Dispatch-at-plot: a delegation can be dispatched at a crown and
       carries it as scope inference, nothing more — inside that
       session, flag-free `ready` answers with the plot's ready seeds
       and priming starts from the crown. It is not a fence and not an
@@ -477,23 +477,23 @@ Ships:
       may tend several seeds across plots at once, and who-holds-what
       stays the per-seed tender. Children are parallel by default;
       only `blocks` edges sequence.
-- [ ] Priming, delegate side: a delegate dispatched at a crown launches
+- [x] Priming, delegate side: a delegate dispatched at a crown launches
       already knowing its plot (crown body summary, ready seeds, freshest
       handoffs) — it never has to ask what it was sent to do.
-- [ ] App: the garden is navigable as a first-class experience — the
+- [x] App: the garden is navigable as a first-class experience — the
       whole garden, root to leaf: drill from a crown into its
       children, climb back up, cross into the next plot. A crown row
       shows its plot's progress (done / growing / ready / blocked
       counts). What the app shows about who works on what is the
       per-seed tender, never a delegation-to-crown assignment.
-- [ ] `attn seed show <crown>` includes plot progress; a stale query
+- [x] `attn seed show <crown>` includes plot progress; a stale query
       (`attn seed ls --stale`) exists as a *query*, not an automatic
       reaper — a person (or later a crew member) decides what withers.
       Stale means a seed claiming attention it is not getting: open,
       with no trail movement (notes, moves, edges) for a window. The
       window is a flag with a default that needs a receipt at build
       time, and the output names the rule and window it applied.
-- [ ] The scope ruling lands, destructively (ruled 2026-08-13): drop
+- [x] The scope ruling lands, destructively (ruled 2026-08-13): drop
       the `workspace_id` field and erase any stored values — no
       compatibility reads, no fallback, no migration shim, because no
       production install ever held seed data. The `--workspace` flag
@@ -619,7 +619,8 @@ the current truth; the original question is kept for the record.
   seam first — A3.4 Stage 2's whole scope — to deliver a list of at most a
   few hundred small documents. `garden.planted` projects to one
   `garden_seeds_updated` push carrying the whole garden, coalesced like
-  every other snapshot; the panel scopes to its workspace client-side.
+  every other snapshot; the panel opens on the whole garden and scopes by
+  plot client-side.
   Revisit when the garden outgrows one push, not before. The panel is the
   first rendering, not a commitment — whether the garden becomes the app's
   front door is a named question in the vision.

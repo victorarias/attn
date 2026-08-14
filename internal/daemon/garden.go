@@ -11,6 +11,7 @@ import (
 
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/garden"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -54,7 +55,7 @@ func (d *Daemon) ensureGardenCollections() {
 	if d.store == nil {
 		return
 	}
-	for _, schema := range []docstore.CollectionSchema{garden.SeedsSchema(), garden.NotesSchema()} {
+	for _, schema := range []docstore.CollectionSchema{garden.SeedsSchema(), garden.NotesSchema(), garden.DispatchesSchema()} {
 		redeclared, err := d.store.DefineDocumentCollection(schema, time.Now())
 		if err != nil {
 			d.logf("garden: declaring %s/%s: %v", schema.Namespace, schema.Collection, err)
@@ -203,26 +204,37 @@ func (d *Daemon) readGarden() (gardenRead, error) {
 }
 
 // wire renders seeds this read holds. A seed the read did not cover — one
-// written since — still renders, without a stamp it cannot know.
+// written since — still renders, without a stamp it cannot know. A crown
+// carries its plot's progress, computed here over the whole read for the same
+// reason readiness is: one rule, rendered everywhere.
 func (g gardenRead) wire(seeds []garden.Seed) []protocol.Seed {
 	out := make([]protocol.Seed, 0, len(seeds))
 	for _, seed := range seeds {
-		out = append(out, seedToProtocol(seed, g.docs[seed.ID], g.ready[seed.ID]))
+		wire := seedToProtocol(seed, g.docs[seed.ID], g.ready[seed.ID])
+		if progress, ok := g.progress(seed.ID); ok {
+			wire.PlotProgress = progress
+		}
+		out = append(out, wire)
 	}
 	return out
 }
 
-// inWorkspace narrows a read to one workspace. An empty workspaceID means "the
-// seeds that belong to no workspace", which is a real answer and not the same as
-// the whole garden.
-func (g gardenRead) inWorkspace(workspaceID string) []garden.Seed {
-	out := make([]garden.Seed, 0, len(g.seeds))
-	for _, seed := range g.seeds {
-		if seed.WorkspaceID == workspaceID {
-			out = append(out, seed)
-		}
+// progress is one crown's plot progress, and false for a seed nothing is part
+// of — a childless seed has no plot to report on.
+func (g gardenRead) progress(id string) (*protocol.SeedPlotProgress, bool) {
+	p := garden.PlotProgress(g.seeds, id, g.ready)
+	if p.Total == 0 {
+		return nil, false
 	}
-	return out
+	return &protocol.SeedPlotProgress{
+		Total:    p.Total,
+		Done:     p.Done,
+		Withered: p.Withered,
+		Growing:  p.Growing,
+		Dormant:  p.Dormant,
+		Ready:    p.Ready,
+		Blocked:  p.Blocked,
+	}, true
 }
 
 // gardenReady answers which seeds are tendable now, for a caller that has
@@ -238,20 +250,14 @@ func (d *Daemon) gardenReady() map[string]bool {
 }
 
 // countSeeds is what makes a truncated read honest: every surface shows a
-// bounded list beside the count of what the same scope holds. It takes the
-// scope querySeeds takes, so a workspace-scoped list is compared against its
-// own workspace and not against the whole garden.
-func (d *Daemon) countSeeds(workspaceID string, scoped bool) int {
+// bounded list beside the count of what the whole garden holds.
+func (d *Daemon) countSeeds() int {
 	if d.store == nil {
 		return 0
 	}
-	q := docstore.Query{Namespace: garden.Namespace, Collection: garden.CollectionSeeds}
-	if scoped {
-		q.Filters = append(q.Filters, docstore.Filter{
-			Field: "workspace_id", Op: docstore.OpEq, Value: workspaceID,
-		})
-	}
-	read, found, err := d.store.CountQuery(q)
+	read, found, err := d.store.CountQuery(docstore.Query{
+		Namespace: garden.Namespace, Collection: garden.CollectionSeeds,
+	})
 	if err != nil || !found {
 		return 0
 	}
@@ -265,7 +271,6 @@ func seedToProtocol(seed garden.Seed, doc docstore.Document, ready bool) protoco
 		Body:           seed.Body,
 		Status:         seed.Status,
 		StepSlug:       seed.StepSlug,
-		WorkspaceID:    seed.WorkspaceID,
 		PlanterSession: seed.PlanterSession,
 		PlanterMember:  seed.PlanterMember,
 		TenderSession:  seed.TenderSession,
@@ -340,7 +345,7 @@ func (d *Daemon) countSeedsForBroadcast() int {
 	if err := d.requireHome(garden.Surface); err != nil {
 		return 0
 	}
-	return d.countSeeds("", false)
+	return d.countSeeds()
 }
 
 // projectGardenSeeds re-pushes the garden to every client. Like every other
@@ -400,22 +405,25 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 	}
 
 	sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
-	workspaceID, err := d.gardenWorkspaceFor(sessionID, msg.WorkspaceID)
-	if err != nil {
-		d.sendGardenError(conn, "plant", err)
-		return
-	}
-
 	seed := garden.Seed{
 		Title:          title,
 		Body:           body,
 		Status:         garden.StatusPlanted,
 		StepSlug:       garden.StepSlug(title),
-		WorkspaceID:    workspaceID,
 		PlanterSession: sessionID,
 		PlanterMember:  d.resolveTenderMember(protocol.Deref(msg.Member), sessionID),
 		Edges:          []garden.Edge{},
 		Vars:           []garden.Var{},
+	}
+	// Planting under a crown: the seed is born part of that plot. The crown must
+	// be planted — an edge to nothing is a plot nobody can find — but its state
+	// does not matter: planting into a closed plot is the planter's call.
+	if crown := strings.TrimSpace(protocol.Deref(msg.PartOf)); crown != "" {
+		if _, _, err := d.readSeed(crown); err != nil {
+			d.sendGardenError(conn, "plant", err)
+			return
+		}
+		seed.Edges = append(seed.Edges, garden.Edge{Kind: garden.EdgePartOf, To: crown})
 	}
 	seed, doc, err := d.mintAndPlant(*schema, seed)
 	if err != nil {
@@ -426,6 +434,102 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		Ok:              true,
 		SeedPlantResult: &protocol.SeedPlantResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])},
 	})
+}
+
+// handleSeedPlot plants a whole plot in one move: the crown, then each child
+// part of it, with the payload's blocks edges between siblings. Everything that
+// can be refused is refused before the first write; a write that fails midway
+// names what was already planted, because half a plot in the garden must not
+// read as no plot.
+func (d *Daemon) handleSeedPlot(conn net.Conn, msg *protocol.SeedPlotMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "plot", err)
+		return
+	}
+	spec := garden.PlotSpec{Title: strings.TrimSpace(msg.Title), Body: protocol.Deref(msg.Body)}
+	for _, child := range msg.Children {
+		spec.Children = append(spec.Children, garden.PlotChildSpec{
+			Title:  strings.TrimSpace(child.Title),
+			Body:   protocol.Deref(child.Body),
+			Blocks: child.Blocks,
+		})
+	}
+	if err := garden.ValidatePlotSpec(spec); err != nil {
+		d.sendGardenError(conn, "plot", err)
+		return
+	}
+	schema, err := d.seedsCollection()
+	if err != nil {
+		d.sendGardenError(conn, "plot", err)
+		return
+	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
+	member := strings.TrimSpace(protocol.Deref(msg.Member))
+
+	var result protocol.SeedPlotResult
+	planted := []string{}
+
+	// One garden push for the whole plot, not one per seed.
+	var plotErr error
+	d.coalesceSnapshots(func() {
+		crown, crownDoc, err := d.mintAndPlant(*schema, garden.Seed{
+			Title: spec.Title, Body: spec.Body, Status: garden.StatusPlanted,
+			StepSlug: garden.StepSlug(spec.Title), PlanterSession: sessionID, PlanterMember: member,
+			Edges: []garden.Edge{}, Vars: []garden.Var{},
+		})
+		if err != nil {
+			plotErr = err
+			return
+		}
+		planted = append(planted, crown.ID)
+		// Children are minted after the crown so their edges can name real ids;
+		// blocks edges point at siblings, so ids are minted for all children
+		// before any child is written.
+		ids := make(map[string]string, len(spec.Children))
+		childSeeds := make([]garden.Seed, 0, len(spec.Children))
+		for _, child := range spec.Children {
+			id, err := d.mintUnplantedSeedID(*schema)
+			if err != nil {
+				plotErr = err
+				return
+			}
+			ids[garden.StepSlug(child.Title)] = id
+			childSeeds = append(childSeeds, garden.Seed{ID: id, Title: child.Title, Body: child.Body})
+		}
+		docs := make([]docstore.Document, 0, len(spec.Children))
+		for i, child := range spec.Children {
+			seed := childSeeds[i]
+			seed.Edges = []garden.Edge{{Kind: garden.EdgePartOf, To: crown.ID}}
+			for _, target := range child.Blocks {
+				seed.Edges = append(seed.Edges, garden.Edge{Kind: garden.EdgeBlocks, To: ids[garden.StepSlug(strings.TrimSpace(target))]})
+			}
+			seed.Status = garden.StatusPlanted
+			seed.StepSlug = garden.StepSlug(seed.Title)
+			seed.PlanterSession = sessionID
+			seed.PlanterMember = member
+			seed.Vars = []garden.Var{}
+			doc, err := d.plantSeed(*schema, seed)
+			if err != nil {
+				plotErr = fmt.Errorf(
+					"planting %q failed after %s were planted: %w — the plot is partial, `attn seed ls --tree` shows what landed",
+					seed.Title, strings.Join(planted, ", "), err)
+				return
+			}
+			planted = append(planted, seed.ID)
+			childSeeds[i] = seed
+			docs = append(docs, doc)
+		}
+		ready := d.gardenReady()
+		result.Crown = seedToProtocol(crown, crownDoc, ready[crown.ID])
+		for i, seed := range childSeeds {
+			result.Children = append(result.Children, seedToProtocol(seed, docs[i], ready[seed.ID]))
+		}
+	})
+	if plotErr != nil {
+		d.sendGardenError(conn, "plot", plotErr)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedPlotResult: &result})
 }
 
 // mintAndPlant gives the seed an id and writes it, minting again when that id
@@ -466,30 +570,27 @@ func (d *Daemon) mintSeedID() (string, error) {
 	return garden.NewID()
 }
 
-// gardenWorkspaceFor resolves the workspace a planting is stamped with:
-// --workspace if given, otherwise the calling session's. A session attn does not
-// know, or one in no workspace, plants a seed with no workspace — which is a
-// real state, listed under --all.
-func (d *Daemon) gardenWorkspaceFor(sessionID string, override *string) (string, error) {
-	if override != nil {
-		id := strings.TrimSpace(*override)
-		if id == "" {
-			return "", fmt.Errorf("--workspace was given with no value; omit it to take the workspace of the session you are in")
+// mintUnplantedSeedID mints an id no planted seed holds. Plot planting names
+// sibling ids in edges before the siblings are written, so a collision has to
+// be caught before the id is woven into the plot — the write's create-only
+// guard still stands behind this check, and a mid-write race just means the
+// planting fails the way any collision does.
+func (d *Daemon) mintUnplantedSeedID(schema docstore.CollectionSchema) (string, error) {
+	const mintAttempts = 3
+	for range mintAttempts {
+		id, err := d.mintSeedID()
+		if err != nil {
+			return "", err
 		}
-		return id, nil
+		_, found, err := d.store.GetDocument(schema, id)
+		if err != nil {
+			return "", err
+		}
+		if !found {
+			return id, nil
+		}
 	}
-	if sessionID == "" {
-		return "", nil
-	}
-	// decoratedSession, not store.Get: a session's workspace is decorated at
-	// broadcast time from the live registry, and the persisted column only leads
-	// during startup. Reading the record directly stamps every seed with an empty
-	// workspace and the panel scopes them all away.
-	session := d.decoratedSession(sessionID)
-	if session == nil {
-		return "", nil
-	}
-	return strings.TrimSpace(session.WorkspaceID), nil
+	return "", fmt.Errorf("minted %d seed ids and every one was already planted, which a working random source does not do", mintAttempts)
 }
 
 func (d *Daemon) handleSeedList(conn net.Conn, msg *protocol.SeedListMessage) {
@@ -497,44 +598,74 @@ func (d *Daemon) handleSeedList(conn net.Conn, msg *protocol.SeedListMessage) {
 		d.sendGardenError(conn, "ls", err)
 		return
 	}
-	all := msg.All != nil && *msg.All
-	workspaceID := ""
-	if !all {
-		sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
-		resolved, err := d.gardenWorkspaceFor(sessionID, msg.WorkspaceID)
-		if err != nil {
-			d.sendGardenError(conn, "ls", err)
-			return
-		}
-		// A caller with no workspace to scope to must be told, not handed the
-		// seeds that happen to have none. The scope is the whole point of the
-		// flag-free form.
-		if resolved == "" && msg.WorkspaceID == nil && sessionID == "" {
-			d.sendGardenError(conn, "ls", errors.New(
-				"there is no session to take a workspace from, so there is no default scope; pass --all for the whole garden, or --workspace <id> for one"))
-			return
-		}
-		workspaceID = resolved
-	}
-
 	read, err := d.readGarden()
 	if err != nil {
 		d.sendGardenError(conn, "ls", err)
 		return
 	}
+	result := &protocol.SeedListResult{Total: d.countSeeds()}
 	seeds := read.seeds
-	if !all {
-		seeds = read.inWorkspace(workspaceID)
+	if protocol.Deref(msg.Stale) {
+		window := garden.DefaultStaleWindow
+		if s := protocol.Deref(msg.StaleWindowSeconds); s > 0 {
+			window = time.Duration(s) * time.Second
+		}
+		seeds, err = d.staleSeeds(read, window)
+		if err != nil {
+			d.sendGardenError(conn, "ls", err)
+			return
+		}
+		// Under --stale the honest total is the stale count itself: the garden's
+		// size says nothing about how many seeds went quiet.
+		result.Total = len(seeds)
+		result.StaleWindowSeconds = protocol.Ptr(int(window / time.Second))
 	}
-	d.sendGardenResponse(conn, protocol.Response{
-		Ok: true,
-		SeedListResult: &protocol.SeedListResult{
-			Seeds:       read.wire(seeds),
-			WorkspaceID: workspaceID,
-			All:         all,
-			Total:       d.countSeeds(workspaceID, !all),
-		},
+	result.Seeds = read.wire(seeds)
+	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedListResult: result})
+}
+
+// staleSeeds is the stale query over one read: open seeds whose trail — the
+// document's own updated stamp or its newest note, whichever is later — has
+// not moved within window. The note read runs only for seeds already quiet by
+// their document stamp: a note never makes a fresh seed stale.
+func (d *Daemon) staleSeeds(read gardenRead, window time.Duration) ([]garden.Seed, error) {
+	now := time.Now()
+	lastMoved := make(map[string]time.Time, len(read.seeds))
+	for _, seed := range read.seeds {
+		if garden.Closed(seed.Status) {
+			continue
+		}
+		moved := read.docs[seed.ID].UpdatedAt
+		if now.Sub(moved) >= window {
+			note, err := d.newestNoteAt(seed.ID)
+			if err != nil {
+				return nil, err
+			}
+			if note.After(moved) {
+				moved = note
+			}
+		}
+		lastMoved[seed.ID] = moved
+	}
+	return garden.Stale(read.seeds, lastMoved, window, now), nil
+}
+
+// newestNoteAt is when a seed's trail last spoke; zero when it never has.
+func (d *Daemon) newestNoteAt(seedID string) (time.Time, error) {
+	readNotes, _, err := d.runDocQuery(docstore.Query{
+		Namespace:  garden.Namespace,
+		Collection: garden.CollectionNotes,
+		Filters:    []docstore.Filter{{Field: "seed", Op: docstore.OpEq, Value: seedID}},
+		Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+		Limit:      1,
 	})
+	if err != nil {
+		return time.Time{}, err
+	}
+	if len(readNotes.Documents) == 0 {
+		return time.Time{}, nil
+	}
+	return readNotes.Documents[0].CreatedAt, nil
 }
 
 func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
@@ -557,10 +688,14 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 	if err != nil {
 		d.logf("garden: reading the garden around %s: %v", seed.ID, err)
 	}
+	wire := seedToProtocol(seed, doc, read.ready[seed.ID])
+	if progress, ok := read.progress(seed.ID); ok {
+		wire.PlotProgress = progress
+	}
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok: true,
 		SeedShowResult: &protocol.SeedShowResult{
-			Seed:       seedToProtocol(seed, doc, read.ready[seed.ID]),
+			Seed:       wire,
 			Notes:      notes,
 			NotesTotal: total,
 			Relations:  gardenRelations(read, seed.ID),
@@ -675,14 +810,36 @@ func (d *Daemon) handleSeedLink(conn net.Conn, msg *protocol.SeedLinkMessage) {
 		from, attempts, verb, from))
 }
 
-// handleSeedReady answers what can be tended now. The scope is inferred from the
-// caller — the daemon owns the session, so the flag-free form is the common one —
-// and a caller with no scope at all is refused rather than handed the seeds that
-// happen to belong to no workspace.
+// handleSeedReady answers what can be tended now. The scope is inferred from
+// the caller — the daemon owns the session, so the flag-free form is the common
+// one: the whole garden, unless the calling session was dispatched at a crown,
+// and then that plot. The inference is scope, not a fence: --all steps a
+// dispatched session out to the garden, --plot into any other plot.
 func (d *Daemon) handleSeedReady(conn net.Conn, msg *protocol.SeedReadyMessage) {
 	if err := d.requireHome(garden.Surface); err != nil {
 		d.sendGardenError(conn, "ready", err)
 		return
+	}
+	crown := strings.TrimSpace(protocol.Deref(msg.Plot))
+	if crown != "" {
+		if err := garden.ValidateID(crown); err != nil {
+			d.sendGardenError(conn, "ready", err)
+			return
+		}
+		if _, _, err := d.readSeed(crown); err != nil {
+			d.sendGardenError(conn, "ready", err)
+			return
+		}
+	}
+	if crown == "" && !protocol.Deref(msg.All) {
+		// The dispatch inference. A crown that has since left the garden infers
+		// nothing — the answer falls back to the whole garden rather than refusing
+		// a caller who asked with no flags at all.
+		if at, ok := d.gardenDispatchCrown(strings.TrimSpace(protocol.Deref(msg.SourceSessionID))); ok {
+			if _, _, err := d.readSeed(at); err == nil {
+				crown = at
+			}
+		}
 	}
 	read, err := d.readGarden()
 	if err != nil {
@@ -696,19 +853,8 @@ func (d *Daemon) handleSeedReady(conn net.Conn, msg *protocol.SeedReadyMessage) 
 		}
 	}
 
-	result := &protocol.SeedReadyResult{Scope: "all"}
-	switch {
-	case protocol.Deref(msg.All):
-	case strings.TrimSpace(protocol.Deref(msg.Plot)) != "":
-		crown := strings.TrimSpace(*msg.Plot)
-		if err := garden.ValidateID(crown); err != nil {
-			d.sendGardenError(conn, "ready", err)
-			return
-		}
-		if _, _, err := d.readSeed(crown); err != nil {
-			d.sendGardenError(conn, "ready", err)
-			return
-		}
+	result := &protocol.SeedReadyResult{Scope: "garden"}
+	if crown != "" {
 		// The plot is walked over the whole garden, not over the ready seeds: a
 		// crown is never ready itself, so walking the ready set would lose every
 		// child whose parent it holds.
@@ -723,51 +869,167 @@ func (d *Daemon) handleSeedReady(conn net.Conn, msg *protocol.SeedReadyMessage) 
 			}
 		}
 		ready, result.Scope, result.ScopeID = scoped, "plot", crown
-	default:
-		sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
-		workspaceID, err := d.gardenWorkspaceFor(sessionID, msg.WorkspaceID)
-		if err != nil {
-			d.sendGardenError(conn, "ready", err)
-			return
-		}
-		if workspaceID == "" && msg.WorkspaceID == nil && sessionID == "" {
-			d.sendGardenError(conn, "ready", errors.New(
-				"there is no session to take a workspace from, so there is no default scope; pass --all for the whole garden, --workspace <id> for one, or --plot <crown> for a plot"))
-			return
-		}
-		scoped := make([]garden.Seed, 0, len(ready))
-		for _, seed := range ready {
-			if seed.WorkspaceID == workspaceID {
-				scoped = append(scoped, seed)
+		if crownSeed, crownDoc, err := d.readSeed(crown); err == nil {
+			wire := seedToProtocol(crownSeed, crownDoc, read.ready[crown])
+			if progress, ok := read.progress(crown); ok {
+				wire.PlotProgress = progress
 			}
+			result.Crown = &wire
 		}
-		ready, result.Scope, result.ScopeID = scoped, "workspace", workspaceID
 	}
 	// Oldest first, against the newest-first order every other read uses: this is
 	// a work queue, and the seed that has waited longest is the one to hand over.
 	slices.Reverse(ready)
 	result.Seeds = read.wire(ready)
+	// The freshest handoff on each ready seed, in the seeds' own order: what a
+	// launching delegate reads before any work. Carried on the plot scope alone —
+	// a garden-wide answer is a listing, not a pickup.
+	if result.Scope == "plot" {
+		for _, seed := range ready {
+			if handoff := d.gardenHandoff(seed.ID); handoff != nil {
+				result.Handoffs = append(result.Handoffs, *handoff)
+			}
+		}
+	}
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedReadyResult: result})
 }
 
-// gardenReadyCount is what a launching session is primed with: how many seeds
-// its workspace has ready. It is the same answer `attn seed ready` gives with no
-// flags, so guidance and the CLI cannot disagree.
-func (d *Daemon) gardenReadyCount(workspaceID string) (int, error) {
+// The dispatch record: a session dispatched at a crown, written by delegation
+// before the runtime spawns so the session's first flag-free `ready` already
+// answers from its plot. Scope inference, nothing more — no surface renders it
+// and nothing enforces it.
+
+func (d *Daemon) dispatchesCollection() (*docstore.CollectionSchema, error) {
+	if d.store == nil {
+		return nil, errors.New("no database")
+	}
+	return d.collectionFor(garden.Namespace, garden.CollectionDispatches)
+}
+
+// recordGardenDispatch stamps a session as dispatched at a crown. Last write
+// wins on purpose: a session is dispatched at one crown, and re-dispatching a
+// recovered session at a new crown is a re-aim, not a conflict.
+func (d *Daemon) recordGardenDispatch(sessionID, crown string) error {
+	schema, err := d.dispatchesCollection()
+	if err != nil {
+		return err
+	}
+	body, err := garden.Dispatch{SessionID: sessionID, Crown: crown}.Encode()
+	if err != nil {
+		return err
+	}
+	fact := documentChangedFact(garden.Namespace, garden.CollectionDispatches, sessionID, false)
+	written, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+		Schema: *schema, ID: sessionID, Body: body,
+	}, fact, time.Now())
+	if err != nil {
+		return err
+	}
+	d.announceCommittedWrite(fact, written.Seq)
+	return nil
+}
+
+// validateDispatchCrown refuses a dispatch aimed at a seed that is not here.
+// It is deliberately not a check that the seed already has children: a crown
+// planted for a plot that is about to be filled is the normal way to start one.
+func (d *Daemon) validateDispatchCrown(crown string) error {
+	if crown == "" {
+		return nil
+	}
 	if err := d.requireHome(garden.Surface); err != nil {
-		return 0, err
+		return fmt.Errorf("dispatch at %s: %w", crown, err)
+	}
+	schema, err := d.seedsCollection()
+	if err != nil {
+		return err
+	}
+	if _, found, err := d.store.GetDocument(*schema, crown); err != nil {
+		return err
+	} else if !found {
+		return fmt.Errorf("no seed %s to dispatch at", crown)
+	}
+	return nil
+}
+
+// gardenDispatchCrown is the crown a session was dispatched at, if any.
+func (d *Daemon) gardenDispatchCrown(sessionID string) (string, bool) {
+	if sessionID == "" || d.store == nil {
+		return "", false
+	}
+	schema, err := d.dispatchesCollection()
+	if err != nil {
+		return "", false
+	}
+	doc, found, err := d.store.GetDocument(*schema, sessionID)
+	if err != nil || !found {
+		return "", false
+	}
+	dispatch, err := garden.DecodeDispatch(doc.Body)
+	if err != nil {
+		d.logf("garden: dispatch record for %s has an unreadable body: %v", sessionID, err)
+		return "", false
+	}
+	return dispatch.Crown, dispatch.Crown != ""
+}
+
+// gardenPrime is what a launching session is primed with: the same answer its
+// own flag-free `attn seed ready` gives — the whole garden's count, or its
+// plot when the session was dispatched at a crown — so guidance and the CLI
+// cannot disagree.
+func (d *Daemon) gardenPrime(sessionID string) (*hooks.GardenPrime, error) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		return nil, err
 	}
 	read, err := d.readGarden()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	count := 0
+	prime := &hooks.GardenPrime{}
 	for _, seed := range read.seeds {
-		if read.ready[seed.ID] && seed.WorkspaceID == workspaceID {
-			count++
+		if read.ready[seed.ID] {
+			prime.Ready++
 		}
 	}
-	return count, nil
+	crown, ok := d.gardenDispatchCrown(sessionID)
+	if !ok {
+		return prime, nil
+	}
+	crownSeed, _, err := d.readSeed(crown)
+	if err != nil {
+		// A dispatched-at crown that has since left the garden primes the garden,
+		// exactly as flag-free `ready` would answer.
+		return prime, nil
+	}
+	plot := &hooks.CrownPrime{ID: crownSeed.ID, Title: crownSeed.Title, Body: crownSeed.Body}
+	inPlot := map[string]bool{}
+	for _, seed := range garden.InPlot(read.seeds, crown) {
+		inPlot[seed.ID] = true
+	}
+	// Oldest first, like `ready`: the seed that has waited longest leads.
+	for i := len(read.seeds) - 1; i >= 0; i-- {
+		seed := read.seeds[i]
+		if !read.ready[seed.ID] || !inPlot[seed.ID] {
+			continue
+		}
+		line := hooks.SeedPrime{ID: seed.ID, Title: seed.Title}
+		if handoff := d.gardenHandoff(seed.ID); handoff != nil {
+			line.Handoff = handoff.Body
+			line.HandoffAuthor = firstNonEmptyString(handoff.AuthorMember, handoff.AuthorSession)
+		}
+		plot.ReadySeeds = append(plot.ReadySeeds, line)
+	}
+	prime.Ready = len(plot.ReadySeeds)
+	prime.Crown = plot
+	return prime, nil
+}
+
+func firstNonEmptyString(values ...string) string {
+	for _, v := range values {
+		if strings.TrimSpace(v) != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // gardenFacts is the verb-to-fact table. One fact per transition, each naming

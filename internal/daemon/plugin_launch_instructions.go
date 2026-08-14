@@ -41,7 +41,7 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 			Content: hooks.Launch{
 				NotebookRoot:   root,
 				HasSelfMonitor: d.sessionHasSelfMonitor(sessionID),
-				GardenReady:    d.gardenReadyForLaunch(workspaceID),
+				Garden:         d.gardenPrimeForLaunch(sessionID),
 			}.Instructions(),
 			WorkspaceID:  workspaceID,
 			NotebookRoot: root,
@@ -68,7 +68,7 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 		Content: hooks.Launch{
 			WorkspaceContextPath: result.Path,
 			InjectWorkflow:       parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
-			GardenReady:          d.gardenReadyForLaunch(workspaceID),
+			Garden:               d.gardenPrimeForLaunch(sessionID),
 		}.Instructions(),
 		WorkspaceID:     workspaceID,
 		ContextPath:     result.Path,
@@ -76,13 +76,13 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 	}, rollback, nil
 }
 
-// gardenReadyForLaunch is the ready count a launching agent is primed with, or
-// nil when this daemon has no garden to prime from — an outpost, where every
-// seed command refuses, must not hand its agents a loop they cannot run.
-func (d *Daemon) gardenReadyForLaunch(workspaceID string) *int {
-	count, err := d.gardenReadyCount(workspaceID)
+// gardenPrimeForLaunch is what a launching agent is primed with, or nil when
+// this daemon has no garden to prime from — an outpost, where every seed
+// command refuses, must not hand its agents a loop they cannot run.
+func (d *Daemon) gardenPrimeForLaunch(sessionID string) *hooks.GardenPrime {
+	prime, err := d.gardenPrime(sessionID)
 	if err != nil {
 		return nil
 	}
-	return &count
+	return prime
 }

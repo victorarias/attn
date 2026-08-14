@@ -2754,6 +2754,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
 	case protocol.CmdSeedPlant: // wire: seed_plant
 		d.handleSeedPlant(conn, msg.(*protocol.SeedPlantMessage))
+	case protocol.CmdSeedPlot: // wire: seed_plot
+		d.handleSeedPlot(conn, msg.(*protocol.SeedPlotMessage))
 	case protocol.CmdSeedList: // wire: seed_list
 		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
 	case protocol.CmdSeedShow: // wire: seed_show

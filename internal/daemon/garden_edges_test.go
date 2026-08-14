@@ -62,8 +62,8 @@ func TestGardenEdges_HarvestingABlockerSurfacesTheDependent(t *testing.T) {
 	if got := readyIDs(first); len(got) != 1 || got[0] != a.ID {
 		t.Fatalf("ready = %v, want only the unblocked seed %s", got, a.ID)
 	}
-	if first.Scope != "workspace" || first.ScopeID != "ws-1" {
-		t.Fatalf("flag-free ready scoped to %s/%s, want the session's workspace", first.Scope, first.ScopeID)
+	if first.Scope != "garden" || first.ScopeID != "" {
+		t.Fatalf("flag-free ready scoped to %s/%s, want the whole garden", first.Scope, first.ScopeID)
 	}
 
 	move(t, d, "sess-a", a.ID, garden.VerbTend, "", "trellis")
@@ -188,43 +188,59 @@ func TestGardenEdges_RefusalsNameBothSeeds(t *testing.T) {
 	}
 }
 
-// Two real sessions in two workspaces. The flag-free form is the common one, so
-// what it infers has to be the caller's own workspace and nobody else's.
-func TestGardenEdges_ReadyDiffersPerSessionWorkspace(t *testing.T) {
+// Dispatch is scope inference and nothing more: a session dispatched at a crown
+// gets that plot from a flag-free ready, --all steps back out to the garden, and
+// the seeds themselves are never fenced — anybody may tend anything.
+func TestGardenEdges_ReadyInfersTheDispatchedPlot(t *testing.T) {
 	d := newGardenDaemon(t)
-	d.workspaces.register("ws-2", "b", "/tmp/b", "b0", false, false)
-	now := string(protocol.TimestampNow())
-	d.store.Add(&protocol.Session{
-		ID: "sess-b", Label: "b", State: "idle",
-		StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	crown := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "the plot"})
+	inside := plant(t, d, protocol.SeedPlantMessage{
+		SourceSessionID: protocol.Ptr("sess-a"), Title: "inside", PartOf: protocol.Ptr(crown.ID),
 	})
-	d.workspaces.associateSession("sess-b", "ws-2", "b")
+	outside := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "outside"})
 
-	here := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "mine"})
-	there := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-b"), Title: "theirs"})
-
-	mine := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
-	if got := readyIDs(mine); len(got) != 1 || got[0] != here.ID {
-		t.Fatalf("sess-a ready = %v, want %s", got, here.ID)
-	}
-	theirs := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-b")})
-	if got := readyIDs(theirs); len(got) != 1 || got[0] != there.ID {
-		t.Fatalf("sess-b ready = %v, want %s", got, there.ID)
-	}
-	if theirs.ScopeID != "ws-2" {
-		t.Fatalf("sess-b scoped to %q, want ws-2", theirs.ScopeID)
+	// Undispatched, the same session sees the whole garden.
+	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 2 {
+		t.Fatalf("undispatched ready = %v, want both seeds", got)
 	}
 
-	// A blocker in another workspace still blocks: the edge is a property of the
-	// garden, not of the workspace the reader happens to be in.
-	mustLink(t, d, there.ID, garden.EdgeBlocks, here.ID)
-	if got := readyIDs(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})); len(got) != 0 {
-		t.Fatalf("ready = %v, want nothing: the only seed here is blocked from another workspace", got)
+	if err := d.recordGardenDispatch("sess-a", crown.ID); err != nil {
+		t.Fatalf("recordGardenDispatch: %v", err)
 	}
 
-	whole := ready(t, d, protocol.SeedReadyMessage{All: protocol.Ptr(true)})
-	if got := readyIDs(whole); len(got) != 1 || got[0] != there.ID || whole.Scope != "all" {
-		t.Fatalf("--all ready = %v (scope %s), want the blocker", got, whole.Scope)
+	dispatched := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
+	if got := readyIDs(dispatched); len(got) != 1 || got[0] != inside.ID {
+		t.Fatalf("dispatched ready = %v, want the plot's child %s", got, inside.ID)
+	}
+	if dispatched.Scope != "plot" || dispatched.ScopeID != crown.ID {
+		t.Fatalf("dispatched scope = %s/%s, want plot/%s", dispatched.Scope, dispatched.ScopeID, crown.ID)
+	}
+	if dispatched.Crown == nil || dispatched.Crown.PlotProgress == nil {
+		t.Fatalf("a plot answer did not carry its crown and progress: %+v", dispatched.Crown)
+	}
+
+	// Not a fence: --all is the way back out, and the seed outside the plot is
+	// still there to be tended.
+	all := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a"), All: protocol.Ptr(true)})
+	if got := readyIDs(all); len(got) != 2 || all.Scope != "garden" {
+		t.Fatalf("--all from a dispatched session = %v (scope %s), want the whole garden", got, all.Scope)
+	}
+	move(t, d, "sess-a", outside.ID, garden.VerbTend, "", "trellis")
+}
+
+// A dispatch record outlives the crown it names — a withered plot, a garden
+// somebody rearranged. Inference then infers nothing rather than refusing a
+// caller who asked with no flags at all.
+func TestGardenEdges_ReadyFallsBackWhenTheCrownIsGone(t *testing.T) {
+	d := newGardenDaemon(t)
+	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "still here"})
+	if err := d.recordGardenDispatch("sess-a", "s-zzzzzz"); err != nil {
+		t.Fatalf("recordGardenDispatch: %v", err)
+	}
+
+	result := ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")})
+	if result.Scope != "garden" || len(result.Seeds) != 1 {
+		t.Fatalf("ready with a dangling dispatch = %+v, want the whole garden", result)
 	}
 }
 
@@ -295,15 +311,18 @@ func TestGardenEdges_LaunchPrimerCountsTheSameReady(t *testing.T) {
 	b := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "second"})
 	mustLink(t, d, a.ID, garden.EdgeBlocks, b.ID)
 
-	count, err := d.gardenReadyCount("ws-1")
+	prime, err := d.gardenPrime("sess-a")
 	if err != nil {
-		t.Fatalf("gardenReadyCount: %v", err)
+		t.Fatalf("gardenPrime: %v", err)
 	}
-	if want := len(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")}).Seeds); count != want {
-		t.Fatalf("primer count = %d, want %d", count, want)
+	if want := len(ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-a")}).Seeds); prime.Ready != want {
+		t.Fatalf("primer count = %d, want %d", prime.Ready, want)
 	}
-	if count != 1 {
-		t.Fatalf("primer count = %d, want 1", count)
+	if prime.Ready != 1 {
+		t.Fatalf("primer count = %d, want 1", prime.Ready)
+	}
+	if prime.Crown != nil {
+		t.Fatalf("an undispatched session was primed with a plot: %+v", prime.Crown)
 	}
 }
 
@@ -323,7 +342,7 @@ func TestGardenEdges_OutpostRefusesLinkAndReady(t *testing.T) {
 	if resp.Ok || !strings.Contains(protocol.Deref(resp.Error), garden.Surface) {
 		t.Fatalf("seed ready on an outpost: %+v", resp)
 	}
-	if primer := d.gardenReadyForLaunch("ws-1"); primer != nil {
-		t.Fatalf("an outpost primed a launching agent with %d ready seeds", *primer)
+	if primer := d.gardenPrimeForLaunch("sess-a"); primer != nil {
+		t.Fatalf("an outpost primed a launching agent with %+v", primer)
 	}
 }

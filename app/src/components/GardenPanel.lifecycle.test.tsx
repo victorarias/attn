@@ -8,7 +8,6 @@ function seed(overrides: Partial<Seed> & { id: string; title: string }): Seed {
     body: '',
     status: 'planted',
     step_slug: overrides.title,
-    workspace_id: 'ws-1',
     planter_session: '',
     planter_member: '',
     tender_session: '',
@@ -37,7 +36,7 @@ describe('GardenPanel lifecycle', () => {
       tender_member: 'trellis',
       tender_session: 'sess-a',
     });
-    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} />);
 
     expect(screen.getByText('growing')).toBeInTheDocument();
     expect(screen.getByText('tended by trellis')).toBeInTheDocument();
@@ -52,7 +51,7 @@ describe('GardenPanel lifecycle', () => {
       status: 'growing',
       tender_session: 'sess-b',
     });
-    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} />);
 
     expect(screen.getByText('tended by sess-b')).toBeInTheDocument();
   });
@@ -64,7 +63,6 @@ describe('GardenPanel lifecycle', () => {
         onClose={vi.fn()}
         seedsTotal={1}
         seeds={[seed({ id: 's-idle11', title: 'unclaimed' })]}
-        workspaceId="ws-1"
       />,
     );
 
@@ -76,7 +74,7 @@ describe('GardenPanel lifecycle', () => {
   it('follows a seed through its life as the pushes arrive', () => {
     const planted = seed({ id: 's-life11', title: 'a whole life' });
     const { rerender } = render(
-      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[planted]} workspaceId="ws-1" />,
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[planted]} />,
     );
     expect(screen.getByText('planted')).toBeInTheDocument();
 
@@ -86,7 +84,6 @@ describe('GardenPanel lifecycle', () => {
         onClose={vi.fn()}
         seedsTotal={1}
         seeds={[{ ...planted, status: 'growing', tender_member: 'trellis', rev: 2 }]}
-        workspaceId="ws-1"
       />,
     );
     expect(screen.getByText('growing')).toBeInTheDocument();
@@ -98,7 +95,6 @@ describe('GardenPanel lifecycle', () => {
         onClose={vi.fn()}
         seedsTotal={1}
         seeds={[{ ...planted, status: 'harvested', reason: 'shipped it', rev: 3 }]}
-        workspaceId="ws-1"
       />,
     );
     expect(screen.getByText('harvested')).toBeInTheDocument();
@@ -112,7 +108,7 @@ describe('GardenPanel lifecycle', () => {
       status: 'harvested',
       reason: 'shipped it',
     });
-    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[harvested]} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[harvested]} />);
 
     expect(screen.queryByText('shipped it')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('finished'));

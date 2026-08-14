@@ -135,7 +135,7 @@ func TestEncodeAlwaysWritesEveryDeclaredField(t *testing.T) {
 		t.Fatalf("stored body is not an object: %v", err)
 	}
 	// A declared field missing from a body is a document a query cannot see: a
-	// filter on workspace_id would skip every seed planted outside a workspace.
+	// filter on a field no body carries matches nothing.
 	for _, field := range SeedsSchema().Fields {
 		if _, ok := body[field.Name]; !ok {
 			t.Fatalf("declared field %q is absent from an encoded seed: %s", field.Name, raw)
@@ -159,7 +159,7 @@ func TestDecodeToleratesAFieldItDoesNotKnow(t *testing.T) {
 func TestSeedRoundTrips(t *testing.T) {
 	want := Seed{
 		ID: "s-7k3f9m", Title: "plant and see", Body: "# a plan\n\nbody",
-		Status: StatusPlanted, StepSlug: "plant-and-see", WorkspaceID: "ws-1",
+		Status: StatusPlanted, StepSlug: "plant-and-see",
 		PlanterSession: "sess-1", PlanterMember: "trellis",
 		Edges: []Edge{{Kind: "part-of", To: "s-aaaaaa"}},
 		Vars:  []Var{{Name: "repo", Required: true}},

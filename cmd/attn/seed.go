@@ -13,6 +13,7 @@ import (
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/garden"
+	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -21,8 +22,9 @@ import (
 // anything worth handing off, parking, or attributing gets planted, and a
 // capture that costs ceremony does not happen.
 //
-// Scope comes from the daemon, not from flags: the session id in the
-// environment is enough for it to stamp the workspace and to scope a listing.
+// Scope comes from the daemon, not from flags: the garden is one space, and the
+// session id in the environment is enough for it to infer the plot a dispatched
+// session was aimed at.
 
 func runSeed() {
 	if len(os.Args) < 3 || os.Args[2] == "-h" || os.Args[2] == "--help" {
@@ -33,6 +35,8 @@ func runSeed() {
 	switch os.Args[2] {
 	case "plant":
 		runSeedPlant(args)
+	case "plot":
+		runSeedPlot(args)
 	case "ls":
 		runSeedList(args)
 	case "show":
@@ -57,7 +61,7 @@ func runSeed() {
 }
 
 func writeSeedHelp(w io.Writer) {
-	fmt.Fprint(w, `usage: attn seed <command>
+	fmt.Fprintf(w, `usage: attn seed <command>
 
 A seed is the unit of work: one document, one short id, planted in the garden.
 Anything worth handing off, parking, or attributing is a seed; in-session
@@ -67,20 +71,30 @@ The garden lives at the home daemon. On an outpost every command here refuses,
 naming the home to run it on.
 
 commands:
-  plant "<title>" [-m <body>] [flags]
+  plant "<title>" [-m <body>] [--part-of <crown>] [flags]
         plant a seed and print its id. -m takes markdown, or - to read stdin —
-        on a crown that body is the plan itself. The seed is stamped with the
-        workspace of the session you are in; --workspace overrides it.
+        on a crown that body is the plan itself. --part-of plants it under a
+        crown, born part of that plot.
 
-  ls [--all | --workspace <id>] [--tree] [--json]
-        the seeds of the workspace you are in, newest first. --all is the whole
-        garden, including seeds planted outside any workspace. --tree nests each
-        seed under the crown it is part of.
+  plot [-f <path>] [--json]
+        plant a whole plot in one move from a JSON payload (-f, or stdin):
+        {"title": …, "body": …, "children": [{"title": …, "body": …,
+        "blocks": ["<sibling step slug>"]}]}. Children are parallel by
+        default; blocks names the siblings a child holds back. Prints the
+        crown's id and each child's id and step slug.
 
-  ready [--plot <crown> | --workspace <id> | --all] [--json]
+  ls [--stale [--window <duration>]] [--tree] [--json]
+        the garden, newest first. --tree nests each seed under the crown it is
+        part of. --stale narrows to the open seeds whose trail has not moved
+        for the window (default %s) — a query for your judgment, never a
+        reaper.
+
+  ready [--plot <crown> | --all] [--json]
         what you can tend right now, oldest first: nothing open blocks it,
         nobody is holding it, and it is not a crown — a plot's work is its
-        children. With no flags the scope is the workspace you are in.
+        children. With no flags the scope is the whole garden — unless this
+        session was dispatched at a crown, and then its plot; --all steps back
+        out to the garden.
 
   link <a> blocks <b> | link <a> part-of <b>
         relate two seeds. "a blocks b" keeps b out of ready until a closes;
@@ -131,20 +145,50 @@ commands:
         edit the seed and export again, never the file.
 
 flags:
+  --part-of <crown>  plant under a crown (plant)
   --plot <crown>     scope a ready answer to one plot
   --tree             nest a listing under its crowns
-  --workspace <id>   the workspace to stamp (plant) or to list (ls, ready)
+  --stale            only open seeds whose trail has not moved (ls)
+  --window <d>       the stale window, like 72h or 14d (ls --stale)
+  -f <path>          the plot payload to read (plot; default stdin)
   --handoff          write a note to whoever tends the seed next (note)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
   --limit <n>        how many trail entries to read (notes)
   --json             print the result as JSON
-`)
+`, formatWindow(garden.DefaultStaleWindow))
 }
 
 func seedClient() *client.Client {
 	return client.New(config.SocketPath())
+}
+
+// gardenPrimeFromReady carries a flag-free ready answer into the launch primer.
+// The daemon already inferred the scope — plot when the session was dispatched
+// at a crown, the whole garden otherwise — so this is rendering, not policy.
+func gardenPrimeFromReady(ready *protocol.SeedReadyResult) *hooks.GardenPrime {
+	prime := &hooks.GardenPrime{Ready: len(ready.Seeds)}
+	if ready.Crown == nil {
+		return prime
+	}
+	crown := &hooks.CrownPrime{ID: ready.Crown.ID, Title: ready.Crown.Title, Body: ready.Crown.Body}
+	handoffs := make(map[string]protocol.SeedNote, len(ready.Handoffs))
+	for _, handoff := range ready.Handoffs {
+		if _, seen := handoffs[handoff.SeedID]; !seen {
+			handoffs[handoff.SeedID] = handoff
+		}
+	}
+	for _, seed := range ready.Seeds {
+		line := hooks.SeedPrime{ID: seed.ID, Title: seed.Title}
+		if handoff, ok := handoffs[seed.ID]; ok {
+			line.Handoff = handoff.Body
+			line.HandoffAuthor = firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)
+		}
+		crown.ReadySeeds = append(crown.ReadySeeds, line)
+	}
+	prime.Crown = crown
+	return prime
 }
 
 func seedFail(verb string, err error) {
@@ -156,36 +200,42 @@ func seedFail(verb string, err error) {
 // best-effort: a headless caller with no session is a real case, and only the
 // commands that need a scope refuse it.
 type seedFlags struct {
-	fs        *flag.FlagSet
-	session   *string
-	workspace *string
-	member    *string
-	json      *bool
-	all       *bool
-	tree      *bool
-	plot      *string
-	message   *string
-	out       *string
-	limit     *int
-	handoff   *bool
+	fs      *flag.FlagSet
+	session *string
+	member  *string
+	json    *bool
+	all     *bool
+	tree    *bool
+	stale   *bool
+	window  *string
+	plot    *string
+	partOf  *string
+	file    *string
+	message *string
+	out     *string
+	limit   *int
+	handoff *bool
 }
 
 func newSeedFlags(verb string) *seedFlags {
 	fs := flag.NewFlagSet("seed "+verb, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return &seedFlags{
-		fs:        fs,
-		session:   fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)"),
-		workspace: fs.String("workspace", "", "workspace id"),
-		member:    fs.String("member", "", "crew member planting this seed"),
-		json:      fs.Bool("json", false, "print the result as JSON"),
-		all:       fs.Bool("all", false, "the whole garden, not one workspace"),
-		tree:      fs.Bool("tree", false, "nest seeds under the crown they are part of"),
-		plot:      fs.String("plot", "", "scope to one plot, by its crown"),
-		message:   fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
-		out:       fs.String("out", "", "file to write (- for stdout)"),
-		limit:     fs.Int("limit", 0, "how many trail entries to read"),
-		handoff:   fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
+		fs:      fs,
+		session: fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)"),
+		member:  fs.String("member", "", "crew member planting this seed"),
+		json:    fs.Bool("json", false, "print the result as JSON"),
+		all:     fs.Bool("all", false, "the whole garden, overriding a dispatched session's plot"),
+		tree:    fs.Bool("tree", false, "nest seeds under the crown they are part of"),
+		stale:   fs.Bool("stale", false, "only open seeds whose trail has not moved for the window"),
+		window:  fs.String("window", "", "the stale window, like 72h or 14d"),
+		plot:    fs.String("plot", "", "scope to one plot, by its crown"),
+		partOf:  fs.String("part-of", "", "plant under this crown"),
+		file:    fs.String("f", "", "the plot payload to read (- or empty reads stdin)"),
+		message: fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
+		out:     fs.String("out", "", "file to write (- for stdout)"),
+		limit:   fs.Int("limit", 0, "how many trail entries to read"),
+		handoff: fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
 	}
 }
 
@@ -239,14 +289,42 @@ func (f *seedFlags) sessionID() string {
 	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
 }
 
-// workspaceOverride is nil unless --workspace was actually written, so the
-// daemon can tell "use my session's workspace" from "use this one".
-func (f *seedFlags) workspaceOverride() *string {
-	if !flagWasSet(f.fs, "workspace") {
-		return nil
+// staleWindowSeconds reads --window, refusing a value that is not a duration.
+// 0 means "the daemon's default", which the result echoes back.
+func (f *seedFlags) staleWindowSeconds() int {
+	raw := strings.TrimSpace(*f.window)
+	if raw == "" {
+		return 0
 	}
-	value := strings.TrimSpace(*f.workspace)
-	return &value
+	window, err := parseWindow(raw)
+	if err != nil {
+		seedFail("ls", err)
+	}
+	return int(window / time.Second)
+}
+
+// parseWindow reads a stale window. Go's ParseDuration tops out at hours, and
+// a stale window is naturally said in days, so `d` is accepted as 24h.
+func parseWindow(raw string) (time.Duration, error) {
+	if days, ok := strings.CutSuffix(raw, "d"); ok {
+		if n, err := time.ParseDuration(days + "h"); err == nil {
+			return n * 24, nil
+		}
+	}
+	window, err := time.ParseDuration(raw)
+	if err != nil || window <= 0 {
+		return 0, fmt.Errorf("%q is not a window; say it like 72h or 14d", raw)
+	}
+	return window, nil
+}
+
+// formatWindow renders a window the way it is said: whole days as Nd,
+// anything else as Go's own duration string.
+func formatWindow(window time.Duration) string {
+	if window >= 24*time.Hour && window%(24*time.Hour) == 0 {
+		return fmt.Sprintf("%dd", window/(24*time.Hour))
+	}
+	return window.String()
 }
 
 func runSeedPlant(args []string) {
@@ -255,7 +333,7 @@ func runSeedPlant(args []string) {
 	if len(positionals) != 1 {
 		seedFail("plant", fmt.Errorf(`needs exactly one title, got %d: attn seed plant "what this is" [-m "the detail"]`, len(positionals)))
 	}
-	result, err := seedClient().SeedPlant(f.sessionID(), positionals[0], f.text("plant"), f.workspaceOverride(), strings.TrimSpace(*f.member))
+	result, err := seedClient().SeedPlant(f.sessionID(), positionals[0], f.text("plant"), strings.TrimSpace(*f.partOf), strings.TrimSpace(*f.member))
 	if err != nil {
 		seedFail("plant", err)
 	}
@@ -272,7 +350,10 @@ func runSeedList(args []string) {
 	if positionals := f.parse("ls", args); len(positionals) != 0 {
 		seedFail("ls", fmt.Errorf("takes no arguments, got %q; to read one seed use `attn seed show <id>`", positionals[0]))
 	}
-	result, err := seedClient().SeedList(f.sessionID(), f.workspaceOverride(), *f.all)
+	if !*f.stale && flagWasSet(f.fs, "window") {
+		seedFail("ls", fmt.Errorf("--window is the stale window; it only means something with --stale"))
+	}
+	result, err := seedClient().SeedList(f.sessionID(), *f.stale, f.staleWindowSeconds())
 	if err != nil {
 		seedFail("ls", err)
 	}
@@ -280,26 +361,105 @@ func runSeedList(args []string) {
 		writeJSON(result)
 		return
 	}
+	if *f.stale {
+		// The rule is half the answer: a stale seed is a question for your
+		// judgment, and the reader has to know what was asked to judge it.
+		fmt.Printf("open seeds with no trail movement for %s — nothing was touched; %s\n\n",
+			staleWindowLabel(result.StaleWindowSeconds), "tend, note or park what still matters")
+	}
 	if len(result.Seeds) == 0 {
-		if result.All {
-			fmt.Println("the garden is empty — `attn seed plant \"what this is\"` puts something in it")
+		if *f.stale {
+			fmt.Println("none — every open seed has moved inside the window")
 			return
 		}
-		fmt.Println("no seeds in this workspace — `attn seed ls --all` reads the whole garden")
+		fmt.Println("the garden is empty — `attn seed plant \"what this is\"` puts something in it")
 		return
 	}
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tSTATUS\tTENDER\tPLANTED\tTITLE")
 	for _, row := range seedRows(result.Seeds, *f.tree) {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s\n",
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s%s\n",
 			row.seed.ID, row.seed.Status, orDash(firstNonEmpty(row.seed.TenderMember, row.seed.TenderSession)),
-			shortStamp(row.seed.CreatedAt), strings.Repeat("  ", row.depth), row.seed.Title)
+			shortStamp(row.seed.CreatedAt), strings.Repeat("  ", row.depth), row.seed.Title, plotProgressSuffix(row.seed))
 	}
 	w.Flush()
 	if result.Total > len(result.Seeds) {
-		fmt.Printf("\nshowing the newest %d of %d seeds — one read is capped at %d. The %d not shown are the oldest; `attn seed ls --workspace <id>` reaches them in a narrower scope.\n",
+		fmt.Printf("\nshowing the newest %d of %d seeds — one read is capped at %d. The %d not shown are the oldest; `attn seed show <id>` still reaches any of them.\n",
 			len(result.Seeds), result.Total, len(result.Seeds), result.Total-len(result.Seeds))
 	}
+}
+
+// staleWindowLabel says the window the daemon actually applied, which is the
+// default unless --window moved it.
+func staleWindowLabel(seconds *int) string {
+	if seconds == nil || *seconds <= 0 {
+		return formatWindow(garden.DefaultStaleWindow)
+	}
+	return formatWindow(time.Duration(*seconds) * time.Second)
+}
+
+// plotProgressSuffix is how a crown wears its plot in a listing: the counts
+// that say whether the plot is draining, and where it is stuck.
+func plotProgressSuffix(seed protocol.Seed) string {
+	if seed.PlotProgress == nil {
+		return ""
+	}
+	p := *seed.PlotProgress
+	return fmt.Sprintf("  [%d/%d done · %d growing · %d ready · %d blocked]",
+		p.Done, p.Total, p.Growing, p.Ready, p.Blocked)
+}
+
+func runSeedPlot(args []string) {
+	f := newSeedFlags("plot")
+	if positionals := f.parse("plot", args); len(positionals) != 0 {
+		seedFail("plot", fmt.Errorf("takes no arguments, got %q; the plot is JSON on stdin or at -f <path>", positionals[0]))
+	}
+	spec, err := garden.ParsePlotSpec(readPlotPayload(strings.TrimSpace(*f.file)))
+	if err != nil {
+		seedFail("plot", err)
+	}
+	msg := protocol.SeedPlotMessage{Title: spec.Title}
+	if spec.Body != "" {
+		msg.Body = protocol.Ptr(spec.Body)
+	}
+	for _, child := range spec.Children {
+		wire := protocol.SeedPlotChild{Title: child.Title, Blocks: child.Blocks}
+		if child.Body != "" {
+			wire.Body = protocol.Ptr(child.Body)
+		}
+		msg.Children = append(msg.Children, wire)
+	}
+	result, err := seedClient().SeedPlot(f.sessionID(), strings.TrimSpace(*f.member), msg)
+	if err != nil {
+		seedFail("plot", err)
+	}
+	if *f.json {
+		writeJSON(result)
+		return
+	}
+	fmt.Println(result.Crown.ID)
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	for _, child := range result.Children {
+		fmt.Fprintf(w, "  %s\t%s\t%s\n", child.ID, child.StepSlug, child.Title)
+	}
+	w.Flush()
+}
+
+// readPlotPayload takes the payload from a file, or from stdin when there is no
+// path — the shape an agent writes a plot in.
+func readPlotPayload(path string) []byte {
+	if path == "" || path == "-" {
+		payload, err := io.ReadAll(os.Stdin)
+		if err != nil {
+			seedFail("plot", fmt.Errorf("read the plot from stdin: %w", err))
+		}
+		return payload
+	}
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		seedFail("plot", err)
+	}
+	return payload
 }
 
 // seedRow is one printed line: the seed and how deep it sits under its crown.
@@ -457,9 +617,9 @@ func runSeedLink(unlink bool, args []string) {
 func runSeedReady(args []string) {
 	f := newSeedFlags("ready")
 	if positionals := f.parse("ready", args); len(positionals) != 0 {
-		seedFail("ready", fmt.Errorf("takes no arguments, got %q; scope it with --plot <crown>, --workspace <id> or --all", positionals[0]))
+		seedFail("ready", fmt.Errorf("takes no arguments, got %q; scope it with --plot <crown> or --all", positionals[0]))
 	}
-	result, err := seedClient().SeedReady(f.sessionID(), strings.TrimSpace(*f.plot), f.workspaceOverride(), *f.all)
+	result, err := seedClient().SeedReady(f.sessionID(), strings.TrimSpace(*f.plot), *f.all)
 	if err != nil {
 		seedFail("ready", err)
 	}
@@ -467,33 +627,53 @@ func runSeedReady(args []string) {
 		writeJSON(result)
 		return
 	}
+	if result.Crown != nil {
+		fmt.Printf("%s  %s%s\n\n", result.Crown.ID, result.Crown.Title, plotProgressSuffix(*result.Crown))
+	}
 	if len(result.Seeds) == 0 {
 		fmt.Printf("nothing is ready %s — `attn seed ls` shows what is planted and what holds it\n", readyScopeName(result))
 		return
 	}
+	handoffs := freshestHandoffs(result.Handoffs)
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(w, "ID\tSTATUS\tPLANTED\tTITLE")
 	for _, seed := range result.Seeds {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", seed.ID, seed.Status, shortStamp(seed.CreatedAt), seed.Title)
+		if handoff, ok := handoffs[seed.ID]; ok {
+			fmt.Fprintf(w, "\t\t\t↳ %s: %s\n",
+				orDash(firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)), firstLine(handoff.Body))
+		}
 	}
 	w.Flush()
 	fmt.Printf("\n%d ready %s — `attn seed tend <id>` claims one\n", len(result.Seeds), readyScopeName(result))
 }
 
-// readyScopeName says what the answer covered, so an empty answer is never read
-// as an empty garden.
-func readyScopeName(result *protocol.SeedReadyResult) string {
-	switch result.Scope {
-	case "plot":
-		return fmt.Sprintf("in the plot under %s", result.ScopeID)
-	case "workspace":
-		if result.ScopeID == "" {
-			return "outside any workspace"
+// freshestHandoffs keeps the first handoff per seed; the daemon sends them
+// newest first, so the first one is the one to read before any work.
+func freshestHandoffs(notes []protocol.SeedNote) map[string]protocol.SeedNote {
+	freshest := make(map[string]protocol.SeedNote, len(notes))
+	for _, note := range notes {
+		if _, seen := freshest[note.SeedID]; !seen {
+			freshest[note.SeedID] = note
 		}
-		return "in this workspace"
-	default:
-		return "in the garden"
 	}
+	return freshest
+}
+
+// firstLine keeps a handoff to one row of a listing; show renders the whole one.
+func firstLine(body string) string {
+	line, _, _ := strings.Cut(strings.TrimSpace(body), "\n")
+	return line
+}
+
+// readyScopeName says what the answer covered, so an empty answer is never read
+// as an empty garden. The plot scope is inferred, never a fence: --all steps
+// back out to the garden from anywhere.
+func readyScopeName(result *protocol.SeedReadyResult) string {
+	if result.Scope == "plot" {
+		return fmt.Sprintf("in the plot under %s", result.ScopeID)
+	}
+	return "in the garden"
 }
 
 func fprintSeed(out io.Writer, seed protocol.Seed) {
@@ -501,9 +681,12 @@ func fprintSeed(out io.Writer, seed protocol.Seed) {
 	fmt.Fprintf(w, "%s\t%s\n", seed.ID, seed.Title)
 	fmt.Fprintf(w, "status\t%s\n", seed.Status)
 	fmt.Fprintf(w, "step\t%s\n", seed.StepSlug)
-	fmt.Fprintf(w, "workspace\t%s\n", orDash(seed.WorkspaceID))
 	fmt.Fprintf(w, "planted\t%s by %s\n", shortStamp(seed.CreatedAt), orDash(firstNonEmpty(seed.PlanterMember, seed.PlanterSession)))
 	fmt.Fprintf(w, "tender\t%s\n", orDash(firstNonEmpty(seed.TenderMember, seed.TenderSession)))
+	if p := seed.PlotProgress; p != nil {
+		fmt.Fprintf(w, "plot\t%d of %d done — %d growing, %d ready, %d blocked, %d dormant, %d withered\n",
+			p.Done, p.Total, p.Growing, p.Ready, p.Blocked, p.Dormant, p.Withered)
+	}
 	if seed.Template {
 		fmt.Fprintf(w, "packet\tyes\n")
 	}

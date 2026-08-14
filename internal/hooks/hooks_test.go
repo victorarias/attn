@@ -359,12 +359,12 @@ func TestGardenPrimer(t *testing.T) {
 	}
 
 	counts := map[int]string{
-		0: "Nothing was ready",
-		1: "One seed was ready",
-		4: "4 seeds were ready",
+		0: "Nothing was ready in the garden",
+		1: "One seed was ready in the garden",
+		4: "4 seeds were ready in the garden",
 	}
 	for count, want := range counts {
-		primer := GardenPrimer(&count)
+		primer := GardenPrimer(&GardenPrime{Ready: count})
 		if !strings.Contains(primer, want) {
 			t.Fatalf("primer for %d does not say %q:\n%s", count, want, primer)
 		}
@@ -378,12 +378,61 @@ func TestGardenPrimer(t *testing.T) {
 	}
 }
 
+// A delegate dispatched at a crown launches knowing its plot: the crown, the
+// plan in its body, the ready seeds, and the freshest handoff on each.
+func TestGardenPrimerPrimesADispatchedDelegate(t *testing.T) {
+	primer := GardenPrimer(&GardenPrime{
+		Ready: 2,
+		Crown: &CrownPrime{
+			ID: "s-crown", Title: "ship the thing", Body: "# the plan\n\nstep by step",
+			ReadySeeds: []SeedPrime{
+				{ID: "s-aaa", Title: "first step", Handoff: "the fixture is seeded", HandoffAuthor: "trellis"},
+				{ID: "s-bbb", Title: "second step"},
+			},
+		},
+	})
+	for _, want := range []string{
+		"s-crown", "ship the thing", "step by step",
+		"s-aaa", "first step", "handoff from trellis: the fixture is seeded",
+		"s-bbb", "second step",
+		"attn seed ready --all", "nothing fences you in", "per-seed tender",
+	} {
+		if !strings.Contains(primer, want) {
+			t.Fatalf("dispatched primer does not carry %q:\n%s", want, primer)
+		}
+	}
+}
+
+// A crown body is a plan, and a plan can be long. It is capped so one seed
+// cannot crowd out the rest of an agent's launch guidance, and the cap says
+// where the whole body is.
+func TestGardenPrimerCapsACrownBody(t *testing.T) {
+	primer := GardenPrimer(&GardenPrime{
+		Crown: &CrownPrime{ID: "s-crown", Title: "big", Body: strings.Repeat("x", crownPrimeBodyLimit*2)},
+	})
+	if len(primer) > crownPrimeBodyLimit*2 {
+		t.Fatalf("an oversized crown body was not capped: %d chars", len(primer))
+	}
+	if !strings.Contains(primer, "attn seed show s-crown") {
+		t.Fatalf("the cap does not say where the whole body is:\n%s", primer)
+	}
+}
+
+// A plot with nothing ready is a real state — everything blocked, held, or done
+// — and saying so beats an empty list the reader has to interpret.
+func TestGardenPrimerSaysAnEmptyPlotIsEmpty(t *testing.T) {
+	primer := GardenPrimer(&GardenPrime{Crown: &CrownPrime{ID: "s-crown", Title: "done already"}})
+	if !strings.Contains(primer, "Nothing in this plot was ready") {
+		t.Fatalf("primer does not name the empty plot:\n%s", primer)
+	}
+}
+
 // Every attn-launched agent lives in the same garden, so the primer rides with
 // chief guidance and workspace guidance alike — and never replaces either.
 func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
-	count := 2
+	prime := &GardenPrime{Ready: 2}
 
-	workspace := Launch{WorkspaceContextPath: "/tmp/context.md", GardenReady: &count}.Instructions()
+	workspace := Launch{WorkspaceContextPath: "/tmp/context.md", Garden: prime}.Instructions()
 	if want := AgentInstructions("/tmp/context.md", false); !strings.HasPrefix(workspace, want) {
 		t.Fatalf("workspace launch dropped the agent instructions:\n%s", workspace)
 	}
@@ -391,7 +440,7 @@ func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
 		t.Fatalf("workspace launch dropped the primer:\n%s", workspace)
 	}
 
-	chief := Launch{NotebookRoot: "/tmp/notebook", GardenReady: &count}.Instructions()
+	chief := Launch{NotebookRoot: "/tmp/notebook", Garden: prime}.Instructions()
 	if want := ChiefGuidance("/tmp/notebook", false); !strings.HasPrefix(chief, want) {
 		t.Fatalf("chief launch dropped the chief guidance:\n%s", chief)
 	}

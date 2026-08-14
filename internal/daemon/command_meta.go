@@ -45,6 +45,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAgentPeek:                  commandMetadata(ScopeSession, false, true),
 	protocol.CmdAgentMsg:                   commandMetadata(ScopeSession, false, true),
 	protocol.CmdSeedPlant:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdSeedPlot:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedList:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedShow:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdSeedTransition:             commandMetadata(ScopeHubLocal, false, true),

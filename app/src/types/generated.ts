@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewListMessage, CrewListResult, CrewMember, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewListMessage, CrewListResult, CrewMember, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocUndefineMessage, DocUndefineResult, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -356,6 +356,10 @@
 //   const seedNotesResult = Convert.toSeedNotesResult(json);
 //   const seedPlantMessage = Convert.toSeedPlantMessage(json);
 //   const seedPlantResult = Convert.toSeedPlantResult(json);
+//   const seedPlotChild = Convert.toSeedPlotChild(json);
+//   const seedPlotMessage = Convert.toSeedPlotMessage(json);
+//   const seedPlotProgress = Convert.toSeedPlotProgress(json);
+//   const seedPlotResult = Convert.toSeedPlotResult(json);
 //   const seedReadyMessage = Convert.toSeedReadyMessage(json);
 //   const seedReadyResult = Convert.toSeedReadyResult(json);
 //   const seedRelation = Convert.toSeedRelation(json);
@@ -1994,6 +1998,7 @@ export interface DelegateMessage {
     label?:                string;
     model?:                string;
     placement?:            string;
+    plot?:                 string;
     request_id:            string;
     source_session_id:     string;
     ticket_id?:            string;
@@ -3054,6 +3059,7 @@ export interface SeedElement {
     id:              string;
     planter_member:  string;
     planter_session: string;
+    plot_progress?:  PlotProgress;
     ready:           boolean;
     reason?:         string;
     rev:             number;
@@ -3065,13 +3071,23 @@ export interface SeedElement {
     title:           string;
     updated_at:      string;
     vars:            VarElement[];
-    workspace_id:    string;
     [property: string]: any;
 }
 
 export interface EdgeElement {
     kind: string;
     to:   string;
+    [property: string]: any;
+}
+
+export interface PlotProgress {
+    blocked:  number;
+    done:     number;
+    dormant:  number;
+    growing:  number;
+    ready:    number;
+    total:    number;
+    withered: number;
     [property: string]: any;
 }
 
@@ -5214,6 +5230,7 @@ export interface Response {
     seed_note_result?:                     SeedNoteResultObject;
     seed_notes_result?:                    SeedNotesResultObject;
     seed_plant_result?:                    SeedPlantResultObject;
+    seed_plot_result?:                     SeedPlotResultObject;
     seed_ready_result?:                    SeedReadyResultObject;
     seed_show_result?:                     SeedShowResultObject;
     seed_transition_result?:               SeedTransitionResultObject;
@@ -5472,10 +5489,9 @@ export interface SeedLinkResultObject {
 }
 
 export interface SeedListResultObject {
-    all:          boolean;
-    seeds:        SeedElement[];
-    total:        number;
-    workspace_id: string;
+    seeds:                 SeedElement[];
+    stale_window_seconds?: number;
+    total:                 number;
     [property: string]: any;
 }
 
@@ -5506,10 +5522,18 @@ export interface SeedPlantResultObject {
     [property: string]: any;
 }
 
+export interface SeedPlotResultObject {
+    children: SeedElement[];
+    crown:    SeedElement;
+    [property: string]: any;
+}
+
 export interface SeedReadyResultObject {
-    scope:    string;
-    scope_id: string;
-    seeds:    SeedElement[];
+    crown?:    SeedElement;
+    handoffs?: Note[];
+    scope:     string;
+    scope_id:  string;
+    seeds:     SeedElement[];
     [property: string]: any;
 }
 
@@ -5808,6 +5832,7 @@ export interface Seed {
     id:              string;
     planter_member:  string;
     planter_session: string;
+    plot_progress?:  PlotProgress;
     ready:           boolean;
     reason?:         string;
     rev:             number;
@@ -5819,7 +5844,6 @@ export interface Seed {
     title:           string;
     updated_at:      string;
     vars:            VarElement[];
-    workspace_id:    string;
     [property: string]: any;
 }
 
@@ -5849,10 +5873,10 @@ export interface SeedLinkResult {
 }
 
 export interface SeedListMessage {
-    all?:               boolean;
-    cmd:                SeedListMessageCmd;
-    source_session_id?: string;
-    workspace_id?:      string;
+    cmd:                   SeedListMessageCmd;
+    source_session_id?:    string;
+    stale?:                boolean;
+    stale_window_seconds?: number;
     [property: string]: any;
 }
 
@@ -5861,10 +5885,9 @@ export enum SeedListMessageCmd {
 }
 
 export interface SeedListResult {
-    all:          boolean;
-    seeds:        SeedElement[];
-    total:        number;
-    workspace_id: string;
+    seeds:                 SeedElement[];
+    stale_window_seconds?: number;
+    total:                 number;
     [property: string]: any;
 }
 
@@ -5919,9 +5942,9 @@ export interface SeedPlantMessage {
     body?:              string;
     cmd:                SeedPlantMessageCmd;
     member?:            string;
+    part_of?:           string;
     source_session_id?: string;
     title:              string;
-    workspace_id?:      string;
     [property: string]: any;
 }
 
@@ -5934,12 +5957,56 @@ export interface SeedPlantResult {
     [property: string]: any;
 }
 
+export interface SeedPlotChild {
+    blocks?: string[];
+    body?:   string;
+    title:   string;
+    [property: string]: any;
+}
+
+export interface SeedPlotMessage {
+    body?:              string;
+    children:           ChildElement[];
+    cmd:                SeedPlotMessageCmd;
+    member?:            string;
+    source_session_id?: string;
+    title:              string;
+    [property: string]: any;
+}
+
+export interface ChildElement {
+    blocks?: string[];
+    body?:   string;
+    title:   string;
+    [property: string]: any;
+}
+
+export enum SeedPlotMessageCmd {
+    SeedPlot = "seed_plot",
+}
+
+export interface SeedPlotProgress {
+    blocked:  number;
+    done:     number;
+    dormant:  number;
+    growing:  number;
+    ready:    number;
+    total:    number;
+    withered: number;
+    [property: string]: any;
+}
+
+export interface SeedPlotResult {
+    children: SeedElement[];
+    crown:    SeedElement;
+    [property: string]: any;
+}
+
 export interface SeedReadyMessage {
     all?:               boolean;
     cmd:                SeedReadyMessageCmd;
     plot?:              string;
     source_session_id?: string;
-    workspace_id?:      string;
     [property: string]: any;
 }
 
@@ -5948,9 +6015,11 @@ export enum SeedReadyMessageCmd {
 }
 
 export interface SeedReadyResult {
-    scope:    string;
-    scope_id: string;
-    seeds:    SeedElement[];
+    crown?:    SeedElement;
+    handoffs?: Note[];
+    scope:     string;
+    scope_id:  string;
+    seeds:     SeedElement[];
     [property: string]: any;
 }
 
@@ -10767,6 +10836,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SeedPlantResult")), null, 2);
     }
 
+    public static toSeedPlotChild(json: string): SeedPlotChild {
+        return cast(JSON.parse(json), r("SeedPlotChild"));
+    }
+
+    public static seedPlotChildToJson(value: SeedPlotChild): string {
+        return JSON.stringify(uncast(value, r("SeedPlotChild")), null, 2);
+    }
+
+    public static toSeedPlotMessage(json: string): SeedPlotMessage {
+        return cast(JSON.parse(json), r("SeedPlotMessage"));
+    }
+
+    public static seedPlotMessageToJson(value: SeedPlotMessage): string {
+        return JSON.stringify(uncast(value, r("SeedPlotMessage")), null, 2);
+    }
+
+    public static toSeedPlotProgress(json: string): SeedPlotProgress {
+        return cast(JSON.parse(json), r("SeedPlotProgress"));
+    }
+
+    public static seedPlotProgressToJson(value: SeedPlotProgress): string {
+        return JSON.stringify(uncast(value, r("SeedPlotProgress")), null, 2);
+    }
+
+    public static toSeedPlotResult(json: string): SeedPlotResult {
+        return cast(JSON.parse(json), r("SeedPlotResult"));
+    }
+
+    public static seedPlotResultToJson(value: SeedPlotResult): string {
+        return JSON.stringify(uncast(value, r("SeedPlotResult")), null, 2);
+    }
+
     public static toSeedReadyMessage(json: string): SeedReadyMessage {
         return cast(JSON.parse(json), r("SeedReadyMessage"));
     }
@@ -13200,6 +13301,7 @@ const typeMap: any = {
         { json: "label", js: "label", typ: u(undefined, "") },
         { json: "model", js: "model", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: u(undefined, "") },
+        { json: "plot", js: "plot", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
         { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
@@ -13839,6 +13941,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "planter_member", js: "planter_member", typ: "" },
         { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "plot_progress", js: "plot_progress", typ: u(undefined, r("PlotProgress")) },
         { json: "ready", js: "ready", typ: true },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "rev", js: "rev", typ: 0 },
@@ -13850,11 +13953,19 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "vars", js: "vars", typ: a(r("VarElement")) },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "EdgeElement": o([
         { json: "kind", js: "kind", typ: "" },
         { json: "to", js: "to", typ: "" },
+    ], "any"),
+    "PlotProgress": o([
+        { json: "blocked", js: "blocked", typ: 0 },
+        { json: "done", js: "done", typ: 0 },
+        { json: "dormant", js: "dormant", typ: 0 },
+        { json: "growing", js: "growing", typ: 0 },
+        { json: "ready", js: "ready", typ: 0 },
+        { json: "total", js: "total", typ: 0 },
+        { json: "withered", js: "withered", typ: 0 },
     ], "any"),
     "VarElement": o([
         { json: "default", js: "default", typ: u(undefined, "") },
@@ -15126,6 +15237,7 @@ const typeMap: any = {
         { json: "seed_note_result", js: "seed_note_result", typ: u(undefined, r("SeedNoteResultObject")) },
         { json: "seed_notes_result", js: "seed_notes_result", typ: u(undefined, r("SeedNotesResultObject")) },
         { json: "seed_plant_result", js: "seed_plant_result", typ: u(undefined, r("SeedPlantResultObject")) },
+        { json: "seed_plot_result", js: "seed_plot_result", typ: u(undefined, r("SeedPlotResultObject")) },
         { json: "seed_ready_result", js: "seed_ready_result", typ: u(undefined, r("SeedReadyResultObject")) },
         { json: "seed_show_result", js: "seed_show_result", typ: u(undefined, r("SeedShowResultObject")) },
         { json: "seed_transition_result", js: "seed_transition_result", typ: u(undefined, r("SeedTransitionResultObject")) },
@@ -15324,10 +15436,9 @@ const typeMap: any = {
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SeedListResultObject": o([
-        { json: "all", js: "all", typ: true },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedNoteResultObject": o([
         { json: "note", js: "note", typ: r("Note") },
@@ -15348,7 +15459,13 @@ const typeMap: any = {
     "SeedPlantResultObject": o([
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
+    "SeedPlotResultObject": o([
+        { json: "children", js: "children", typ: a(r("SeedElement")) },
+        { json: "crown", js: "crown", typ: r("SeedElement") },
+    ], "any"),
     "SeedReadyResultObject": o([
+        { json: "crown", js: "crown", typ: u(undefined, r("SeedElement")) },
+        { json: "handoffs", js: "handoffs", typ: u(undefined, a(r("Note"))) },
         { json: "scope", js: "scope", typ: "" },
         { json: "scope_id", js: "scope_id", typ: "" },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
@@ -15566,6 +15683,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "planter_member", js: "planter_member", typ: "" },
         { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "plot_progress", js: "plot_progress", typ: u(undefined, r("PlotProgress")) },
         { json: "ready", js: "ready", typ: true },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "rev", js: "rev", typ: 0 },
@@ -15577,7 +15695,6 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "vars", js: "vars", typ: a(r("VarElement")) },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedEdge": o([
         { json: "kind", js: "kind", typ: "" },
@@ -15595,16 +15712,15 @@ const typeMap: any = {
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SeedListMessage": o([
-        { json: "all", js: "all", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("SeedListMessageCmd") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "stale", js: "stale", typ: u(undefined, true) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
     ], "any"),
     "SeedListResult": o([
-        { json: "all", js: "all", typ: true },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedNote": o([
         { json: "author_member", js: "author_member", typ: "" },
@@ -15639,21 +15755,53 @@ const typeMap: any = {
         { json: "body", js: "body", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("SeedPlantMessageCmd") },
         { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "part_of", js: "part_of", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
         { json: "title", js: "title", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "SeedPlantResult": o([
         { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedPlotChild": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a("")) },
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedPlotMessage": o([
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "children", js: "children", typ: a(r("ChildElement")) },
+        { json: "cmd", js: "cmd", typ: r("SeedPlotMessageCmd") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "ChildElement": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a("")) },
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedPlotProgress": o([
+        { json: "blocked", js: "blocked", typ: 0 },
+        { json: "done", js: "done", typ: 0 },
+        { json: "dormant", js: "dormant", typ: 0 },
+        { json: "growing", js: "growing", typ: 0 },
+        { json: "ready", js: "ready", typ: 0 },
+        { json: "total", js: "total", typ: 0 },
+        { json: "withered", js: "withered", typ: 0 },
+    ], "any"),
+    "SeedPlotResult": o([
+        { json: "children", js: "children", typ: a(r("SeedElement")) },
+        { json: "crown", js: "crown", typ: r("SeedElement") },
     ], "any"),
     "SeedReadyMessage": o([
         { json: "all", js: "all", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("SeedReadyMessageCmd") },
         { json: "plot", js: "plot", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "SeedReadyResult": o([
+        { json: "crown", js: "crown", typ: u(undefined, r("SeedElement")) },
+        { json: "handoffs", js: "handoffs", typ: u(undefined, a(r("Note"))) },
         { json: "scope", js: "scope", typ: "" },
         { json: "scope_id", js: "scope_id", typ: "" },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
@@ -17633,6 +17781,9 @@ const typeMap: any = {
     ],
     "SeedPlantMessageCmd": [
         "seed_plant",
+    ],
+    "SeedPlotMessageCmd": [
+        "seed_plot",
     ],
     "SeedReadyMessageCmd": [
         "seed_ready",

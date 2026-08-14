@@ -4158,7 +4158,6 @@ function AppContent({
                   onClose={() => closeDockPanel('garden')}
                   seeds={seeds}
                   seedsTotal={seedsTotal}
-                  workspaceId={activeWorkspaceId ?? null}
                 />
               ),
             },

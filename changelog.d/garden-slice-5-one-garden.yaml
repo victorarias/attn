@@ -1,0 +1,9 @@
+kind: changed
+area: garden
+change: >
+  The garden is one space. Seeds no longer belong to a workspace: the
+  `--workspace` flag is gone from `attn seed plant`, `ls` and `ready`, those
+  commands answer for the whole garden when asked with no flags, the panel no
+  longer scopes to the workspace you are looking at, and an agent's launch
+  guidance speaks of the garden rather than of the workspace it happens to be
+  in. Plots are how work is grouped now.

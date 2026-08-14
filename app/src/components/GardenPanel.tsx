@@ -6,9 +6,10 @@
 // (garden_seeds_updated, and initial_state on connect) and re-renders when they
 // change.
 //
-// Scope is the workspace being looked at, because that is the question the panel
-// answers — what is planted here. The push carries the whole garden, so the
-// scope toggle costs no round trip.
+// The garden is one space (ruled 2026-08-13): the panel opens on all of it and
+// scopes by plot, not by workspace. Drilling into a crown, climbing back, and
+// crossing into another plot are all local — the push already carries the whole
+// garden, so navigation costs no round trip.
 import { useMemo, useState } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';
 import './GardenPanel.css';
@@ -21,9 +22,6 @@ interface GardenPanelProps {
   // garden outgrew one push, and then the panel says so: a list that ends at a
   // cap without saying it reads as the whole garden.
   seedsTotal: number;
-  // The workspace the user is looking at; null on the dashboard, where the only
-  // honest scope is the whole garden.
-  workspaceId: string | null;
 }
 
 // formatPlantedAt renders an RFC3339 created_at as a short relative phrase.
@@ -117,43 +115,108 @@ function tenderOf(seed: Seed): string {
   return seed.tender_member || seed.tender_session || '';
 }
 
-export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }: GardenPanelProps) {
-  // Whole-garden view. Sticky across workspace switches on purpose: it is a
-  // reading mode, not a property of the workspace.
-  const [showAll, setShowAll] = useState(false);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+// crownOf is the crown a seed is part of, or '' when it stands on its own.
+function crownOf(seed: Seed): string {
+  return (seed.edges ?? []).find((edge) => edge.kind === 'part-of')?.to ?? '';
+}
 
-  const scoped = useMemo(() => {
-    if (showAll || !workspaceId) return seeds;
-    return seeds.filter((seed) => seed.workspace_id === workspaceId);
-  }, [seeds, showAll, workspaceId]);
+// progressOf renders a crown's plot as the counts a reader acts on. Zeroes are
+// dropped: "0 growing" on a plot nobody has started is noise between the two
+// numbers that matter.
+function progressOf(seed: Seed): string {
+  const p = seed.plot_progress;
+  if (!p) return '';
+  const parts = [`${p.done}/${p.total} done`];
+  if (p.growing) parts.push(`${p.growing} growing`);
+  if (p.ready) parts.push(`${p.ready} ready`);
+  if (p.blocked) parts.push(`${p.blocked} blocked`);
+  return parts.join(' · ');
+}
+
+export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelProps) {
+  // The trail of crowns walked into, root last. Empty is the whole garden, which
+  // is where the panel opens.
+  const [trail, setTrail] = useState<string[]>([]);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const index = useMemo(() => indexEdges(seeds), [seeds]);
 
+  // A crown can leave the garden while the panel sits inside its plot — a
+  // harvest that removes it, a push that no longer carries it. The trail is
+  // trimmed to what still exists rather than rendering an empty plot nobody can
+  // climb out of.
+  const livingTrail = useMemo(() => {
+    const alive: string[] = [];
+    for (const id of trail) {
+      if (!index.byID.has(id)) break;
+      alive.push(id);
+    }
+    return alive;
+  }, [trail, index]);
+  const plotId = livingTrail.length > 0 ? livingTrail[livingTrail.length - 1] : null;
+
+  const scoped = useMemo(() => {
+    if (!plotId) return seeds;
+    return seeds.filter((seed) => crownOf(seed) === plotId);
+  }, [seeds, plotId]);
+
+  const drillInto = (id: string) => {
+    setExpandedId(null);
+    setTrail((prev) => [...prev, id]);
+  };
+  const climbTo = (depth: number) => {
+    setExpandedId(null);
+    setTrail((prev) => prev.slice(0, depth));
+  };
+
   if (!isOpen) return null;
 
-  const scopedToWorkspace = !showAll && !!workspaceId;
+  const crown = plotId ? index.byID.get(plotId) : undefined;
 
   return (
     <div className="garden-panel" role="region" aria-label="The garden">
       <div className="garden-panel__header">
         <span className="garden-panel__kicker">The garden</span>
         <div className="garden-panel__header-actions">
-          {workspaceId && (
-            <button
-              type="button"
-              className="garden-panel__scope"
-              onClick={() => setShowAll((prev) => !prev)}
-            >
-              {scopedToWorkspace ? 'This workspace' : 'Whole garden'}
-            </button>
-          )}
           <span className="garden-panel__count">{scoped.length}</span>
           <button type="button" className="garden-panel__close" onClick={onClose} aria-label="Close">
             ×
           </button>
         </div>
       </div>
+
+      {/* The way back out. Every level is its own target, so climbing two plots
+          is one click rather than two. */}
+      <nav className="garden-panel__trail" aria-label="Where you are">
+        <button
+          type="button"
+          className="garden-panel__trail-step"
+          onClick={() => climbTo(0)}
+          disabled={livingTrail.length === 0}
+        >
+          Whole garden
+        </button>
+        {livingTrail.map((id, depth) => (
+          <span key={id} className="garden-panel__trail-segment">
+            <span className="garden-panel__trail-sep" aria-hidden="true">›</span>
+            <button
+              type="button"
+              className="garden-panel__trail-step"
+              onClick={() => climbTo(depth + 1)}
+              disabled={depth === livingTrail.length - 1}
+            >
+              {index.byID.get(id)?.title ?? id}
+            </button>
+          </span>
+        ))}
+      </nav>
+
+      {crown && (
+        <div className="garden-panel__crown">
+          <span className="garden-panel__crown-progress">{progressOf(crown) || 'nothing planted in it yet'}</span>
+          <span className="garden-seed__id">{crown.id}</span>
+        </div>
+      )}
 
       {seedsTotal > seeds.length && (
         <p className="garden-panel__capped">
@@ -163,11 +226,11 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
 
       {scoped.length === 0 ? (
         <p className="garden-panel__empty">
-          {scopedToWorkspace
-            ? 'Nothing planted in this workspace yet.'
-            : 'The garden is empty.'}
-          {' '}
-          <code>attn seed plant "what this is"</code> puts something in it.
+          {plotId ? 'Nothing planted in this plot yet.' : 'The garden is empty.'}{' '}
+          <code>
+            {plotId ? `attn seed plant "what this is" --part-of ${plotId}` : 'attn seed plant "what this is"'}
+          </code>{' '}
+          puts something in it.
         </p>
       ) : (
         <ul className="garden-panel__list">
@@ -204,6 +267,17 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
                     </span>
                   </span>
                 </button>
+                {seed.plot_progress && (
+                  <button
+                    type="button"
+                    className="garden-seed__plot"
+                    onClick={() => drillInto(seed.id)}
+                    aria-label={`Open the plot under ${seed.title}`}
+                  >
+                    <span className="garden-seed__plot-counts">{progressOf(seed)}</span>
+                    <span className="garden-seed__plot-arrow" aria-hidden="true">›</span>
+                  </button>
+                )}
                 {expanded && (
                   <div className="garden-seed__detail">
                     <div className="garden-seed__meta">
@@ -219,7 +293,20 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal, workspaceId }:
                         {relations.map((relation) => (
                           <li key={`${relation.label}:${relation.seed.id}`}>
                             <span className="garden-seed__relation-label">{relation.label}</span>
-                            <span className="garden-seed__relation-title">{relation.seed.title}</span>
+                            {/* Crossing plots: a related crown is one click away,
+                                so following work sideways never goes through the
+                                whole garden. */}
+                            {relation.seed.plot_progress ? (
+                              <button
+                                type="button"
+                                className="garden-seed__relation-title garden-seed__relation-link"
+                                onClick={() => drillInto(relation.seed.id)}
+                              >
+                                {relation.seed.title}
+                              </button>
+                            ) : (
+                              <span className="garden-seed__relation-title">{relation.seed.title}</span>
+                            )}
                             <span className="garden-seed__id">{relation.seed.id}</span>
                             <span className="garden-seed__relation-state">{relation.seed.status}</span>
                           </li>

@@ -455,8 +455,22 @@ not the crown. It is computed when asked and never stored, so harvesting a
 blocker frees its dependent at the next call, with nobody clearing anything.
 `attn seed ready` answers for the whole garden unless told otherwise — a
 delegation dispatched at a crown is the exception, scoped to its plot — and
-every attn-launched agent starts knowing the garden's count (ruled 2026-08-13;
-slice 5 repoints the shipped workspace scoping).
+every attn-launched agent starts knowing the garden's count. The garden is one
+space: it has no workspace dimension at all, and plots are its only grouping
+(ruled 2026-08-13).
+
+**Dispatch-at-plot** aims a delegation at a crown (`attn delegate --plot
+<crown>`). It is scope inference and nothing more: inside that session a
+flag-free `ready` answers with the plot, and its launch guidance starts from
+the crown — the plan in the crown's body, the plot's ready seeds, the freshest
+handoff on each. It is not a fence and not an assignment. The delegate may tend
+or plant anything (`--all` steps back out to the garden), several agents may
+work one plot at once, and who holds what is always the per-seed tender.
+
+**Stale** is a seed claiming attention it is not getting: open, with no trail
+movement — no note, no move, no edge — for a window (`attn seed ls --stale`,
+default seven days). It is a query for a person's judgment, never a reaper:
+nothing withers because a window passed.
 
 "Nobody holds it" is one rule, shared by `ready` and by the claim `tend` makes,
 so a seed offered by one is accepted by the other. A tender whose session the
