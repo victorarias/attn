@@ -1,0 +1,13 @@
+kind: internal
+area: testing
+change: >
+  The perf-baseline scenario now measures the app's physical footprint --
+  the number Activity Monitor shows -- for the Tauri process and its WebKit
+  processes only. It previously summed `ps` RSS across the whole process
+  tree, which cannot see GPU surfaces at all (they are charged to the
+  process but mapped in another) and counted a daemon-spawned headless
+  classifier as part of the app, inflating every reading by around 400MB.
+  New probes report the individual GPU surfaces a process holds, whether
+  memory returns under memory pressure, on session close, and across
+  repeated open/close rounds, and photograph the window after each session
+  switch so a memory win that stopped a pane from painting cannot pass.

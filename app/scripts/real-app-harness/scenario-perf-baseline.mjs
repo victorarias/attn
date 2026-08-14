@@ -32,14 +32,27 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import { promisify } from 'node:util';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, createSessionAndWaitForInitialPane, emitVerdict, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { profileForAppPath, socketPathForProfile } from './harnessProfile.mjs';
 import { getMachineFingerprint, loadBaseline, recordOrCompareBaseline } from './machineRegistry.mjs';
 import { buildBaselineVerdict, evaluateRssBaseline } from './rssBaselineVerdict.mjs';
-import { delay, captureWebKitPids, snapshot, classRssMb, sampleWindow, readLiveDaemonPid, stopDaemon, paneIdForSession, closeSessions, fillAllPanes } from './perfMeasure.mjs';
+import { captureFrontWindowScreenshot, getFrontWindowBounds, setFrontWindowBounds } from './nativeWindowCapture.mjs';
+import { delay, captureWebKitPids, snapshot, classRssMb, sampleWindow, readLiveDaemonPid, stopDaemon, paneIdForSession, closeSessions, fillAllPanes, readRegionFootprint, readGraphicsRegions, readAppFootprint } from './perfMeasure.mjs';
+
+const execFileAsync = promisify(execFile);
+
+// The app's own WebContent: the largest of the attributed WebContent pids. A
+// second one appears for an auxiliary web view (the in-app browser), and it is
+// never the one holding the terminal panes.
+function webContentPid(snap) {
+  const pids = snap?.byClass?.webkit_webcontent?.pids ?? [];
+  if (pids.length === 0) return null;
+  return pids.reduce((best, entry) => (entry.rssKb > best.rssKb ? entry : best)).pid;
+}
 
 function parseArgs(argv) {
   const filtered = argv.filter((arg) => arg !== '--');
@@ -54,11 +67,17 @@ function parseArgs(argv) {
     cpuSeconds: 20,
     realCmd: null,
     realWindowMs: 25000,
+    window: null,
     warm: null,
     fillCmd: null,
     fillSettleMs: 3000,
     reclaimHoldMs: 0,
     reclaimHoldIntervalMs: 15000,
+    pressure: false,
+    closeProbe: false,
+    churnRounds: 0,
+    dockProbe: null,
+    switchProbe: false,
     rssTolerancePct: 15,
     recordBaseline: false,
   };
@@ -74,16 +93,37 @@ function parseArgs(argv) {
     else if (arg === '--real-window-ms') extras.realWindowMs = Number(filtered[++index]);
     else if (arg === '--no-restart-daemon') extras.restartDaemon = false;
     else if (arg === '--warm') extras.warm = filtered[++index];
+    else if (arg === '--window') extras.window = filtered[++index];
     else if (arg === '--fill-cmd') extras.fillCmd = filtered[++index];
     else if (arg === '--fill-settle-ms') extras.fillSettleMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-ms') extras.reclaimHoldMs = Number(filtered[++index]);
     else if (arg === '--reclaim-hold-interval-ms') extras.reclaimHoldIntervalMs = Number(filtered[++index]);
     else if (arg === '--rss-tolerance-pct') extras.rssTolerancePct = Number(filtered[++index]);
+    else if (arg === '--pressure') extras.pressure = true;
+    else if (arg === '--close-probe') extras.closeProbe = true;
+    else if (arg === '--churn') extras.churnRounds = Number(filtered[++index]);
+    else if (arg === '--dock-probe') extras.dockProbe = filtered[++index];
+    else if (arg === '--switch-probe') extras.switchProbe = true;
     else if (arg === '--record-baseline') extras.recordBaseline = true;
     else passthrough.push(arg);
   }
   const options = parseCommonArgs(passthrough);
   return Object.assign(options, extras);
+}
+
+// The harness parks the window nearly off-screen, and `screencapture -R` grabs a
+// screen region -- so a shot taken as-is catches the parked sliver, or whatever
+// window happens to sit in front. Put the window fully on screen and raise the
+// app before capturing anything.
+async function bringWindowForward(client) {
+  const parked = await getFrontWindowBounds(client.bundleId, { client }).catch(() => null);
+  if (parked) {
+    await setFrontWindowBounds({ x: 0, y: 25, width: parked.width, height: parked.height }, { client })
+      .catch((error) => console.warn(`[perf] unpark failed: ${error.message}`));
+    await delay(1500);
+  }
+  await execFileAsync('open', ['-b', client.bundleId]).catch(() => {});
+  await delay(1200);
 }
 
 function pprofPort() {
@@ -216,6 +256,9 @@ async function main() {
     console.log('                      synthetic benchmark/CPU profile and samples peak + post RSS.');
     console.log('  --real-window-ms <n>  Sampling window for --real-cmd (default: 25000)');
     console.log('  --no-restart-daemon Do not restart the dev daemon for ATTN_PPROF');
+    console.log('  --window <WxH>      Resize the app window before measuring (e.g. 1728x1080). A');
+    console.log('                      pane\'s GPU surface is sized in device pixels, so the default');
+    console.log('                      1200x800 launch window understates per-pane graphics memory.');
     console.log('  --warm <list>       Warm-workspace A/B (terminal virtualization). Drives every');
     console.log('                      session to idle (the real `attn _hook-state idle` path), then');
     console.log('                      sweeps each comma-separated limit, snapshotting retained RSS at');
@@ -230,6 +273,19 @@ async function main() {
     console.log('                      curve -- distinguishes soft-but-delayed from hard. Pair with');
     console.log('                      --fill-cmd + --warm <low>.');
     console.log('  --reclaim-hold-interval-ms <n>  Sample interval during the hold (default: 15000)');
+    console.log('  --pressure          After the warm sweep, fire WebKit\'s low-memory notification and');
+    console.log('                      re-measure. Separates surfaces a live layer owns (survive) from');
+    console.log('                      surfaces WebKit is caching for reuse (dropped).');
+    console.log('  --churn <rounds>    Open --sessions sessions, close them all, repeat <rounds> times,');
+    console.log('                      measuring at rest each round. A rising at-rest line is memory');
+    console.log('                      no session owns any more.');
+    console.log('  --switch-probe      Walk every session with select_session and screenshot each one');
+    console.log('                      after it is revealed. A pane that hands its GPU drawing buffer');
+    console.log('                      back while hidden has to paint again on reveal; a blank or');
+    console.log('                      stale window in a shot is that repaint missing. Pair with');
+    console.log('                      --fill-cmd so each pane holds distinguishable content.');
+    console.log('  --close-probe       Close every session after the sweep and re-measure, to see');
+    console.log('                      whether full teardown releases what unmounting did not.');
     console.log('  --rss-tolerance-pct <n>  Allowed growth over the per-machine baseline before the');
     console.log('                      verdict fails (default: 15)');
     console.log('  --record-baseline   Overwrite the per-machine baseline with this run\'s RSS instead');
@@ -289,6 +345,23 @@ async function main() {
     await client.waitForFrontendResponsive(20_000);
     await observer.connect();
 
+    // A pane's GPU surface is sized in device pixels, so every graphics number
+    // is only readable next to the window it was measured at. The harness
+    // launches at Tauri's 1200x800 default, which is far smaller than a real
+    // window and understates the per-pane surface accordingly.
+    if (options.window) {
+      const match = /^(\d+)x(\d+)$/.exec(options.window);
+      if (!match) throw new Error(`--window expects WxH (e.g. 1728x1080), got: ${options.window}`);
+      const current = await getFrontWindowBounds(client.bundleId, { client });
+      await setFrontWindowBounds(
+        { x: current?.x ?? 0, y: current?.y ?? 0, width: Number(match[1]), height: Number(match[2]) },
+        { client },
+      );
+      await delay(1500);
+    }
+    summary.window = await getFrontWindowBounds(client.bundleId, { client }).catch(() => null);
+    console.log(`[perf] window bounds: ${summary.window ? `${summary.window.width}x${summary.window.height}` : 'unknown'}`);
+
     // Clear detritus from prior runs. Sessions persist in the daemon's SQLite
     // store and are restored across daemon restarts, so a fresh daemon can still
     // surface stale perf-baseline sessions (with dead workers).
@@ -341,7 +414,27 @@ async function main() {
     summary.daemonPidSource = daemonPid ? (summary.diagUp ? 'debug-vars' : 'pid-file') : 'none';
 
     summary.snapshots.empty = await snapshot(appPid, daemonPid, webkitBaseline);
-    console.log(`[perf] empty snapshot: ${summary.snapshots.empty.totalRssMb} MB (${summary.snapshots.empty.procCount} procs)`);
+    // The app's own floor, in the accounting the user sees. Everything else in
+    // the tree -- daemon, pty-workers, session shells, agents the daemon spawns
+    // -- is a different program, and summing them hides what the UI costs.
+    summary.appFootprint = { empty: await readAppFootprint(summary.snapshots.empty) };
+    const emptyWc = webContentPid(summary.snapshots.empty);
+    summary.emptyWebContent = {
+      regions: await readRegionFootprint(emptyWc),
+      surfaces: await readGraphicsRegions(emptyWc),
+    };
+    console.log(
+      `[perf] empty snapshot: ${summary.snapshots.empty.totalRssMb} MB rss `
+      + `(${summary.snapshots.empty.procCount} procs) | APP FOOTPRINT `
+      + `${summary.appFootprint.empty.totalMb} MB`,
+    );
+    console.log(
+      `[perf] empty app webContent: ${JSON.stringify(summary.emptyWebContent.regions?.slices ?? {})} `
+      + `footprint=${summary.emptyWebContent.regions?.footprintMb ?? 'n/a'}MB | surfaces=`
+      + `${summary.emptyWebContent.surfaces?.largeCount ?? 'n/a'} `
+      + JSON.stringify(summary.emptyWebContent.surfaces?.histogram ?? {}),
+    );
+    console.log(`[perf] empty app by pid: ${JSON.stringify(summary.appFootprint.empty.byPid)}`);
 
     // Pace creation: wait for each session's initial pane to mount before
     // creating the next, so the frontend main thread is free to reply to the
@@ -419,6 +512,16 @@ async function main() {
         }
         await delay(options.settleMs);
         const snap = await snapshot(appPid, daemonPid, webkitBaseline);
+        // Per-pane GPU surfaces do not appear as their own class in `ps` RSS, so
+        // the sweep reads the WebContent region split too: a warm level that
+        // mounts fewer panes should show `graphics` fall with `livePanes`.
+        const pid = webContentPid(snap);
+        const regions = await readRegionFootprint(pid);
+        // How many pane-sized GPU surfaces exist at this warm level. If the
+        // count tracks mounted panes, virtualization releases surfaces; if it
+        // tracks sessions, something holds them past unmount.
+        const surfaces = await readGraphicsRegions(pid);
+        const appFootprint = await readAppFootprint(snap);
         const expectedVirtualized = limit < 0 ? 0 : Math.max(0, options.sessions - (limit + 1));
         const entry = {
           warm: limit,
@@ -429,12 +532,25 @@ async function main() {
           webContentRssMb: classRssMb(snap, 'webkit_webcontent'),
           gpuRssMb: classRssMb(snap, 'webkit_gpu'),
           appRssMb: classRssMb(snap, 'app'),
+          webContentDirtyMb: regions?.slices ?? null,
+          graphicsSurfaces: surfaces ?? null,
+          appFootprintMb: appFootprint.totalMb,
+          appFootprintByPid: appFootprint.byPid,
         };
         summary.warmSweep.push(entry);
         console.log(
           `[perf] warm=${limit}: live=${entry.livePanes}/${options.sessions} `
           + `virtualized=${entry.virtualizedPanes} (expected ${expectedVirtualized}) | `
-          + `total=${entry.totalRssMb}MB webContent=${entry.webContentRssMb}MB gpu=${entry.gpuRssMb}MB`,
+          + `APP FOOTPRINT ${entry.appFootprintMb}MB | `
+          + `total=${entry.totalRssMb}MB webContent=${entry.webContentRssMb}MB gpu=${entry.gpuRssMb}MB`
+          + (regions
+            ? ` | dirty: graphics=${regions.slices.graphics}MB `
+              + `webkitMalloc=${regions.slices.webkitMalloc}MB jsHeap=${regions.slices.jsHeap}MB`
+            : ' | dirty: unavailable')
+          + (surfaces
+            ? ` | paneSizedSurfaces=${surfaces.largeCount} (${surfaces.largeDirtyMb}MB dirty) `
+              + JSON.stringify(surfaces.histogram)
+            : ''),
         );
         // The per-pane RSS slope is only meaningful if the warm-set actually
         // reached the intended live/virtual split. A mismatch means
@@ -451,6 +567,173 @@ async function main() {
       }
     }
 
+    // Does WebKit hand the pane-sized GPU surfaces back when asked? A surface a
+    // live compositing layer still owns survives the low-memory notification; a
+    // surface WebKit is merely caching for reuse is dropped by it. The two have
+    // different fixes — mount fewer panes vs. cap or defeat the cache — so the
+    // sweep alone cannot pick one.
+    if (options.pressure) {
+      const before = await snapshot(appPid, daemonPid, webkitBaseline);
+      const pid = webContentPid(before);
+      const beforeRegions = await readRegionFootprint(pid);
+      const beforeSurfaces = await readGraphicsRegions(pid);
+      await execFileAsync('notifyutil', ['-p', 'org.WebKit.lowMemory']);
+      await delay(options.settleMs);
+      const after = await snapshot(appPid, daemonPid, webkitBaseline);
+      const afterRegions = await readRegionFootprint(pid);
+      const afterSurfaces = await readGraphicsRegions(pid);
+      summary.pressure = {
+        before: {
+          totalRssMb: before.totalRssMb,
+          byClass: before.byClass,
+          webContentDirtyMb: beforeRegions?.slices ?? null,
+          graphicsSurfaces: beforeSurfaces ?? null,
+        },
+        after: {
+          totalRssMb: after.totalRssMb,
+          byClass: after.byClass,
+          webContentDirtyMb: afterRegions?.slices ?? null,
+          graphicsSurfaces: afterSurfaces ?? null,
+        },
+      };
+      console.log(
+        `[perf] pressure: total ${before.totalRssMb} -> ${after.totalRssMb}MB | `
+        + `graphics ${beforeRegions?.slices.graphics ?? 'n/a'} -> ${afterRegions?.slices.graphics ?? 'n/a'}MB | `
+        + `paneSizedSurfaces ${beforeSurfaces?.largeCount ?? 'n/a'} -> ${afterSurfaces?.largeCount ?? 'n/a'} `
+        + `(${beforeSurfaces?.largeDirtyMb ?? 'n/a'} -> ${afterSurfaces?.largeDirtyMb ?? 'n/a'}MB dirty)`,
+      );
+    }
+
+    // A dock panel costs a compositing layer only while it is open. Measures
+    // both directions -- the layer must be absent when closed and present when
+    // open -- and captures the open panel so a memory win that stopped the
+    // drawer from rendering cannot pass as a win.
+    if (options.dockProbe) {
+      const closedPid = webContentPid(await snapshot(appPid, daemonPid, webkitBaseline));
+      const closed = await readGraphicsRegions(closedPid);
+      await client.request('open_dock_panel', { panelId: options.dockProbe }, { timeoutMs: 15_000 });
+      await delay(options.settleMs);
+      const openPid = webContentPid(await snapshot(appPid, daemonPid, webkitBaseline));
+      const opened = await readGraphicsRegions(openPid);
+      await bringWindowForward(client);
+      const shot = path.join(runDir, `dock-${options.dockProbe}-open.png`);
+      await captureFrontWindowScreenshot(shot).catch((error) => console.warn(`[perf] dock screenshot failed: ${error.message}`));
+      summary.dockProbe = { panelId: options.dockProbe, closed, opened, screenshot: shot };
+      console.log(
+        `[perf] dock ${options.dockProbe}: closed surfaces=${closed?.largeCount ?? 'n/a'} `
+        + JSON.stringify(closed?.histogram ?? {})
+        + ` -> open surfaces=${opened?.largeCount ?? 'n/a'} `
+        + JSON.stringify(opened?.histogram ?? {}) + ` | shot=${shot}`,
+      );
+    }
+
+    // An off-screen pane hands its GPU drawing buffer back, so being revealed is
+    // the moment it owes a repaint. Walk every session and photograph the window
+    // right after each switch: the memory win is only a win if the pane the user
+    // switched to still shows its own content.
+    if (options.switchProbe && sessionIds.length > 0) {
+      await bringWindowForward(client);
+      summary.switchProbe = [];
+      for (let index = 0; index < sessionIds.length; index += 1) {
+        const sessionId = sessionIds[index];
+        await client.request('select_session', { sessionId }, { timeoutMs: 15_000 });
+        await delay(options.settleMs);
+        const shot = path.join(runDir, `switch-${index + 1}.png`);
+        await captureFrontWindowScreenshot(shot)
+          .catch((error) => console.warn(`[perf] switch screenshot failed: ${error.message}`));
+        const surfaces = await readGraphicsRegions(webContentPid(await snapshot(appPid, daemonPid, webkitBaseline)));
+        summary.switchProbe.push({ sessionId, screenshot: shot, graphicsSurfaces: surfaces ?? null });
+        console.log(
+          `[perf] switch ${index + 1}/${sessionIds.length}: ${sessionId} | `
+          + `paneSizedSurfaces=${surfaces?.largeCount ?? 'n/a'} `
+          + JSON.stringify(surfaces?.histogram ?? {}) + ` | shot=${shot}`,
+        );
+      }
+    }
+
+    // What a day of real use does that a single snapshot cannot see: open a set
+    // of sessions, close them, and do it again. A round that ends heavier than
+    // it started is memory no session owns any more, so nothing will ever
+    // release it — the shape that turns a working app into a 1GB one by evening.
+    if (options.churnRounds > 0) {
+      summary.churn = [];
+      for (let round = 0; round < options.churnRounds; round += 1) {
+        const roundIds = [];
+        for (let i = 0; i < options.sessions; i += 1) {
+          roundIds.push(await createSessionAndWaitForInitialPane({
+            client,
+            observer,
+            cwd: sessionDir,
+            label: `perf-churn-${runId}-${round}-${i}`,
+            agent: 'shell',
+            sessionWaitMs: 30_000,
+            waitForInitialPaneVisible: true,
+            initialPaneWaitMs: 25_000,
+          }));
+        }
+        if (options.fillCmd) await fillAllPanes(client, roundIds, options.fillCmd, options.fillSettleMs);
+        await delay(options.settleMs);
+        const peak = await snapshot(appPid, daemonPid, webkitBaseline);
+        const peakRegions = await readRegionFootprint(webContentPid(peak));
+        await closeSessions(client, roundIds);
+        await delay(options.settleMs);
+        const rest = await snapshot(appPid, daemonPid, webkitBaseline);
+        const pid = webContentPid(rest);
+        const restRegions = await readRegionFootprint(pid);
+        const restSurfaces = await readGraphicsRegions(pid);
+        summary.churn.push({
+          round,
+          peak: { totalRssMb: peak.totalRssMb, webContentDirtyMb: peakRegions?.slices ?? null },
+          rest: {
+            totalRssMb: rest.totalRssMb,
+            webContentDirtyMb: restRegions?.slices ?? null,
+            graphicsSurfaces: restSurfaces ?? null,
+          },
+        });
+        console.log(
+          `[perf] churn round ${round + 1}/${options.churnRounds}: `
+          + `at rest (0 sessions) graphics=${restRegions?.slices.graphics ?? 'n/a'}MB `
+          + `webkitMalloc=${restRegions?.slices.webkitMalloc ?? 'n/a'}MB `
+          + `jsHeap=${restRegions?.slices.jsHeap ?? 'n/a'}MB `
+          + `total=${rest.totalRssMb}MB | peak webkitMalloc=${peakRegions?.slices.webkitMalloc ?? 'n/a'}MB`,
+        );
+      }
+    }
+
+    // Full teardown, not just unmount: close every session and re-measure. If
+    // closing releases the pane-sized surfaces that virtualization did not, the
+    // retention is attn's to fix; if it does not, WebKit is caching them past
+    // any lifetime attn controls and only memory pressure returns them.
+    if (options.closeProbe) {
+      const before = await snapshot(appPid, daemonPid, webkitBaseline);
+      const pid = webContentPid(before);
+      const beforeRegions = await readRegionFootprint(pid);
+      const beforeSurfaces = await readGraphicsRegions(pid);
+      await closeSessions(client, sessionIds);
+      sessionIds.length = 0;
+      await delay(options.settleMs);
+      const after = await snapshot(appPid, daemonPid, webkitBaseline);
+      const afterRegions = await readRegionFootprint(pid);
+      const afterSurfaces = await readGraphicsRegions(pid);
+      summary.closeProbe = {
+        before: {
+          webContentDirtyMb: beforeRegions?.slices ?? null,
+          graphicsSurfaces: beforeSurfaces ?? null,
+        },
+        after: {
+          webContentDirtyMb: afterRegions?.slices ?? null,
+          graphicsSurfaces: afterSurfaces ?? null,
+        },
+      };
+      console.log(
+        `[perf] close-all: graphics ${beforeRegions?.slices.graphics ?? 'n/a'} -> `
+        + `${afterRegions?.slices.graphics ?? 'n/a'}MB | webkitMalloc `
+        + `${beforeRegions?.slices.webkitMalloc ?? 'n/a'} -> ${afterRegions?.slices.webkitMalloc ?? 'n/a'}MB | `
+        + `jsHeap ${beforeRegions?.slices.jsHeap ?? 'n/a'} -> ${afterRegions?.slices.jsHeap ?? 'n/a'}MB | `
+        + `paneSizedSurfaces ${beforeSurfaces?.largeCount ?? 'n/a'} -> ${afterSurfaces?.largeCount ?? 'n/a'}`,
+      );
+    }
+
     // Reclaim decay sampler (no pressure, no GC nudge). Hold the torn-down
     // (most-virtualized) state and sample retained RSS over time. WebKit's
     // scavenger / periodic memory monitor reclaims freed WASM + heap on a delay
@@ -465,16 +748,19 @@ async function main() {
       let elapsed = 0;
       for (;;) {
         const snap = await snapshot(appPid, daemonPid, webkitBaseline);
+        const regions = await readRegionFootprint(webContentPid(snap));
         const entry = {
           tMs: elapsed,
           totalRssMb: snap.totalRssMb,
           webContentRssMb: classRssMb(snap, 'webkit_webcontent'),
           gpuRssMb: classRssMb(snap, 'webkit_gpu'),
+          webContentDirtyMb: regions?.slices ?? null,
         };
         summary.reclaimHold.push(entry);
         console.log(
           `[perf] HOLD t=${Math.round(elapsed / 1000)}s: webContent=${entry.webContentRssMb}MB `
-          + `gpu=${entry.gpuRssMb}MB total=${entry.totalRssMb}MB`,
+          + `gpu=${entry.gpuRssMb}MB total=${entry.totalRssMb}MB`
+          + (regions ? ` gfxDirty=${regions.slices.graphics}MB mallocDirty=${regions.slices.webkitMalloc}MB` : ''),
         );
         if (elapsed >= options.reclaimHoldMs) break;
         await delay(Math.min(options.reclaimHoldIntervalMs, options.reclaimHoldMs - elapsed));
@@ -592,9 +878,14 @@ async function main() {
           totalRssMb: entry.totalRssMb,
           webContentRssMb: entry.webContentRssMb,
           gpuRssMb: entry.gpuRssMb,
+          webContentDirtyMb: entry.webContentDirtyMb,
         })),
         perLivePaneTotalMb: paneSpan > 0 ? Number(((most.totalRssMb - least.totalRssMb) / paneSpan).toFixed(1)) : null,
         perLivePaneWebContentMb: paneSpan > 0 ? Number(((most.webContentRssMb - least.webContentRssMb) / paneSpan).toFixed(1)) : null,
+        // The per-pane GPU surface: what release-on-hide could actually reclaim.
+        perLivePaneGraphicsMb: paneSpan > 0 && most.webContentDirtyMb && least.webContentDirtyMb
+          ? Number(((most.webContentDirtyMb.graphics - least.webContentDirtyMb.graphics) / paneSpan).toFixed(1))
+          : null,
       };
     }
 
@@ -632,7 +923,7 @@ async function main() {
   if (summary.headline?.warmSweep) {
     const { levels, perLivePaneTotalMb, perLivePaneWebContentMb } = summary.headline.warmSweep;
     console.log(`\n[perf] WARM-SET A/B (${options.sessions} idle sessions)`);
-    console.log('  warm  live  virt  total(MB)  webContent(MB)  gpu(MB)');
+    console.log('  warm  live  virt  total(MB)  webContent(MB)  gpu(MB)  gfxDirty(MB)  mallocDirty(MB)');
     for (const lvl of levels) {
       const warmCol = String(lvl.warm).padStart(4);
       const liveCol = String(lvl.livePanes).padStart(4);
@@ -640,9 +931,27 @@ async function main() {
       const totalCol = String(lvl.totalRssMb).padStart(9);
       const wcCol = String(lvl.webContentRssMb).padStart(14);
       const gpuCol = String(lvl.gpuRssMb).padStart(7);
-      console.log(`  ${warmCol}  ${liveCol}  ${virtCol}  ${totalCol}  ${wcCol}  ${gpuCol}`);
+      const gfxCol = String(lvl.webContentDirtyMb?.graphics ?? 'n/a').padStart(12);
+      const mallocCol = String(lvl.webContentDirtyMb?.webkitMalloc ?? 'n/a').padStart(15);
+      console.log(`  ${warmCol}  ${liveCol}  ${virtCol}  ${totalCol}  ${wcCol}  ${gpuCol}  ${gfxCol}  ${mallocCol}`);
     }
     console.log(`  per-live-pane: total ${perLivePaneTotalMb ?? 'n/a'} MB, webContent ${perLivePaneWebContentMb ?? 'n/a'} MB`);
+    // The A/B this table exists for: graphics dirty is the per-pane GPU surface.
+    // If it does not fall with livePanes, invisible panes are not holding it and
+    // the release-on-hide hypothesis is wrong.
+    const withGfx = levels.filter((lvl) => lvl.webContentDirtyMb?.graphics != null);
+    if (withGfx.length >= 2) {
+      const first = withGfx[0];
+      const last = withGfx[withGfx.length - 1];
+      const paneDelta = first.livePanes - last.livePanes;
+      const gfxDelta = first.webContentDirtyMb.graphics - last.webContentDirtyMb.graphics;
+      console.log(
+        `  graphics dirty: ${first.webContentDirtyMb.graphics} MB @ ${first.livePanes} live `
+        + `-> ${last.webContentDirtyMb.graphics} MB @ ${last.livePanes} live `
+        + `(${gfxDelta >= 0 ? '-' : '+'}${Math.abs(gfxDelta).toFixed(1)} MB`
+        + (paneDelta > 0 ? `, ${(gfxDelta / paneDelta).toFixed(1)} MB per pane` : '') + ')',
+      );
+    }
   }
 
   console.log(JSON.stringify({ headline: summary.headline, reclaimHold: summary.reclaimHold, idleByClass: summary.snapshots.idle?.byClass, profiles: summary.profiles, runDir }, null, 2));

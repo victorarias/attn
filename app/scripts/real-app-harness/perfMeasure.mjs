@@ -126,6 +126,195 @@ export function classRssMb(snap, label) {
   return snap?.byClass?.[label]?.rssMb ?? 0;
 }
 
+// Region types worth naming in a memory receipt, and why each one is here.
+// `ps` RSS sums these into one number, so a change that moves memory between
+// them — releasing a GPU surface, bounding allocator churn — is invisible
+// without the split.
+const REGION_SLICES = {
+  // Per-pane GPU surfaces: the WebGL drawing buffer and glyph atlas of every
+  // MOUNTED terminal, visible or not. Owned by this process, mapped in the GPU
+  // process, so it lands here rather than in any malloc zone.
+  graphics: ['owned unmapped (graphics)', 'VM_ALLOCATE (graphics)'],
+  // bmalloc: WebKit's C++ allocator. Ingestion-path churn high-water lives here,
+  // NOT in the JS heap, and the scavenger returns it lazily.
+  webkitMalloc: ['WebKit Malloc', 'WebKit Malloc metadata'],
+  // The JS object heap proper. Measured small on attn (~7 MB) — kept so a claim
+  // of "JS leak" can be checked rather than assumed.
+  jsHeap: ['JS VM Gigacage', 'JS JIT generated code'],
+  // The wasm linear memory of every Ghostty model plus other large buffers.
+  malloc: ['MALLOC_LARGE', 'MALLOC_SMALL', 'MALLOC_TINY'],
+};
+
+function parseVmmapSize(token) {
+  const match = /^([\d.]+)([KMGT])?$/.exec(token);
+  if (!match) return null;
+  const value = Number(match[1]);
+  if (!Number.isFinite(value)) return null;
+  const scale = { K: 1 / 1024, M: 1, G: 1024, T: 1024 * 1024 };
+  return match[2] ? value * scale[match[2]] : value / (1024 * 1024);
+}
+
+// Locates the measurement window in a summary row: 7 size columns
+// (VIRTUAL/RESIDENT/DIRTY/SWAPPED/VOLATILE/NONVOL/EMPTY) followed by an integer
+// REGION COUNT. Neither end of the row can be trusted as an anchor — the name
+// may end in a bare number ("Memory Tag 241") and the row may carry trailing
+// prose ("see MALLOC ZONE table below"), so the window is found rather than
+// counted from an edge. Returns the index the sizes start at, or -1.
+function findSizeWindow(columns) {
+  for (let start = 1; start + 7 < columns.length + 1; start += 1) {
+    if (!/^\d+$/.test(columns[start + 7] ?? '')) continue;
+    const sizes = columns.slice(start, start + 7).map(parseVmmapSize);
+    if (sizes.length === 7 && sizes.every((size) => size !== null)) return start;
+  }
+  return -1;
+}
+
+// Pure: parses `vmmap --summary` into per-region-type resident/dirty megabytes.
+// Parsing stops at the MALLOC ZONE table below, whose rows have a different
+// arity and would otherwise mis-parse.
+export function parseVmmapSummary(text) {
+  const byRegion = {};
+  // Unrounded, so a slice sums raw values and rounds once. Rounding each region
+  // first and then adding lets the per-region error accumulate into the slice.
+  const exactDirtyMb = {};
+  let totalDirtyMb = 0;
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trimEnd();
+    if (/^\s*MALLOC ZONE/.test(line)) break;
+    if (!line || /^[=\s]+$/.test(line) || /^REGION TYPE/.test(line)) continue;
+    const columns = line.trim().split(/\s+/);
+    if (columns.length < 9) continue;
+    const start = findSizeWindow(columns);
+    if (start < 0) continue;
+    const sizes = columns.slice(start, start + 7).map(parseVmmapSize);
+    const name = columns.slice(0, start).join(' ');
+    // Both summary rows: `TOTAL` and `TOTAL, minus reserved VM space`.
+    if (!name || name.startsWith('TOTAL')) continue;
+    const [residentMb, dirtyMb] = [sizes[1], sizes[2]];
+    byRegion[name] = {
+      residentMb: Number(residentMb.toFixed(1)),
+      dirtyMb: Number(dirtyMb.toFixed(1)),
+    };
+    exactDirtyMb[name] = dirtyMb;
+    totalDirtyMb += dirtyMb;
+  }
+
+  const slices = {};
+  for (const [slice, names] of Object.entries(REGION_SLICES)) {
+    slices[slice] = Number(
+      names.reduce((sum, name) => sum + (exactDirtyMb[name] ?? 0), 0).toFixed(1),
+    );
+  }
+  return {
+    byRegion,
+    slices,
+    totalDirtyMb: Number(totalDirtyMb.toFixed(1)),
+    footprintMb: parseFootprint(text),
+  };
+}
+
+// The number Activity Monitor prints in its Memory column, and the only one that
+// counts `owned unmapped (graphics)` — those pages are charged to this process
+// but mapped in another, so `ps` RSS cannot see them at all. An app measured by
+// RSS alone is missing its GPU surfaces entirely.
+export function parseFootprint(text) {
+  const match = /^Physical footprint:\s+(\S+)/m.exec(text);
+  if (!match) return null;
+  const mb = parseVmmapSize(match[1]);
+  return mb === null ? null : Number(mb.toFixed(1));
+}
+
+// The app is the Tauri process plus the WebKit processes it drives. The daemon,
+// its pty-workers, the session shells, and anything an agent spawns are separate
+// programs that happen to share a process tree — counting them as "the app"
+// attributes a 450MB headless classifier to the UI.
+export const APP_PROCESS_CLASSES = ['app', 'webkit_webcontent', 'webkit_gpu', 'webkit_networking'];
+
+export function appPids(snap) {
+  return APP_PROCESS_CLASSES.flatMap((label) => (snap?.byClass?.[label]?.pids ?? []).map((entry) => entry.pid));
+}
+
+// Physical footprint of the app alone, per process and summed. Returns null
+// entries for any process vmmap could not read rather than dropping it silently,
+// so a partial total is visible as partial.
+export async function readAppFootprint(snap) {
+  const byPid = {};
+  let totalMb = 0;
+  let missing = 0;
+  for (const label of APP_PROCESS_CLASSES) {
+    for (const entry of snap?.byClass?.[label]?.pids ?? []) {
+      const regions = await readRegionFootprint(entry.pid);
+      const mb = regions?.footprintMb ?? null;
+      byPid[entry.pid] = { label, footprintMb: mb };
+      if (mb === null) missing += 1;
+      else totalMb += mb;
+    }
+  }
+  return { totalMb: Number(totalMb.toFixed(1)), missing, byPid };
+}
+
+// A GPU surface below this is chrome (compositing tiles, small layers), not a
+// pane-sized buffer. At a 1710x1073 window a full-width surface is ~22-30 MB,
+// and WebKit's 512x512@2x compositing tiles are ~4 MB, so 10 MB separates them
+// cleanly. Reported alongside the count so a shifted window size is visible
+// rather than silently re-bucketing.
+const LARGE_GRAPHICS_SURFACE_MB = 10;
+
+// Pure: the individual `owned unmapped (graphics)` regions from a full `vmmap`
+// (NOT --summary, which pre-aggregates them). The summary says how much GPU
+// surface a process holds; this says how many surfaces and what size, which is
+// what distinguishes "one buffer per pane" from "a fixed cost per window".
+export function parseGraphicsRegions(text) {
+  const surfaces = [];
+  for (const line of text.split('\n')) {
+    if (!line.includes('owned unmapped (graphics)')) continue;
+    const match = /\[\s*(\S+)\s+(\S+)\s+(\S+)\s+(\S+)\s*\]/.exec(line);
+    if (!match) continue;
+    const virtualMb = parseVmmapSize(match[1]);
+    const dirtyMb = parseVmmapSize(match[3]);
+    if (virtualMb === null || dirtyMb === null) continue;
+    surfaces.push({ virtualMb, dirtyMb });
+  }
+  const large = surfaces.filter((surface) => surface.virtualMb >= LARGE_GRAPHICS_SURFACE_MB);
+  const histogram = {};
+  for (const surface of large) {
+    const key = surface.virtualMb.toFixed(1);
+    histogram[key] = (histogram[key] ?? 0) + 1;
+  }
+  return {
+    regionCount: surfaces.length,
+    largeCount: large.length,
+    largeDirtyMb: Number(large.reduce((sum, s) => sum + s.dirtyMb, 0).toFixed(1)),
+    largeVirtualMb: Number(large.reduce((sum, s) => sum + s.virtualMb, 0).toFixed(1)),
+    histogram,
+  };
+}
+
+export async function readGraphicsRegions(pid) {
+  if (!pid) return null;
+  try {
+    const { stdout } = await execFileAsync('vmmap', [String(pid)], { maxBuffer: 128 * 1024 * 1024 });
+    return parseGraphicsRegions(stdout);
+  } catch {
+    return null;
+  }
+}
+
+// Dirty-page breakdown of one process. Returns null (never throws) when vmmap
+// is unavailable or the process is gone: a region receipt is an enrichment of
+// the RSS numbers, and losing it must not fail a run that measured fine.
+export async function readRegionFootprint(pid) {
+  if (!pid) return null;
+  try {
+    const { stdout } = await execFileAsync('vmmap', ['--summary', String(pid)], {
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    return parseVmmapSummary(stdout);
+  } catch {
+    return null;
+  }
+}
+
 // Sample RSS repeatedly over a window and return the peak (by total RSS) and the
 // last sample. Used to catch the transient/retained spike from heavy output.
 export async function sampleWindow(appPid, daemonPid, webkitBaseline, windowMs, intervalMs = 1000) {
