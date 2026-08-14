@@ -40,3 +40,16 @@ export function resolveDaemonWebSocketURL(options: ResolveDaemonWebSocketURLOpti
 
   return `${protocol}://${host}:${port}${path}`;
 }
+
+// The HTTP origin of the same daemon, derived from the WebSocket URL rather than
+// resolved a second time: the app bundle route sits on that listener's mux
+// beside /ws, so a profile that moved its port must move both together or a
+// docked app view silently imports another profile's artifact.
+//
+// A remote endpoint's origin is the remote daemon's, which is deliberate and
+// currently unreachable: apps_updated is not relayed, so nothing from a remote
+// registry is ever mountable.
+export function resolveDaemonHTTPOrigin(options: ResolveDaemonWebSocketURLOptions = {}): string {
+  const ws = new URL(resolveDaemonWebSocketURL(options));
+  return `${ws.protocol === 'wss:' ? 'https:' : 'http:'}//${ws.host}`;
+}

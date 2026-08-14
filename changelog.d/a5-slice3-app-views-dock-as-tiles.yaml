@@ -1,0 +1,19 @@
+kind: added
+area: apps
+change: >
+  An app's views now dock as tiles. Every enabled app's views appear in the
+  command menu; picking one docks it into the active workspace, and a view that
+  declared a param asks for it first. The view runs on attn's own React —
+  resolved in the browser through an import map, so an app ships no copy of its
+  own — and its module is served by the daemon at a URL that names the version's
+  content hash. Applying a new version moves that URL, so a docked tile reloads
+  itself; while you are typing in the tile it waits and says so instead.
+  A view that will not load, will not link, or throws while rendering costs its
+  own tile and nothing else, and says what is wrong and the way back. A crash is
+  recorded against the app, stamped with the version that served it, so
+  `attn app logs <app>` has it. Disabling or removing an app leaves its tiles in
+  place saying so — nothing self-removes.
+notes: >
+  A5 slice 3. `attn app status` gained a views line naming each view's tile
+  kind. Protocol 242: the apps registry is on the wire (initial_state's `apps`
+  and the `apps_updated` broadcast) and `app_view_crash` reports a render crash.

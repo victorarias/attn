@@ -165,16 +165,21 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdWorkspaceLayoutMoveLeafToNewWorkspace: commandMetadata(ScopeSession, true, true),
 	protocol.CmdSetWorkspaceRank:                      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdWorkspaceTileContentGet:               commandMetadata(ScopeSession, true, true),
-	protocol.CmdOpenMarkdown:                          commandMetadata(ScopeSession, true, true),
-	protocol.CmdOpenSentFiles:                         commandMetadata(ScopeSession, true, true),
-	protocol.CmdMarkdownAnnotationsGet:                commandMetadata(ScopeSession, true, true),
-	protocol.CmdMarkdownAnnotationsSave:               commandMetadata(ScopeSession, true, true),
-	protocol.CmdMarkdownAnnotationsClear:              commandMetadata(ScopeSession, true, true),
-	protocol.CmdMarkdownAnnotationsSubmit:             commandMetadata(ScopeSession, true, true),
-	protocol.CmdSessionMessagesGet:                    commandMetadata(ScopeSession, false, true),
-	protocol.CmdSessionAnnotationsGet:                 commandMetadata(ScopeSession, false, true),
-	protocol.CmdSessionAnnotationsSave:                commandMetadata(ScopeSession, false, true),
-	protocol.CmdSessionAnnotationsClear:               commandMetadata(ScopeSession, false, true),
+	// Local: an app's bundle and its version rows live on THIS daemon, so a
+	// crash report about one is never merged from or forwarded to an endpoint.
+	// Logged: a view that crashes is worth a daemon.log line beside the
+	// invocation it records.
+	protocol.CmdAppViewCrash:              commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdOpenMarkdown:              commandMetadata(ScopeSession, true, true),
+	protocol.CmdOpenSentFiles:             commandMetadata(ScopeSession, true, true),
+	protocol.CmdMarkdownAnnotationsGet:    commandMetadata(ScopeSession, true, true),
+	protocol.CmdMarkdownAnnotationsSave:   commandMetadata(ScopeSession, true, true),
+	protocol.CmdMarkdownAnnotationsClear:  commandMetadata(ScopeSession, true, true),
+	protocol.CmdMarkdownAnnotationsSubmit: commandMetadata(ScopeSession, true, true),
+	protocol.CmdSessionMessagesGet:        commandMetadata(ScopeSession, false, true),
+	protocol.CmdSessionAnnotationsGet:     commandMetadata(ScopeSession, false, true),
+	protocol.CmdSessionAnnotationsSave:    commandMetadata(ScopeSession, false, true),
+	protocol.CmdSessionAnnotationsClear:   commandMetadata(ScopeSession, false, true),
 	// Blocks during recovery, unlike its get/save/clear siblings: those touch
 	// only the store, this one types into a PTY.
 	protocol.CmdSessionAnnotationsSubmit: commandMetadata(ScopeSession, true, true),

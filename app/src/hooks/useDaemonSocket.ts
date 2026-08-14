@@ -7,6 +7,8 @@ import type {
   PR as GeneratedPR,
   Worktree as GeneratedWorktree,
   PluginInfo as GeneratedPluginInfo,
+  AppRegistryEntry as GeneratedAppRegistryEntry,
+  ViewElement as GeneratedAppViewInfo,
   PluginIssue as GeneratedPluginIssue,
   GitOperation as GeneratedGitOperation,
   Endpoint as GeneratedEndpoint,
@@ -126,6 +128,10 @@ export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
 export type DaemonPlugin = GeneratedPluginInfo;
+export type AppRegistryEntry = GeneratedAppRegistryEntry;
+// quicktype names the inlined member type ViewElement; AppViewInfo and it are
+// the same shape, and this is the one AppRegistryEntry.views actually carries.
+export type AppViewInfo = GeneratedAppViewInfo;
 export type DaemonPluginIssue = GeneratedPluginIssue;
 export type DaemonGitOperation = GeneratedGitOperation;
 export type DaemonEndpoint = GeneratedEndpoint;
@@ -240,7 +246,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '241';
+export const PROTOCOL_VERSION = '242';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -619,6 +625,10 @@ interface UseDaemonSocketOptions {
   // when the garden outgrew one push, and the panel says so rather than ending
   // silently at the cap.
   onSeedsUpdate?: (seeds: Seed[], total: number) => void;
+  // Fired with this daemon's whole app registry on initial_state and on every
+  // apps_updated broadcast. A version flip moves an app's content hash, which is
+  // how a docked tile learns its bundle URL moved — there is no other signal.
+  onAppsUpdate?: (apps: AppRegistryEntry[]) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
@@ -920,6 +930,7 @@ export function useDaemonSocket({
   onFsChanged,
   onTicketsUpdate,
   onSeedsUpdate,
+  onAppsUpdate,
   onPresentationAdded,
   onPresentationUpdated,
   onWorkspacesUpdate,
@@ -954,6 +965,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onAppsUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -977,6 +989,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onAppsUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -1535,6 +1548,7 @@ export function useDaemonSocket({
               data.seeds || [],
               data.seeds_total ?? (data.seeds || []).length,
             );
+            callbacksRef.current.onAppsUpdate?.(data.apps || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1705,6 +1719,10 @@ export function useDaemonSocket({
               data.seeds || [],
               data.total ?? (data.seeds || []).length,
             );
+            break;
+
+          case 'apps_updated':
+            callbacksRef.current.onAppsUpdate?.(data.apps || []);
             break;
 
           case 'presentation_added':
@@ -3371,6 +3389,28 @@ export function useDaemonSocket({
   // left off the command entirely when absent: an explicit 0 and an omitted
   // field mean the same thing to the daemon ("no pixel geometry"), and omitting
   // keeps the wire honest about which resizes actually measured the pane.
+  // A docked app view crashed while rendering. Fire-and-forget on purpose: the
+  // host already has the error and shows it in the tile — this is the copy the
+  // authoring agent reads in `attn app logs`, stamped with the version that
+  // served the bundle, and a report the daemon never answers must not become a
+  // second failure inside an error boundary.
+  const sendAppViewCrash = useCallback((report: {
+    app: string;
+    view: string;
+    versionId: number;
+    tileId: string;
+    error: string;
+  }) => {
+    sendOrQueueCommand({
+      cmd: 'app_view_crash',
+      app: report.app,
+      view: report.view,
+      version_id: report.versionId,
+      tile_id: report.tileId,
+      error: report.error,
+    });
+  }, [sendOrQueueCommand]);
+
   const sendPtyResize = useCallback((
     id: string,
     cols: number,
@@ -5546,6 +5586,7 @@ export function useDaemonSocket({
     sendTerminalPointerActivity,
     sendSetClientPresence,
     sendSetTerminalTheme,
+    sendAppViewCrash,
     isRuntimeAttached,
     sendGetFileDiff,
     getRepoInfo,

@@ -795,6 +795,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Tickets:           d.ticketsForBroadcast(),
 		Seeds:             d.seedsForBroadcast(),
 		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
+		Apps:              d.appRegistryForWire(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -1339,6 +1340,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutRenamePane(client, msg.(*protocol.WorkspaceLayoutRenamePaneMessage))
 	case protocol.CmdWorkspaceLayoutSetSplitRatio: // wire: workspace_layout_set_split_ratio
 		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
+	case protocol.CmdAppViewCrash: // wire: app_view_crash
+		d.handleAppViewCrash(client, msg.(*protocol.AppViewCrashMessage))
 	case protocol.CmdWorkspaceLayoutDockTile: // wire: workspace_layout_dock_tile
 		d.handleWorkspaceLayoutDockTile(client, msg.(*protocol.WorkspaceLayoutDockTileMessage))
 	case protocol.CmdWorkspaceLayoutUndockTile: // wire: workspace_layout_undock_tile

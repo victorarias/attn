@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "241"
+const ProtocolVersion = "242"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -136,6 +136,7 @@ const (
 	CmdAppRuntimeStatus                      = "app_runtime_status"
 	CmdAppRuntimeRestart                     = "app_runtime_restart"
 	CmdAppWatch                              = "app_watch"
+	CmdAppViewCrash                          = "app_view_crash"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -364,6 +365,7 @@ const (
 	EventSessionContextWindowCapResult   = "session_context_window_cap_result"
 	EventTicketsUpdated                  = "tickets_updated"
 	EventGardenSeedsUpdated              = "garden_seeds_updated"
+	EventAppsUpdated                     = "apps_updated"
 	EventTicketResult                    = "ticket_result"
 	EventTicketActionResult              = "ticket_action_result"
 	EventTicketAttachResult              = "ticket_attach_result"
@@ -814,6 +816,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAppRuntimeRestart:
 		var msg AppRuntimeRestartMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAppViewCrash:
+		var msg AppViewCrashMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

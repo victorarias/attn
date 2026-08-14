@@ -222,12 +222,11 @@ const (
 
 	// App registry facts; subject is the app's name.
 	//
-	// Neither has an entry in wireProjections, and that is not an omission: the
-	// app registry has no UI surface, so these produce no WebSocket traffic. They
-	// exist because the runtime has to hear about a state change it did not make
-	// — an app disabled from the CLI, or by the auto-disable clock, has to reach
-	// the loop that dispatches its handlers, and the log is how one part of the
-	// daemon tells another something happened.
+	// They have two readers. The runtime has to hear about a state change it did
+	// not make — an app disabled from the CLI, or by the auto-disable clock, has
+	// to reach the loop that dispatches its handlers. And, since A5, each one
+	// re-pushes the app registry snapshot the frontend mounts views from, which
+	// is how a docked tile learns its bundle URL moved.
 	//
 	// FactAppEnabledChanged: the app's bus consumer bit was flipped. The payload
 	// carries which way, so a consumer of this fact does not have to read back a
@@ -508,6 +507,13 @@ func buildWireProjections() []projection {
 			filter: bus.Filter{FactPresentationAdded, FactPresentationUpdated},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectPresentation(ev) },
 		},
+		{
+			// The registry snapshot the UI mounts app views from. A version flip is
+			// how a docked tile learns its bundle URL moved, which is the whole
+			// reload mechanism — no watcher, no polling.
+			filter: bus.Filter{FactAppVersionChanged, FactAppEnabledChanged, FactAppRemoved},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectAppsUpdated() },
+		},
 	}
 }
 
@@ -660,6 +666,7 @@ const (
 	snapshotNotifs      = "notifications_updated"
 	snapshotAutomations = "automations_changed"
 	snapshotTasks       = "tasks_changed"
+	snapshotApps        = "apps_updated"
 )
 
 // wireEqual reports whether two values reach clients as the same JSON —

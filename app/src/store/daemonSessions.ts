@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow, Seed } from '../hooks/useDaemonSocket';
+import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow, Seed, AppRegistryEntry } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
@@ -22,6 +22,13 @@ interface DaemonStore {
   // PRs from daemon
   prs: DaemonPR[];
   setPRs: (prs: DaemonPR[]) => void;
+
+  // Every app this daemon has installed, with the views its serving version
+  // declares. Two surfaces far apart read it — the dock picker offers the views,
+  // and a docked tile resolves its bundle URL and watches for the content hash
+  // to move — so it lives here rather than travelling down as a prop.
+  apps: AppRegistryEntry[];
+  setApps: (apps: AppRegistryEntry[]) => void;
 
   // Repo states from daemon (muted, collapsed)
   repoStates: RepoState[];
@@ -55,6 +62,9 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
 
   prs: [],
   setPRs: (prs) => set({ prs }),
+
+  apps: [],
+  setApps: (apps) => set({ apps }),
 
   repoStates: [],
   setRepoStates: (repos) => set({ repoStates: repos }),

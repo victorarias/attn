@@ -1,0 +1,70 @@
+/* The host's own chrome. An app's component draws inside .app-tile-host and is
+   given no styling of its own — attn's tokens are not a contract an app may
+   rely on. Nothing here animates: attn renders GPU terminals all day beside
+   these tiles, and a permanent repaint loop is a battery bug no test catches. */
+
+.app-tile-host {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  color: var(--color-text-primary);
+}
+
+/* A newer version is serving than what is mounted. Static, and above the view
+   rather than over it: covering an app's own UI to say attn has news is worse
+   than one line of chrome. */
+.app-tile-host-badge {
+  flex: 0 0 auto;
+  padding: 4px 10px;
+  font-size: 11px;
+  color: var(--color-text-secondary);
+  background: var(--color-bg-elevated);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.app-tile-host-message {
+  padding: 16px 18px;
+  color: var(--color-text-tertiary);
+  font-style: italic;
+}
+
+/* Every non-mounting state: not installed, disabled, no version, view gone,
+   load failed, crashed. Each says what is wrong and the way back — none of them
+   removes the tile. */
+.app-tile-host-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 18px;
+  overflow: auto;
+}
+
+.app-tile-host-placeholder-title {
+  color: var(--color-text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.app-tile-host-placeholder-detail {
+  color: var(--color-text-tertiary);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.app-tile-host-placeholder-action {
+  padding: 5px 12px;
+  font-size: 12px;
+  color: var(--color-text-primary);
+  background: var(--color-bg-button);
+  border: 1px solid var(--color-border);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.app-tile-host-placeholder-action:hover {
+  border-color: var(--color-border-hover);
+}

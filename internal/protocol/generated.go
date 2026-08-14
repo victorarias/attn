@@ -351,6 +351,26 @@ type AppLogsResult struct {
 	Truncated bool `json:"truncated"`
 }
 
+type AppRegistryEntry struct {
+	// ContentHash corresponds to the JSON schema field "content_hash".
+	ContentHash *string `json:"content_hash,omitempty,omitzero"`
+
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Enabled corresponds to the JSON schema field "enabled".
+	Enabled bool `json:"enabled"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID *int `json:"version_id,omitempty,omitzero"`
+
+	// Views corresponds to the JSON schema field "views".
+	Views []AppViewInfo `json:"views"`
+}
+
 type AppRemoveMessage struct {
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
@@ -575,6 +595,9 @@ type AppSummary struct {
 
 	// UpdatedAt corresponds to the JSON schema field "updated_at".
 	UpdatedAt string `json:"updated_at"`
+
+	// Views corresponds to the JSON schema field "views".
+	Views []AppViewInfo `json:"views,omitempty,omitzero"`
 }
 
 type AppVersionInfo struct {
@@ -589,6 +612,43 @@ type AppVersionInfo struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID int `json:"id"`
+}
+
+type AppViewCrashMessage struct {
+	// App corresponds to the JSON schema field "app".
+	App string `json:"app"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// TileID corresponds to the JSON schema field "tile_id".
+	TileID string `json:"tile_id"`
+
+	// VersionID corresponds to the JSON schema field "version_id".
+	VersionID int `json:"version_id"`
+
+	// View corresponds to the JSON schema field "view".
+	View string `json:"view"`
+}
+
+type AppViewInfo struct {
+	// Kind corresponds to the JSON schema field "kind".
+	Kind string `json:"kind"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+
+	// ParamsLabel corresponds to the JSON schema field "params_label".
+	ParamsLabel *string `json:"params_label,omitempty,omitzero"`
+
+	// ParamsPlaceholder corresponds to the JSON schema field "params_placeholder".
+	ParamsPlaceholder *string `json:"params_placeholder,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
 }
 
 type AppWatchMessage struct {
@@ -610,6 +670,14 @@ type ApprovePRMessage struct {
 
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
+}
+
+type AppsUpdatedMessage struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppRegistryEntry `json:"apps"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
 }
 
 type AttachBlock struct {
@@ -3170,6 +3238,9 @@ type HookStopFailureMessage struct {
 }
 
 type InitialStateMessage struct {
+	// Apps corresponds to the JSON schema field "apps".
+	Apps []AppRegistryEntry `json:"apps,omitempty,omitzero"`
+
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
 

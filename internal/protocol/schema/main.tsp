@@ -2975,6 +2975,12 @@ model InitialStateMessage {
   // as well as on garden_seeds_updated so a client that connects to an
   // over-large garden knows it is short before anything moves.
   seeds_total?: int32;
+  // Every app registered on THIS daemon, with the views it offers. It is what
+  // the dock picker lists and what a mounted app tile resolves its bundle URL
+  // from. Local only: an app's bundle is an HTTP artifact on the daemon holding
+  // it and the hub relays WebSocket messages rather than proxying HTTP, so a
+  // remote endpoint's apps are deliberately never offered here.
+  apps?: AppRegistryEntry[];
 }
 
 model EndpointStatusChangedMessage {
@@ -4534,6 +4540,88 @@ model AppSummary {
   // state, not a gap in the answer: it means nothing is delivering facts to
   // this app.
   "consumer"?: AppConsumerInfo;
+  // The views the serving version declares, read back out of its frozen
+  // declaration. Empty for an app with no views, and for an app with no version
+  // applied yet — a view exists only inside a built version.
+  "views"?: AppViewInfo[];
+}
+
+// One declared view: a named component the app offers attn to render, as the
+// dock picker and the tile header show it.
+//
+// `entrypoint` is deliberately absent. It is a path in the author's source tree
+// and says nothing to a UI that mounts a built artifact; what the frontend needs
+// is the name (which addresses the artifact and the tile kind), the kind (where
+// attn may put it) and the title (what a person reads).
+model AppViewInfo {
+  "name": string;
+  // "tile" is the only kind this attn mounts. It is carried rather than assumed
+  // so a client meeting a kind it cannot render says so instead of mounting the
+  // wrong surface.
+  "kind": string;
+  "title": string;
+  // Set when the view declares `params`: the dock picker asks for one line of
+  // text with this label before placing the tile, and hands the string to the
+  // view untouched. Absent means the view takes no params and the picker asks
+  // for nothing.
+  "params_label"?: string;
+  "params_placeholder"?: string;
+}
+
+// One app as the UI needs it: what is mountable, from where, and whether it is
+// running. Deliberately not AppSummary — that answer carries the consumer's
+// cursor and lag, which cost a bus-head read per push and mean nothing to a
+// tile.
+//
+// `content_hash` is what makes the bundle URL: an artifact is addressed by the
+// version's hash, so a new version is a different URL rather than a cache to
+// bust, and a tile remounts by noticing this value moved.
+model AppRegistryEntry {
+  "name": string;
+  // The manifest's description, when it has one — what the dock picker shows
+  // under the view's title.
+  "description"?: string;
+  // The app's enabled state, which IS its bus consumer's bit. False when the app
+  // has no consumer at all: nothing would run it either way, and a tile has no
+  // use for the distinction.
+  "enabled": boolean;
+  // Absent until a version has been applied. A registry row can exist ahead of
+  // its first successful build, and such an app has nothing to mount.
+  "version_id"?: safeint;
+  "content_hash"?: string;
+  "views": AppViewInfo[];
+}
+
+// The app registry changed: a version flipped, an app was enabled or disabled,
+// or an app was removed. A whole-list push, like tickets and seeds — the list is
+// short (a machine has a handful of apps) and every mounted tile has to
+// re-decide what it is serving from it.
+model AppsUpdatedMessage {
+  event: "apps_updated";
+  apps: AppRegistryEntry[];
+}
+
+// A docked view threw while rendering, caught by the host's per-app error
+// boundary.
+//
+// It is a report, not a request: the tile has already shown the error and the
+// way back, and the daemon's job is to make the crash visible to the agent that
+// wrote the view — it is recorded as an app invocation stamped with the version
+// that served it, so `attn app logs` and `attn app status` show it beside handler
+// failures.
+model AppViewCrashMessage {
+  "cmd": "app_view_crash";
+  "app": string;
+  "view": string;
+  // The version that served the bundle, which a rollback must not rewrite. The
+  // report is dropped when it does not match a version of this app.
+  "version_id": safeint;
+  // The tile the crash happened in — the subject a reader uses to tell "one tile
+  // is broken" from "every mount of this view crashes".
+  "tile_id": string;
+  // The error as the boundary caught it: message first, then the component stack
+  // when React gave one.
+  "error": string;
 }
 
 model AppVersionInfo {
@@ -5693,4 +5781,5 @@ alias DaemonEvent =
   | MarkdownAnnotationsSubmitResultMessage
   | PastConversationsResultMessage
   | BusStatusResultMessage
-  | BusSetConsumerEnabledResultMessage;
+  | BusSetConsumerEnabledResultMessage
+  | AppsUpdatedMessage;
