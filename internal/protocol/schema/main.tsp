@@ -4386,7 +4386,7 @@ model SeedPlotResult {
 model SeedListMessage {
   "cmd": "seed_list";
   "source_session_id"?: string;
-  // Only the open seeds whose trail has not moved for the window — a query for
+  // Only the open seeds whose log has not moved for the window — a query for
   // a person's judgment, never a reaper.
   "stale"?: boolean;
   // Overrides the stale window; 0 or absent takes the daemon's default.
@@ -4411,8 +4411,8 @@ model SeedShowMessage {
 
 model SeedShowResult {
   "seed": Seed;
-  // The newest entries on the seed's trail, and how many it holds. Notes ride
-  // the read the tender already runs: a trail nobody is told to look at is the
+  // The newest entries on the seed's log, and how many it holds. Notes ride
+  // the read the tender already runs: a log nobody is told to look at is the
   // unread bulletin board this surface replaces. The list is bounded, so
   // `total` is what makes the shortfall visible rather than silent.
   "notes": SeedNote[];
@@ -4424,7 +4424,7 @@ model SeedShowResult {
   // The freshest handoff on this seed, absent when nobody left one. It rides
   // beside `notes` rather than being found in them: a handoff is written to
   // whoever tends the seed next, so it is rendered before the seed itself and
-  // not left to be recognised in a trail.
+  // not left to be recognised in a log.
   "handoff"?: SeedNote;
 }
 
@@ -4508,7 +4508,7 @@ model SeedTransitionResult {
   "handoff"?: SeedNote;
 }
 
-// One entry on a seed's trail: what happened and what was learned, written for
+// One entry on a seed's log: what happened and what was learned, written for
 // whoever tends the seed next. A note is anchored to the work and routed to
 // nobody — directed messages are their own surface.
 model SeedNote {
@@ -4529,7 +4529,7 @@ model SeedNoteMessage {
   "seed_id": string;
   "body": string;
   "member"?: string;
-  // Omitted is a plain trail entry, so a caller that never heard of kinds
+  // Omitted is a plain log entry, so a caller that never heard of kinds
   // writes a note. An unknown kind is refused, naming the whole set.
   "kind"?: string;
 }
@@ -4538,7 +4538,7 @@ model SeedNoteResult {
   "note": SeedNote;
 }
 
-// The whole trail, newest first — what `show`'s bounded list points at.
+// The whole log, newest first — what `show`'s bounded list points at.
 model SeedNotesMessage {
   "cmd": "seed_notes";
   "seed_id": string;

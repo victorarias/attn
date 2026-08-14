@@ -624,7 +624,7 @@ func (d *Daemon) handleSeedList(conn net.Conn, msg *protocol.SeedListMessage) {
 	d.sendGardenResponse(conn, protocol.Response{Ok: true, SeedListResult: result})
 }
 
-// staleSeeds is the stale query over one read: open seeds whose trail — the
+// staleSeeds is the stale query over one read: open seeds whose log — the
 // document's own updated stamp or its newest note, whichever is later — has
 // not moved within window. The note read runs only for seeds already quiet by
 // their document stamp: a note never makes a fresh seed stale.
@@ -650,7 +650,7 @@ func (d *Daemon) staleSeeds(read gardenRead, window time.Duration) ([]garden.See
 	return garden.Stale(read.seeds, lastMoved, window, now), nil
 }
 
-// newestNoteAt is when a seed's trail last spoke; zero when it never has.
+// newestNoteAt is when a seed's log last spoke; zero when it never has.
 func (d *Daemon) newestNoteAt(seedID string) (time.Time, error) {
 	readNotes, _, err := d.runDocQuery(docstore.Query{
 		Namespace:  garden.Namespace,
@@ -678,11 +678,11 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 		d.sendGardenError(conn, "show", err)
 		return
 	}
-	// The trail rides the read the tender already runs. A failure to read it must
+	// The log rides the read the tender already runs. A failure to read it must
 	// not fail the show — the seed is the answer, the notes are the context.
 	notes, total, err := d.readNotes(seed.ID, garden.ShowNotes)
 	if err != nil {
-		d.logf("garden: reading the trail of %s: %v", seed.ID, err)
+		d.logf("garden: reading the log of %s: %v", seed.ID, err)
 	}
 	read, err := d.readGarden()
 	if err != nil {
@@ -1117,9 +1117,9 @@ func (d *Daemon) applySeedTransition(id string, verb garden.Verb, actor garden.T
 		id, attempts, verb, id)
 }
 
-// Notes. The trail is its own collection keyed by seed, so a long-tended seed
+// Notes. The log is its own collection keyed by seed, so a long-tended seed
 // never bloats its own document, and a note is append-only: nothing edits or
-// deletes one, because the trail is what happened.
+// deletes one, because the log is what happened.
 
 func (d *Daemon) notesCollection() (*docstore.CollectionSchema, error) {
 	if d.store == nil {
@@ -1143,7 +1143,7 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		return
 	}
 	// A note on a seed that is not planted is refused by name rather than
-	// written into a trail nobody will ever read.
+	// written into a log nobody will ever read.
 	seed, _, err := d.readSeed(msg.SeedID)
 	if err != nil {
 		d.sendGardenError(conn, "note", err)
@@ -1173,7 +1173,7 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 	})
 }
 
-// mintAndWriteNote writes one trail entry, minting again on a taken id for the
+// mintAndWriteNote writes one log entry, minting again on a taken id for the
 // same reason planting does: the author did nothing wrong and has nothing to fix.
 func (d *Daemon) mintAndWriteNote(schema docstore.CollectionSchema, note garden.Note) (garden.Note, docstore.Document, error) {
 	const mintAttempts = 3
@@ -1247,9 +1247,9 @@ func (d *Daemon) handleSeedNotes(conn net.Conn, msg *protocol.SeedNotesMessage) 
 	})
 }
 
-// readNotes reads a seed's trail newest first, bounded, and returns how many it
+// readNotes reads a seed's log newest first, bounded, and returns how many it
 // holds beside it. The total is what keeps a bounded list from reading as the
-// whole trail.
+// whole log.
 func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, error) {
 	if d.store == nil {
 		return nil, 0, errors.New("no database")
@@ -1287,9 +1287,9 @@ func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, 
 
 // freshestHandoff reads the one handoff a tender must see: the newest note of
 // kind `handoff` on this seed. It is its own query rather than a scan of the
-// notes `show` already read, because a handoff older than the newest few trail
+// notes `show` already read, because a handoff older than the newest few log
 // entries is exactly the one that would fall out of that window — and a
-// continuity surface that goes quiet once the trail gets busy is worse than
+// continuity surface that goes quiet once the log gets busy is worse than
 // none.
 //
 // A read failure is not a refusal. The caller is claiming or reading a seed;

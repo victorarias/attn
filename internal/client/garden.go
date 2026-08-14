@@ -37,7 +37,7 @@ func (c *Client) SeedPlant(sessionID, title, body, partOf, member string) (*prot
 }
 
 // SeedList reads the garden, newest first. stale narrows to the open seeds
-// whose trail has not moved for the window; staleWindowSeconds 0 takes the
+// whose log has not moved for the window; staleWindowSeconds 0 takes the
 // daemon's default.
 func (c *Client) SeedList(sessionID string, stale bool, staleWindowSeconds int) (*protocol.SeedListResult, error) {
 	msg := protocol.SeedListMessage{Cmd: protocol.CmdSeedList}
@@ -60,7 +60,7 @@ func (c *Client) SeedList(sessionID string, stale bool, staleWindowSeconds int) 
 	return resp.SeedListResult, nil
 }
 
-// SeedShow reads one seed and the newest entries on its trail.
+// SeedShow reads one seed and the newest entries on its log.
 func (c *Client) SeedShow(seedID string) (*protocol.SeedShowResult, error) {
 	resp, err := c.send(protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: seedID})
 	if err != nil {
@@ -96,7 +96,7 @@ func (c *Client) SeedTransition(sessionID, seedID, verb, reason, member string) 
 	return resp.SeedTransitionResult, nil
 }
 
-// SeedNote appends one entry to a seed's trail. An empty kind is the plain
+// SeedNote appends one entry to a seed's log. An empty kind is the plain
 // entry; `handoff` writes it to whoever tends the seed next.
 func (c *Client) SeedNote(sessionID, seedID, body, member, kind string) (*protocol.SeedNoteResult, error) {
 	msg := protocol.SeedNoteMessage{Cmd: protocol.CmdSeedNote, SeedID: seedID, Body: body}
@@ -163,7 +163,7 @@ func (c *Client) SeedReady(sessionID, plot string, all bool) (*protocol.SeedRead
 	return resp.SeedReadyResult, nil
 }
 
-// SeedNotes reads a seed's whole trail, newest first. limit 0 takes the
+// SeedNotes reads a seed's whole log, newest first. limit 0 takes the
 // daemon's bound.
 func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult, error) {
 	msg := protocol.SeedNotesMessage{Cmd: protocol.CmdSeedNotes, SeedID: seedID}
@@ -175,7 +175,7 @@ func (c *Client) SeedNotes(seedID string, limit int) (*protocol.SeedNotesResult,
 		return nil, err
 	}
 	if resp.SeedNotesResult == nil {
-		return nil, fmt.Errorf("the daemon answered without a trail")
+		return nil, fmt.Errorf("the daemon answered without a log")
 	}
 	return resp.SeedNotesResult, nil
 }

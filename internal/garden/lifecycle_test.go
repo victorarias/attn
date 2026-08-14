@@ -158,7 +158,7 @@ func TestTransitionMovesTheTender(t *testing.T) {
 
 // Three of the five moves record nothing, so a reason handed to one of them
 // would be dropped on the floor. Text somebody wrote never vanishes without a
-// word: the move is refused and the refusal points at the trail.
+// word: the move is refused and the refusal points at the log.
 func TestTransitionRefusesAReasonTheMoveWouldDrop(t *testing.T) {
 	actor := Tender{Session: me}
 	for _, verb := range []Verb{VerbTend, VerbPark, VerbReplant} {
@@ -316,7 +316,7 @@ func TestHarvestNeedsAReason(t *testing.T) {
 	}
 }
 
-func TestReasonLimitNamesItselfAndPointsAtTheTrail(t *testing.T) {
+func TestReasonLimitNamesItselfAndPointsAtTheLog(t *testing.T) {
 	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, strings.Repeat("x", MaxReasonChars+1), alive)
 	if err == nil {
 		t.Fatal("an oversized reason was accepted")
@@ -370,7 +370,7 @@ func TestValidateNote(t *testing.T) {
 }
 
 func TestParseNoteKindNamesTheWholeSet(t *testing.T) {
-	// An unnamed kind is the plain trail entry: `attn seed note` wrote one
+	// An unnamed kind is the plain log entry: `attn seed note` wrote one
 	// before kinds existed and must keep writing one.
 	if got, err := ParseNoteKind(""); err != nil || got != NoteKindNote {
 		t.Fatalf("ParseNoteKind(\"\") = %q, %v; want the plain note", got, err)

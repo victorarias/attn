@@ -43,7 +43,7 @@ to fix.
   only, storage explicitly not adopted).
   - Core loop: one-line capture; `ready` = no open blockers,
     auto-surfacing when a blocker closes; atomic claim; close-with-reason;
-    audit trail in `show`; JSON everywhere.
+    audit log in `show`; JSON everywhere.
   - Workflow layer (`docs/workflows/{formulas,molecules}.md` in the beads
     repo): a **molecule is just an epic** — parent with children plus
     execution intent, children parallel by default, only explicit
@@ -271,8 +271,8 @@ stateDiagram-v2
   crown starts knowing its plot,
   its ready seeds, and the freshest handoffs. No agent should have to
   discover the garden exists.
-- **Audit trail = revisions + notes + facts.** Docstore revisions record
-  every mutation; notes carry the human/agent-authored trail; bus facts
+- **Audit log = revisions + notes + facts.** Docstore revisions record
+  every mutation; notes carry the human/agent-authored log; bus facts
   (`garden.planted`, `garden.tended`, …) drive projections. `attn seed show`
   assembles all three.
 
@@ -300,7 +300,7 @@ full set and the beads mapping.
 | sow | instantiate a packet, filling its variables | `bd mol pour` |
 | cutting | extract a packet from a proven plot | `bd mol distill` |
 | gate | a seed that needs a human; opens a turn when unblocked, never enters agent `ready` | `[steps.gate]` |
-| note | trail entry on a seed; the seed's memory of itself, routed to nobody | comment |
+| note | log entry on a seed; the seed's memory of itself, routed to nobody | comment |
 | handoff | a note kind addressed to whoever tends the seed next | — |
 | fruit / laurel | recognition attached to a seed | — |
 
@@ -348,7 +348,7 @@ Acceptance:
 
 ### Slice 2 — lifecycle and tending
 
-Goal: a seed moves through its life, and the trail is visible.
+Goal: a seed moves through its life, and the log is visible.
 
 Ships:
 
@@ -357,13 +357,13 @@ Ships:
       errors. The claim is guarded on `tend` alone (2026-08-12): the other four
       are fate calls, and guarding them would make a tender whose session ended
       a one-way door with no key.
-- [x] `attn seed note <id> -m` appends to the trail; `show` renders states,
+- [x] `attn seed note <id> -m` appends to the log; `show` renders states,
       tender, and notes newest-first. `show` renders the newest
       `garden.ShowNotes` and names what it withheld; `attn seed notes <id>`
-      reads the whole trail.
+      reads the whole log.
 - [x] App panel shows state and tender; state changes arrive live.
 - [x] Bus facts per transition (`garden.tended`, `garden.harvested`, …), plus
-      `garden.noted` for the trail.
+      `garden.noted` for the log.
 - [x] Slice 1's seed-list cap finished (Victor, 2026-08-12): the count the push
       already carried now has consumers — the panel says how many the garden
       holds when it outgrew one push, and `attn seed ls` names how many seeds it
@@ -451,7 +451,7 @@ picks up from. Both now read `Tender.Holds`.
 
 The handoff is not on the wire Seed and so not in the panel: the plan gives
 slice 4 no app line, and the panel renders no notes of any kind today. Whichever
-slice teaches it the trail teaches it handoffs in the same move.
+slice teaches it the log teaches it handoffs in the same move.
 
 Acceptance:
 
@@ -490,7 +490,7 @@ Ships:
       (`attn seed ls --stale`) exists as a *query*, not an automatic
       reaper — a person (or later a crew member) decides what withers.
       Stale means a seed claiming attention it is not getting: open,
-      with no trail movement (notes, moves, edges) for a window. The
+      with no log movement (notes, moves, edges) for a window. The
       window is a flag with a default that needs a receipt at build
       time, and the output names the rule and window it applied.
 - [x] The scope ruling lands, destructively (ruled 2026-08-13): drop
@@ -532,7 +532,7 @@ Ships:
       appear as the live ledger beneath it.
 - [ ] Annotations on a rendered seed route as feedback to its tender's
       session (the existing annotation→agent path); on an untended seed
-      they land as notes on the trail, so review feedback is never lost.
+      they land as notes on the log, so review feedback is never lost.
 - [ ] A chunk plan authored as a plot replaces its would-be
       `docs/plans/*.md` file for one real chunk — the first plan that never
       touches git.
@@ -563,7 +563,7 @@ Acceptance:
   attachment points, nothing in this plan blocks it.
 - **Ready nudges** — waking a tender when its blocker falls (doorbell path).
 - **No seed comments — deliberately** (decided 2026-08-06). A comment is a
-  message with no addressee: too noisy to be a good trail note, too
+  message with no addressee: too noisy to be a good log note, too
   undirected to be a good message. Notes are the seed's memory of itself and
   route to nobody; conversation between agents is the vision's "agents
   converse and observe" rock — directed, daemon-brokered messages that can

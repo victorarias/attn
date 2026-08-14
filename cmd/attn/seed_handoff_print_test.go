@@ -17,7 +17,7 @@ func seedNote(id, kind, body string) protocol.SeedNote {
 }
 
 // The slice's acceptance, at the surface a successor actually reads: the
-// handoff is above the seed, not under its body and not buried in the trail.
+// handoff is above the seed, not under its body and not buried in the log.
 func TestFprintSeedShowPutsTheHandoffFirst(t *testing.T) {
 	left := seedNote("n-aaaaaa", garden.NoteKindHandoff, "the join test is the gate")
 	var buf bytes.Buffer
@@ -40,11 +40,11 @@ func TestFprintSeedShowPutsTheHandoffFirst(t *testing.T) {
 		t.Fatalf("the handoff body appears %d times, want once:\n%s", n, out)
 	}
 	if !strings.Contains(out, "ordinary progress") {
-		t.Fatalf("dropping the handoff from the trail dropped the rest of it:\n%s", out)
+		t.Fatalf("dropping the handoff from the log dropped the rest of it:\n%s", out)
 	}
 }
 
-// A seed nobody handed over says nothing about handoffs, and its trail is
+// A seed nobody handed over says nothing about handoffs, and its log is
 // whole.
 func TestFprintSeedShowWithoutAHandoff(t *testing.T) {
 	var buf bytes.Buffer
@@ -59,11 +59,11 @@ func TestFprintSeedShowWithoutAHandoff(t *testing.T) {
 		t.Fatalf("a seed with no handoff mentions one:\n%s", out)
 	}
 	if !strings.Contains(out, "what happened") {
-		t.Fatalf("the trail is missing:\n%s", out)
+		t.Fatalf("the log is missing:\n%s", out)
 	}
 }
 
-// Dropping the handoff from the trail must not turn a shown note into a hidden
+// Dropping the handoff from the log must not turn a shown note into a hidden
 // one: what is withheld is counted against the window the daemon read.
 func TestFprintSeedShowCountsWhatItWithheld(t *testing.T) {
 	left := seedNote("n-aaaaaa", garden.NoteKindHandoff, "over to you")
@@ -84,7 +84,7 @@ func TestFprintSeedShowCountsWhatItWithheld(t *testing.T) {
 	}
 }
 
-// A handoff read in the trail — an older one, or one on `attn seed notes` — is
+// A handoff read in the log — an older one, or one on `attn seed notes` — is
 // labelled, so it is recognisable as written to a successor rather than to
 // nobody.
 func TestFprintNotesLabelsAHandoff(t *testing.T) {
@@ -106,7 +106,7 @@ func TestFprintNotesLabelsAHandoff(t *testing.T) {
 		}
 	}
 	if !strings.Contains(handoffLine, garden.NoteKindHandoff) {
-		t.Fatalf("a handoff on the trail is not labelled: %q", handoffLine)
+		t.Fatalf("a handoff on the log is not labelled: %q", handoffLine)
 	}
 	if strings.Contains(plainLine, garden.NoteKindNote) {
 		t.Fatalf("a plain note carries a kind nobody needs: %q", plainLine)

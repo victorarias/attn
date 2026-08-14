@@ -85,7 +85,7 @@ commands:
 
   ls [--stale [--window <duration>]] [--tree] [--json]
         the garden, newest first. --tree nests each seed under the crown it is
-        part of. --stale narrows to the open seeds whose trail has not moved
+        part of. --stale narrows to the open seeds whose log has not moved
         for the window (default %s) — a query for your judgment, never a
         reaper.
 
@@ -107,7 +107,7 @@ commands:
   show <id> [--json]
         one seed: the freshest handoff left on it, its state, who tends it,
         every edge that touches it in both directions, its body, and the newest
-        notes on its trail.
+        notes on its log.
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
@@ -129,13 +129,13 @@ commands:
         moves again.
 
   note <id> -m "<what happened>" [--handoff]
-        append to the seed's trail — what happened and what you learned, for
+        append to the seed's log — what happened and what you learned, for
         whoever tends it next. - reads stdin. --handoff addresses it to your
         successor on this seed: show renders the freshest one first and tend
         prints it on the claim, so it is read before any work.
 
   notes <id> [--limit <n>] [--json]
-        the whole trail, newest first. show renders the newest few and says
+        the whole log, newest first. show renders the newest few and says
         how many more are here.
 
   export <id> [--out <path>] [--json]
@@ -148,14 +148,14 @@ flags:
   --part-of <crown>  plant under a crown (plant)
   --plot <crown>     scope a ready answer to one plot
   --tree             nest a listing under its crowns
-  --stale            only open seeds whose trail has not moved (ls)
+  --stale            only open seeds whose log has not moved (ls)
   --window <d>       the stale window, like 72h or 14d (ls --stale)
   -f <path>          the plot payload to read (plot; default stdin)
   --handoff          write a note to whoever tends the seed next (note)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
-  --limit <n>        how many trail entries to read (notes)
+  --limit <n>        how many log entries to read (notes)
   --json             print the result as JSON
 `, formatWindow(garden.DefaultStaleWindow))
 }
@@ -227,19 +227,19 @@ func newSeedFlags(verb string) *seedFlags {
 		json:    fs.Bool("json", false, "print the result as JSON"),
 		all:     fs.Bool("all", false, "the whole garden, overriding a dispatched session's plot"),
 		tree:    fs.Bool("tree", false, "nest seeds under the crown they are part of"),
-		stale:   fs.Bool("stale", false, "only open seeds whose trail has not moved for the window"),
+		stale:   fs.Bool("stale", false, "only open seeds whose log has not moved for the window"),
 		window:  fs.String("window", "", "the stale window, like 72h or 14d"),
 		plot:    fs.String("plot", "", "scope to one plot, by its crown"),
 		partOf:  fs.String("part-of", "", "plant under this crown"),
 		file:    fs.String("f", "", "the plot payload to read (- or empty reads stdin)"),
 		message: fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
 		out:     fs.String("out", "", "file to write (- for stdout)"),
-		limit:   fs.Int("limit", 0, "how many trail entries to read"),
+		limit:   fs.Int("limit", 0, "how many log entries to read"),
 		handoff: fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
 	}
 }
 
-// noteKind reads --handoff. The plain trail entry is the default, so a note
+// noteKind reads --handoff. The plain log entry is the default, so a note
 // written the way it always was stays one.
 func (f *seedFlags) noteKind() string {
 	if *f.handoff {
@@ -364,7 +364,7 @@ func runSeedList(args []string) {
 	if *f.stale {
 		// The rule is half the answer: a stale seed is a question for your
 		// judgment, and the reader has to know what was asked to judge it.
-		fmt.Printf("open seeds whose trail has not moved for %s — no note, no move, no edge. This is a query, not a reaper: tend, note or park what still matters.\n\n",
+		fmt.Printf("open seeds whose log has not moved for %s — no note, no move, no edge. This is a query, not a reaper: tend, note or park what still matters.\n\n",
 			staleWindowLabel(result.StaleWindowSeconds))
 	}
 	if len(result.Seeds) == 0 {
@@ -528,14 +528,14 @@ func fprintSeedShow(w io.Writer, result *protocol.SeedShowResult) {
 		fmt.Fprintln(w)
 		fprintRelations(w, result.Relations)
 	}
-	// The handoff is already above; repeating it in the trail would print the
+	// The handoff is already above; repeating it in the log would print the
 	// same paragraph twice on one screen. What was withheld is counted against
 	// the window the daemon read, not against what is printed here, so dropping
 	// it does not turn one shown note into one hidden note.
-	trail := withoutNote(result.Notes, result.Handoff)
-	if len(trail) > 0 {
+	entries := withoutNote(result.Notes, result.Handoff)
+	if len(entries) > 0 {
 		fmt.Fprintln(w)
-		fprintNotes(w, trail, result.Seed.ID, result.NotesTotal-len(result.Notes))
+		fprintNotes(w, entries, result.Seed.ID, result.NotesTotal-len(result.Notes))
 	}
 }
 
@@ -553,7 +553,7 @@ func fprintHandoff(w io.Writer, handoff *protocol.SeedNote) {
 	fmt.Fprintln(w)
 }
 
-// withoutNote drops one note from a trail by id, so a note rendered elsewhere on
+// withoutNote drops one note from a log by id, so a note rendered elsewhere on
 // the same screen is not printed twice.
 func withoutNote(notes []protocol.SeedNote, drop *protocol.SeedNote) []protocol.SeedNote {
 	if drop == nil {
@@ -805,14 +805,14 @@ func runSeedNotes(args []string) {
 		return
 	}
 	if len(result.Notes) == 0 {
-		fmt.Printf("nothing on this seed's trail yet — `attn seed note %s -m \"what happened\"` starts it\n", positionals[0])
+		fmt.Printf("nothing on this seed's log yet — `attn seed note %s -m \"what happened\"` starts it\n", positionals[0])
 		return
 	}
 	fprintNotes(os.Stdout, result.Notes, positionals[0], result.Total-len(result.Notes))
 }
 
-// fprintNotes renders a trail newest first, and says what it did not print. A
-// silently short trail reads as a complete one.
+// fprintNotes renders a log newest first, and says what it did not print. A
+// silently short log reads as a complete one.
 func fprintNotes(w io.Writer, notes []protocol.SeedNote, seedID string, withheld int) {
 	for i, note := range notes {
 		if i > 0 {
@@ -827,8 +827,8 @@ func fprintNotes(w io.Writer, notes []protocol.SeedNote, seedID string, withheld
 	}
 }
 
-// noteKindSuffix labels a trail entry that is not a plain note, so a handoff
-// read in the trail is recognisable as one written to a successor.
+// noteKindSuffix labels a log entry that is not a plain note, so a handoff
+// read in the log is recognisable as one written to a successor.
 func noteKindSuffix(kind string) string {
 	if kind == "" || kind == garden.NoteKindNote {
 		return ""
