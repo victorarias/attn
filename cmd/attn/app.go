@@ -304,6 +304,19 @@ func runAppStatus(args []string) {
 			fmt.Printf("              dock as %s\n", apps.ViewTileKind(app.Name, v.Name))
 		}
 	}
+	if len(app.Commands) > 0 {
+		// A command is invoked from one of this app's views, so there is no CLI
+		// verb that runs one — this line is how an author confirms the command
+		// they declared reached the version that is serving.
+		fmt.Println("  commands:")
+		for _, c := range app.Commands {
+			line := fmt.Sprintf("              %s", c.Name)
+			if c.Description != nil && *c.Description != "" {
+				line += " — " + *c.Description
+			}
+			fmt.Println(line)
+		}
+	}
 	fmt.Printf("  runtime:    %s\n", appRuntimeCell(result.Runtime))
 	if result.Stall != nil {
 		// The stall clock is the only thing here that ends with the app being

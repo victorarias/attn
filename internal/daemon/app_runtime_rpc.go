@@ -55,6 +55,14 @@ func (c *appRuntimeConnection) dispatch(ctx context.Context, req appDispatchRequ
 	return result, nil
 }
 
+func (c *appRuntimeConnection) command(ctx context.Context, req appCommandRequest) (appCommandDispatchResult, error) {
+	var result appCommandDispatchResult
+	if err := c.request(ctx, "app runtime", "app.command", req, &result); err != nil {
+		return appCommandDispatchResult{}, err
+	}
+	return result, nil
+}
+
 // appRuntimePingResult answers whether the sidecar's event loop is turning. The
 // host serves it without touching app code, so a silent ping means the loop
 // itself is blocked and no app's handler is being run.

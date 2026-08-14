@@ -119,6 +119,44 @@ func (e buildEnv) edit(t *testing.T, rel, old, new string) {
 	}
 }
 
+// dropScaffoldView returns the app to a subscription-only shape. The scaffold
+// ships a working view and the command it calls, which is what an author should
+// get; these tests are about what a build does with the views they add
+// themselves, or with none at all.
+func (e buildEnv) dropScaffoldView(t *testing.T) {
+	t.Helper()
+	e.editManifest(t, "\n[[views]]\n", "\n[views_removed_by_test]\n#")
+	data, err := os.ReadFile(filepath.Join(e.dir, ManifestName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(data)
+	cut := strings.Index(text, "\n[views_removed_by_test]\n")
+	if cut < 0 {
+		t.Fatal("the scaffold no longer declares a view where this helper expects one")
+	}
+	if err := os.WriteFile(filepath.Join(e.dir, ManifestName), []byte(text[:cut]+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	e.edit(t, "src/index.ts", "\n  commands: { forget },", "")
+	if err := os.RemoveAll(filepath.Join(e.dir, "src", "views")); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// viewArtifact is the built view with this name, by name rather than by
+// position: the scaffold ships one of its own, so an index says nothing.
+func viewArtifact(t *testing.T, res Result, name string) ViewSize {
+	t.Helper()
+	for _, v := range res.ViewBytes {
+		if v.Name == name {
+			return v
+		}
+	}
+	t.Fatalf("no view named %q in %+v", name, res.ViewBytes)
+	return ViewSize{}
+}
+
 // The scaffold's bar: `new` then `apply`, untouched. A scaffold that needs an
 // edit first is a broken scaffold, and this is the whole assertion.
 func TestScaffoldAppliesWithNoEdits(t *testing.T) {
@@ -156,7 +194,13 @@ func TestScaffoldWritesClaudeMDAsASymlinkToAgentsMD(t *testing.T) {
 	// write an app from this file alone, so the things it cannot omit are the
 	// commands, the contract that binds manifest to code, and the rule that
 	// apply does not run what you wrote.
-	for _, want := range []string{"attn app apply", "attn app rollback", "satisfies Handlers", "never runs your code", "ctx.collections"} {
+	for _, want := range []string{
+		"attn app apply", "attn app rollback", "satisfies Handlers", "never runs your code",
+		"ctx.collections",
+		// Slice 5: a view is half of what an app is now, so the brief teaches all
+		// of it — where a view sits, how it reads, how it acts, what it draws with.
+		"useQuery", "useCommand", "params", "EmptyState",
+	} {
 		if !strings.Contains(string(agents), want) {
 			t.Errorf("AGENTS.md does not mention %q", want)
 		}
@@ -186,7 +230,7 @@ func TestScaffoldRefusesADirectoryNameThatIsNotAnAppName(t *testing.T) {
 }
 
 func TestGeneratedTypesCarryTheAppsIdentityAndItsSubscriptions(t *testing.T) {
-	m, err := ParseManifest(validManifest(t, ""))
+	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -194,9 +238,15 @@ func TestGeneratedTypesCarryTheAppsIdentityAndItsSubscriptions(t *testing.T) {
 	for _, want := range []string{
 		apps.ConsumerName("approval-gate"),
 		apps.Namespace("approval-gate"),
+		`  subscriptions: {`,
 		`"delegation.*": (event: AppEvent, ctx: Ctx)`,
 		`"session.state.changed": (event: AppEvent, ctx: Ctx)`,
 		`"decisions": Collection`,
+		// A command lives in its own group, keyed by its bare name: the kind is
+		// structure, so nothing has to keep the two sets of keys apart.
+		`  commands: {`,
+		`"approve": (payload: unknown, ctx: Ctx) => unknown`,
+		`"reject": (payload: unknown, ctx: Ctx) => unknown`,
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("generated.ts does not contain %q:\n%s", want, types)
@@ -223,6 +273,45 @@ func TestBuild_DeclaredSubscriptionWithNoHandlerIsACompilerError(t *testing.T) {
 	}
 	if !strings.Contains(msg, `"ticket.created"`) {
 		t.Errorf("error does not name the unhandled subscription: %s", msg)
+	}
+}
+
+// The same arrow, for the other group: a button a view could press
+// with nothing behind it is a compile error at apply, not a 404 at click time.
+func TestBuild_DeclaredCommandWithNoHandlerIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "uncommanded-app")
+	env.editManifest(t, "[[commands]]\nname = \"forget\"", "[[commands]]\nname = \"remember\"\n\n[[commands]]\nname = \"forget\"")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a command with no handler")
+	}
+	msg := err.Error()
+	if !tscError.MatchString(msg) {
+		t.Fatalf("error does not carry file(line,col): %s", msg)
+	}
+	if !strings.Contains(msg, `"remember"`) {
+		t.Errorf("error does not name the unhandled command: %s", msg)
+	}
+}
+
+// The other direction, which is what grouping by kind buys: a handler under a
+// kind nothing declared is an excess property, so a command a view could never
+// reach cannot be exported by accident either.
+func TestBuild_UndeclaredCommandHandlerIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "overcommanded-app")
+	env.edit(t, "src/index.ts", "commands: { forget },", "commands: { forget, remember: forget },")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a command handler the manifest never declared")
+	}
+	msg := err.Error()
+	if !tscError.MatchString(msg) {
+		t.Fatalf("error does not carry file(line,col): %s", msg)
+	}
+	if !strings.Contains(msg, "remember") {
+		t.Errorf("error does not name the undeclared handler: %s", msg)
 	}
 }
 
@@ -374,6 +463,7 @@ func (e buildEnv) addView(t *testing.T, name, source string) {
 // beside the handler bundle, in the same content-addressed version directory.
 func TestBuild_EachViewIsItsOwnArtifactBesideTheBundle(t *testing.T) {
 	env := newBuildEnv(t, "viewed-app")
+	env.dropScaffoldView(t)
 	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
 	env.addView(t, "history", "export default function History(): string { return \"history\" }\n")
 
@@ -414,7 +504,7 @@ func TestBuild_ViewCarriesItsWholeImportGraph(t *testing.T) {
 
 	res := env.mustBuild(t)
 
-	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	built, err := os.ReadFile(viewArtifact(t, res, "approvals").Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +522,7 @@ func TestBuild_ViewLeavesTheSDKSpecifierUnresolved(t *testing.T) {
 
 	res := env.mustBuild(t)
 
-	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	built, err := os.ReadFile(viewArtifact(t, res, "approvals").Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -455,7 +545,7 @@ func TestBuild_ViewLinksAgainstTheProductionJSXRuntime(t *testing.T) {
 
 	res := env.mustBuild(t)
 
-	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	built, err := os.ReadFile(viewArtifact(t, res, "approvals").Path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -481,10 +571,10 @@ func TestBuild_ViewOnlyEditIsANewVersion(t *testing.T) {
 	if second.ContentHash == first.ContentHash {
 		t.Fatal("editing a view left the version hash unchanged, so the version row would name the old artifact")
 	}
-	if _, err := os.Stat(first.ViewBytes[0].Path); err != nil {
+	if _, err := os.Stat(viewArtifact(t, first, "approvals").Path); err != nil {
 		t.Errorf("the previous version's view must survive for rollback: %v", err)
 	}
-	if _, err := os.Stat(second.ViewBytes[0].Path); err != nil {
+	if _, err := os.Stat(viewArtifact(t, second, "approvals").Path); err != nil {
 		t.Errorf("the new version has no view artifact: %v", err)
 	}
 }
@@ -521,6 +611,7 @@ func TestVersionHash_DoesNotDependOnViewOrder(t *testing.T) {
 // re-applying an app built by an older attn lands on the row it already had.
 func TestBuild_ViewlessAppHashesAsItDidBeforeViews(t *testing.T) {
 	env := newBuildEnv(t, "unchanged-app")
+	env.dropScaffoldView(t)
 	res := env.mustBuild(t)
 
 	bundle, err := os.ReadFile(res.ArtifactPath)
@@ -541,10 +632,11 @@ func TestBuild_ViewlessAppHashesAsItDidBeforeViews(t *testing.T) {
 // is a legitimate whole app.
 func TestBuild_AppWithAViewAndNoSubscriptionsBuilds(t *testing.T) {
 	env := newBuildEnv(t, "board-app")
+	env.dropScaffoldView(t)
 	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
 	env.editManifest(t, "[[subscribe]]\nevents = [\"session.state.changed\"]\n", "")
 	env.edit(t, "src/index.ts",
-		"export default {\n  \"session.state.changed\": onSessionState,\n} satisfies Handlers",
+		"export default {\n  subscriptions: { \"session.state.changed\": onSessionState },\n} satisfies Handlers",
 		"export default {} satisfies Handlers")
 
 	res := env.mustBuild(t)

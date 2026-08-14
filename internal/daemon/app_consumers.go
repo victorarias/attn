@@ -123,12 +123,18 @@ type appStall struct {
 }
 
 // appDispatchPlan is everything one delivery needs, read once per event.
+//
+// handler and label are separate on purpose. The handler is a key of the
+// bundle's map for this kind — an event pattern here, a bare command name for a
+// command — and the label is what the invocation log shows, which names the
+// kind because a reader wants to know which of them ran.
 type appDispatchPlan struct {
 	app         string
 	namespace   string
 	versionID   int64
 	artifact    string
 	handler     string
+	label       string
 	collections []string
 }
 
@@ -324,7 +330,7 @@ func (d *Daemon) deliverAppEvent(ctx context.Context, name string, ev bus.Event)
 		EventSeq:     ev.Seq,
 		EventName:    ev.Name,
 		EventSubject: ev.Subject,
-		Handler:      plan.handler,
+		Handler:      plan.label,
 		Duration:     took,
 		StartedAt:    started,
 	}
@@ -395,6 +401,7 @@ func (d *Daemon) planAppDispatch(name string, ev bus.Event) (*appDispatchPlan, e
 		versionID: version.ID,
 		artifact:  version.ArtifactPath,
 		handler:   handler,
+		label:     apps.SubscriptionLabel(handler),
 	}
 	for _, collection := range manifest.Collections {
 		plan.collections = append(plan.collections, collection.Name)

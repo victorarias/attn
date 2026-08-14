@@ -26,7 +26,7 @@ export interface DispatchParams {
   version_id: number
   /** Absolute path to this version's bundle. */
   artifact: string
-  /** The subscription pattern to invoke — a key of the bundle's default export. */
+  /** The subscription to invoke — a key of the bundle's `subscriptions` map. */
   handler: string
   /** The collections this version declared, by name. */
   collections: string[]
@@ -45,7 +45,40 @@ export interface DispatchResult {
   error?: string
 }
 
-type Handler = (event: DispatchParams["event"], ctx: unknown) => unknown
+/** What the daemon sends to run one command a view invoked. */
+export interface CommandParams {
+  dispatch: string
+  app: string
+  version_id: number
+  artifact: string
+  /** The command to invoke, by bare name — a key of the bundle's `commands` map. */
+  handler: string
+  collections: string[]
+  /** The caller's argument, already parsed. Absent when the command takes none. */
+  payload?: unknown
+}
+
+/** What the daemon gets back from a command, plus whatever the handler returned. */
+export interface CommandResult {
+  ok: boolean
+  error?: string
+  payload?: unknown
+}
+
+/** A handler of either kind: the first argument is the fact or the payload. */
+type Handler = (arg: unknown, ctx: unknown) => unknown
+
+/**
+ * What an app's entrypoint default-exports: one map per kind of handler.
+ *
+ * The kind is structure rather than a naming convention, and this is where that
+ * pays: which map to index in is decided by which method the daemon called, so
+ * a command and a subscription of the same name are two different handlers and
+ * no key can be ambiguous.
+ */
+type Bundle = Partial<Record<HandlerKind, Record<string, Handler>>>
+
+type HandlerKind = "subscriptions" | "commands"
 
 /**
  * Bundles already imported, by absolute path. It only ever grows, which is
@@ -53,7 +86,7 @@ type Handler = (event: DispatchParams["event"], ctx: unknown) => unknown
  * can run again on a rollback, and the entries are small. A runtime restart is
  * what empties it, and the supervisor provides those.
  */
-const modules = new Map<string, Promise<Record<string, Handler>>>()
+const modules = new Map<string, Promise<Bundle>>()
 
 /**
  * Which app each loaded bundle belongs to. It is how an error that escaped every
@@ -77,10 +110,10 @@ export function appForStack(stack: string): string {
   return ""
 }
 
-async function loadHandlers(artifact: string): Promise<Record<string, Handler>> {
+async function loadBundle(artifact: string): Promise<Bundle> {
   let pending = modules.get(artifact)
   if (!pending) {
-    pending = importHandlers(artifact)
+    pending = importBundle(artifact)
     modules.set(artifact, pending)
     // A bundle that fails to import must not be remembered as broken forever: the
     // artifact may be mid-write, or the disk may have had a bad moment, and the
@@ -90,15 +123,23 @@ async function loadHandlers(artifact: string): Promise<Record<string, Handler>> 
   return pending
 }
 
-async function importHandlers(artifact: string): Promise<Record<string, Handler>> {
+async function importBundle(artifact: string): Promise<Bundle> {
   const module = (await import(pathToFileURL(artifact).href)) as { default?: unknown }
-  const handlers = module.default
-  if (!handlers || typeof handlers !== "object") {
+  const bundle = module.default
+  if (!bundle || typeof bundle !== "object") {
     throw new Error(
-      `${artifact} has no default export; an app's entrypoint default-exports its handlers, as \`export default { "session.state.changed": onChange } satisfies Handlers\``,
+      `${artifact} has no default export; an app's entrypoint default-exports its handlers grouped by kind, as \`export default { subscriptions: { "session.state.changed": onChange }, commands: { approve } } satisfies Handlers\``,
     )
   }
-  return handlers as Record<string, Handler>
+  return bundle as Bundle
+}
+
+/** The handler the daemon named, or undefined with nothing guessed. */
+function handlerFor(bundle: Bundle, kind: HandlerKind, key: string): Handler | undefined {
+  const group = bundle[kind]
+  if (!group || typeof group !== "object") return undefined
+  const handler = group[key]
+  return typeof handler === "function" ? handler : undefined
 }
 
 /** Builds `ctx.collections`, one object per collection the version declared. */
@@ -140,24 +181,18 @@ export async function runDispatch(
 ): Promise<DispatchResult> {
   appByArtifact.set(params.artifact, params.app)
 
-  let handlers: Record<string, Handler>
+  let bundle: Bundle
   try {
-    handlers = await loadHandlers(params.artifact)
+    bundle = await loadBundle(params.artifact)
   } catch (err) {
     return { ok: false, error: describeFailure(err) }
   }
 
-  const handler = handlers[params.handler]
-  if (typeof handler !== "function") {
-    const declared = Object.keys(handlers)
+  const handler = handlerFor(bundle, "subscriptions", params.handler)
+  if (!handler) {
     return {
       ok: false,
-      error:
-        `app ${params.app} version ${params.version_id} subscribes to ${params.handler} but its default export has no handler under that key. ` +
-        (declared.length > 0
-          ? `It exports: ${declared.join(", ")}.`
-          : "It exports no handlers at all.") +
-        " The generated Handlers type makes this a compile error — the bundle is out of step with its manifest.",
+      error: missingHandler(bundle, "subscriptions", params.app, params.version_id, params.handler),
     }
   }
 
@@ -185,6 +220,80 @@ export async function runDispatch(
   } finally {
     conn.notify("app_runtime.left", scope)
   }
+}
+
+/**
+ * Runs one command a view invoked, and describes what happened.
+ *
+ * It is runDispatch with a different argument and an answer that carries a
+ * value. Everything that makes a handler run — the module cache keyed by the
+ * content-addressed artifact, the app-scoped collections, the entered/left
+ * announcements that let the daemon name whoever froze the shared loop — is the
+ * same code, reading a different group of the same default export.
+ */
+export async function runCommand(
+  conn: RpcConnection,
+  params: CommandParams,
+): Promise<CommandResult> {
+  appByArtifact.set(params.artifact, params.app)
+
+  let bundle: Bundle
+  try {
+    bundle = await loadBundle(params.artifact)
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  }
+
+  const handler = handlerFor(bundle, "commands", params.handler)
+  if (!handler) {
+    return {
+      ok: false,
+      error: missingHandler(bundle, "commands", params.app, params.version_id, params.handler),
+    }
+  }
+
+  const ctx = {
+    app: params.app,
+    version: params.version_id,
+    collections: collectionsFor(conn, params.dispatch, params.collections),
+  }
+  const scope = { dispatch: params.dispatch, app: params.app }
+  conn.notify("app_runtime.entered", scope)
+  try {
+    const payload = await handler(params.payload, ctx)
+    // undefined is "returned nothing", and JSON has no word for it: leaving the
+    // field off is what tells the caller that apart from a handler that
+    // deliberately returned null.
+    return payload === undefined ? { ok: true } : { ok: true, payload }
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  } finally {
+    conn.notify("app_runtime.left", scope)
+  }
+}
+
+/**
+ * What to say when the manifest declared something the bundle does not export.
+ *
+ * The generated Handlers type makes this a compile error at apply time, so
+ * reaching it means the bundle is out of step with the declaration it was
+ * stored beside — worth naming exactly, because nothing else in the system can.
+ */
+function missingHandler(
+  bundle: Bundle,
+  kind: HandlerKind,
+  app: string,
+  version: number,
+  key: string,
+): string {
+  const exported = Object.keys(bundle[kind] ?? {})
+  return (
+    `app ${app} version ${version} declares ${key} but its default export has no handler for it under ${kind}. ` +
+    (exported.length > 0
+      ? `Its ${kind} are: ${exported.join(", ")}.`
+      : `It exports no ${kind} at all.`) +
+    " The generated Handlers type makes this a compile error — the bundle is out of step with its manifest."
+  )
 }
 
 function describeFailure(err: unknown): string {

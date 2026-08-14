@@ -310,6 +310,27 @@ will not load, exports no component, or throws while rendering — costs its own
 tile and nothing beyond it, and the failure is recorded as an invocation of the
 app stamped with the version that served it, so `attn app logs` has it.
 
+A **tile** is a place in a workspace layout: one pane the user split, dragged
+and sized. A view is what an app declares; a tile is where one instance of it
+sits. Keeping them separate words is what makes the mount surface extensible — a
+later kind of mount moves what a *tile* is, and leaves `[[views]]`, the registry
+row and the artifact untouched. Two tiles of one view are two independent
+mounts, told apart by their `params` and by a `tileId` stable for the life of
+each docked tile.
+
+A **command** is how a view acts. The app declares it in a `[[commands]]` block,
+the bundle exports a handler under `command:<name>`, and a view invokes it by
+name — never by app, because which app is asked comes from the mount, the same
+rule the document namespace follows. A command runs where every other handler
+runs: the shared sidecar, the same document access, the same invocation log, the
+same sixty-second abandon. What an app answers is what the *serving* version
+declared, so a rollback takes a command away with it.
+
+A command that fails costs that click and nothing else. It is recorded and
+reported to the view in the handler's own words, and it does not advance the
+clock that disables a stalled app — that clock exists for a consumer pinning the
+durable log, and a person pressing a button pins nothing.
+
 **Applying** is how a directory becomes a version: parse the manifest, generate
 the types the handlers are checked against, typecheck, bundle, hash, write the
 artifact, insert the row, move the pointer. Apply never evaluates the app's

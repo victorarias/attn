@@ -1347,6 +1347,8 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
 	case protocol.CmdAppViewCrash: // wire: app_view_crash
 		d.handleAppViewCrash(client, msg.(*protocol.AppViewCrashMessage))
+	case protocol.CmdAppCommand: // wire: app_command
+		d.handleAppCommand(client, msg.(*protocol.AppCommandMessage))
 	case protocol.CmdDocSubscribe: // wire: doc_subscribe
 		d.handleDocSubscribeWS(client, msg.(*protocol.DocSubscribeMessage))
 	case protocol.CmdDocUnsubscribe: // wire: doc_unsubscribe

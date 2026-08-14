@@ -4596,6 +4596,18 @@ model AppSummary {
   // declaration. Empty for an app with no views, and for an app with no version
   // applied yet — a view exists only inside a built version.
   "views"?: AppViewInfo[];
+  // The commands the serving version declares, same rule as views: what an app
+  // answers is what the version now serving declared, not what its manifest
+  // says today. It is the only way to see a command exists without invoking it.
+  "commands"?: AppCommandInfo[];
+}
+
+// One declared command: something a view of this app can ask it to do.
+model AppCommandInfo {
+  "name": string;
+  // The manifest's description, when it has one. attn renders no UI from it —
+  // an app draws its own button — so this is for a reader of `attn app status`.
+  "description"?: string;
 }
 
 // One declared view: a named component the app offers attn to render, as the
@@ -4674,6 +4686,44 @@ model AppViewCrashMessage {
   // The error as the boundary caught it: message first, then the component stack
   // when React gave one.
   "error": string;
+}
+
+// A view asks its app to do something.
+//
+// The envelope is generic on purpose: attn knows the app, the command name and
+// a payload it never looks inside, and the app's handler is what gives any of
+// it meaning. That is the whole surface — there is no per-command shape in the
+// protocol, and adding a command is a manifest line plus a handler.
+//
+// `app` is composed by the host from the mount's identity and never by the
+// view, the same rule that makes a view unable to read another app's documents.
+model AppCommandMessage {
+  "cmd": "app_command";
+  "request_id": string;
+  "app": string;
+  "command": string;
+  // The argument, as JSON text. Text rather than a typed field because the
+  // daemon never interprets it: it is handed to the app's handler and its
+  // answer comes back the same way, exactly as a document body travels.
+  // Absent when the command takes none.
+  "payload"?: string;
+}
+
+// What the app's command handler answered.
+//
+// `success` false covers every way the command did not run — the app is not
+// installed, disabled, has no serving version, does not declare this command,
+// the runtime is not there, or the handler threw — and `error` is the sentence
+// a person reads in the tile. A handler that threw is a failed command, never a
+// dead socket: the distinction the runtime draws between an app's fault and its
+// own is unchanged here.
+model AppCommandResultMessage {
+  event: "app_command_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  // The handler's return value as JSON text, when it returned one.
+  "payload"?: string;
 }
 
 model AppVersionInfo {
@@ -5835,5 +5885,6 @@ alias DaemonEvent =
   | BusStatusResultMessage
   | BusSetConsumerEnabledResultMessage
   | AppsUpdatedMessage
+  | AppCommandResultMessage
   | DocSubscriptionDeliveryMessage
   | DocSubscriptionEndedMessage;

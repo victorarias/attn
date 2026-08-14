@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/victorarias/attn/internal/appbuild"
+	"github.com/victorarias/attn/internal/apps"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -135,7 +136,7 @@ func TestAViewCrashIsRecordedAgainstTheVersionThatServedIt(t *testing.T) {
 		t.Fatalf("the crash is stamped with version %d, want %d", got.VersionID, version.ID)
 	}
 	// The handler name is what makes `attn app logs` say which surface failed.
-	if got.Handler != appViewCrashHandler+"approvals" {
+	if got.Handler != apps.ViewLabel("approvals") {
 		t.Fatalf("handler is %q", got.Handler)
 	}
 	if got.Status != appInvocationStatusError || !strings.Contains(got.Error, "TypeError") {

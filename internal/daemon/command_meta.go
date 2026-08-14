@@ -170,6 +170,7 @@ var CommandMeta = map[string]CommandMetadata{
 	// Logged: a view that crashes is worth a daemon.log line beside the
 	// invocation it records.
 	protocol.CmdAppViewCrash:              commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAppCommand:                commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdOpenMarkdown:              commandMetadata(ScopeSession, true, true),
 	protocol.CmdOpenSentFiles:             commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsGet:    commandMetadata(ScopeSession, true, true),

@@ -570,9 +570,9 @@ Dispatch reuses everything A4 built rather than adding a second path:
 attn-app.toml   [[commands]] name = "approve"
       ↓ codegen
 handlers.ts     type Handlers = {
-                  "subscribe:doc.changed": …   A4
-                  "command:approve": …         ← A5, missing = tsc error
-                }
+                  subscriptions: { "doc.changed": … }   A4
+                  commands: { approve: … }              ← A5,
+                }                                       missing = tsc error
       ↓ apply → sidecar
 runtime         ordinary dispatch: same invocation log, same timeout,
                 same drain on version flip, same failure attribution
@@ -966,6 +966,61 @@ package and cannot import the app's socket, so it exports the seam
 handing over `app/<app>` and the frontend's `subscribeDocuments`. That is what
 makes "a view cannot read another app's documents" structural: a view is given a
 namespace, and there is no call that takes one.
+
+## Slice 5 as-built
+
+Commands, the components, and the scaffold landed as designed. Four departures
+and receipts, all found by building it.
+
+**Kind is structure, not a prefix on a key.** The design drew
+`"subscribe:doc.changed"` beside `"command:approve"` in one flat map, and the
+first build of this slice shipped half of that — raw patterns for subscriptions,
+a `command:` prefix for commands — defended by a proof that the two can never
+collide, since a colon appears in neither an event pattern nor a command name.
+That proof is a rule someone can break later. A bundle exports one map per kind
+instead: `subscriptions`, keyed by the raw event pattern, and `commands`, keyed
+by the bare name. The manifest already separates the kinds, so the bundle mirrors
+it rather than re-encoding kind as a string convention, codegen derives a typed
+group per kind — tsc enforces "every declared command has a command-shaped
+handler" structurally — and the sidecar indexes the map its dispatch context
+names (a fact arrived → `subscriptions`; a command envelope → `commands`),
+constructing no keys at all. Collision becomes inexpressible rather than
+proven-absent.
+
+Invocation **labels** are a separate thing: what `attn app logs` shows, so it
+names the kind — `command:approve`, `subscribe:ticket.*`, `view:approvals`. They
+have no dispatch meaning, which is what makes labelling every kind free.
+
+Existing installed apps export the flat shape and stop dispatching until they are
+re-applied. Pre-release, with no app installed anywhere but a dev profile, that
+costs one `attn app apply` and buys a shape that cannot be got wrong.
+
+**A command carries at most 256KB in either direction.** The same limit as a
+document body, and for the same reason: the payload lands in the sidecar's
+single-threaded loop and in the invocation log's error text. Over it, the
+refusal names the command, the app, the limit and the ask, and says where
+larger data belongs — a document, which is the surface built to hold it.
+
+**The frontend waits longer than the daemon.** `APP_COMMAND_TIMEOUT_MS` is 75s
+against the daemon's 60s dispatch budget. That ordering is the whole point: a
+handler that never yields is abandoned by the daemon, which knows which app and
+which command froze the shared loop, and its refusal reaches the view naming all
+three. A frontend that gave up first would replace that with "the daemon did not
+answer", which no agent can act on. A failed command never advances the app's
+stall clock — that clock exists for a consumer pinning the durable log's
+retention floor, and a docked tile pins nothing, so clicking must not be able to
+disable a healthy app.
+
+**Component styles live in the app, not in the SDK.** A CSS import inside the
+SDK's rollup entry emits an asset the import map's three fixed-name chunks
+cannot link, so the components emit `attn-app-*` class names only and
+`app/src/components/appViews/appSdkComponents.css` — imported by `AppTileHost` —
+carries every rule, over attn's own tokens. A test asserts both directions of
+that pairing, so a component that grows a class without a rule, or a rule with
+no component, fails rather than shipping unstyled. The shipped slice is Button,
+TextInput, TextArea, List, ListRow, EmptyState and Markdown; nothing in them
+animates, which is why the spinner and the relative-time label the design
+excluded stay excluded.
 
 ## Out of scope
 

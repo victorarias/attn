@@ -48,10 +48,16 @@ type fakeAppRuntime struct {
 	// reaches the daemon.
 	handler func(*fakeAppRuntime, appDispatchRequest) error
 
+	// command runs in place of a command handler. Nil answers every command with
+	// no payload, which is what a handler returning nothing looks like on the
+	// wire. Returning an error is a handler that threw.
+	command func(*fakeAppRuntime, appCommandRequest) (json.RawMessage, error)
+
 	writeMu sync.Mutex
 
 	mu         sync.Mutex
 	dispatches []appDispatchRequest
+	commands   []appCommandRequest
 	pending    map[string]chan jsonRPCMessage
 	nextID     int
 	// loopFrozen models a blocked event loop. A real host does everything off one
@@ -168,8 +174,12 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			// either: a frozen loop cannot read its own socket.
 			continue
 		}
+		if msg.Method == "app.command" {
+			f.serveCommand(msg)
+			continue
+		}
 		if msg.Method != "app.dispatch" {
-			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch and app.runtime.ping"))
+			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch, app.command and app.runtime.ping"))
 			continue
 		}
 		var req appDispatchRequest
@@ -207,6 +217,52 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			f.sendRaw(jsonRPCResult(id, result))
 		}(msg.ID, req)
 	}
+}
+
+// serveCommand is the command half of the loop above, with the same
+// entered/left announcements: a command runs on the one event loop every
+// dispatch runs on, so the daemon has to be able to name it when that loop
+// stops turning.
+func (f *fakeAppRuntime) serveCommand(msg jsonRPCMessage) {
+	var req appCommandRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
+	f.mu.Lock()
+	f.commands = append(f.commands, req)
+	f.mu.Unlock()
+	f.sendRaw(jsonRPCMessage{
+		JSONRPC: "2.0",
+		Method:  appRuntimeEnteredMethod,
+		Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+	})
+	go func(id json.RawMessage, req appCommandRequest) {
+		result := appCommandDispatchResult{OK: true}
+		if f.command != nil {
+			payload, err := f.command(f, req)
+			if err != nil {
+				result = appCommandDispatchResult{OK: false, Error: err.Error()}
+			} else {
+				result = appCommandDispatchResult{OK: true, Payload: payload}
+			}
+		}
+		f.sendRaw(jsonRPCMessage{
+			JSONRPC: "2.0",
+			Method:  appRuntimeLeftMethod,
+			Params:  mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+		})
+		f.sendRaw(jsonRPCResult(id, result))
+	}(msg.ID, req)
+}
+
+// commandLog is what this sidecar was asked to run, in arrival order.
+func (f *fakeAppRuntime) commandLog() []appCommandRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]appCommandRequest, len(f.commands))
+	copy(out, f.commands)
+	return out
 }
 
 func mustMarshalHandlerParams(t *testing.T, params appRuntimeHandlerParams) json.RawMessage {
