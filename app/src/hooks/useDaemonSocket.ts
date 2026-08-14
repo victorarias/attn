@@ -1035,7 +1035,8 @@ export function useDaemonSocket({
   const gitStatusSubscriptionRef = useRef<string | null>(null);
   // Live document queries. They live on the daemon's connection, so a reconnect
   // has to re-send them; the registry is what remembers they are still wanted.
-  const docSubscriptionsRef = useRef(new DocumentSubscriptions());
+  const docSubscriptionsRef = useRef<DocumentSubscriptions | null>(null);
+  const docSubscriptions = (docSubscriptionsRef.current ??= new DocumentSubscriptions());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const canceledAttachIdsRef = useRef(new Set<string>());
   // Per-session attach serialization chain — see sendAttachSession.
@@ -1439,7 +1440,7 @@ export function useDaemonSocket({
       // Every live query the daemon lost when this socket's predecessor closed.
       // Each subscriber is asked for its `have()` right now, so the resume
       // carries only what changed while we were away.
-      docSubscriptionsRef.current.resubscribeAll((payload) => ws.send(JSON.stringify(payload)));
+      docSubscriptions.resubscribeAll((payload) => ws.send(JSON.stringify(payload)));
 
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
@@ -3001,7 +3002,7 @@ export function useDaemonSocket({
               }
             })) break;
             if (handleBusDaemonEvent(data, pending)) break;
-            if (docSubscriptionsRef.current.handleEvent(data)) break;
+            if (docSubscriptions.handleEvent(data)) break;
             break;
           }
         }
@@ -3014,7 +3015,7 @@ export function useDaemonSocket({
       wsRef.current = null;
       hasReceivedInitialStateRef.current = false;
       canceledAttachIdsRef.current.clear();
-      docSubscriptionsRef.current.markDisconnected();
+      docSubscriptions.markDisconnected();
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -3420,7 +3421,7 @@ export function useDaemonSocket({
    * registry alone carries it, and the connect handler sends it once.
    */
   const subscribeDocuments = useCallback((subscriber: DocumentSubscriber) => {
-    const registry = docSubscriptionsRef.current;
+    const registry = docSubscriptions;
     const id = registry.add(subscriber);
     const ws = wsRef.current;
     if (ws && ws.readyState === WebSocket.OPEN) {
