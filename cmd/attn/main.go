@@ -251,6 +251,9 @@ func main() {
 	case "seed":
 		maybePrintProfileBanner()
 		runSeed()
+	case "crew":
+		maybePrintProfileBanner()
+		runCrew()
 	case "doc":
 		maybePrintProfileBanner()
 		runDoc()
@@ -661,6 +664,7 @@ commands:
   bus <command>                     event bus: consumer cursors, lag, kill switch
   enrollment <command>              this daemon's home: status, enroll, leave
   seed <command>                    the garden: plant, tend, harvest, note, ls
+  crew <command>                    the crew roster: who exists, who is awake
   doc <command>                     document store: collections, documents, live queries
   app <command>                     apps: list, status, enable, disable, remove
   vision-check <image> <question>   answer a question about an image (single LLM call)
@@ -2903,6 +2907,7 @@ type directLaunchArgs struct {
 	resumePicker      bool
 	yoloMode          bool
 	initialPromptFile string
+	member            string
 }
 
 func readInitialPromptFile(path string) (string, error) {
@@ -2915,8 +2920,8 @@ func readInitialPromptFile(path string) (string, error) {
 }
 
 // parseDirectLaunchArgs parses the wrapper launch flags. attn understands only
-// -s, --resume, --yolo, and the internal --initial-prompt-file flag; any other
-// argument is an error. We deliberately do not forward unrecognized args to the underlying agent — that implicit
+// -s, --resume, --yolo, --member, and the internal --initial-prompt-file flag;
+// any other argument is an error. We deliberately do not forward unrecognized args to the underlying agent — that implicit
 // passthrough was never used by attn itself and only created confusion (e.g.
 // `attn --help` printing the agent's help instead of attn's).
 func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
@@ -2940,6 +2945,12 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 			}
 		case "--yolo":
 			parsed.yoloMode = true
+		case "--member":
+			if i+1 >= len(args) {
+				return directLaunchArgs{}, fmt.Errorf("flag --member needs a value: the crew member this session launches as (`attn crew list` names the roster)")
+			}
+			parsed.member = args[i+1]
+			i++
 		case "--initial-prompt-file":
 			if i+1 >= len(args) {
 				return directLaunchArgs{}, fmt.Errorf("flag --initial-prompt-file needs a value")
@@ -2951,7 +2962,12 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 		}
 	}
 	if label == "" {
-		label = wrapper.DefaultLabel()
+		// A member's day is named after the member; -s still overrides.
+		if parsed.member != "" {
+			label = parsed.member
+		} else {
+			label = wrapper.DefaultLabel()
+		}
 	}
 	parsed.label = label
 	return parsed, nil
@@ -3033,8 +3049,21 @@ func runAgentDirectly(requestedAgent string) {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
+	if managedMode && parsed.member != "" {
+		// The daemon-owned spawn path does not carry a binding yet (the wake
+		// slice adds it); running anyway would silently drop the identity.
+		fmt.Fprintf(os.Stderr, "attn: --member is not supported on daemon-managed launches yet\n")
+		os.Exit(1)
+	}
 	if !managedMode {
-		if err := c.RegisterWithAgent(sessionID, parsed.label, cwd, driver.Name()); err != nil {
+		err := c.RegisterAsMember(sessionID, parsed.label, cwd, driver.Name(), parsed.member)
+		switch {
+		case err != nil && parsed.member != "":
+			// The binding IS the identity: a member launch that cannot bind does
+			// not run, or two trellises could exist the moment the daemon is down.
+			fmt.Fprintf(os.Stderr, "attn: %v\n", err)
+			os.Exit(1)
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 		}
 	}

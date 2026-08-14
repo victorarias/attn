@@ -84,6 +84,7 @@ func (d *Daemon) agentPeekResult(session *protocol.Session) *protocol.AgentPeekR
 		StateReason: decorated.StateReason,
 		TurnOwed:    decorated.TurnOwed,
 		Todos:       decorated.Todos,
+		CrewMember:  decorated.CrewMember,
 	}
 	if result.Todos == nil {
 		result.Todos = []string{}
