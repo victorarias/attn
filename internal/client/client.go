@@ -484,6 +484,7 @@ type DelegateOptions struct {
 	Label              string
 	Yolo               bool
 	Placement          string
+	Plot               string
 	WorkspaceID        string
 	CWD                string
 	WorktreeRepo       string
@@ -533,6 +534,9 @@ func (c *Client) StartDelegation(sourceSessionID, brief string, opts DelegateOpt
 	}
 	if value := strings.TrimSpace(opts.Placement); value != "" {
 		msg.Placement = protocol.Ptr(value)
+	}
+	if value := strings.TrimSpace(opts.Plot); value != "" {
+		msg.Plot = protocol.Ptr(value)
 	}
 	if value := strings.TrimSpace(opts.WorkspaceID); value != "" {
 		msg.WorkspaceID = protocol.Ptr(value)

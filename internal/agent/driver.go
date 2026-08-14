@@ -248,10 +248,10 @@ type SpawnOpts struct {
 	// driver's repository trust gate; interactive launches leave it false.
 	TrustWorkingDirectory bool
 
-	// GardenReady is how many seeds this session's workspace had ready when the
-	// launch resolved it, and nil when the daemon had no answer — no garden
-	// reachable from here. It is what the garden primer is built from.
-	GardenReady *int
+	// Garden is what the launch resolved for the garden primer — the ready
+	// count, and the plot when this session was dispatched at a crown. Nil when
+	// the daemon had no answer: no garden reachable from here.
+	Garden *hooks.GardenPrime
 }
 
 // launchGuidance is the system-prompt block for this launch: chief guidance or
@@ -263,7 +263,7 @@ func (o SpawnOpts) launchGuidance(hasSelfMonitor bool) string {
 		HasSelfMonitor:       hasSelfMonitor,
 		WorkspaceContextPath: o.WorkspaceContextPath,
 		InjectWorkflow:       o.InjectWorkflowGuidance,
-		GardenReady:          o.GardenReady,
+		Garden:               o.Garden,
 	}.Instructions()
 }
 

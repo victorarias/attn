@@ -8,7 +8,6 @@ function seed(overrides: Partial<Seed> & { id: string; title: string }): Seed {
     body: '',
     status: 'planted',
     step_slug: overrides.title,
-    workspace_id: 'ws-1',
     planter_session: '',
     planter_member: '',
     tender_session: '',
@@ -47,7 +46,7 @@ describe('GardenPanel edges', () => {
   }
 
   it('marks the ready seed and says how many block the others', () => {
-    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} workspaceId="ws-1" />);
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />);
 
     expect(screen.getByText('ready')).toBeInTheDocument();
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
@@ -57,18 +56,18 @@ describe('GardenPanel edges', () => {
   // being blocked at the next read, with nobody clearing anything by hand.
   it('stops counting a harvested blocker', () => {
     const { rerender } = render(
-      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} workspaceId="ws-1" />,
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();
 
-    rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('harvested')} workspaceId="ws-1" />);
+    rerender(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('harvested')} />);
 
     expect(screen.queryByText('blocked by 1')).not.toBeInTheDocument();
   });
 
   it('lists a seed’s edges in both directions when opened', () => {
     const { container } = render(
-      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} workspaceId="ws-1" />,
+      <GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={chain('planted')} />,
     );
 
     fireEvent.click(screen.getByText('the blocked one'));
@@ -80,16 +79,22 @@ describe('GardenPanel edges', () => {
     expect(relations?.textContent).toContain('the blocker');
   });
 
-  // A blocker in another workspace still blocks. The panel scopes what it lists
-  // but must read edges against the whole push, or a blocked seed reads as free.
-  it('counts a blocker from another workspace', () => {
+  // A blocker in another plot still blocks. Walking into a plot scopes what is
+  // listed, but edges are read against the whole push — or a seed held up from
+  // outside reads as free.
+  it('counts a blocker from outside the plot it is standing in', () => {
     const away = seed({
       id: 's-ddd111',
       title: 'blocker elsewhere',
-      workspace_id: 'ws-2',
       edges: [{ kind: 'blocks', to: 's-bbb111' }],
     });
-    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={2} seeds={[blocked, away]} workspaceId="ws-1" />);
+    const withPlot = {
+      ...crown,
+      plot_progress: { total: 1, done: 0, withered: 0, growing: 0, dormant: 0, ready: 0, blocked: 1 },
+    };
+    render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={3} seeds={[blocked, away, withPlot]} />);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open the plot under the crown' }));
 
     expect(screen.queryByText('blocker elsewhere')).not.toBeInTheDocument();
     expect(screen.getByText('blocked by 1')).toBeInTheDocument();

@@ -76,6 +76,13 @@ export const scenarioCatalog = [
     command: ['pnpm', 'run', 'real-app:scenario-garden-seed-handoff'],
   },
   {
+    id: 'garden-plot-dispatch',
+    label: 'Garden plot dispatch: a plot is planted, a delegate is dispatched at it, and the panel walks it draining',
+    command: ['pnpm', 'run', 'real-app:scenario-garden-plot-dispatch'],
+    // Boots the app, a session, and a real delegation into a second session.
+    timeoutMs: 240_000,
+  },
+  {
     id: 'ticket-lifecycle',
     label: 'Ticket lifecycle: chief delegates, worker reports, chief reviews in the panel',
     command: ['pnpm', 'run', 'real-app:scenario-ticket-lifecycle'],

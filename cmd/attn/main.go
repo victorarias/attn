@@ -778,6 +778,12 @@ session options:
                              otherwise the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
+  --plot <crown>             dispatch the delegate at a crown. It launches
+                             knowing that plot, and a flag-free "attn seed ready"
+                             inside it answers with the plot's ready seeds. It
+                             is scope, not a fence or an assignment: who holds
+                             what stays the per-seed tender, and --all steps
+                             back out to the whole garden.
 	--allow-worktree-reuse     explicitly allow another active session to share the worktree
 
 inspection:
@@ -2382,6 +2388,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	name := fs.String("name", "", "name for the agent and, when a new workspace is created, the workspace")
 	sourceSessionID := fs.String("source-session", "", "source session id (defaults to ATTN_SESSION_ID)")
 	yolo := fs.Bool("yolo", false, "launch the target agent in yolo mode")
+	plot := fs.String("plot", "", "dispatch the delegate at a crown: its plot is what flag-free `attn seed ready` answers with")
 	newWorkspace := fs.Bool("new-workspace", false, "create a new workspace for the delegated agent")
 	workspaceID := fs.String("workspace", "", "place the delegated agent in an existing workspace")
 	cwd := fs.String("cwd", "", "use an existing directory in a new workspace")
@@ -2471,6 +2478,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 			Label:              strings.TrimSpace(*name),
 			Yolo:               *yolo,
 			Placement:          placement,
+			Plot:               strings.TrimSpace(*plot),
 			WorkspaceID:        explicitWorkspace,
 			CWD:                customCWD,
 			WorktreeRepo:       repo,
@@ -3116,14 +3124,14 @@ func runAgentDirectly(requestedAgent string) {
 		}
 	}
 	// The garden primer rides the same launch injection as the guidance above,
-	// for chief and workspace agents alike. The count comes from the daemon
+	// for chief and workspace agents alike. The answer comes from the daemon
 	// rather than a copy of the rule, so what an agent is primed with and what
-	// `attn seed ready` answers cannot drift apart; a refusal — an outpost, whose
-	// garden lives at its home — primes nothing rather than teaching a loop this
-	// session cannot run.
-	if ready, err := c.SeedReady(sessionID, "", nil, false); err == nil {
-		count := len(ready.Seeds)
-		opts.GardenReady = &count
+	// `attn seed ready` answers cannot drift apart: the whole garden, or — for a
+	// delegate dispatched at a crown — its plot, crown body and handoffs
+	// included. A refusal — an outpost, whose garden lives at its home — primes
+	// nothing rather than teaching a loop this session cannot run.
+	if ready, err := c.SeedReady(sessionID, "", false); err == nil {
+		opts.Garden = gardenPrimeFromReady(ready)
 	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so

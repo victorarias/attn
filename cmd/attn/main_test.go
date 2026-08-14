@@ -701,6 +701,32 @@ func TestParseDelegateArgsAcceptsWorkspaceWithWorktree(t *testing.T) {
 	}
 }
 
+// Dispatch-at-plot is a placement-independent aim: it says what the delegate
+// tends, not where it runs, so it composes with every placement.
+func TestParseDelegateArgsAcceptsAPlot(t *testing.T) {
+	parsed, err := parseDelegateArgs([]string{
+		"--source-session", "source-session",
+		"--brief", "Tend this plot",
+		"--plot", "s-7k3f9m",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs error = %v", err)
+	}
+	if parsed.options.Plot != "s-7k3f9m" || parsed.options.Placement != "current_workspace" {
+		t.Fatalf("options = %+v", parsed.options)
+	}
+
+	bare, err := parseDelegateArgs([]string{
+		"--source-session", "source-session", "--brief", "Just work",
+	})
+	if err != nil {
+		t.Fatalf("parseDelegateArgs error = %v", err)
+	}
+	if bare.options.Plot != "" {
+		t.Fatalf("a delegation with no --plot was aimed at %q", bare.options.Plot)
+	}
+}
+
 func TestParseDelegateArgsAcceptsCwdWithWorktree(t *testing.T) {
 	parsed, err := parseDelegateArgs([]string{
 		"--source-session", "source-session",

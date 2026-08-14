@@ -1,0 +1,21 @@
+kind: added
+area: garden
+change: >
+  Work in the garden now comes in plots, and a delegate can be sent to one.
+  `attn seed plot` plants a whole chunk of work in one command — a crown with
+  its children, and the blocks edges that sequence them — and `attn seed plant
+  --part-of <crown>` adds one seed to a plot that already exists. Children are
+  parallel by default: only a blocks edge holds one back. `attn delegate --plot
+  <crown>` aims a delegation at a plot, and that delegate launches already
+  knowing the plan in the crown's body, the seeds it can pick up, and the
+  freshest handoff left on each of them; inside that session `attn seed ready`
+  answers with the plot. It is scope, not a fence — the delegate may tend or
+  plant anything, `--all` steps back out to the whole garden, and who holds
+  what is still the per-seed tender, so several agents can work one plot at
+  once. The garden panel opens on the whole garden and walks it root to leaf:
+  a crown row carries its plot's counts, opening one drills into its children,
+  and the trail across the top climbs back out or crosses into a plot beside
+  it. `attn seed show` on a crown carries the same counts, and `attn seed ls
+  --stale` asks which open seeds have gone quiet — nothing has moved on their
+  trail for a week, `--window` to change it. It only ever answers; nothing
+  withers because a window passed.

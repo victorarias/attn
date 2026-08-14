@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // HookEntry is a single hook configuration
@@ -110,29 +111,110 @@ func AgentInstructions(workspaceContextPath string, injectWorkflow bool) string 
 	return strings.Join(blocks, "\n\n")
 }
 
-// GardenPrimer is the standing garden block: the vocabulary, the loop, and how
-// many seeds this session's workspace had ready when it launched. ready is nil
-// when the daemon had no answer — no garden here, or none this session can
-// reach — and then nothing is injected, because an agent told to run a command
-// that refuses is worse off than one that was never told.
+// GardenPrime is what the daemon resolved for one launch: the garden's ready
+// count and, when the session was dispatched at a crown, its plot — the crown
+// (whose body is the plan), the plot's ready seeds, and the freshest handoff
+// left on each. It is the same answer the session's own flag-free `attn seed
+// ready` gives, so guidance and the CLI cannot disagree.
+type GardenPrime struct {
+	Ready int
+	Crown *CrownPrime
+}
+
+// CrownPrime is the plot a dispatched session starts from.
+type CrownPrime struct {
+	ID         string
+	Title      string
+	Body       string
+	ReadySeeds []SeedPrime
+}
+
+// SeedPrime is one ready seed as the primer lists it, with the freshest
+// handoff left on it — what its next tender reads before any work.
+type SeedPrime struct {
+	ID            string
+	Title         string
+	Handoff       string
+	HandoffAuthor string
+}
+
+// crownPrimeBodyLimit bounds how much of a crown's body the primer inlines. A
+// crown body may be a whole plan (the cap on a seed body is 1MB); a system
+// prompt block is not where a plan lives, so past this the primer points at
+// `attn seed show`. 4000 bytes carries the alignment and design sections of a
+// typical plan header without dragging the ledger along.
+const crownPrimeBodyLimit = 4000
+
+// truncateRunes cuts to at most limit bytes without splitting a rune: a plan is
+// markdown and markdown carries any Unicode, so a byte slice can end the block
+// on half a character.
+func truncateRunes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
+// GardenPrimer is the standing garden block: the vocabulary, the loop, how many
+// seeds the garden had ready when the session launched, and — for a session
+// dispatched at a crown — its plot. prime is nil when the daemon had no answer
+// (no garden here, or none this session can reach) and then nothing is
+// injected, because an agent told to run a command that refuses is worse off
+// than one that was never told.
 //
-// The count is a starting position, not a live number: guidance is composed once
-// at launch, so the block says where the live answer is.
-func GardenPrimer(ready *int) string {
-	if ready == nil {
+// The counts are a starting position, not a live number: guidance is composed
+// once at launch, so the block says where the live answer is.
+func GardenPrimer(prime *GardenPrime) string {
+	if prime == nil {
 		return ""
 	}
-	standing := "Nothing was ready in this workspace when you started"
-	if *ready == 1 {
-		standing = "One seed was ready in this workspace when you started"
-	} else if *ready > 1 {
-		standing = fmt.Sprintf("%d seeds were ready in this workspace when you started", *ready)
+	var b strings.Builder
+	b.WriteString(`attn keeps work in **the garden**. A **seed** is one unit of work — a short id (` + "`s-7k3f9m`" + `), a title, a markdown body, and a state. Anything worth handing off, parking, or attributing is a seed; in-session scratch is not. A **plot** is a seed with children — the crown — and its children are parallel by default: only ` + "`blocks`" + ` edges sequence them.
+
+The loop is ready → tend → harvest. ` + "`attn seed ready`" + ` says what you can pick up right now: nothing open blocks it and nobody holds it. ` + "`attn seed tend <id>`" + ` claims one — one tender at a time, so the claim is how other agents know it is taken. ` + "`attn seed note <id> -m \"…\"`" + ` records what happened and what you learned, for whoever tends it next. ` + "`attn seed harvest <id> -m \"what got done\"`" + ` closes it as done; ` + "`attn seed wither`" + ` closes one nobody will pick up, and ` + "`attn seed park`" + ` puts it down without giving up on it. Plant with ` + "`attn seed plant \"what this is\"`" + `, which prints the id. ` + "`attn seed --help`" + ` has the rest.
+
+`)
+	if prime.Crown == nil {
+		standing := "Nothing was ready in the garden when you started"
+		if prime.Ready == 1 {
+			standing = "One seed was ready in the garden when you started"
+		} else if prime.Ready > 1 {
+			standing = fmt.Sprintf("%d seeds were ready in the garden when you started", prime.Ready)
+		}
+		fmt.Fprintf(&b, "%s. Run `attn seed ready` for the live answer — readiness is computed when you ask, so a blocker somebody harvests since then shows up on your next call.", standing)
+		return b.String()
 	}
-	return fmt.Sprintf(`attn keeps work in **the garden**. A **seed** is one unit of work — a short id (`+"`s-7k3f9m`"+`), a title, a markdown body, and a state. Anything worth handing off, parking, or attributing is a seed; in-session scratch is not.
 
-The loop is ready → tend → harvest. `+"`attn seed ready`"+` says what you can pick up right now in this workspace: nothing open blocks it and nobody holds it. `+"`attn seed tend <id>`"+` claims one — one tender at a time, so the claim is how other agents know it is taken. `+"`attn seed note <id> -m \"…\"`"+` records what happened and what you learned, for whoever tends it next. `+"`attn seed harvest <id> -m \"what got done\"`"+` closes it as done; `+"`attn seed wither`"+` closes one nobody will pick up, and `+"`attn seed park`"+` puts it down without giving up on it. Plant with `+"`attn seed plant \"what this is\"`"+`, which prints the id. `+"`attn seed --help`"+` has the rest.
-
-%s. Run `+"`attn seed ready`"+` for the live answer — readiness is computed when you ask, so a blocker somebody harvests since then shows up on your next call.`, standing)
+	crown := prime.Crown
+	fmt.Fprintf(&b, "You were dispatched at the plot under crown `%s` — **%s**. Your flag-free `attn seed ready` answers with this plot; `attn seed ready --all` steps out to the whole garden, and nothing fences you in — tend or plant anything, here or elsewhere. Who holds what is always the per-seed tender.\n", crown.ID, crown.Title)
+	if body := strings.TrimSpace(crown.Body); body != "" {
+		if len(body) > crownPrimeBodyLimit {
+			body = truncateRunes(body, crownPrimeBodyLimit) +
+				fmt.Sprintf("\n\n[the crown's body continues — `attn seed show %s` has the whole plan]", crown.ID)
+		}
+		fmt.Fprintf(&b, "\nThe crown's body is the plan:\n\n%s\n", body)
+	}
+	if len(crown.ReadySeeds) == 0 {
+		fmt.Fprintf(&b, "\nNothing in this plot was ready when you launched — its seeds are blocked, held, or done. `attn seed show %s` shows the plot's progress and what blocks what.", crown.ID)
+		return b.String()
+	}
+	fmt.Fprintf(&b, "\nReady in this plot when you launched (oldest first — `attn seed tend <id>` claims one):\n")
+	for _, seed := range crown.ReadySeeds {
+		fmt.Fprintf(&b, "- `%s` %s\n", seed.ID, seed.Title)
+		if strings.TrimSpace(seed.Handoff) != "" {
+			author := seed.HandoffAuthor
+			if author == "" {
+				author = "a previous tender"
+			}
+			fmt.Fprintf(&b, "  handoff from %s: %s\n", author, strings.TrimSpace(seed.Handoff))
+		}
+	}
+	b.WriteString("\nReadiness is computed when you ask — run `attn seed ready` for the live answer before claiming.")
+	return b.String()
 }
 
 // Launch is everything attn injects into an agent's system prompt at launch. A
@@ -144,7 +226,7 @@ type Launch struct {
 	HasSelfMonitor       bool
 	WorkspaceContextPath string
 	InjectWorkflow       bool
-	GardenReady          *int
+	Garden               *GardenPrime
 }
 
 // Instructions composes the blocks, joined by a blank line.
@@ -155,7 +237,7 @@ func (l Launch) Instructions() string {
 	} else {
 		blocks = append(blocks, AgentInstructions(l.WorkspaceContextPath, l.InjectWorkflow))
 	}
-	if primer := GardenPrimer(l.GardenReady); primer != "" {
+	if primer := GardenPrimer(l.Garden); primer != "" {
 		blocks = append(blocks, primer)
 	}
 	return strings.Join(blocks, "\n\n")

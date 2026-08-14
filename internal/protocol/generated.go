@@ -1687,6 +1687,9 @@ type DelegateMessage struct {
 	// Placement corresponds to the JSON schema field "placement".
 	Placement *string `json:"placement,omitempty,omitzero"`
 
+	// Plot corresponds to the JSON schema field "plot".
+	Plot *string `json:"plot,omitempty,omitzero"`
+
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
 
@@ -5313,6 +5316,9 @@ type Response struct {
 	// SeedPlantResult corresponds to the JSON schema field "seed_plant_result".
 	SeedPlantResult *SeedPlantResult `json:"seed_plant_result,omitempty,omitzero"`
 
+	// SeedPlotResult corresponds to the JSON schema field "seed_plot_result".
+	SeedPlotResult *SeedPlotResult `json:"seed_plot_result,omitempty,omitzero"`
+
 	// SeedReadyResult corresponds to the JSON schema field "seed_ready_result".
 	SeedReadyResult *SeedReadyResult `json:"seed_ready_result,omitempty,omitzero"`
 
@@ -5450,6 +5456,9 @@ type Seed struct {
 	// PlanterSession corresponds to the JSON schema field "planter_session".
 	PlanterSession string `json:"planter_session"`
 
+	// PlotProgress corresponds to the JSON schema field "plot_progress".
+	PlotProgress *SeedPlotProgress `json:"plot_progress,omitempty,omitzero"`
+
 	// Ready corresponds to the JSON schema field "ready".
 	Ready bool `json:"ready"`
 
@@ -5482,9 +5491,6 @@ type Seed struct {
 
 	// Vars corresponds to the JSON schema field "vars".
 	Vars []SeedVar `json:"vars"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
 }
 
 type SeedEdge struct {
@@ -5521,31 +5527,28 @@ type SeedLinkResult struct {
 }
 
 type SeedListMessage struct {
-	// All corresponds to the JSON schema field "all".
-	All *bool `json:"all,omitempty,omitzero"`
-
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
 
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+	// Stale corresponds to the JSON schema field "stale".
+	Stale *bool `json:"stale,omitempty,omitzero"`
+
+	// StaleWindowSeconds corresponds to the JSON schema field "stale_window_seconds".
+	StaleWindowSeconds *int `json:"stale_window_seconds,omitempty,omitzero"`
 }
 
 type SeedListResult struct {
-	// All corresponds to the JSON schema field "all".
-	All bool `json:"all"`
-
 	// Seeds corresponds to the JSON schema field "seeds".
 	Seeds []Seed `json:"seeds"`
 
+	// StaleWindowSeconds corresponds to the JSON schema field "stale_window_seconds".
+	StaleWindowSeconds *int `json:"stale_window_seconds,omitempty,omitzero"`
+
 	// Total corresponds to the JSON schema field "total".
 	Total int `json:"total"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID string `json:"workspace_id"`
 }
 
 type SeedNote struct {
@@ -5625,19 +5628,81 @@ type SeedPlantMessage struct {
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
 
+	// PartOf corresponds to the JSON schema field "part_of".
+	PartOf *string `json:"part_of,omitempty,omitzero"`
+
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
 
 	// Title corresponds to the JSON schema field "title".
 	Title string `json:"title"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type SeedPlantResult struct {
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
+}
+
+type SeedPlotChild struct {
+	// Blocks corresponds to the JSON schema field "blocks".
+	Blocks []string `json:"blocks,omitempty,omitzero"`
+
+	// Body corresponds to the JSON schema field "body".
+	Body *string `json:"body,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type SeedPlotMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body *string `json:"body,omitempty,omitzero"`
+
+	// Children corresponds to the JSON schema field "children".
+	Children []SeedPlotChild `json:"children"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// SourceSessionID corresponds to the JSON schema field "source_session_id".
+	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
+
+	// Title corresponds to the JSON schema field "title".
+	Title string `json:"title"`
+}
+
+type SeedPlotProgress struct {
+	// Blocked corresponds to the JSON schema field "blocked".
+	Blocked int `json:"blocked"`
+
+	// Done corresponds to the JSON schema field "done".
+	Done int `json:"done"`
+
+	// Dormant corresponds to the JSON schema field "dormant".
+	Dormant int `json:"dormant"`
+
+	// Growing corresponds to the JSON schema field "growing".
+	Growing int `json:"growing"`
+
+	// Ready corresponds to the JSON schema field "ready".
+	Ready int `json:"ready"`
+
+	// Total corresponds to the JSON schema field "total".
+	Total int `json:"total"`
+
+	// Withered corresponds to the JSON schema field "withered".
+	Withered int `json:"withered"`
+}
+
+type SeedPlotResult struct {
+	// Children corresponds to the JSON schema field "children".
+	Children []Seed `json:"children"`
+
+	// Crown corresponds to the JSON schema field "crown".
+	Crown Seed `json:"crown"`
 }
 
 type SeedReadyMessage struct {
@@ -5652,12 +5717,15 @@ type SeedReadyMessage struct {
 
 	// SourceSessionID corresponds to the JSON schema field "source_session_id".
 	SourceSessionID *string `json:"source_session_id,omitempty,omitzero"`
-
-	// WorkspaceID corresponds to the JSON schema field "workspace_id".
-	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
 type SeedReadyResult struct {
+	// Crown corresponds to the JSON schema field "crown".
+	Crown *Seed `json:"crown,omitempty,omitzero"`
+
+	// Handoffs corresponds to the JSON schema field "handoffs".
+	Handoffs []SeedNote `json:"handoffs,omitempty,omitzero"`
+
 	// Scope corresponds to the JSON schema field "scope".
 	Scope string `json:"scope"`
 
