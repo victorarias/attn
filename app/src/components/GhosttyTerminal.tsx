@@ -492,6 +492,34 @@ function emptyStartup(): TerminalPerfStartupSnapshot {
   };
 }
 
+function createRendererEffectResources() {
+  let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+
+  return {
+    isRecoveryScheduled: () => recoveryTimer !== null,
+    scheduleRecovery: (callback: () => void, delayMs: number) => {
+      if (recoveryTimer !== null) return;
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        callback();
+      }, delayMs);
+    },
+    observeResize: (target: Element, callback: ResizeObserverCallback) => {
+      resizeObserver = new ResizeObserver(callback);
+      resizeObserver.observe(target);
+    },
+    dispose: () => {
+      if (recoveryTimer !== null) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+    },
+  };
+}
+
 function normalizeSelection(range: SelectionRange): SelectionRange {
   if (range.startRow < range.endRow || (range.startRow === range.endRow && range.startCol <= range.endCol)) {
     return range;
@@ -2331,23 +2359,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useEffect(() => {
       let active = true;
-      let observer: ResizeObserver | null = null;
       const container = containerRef.current;
       const canvas = canvasRef.current;
       if (!container || !canvas) return;
       const perfId = `ghostty-${debugNameRef.current}`;
-      // The pending recovery timer. Owned by this effect run rather than by a
-      // ref, so the cleanup below is visibly the thing that cancels it and a
-      // torn-down pane can leave nothing behind. The attempt COUNT is a ref:
-      // it has to survive the epoch bump that rebuilds the renderer.
-      let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+      // One resource owner per effect run; disposing it below cancels the
+      // recovery timer and disconnects the resize observer together.
+      // The attempt COUNT is a ref because it survives the renderer epoch bump.
+      const resources = createRendererEffectResources();
 
       // Schedules the next WebGL-recovery attempt (a lost context or a failed
       // renderer construction land here) with escalating backoff. A pending
       // timer is never doubled: a context-lost event and a construction
       // failure could otherwise both fire for the same dead renderer.
       const scheduleRecovery = () => {
-        if (recoveryTimer !== null) return;
+        if (resources.isRecoveryScheduled()) return;
         recoveryAttemptRef.current += 1;
         const attempt = recoveryAttemptRef.current;
         const delay = recoveryDelayMs(attempt);
@@ -2359,8 +2385,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
         noteRecovery(diagKeyRef.current, { session, paneKind, attempt, outcome: 'scheduled', delayMs: delay });
-        recoveryTimer = setTimeout(() => {
-          recoveryTimer = null;
+        resources.scheduleRecovery(() => {
           // A stale timer must not resurrect a pane that has since unmounted
           // (or been torn down for an unrelated reason, e.g. this same effect
           // already cleaned up) — cleanup below also cancels this outright,
@@ -2507,8 +2532,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         startupRef.current.firstReadyAt = Date.now();
         startupRef.current.firstReadyCols = terminal.cols;
         startupRef.current.firstReadyRows = terminal.rows;
-        observer = new ResizeObserver(fit);
-        observer.observe(container);
+        resources.observeResize(container, fit);
         onReadyRef.current({
           fit,
           openFind,
@@ -2626,10 +2650,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       return () => {
         active = false;
-        if (recoveryTimer !== null) {
-          clearTimeout(recoveryTimer);
-          recoveryTimer = null;
-        }
+        resources.dispose();
         recordDiag({
           kind: 'pane_unmount',
           pane: diagKeyRef.current,
@@ -2638,7 +2659,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           model: modelInstanceRef.current,
         });
         disposePaneDiagnostics(diagKeyRef.current);
-        observer?.disconnect();
         if (overflowRefitRafRef.current !== null) {
           cancelAnimationFrame(overflowRefitRafRef.current);
           overflowRefitRafRef.current = null;
