@@ -1,0 +1,6 @@
+kind: internal
+area: apps
+change: >
+  The reconcile design doc's slice plan now assigns the TrimBusEvents
+  retention-floor change to slice 3, beside the fence cleanup it already
+  owned, so the retention policy lands as code in one slice.
