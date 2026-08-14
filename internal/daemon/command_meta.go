@@ -57,6 +57,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdCrewWake:                   commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdCrewSet:                    commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdCrewPrime:                  commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdCrewHandoff:                commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdStop:                       commandMetadata(ScopeSession, false, true),
 	protocol.CmdTodos:                      commandMetadata(ScopeSession, false, true),
 	protocol.CmdFilesEdited:                commandMetadata(ScopeSession, false, true),

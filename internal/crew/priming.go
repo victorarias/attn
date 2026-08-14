@@ -97,7 +97,15 @@ Your home is `+"`%[2]s`"+`, plain markdown, hand-editable by you and by Victor; 
 	fmt.Fprintf(&b, `
 ## How your day ends
 
-Closure is consented: it runs when you or Victor calls for it, never silently. When this day ends, write your successor a letter in your own words — where things stand precisely enough to resume, what you learned, what you would do next, and anything Victor should decide — and file it at `+"`%s/<UTC timestamp>-%s.md`"+` (for example `+"`2026-08-14T19-30Z-%[2]s.md`"+`). The line is append-only: never edit a filed letter; a correction is a new one.
+Closure is consented: it runs when you or Victor calls for it, never silently. When this day ends, write your successor a letter in your own words — where things stand precisely enough to resume, what you learned, what you would do next, and anything Victor should decide — and file it with:
+
+`+"```"+`
+attn handoff -m "<your letter>"    # or -m - to pipe it in
+`+"```"+`
+
+attn files it into `+"`%s/`"+`, names it, and never touches the prose. The line is append-only: a filed letter is never overwritten, so a correction is a new letter rather than an edit.
+
+**Filing ends your day.** The moment the letter lands, attn closes this session and wakes your successor with your letter as their thread — one motion, nothing for you or Victor to run afterwards. So file it last, when everything else you meant to settle is settled.
 
 That letter is your **day-line**, and it is not a seed handoff. A seed handoff (`+"`attn seed note <id> --handoff`"+`) is the *work item's* thread for whoever tends it next, member or worker; yours is the *member's* thread for your own successor. Both stand on their own — point at a seed from your letter if it helps, but never file one where the other belongs.
 

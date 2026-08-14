@@ -1606,6 +1606,7 @@ type fakeSpawnBackend struct {
 	onInput      func(string, []byte)
 	onKill       func()
 	killErr      error
+	spawnErr     error
 	sessionIDs   []string
 	themeCalls   []pty.TerminalTheme
 	themeCallIDs []string
@@ -1616,11 +1617,12 @@ func (b *fakeSpawnBackend) Spawn(_ context.Context, opts ptybackend.SpawnOptions
 	b.mu.Lock()
 	b.spawnOpts = append(b.spawnOpts, opts)
 	onSpawn := b.onSpawn
+	spawnErr := b.spawnErr
 	b.mu.Unlock()
 	if onSpawn != nil {
 		onSpawn(opts)
 	}
-	return nil
+	return spawnErr
 }
 func (b *fakeSpawnBackend) Attach(context.Context, string, string) (ptybackend.AttachInfo, ptybackend.Stream, error) {
 	return ptybackend.AttachInfo{Running: true}, newFakeOutputStream(), nil

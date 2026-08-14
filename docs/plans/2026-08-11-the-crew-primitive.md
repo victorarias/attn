@@ -228,6 +228,22 @@ sequenceDiagram
   it there and there is no unpin. Every member is present, awake or
   asleep, and is one action from waking: clicking an awake member
   focuses its day, clicking a sleeping one wakes it.
+- **The nap replaces the day's session, and the binding moves rather than
+  releasing.** Receipt: `claude --session-id <id>` refuses a second launch
+  under an id it has already used ("Session ID … is already in use"), which
+  is why the daemon's existing in-place reload is resume-preserving — and
+  resuming is the one thing the nap must not do. So the successor is a new
+  session in the same workspace, carrying the closed day's launch settings,
+  and the old session is closed behind it. The binding moves from the old
+  session to the new one in a single registry write: the shape above said
+  handoff "releases the binding", but a release-then-rebind opens exactly
+  the gap another wake could claim, and the invariant the plan actually
+  wants is one active binding with no unbound window. The binding tracks the
+  session and releases on session teardown as it already does.
+- **A failed nap keeps the letter and the day.** The letter is filed first
+  and never rolled back — it is the member's honest closure — and everything
+  after it that fails leaves the day's session running with its binding
+  held. A member is never torn down with its letter unfiled.
 - **Where the launch directory and the awareness dirs come from.**
   Registry fields, set by `attn crew set <member> --cwd <dir>
   --awareness-dir <dir>`, never read out of the member's prose — the

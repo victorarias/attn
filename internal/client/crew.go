@@ -67,3 +67,19 @@ func (c *Client) CrewPrime(sessionID string) (*protocol.CrewPrimeResult, error) 
 	}
 	return resp.CrewPrimeResult, nil
 }
+
+// CrewHandoff files the calling session's member letter and ends its day. The
+// note is the member's own prose; the daemon names the file, refuses to
+// overwrite one, and wakes the successor.
+func (c *Client) CrewHandoff(sessionID, note string) (*protocol.CrewHandoffResult, error) {
+	resp, err := c.send(protocol.CrewHandoffMessage{
+		Cmd: protocol.CmdCrewHandoff, SessionID: sessionID, Note: note,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp.CrewHandoffResult == nil {
+		return nil, fmt.Errorf("the daemon answered without saying where the letter landed")
+	}
+	return resp.CrewHandoffResult, nil
+}

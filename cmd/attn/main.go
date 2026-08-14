@@ -254,6 +254,9 @@ func main() {
 	case "crew":
 		maybePrintProfileBanner()
 		runCrew()
+	case "handoff":
+		maybePrintProfileBanner()
+		runHandoff(os.Args[2:])
 	case "doc":
 		maybePrintProfileBanner()
 		runDoc()
@@ -665,6 +668,7 @@ commands:
   enrollment <command>              this daemon's home: status, enroll, leave
   seed <command>                    the garden: plant, tend, harvest, note, ls
   crew <command>                    the crew roster: who exists, who is awake
+  handoff -m "<letter>"             file this crew member's letter; the day turns over
   doc <command>                     document store: collections, documents, live queries
   app <command>                     apps: list, status, enable, disable, remove
   vision-check <image> <question>   answer a question about an image (single LLM call)

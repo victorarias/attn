@@ -4942,6 +4942,7 @@ model Response {
   crew_wake_result?: CrewWakeResult;
   crew_set_result?: CrewSetResult;
   crew_prime_result?: CrewPrimeResult;
+  crew_handoff_result?: CrewHandoffResult;
   seed_plant_result?: SeedPlantResult;
   seed_plot_result?: SeedPlotResult;
   seed_list_result?: SeedListResult;
@@ -5135,6 +5136,29 @@ model CrewPrimeResult {
   guidance?: string;
   awareness_dirs: string[];
   priming_bytes: int32;
+}
+
+// File the calling session's member letter and end its day. The note is the
+// member's own prose — attn names the file and never edits what is in it — and
+// the line is append-only, so a name already taken is refused rather than
+// overwritten. Home-only, and refused for a session that holds no binding: a
+// crew handoff is a member's day-line, and a session that is nobody has none.
+model CrewHandoffMessage {
+  cmd: "crew_handoff";
+  session_id: string;
+  note: string;
+}
+
+// Where the letter landed, and what became of the day. A filed letter is never
+// undone by what follows it: when the nap cannot run, the letter is still filed
+// and `nap_error` says why the successor was not woken.
+model CrewHandoffResult {
+  member: string;
+  path: string;
+  // The session living the member's new day. Absent when no nap ran.
+  session_id?: string;
+  // Why no successor was woken, when none was.
+  nap_error?: string;
 }
 
 // The roster, pushed on initial_state and whenever a member is registered,
