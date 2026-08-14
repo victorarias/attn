@@ -475,7 +475,11 @@ proof.
    the end of this doc as code, both halves of one promise: keep the facts —
    `TrimBusEvents` floors at the minimum cursor across installed app
    consumers, enabled or disabled, with "disabled must not pin" narrowed to
-   rows no install serves — and deliver the facts: slice 1's as-built cleanup
+   rows no install serves, replacing the shipped test that pins the old
+   contract (`TestTrimBusEventsIgnoresDisabledConsumers`) with its witness: a
+   disabled installed app's rows survive a trim that would have deleted them,
+   while orphaned rows still trim — and deliver the facts: slice 1's as-built
+   cleanup
    (delete the `re_enabled` insert and enum value, re-fence `version_changed`
    to cursor and `gap` to `earliest - 1`) with the three witnesses named in
    slice 1's note. The per-lane cap stays out until its number has a receipt
