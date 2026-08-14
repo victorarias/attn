@@ -554,6 +554,26 @@ day filed so the two refusals stay apart: filing again after a failed turnover
 names the retry, and a retry with nothing filed names the verb that writes a
 letter.
 
+Filing does not always start the next day. Whether it naps or **sleeps** is
+attn's call, made from whether the user is around: a day that closes while
+nobody is there does not start another one, because the point of a fresh day is
+somebody to spend it with. A sleeping member is bound to nothing and shows in
+the sidebar one click from a new day. `attn handoff --sleep` and `--nap` decide
+it for one handoff rather than letting attn read presence.
+
+Between those two, the **crew lifecycle** is what watches an awake member and
+decides when either should happen. It reads two things: how long the user has
+been away, and how close the member's session is to losing its prompt cache —
+an **estimate**, since no API reports a cache entry's life, so it is time since
+the session last talked to the model against an assumed TTL for its harness.
+Cache pressure gates everything, which is what keeps the subsystem silent: a
+member whose cache is fresh is left alone whoever is around. Once it is close,
+who is here decides — the user present means a **heartbeat**, a nudge that reads
+the day's context so its lifetime starts over; the user gone means the member is
+asked to close its day. Wakes attn starts on its own are bounded per member by
+the **wake limit**, so an unattended night has a ceiling and every refusal names
+it.
+
 Tending is not a crew privilege: workers and errand sessions tend seeds too,
 under any free-string name. Where a tender's name happens to match a registered
 member it resolves to that member's id, so the claim compares addresses rather

@@ -1,0 +1,18 @@
+kind: added
+area: daemon
+change: >
+  A crew member's day now follows the user's attention. While you are around,
+  attn keeps an awake member's context warm just before it would go cold, so
+  picking a member back up costs nothing and waits for nothing. While you are
+  not — measured, not guessed: no sign of you for two and a half hours — it asks
+  the member to write its letter and go to sleep instead, because a context kept
+  warm through an absence is warmth nobody uses. The sidebar shows the member
+  asleep, one click from a new day.
+  Nothing happens until a context is actually close to going cold, so a member
+  sitting idle beside you costs nothing at all, and wakes attn started on its own
+  are capped per member (eight in twelve hours by default) with every refusal
+  naming the limit and how to raise it. Every part of it is a setting:
+  `crew.heartbeat_enabled`, `crew.autosleep_enabled`, `crew.away_seconds`,
+  `crew.cache_ttl_seconds`, `crew.heartbeat_lead_seconds`, `crew.wake_limit`,
+  `crew.wake_limit_window_seconds`. `attn handoff --sleep` and `--nap` decide it
+  yourself for one handoff.

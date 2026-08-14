@@ -5153,6 +5153,16 @@ model CrewHandoffMessage {
   // writing one. The way out of a turnover that failed behind a filed letter:
   // the line is append-only, so the letter cannot be written a second time.
   retry?: boolean;
+  // What the filing does to the day. Absent lets attn decide from whether the
+  // user is here: a day that closes while nobody is around does not start
+  // another one, because sleeping through an absence is the point.
+  close?: CrewDayClose;
+}
+
+// Whether a filed letter starts the next day or ends this one.
+enum CrewDayClose {
+  nap,
+  sleep,
 }
 
 // Where the letter landed, and what became of the day. A filed letter is never
@@ -5165,6 +5175,9 @@ model CrewHandoffResult {
   session_id?: string;
   // Why no successor was woken, when none was.
   nap_error?: string;
+  // What the day did: `nap` started the next one, `sleep` ended it. Absent when
+  // neither happened, which is what nap_error explains.
+  outcome?: CrewDayClose;
 }
 
 // The roster, pushed on initial_state and whenever a member is registered,

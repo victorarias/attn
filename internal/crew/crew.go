@@ -78,6 +78,11 @@ type Member struct {
 	// written nothing yet.
 	LetterPath    string `json:"letter_path"`
 	LetterSession string `json:"letter_session"`
+	// AutonomousWakes stamps every wake the user did not ask for, RFC3339,
+	// trimmed to the limit's window on each write. Durable because the limit
+	// bounds a night, and a daemon restart in the middle of one must not hand
+	// back a fresh allowance.
+	AutonomousWakes []string `json:"autonomous_wakes"`
 }
 
 // FiledLetterFor answers whether sessionID has already filed this member's
@@ -106,6 +111,9 @@ func MembersSchema() docstore.CollectionSchema {
 func (m Member) Encode() ([]byte, error) {
 	if m.AwarenessDirs == nil {
 		m.AwarenessDirs = []string{}
+	}
+	if m.AutonomousWakes == nil {
+		m.AutonomousWakes = []string{}
 	}
 	return json.Marshal(m)
 }

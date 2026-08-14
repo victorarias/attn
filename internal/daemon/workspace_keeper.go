@@ -304,6 +304,10 @@ func (d *Daemon) startJobQueue() {
 				d.logf("bus: register retention-pin alarm tick: %v", err)
 			}
 		}
+		// The crew lifecycle is the fifth: it watches awake members' context
+		// caches and the user's absence, and does nothing at all until one of
+		// those is close to mattering.
+		d.registerCrewLifecycleCron(runner)
 		if err := runner.RegisterCron(
 			automationScheduleKind,
 			automationScheduleInterval,

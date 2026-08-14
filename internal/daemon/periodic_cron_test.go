@@ -7,10 +7,11 @@ import (
 	"github.com/victorarias/attn/internal/jobs"
 )
 
-// The daemon's two periodic duties — the notebook tick and the scheduled-automation
-// observation — used to be ticker goroutines whose next fire lived only in memory.
-// They are cron entries on the job queue now, so startJobQueue is what arms
-// them: if this breaks, nothing ticks and nothing says so.
+// The daemon's periodic duties — the notebook tick, the scheduled-automation
+// observation, the crew lifecycle — used to be ticker goroutines whose next
+// fire lived only in memory. They are cron entries on the job queue now, so
+// startJobQueue is what arms them: if this breaks, nothing ticks and nothing
+// says so.
 func TestStartJobQueueArmsThePeriodicTicks(t *testing.T) {
 	d := newBubbleDaemon(t)
 	notebookRoot := t.TempDir()
@@ -26,7 +27,7 @@ func TestStartJobQueueArmsThePeriodicTicks(t *testing.T) {
 		t.Cleanup(runner.Stop)
 		synctest.Wait()
 
-		for _, kind := range []string{notebookCronKind, automationScheduleKind} {
+		for _, kind := range []string{notebookCronKind, automationScheduleKind, crewLifecycleKind} {
 			entry, err := runner.CronEntry(kind)
 			if err != nil {
 				t.Fatalf("cron entry for %s: %v", kind, err)
@@ -39,13 +40,13 @@ func TestStartJobQueueArmsThePeriodicTicks(t *testing.T) {
 			}
 		}
 
-		// The panel lists work the daemon owes, so the two heartbeats must not be in it.
+		// The panel lists work the daemon owes, so the heartbeats must not be in it.
 		list, err := runner.List()
 		if err != nil {
 			t.Fatalf("list: %v", err)
 		}
 		for _, job := range list {
-			if job.Kind == notebookCronKind || job.Kind == automationScheduleKind {
+			if job.Kind == notebookCronKind || job.Kind == automationScheduleKind || job.Kind == crewLifecycleKind {
 				t.Fatalf("the work list included the %s heartbeat: %+v", job.Kind, job)
 			}
 		}

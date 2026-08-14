@@ -71,11 +71,15 @@ func (c *Client) CrewPrime(sessionID string) (*protocol.CrewPrimeResult, error) 
 // CrewHandoff files the calling session's member letter and ends its day. The
 // note is the member's own prose; the daemon names the file, refuses to
 // overwrite one, and wakes the successor. retry turns the day over with the
-// letter this day already filed and ignores note.
-func (c *Client) CrewHandoff(sessionID, note string, retry bool) (*protocol.CrewHandoffResult, error) {
+// letter this day already filed and ignores note. close insists on what the
+// filing does to the day; empty lets the daemon decide from presence.
+func (c *Client) CrewHandoff(sessionID, note string, retry bool, close protocol.CrewDayClose) (*protocol.CrewHandoffResult, error) {
 	msg := protocol.CrewHandoffMessage{Cmd: protocol.CmdCrewHandoff, SessionID: sessionID, Note: note}
 	if retry {
 		msg.Retry = protocol.Ptr(true)
+	}
+	if close != "" {
+		msg.Close = protocol.Ptr(close)
 	}
 	resp, err := c.send(msg)
 	if err != nil {
