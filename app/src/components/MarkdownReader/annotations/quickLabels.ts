@@ -28,9 +28,14 @@ export const PROMOTED_LABELS: readonly QuickLabel[] = PROMOTED_LABEL_IDS.map(req
 
 const promotedLabelIds = new Set<string>(PROMOTED_LABEL_IDS);
 
-export const QUICK_LABEL_PICKER_GROUPS: readonly (readonly QuickLabel[])[] = QUICK_LABEL_GROUPS
-  .map((group) => group.filter((label) => !promotedLabelIds.has(label.id)))
-  .filter((group) => group.length > 0);
+const pickerGroups: QuickLabel[][] = [];
+for (const group of QUICK_LABEL_GROUPS) {
+  const pickerGroup = group.filter((label) => !promotedLabelIds.has(label.id));
+  if (pickerGroup.length > 0) {
+    pickerGroups.push(pickerGroup);
+  }
+}
+export const QUICK_LABEL_PICKER_GROUPS: readonly (readonly QuickLabel[])[] = pickerGroups;
 
 export const QUICK_LABEL_PICKER_LABELS: readonly QuickLabel[] = QUICK_LABEL_PICKER_GROUPS.flat();
 

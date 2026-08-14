@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
-import { resolveDomRange } from '../anchoring';
+import { resolveDomRange } from '../anchoring/domRange';
 import { AnnotationPopover } from './AnnotationPopover';
 import { AnnotationSidebar } from './AnnotationSidebar';
 import { SelectionToolbar } from './SelectionToolbar';

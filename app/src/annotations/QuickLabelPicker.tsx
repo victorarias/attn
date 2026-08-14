@@ -152,7 +152,7 @@ function FloatingQuickLabelPicker({
     >
       {indexedGroups.map((group, groupIndex) => (
         <Fragment key={group[0].label.id}>
-          {groupIndex > 0 ? <span className="md-quick-label-divider" role="separator" /> : null}
+          {groupIndex > 0 ? <hr className="md-quick-label-divider" /> : null}
           {group.map(({ label, index }) => {
             const color = LABEL_COLOR_MAP[label.color];
             return (
