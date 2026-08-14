@@ -80,9 +80,14 @@ import {
 import {
   handleMarkdownAnnotationDaemonEvent,
   markdownAnnotationKey,
-  type PendingMarkdownAnnotations,
 } from './daemonMarkdownAnnotationEvents';
-import { pendingRequestKey, settlePendingRequest, type PendingRequests } from './daemonPendingRequests';
+import {
+  pendingRequestKey,
+  sendKeyedRequest as sendLastWriterWinsRequest,
+  settlePendingRequest,
+  type PendingKeyedRequests,
+  type PendingRequests,
+} from './daemonPendingRequests';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
@@ -1008,9 +1013,8 @@ export function useDaemonSocket({
   // Keyed `<kind>:<requestId>` — see daemonPendingRequests.ts for the format and
   // the settle helper the extracted event modules use.
   const pendingActionsRef = useRef<PendingRequests>(new Map());
-  // Markdown-annotation drafts use their own last-writer-wins correlation —
-  // see daemonMarkdownAnnotationEvents.ts, not daemonPendingRequests.ts.
-  const mdAnnotationsPendingRef = useRef<PendingMarkdownAnnotations>(new Map());
+  // Markdown-annotation drafts use shared last-writer-wins correlation.
+  const mdAnnotationsPendingRef = useRef<PendingKeyedRequests>(new Map());
   // Completed transcript messages invalidate only their own terminal. Keeping
   // listeners here avoids a global React tick and releases the session entry as
   // soon as its last pane unmounts.
@@ -3933,45 +3937,35 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Markdown annotation drafts (request/result pattern; save/clear can fail —
-  // stale-generation rejection — so no fire-and-forget). Pending entries are
-  // keyed `<op>:<path>` in a dedicated map: a newer request for the same
-  // path+op supersedes the in-flight one (rejects it), and results are
-  // matched by request_id so a late result for a superseded request can
-  // never settle its successor.
+  // Markdown annotation drafts use last-writer-wins request correlation keyed
+  // by operation, workspace, and path.
   const sendMarkdownAnnotationsCommand = useCallback(<T,>(
     op: 'get' | 'save' | 'clear' | 'submit',
     path: string,
     workspaceId: string,
     extra: Record<string, unknown>,
   ): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      // workspace-scoped: the same path open in two workspaces (possibly on
-      // two different endpoints) must not supersede each other's requests.
-      const key = markdownAnnotationKey(op, workspaceId, path);
-      const requestId = crypto.randomUUID();
-      mdAnnotationsPendingRef.current.get(key)?.reject(new Error('Superseded by a newer request'));
-      mdAnnotationsPendingRef.current.set(key, { requestId, resolve: resolve as (value: unknown) => void, reject });
-      ws.send(JSON.stringify({
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    // Workspace scope keeps identical paths on different endpoints independent.
+    const key = markdownAnnotationKey(op, workspaceId, path);
+    const requestId = crypto.randomUUID();
+    return sendLastWriterWinsRequest<T>(
+      mdAnnotationsPendingRef.current,
+      key,
+      requestId,
+      () => ws.send(JSON.stringify({
         cmd: `markdown_annotations_${op}`,
         path,
         workspace_id: workspaceId,
         request_id: requestId,
         ...extra,
-      }));
-      setTimeout(() => {
-        const pending = mdAnnotationsPendingRef.current.get(key);
-        if (pending?.requestId === requestId) {
-          mdAnnotationsPendingRef.current.delete(key);
-          reject(new Error('Timeout'));
-        }
-      }, 10000);
-    });
+      })),
+      'Timeout',
+      10000,
+    );
   }, []);
 
   // workspace_id is the requesting tile's owning workspace: on a hub it routes

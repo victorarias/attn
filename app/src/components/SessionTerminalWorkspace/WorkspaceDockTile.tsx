@@ -15,7 +15,7 @@ import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
 import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
-import { useShortcut } from '../../shortcuts';
+import { useAnnotationSend } from '../../annotations/useAnnotationSend';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
@@ -80,9 +80,7 @@ interface WorkspaceDockTileProps {
     `skipped`/`warning`/`error` persist until the next action. `warning`
     covers delivered-but-draft-clear-failed: the payload reached the session
     but the daemon still holds the draft, so local state is kept to match. */
-type SendStatus =
-  | { kind: 'idle' }
-  | { kind: 'sending' }
+type MarkdownSendResult =
   | { kind: 'sent' }
   | { kind: 'skipped' }
   | { kind: 'warning'; message: string }
@@ -136,18 +134,10 @@ export function WorkspaceDockTile({
   const isMarkdown = tile.tileKind === 'markdown';
   const annotationsSendRef = useRef<MarkdownAnnotationsSendHandle | null>(null);
   const [annotationCount, setAnnotationCount] = useState(0);
-  const [sendStatus, setSendStatus] = useState<SendStatus>({ kind: 'idle' });
-  // Focus-within on the tile root gates the ⌘Enter shortcut's REGISTRATION
-  // (see useShortcut below): when focus sits in a terminal pane the shortcut
+  // Focus-within on the tile root gates the ⌘Enter shortcut's registration:
+  // when focus sits in a terminal pane the shortcut
   // must not exist at all, so the key falls through to the PTY untouched.
   const [hasFocusWithin, setHasFocusWithin] = useState(false);
-  const sendingRef = useRef(false);
-  const sentClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (sentClearTimerRef.current) {
-      clearTimeout(sentClearTimerRef.current);
-    }
-  }, []);
 
   // The Send target: the tile's persisted session binding, but only while that
   // session is still in the workspace — otherwise the picker shows a disabled
@@ -176,87 +166,60 @@ export function WorkspaceDockTile({
       : '';
   const transportAvailable = getMarkdownAnnotationsTransport() !== null;
 
-  const setSendResult = useCallback((status: SendStatus) => {
-    if (sentClearTimerRef.current) {
-      clearTimeout(sentClearTimerRef.current);
-      sentClearTimerRef.current = null;
-    }
-    setSendStatus(status);
-    if (status.kind === 'sent') {
-      sentClearTimerRef.current = setTimeout(() => {
-        sentClearTimerRef.current = null;
-        setSendStatus((prev) => (prev.kind === 'sent' ? { kind: 'idle' } : prev));
-      }, SEND_SENT_CLEAR_MS);
-    }
-  }, []);
-
-  const sendNow = useCallback(() => {
+  const performAnnotationSend = useCallback((): MarkdownSendResult | null | Promise<MarkdownSendResult> => {
     const handle = annotationsSendRef.current;
     const transport = getMarkdownAnnotationsTransport();
-    if (sendingRef.current || annotationCount === 0 || !targetSessionId || !handle || !transport || !path) {
-      return;
+    if (annotationCount === 0 || !targetSessionId || !handle || !transport || !path) {
+      return null;
     }
     if (!handle.isHydrated()) {
       // The daemon draft has not been loaded (hydrate in flight or failed):
       // local edits are unsaved, so the daemon would format a STALE stored
       // draft — not what the sidebar shows. Refuse rather than mis-deliver.
-      setSendResult({ kind: 'error', message: NOT_HYDRATED_MESSAGE });
-      return;
+      return { kind: 'error', message: NOT_HYDRATED_MESSAGE };
     }
-    sendingRef.current = true;
-    setSendResult({ kind: 'sending' });
-    void (async () => {
-      try {
-        // Flush the 500ms save debounce first so the daemon formats a draft
-        // that includes the last keystroke's edit.
-        await handle.flushPendingSave();
-        const result = await transport.submitMarkdownAnnotations(
-          path,
-          targetSessionId,
-          handle.getOrphanedIds(),
-        );
-        if (result.status === 'delivered' && result.error) {
-          // Delivered, but the daemon FAILED to clear its draft afterwards
-          // (spec B.7): keep local state — it still matches the surviving
-          // daemon draft — and surface the qualified outcome instead of a
-          // clean "Sent ✓" over a silently emptied list.
-          setSendResult({ kind: 'warning', message: result.error });
-        } else if (result.status === 'delivered') {
-          // Daemon already tombstone-cleared; mirror locally without a second
-          // clear and seed the generation counter from the new floor.
-          handle.applyDeliveredClear(result.generation ?? 0);
-          setSendResult({ kind: 'sent' });
-        } else if (result.status === 'skipped_pending_approval') {
-          setSendResult({ kind: 'skipped' }); // annotations kept for retry
-        } else {
-          setSendResult({ kind: 'error', message: result.error || 'Send failed' });
-        }
-      } catch (error) {
-        setSendResult({
-          kind: 'error',
-          message: error instanceof Error ? error.message : 'Send failed',
-        });
-      } finally {
-        sendingRef.current = false;
+    return (async () => {
+      // Flush the 500ms save debounce first so the daemon formats a draft
+      // that includes the last keystroke's edit.
+      await handle.flushPendingSave();
+      const result = await transport.submitMarkdownAnnotations(
+        path,
+        targetSessionId,
+        handle.getOrphanedIds(),
+      );
+      if (result.status === 'delivered' && result.error) {
+        // The daemon delivered the payload but kept its draft; local state
+        // stays with that surviving source of truth.
+        return { kind: 'warning', message: result.error };
       }
+      if (result.status === 'delivered') {
+        handle.applyDeliveredClear(result.generation ?? 0);
+        return { kind: 'sent' };
+      }
+      if (result.status === 'skipped_pending_approval') {
+        return { kind: 'skipped' };
+      }
+      return { kind: 'error', message: result.error || 'Send failed' };
     })();
-  }, [annotationCount, path, setSendResult, targetSessionId]);
+  }, [annotationCount, path, targetSessionId]);
 
-  // ⌘Enter — registration-gated (not handler-gated): the dispatcher consumes
-  // the event whenever a matching handler is registered, so an always-on
-  // no-op handler would eat the terminal's ⌘Enter. The def's
-  // `editableTarget: 'native'` additionally keeps it out of textareas (the
-  // annotation popover's own ⌘Enter submits the comment there).
-  useShortcut(
-    'markdown.sendAnnotations',
-    sendNow,
-    isMarkdown
+  const sendEnabled = isMarkdown
       && visible
       && hasFocusWithin
       && annotationCount > 0
       && !!targetSessionId
-      && transportAvailable,
-  );
+      && transportAvailable;
+  const {
+    outcome: sendOutcome,
+    send: sendNow,
+    clearOutcome: clearSendOutcome,
+  } = useAnnotationSend<MarkdownSendResult>({
+    send: performAnnotationSend,
+    shortcutId: 'markdown.sendAnnotations',
+    enabled: sendEnabled,
+    sentClearMs: SEND_SENT_CLEAR_MS,
+  });
+  const sendStatus = sendOutcome ?? { kind: 'idle' as const };
 
   const handleTileFocus = useCallback(() => {
     setHasFocusWithin(true);
@@ -493,7 +456,7 @@ export function WorkspaceDockTile({
                 // AND Send target); the daemon echo confirms it later. On a
                 // failed retarget request, roll back to the persisted binding.
                 setPendingTargetSessionId(sessionId);
-                setSendResult({ kind: 'idle' });
+                clearSendOutcome();
                 void Promise.resolve(onRetargetTile?.(sessionId)).catch((error) => {
                   console.warn('[WorkspaceDockTile] Failed to retarget tile session:', error);
                   setPendingTargetSessionId((prev) => (prev === sessionId ? null : prev));

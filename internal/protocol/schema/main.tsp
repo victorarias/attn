@@ -2633,7 +2633,9 @@ model SessionAnnotation {
   // The markdown the offsets covered when the annotation was made. Kept so the
   // panel can list it, and the draft can be submitted, without the message.
   quote: string;
-  emoji: string;
+  quick_label_id?: string;
+  // Read compatibility for drafts written before labels stored their stable id.
+  emoji?: string;
   comment: string;
 }
 

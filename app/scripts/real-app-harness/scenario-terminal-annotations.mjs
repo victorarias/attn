@@ -44,9 +44,9 @@ const TURN_START_TIMEOUT_MS = 90_000;
 const ANCHOR_TIMEOUT_MS = 30_000;
 const SETTLED_STATES = new Set(['idle', 'waiting_input', 'pending_approval']);
 
-// The label clicked in the popup. Its aria-label is the button's accessible
-// name in QUICK_LABELS; its emoji is what the filed annotation carries.
-const LABEL = { name: 'Show the receipt', emoji: '🧾' };
+// The label clicked in the popup. The UI renders its emoji, while the daemon
+// stores its stable id.
+const LABEL = { name: 'Show the receipt', id: 'show-the-receipt', emoji: '🧾' };
 // The note drafted beside the marks, and what proves it left the composer.
 const NOTE = 'Prefer the smallest change that covers this.';
 const FIRST_MESSAGE = 'A retry wrapper protects idempotent operations from duplicate network effects.';
@@ -407,6 +407,10 @@ async function main() {
       );
       const [annotation] = stored.annotations;
       runner.assert(annotation.quote === quote, `Daemon quote ${JSON.stringify(annotation.quote)} != UI quote ${JSON.stringify(quote)}`);
+      runner.assert(
+        annotation.quick_label_id === LABEL.id,
+        `Stored quick label = ${JSON.stringify(annotation.quick_label_id)}, want ${LABEL.id}`,
+      );
       runner.assert(
         typeof annotation.message_key === 'string' && annotation.message_key.length > 0,
         `Stored annotation has no message key: ${JSON.stringify(annotation)}`,

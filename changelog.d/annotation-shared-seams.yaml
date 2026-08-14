@@ -1,0 +1,7 @@
+kind: internal
+area: annotations
+change: >
+  Terminal and Markdown annotations now share draft handlers, request
+  correlation, quick-label picking, and send-outcome orchestration while
+  keeping their domain-specific anchoring, rendering, payload, and clearing
+  behavior separate.

@@ -1,24 +1,6 @@
-/**
- * Markdown-annotation daemon events (`markdown_annotations_*_result`).
- *
- * These do NOT use the shared `<kind>:<requestId>` correlation in
- * daemonPendingRequests.ts. Annotation commands are per-document and
- * last-writer-wins: the waiter is keyed `<op>:<workspaceId>:<path>` so a newer
- * request supersedes an older one for the same document, and the event's
- * `request_id` is checked against the stored one to drop a late result whose
- * request was already replaced. Two correlation schemes in one hook was a large
- * part of why the events were hard to follow; naming this one is the point of
- * the module.
- */
+/** Markdown-annotation daemon event decoding (`markdown_annotations_*_result`). */
 
-/** The waiter an annotation command parks, keyed by `markdownAnnotationKey`. */
-export interface PendingMarkdownAnnotation {
-  requestId: string;
-  resolve: (value: unknown) => void;
-  reject: (error: Error) => void;
-}
-
-export type PendingMarkdownAnnotations = Map<string, PendingMarkdownAnnotation>;
+import { takeKeyedRequest, type PendingKeyedRequests } from './daemonPendingRequests';
 
 /** `<op>:<workspaceId>:<path>` — one in-flight request per document per op. */
 export function markdownAnnotationKey(op: string, workspaceId: string, path: string): string {
@@ -45,7 +27,7 @@ type MarkdownAnnotationEvent = {
  */
 export function handleMarkdownAnnotationDaemonEvent(
   event: MarkdownAnnotationEvent,
-  pending: PendingMarkdownAnnotations,
+  pending: PendingKeyedRequests,
 ): boolean {
   switch (event.event) {
     case 'markdown_annotations_get_result':
@@ -58,11 +40,10 @@ export function handleMarkdownAnnotationDaemonEvent(
             ? 'save'
             : 'clear';
       const key = markdownAnnotationKey(op, String(event.workspace_id ?? ''), String(event.path));
-      const waiter = pending.get(key);
-      if (!waiter || waiter.requestId !== event.request_id) {
+      const waiter = takeKeyedRequest(pending, key, event.request_id);
+      if (!waiter) {
         return true; // superseded or timed out — drop the late result
       }
-      pending.delete(key);
       if (op === 'save' && !event.success && event.stale) {
         // Stale generation (tombstone / newer writer) is a protocol outcome the
         // client handles, not an error.
@@ -89,11 +70,10 @@ export function handleMarkdownAnnotationDaemonEvent(
       // pending entry with workspaceId '' so mirror that here (the daemon echoes
       // workspace_id '' or omits it).
       const key = markdownAnnotationKey('submit', String(event.workspace_id ?? ''), String(event.path));
-      const waiter = pending.get(key);
-      if (!waiter || waiter.requestId !== event.request_id) {
+      const waiter = takeKeyedRequest(pending, key, event.request_id);
+      if (!waiter) {
         return true; // superseded or timed out — drop the late result
       }
-      pending.delete(key);
       if (event.success || event.status === 'skipped_pending_approval') {
         // skipped_pending_approval resolves (success:false) so the UI can
         // message it distinctly from a hard failure; a delivered result may

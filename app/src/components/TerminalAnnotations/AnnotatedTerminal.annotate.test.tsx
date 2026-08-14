@@ -362,7 +362,7 @@ describe('AnnotatedTerminal', () => {
     // One click is the whole gesture: the popup closes and the panel takes over.
     expect(screen.queryByTestId('annotation-popup')).toBeNull();
     expect(screen.getByTestId('annotation-panel')).toBeTruthy();
-    expect(stored()[0]?.emoji).toBe('🔍');
+    expect(stored()[0]?.quickLabelId).toBe('verify-this');
     expect(stored()[0]?.quote).toBe(TURN_1.slice(0, 26));
   });
 
@@ -431,7 +431,7 @@ describe('AnnotatedTerminal', () => {
     fireEvent.click(screen.getByLabelText('Show the receipt'));
 
     expect(stored()).toHaveLength(1);
-    expect(stored()[0].emoji).toBe('🧾');
+    expect(stored()[0].quickLabelId).toBe('show-the-receipt');
   });
 
   it('reopens a comment straight into its editor, prefilled', async () => {
@@ -1035,8 +1035,8 @@ describe('AnnotatedTerminal sending', () => {
     await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
     expect(stored()).toHaveLength(1);
     expect(stored()[0].id).toBe(id);
-    expect(stored()[0].emoji).toBe('🧾');
-    await waitFor(() => expect(daemon.annotations.map((entry) => entry.emoji)).toEqual(['🧾']));
+    expect(stored()[0].quickLabelId).toBe('show-the-receipt');
+    await waitFor(() => expect(daemon.annotations.map((entry) => entry.quickLabelId)).toEqual(['show-the-receipt']));
     expect(daemon.calls.clearAnnotations).toBe(0);
   });
 
@@ -1064,7 +1064,7 @@ describe('AnnotatedTerminal sending', () => {
     });
 
     await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual([editedId]));
-    expect(stored()[0].emoji).toBe('❌');
+    expect(stored()[0].quickLabelId).toBe('this-is-wrong');
   });
 
   it('tombstones the daemon draft only once the send is delivered', async () => {
@@ -1101,7 +1101,7 @@ describe('AnnotatedTerminal persistence', () => {
     anchor('turn-1', 0, 26);
     fireEvent.click(screen.getByLabelText('Verify this'));
     await waitFor(() => expect(daemon.annotations).toHaveLength(1));
-    expect(daemon.annotations[0].emoji).toBe('🔍');
+    expect(daemon.annotations[0].quickLabelId).toBe('verify-this');
     expect(daemon.annotations[0].quote).toBe(TURN_1.slice(0, 26));
 
     fireEvent.click(screen.getByLabelText('Remove annotation'));
@@ -1116,7 +1116,7 @@ describe('AnnotatedTerminal persistence', () => {
       start: 4,
       end: 10,
       quote: TURN_1.slice(4, 10),
-      emoji: '❓',
+      quickLabelId: 'clarify-this',
       comment: 'why this?',
     }];
     daemon.generation = 7;
@@ -1144,7 +1144,7 @@ describe('AnnotatedTerminal persistence', () => {
     renderTerminal({ api: daemon });
 
     await waitFor(() => expect(stored()).toHaveLength(1));
-    expect(stored()[0].emoji).toBe('🔍');
+    expect(stored()[0].quickLabelId).toBe('verify-this');
     expect(stored()[0].quote).toBe(TURN_1.slice(0, 26));
   });
 
@@ -1161,7 +1161,7 @@ describe('AnnotatedTerminal persistence', () => {
       start: 31,
       end: 55,
       quote: TURN_1.slice(31, 55),
-      emoji: '🧾',
+      quickLabelId: 'show-the-receipt',
       comment: '',
     }];
 
@@ -1196,7 +1196,7 @@ describe('AnnotatedTerminal persistence', () => {
       start: 0,
       end: 26,
       quote: TURN_1.slice(0, 26),
-      emoji: '🔍',
+      quickLabelId: 'verify-this',
       comment: '',
     }], '', daemon.tombstone);
     expect(late.stale).toBe(true);

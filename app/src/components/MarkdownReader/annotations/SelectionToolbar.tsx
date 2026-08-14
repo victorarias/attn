@@ -30,7 +30,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscapeStack } from '../../../hooks/useEscapeStack';
-import { QuickLabelPicker } from './QuickLabelPicker';
+import { QuickLabelPicker } from '../../../annotations/QuickLabelPicker';
 import { QUICK_LABELS, THUMBS_UP_LABEL, type QuickLabel } from './quickLabels';
 
 export type ToolbarPositionMode = 'center-above' | 'top-right';
@@ -260,6 +260,8 @@ export function SelectionToolbar({
       </button>
       {showQuickLabels && zapButtonRef.current && (
         <QuickLabelPicker
+          className="md-quick-label-picker"
+          labels={QUICK_LABELS}
           anchorEl={zapButtonRef.current}
           cursorHint={pickerHint}
           onSelect={(label) => {
