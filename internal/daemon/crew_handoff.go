@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net"
+	"os"
 	"strings"
 	"syscall"
 	"time"
@@ -47,38 +49,24 @@ const crewNapPrompt = "Your predecessor just closed their day and left you the l
 // call from the nap's rollback: a binding that has since moved on is not
 // quietly stolen back.
 func (d *Daemon) transferCrewBinding(memberID, from, to string) error {
-	if err := d.requireHome(crew.Surface); err != nil {
-		return err
-	}
-	schema, err := d.crewCollection()
+	_, err := d.updateCrewMember(memberID, func(member *crew.Member) (bool, error) {
+		if member.BindingSession != from {
+			return false, fmt.Errorf("%s's day is no longer session %s; nothing was moved", member.ID, shortSessionID(from))
+		}
+		member.BindingSession = to
+		// The filed-letter fields are deliberately left alone. They name the
+		// session that wrote the letter, and `FiledLetterFor` only answers the
+		// session they name — so they go inert the moment the day changes, and a
+		// rollback that puts the binding back finds them still true. Clearing them
+		// here would erase, on the way in, exactly what the way out needs.
+		return true, nil
+	})
 	if err != nil {
 		return err
 	}
-	const attempts = 3
-	for range attempts {
-		members, docs, err := d.readCrewMembers()
-		if err != nil {
-			return err
-		}
-		member, ok := crew.Resolve(memberID, members)
-		if !ok {
-			return fmt.Errorf("no crew member %q is registered", memberID)
-		}
-		if member.BindingSession != from {
-			return fmt.Errorf("%s's day is no longer session %s; nothing was moved", member.ID, shortSessionID(from))
-		}
-		member.BindingSession = to
-		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
-		if err == nil {
-			d.publishFact(FactCrewBound, member.ID, nil)
-			d.logf("crew: %s's binding moved from session %s to %s", member.ID, from, to)
-			return nil
-		}
-		if !docstore.IsConflict(err) {
-			return err
-		}
-	}
-	return fmt.Errorf("the registry record for %q was rewritten under all %d attempts to move its binding; try again", memberID, attempts)
+	d.publishFact(FactCrewBound, memberID, nil)
+	d.logf("crew: %s's binding moved from session %s to %s", memberID, from, to)
+	return nil
 }
 
 // crewMemberForSession answers which member a session is living, judged the
@@ -105,7 +93,12 @@ func (d *Daemon) crewMemberForSession(sessionID string) (crew.Member, bool) {
 // crewHandoff files the letter and runs the nap. The letter is filed first and
 // is never rolled back: it is the member's honest closure, and a nap that could
 // not run is a day that did not start, not a letter that was not written.
-func (d *Daemon) crewHandoff(sessionID, note string) (*protocol.CrewHandoffResult, error) {
+//
+// retry is the way out of exactly that state. Writing the letter and turning the
+// day over are one motion but two acts, and only the second one can fail. A
+// retry runs the turnover against the letter already on disk: no second file, no
+// overwrite, append-only untouched.
+func (d *Daemon) crewHandoff(sessionID, note string, retry bool) (*protocol.CrewHandoffResult, error) {
 	if err := d.requireHome(crew.Surface); err != nil {
 		return nil, err
 	}
@@ -116,14 +109,10 @@ func (d *Daemon) crewHandoff(sessionID, note string) (*protocol.CrewHandoffResul
 	if !bound {
 		return nil, fmt.Errorf("this session is not living a crew member's day, so it has no day-line to close. A crew handoff is a member's own letter to its successor; the note you write for whoever tends a piece of work next is `attn seed note <id> -m \"…\" --handoff`")
 	}
-	if err := crew.ValidateHandoffNote(note); err != nil {
-		return nil, err
-	}
-	path, err := crew.FileHandoff(member.HomeDir, member.ID, note, time.Now())
+	path, err := d.crewLetterForHandoff(member, sessionID, note, retry)
 	if err != nil {
 		return nil, err
 	}
-	d.logf("crew: %s filed a letter at %s (%d bytes)", member.ID, path, len(note))
 
 	result := &protocol.CrewHandoffResult{Member: member.ID, Path: path}
 	newSessionID, err := d.crewNap(member, sessionID)
@@ -136,6 +125,57 @@ func (d *Daemon) crewHandoff(sessionID, note string) (*protocol.CrewHandoffResul
 	}
 	result.SessionID = protocol.Ptr(newSessionID)
 	return result, nil
+}
+
+// crewLetterForHandoff settles which letter this handoff turns the day over
+// with: the one being written now, or the one this day already filed. The two
+// paths never share an exit — each refusal names the other by its verb, because
+// "a letter is already filed under that name" is the same sentence for a retry
+// and for a correction and the caller cannot tell which it is in.
+func (d *Daemon) crewLetterForHandoff(member crew.Member, sessionID, note string, retry bool) (string, error) {
+	filed, hasFiled := member.FiledLetterFor(sessionID)
+	if retry {
+		if !hasFiled {
+			return "", fmt.Errorf("%s's day has filed no letter yet, so there is no turnover to retry — write one with `attn handoff -m \"<your letter>\"`", member.ID)
+		}
+		if _, err := os.Stat(filed); err != nil {
+			return "", fmt.Errorf("%s's filed letter is recorded at %s but is not readable there (%v); file this day's letter again with `attn handoff -m \"<your letter>\"`", member.ID, filed, err)
+		}
+		d.logf("crew: %s is retrying its turnover with the letter already filed at %s", member.ID, filed)
+		return filed, nil
+	}
+	if err := crew.ValidateHandoffNote(note); err != nil {
+		return "", err
+	}
+	path, err := crew.FileHandoff(member.HomeDir, member.ID, note, time.Now())
+	if err != nil {
+		if errors.Is(err, crew.ErrHandoffExists) && hasFiled {
+			// The one collision that is not a correction: this day wrote that letter
+			// minutes ago and the turnover behind it failed.
+			return "", fmt.Errorf("%s's letter for this minute is already filed at %s — if the turnover is what failed, `attn handoff --retry` runs it against that letter; if this is a correction, file it as its own letter a minute from now", member.ID, filed)
+		}
+		return "", err
+	}
+	d.logf("crew: %s filed a letter at %s (%d bytes)", member.ID, path, len(note))
+	d.recordCrewLetter(member.ID, sessionID, path)
+	return path, nil
+}
+
+// recordCrewLetter remembers which letter this day filed, so a failed turnover
+// has something to retry against. Best-effort by design: the letter is on disk
+// either way, and a registry write that fails must not undo a filing or fail the
+// nap that is about to run.
+func (d *Daemon) recordCrewLetter(memberID, sessionID, path string) {
+	if _, err := d.updateCrewMember(memberID, func(member *crew.Member) (bool, error) {
+		if member.BindingSession != sessionID {
+			return false, nil
+		}
+		member.LetterPath = path
+		member.LetterSession = sessionID
+		return true, nil
+	}); err != nil {
+		d.logf("crew: recording %s's filed letter at %s: %v", memberID, path, err)
+	}
 }
 
 // crewNap starts the member's next day in place of the one that just ended: a
@@ -268,7 +308,7 @@ func (d *Daemon) closeNappedSession(sessionID string) {
 // IPC handlers.
 
 func (d *Daemon) handleCrewHandoff(conn net.Conn, msg *protocol.CrewHandoffMessage) {
-	result, err := d.crewHandoff(strings.TrimSpace(msg.SessionID), msg.Note)
+	result, err := d.crewHandoff(strings.TrimSpace(msg.SessionID), msg.Note, protocol.Deref(msg.Retry))
 	if err != nil {
 		d.sendCrewError(conn, "handoff", err)
 		return

@@ -21,6 +21,12 @@ func crewHandoffCall(t *testing.T, d *Daemon, sessionID, note string) protocol.R
 	return gardenCall(t, func(c net.Conn) { d.handleCrewHandoff(c, &msg) })
 }
 
+func crewHandoffRetryCall(t *testing.T, d *Daemon, sessionID string) protocol.Response {
+	t.Helper()
+	msg := protocol.CrewHandoffMessage{Cmd: protocol.CmdCrewHandoff, SessionID: sessionID, Retry: protocol.Ptr(true)}
+	return gardenCall(t, func(c net.Conn) { d.handleCrewHandoff(c, &msg) })
+}
+
 func spawnedSessions(t *testing.T, backend *fakeSpawnBackend) []ptybackend.SpawnOptions {
 	t.Helper()
 	backend.mu.Lock()
@@ -234,6 +240,156 @@ func TestCrewHandoff_ANapThatCannotSpawnKeepsTheLetterAndTheDay(t *testing.T) {
 	}
 	if got := protocol.Deref(memberByID(t, crewList(t, d), "alder").BindingSession); got != woken.SessionID {
 		t.Fatalf("roster binding = %q, want the day still running %q — a failed nap must give the binding back", got, woken.SessionID)
+	}
+}
+
+// The way out of a nap that failed behind a filed letter. The line is
+// append-only, so the letter cannot be written twice: a retry runs the turnover
+// again against the one already on disk, and files nothing.
+func TestCrewHandoff_ARetryTurnsTheDayOverWithTheLetterAlreadyFiled(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	backend.spawnErr = errors.New("no room to launch")
+	backend.mu.Unlock()
+
+	first := crewHandoffCall(t, d, woken.SessionID, "The letter, written once.")
+	if !first.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(first.Error))
+	}
+	filed := first.CrewHandoffResult.Path
+	if protocol.Deref(first.CrewHandoffResult.NapError) == "" {
+		t.Fatal("the nap was supposed to fail")
+	}
+	before := handoffFiles(t, d, "alder")
+
+	backend.mu.Lock()
+	backend.spawnErr = nil
+	backend.mu.Unlock()
+
+	retried := crewHandoffRetryCall(t, d, woken.SessionID)
+	if !retried.Ok {
+		t.Fatalf("retry: %v", protocol.Deref(retried.Error))
+	}
+	result := retried.CrewHandoffResult
+	if napErr := protocol.Deref(result.NapError); napErr != "" {
+		t.Fatalf("the retried nap did not run: %s", napErr)
+	}
+	if result.Path != filed {
+		t.Errorf("the retry reports %s, want the letter already filed at %s", result.Path, filed)
+	}
+	if after := handoffFiles(t, d, "alder"); len(after) != len(before) {
+		t.Fatalf("the handoffs dir went from %v to %v; a retry writes no second letter", before, after)
+	}
+	successor := protocol.Deref(result.SessionID)
+	if successor == "" || successor == woken.SessionID {
+		t.Fatalf("the successor's session is %q; the retry must start the next day", successor)
+	}
+	if d.store.Get(woken.SessionID) != nil {
+		t.Error("the day that handed off is still running after the retry")
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "alder").BindingSession); got != successor {
+		t.Fatalf("roster binding = %q, want the successor %q", got, successor)
+	}
+	// The letter the member actually wrote is what threads the new day — the
+	// retry must not have primed the successor off some other file.
+	_, block, bound := d.crewPrimeForSession(successor)
+	if !bound || !strings.Contains(block, "The letter, written once.") {
+		t.Error("the successor was not primed by the letter that was already filed")
+	}
+}
+
+// A retry and a correction share a symptom — the name this letter would take is
+// taken — and must never share an exit. When this day is the one that took it,
+// the refusal names the retry; nothing is filed either way.
+func TestCrewHandoff_AFilingCollisionAfterAFailedNapNamesTheRetry(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	backend.spawnErr = errors.New("no room to launch")
+	backend.mu.Unlock()
+
+	first := crewHandoffCall(t, d, woken.SessionID, "The letter, written once.")
+	if !first.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(first.Error))
+	}
+	// Take the next minute's name too, so a minute rolling over between the two
+	// calls cannot let the second one through.
+	dir := filepath.Join(d.dataRoot, crew.HomesDirName, "alder", crew.HandoffsDirName)
+	next := filepath.Join(dir, crew.HandoffFileName("alder", time.Now().Add(time.Minute)))
+	if err := os.WriteFile(next, []byte("taken\n"), 0o644); err != nil {
+		t.Fatalf("take %s: %v", next, err)
+	}
+	before := handoffFiles(t, d, "alder")
+
+	second := crewHandoffCall(t, d, woken.SessionID, "The letter, written twice.")
+	if second.Ok {
+		t.Fatal("a second letter was filed over the one this day already wrote")
+	}
+	refusal := protocol.Deref(second.Error)
+	if !strings.Contains(refusal, "--retry") {
+		t.Errorf("the refusal %q does not name the retry path", refusal)
+	}
+	if !strings.Contains(refusal, first.CrewHandoffResult.Path) {
+		t.Errorf("the refusal %q does not name the letter already filed", refusal)
+	}
+	if after := handoffFiles(t, d, "alder"); len(after) != len(before) {
+		t.Fatalf("the handoffs dir went from %v to %v; a refused filing writes nothing", before, after)
+	}
+}
+
+// The other half of the pair: a retry with nothing to retry says so, and points
+// at the verb that writes a letter. A member must never be told "already filed"
+// when nothing is.
+func TestCrewHandoff_ARetryWithNoFiledLetterSaysToWriteOne(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	resp := crewHandoffRetryCall(t, d, woken.SessionID)
+	if resp.Ok {
+		t.Fatal("a day with no letter turned over on a retry")
+	}
+	if refusal := protocol.Deref(resp.Error); !strings.Contains(refusal, `attn handoff -m`) {
+		t.Errorf("the refusal %q does not name the verb that writes a letter", refusal)
+	}
+	if len(spawnedSessions(t, backend)) != 1 {
+		t.Error("a refused retry woke a successor")
+	}
+	if d.store.Get(woken.SessionID) == nil {
+		t.Error("a refused retry tore the day down")
+	}
+}
+
+// A letter belongs to the day that wrote it. Once the turnover succeeds, the
+// new day has written nothing — so its retry is refused rather than turning the
+// day over a second time off its predecessor's letter.
+func TestCrewHandoff_ANewDayInheritsNoLetterToRetry(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	first := crewHandoffCall(t, d, woken.SessionID, "Filed and gone.")
+	if !first.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(first.Error))
+	}
+	successor := protocol.Deref(first.CrewHandoffResult.SessionID)
+
+	resp := crewHandoffRetryCall(t, d, successor)
+	if resp.Ok {
+		t.Fatal("a fresh day turned over on its predecessor's letter")
+	}
+	if refusal := protocol.Deref(resp.Error); !strings.Contains(refusal, "filed no letter yet") {
+		t.Errorf("the refusal %q does not say this day has written nothing", refusal)
 	}
 }
 

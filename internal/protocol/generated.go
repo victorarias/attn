@@ -1625,6 +1625,9 @@ type CrewHandoffMessage struct {
 	// Note corresponds to the JSON schema field "note".
 	Note string `json:"note"`
 
+	// Retry corresponds to the JSON schema field "retry".
+	Retry *bool `json:"retry,omitempty,omitzero"`
+
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
 }
