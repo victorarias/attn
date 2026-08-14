@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
+import FocusTrap from 'focus-trap-react';
 import { useEscapeStack } from '../../hooks/useEscapeStack';
 import './AppViewParamsPrompt.css';
 
@@ -31,10 +32,6 @@ export function AppViewParamsPrompt({
 
   useEscapeStack(onClose, true);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
   const submit = () => {
     // An empty answer is a legitimate one — the view is told it got none, and
     // an app that needs it says so far better than a modal that will not close.
@@ -44,37 +41,49 @@ export function AppViewParamsPrompt({
 
   return (
     <div className="app-view-params-prompt" role="presentation" onClick={onClose}>
-      <div
-        className="app-view-params-content"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="app-view-params-title"
-        onClick={(event) => event.stopPropagation()}
+      {/* The trap is what makes the field typable. This prompt opens from the
+          command menu, whose own trap returns focus to the terminal as it
+          closes — after this one has mounted — so a plain focus-on-mount is
+          undone and every keystroke goes to the shell instead. */}
+      <FocusTrap
+        focusTrapOptions={{
+          allowOutsideClick: true,
+          escapeDeactivates: false,
+          initialFocus: () => inputRef.current ?? false,
+        }}
       >
-        <div className="app-view-params-title" id="app-view-params-title">{viewTitle}</div>
-        <label className="app-view-params-label" htmlFor="app-view-params-input">{label}</label>
-        <input
-          ref={inputRef}
-          id="app-view-params-input"
-          className="app-view-params-input"
-          data-testid="app-view-params-input"
-          type="text"
-          spellCheck={false}
-          placeholder={placeholder}
-          value={value}
-          onChange={(event) => setValue(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter') {
-              event.preventDefault();
-              submit();
-            }
-          }}
-        />
-        <div className="app-view-params-actions">
-          <button type="button" className="cancel" onClick={onClose}>Cancel</button>
-          <button type="button" className="confirm" data-testid="app-view-params-dock" onClick={submit}>Dock</button>
+        <div
+          className="app-view-params-content"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="app-view-params-title"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="app-view-params-title" id="app-view-params-title">{viewTitle}</div>
+          <label className="app-view-params-label" htmlFor="app-view-params-input">{label}</label>
+          <input
+            ref={inputRef}
+            id="app-view-params-input"
+            className="app-view-params-input"
+            data-testid="app-view-params-input"
+            type="text"
+            spellCheck={false}
+            placeholder={placeholder}
+            value={value}
+            onChange={(event) => setValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                submit();
+              }
+            }}
+          />
+          <div className="app-view-params-actions">
+            <button type="button" className="cancel" onClick={onClose}>Cancel</button>
+            <button type="button" className="confirm" data-testid="app-view-params-dock" onClick={submit}>Dock</button>
+          </div>
         </div>
-      </div>
+      </FocusTrap>
     </div>
   );
 }
