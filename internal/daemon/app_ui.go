@@ -3,6 +3,8 @@ package daemon
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -224,4 +226,38 @@ func (d *Daemon) handleAppViewCrash(_ *wsClient, msg *protocol.AppViewCrashMessa
 		Error:        text,
 		StartedAt:    now,
 	})
+	// The invocation is the countable record; the log is where the author looks.
+	// `attn app logs <app>` is what the crashed tile tells them to run, and an
+	// invocation row truncates the stack that says which line threw.
+	if err := appendAppLogLines(AppRuntimeLogPath(d.socketPath), name, fmt.Sprintf(
+		"view %s crashed while rendering (version %d)\n%s", view, version.ID, text)); err != nil {
+		d.logf("apps: writing the view crash of %s/%s to the app log: %v", name, view, err)
+	}
+}
+
+// appendAppLogLines adds one app's lines to the shared runtime log, each under
+// the tag `attn app logs` filters by.
+//
+// The supervisor's capture holds the same file open with O_APPEND, so both
+// writers land at the end; the whole block goes out in one write so a crash's
+// stack cannot interleave with what a handler is printing at the same moment.
+func appendAppLogLines(path, app, text string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	tag := appRuntimeAppTag(app)
+	var block strings.Builder
+	for _, line := range strings.Split(text, "\n") {
+		block.WriteString(tag)
+		block.WriteString(line)
+		block.WriteByte('\n')
+	}
+	_, err = file.WriteString(block.String())
+	return err
 }

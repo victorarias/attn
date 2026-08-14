@@ -146,6 +146,37 @@ func TestAViewCrashIsRecordedAgainstTheVersionThatServedIt(t *testing.T) {
 	}
 }
 
+func TestAViewCrashLandsInTheAppLogTheTileTellsYouToRead(t *testing.T) {
+	d := newAppDaemon(t)
+	version := installApp(t, d, "reviewer", appViewManifest(tileView("approvals", "Pending approvals")))
+
+	d.handleAppViewCrash(nil, &protocol.AppViewCrashMessage{
+		Cmd:       protocol.CmdAppViewCrash,
+		App:       "reviewer",
+		View:      "approvals",
+		VersionID: int(version.ID),
+		TileID:    "tile-7",
+		Error:     "TypeError: board is undefined\n    at Approvals (approvals.js:1:199)",
+	})
+
+	// Read it the way `attn app logs reviewer` does — through the tag filter, so
+	// a line written without the app's tag would be invisible to the author.
+	lines, _, err := readAppLog(AppRuntimeLogPath(d.socketPath), "reviewer", false, 20)
+	if err != nil {
+		t.Fatalf("reading the app log: %v", err)
+	}
+	whole := strings.Join(lines, "\n")
+	for _, want := range []string{
+		"view approvals crashed while rendering (version 1)",
+		"TypeError: board is undefined",
+		"at Approvals (approvals.js:1:199)",
+	} {
+		if !strings.Contains(whole, want) {
+			t.Fatalf("`attn app logs reviewer` does not carry %q:\n%s", want, whole)
+		}
+	}
+}
+
 func TestAViewCrashNamingAnotherAppsVersionIsDropped(t *testing.T) {
 	d := newAppDaemon(t)
 	installApp(t, d, "reviewer", appViewManifest(tileView("approvals", "Pending approvals")))
