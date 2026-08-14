@@ -148,7 +148,7 @@ func (d *Daemon) readSeed(id string) (garden.Seed, docstore.Document, error) {
 		return garden.Seed{}, docstore.Document{}, err
 	}
 	if !found {
-		return garden.Seed{}, docstore.Document{}, fmt.Errorf("no seed %s is planted here; `attn seed ls --all` lists the garden", id)
+		return garden.Seed{}, docstore.Document{}, fmt.Errorf("no seed %s is planted here; `attn seed ls` lists the garden", id)
 	}
 	seed, err := garden.Decode(doc.Body)
 	if err != nil {

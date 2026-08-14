@@ -364,8 +364,8 @@ func runSeedList(args []string) {
 	if *f.stale {
 		// The rule is half the answer: a stale seed is a question for your
 		// judgment, and the reader has to know what was asked to judge it.
-		fmt.Printf("open seeds with no trail movement for %s — nothing was touched; %s\n\n",
-			staleWindowLabel(result.StaleWindowSeconds), "tend, note or park what still matters")
+		fmt.Printf("open seeds whose trail has not moved for %s — no note, no move, no edge. This is a query, not a reaper: tend, note or park what still matters.\n\n",
+			staleWindowLabel(result.StaleWindowSeconds))
 	}
 	if len(result.Seeds) == 0 {
 		if *f.stale {

@@ -504,12 +504,15 @@ Ships:
 
 Acceptance:
 
-- [ ] One real piece of work flows end to end in production use: a plot is
+- [x] One real piece of work flows end to end in production use: a plot is
       planted, a delegate dispatched at it tends and harvests children in
       dependency order, the panel shows it draining live.
-- [ ] Two delegates on one plot pick up parallel children without collision.
-- [ ] A fresh session re-orients from `ready`/`ls` alone (garden state lives
+- [x] Two delegates on one plot pick up parallel children without collision.
+- [x] A fresh session re-orients from `ready`/`ls` alone (garden state lives
       in the daemon, not in anyone's context).
+
+All three run against the packaged app on every checkout:
+`pnpm --dir app run real-app:scenario-garden-plot-dispatch`.
 
 ### Slice 6 — the plan lives in the garden
 
