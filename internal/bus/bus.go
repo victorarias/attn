@@ -97,6 +97,19 @@ type Store interface {
 // redelivers the event; handlers must tolerate redelivery.
 type Handler func(ctx context.Context, ev Event) error
 
+// Gap describes the history missing below a durable consumer's cursor.
+type Gap struct {
+	Cursor   int64
+	Earliest int64
+	Head     int64
+	Missed   int64
+}
+
+// PreDrain runs after the consumer registration and log bounds are read, but
+// before any event is selected. It may durably move the cursor; the bus re-reads
+// the registration after it returns.
+type PreDrain func(ctx context.Context, consumer Consumer, gap *Gap) error
+
 // Options configures a Bus; zero durations fall back to the package defaults.
 type Options struct {
 	Store        Store
@@ -166,8 +179,9 @@ type Bus struct {
 }
 
 type durable struct {
-	name    string
-	handler Handler
+	name     string
+	handler  Handler
+	preDrain PreDrain
 
 	wake chan struct{}
 
@@ -390,6 +404,19 @@ func (b *Bus) wakeDurables() {
 // must neither rewind a consumer nor resurrect a killed one. A registration
 // that fails to persist leaves nothing behind, so the caller can retry.
 func (b *Bus) Register(name string, filter Filter, h Handler) error {
+	return b.register(name, filter, nil, h)
+}
+
+// RegisterWithPreDrain adds a durable consumer whose owner must settle work at
+// the cursor boundary before ordinary fact delivery begins.
+func (b *Bus) RegisterWithPreDrain(name string, filter Filter, pre PreDrain, h Handler) error {
+	if pre == nil {
+		return fmt.Errorf("bus: consumer %s needs a pre-drain hook", name)
+	}
+	return b.register(name, filter, pre, h)
+}
+
+func (b *Bus) register(name string, filter Filter, pre PreDrain, h Handler) error {
 	if strings.TrimSpace(name) == "" {
 		return errors.New("bus: consumer name is required")
 	}
@@ -412,7 +439,7 @@ func (b *Bus) Register(name string, filter Filter, h Handler) error {
 	if _, retiring := b.retiring[name]; retiring {
 		return fmt.Errorf("bus: consumer %s is being unregistered; retry once it is gone", name)
 	}
-	d := b.newDurable(name, filter, h)
+	d := b.newDurable(name, filter, pre, h)
 
 	// Before Start, the registration is all there is to do: Start persists every
 	// consumer and launches its loop. The same is true for a bus with no store,
@@ -573,17 +600,18 @@ func (b *Bus) Registered(name string) bool {
 
 // newDurable builds a consumer and its cancel scope. Callers that also touch the
 // consumer set hold b.mu; the bus context it reads is fixed at construction.
-func (b *Bus) newDurable(name string, filter Filter, h Handler) *durable {
+func (b *Bus) newDurable(name string, filter Filter, pre PreDrain, h Handler) *durable {
 	ctx, cancel := context.WithCancel(b.ctx)
 	return &durable{
-		name:    name,
-		filter:  filter,
-		handler: h,
-		wake:    make(chan struct{}, 1),
-		ctx:     ctx,
-		cancel:  cancel,
-		done:    make(chan struct{}),
-		enabled: true,
+		name:     name,
+		filter:   filter,
+		handler:  h,
+		preDrain: pre,
+		wake:     make(chan struct{}, 1),
+		ctx:      ctx,
+		cancel:   cancel,
+		done:     make(chan struct{}),
+		enabled:  true,
 	}
 }
 
@@ -763,8 +791,36 @@ func (b *Bus) drain(d *durable) error {
 		return nil
 	}
 
-	if err := b.reconcileGap(d); err != nil {
-		return err
+	earliest, head, err := b.store.Bounds()
+	if err != nil {
+		return fmt.Errorf("reading log bounds: %w", err)
+	}
+	var gap *Gap
+	if earliest != 0 && d.position() < earliest-1 {
+		gap = &Gap{
+			Cursor: d.position(), Earliest: earliest, Head: head,
+			Missed: earliest - 1 - d.position(),
+		}
+	}
+	if d.preDrain != nil {
+		if err := d.preDrain(d.ctx, rec, gap); err != nil {
+			return fmt.Errorf("before draining: %w", err)
+		}
+		rec, ok, err = b.store.GetConsumer(d.name)
+		if err != nil {
+			return fmt.Errorf("reading registration after pre-drain: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("registration for %s disappeared during pre-drain", d.name)
+		}
+		d.setPosition(rec.Cursor, rec.Enabled)
+		if !rec.Enabled {
+			return nil
+		}
+	} else if gap != nil {
+		if err := b.reconcileGap(d, *gap); err != nil {
+			return err
+		}
 	}
 
 	// A lagging consumer never leaves the loop below, so the kill switch is
@@ -848,18 +904,10 @@ func (b *Bus) drain(d *durable) error {
 
 // reconcileGap handles a cursor below the oldest surviving event (retention
 // trimmed past it while disabled or dead): resume at head, with a logged gap.
-func (b *Bus) reconcileGap(d *durable) error {
-	earliest, head, err := b.store.Bounds()
-	if err != nil {
-		return fmt.Errorf("reading log bounds: %w", err)
-	}
-	if earliest == 0 || d.position() >= earliest-1 {
-		return nil
-	}
-	missed := earliest - 1 - d.position()
+func (b *Bus) reconcileGap(d *durable, gap Gap) error {
 	b.log("bus: consumer %s resumed at head %d; %d event(s) were trimmed before its cursor %d",
-		d.name, head, missed, d.position())
-	return b.advance(d, head)
+		d.name, gap.Head, gap.Missed, gap.Cursor)
+	return b.advance(d, gap.Head)
 }
 
 func (b *Bus) advance(d *durable, seq int64) error {

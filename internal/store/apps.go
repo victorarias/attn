@@ -64,35 +64,35 @@ const appColumnsSQL = `
 // Landing on the version already current is not a move — re-applying
 // byte-identical content does exactly that — so it pushes nothing and leaves the
 // chain, and the way back, alone.
-func pushServingStep(tx *sql.Tx, name string, versionID int64, stamp string) error {
+func pushServingStep(tx *sql.Tx, name string, versionID int64, stamp string) (int64, bool, error) {
 	var current, cursor sql.NullInt64
 	err := tx.QueryRow(`SELECT current_version_id, serving_step_id FROM apps WHERE name = ?`, name).
 		Scan(&current, &cursor)
 	if err == sql.ErrNoRows {
-		return fmt.Errorf("store: no app named %q", name)
+		return 0, false, fmt.Errorf("store: no app named %q", name)
 	}
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	if current.Valid && current.Int64 == versionID {
 		_, err = tx.Exec(`UPDATE apps SET updated_at = ? WHERE name = ?`, stamp, name)
-		return err
+		return current.Int64, false, err
 	}
 	res, err := tx.Exec(`
 		INSERT INTO app_serving_steps (app_name, version_id, parent_id, created_at)
 		VALUES (?, ?, ?, ?)
 	`, name, versionID, cursor, stamp)
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	step, err := res.LastInsertId()
 	if err != nil {
-		return err
+		return 0, false, err
 	}
 	_, err = tx.Exec(`
 		UPDATE apps SET current_version_id = ?, serving_step_id = ?, updated_at = ? WHERE name = ?
 	`, versionID, step, stamp, name)
-	return err
+	return current.Int64, true, err
 }
 
 // AppVersion is an immutable record of one built artifact. ContentHash is the
@@ -208,12 +208,26 @@ func (s *Store) DeleteApp(name string) (bool, error) {
 	if s.db == nil {
 		return false, nil
 	}
-	res, err := s.db.Exec(`DELETE FROM apps WHERE name = ?`, name)
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.Exec(`DELETE FROM app_reconcile_requests WHERE app_name = ?`, name); err != nil {
+		return false, err
+	}
+	if _, err := tx.Exec(`DELETE FROM app_reconcile_progress WHERE app_name = ?`, name); err != nil {
+		return false, err
+	}
+	res, err := tx.Exec(`DELETE FROM apps WHERE name = ?`, name)
 	if err != nil {
 		return false, err
 	}
 	n, err := res.RowsAffected()
-	return n > 0, err
+	if err != nil {
+		return false, err
+	}
+	return n > 0, tx.Commit()
 }
 
 // CommitAppVersion records a built version and points the app at it, in one
@@ -281,8 +295,18 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 		return AppVersion{}, false, err
 	}
 
-	if err := pushServingStep(tx, v.AppName, v.ID, stamp); err != nil {
+	previous, moved, err := pushServingStep(tx, v.AppName, v.ID, stamp)
+	if err != nil {
 		return AppVersion{}, false, err
+	}
+	if moved && previous != 0 {
+		head, err := busHeadWith(tx)
+		if err != nil {
+			return AppVersion{}, false, err
+		}
+		if err := appendAppReconcileRequest(tx, v.AppName, AppReconcileVersionChange, v.ID, head, previous, now); err != nil {
+			return AppVersion{}, false, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return AppVersion{}, false, err
@@ -317,8 +341,18 @@ func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
-	if err := pushServingStep(tx, name, versionID, now.UTC().Format(sortableTimeFormat)); err != nil {
+	previous, moved, err := pushServingStep(tx, name, versionID, now.UTC().Format(sortableTimeFormat))
+	if err != nil {
 		return err
+	}
+	if moved && previous != 0 {
+		head, err := busHeadWith(tx)
+		if err != nil {
+			return err
+		}
+		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, head, previous, now); err != nil {
+			return err
+		}
 	}
 	return tx.Commit()
 }
@@ -339,13 +373,13 @@ func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) err
 	if s.db == nil {
 		return nil
 	}
-	var stepID, versionID int64
+	var stepID, versionID, previous int64
 	err := s.db.QueryRow(`
-		SELECT p.id, p.version_id FROM apps a
+		SELECT p.id, p.version_id, c.version_id FROM apps a
 			JOIN app_serving_steps c ON c.id = a.serving_step_id
 			JOIN app_serving_steps p ON p.id = c.parent_id
 		WHERE a.name = ?
-	`, name).Scan(&stepID, &versionID)
+	`, name).Scan(&stepID, &versionID, &previous)
 	switch {
 	case err == sql.ErrNoRows:
 		return fmt.Errorf("store: app %q has nothing below it in its serving history", name)
@@ -354,10 +388,27 @@ func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) err
 	case versionID != target:
 		return fmt.Errorf("store: app %q now has version %d one step back, not the %d this rollback resolved; nothing moved", name, versionID, target)
 	}
-	_, err = s.db.Exec(`
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.Exec(`
 		UPDATE apps SET current_version_id = ?, serving_step_id = ?, updated_at = ? WHERE name = ?
 	`, versionID, stepID, now.UTC().Format(sortableTimeFormat), name)
-	return err
+	if err != nil {
+		return err
+	}
+	if previous != 0 {
+		head, err := busHeadWith(tx)
+		if err != nil {
+			return err
+		}
+		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, head, previous, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 // ListAppServingHistory returns the versions on an app's serving history,
