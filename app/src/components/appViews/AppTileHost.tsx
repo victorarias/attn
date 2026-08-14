@@ -114,6 +114,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     if (!entry) {
       return (
         <Placeholder
+          kind="not-installed"
           title={`The app “${app}” is not installed.`}
           detail={`This tile stays where you put it. Apply the app again with \`attn app apply <path>\` and it will mount, or close the tile to remove it.`}
         />
@@ -122,6 +123,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     if (!entry.enabled) {
       return (
         <Placeholder
+          kind="disabled"
           title={`${app} is disabled.`}
           detail={`Its views do not run while it is off. \`attn app enable ${app}\` turns it back on.`}
         />
@@ -130,6 +132,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     if (servingVersion === 0 || servingHash === '') {
       return (
         <Placeholder
+          kind="no-version"
           title={`${app} has no version serving.`}
           detail={`\`attn app apply <path>\` builds and installs one; \`attn app status ${app}\` shows what it has.`}
         />
@@ -139,6 +142,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
       const names = (entry.views ?? []).map((v) => v.name);
       return (
         <Placeholder
+          kind="view-gone"
           title={`${app} no longer has a view called “${view}”.`}
           detail={names.length > 0
             ? `The version serving now offers: ${names.join(', ')}. Roll back with \`attn app rollback ${app}\`, or close this tile and dock one of those.`
@@ -149,6 +153,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     if (loadError) {
       return (
         <Placeholder
+          kind="load-error"
           title={loadError.message}
           detail={loadError.detail}
           action={{ label: 'Retry', onClick: () => setAttempt((n) => n + 1) }}
@@ -156,7 +161,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
       );
     }
     if (!mounted) {
-      return <div className="app-tile-host-message">Loading {app}/{view}…</div>;
+      return <div className="app-tile-host-message" data-app-view-placeholder="loading">Loading {app}/{view}…</div>;
     }
     const View = mounted.component;
     return (
@@ -165,6 +170,7 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
         onError={reportCrash}
         fallback={(error) => (
           <Placeholder
+            kind="crashed"
             title={`${app}/${view} crashed while rendering.`}
             detail={`${error.message}\n\nThe full error is recorded against this app — \`attn app logs ${app}\` has it.`}
             action={{ label: 'Reload', onClick: () => setAttempt((n) => n + 1) }}
@@ -177,7 +183,17 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
   })();
 
   return (
-    <div className="app-tile-host" onFocus={handleFocus} onBlur={handleBlur}>
+    // The data attributes are what `app_view_get_state` reads: the packaged-app
+    // harness has no other way to tell a mounted view from a placeholder that
+    // happens to render text.
+    <div
+      className="app-tile-host"
+      data-app-view-host={`${app}/${view}`}
+      data-app-view-tile={tileId}
+      data-app-view-stale={stale ? '1' : '0'}
+      onFocus={handleFocus}
+      onBlur={handleBlur}
+    >
       {stale && (
         // Static on purpose: a tile that repaints forever costs battery on a
         // machine that keeps attn open all day, and this badge has nothing to
@@ -191,13 +207,14 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
   );
 }
 
-function Placeholder({ title, detail, action }: {
+function Placeholder({ kind, title, detail, action }: {
+  kind: string;
   title: string;
   detail: string;
   action?: { label: string; onClick: () => void };
 }) {
   return (
-    <div className="app-tile-host-placeholder">
+    <div className="app-tile-host-placeholder" data-app-view-placeholder={kind}>
       <div className="app-tile-host-placeholder-title">{title}</div>
       <div className="app-tile-host-placeholder-detail">{detail}</div>
       {action && (
