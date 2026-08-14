@@ -267,7 +267,7 @@ func TestGarden_ConcurrentClaimsProduceOneTender(t *testing.T) {
 
 // Notes are the log. They read newest first, they say what they withheld, and
 // show carries them because a log behind a verb nobody runs is not read.
-func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
+func TestGarden_LogReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 	d := newGardenDaemon(t)
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a log"})
 

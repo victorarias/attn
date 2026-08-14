@@ -27,7 +27,7 @@ func runGit(t *testing.T, dir string, args ...string) {
 	}
 }
 
-func TestParseBrowseInputTreatsTrailingSlashAsBrowseIntoDirectory(t *testing.T) {
+func TestParseBrowseInputTreatsLogingSlashAsBrowseIntoDirectory(t *testing.T) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		t.Fatalf("UserHomeDir() error = %v", err)

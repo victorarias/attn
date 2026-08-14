@@ -231,7 +231,7 @@ func TestGardenPlot_StaleNamesTheQuietOpenSeeds(t *testing.T) {
 // A note is log movement even when the seed document itself never changed:
 // somebody writing down what they learned is exactly the seed not being
 // neglected.
-func TestGardenPlot_StaleReadsTheTrailNotJustTheDocument(t *testing.T) {
+func TestGardenPlot_StaleReadsTheLogNotJustTheDocument(t *testing.T) {
 	d := newGardenDaemon(t)
 	quiet := plantAt(t, d, "old document, live log", time.Now().Add(-30*24*time.Hour))
 	if got := list(t, d, protocol.SeedListMessage{Stale: protocol.Ptr(true)}); len(got.Seeds) != 1 {

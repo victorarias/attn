@@ -76,7 +76,7 @@ func TestGarden_AHandoffReachesTheNextTender(t *testing.T) {
 // A handoff outlives the log window. It is the case a scan of `show`'s newest
 // few notes would miss, and the one that matters most: a busy seed is exactly
 // where a successor needs the note that was written to them.
-func TestGarden_TheFreshestHandoffSurvivesABusyTrail(t *testing.T) {
+func TestGarden_TheFreshestHandoffSurvivesABusyLog(t *testing.T) {
 	d := newGardenDaemon(t)
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "busy"})
 

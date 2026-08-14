@@ -316,7 +316,7 @@ func TestHarvestNeedsAReason(t *testing.T) {
 	}
 }
 
-func TestReasonLimitNamesItselfAndPointsAtTheTrail(t *testing.T) {
+func TestReasonLimitNamesItselfAndPointsAtTheLog(t *testing.T) {
 	_, err := Transition(seedIn(StatusPlanted, Tender{}), VerbHarvest, Tender{Session: me}, strings.Repeat("x", MaxReasonChars+1), alive)
 	if err == nil {
 		t.Fatal("an oversized reason was accepted")
