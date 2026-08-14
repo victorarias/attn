@@ -21,5 +21,7 @@ notes: >
   A5 slice 5. Protocol 244: `app_command` and `app_command_result`. An app's
   bundle now default-exports one handler map per kind — `subscriptions`, keyed
   by event pattern, and `commands`, keyed by name — so an app installed before
-  this needs one `attn app apply` to keep dispatching. One command carries at
+  this needs one `attn app apply` to keep dispatching, and the app runtime's API
+  version goes to 4 so a stale sidecar binary is refused at hello rather than
+  served against the new shape. One command carries at
   most 256KB in either direction.

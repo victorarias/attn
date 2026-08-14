@@ -51,7 +51,12 @@ const (
 	// case this guards is an old binary inside a stale app bundle meeting a new
 	// daemon, where every symptom of the skew would otherwise appear later and
 	// somewhere else.
-	appRuntimeAPIVersion = 3
+	//
+	// It moves with the daemon↔host contract, which includes the shape of an
+	// app's bundle: the host loads it. Bump it here and in apphost/src/index.ts
+	// together — TestAppRuntimeAPIVersionMatchesTheHost is what fails when only
+	// one moves.
+	appRuntimeAPIVersion = 4
 )
 
 // appRuntimeHostOverride lets a test — and a developer running a checkout's

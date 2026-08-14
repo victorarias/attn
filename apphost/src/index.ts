@@ -29,8 +29,10 @@ import {
  * The runtime contract this host speaks. The daemon refuses a host that does not
  * match, because a version skew between the daemon and a binary inside an old app
  * bundle is exactly the case a silent mismatch would turn into wrong behavior.
+ *
+ * Bump it together with appRuntimeAPIVersion in internal/daemon/app_runtime.go.
  */
-const APP_RUNTIME_API_VERSION = 3
+const APP_RUNTIME_API_VERSION = 4
 
 /**
  * Which app a line of output came from.
