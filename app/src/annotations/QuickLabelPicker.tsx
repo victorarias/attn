@@ -104,7 +104,9 @@ function FloatingQuickLabelPicker({
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
   }, [labels, onSelect]);
 
   useEffect(() => {

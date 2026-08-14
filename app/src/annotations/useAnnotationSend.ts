@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useShortcut } from '../shortcuts/useShortcut';
 import type { ShortcutId } from '../shortcuts/registry';
 
@@ -28,9 +28,12 @@ export function useAnnotationSend<T extends AnnotationSendResult>({
   sentClearMs,
 }: UseAnnotationSendOptions<T>) {
   const sendRef = useRef(send);
-  sendRef.current = send;
   const sendingRef = useRef(false);
   const [outcome, setOutcome] = useState<AnnotationSendOutcome<T>>(null);
+
+  useLayoutEffect(() => {
+    sendRef.current = send;
+  }, [send]);
 
   const sendNow = useCallback(() => {
     if (sendingRef.current) {
