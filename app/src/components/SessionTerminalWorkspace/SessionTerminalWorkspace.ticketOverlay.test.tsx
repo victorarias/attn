@@ -31,6 +31,7 @@ vi.mock('../GhosttyTerminal', async () => {
         write: async () => {},
         resizeLocal: async () => {},
         reset: () => {},
+        setSurfaceReleased: () => {},
         scrollToTop: () => false,
         getText: () => '',
         hasMeasuredSize: () => true,

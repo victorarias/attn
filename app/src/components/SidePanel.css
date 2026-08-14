@@ -32,13 +32,18 @@
   transform: translateX(calc(100% + 18px));
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease;
   width: var(--side-panel-width, min(420px, 42vw));
-  will-change: transform, opacity;
 }
 
+/* will-change only while the panel is open. The dock mounts all five panels
+   unconditionally, so a permanent hint gave every closed one a compositing
+   layer with a full-height backing store it never draws: measured 74MB of the
+   empty app's 212MB of GPU surface. Promotion still happens for the open/close
+   transition, which is the only time these move. */
 .side-panel-shell.is-open .side-panel {
   opacity: 1;
   pointer-events: auto;
   transform: translateX(0);
+  will-change: transform, opacity;
 }
 
 .side-panel--running {

@@ -52,6 +52,7 @@ vi.mock('../GhosttyTerminal', async () => {
         },
         getSize: () => null,
         fit: () => {},
+        setSurfaceReleased: () => {},
       }), [paneId]);
       React.useImperativeHandle(ref, () => handle, [handle]);
       // Once per mount, like the real terminal: onReady's identity changes every

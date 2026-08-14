@@ -247,6 +247,12 @@ export interface GhosttyTerminalHandle {
   // is meaningful: it clears what the pane drew before the reattach.
   seedPlacements: (sessionId: string, placements: PlacementElement[]) => Promise<void>;
   reset: () => void;
+  // Hand back (or take back) the GPU drawing buffer while the pane is off-screen.
+  // The model, its scrollback, and the GL context all survive; only the surface
+  // the compositor would show goes. Releasing must be paired with a restore
+  // before the pane is painted again, and the restore repaints synchronously so
+  // a revealed pane never shows a blank frame.
+  setSurfaceReleased: (released: boolean) => void;
   scrollToTop: () => boolean;
   getText: () => string;
   getSize: () => { cols: number; rows: number } | null;
@@ -525,6 +531,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const terminalRef = useRef<GhosttyModel | null>(null);
     const rendererRef = useRef<WebGlTerminalRenderer | null>(null);
+    // Belongs to the pane, not to a renderer instance: it outlives the rebuilds.
+    const surfaceReleasedRef = useRef(false);
     const inputRef = useRef<InputHandler | null>(null);
     const modelSizeRef = useRef({ cols: 80, rows: 24 });
     // False until fit() measures the container: the construction-default size
@@ -1054,6 +1062,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         return false;
       }
     }, [getViewportCells, recoverFromModelFault, resolvedTheme]);
+
+    // Off-screen panes hand their GPU drawing buffer back; the owner that knows
+    // whether this pane is on screen drives both directions. The restore repaints
+    // from the model, which never left, so the caller only has to run it before
+    // the browser paints the reveal.
+    const setSurfaceReleased = useCallback((released: boolean) => {
+      // The owner re-asserts this on every layout pass; only a real transition
+      // may repaint, or a visible pane would take a forced full paint per render.
+      if (surfaceReleasedRef.current === released) return;
+      surfaceReleasedRef.current = released;
+      const renderer = rendererRef.current;
+      if (!renderer) return;
+      if (released) {
+        renderer.releaseDrawingBuffer();
+        return;
+      }
+      renderer.restoreDrawingBuffer();
+      renderSurface(true);
+    }, [renderSurface]);
 
     // The annotation store is a mutable object, so adding, editing, or removing
     // an annotation changes nothing React can see. The owner bumps the version
@@ -2273,6 +2300,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       applyPlacements,
       seedPlacements,
       reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); placementStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+      setSurfaceReleased,
       scrollToTop: () => {
         const terminal = terminalRef.current;
         if (!terminal) return false;
@@ -2298,7 +2326,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getBlockState,
       getPlacementState,
       drain: () => writeChainRef.current,
-    }), [applyPlacements, fit, getBlockState, getPlacementState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, seedPlacements, write]);
+    }), [applyPlacements, fit, getBlockState, getPlacementState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, seedPlacements, setSurfaceReleased, write]);
 
     useEffect(() => {
       let active = true;
@@ -2393,6 +2421,11 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         });
         terminalRef.current = terminal;
         rendererRef.current = renderer;
+        // A fresh renderer always owns a drawing buffer. A theme change or a
+        // model-fault recovery rebuilds one for every mounted pane, including the
+        // hidden ones, so the released state has to survive the rebuild or those
+        // panes silently re-take the surfaces they gave back.
+        if (surfaceReleasedRef.current) renderer.releaseDrawingBuffer();
         const recoveryAttempt = recoveryAttemptRef.current;
         const recoveredModelFault = modelRecoveryPendingRef.current;
         recoveryAttemptRef.current = 0;
@@ -2490,6 +2523,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           applyPlacements,
           seedPlacements,
           reset: () => { recordDiag({ kind: 'reset', pane: diagKeyRef.current, session: runtimeMetaRef.current?.sessionId ?? undefined, model: modelInstanceRef.current }); modelOpRingRef.current.noteReset(); blockStoreRef.current.clear(); placementStoreRef.current.clear(); annotationsRef.current?.reset(); selectedBlockIdRef.current = null; void write('\x1bc'); },
+          setSurfaceReleased,
           scrollToTop: () => { viewportOffsetRef.current = terminal.getScrollbackLength(); wheelRemainderRowsRef.current = 0; hoverGenerationRef.current += 1; renderSurface(true); return true; },
           getText,
           getSize: () => ({ cols: terminal.cols, rows: terminal.rows }),
@@ -2657,7 +2691,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // fontSize is intentionally NOT a dependency: see the font-size effect
     // below for why a size change must re-metric the existing renderer in
     // place instead of rebuilding the model/renderer for every mounted pane.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, rendererEpoch, resizeLocal, resolvedTheme, write]);
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, rendererEpoch, resizeLocal, resolvedTheme, setSurfaceReleased, write]);
 
     // React to a font-size change without tearing down the WASM model or the
     // WebGL renderer. Rebuilding on every font-size change (the previous

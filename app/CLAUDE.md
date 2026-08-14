@@ -195,3 +195,36 @@ pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
 4. **Git status subscription**: Only 1 subscription per client. New subscription replaces old one.
 
 5. **Circuit breaker auto-reset**: Opens after failed reconnects, auto-resets after 30s even without user action.
+
+6. **GPU surfaces outnumber what you can see.** Three traps, each of which
+   cost the app over 100MB at rest until 2026-08-14. Receipts and the
+   measurement recipe:
+   [docs/plans/2026-08-14-app-memory-floor.md](../docs/plans/2026-08-14-app-memory-floor.md).
+
+   - **`will-change` on an always-mounted component.** The right dock mounts
+     all five panels and only toggles a class, so a permanent hint gave every
+     closed one a full-height backing store it never drew. Promote under the
+     open state, not on the base rule — and check whether the component is
+     conditionally rendered before reaching for the hint at all. The same
+     applies to `translateZ`, `backdrop-filter`, `isolation`, and `contain`.
+   - **A WebGL context hands you attachments you did not ask for.** `depth`
+     is `true` unless you say otherwise, and every attachment is another
+     drawing-buffer-sized allocation per canvas. Ask for what you read; the
+     terminal renderer reads neither depth nor stencil, so it asks for
+     neither — `stencil` already defaults to `false`, which makes that half
+     insurance rather than a saving.
+   - **A hidden canvas still owns its drawing buffer.** `display:none` hides
+     an element; the buffer is sized by the canvas's width/height attributes.
+     An inactive session's panes hand theirs back via
+     `setSurfaceReleased(true)` on the terminal handle, driven from
+     `SessionTerminalWorkspace`. If you add a surface that survives being
+     off-screen, give it the same treatment — and restore in a layout effect
+     so the repaint precedes the frame that reveals it.
+
+   Never resolve one of these by tearing down and rebuilding a WebGL context.
+   WKWebView's live-context pool is small enough that rebuilding every mounted
+   pane loses contexts and permanently breaks panes — the reason the font-size
+   effect in `GhosttyTerminal.tsx` re-metrics in place.
+
+   Measure with `scenario-perf-baseline`'s `APP FOOTPRINT` and its
+   `paneSizedSurfaces` histogram. `ps` RSS cannot see graphics memory at all.

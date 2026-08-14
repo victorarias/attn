@@ -26,10 +26,13 @@ die() {
   exit 1
 }
 
-# Prints "<window-id> <width>" for the largest on-screen layer-0 window owned
-# by $1; with WINID_LIST=1, prints every attn* owner instead (for the error
-# path). CGWindowID is not reachable from AppleScript, so this goes through a
-# throwaway swift script.
+# Prints "<window-id> <width>" for the largest on-screen window owned by $1;
+# with WINID_LIST=1, prints every attn* owner instead (for the error path).
+# CGWindowID is not reachable from AppleScript, so this goes through a
+# throwaway swift script. Window level is deliberately not filtered: the
+# harness floats the app it drives above everything else, so a layer-0 rule
+# finds no window on exactly the runs worth recording. Largest-area already
+# rejects the status items and panels that rule was aimed at.
 window_id_for_app() {
   local owner="$1"
   local swift_src
@@ -43,7 +46,6 @@ let target = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : ""
 var best: (id: Int, area: Int, width: Int) = (0, 0, 0)
 var owners = Set<String>()
 for w in list {
-    guard (w[kCGWindowLayer as String] as? Int ?? -1) == 0 else { continue }
     let owner = w[kCGWindowOwnerName as String] as? String ?? ""
     if owner.hasPrefix("attn") { owners.insert(owner) }
     guard owner == target, let num = w[kCGWindowNumber as String] as? Int,

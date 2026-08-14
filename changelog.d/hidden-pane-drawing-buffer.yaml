@@ -1,0 +1,9 @@
+kind: fixed
+area: app
+change: >
+  A session you are not looking at no longer holds the GPU memory to draw
+  itself. Every warm pane kept a full window's worth of drawing surface ready
+  while it sat behind another session, so eight open sessions paid for eight
+  windows and showed one. Hidden panes now hand that surface back and take it
+  again as they are revealed; the terminal, its scrollback, and instant
+  switching are unchanged.
