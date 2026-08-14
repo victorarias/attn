@@ -207,10 +207,30 @@ func TestTendRefusalNamesTheTenderAndTheWayForward(t *testing.T) {
 	if err == nil {
 		t.Fatal("a second session was allowed to take a live claim")
 	}
-	for _, want := range []string{held.ID, "alder", "attn seed note"} {
+	for _, want := range []string{held.ID, "Alder", "attn seed note"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("refusal does not name %q:\n%s", want, err)
 		}
+	}
+}
+
+// Display capitalizes, identity does not: a refusal names the member the way a
+// person says it, while Name() — which doubles as the identity test — is left
+// exactly as stored, and a session id is never dressed up as a name.
+func TestTenderDisplayName_WritesAMemberAsANameAndLeavesASessionAlone(t *testing.T) {
+	member := Tender{Session: "sess-a", Member: "trellis"}
+	if got := member.DisplayName(); got != "Trellis" {
+		t.Errorf("DisplayName() = %q, want Trellis", got)
+	}
+	if got := member.Name(); got != "trellis" {
+		t.Errorf("Name() = %q, want the stored id", got)
+	}
+	session := Tender{Session: "sess-a"}
+	if got := session.DisplayName(); got != "sess-a" {
+		t.Errorf("DisplayName() = %q, want the session id untouched", got)
+	}
+	if got := (Tender{}).DisplayName(); got != "" {
+		t.Errorf("an unnamed tender displays as %q, want empty", got)
 	}
 }
 
@@ -227,7 +247,7 @@ func TestTendRefusesAnotherMemberWhenNeitherCarriesASession(t *testing.T) {
 
 	if _, err := Transition(held, VerbTend, Tender{Member: "alder"}, "", alive); err == nil {
 		t.Fatal("a different member took a live claim; the seed has one tender at a time")
-	} else if !strings.Contains(err.Error(), "trellis") {
+	} else if !strings.Contains(err.Error(), "Trellis") {
 		t.Fatalf("refusal does not name who holds it: %v", err)
 	}
 

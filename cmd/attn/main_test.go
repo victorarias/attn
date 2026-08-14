@@ -266,7 +266,9 @@ func TestParseDirectLaunchArgs_MemberNamesTheSession(t *testing.T) {
 	if parsed.member != "trellis" {
 		t.Fatalf("member = %q, want trellis", parsed.member)
 	}
-	if parsed.label != "trellis" {
+	// The label is the display side of the same member: a name, while the id
+	// the binding takes stays lowercase.
+	if parsed.label != "Trellis" {
 		t.Fatalf("label = %q, want the member's name", parsed.label)
 	}
 }

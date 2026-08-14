@@ -119,6 +119,42 @@ func TestCrewWake_AnotherHarnessIsNotGivenTheClaudeModel(t *testing.T) {
 	}
 }
 
+// Display capitalizes, identity does not. Everything a person reads off a woken
+// member — its session label, its pane, its workspace — is written as a name,
+// while the workspace id, the binding and the wire's member field stay the
+// lowercase id.
+func TestCrewWake_NamesTheDayAndKeepsTheIDLowercase(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+
+	result, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil {
+		t.Fatalf("no session %q was stored", result.SessionID)
+	}
+	if session.Label != "Trellis" {
+		t.Errorf("session label = %q, want Trellis", session.Label)
+	}
+	workspace := d.store.GetWorkspace(result.WorkspaceID)
+	if workspace == nil {
+		t.Fatalf("no workspace %q was created", result.WorkspaceID)
+	}
+	if workspace.Title != "Trellis" {
+		t.Errorf("workspace title = %q, want Trellis", workspace.Title)
+	}
+	if result.WorkspaceID != "workspace-crew-trellis" {
+		t.Errorf("workspace id = %q, want workspace-crew-trellis", result.WorkspaceID)
+	}
+	if result.Member != "trellis" {
+		t.Errorf("wire member = %q, want the lowercase id", result.Member)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").BindingSession); got != result.SessionID {
+		t.Errorf("roster binding = %q, want %q", got, result.SessionID)
+	}
+}
+
 // Two agents with the same identity never run at once. The sidebar's one action
 // must not fail exactly when the member is present, so a second wake names the
 // live day instead of refusing — and launches nothing.
@@ -177,7 +213,8 @@ func TestCrewWake_ADirectoryThatMovedIsNamedAndNothingIsClaimed(t *testing.T) {
 	if err == nil {
 		t.Fatal("a member launched into a directory that is not there")
 	}
-	for _, want := range []string{"alder", launchDir, "attn crew set"} {
+	// The prose names Alder; the command it hands back takes the id.
+	for _, want := range []string{"Alder launches in", launchDir, "attn crew set alder --cwd"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
@@ -237,7 +274,7 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 	}
 
 	log := readLog()
-	if !strings.Contains(log, "crew: priming trellis") {
+	if !strings.Contains(log, "crew: priming Trellis") {
 		t.Fatalf("no greppable priming receipt in the daemon log:\n%s", log)
 	}
 	// The logged size is the size of what was injected, not an estimate of it.

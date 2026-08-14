@@ -7,6 +7,7 @@ import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { activityStaleMs } from './utils/activitySettings';
+import { crewDisplayName } from './utils/crewName';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
 
@@ -3468,7 +3469,7 @@ function AppContent({
   const handleWakeCrewMember = useCallback((member: string) => {
     sendCrewWake(member)
       .then((result) => handleSelectSession(result.sessionId))
-      .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${member}`));
+      .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${crewDisplayName(member)}`));
   }, [sendCrewWake, handleSelectSession, showError]);
 
   // The daemon-facing ticket actions the pane-header ticket overlay wires into

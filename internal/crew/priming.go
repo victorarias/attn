@@ -5,7 +5,6 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
-	"unicode"
 	"unicode/utf8"
 )
 
@@ -65,7 +64,7 @@ func (p Priming) Block() string {
 	if strings.TrimSpace(p.Member) == "" {
 		return ""
 	}
-	name := capitalized(p.Member)
+	name := DisplayName(p.Member)
 	var b strings.Builder
 	fmt.Fprintf(&b, `You are **%[1]s**, a crew member of this attn home.
 
@@ -131,17 +130,6 @@ func cut(text string, limit int, path string) string {
 		end--
 	}
 	return text[:end] + fmt.Sprintf("\n\n[cut at %d bytes of %d — the whole file is at %s]", end, len(text), path)
-}
-
-// capitalized renders a member id as the name it is in prose: Trellis speaking
-// to Trellis. Ids stay lowercase everywhere they are addresses — the home path,
-// the registry, the CLI.
-func capitalized(id string) string {
-	first, size := utf8.DecodeRuneInString(id)
-	if size == 0 {
-		return id
-	}
-	return string(unicode.ToUpper(first)) + id[size:]
 }
 
 func trimmed(values []string) []string {

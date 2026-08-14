@@ -7,6 +7,7 @@ import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
 import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
 import { formatWakeTime } from '../utils/snoozeDurations';
+import { crewDisplayName } from '../utils/crewName';
 import { useNow, TURN_AGE_TICK_MS } from '../hooks/useNow';
 
 export interface QueueBandSessionView {
@@ -427,7 +428,10 @@ function CrewRowView({
   onOpenActions?: (event: ReactMouseEvent) => void;
 }) {
   const awake = Boolean(row);
-  const label = row?.session.label || member;
+  // An awake member arrives with the daemon's label; a sleeping one has no
+  // session to carry one, so the display rule names it here.
+  const name = crewDisplayName(member);
+  const label = row?.session.label || name;
   return (
     <div
       className={`session-item queue-row queue-row--crew ${selected ? 'selected' : ''}`.trim()}
@@ -441,7 +445,7 @@ function CrewRowView({
         type="button"
         className="queue-row-select"
         data-testid={`queue-crew-select-${member}`}
-        aria-label={awake ? `Open ${label}` : `Wake ${member}`}
+        aria-label={awake ? `Open ${label}` : `Wake ${name}`}
         onClick={awake ? onSelect : onWake}
       />
       {awake ? (
@@ -452,7 +456,7 @@ function CrewRowView({
         <span className="crew-asleep-dot" aria-hidden="true" />
       )}
       <SessionLabel label={label} />
-      <span className="crew-row-mark" title={awake ? `${member} is awake` : `${member} is asleep`}>
+      <span className="crew-row-mark" title={awake ? `${name} is awake` : `${name} is asleep`}>
         {awake ? 'crew' : 'asleep'}
       </span>
       {!awake && onWake && (
@@ -461,8 +465,8 @@ function CrewRowView({
             type="button"
             className="queue-row-wake"
             data-testid={`queue-crew-wake-${member}`}
-            title={`Wake ${member} — start its day`}
-            aria-label={`Wake ${member}`}
+            title={`Wake ${name} — start its day`}
+            aria-label={`Wake ${name}`}
             onClick={(event) => {
               event.stopPropagation();
               onWake();

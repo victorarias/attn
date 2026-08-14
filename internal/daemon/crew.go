@@ -78,11 +78,11 @@ func (d *Daemon) importCrewHomes() {
 			if docstore.IsConflict(err) {
 				continue // already registered; the record is authoritative
 			}
-			d.logf("crew: importing %s: %v", member.ID, err)
+			d.logf("crew: importing %s: %v", crew.DisplayName(member.ID), err)
 			continue
 		}
 		d.publishFact(FactCrewRegistered, member.ID, nil)
-		d.logf("crew: imported member %s from %s", member.ID, member.HomeDir)
+		d.logf("crew: imported member %s from %s", crew.DisplayName(member.ID), member.HomeDir)
 	}
 }
 
@@ -227,7 +227,7 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 		}
 		if d.crewBindingLive(member) {
 			return "", fmt.Errorf("%s is already awake in session %s; two agents with the same identity never run at once — wait for that day to end, or wake another member",
-				member.ID, shortSessionID(member.BindingSession))
+				crew.DisplayName(member.ID), shortSessionID(member.BindingSession))
 		}
 		// Past every refusal, so the claim is going to land: drop any other name
 		// this session already answered to. A refused claim is not reached here,
@@ -237,7 +237,7 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
 		if err == nil {
 			d.publishFact(FactCrewBound, member.ID, nil)
-			d.logf("crew: session %s bound as %s", sessionID, member.ID)
+			d.logf("crew: session %s bound as %s", sessionID, crew.DisplayName(member.ID))
 			return member.ID, nil
 		}
 		if !docstore.IsConflict(err) {
@@ -280,11 +280,11 @@ func (d *Daemon) releaseCrewBindingsExcept(schema docstore.CollectionSchema, mem
 		}
 		member.BindingSession = ""
 		if err := d.writeCrewMember(schema, member, docs[member.ID].Rev); err != nil {
-			d.logf("crew: releasing %s's binding for session %s: %v", member.ID, sessionID, err)
+			d.logf("crew: releasing %s's binding for session %s: %v", crew.DisplayName(member.ID), sessionID, err)
 			continue
 		}
 		d.publishFact(FactCrewReleased, member.ID, nil)
-		d.logf("crew: session %s released %s's binding", sessionID, member.ID)
+		d.logf("crew: session %s released %s's binding", sessionID, crew.DisplayName(member.ID))
 	}
 }
 

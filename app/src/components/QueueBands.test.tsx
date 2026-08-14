@@ -468,6 +468,17 @@ describe('the crew in the sidebar', () => {
     expect(screen.queryByTestId('queue-crew-wake-keel')).toBeNull();
   });
 
+  it('writes a sleeping member as a name while the id stays the address', () => {
+    renderCrew([], { onWakeCrewMember: vi.fn() });
+    const row = screen.getByTestId('queue-crew-trellis');
+    // The row reads Trellis; every hook into it — test id, data attribute, the
+    // id handed back on wake — is the lowercase id.
+    expect(row.textContent).toContain('Trellis');
+    expect(row.textContent).not.toContain('trellis');
+    expect(row.getAttribute('data-crew-member')).toBe('trellis');
+    expect(screen.getByTestId('queue-crew-wake-trellis').getAttribute('aria-label')).toBe('Wake Trellis');
+  });
+
   it('keeps the band when the crew is the only thing in it', () => {
     // Without a crew the pinned band is absent, so the members had nowhere to
     // render before this.

@@ -498,9 +498,15 @@ Plan:
 ## The crew
 
 The **crew** is the roster of durable named identities. A **crew member** —
-keel, alder, trellis — is a charter, a handoff line, and an address; its
+Keel, Alder, Trellis — is a charter, a handoff line, and an address; its
 sessions are its **days**. A member belongs to a home daemon, for the same
 reason the garden does: one roster across a fleet is its whole point.
+
+**Display capitalizes, identity does not.** The id is lowercase and stays that
+way wherever it addresses something — the home directory, `--member`, the
+fields on the wire, the store. Wherever a person reads the member, it is
+written as the name it is: you type `attn crew wake trellis` and Trellis is
+who answers.
 
 A member's **home** is plain markdown on disk at `~/.attn/crew/<name>/`: a
 `CHARTER.md` saying what it cares about, and dated **handoffs** it writes to

@@ -12,6 +12,7 @@
 // garden, so navigation costs no round trip.
 import { useMemo, useState } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';
+import { crewDisplayName } from '../utils/crewName';
 import './GardenPanel.css';
 
 interface GardenPanelProps {
@@ -112,7 +113,7 @@ function relationsOf(index: GardenIndex, id: string): Relation[] {
 // session id is not pretty, but "somebody holds this" is the fact the panel owes
 // the reader — showing nothing would read as unclaimed.
 function tenderOf(seed: Seed): string {
-  return seed.tender_member || seed.tender_session || '';
+  return seed.tender_member ? crewDisplayName(seed.tender_member) : seed.tender_session || '';
 }
 
 // crownOf is the crown a seed is part of, or '' when it stands on its own.
@@ -282,7 +283,7 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelP
                   <div className="garden-seed__detail">
                     <div className="garden-seed__meta">
                       <span>{seed.status}</span>
-                      {seed.planter_member && <span>planted by {seed.planter_member}</span>}
+                      {seed.planter_member && <span>planted by {crewDisplayName(seed.planter_member)}</span>}
                       {tenderOf(seed) && <span>tended by {tenderOf(seed)}</span>}
                       {seed.reason && <span>{seed.reason}</span>}
                       {seed.template && <span>packet</span>}

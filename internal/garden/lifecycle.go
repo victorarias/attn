@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+
+	"github.com/victorarias/attn/internal/crew"
 )
 
 // A seed's life, as one table. `planted` → `growing` when someone tends it →
@@ -45,6 +47,16 @@ type Tender struct {
 func (t Tender) Name() string {
 	if member := strings.TrimSpace(t.Member); member != "" {
 		return member
+	}
+	return strings.TrimSpace(t.Session)
+}
+
+// DisplayName is Name() written for a person to read: a crew member reads as
+// the name it is, and a bare session id is left exactly as it is. Separate from
+// Name() because that one doubles as an identity and emptiness test.
+func (t Tender) DisplayName() string {
+	if member := strings.TrimSpace(t.Member); member != "" {
+		return crew.DisplayName(member)
 	}
 	return strings.TrimSpace(t.Session)
 }
@@ -196,7 +208,7 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive f
 			return Seed{}, fmt.Errorf(
 				"%s is being tended by %s, and a seed has one tender at a time.\n"+
 					"Wait for %s to harvest or park it, or say what you need on the log: attn seed note %s -m \"…\"",
-				seed.ID, held.Name(), held.Name(), seed.ID)
+				seed.ID, held.DisplayName(), held.DisplayName(), seed.ID)
 		}
 	}
 	if rule.needsReason && reason == "" {

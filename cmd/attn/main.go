@@ -24,6 +24,7 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
@@ -2974,9 +2975,10 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 		}
 	}
 	if label == "" {
-		// A member's day is named after the member; -s still overrides.
+		// A member's day is named after the member, written as a name; -s still
+		// overrides.
 		if parsed.member != "" {
-			label = parsed.member
+			label = crew.DisplayName(parsed.member)
 		} else {
 			label = wrapper.DefaultLabel()
 		}

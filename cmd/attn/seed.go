@@ -12,6 +12,7 @@ import (
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/hooks"
 	"github.com/victorarias/attn/internal/protocol"
@@ -183,7 +184,7 @@ func gardenPrimeFromReady(ready *protocol.SeedReadyResult) *hooks.GardenPrime {
 		line := hooks.SeedPrime{ID: seed.ID, Title: seed.Title}
 		if handoff, ok := handoffs[seed.ID]; ok {
 			line.Handoff = handoff.Body
-			line.HandoffAuthor = firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)
+			line.HandoffAuthor = holderName(handoff.AuthorMember, handoff.AuthorSession)
 		}
 		crown.ReadySeeds = append(crown.ReadySeeds, line)
 	}
@@ -379,7 +380,7 @@ func runSeedList(args []string) {
 	fmt.Fprintln(w, "ID\tSTATUS\tTENDER\tPLANTED\tTITLE")
 	for _, row := range seedRows(result.Seeds, *f.tree) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s%s%s\n",
-			row.seed.ID, row.seed.Status, orDash(firstNonEmpty(row.seed.TenderMember, row.seed.TenderSession)),
+			row.seed.ID, row.seed.Status, orDash(holderName(row.seed.TenderMember, row.seed.TenderSession)),
 			shortStamp(row.seed.CreatedAt), strings.Repeat("  ", row.depth), row.seed.Title, plotProgressSuffix(row.seed))
 	}
 	w.Flush()
@@ -546,7 +547,7 @@ func fprintHandoff(w io.Writer, handoff *protocol.SeedNote) {
 		return
 	}
 	fmt.Fprintf(w, "handoff — %s, %s\n",
-		orDash(firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)), shortStamp(handoff.CreatedAt))
+		orDash(holderName(handoff.AuthorMember, handoff.AuthorSession)), shortStamp(handoff.CreatedAt))
 	for _, line := range strings.Split(strings.TrimRight(handoff.Body, "\n"), "\n") {
 		fmt.Fprintf(w, "  %s\n", line)
 	}
@@ -641,7 +642,7 @@ func runSeedReady(args []string) {
 		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", seed.ID, seed.Status, shortStamp(seed.CreatedAt), seed.Title)
 		if handoff, ok := handoffs[seed.ID]; ok {
 			fmt.Fprintf(w, "\t\t\t↳ %s: %s\n",
-				orDash(firstNonEmpty(handoff.AuthorMember, handoff.AuthorSession)), firstLine(handoff.Body))
+				orDash(holderName(handoff.AuthorMember, handoff.AuthorSession)), firstLine(handoff.Body))
 		}
 	}
 	w.Flush()
@@ -681,8 +682,8 @@ func fprintSeed(out io.Writer, seed protocol.Seed) {
 	fmt.Fprintf(w, "%s\t%s\n", seed.ID, seed.Title)
 	fmt.Fprintf(w, "status\t%s\n", seed.Status)
 	fmt.Fprintf(w, "step\t%s\n", seed.StepSlug)
-	fmt.Fprintf(w, "planted\t%s by %s\n", shortStamp(seed.CreatedAt), orDash(firstNonEmpty(seed.PlanterMember, seed.PlanterSession)))
-	fmt.Fprintf(w, "tender\t%s\n", orDash(firstNonEmpty(seed.TenderMember, seed.TenderSession)))
+	fmt.Fprintf(w, "planted\t%s by %s\n", shortStamp(seed.CreatedAt), orDash(holderName(seed.PlanterMember, seed.PlanterSession)))
+	fmt.Fprintf(w, "tender\t%s\n", orDash(holderName(seed.TenderMember, seed.TenderSession)))
 	if p := seed.PlotProgress; p != nil {
 		fmt.Fprintf(w, "plot\t%d of %d done — %d growing, %d ready, %d blocked, %d dormant, %d withered\n",
 			p.Done, p.Total, p.Growing, p.Ready, p.Blocked, p.Dormant, p.Withered)
@@ -755,11 +756,21 @@ func fprintTransition(w io.Writer, result *protocol.SeedTransitionResult) {
 	}
 }
 
+// holderName is how a seed's planter, tender or author is written for a
+// reader: a
+// member reads as a name, and a bare session id is left exactly as it is.
+func holderName(member, session string) string {
+	if strings.TrimSpace(member) != "" {
+		return crew.DisplayName(member)
+	}
+	return session
+}
+
 // transitionLine is the one line a move prints: what the seed is now, and who
 // holds it if anybody does. An agent reads it to confirm the claim landed.
 func transitionLine(seed protocol.Seed) string {
 	line := fmt.Sprintf("%s is %s", seed.ID, seed.Status)
-	if tender := firstNonEmpty(seed.TenderMember, seed.TenderSession); tender != "" {
+	if tender := holderName(seed.TenderMember, seed.TenderSession); tender != "" {
 		line += fmt.Sprintf(", tended by %s", tender)
 	}
 	if seed.Reason != nil && *seed.Reason != "" {
@@ -819,7 +830,7 @@ func fprintNotes(w io.Writer, notes []protocol.SeedNote, seedID string, withheld
 			fmt.Fprintln(w)
 		}
 		fmt.Fprintf(w, "%s  %s%s\n", shortStamp(note.CreatedAt),
-			orDash(firstNonEmpty(note.AuthorMember, note.AuthorSession)), noteKindSuffix(note.Kind))
+			orDash(holderName(note.AuthorMember, note.AuthorSession)), noteKindSuffix(note.Kind))
 		fmt.Fprintf(w, "%s\n", strings.TrimRight(note.Body, "\n"))
 	}
 	if withheld > 0 {

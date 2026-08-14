@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/hooks"
@@ -1014,13 +1015,22 @@ func (d *Daemon) gardenPrime(sessionID string) (*hooks.GardenPrime, error) {
 		line := hooks.SeedPrime{ID: seed.ID, Title: seed.Title}
 		if handoff := d.gardenHandoff(seed.ID); handoff != nil {
 			line.Handoff = handoff.Body
-			line.HandoffAuthor = firstNonEmptyString(handoff.AuthorMember, handoff.AuthorSession)
+			line.HandoffAuthor = holderName(handoff.AuthorMember, handoff.AuthorSession)
 		}
 		plot.ReadySeeds = append(plot.ReadySeeds, line)
 	}
 	prime.Ready = len(plot.ReadySeeds)
 	prime.Crown = plot
 	return prime, nil
+}
+
+// holderName is how a note's or a seed's author is written for a reader: a
+// member reads as a name, and a bare session id is left exactly as it is.
+func holderName(member, session string) string {
+	if strings.TrimSpace(member) != "" {
+		return crew.DisplayName(member)
+	}
+	return session
 }
 
 func firstNonEmptyString(values ...string) string {
