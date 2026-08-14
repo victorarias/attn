@@ -1,9 +1,12 @@
 package appbuild
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 	"testing"
@@ -203,6 +206,54 @@ func TestSDKDeclarationsMatchTheDaemonsContract(t *testing.T) {
 	want := "export type FilterOp = " + strings.Join(ops, " | ") + ";"
 	if !strings.Contains(index, want) {
 		t.Fatalf("the SDK's FilterOp union is not the store's operator set; expected the line\n  %s", want)
+	}
+}
+
+// One package, two manifests: sdk/attn-app/package.json is what the workspace
+// links, sdkPackageJSON is what apply materializes. A subpath added to one alone
+// resolves at development time and fails at apply time with "no export", which
+// reads as the app being wrong. The set of specifiers is the promise; this is
+// where the two copies of it have to agree.
+func TestBothManifestsExportTheSameSpecifiers(t *testing.T) {
+	exports := func(what string, data []byte) []string {
+		t.Helper()
+		var manifest struct {
+			Exports map[string]any `json:"exports"`
+		}
+		if err := json.Unmarshal(data, &manifest); err != nil {
+			t.Fatalf("parsing %s: %v", what, err)
+		}
+		if len(manifest.Exports) == 0 {
+			t.Fatalf("%s declares no exports", what)
+		}
+		var keys []string
+		for key := range manifest.Exports {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		return keys
+	}
+
+	source, err := os.ReadFile(filepath.Join("..", "..", "sdk", "attn-app", "package.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := exports("sdk/attn-app/package.json", source)
+	got := exports("the materialized manifest", []byte(sdkPackageJSON))
+	if !slices.Equal(got, want) {
+		t.Fatalf("the materialized package exports %v, the workspace package exports %v", got, want)
+	}
+
+	// And every specifier it names has to be a file the binary actually carries.
+	files := SDKFiles()
+	for _, specifier := range got {
+		name := "index.d.ts"
+		if specifier != "." {
+			name = strings.TrimPrefix(specifier, "./") + ".d.ts"
+		}
+		if _, ok := files[name]; !ok {
+			t.Fatalf("the SDK exports %s but ships no %s; run make generate-sdk", specifier, name)
+		}
 	}
 }
 
