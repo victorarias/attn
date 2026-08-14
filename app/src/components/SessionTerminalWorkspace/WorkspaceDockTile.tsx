@@ -15,7 +15,7 @@ import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
 import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
-import { useShortcut } from '../../shortcuts';
+import { useShortcut } from '../../shortcuts/useShortcut';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
 import { AppTileHost } from '../appViews/AppTileHost';
