@@ -555,10 +555,27 @@ Acceptance:
   has repeated and earned its packet.
 - **Gates as turns** — `gate` seeds opening turns when unblocked; the
   schema field exists from slice 1.
-- **Tickets retire** (decided 2026-08-06; supersedes "tickets as views").
-  There will be no era of two capture systems: the garden takes over as
-  soon as it is usable — slice 5 (capture + dispatch) is the bar — and
-  tickets are then removed, not kept as a parallel board.
+- **Tickets retire** (decided 2026-08-06; supersedes "tickets as views";
+  path ruled 2026-08-14). There will be no era of two capture systems:
+  the garden takes over as soon as it is usable — slice 5 (capture +
+  dispatch) is the bar — and tickets are then removed, not kept as a
+  parallel board. The retirement rides the garden-era epic alongside
+  slice 6, and the path is: a delegation binds a seed — the brief is the
+  seed's body, the delegate session its tender; status reports become
+  log notes; steering goes over agent-msg. The `attn ticket` verbs
+  become loud signposts to their garden equivalents, kept indefinitely
+  — their audience is agents on stale guidance, and a signpost is what
+  lets them self-correct. Unbound backlog todos bulk-convert to seeds
+  at cutover; in-flight delegations finish on their tickets; done
+  tickets stay readable, never migrated. Victor proves it by living on
+  the epic
+  branch for days without touching tickets before it merges. The
+  landmine to design around: delegation reporting IS tickets today
+  (briefs, status reports, artifacts all land there), so the garden must
+  carry that weight before tickets die. The outpost leg stays gated on
+  the uplink per
+  [the arc plan](2026-08-10-home-garden-crew-arc.md) — retiring outpost
+  tickets while outposts are fenced would strand outpost delegations.
 - **Laurels attach to seeds** — the recognition arc; seed ids are the
   attachment points, nothing in this plan blocks it.
 - **Ready nudges** — waking a tender when its blocker falls (doorbell path).
