@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -271,6 +272,45 @@ func TestCrewSet_RecordsAndClearsWhereAMemberWorks(t *testing.T) {
 	if got := protocol.Deref(memberByID(t, crewList(t, d), "keel").Cwd); got != launchDir {
 		t.Errorf("cwd = %q after clearing awareness dirs, want %q", got, launchDir)
 	}
+}
+
+// The way out has to survive the wire. An empty awareness list marshals away
+// under `omitempty`, so a clear sent as an empty slice reaches the daemon as
+// "leave it alone" and the CLI reports success while nothing changed. This
+// drives the same bytes the client sends, which is the only place that shows.
+func TestCrewSet_ClearingAwarenessDirsSurvivesTheWire(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	awareness := t.TempDir()
+	if resp := crewSetOverTheWire(t, d, "keel", nil, []string{awareness}); !resp.Ok {
+		t.Fatalf("crew set: %v", protocol.Deref(resp.Error))
+	}
+
+	if resp := crewSetOverTheWire(t, d, "keel", nil, []string{}); !resp.Ok {
+		t.Fatalf("clearing awareness dirs: %v", protocol.Deref(resp.Error))
+	}
+	if got := memberByID(t, crewList(t, d), "keel").AwarenessDirs; len(got) != 0 {
+		t.Fatalf("awareness dirs after the clear = %v, want none", got)
+	}
+}
+
+// crewSetOverTheWire builds the message the client builds, marshals it, and
+// decodes it the way the daemon does — so a field the encoder drops is dropped
+// here too.
+func crewSetOverTheWire(t *testing.T, d *Daemon, member string, cwd *string, dirs []string) protocol.Response {
+	t.Helper()
+	msg := protocol.CrewSetMessage{Cmd: protocol.CmdCrewSet, Member: member, Cwd: cwd, AwarenessDirs: dirs}
+	if dirs != nil && len(dirs) == 0 {
+		msg.ClearAwarenessDirs = protocol.Ptr(true)
+	}
+	encoded, err := json.Marshal(msg)
+	if err != nil {
+		t.Fatalf("marshal crew_set: %v", err)
+	}
+	_, decoded, err := protocol.ParseMessage(encoded)
+	if err != nil {
+		t.Fatalf("parse crew_set: %v", err)
+	}
+	return gardenCall(t, func(c net.Conn) { d.handleCrewSet(c, decoded.(*protocol.CrewSetMessage)) })
 }
 
 // A directory that is not there is refused at set time. Recording it and failing

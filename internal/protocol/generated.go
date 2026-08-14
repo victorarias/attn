@@ -1674,6 +1674,9 @@ type CrewSetMessage struct {
 	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
 	AwarenessDirs []string `json:"awareness_dirs,omitempty,omitzero"`
 
+	// ClearAwarenessDirs corresponds to the JSON schema field "clear_awareness_dirs".
+	ClearAwarenessDirs *bool `json:"clear_awareness_dirs,omitempty,omitzero"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 

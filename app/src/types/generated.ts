@@ -2008,10 +2008,11 @@ export interface CrewPrimeResult {
 }
 
 export interface CrewSetMessage {
-    awareness_dirs?: string[];
-    cmd:             CrewSetMessageCmd;
-    cwd?:            string;
-    member:          string;
+    awareness_dirs?:       string[];
+    clear_awareness_dirs?: boolean;
+    cmd:                   CrewSetMessageCmd;
+    cwd?:                  string;
+    member:                string;
     [property: string]: any;
 }
 
@@ -13476,6 +13477,7 @@ const typeMap: any = {
     ], "any"),
     "CrewSetMessage": o([
         { json: "awareness_dirs", js: "awareness_dirs", typ: u(undefined, a("")) },
+        { json: "clear_awareness_dirs", js: "clear_awareness_dirs", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("CrewSetMessageCmd") },
         { json: "cwd", js: "cwd", typ: u(undefined, "") },
         { json: "member", js: "member", typ: "" },

@@ -36,11 +36,16 @@ func (c *Client) CrewWake(member, agent string) (*protocol.CrewWakeResult, error
 }
 
 // CrewSet records where a member's sessions launch and what its charter is
-// about. A nil field is left as it was.
+// about. A nil field is left as it was; awarenessDirs non-nil and empty clears
+// the list, which travels as its own flag because an empty list marshals away.
 func (c *Client) CrewSet(member string, cwd *string, awarenessDirs []string) (*protocol.CrewSetResult, error) {
-	resp, err := c.send(protocol.CrewSetMessage{
+	msg := protocol.CrewSetMessage{
 		Cmd: protocol.CmdCrewSet, Member: member, Cwd: cwd, AwarenessDirs: awarenessDirs,
-	})
+	}
+	if awarenessDirs != nil && len(awarenessDirs) == 0 {
+		msg.ClearAwarenessDirs = protocol.Ptr(true)
+	}
+	resp, err := c.send(msg)
 	if err != nil {
 		return nil, err
 	}

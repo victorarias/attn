@@ -318,7 +318,11 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 		}
 		member.CWD = cwd
 	}
-	if msg.AwarenessDirs != nil {
+	// The way out arrives as its own flag: an empty list marshals away, so an
+	// empty AwarenessDirs is indistinguishable from "leave it alone" on the wire.
+	if protocol.Deref(msg.ClearAwarenessDirs) {
+		member.AwarenessDirs = nil
+	} else if msg.AwarenessDirs != nil {
 		dirs := make([]string, 0, len(msg.AwarenessDirs))
 		for _, dir := range msg.AwarenessDirs {
 			resolved, err := resolveCrewDir(dir)

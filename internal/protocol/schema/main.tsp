@@ -5110,6 +5110,11 @@ model CrewSetMessage {
   member: string;
   cwd?: string;
   awareness_dirs?: string[];
+
+  // The way out. An empty awareness_dirs cannot say "clear it": the field is
+  // optional, so an empty list marshals away and reaches the daemon as absent,
+  // which is how "leave it alone" is said.
+  clear_awareness_dirs?: boolean;
 }
 
 model CrewSetResult {
