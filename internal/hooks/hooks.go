@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // HookEntry is a single hook configuration
@@ -144,6 +145,20 @@ type SeedPrime struct {
 // typical plan header without dragging the ledger along.
 const crownPrimeBodyLimit = 4000
 
+// truncateRunes cuts to at most limit bytes without splitting a rune: a plan is
+// markdown and markdown carries any Unicode, so a byte slice can end the block
+// on half a character.
+func truncateRunes(text string, limit int) string {
+	if len(text) <= limit {
+		return text
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(text[cut]) {
+		cut--
+	}
+	return text[:cut]
+}
+
 // GardenPrimer is the standing garden block: the vocabulary, the loop, how many
 // seeds the garden had ready when the session launched, and — for a session
 // dispatched at a crown — its plot. prime is nil when the daemon had no answer
@@ -178,7 +193,8 @@ The loop is ready → tend → harvest. ` + "`attn seed ready`" + ` says what yo
 	fmt.Fprintf(&b, "You were dispatched at the plot under crown `%s` — **%s**. Your flag-free `attn seed ready` answers with this plot; `attn seed ready --all` steps out to the whole garden, and nothing fences you in — tend or plant anything, here or elsewhere. Who holds what is always the per-seed tender.\n", crown.ID, crown.Title)
 	if body := strings.TrimSpace(crown.Body); body != "" {
 		if len(body) > crownPrimeBodyLimit {
-			body = body[:crownPrimeBodyLimit] + fmt.Sprintf("\n\n[the crown's body continues — `attn seed show %s` has the whole plan]", crown.ID)
+			body = truncateRunes(body, crownPrimeBodyLimit) +
+				fmt.Sprintf("\n\n[the crown's body continues — `attn seed show %s` has the whole plan]", crown.ID)
 		}
 		fmt.Fprintf(&b, "\nThe crown's body is the plan:\n\n%s\n", body)
 	}

@@ -371,3 +371,49 @@ func delegatedSessionID(t *testing.T, d *Daemon, sourceSessionID string) string 
 	t.Fatal("no delegated session exists yet")
 	return ""
 }
+
+// The primer and flag-free `ready` are two builders over one answer: the daemon
+// composes the launch block, the CLI renders the wire result. Undispatched, the
+// count is pinned elsewhere; dispatched, this is the pin — same seeds, same
+// order, or a delegate is primed with work its own `ready` will not offer.
+func TestGardenPlot_ThePrimerAndReadyAgreeInsideAPlot(t *testing.T) {
+	d := newGardenDaemon(t)
+	planted := plot(t, d, protocol.SeedPlotMessage{
+		SourceSessionID: protocol.Ptr("sess-a"),
+		Title:           "ship the thing",
+		Body:            protocol.Ptr("# the plan"),
+		Children: []protocol.SeedPlotChild{
+			{Title: "first step", Blocks: []string{"third-step"}},
+			{Title: "second step"},
+			{Title: "third step"},
+		},
+	})
+	if err := d.recordGardenDispatch("sess-b", planted.Crown.ID); err != nil {
+		t.Fatalf("recordGardenDispatch: %v", err)
+	}
+
+	prime, err := d.gardenPrime("sess-b")
+	if err != nil {
+		t.Fatalf("gardenPrime: %v", err)
+	}
+	if prime.Crown == nil {
+		t.Fatal("a dispatched session was primed without its plot")
+	}
+	var primed []string
+	for _, seed := range prime.Crown.ReadySeeds {
+		primed = append(primed, seed.ID)
+	}
+	var offered []string
+	for _, seed := range ready(t, d, protocol.SeedReadyMessage{SourceSessionID: protocol.Ptr("sess-b")}).Seeds {
+		offered = append(offered, seed.ID)
+	}
+	if !slices.Equal(primed, offered) {
+		t.Fatalf("the primer lists %v, ready offers %v", primed, offered)
+	}
+	if len(offered) != 2 {
+		t.Fatalf("the plot offered %v, want the two unblocked children", offered)
+	}
+	if prime.Ready != len(offered) {
+		t.Fatalf("primer count = %d, want %d", prime.Ready, len(offered))
+	}
+}

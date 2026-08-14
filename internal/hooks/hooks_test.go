@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestGenerateHooks(t *testing.T) {
@@ -412,6 +413,21 @@ func TestGardenPrimerCapsACrownBody(t *testing.T) {
 	})
 	if len(primer) > crownPrimeBodyLimit*2 {
 		t.Fatalf("an oversized crown body was not capped: %d chars", len(primer))
+	}
+	if !strings.Contains(primer, "attn seed show s-crown") {
+		t.Fatalf("the cap does not say where the whole body is:\n%s", primer)
+	}
+}
+
+// The cap is in bytes and a plan is markdown, so the cut lands wherever it
+// lands: a body of multi-byte runes must still leave the block readable rather
+// than ending it on half a character.
+func TestGardenPrimerCapsACrownBodyWithoutSplittingARune(t *testing.T) {
+	primer := GardenPrimer(&GardenPrime{
+		Crown: &CrownPrime{ID: "s-crown", Title: "big", Body: strings.Repeat("é", crownPrimeBodyLimit)},
+	})
+	if !utf8.ValidString(primer) {
+		t.Fatal("the capped primer is not valid UTF-8")
 	}
 	if !strings.Contains(primer, "attn seed show s-crown") {
 		t.Fatalf("the cap does not say where the whole body is:\n%s", primer)
