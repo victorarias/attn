@@ -391,7 +391,7 @@ export function QueueBands({
  * bound session whose member left the roster still gets a row, because the
  * session is real and dropping it would hide a running agent.
  */
-export function buildCrewRows(
+function buildCrewRows(
   crew: CrewMemberView[] | undefined,
   awake: QueueRow<QueueBandSessionView>[],
 ): { member: string; row?: QueueRow<QueueBandSessionView> }[] {
