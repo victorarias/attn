@@ -33,7 +33,7 @@ const Surface = "the garden"
 
 // The garden's document-store address. `core/` is attn's own namespace owner;
 // seeds and notes are separate collections because a long-tended seed must not
-// bloat its own document with its trail.
+// bloat its own document with its log.
 const (
 	Namespace            = "core/garden"
 	CollectionSeeds      = "seeds"
@@ -128,7 +128,7 @@ func SeedsSchema() docstore.CollectionSchema {
 	}
 }
 
-// NotesSchema declares the trail collection. Notes are written from slice 2; the
+// NotesSchema declares the log collection. Notes are written from slice 2; the
 // collection exists now so the garden's storage is whole from the first day.
 func NotesSchema() docstore.CollectionSchema {
 	return docstore.CollectionSchema{

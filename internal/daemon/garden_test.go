@@ -265,11 +265,11 @@ func TestGarden_ConcurrentClaimsProduceOneTender(t *testing.T) {
 	}
 }
 
-// Notes are the trail. They read newest first, they say what they withheld, and
-// show carries them because a trail behind a verb nobody runs is not read.
+// Notes are the log. They read newest first, they say what they withheld, and
+// show carries them because a log behind a verb nobody runs is not read.
 func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 	d := newGardenDaemon(t)
-	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a trail"})
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a log"})
 
 	bodies := []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh"}
 	for _, body := range bodies {
@@ -284,7 +284,7 @@ func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 		t.Fatalf("show rendered %d notes inline, want %d", len(shown.Notes), garden.ShowNotes)
 	}
 	if shown.Notes[0].Body != "seventh" {
-		t.Fatalf("the trail leads with %q, want the newest note", shown.Notes[0].Body)
+		t.Fatalf("the log leads with %q, want the newest note", shown.Notes[0].Body)
 	}
 	if shown.Notes[0].AuthorMember != "trellis" || shown.Notes[0].AuthorSession != "sess-a" {
 		t.Fatalf("a note does not record who wrote it: %+v", shown.Notes[0])
@@ -297,13 +297,13 @@ func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 		t.Fatalf("notes: %v", protocol.Deref(all.Error))
 	}
 	if len(all.SeedNotesResult.Notes) != len(bodies) || all.SeedNotesResult.Total != len(bodies) {
-		t.Fatalf("the full trail is %d of %d, want all %d", len(all.SeedNotesResult.Notes), all.SeedNotesResult.Total, len(bodies))
+		t.Fatalf("the full log is %d of %d, want all %d", len(all.SeedNotesResult.Notes), all.SeedNotesResult.Total, len(bodies))
 	}
 
-	// A trail belongs to its seed and to no other.
-	elsewhere := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "no trail"})
+	// A log belongs to its seed and to no other.
+	elsewhere := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "no log"})
 	if got := show(t, d, elsewhere.ID); len(got.Notes) != 0 || got.NotesTotal != 0 {
-		t.Fatalf("another seed's trail leaked: %+v", got.Notes)
+		t.Fatalf("another seed's log leaked: %+v", got.Notes)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestGarden_EveryMovePublishesItsOwnFact(t *testing.T) {
 	defer unsubscribe()
 
 	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
-	note(t, d, "sess-a", seed.ID, "on the trail", "trellis")
+	note(t, d, "sess-a", seed.ID, "on the log", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbPark, "", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "done", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbReplant, "", "trellis")

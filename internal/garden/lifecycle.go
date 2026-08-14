@@ -172,7 +172,7 @@ func ParseVerb(raw string) (Verb, error) {
 // refusal exists for. The other four are fate calls — parking, finishing,
 // abandoning — and a seed whose tender walked away must stay reachable by
 // somebody; guarding those too would make an ended session a one-way door with
-// no key, which is worse than a rude harvest that the trail records anyway.
+// no key, which is worse than a rude harvest that the log records anyway.
 //
 // sessionLive is how the claim asks whether the tender is still around, and it
 // is the same predicate `ready` reads: a seed `ready` offers must be one `tend`
@@ -195,7 +195,7 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive f
 		if held := seed.Tender(); held.Holds(sessionLive) && !held.Is(actor) {
 			return Seed{}, fmt.Errorf(
 				"%s is being tended by %s, and a seed has one tender at a time.\n"+
-					"Wait for %s to harvest or park it, or say what you need on the trail: attn seed note %s -m \"…\"",
+					"Wait for %s to harvest or park it, or say what you need on the log: attn seed note %s -m \"…\"",
 				seed.ID, held.Name(), held.Name(), seed.ID)
 		}
 	}
@@ -208,12 +208,12 @@ func Transition(seed Seed, verb Verb, actor Tender, reason string, sessionLive f
 	// on the floor — and text somebody wrote must never vanish without a word.
 	if reason != "" && !rule.keepsReason {
 		return Seed{}, fmt.Errorf(
-			"%s records no reason — harvest and wither are the moves that close a seed with one. Put it on the trail instead: attn seed note %s -m \"…\"",
+			"%s records no reason — harvest and wither are the moves that close a seed with one. Put it on the log instead: attn seed note %s -m \"…\"",
 			verb, seed.ID)
 	}
 	if n := len(reason); n > MaxReasonChars {
 		return Seed{}, fmt.Errorf(
-			"that reason is %d characters and the limit is %d; the detail belongs on the trail (`attn seed note %s -m …`)",
+			"that reason is %d characters and the limit is %d; the detail belongs on the log (`attn seed note %s -m …`)",
 			n, MaxReasonChars, seed.ID)
 	}
 
@@ -264,7 +264,7 @@ func refuseState(seed Seed, verb Verb, rule move) error {
 	}
 }
 
-// Note is one entry on a seed's trail: the seed's memory of itself, written by
+// Note is one entry on a seed's log: the seed's memory of itself, written by
 // whoever was there and read by whoever tends it next. A note is routed to
 // nobody — it is anchored to the work, not addressed to a person.
 type Note struct {
@@ -281,7 +281,7 @@ type Note struct {
 // The kinds a note may carry. A plain note is the seed's memory of itself; a
 // handoff is written to whoever tends the seed next, which is why `show` and
 // `tend` put the freshest one in front of them instead of leaving it in the
-// trail to be scrolled past.
+// log to be scrolled past.
 const (
 	NoteKindNote    = "note"
 	NoteKindHandoff = "handoff"
@@ -292,7 +292,7 @@ const (
 var NoteKinds = []string{NoteKindNote, NoteKindHandoff}
 
 // ParseNoteKind reads a wire kind, naming the whole set when it is not one. An
-// empty kind is the plain trail entry: a caller that never heard of kinds writes
+// empty kind is the plain log entry: a caller that never heard of kinds writes
 // a note, which is what `attn seed note` has always done.
 func ParseNoteKind(raw string) (string, error) {
 	kind := strings.TrimSpace(strings.ToLower(raw))
@@ -317,7 +317,7 @@ func ParseNoteKind(raw string) (string, error) {
 // — measured 2026-08-12, 45KB of ordinary text with light escaping arrives as
 // 75KB — so a limit set at the frame size is answered by the transport first,
 // and the caller reads "initial socket frame exceeds 65536 bytes" instead of
-// being told the note limit and pointed at the trail. Same arithmetic as
+// being told the note limit and pointed at the log. Same arithmetic as
 // protocol.AgentMessageMaxChars, which travels the same frame.
 //
 // MaxReasonChars keeps a closing reason to the one line `ls` and the panel
