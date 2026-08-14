@@ -244,6 +244,18 @@ sequenceDiagram
   and never rolled back — it is the member's honest closure — and everything
   after it that fails leaves the day's session running with its binding
   held. A member is never torn down with its letter unfiled.
+- **A failed nap needs a way out, and it is not a second letter.** Filing and
+  turning the day over are one motion but two acts, and only the second can
+  fail. Slice 3 left the letter filed and the day running, which is right — but
+  the only verb left refuses, because the letter's name is taken by the letter
+  the same day just wrote, and append-only is absolute. So the retry is its own
+  path: `attn handoff --retry` runs the turnover against the letter already
+  filed and writes nothing. The registry records which letter the current day
+  filed, so the two refusals never share an exit — a collision this day caused
+  names the retry, a retry with nothing filed names the verb that writes a
+  letter. Ships ahead of slice 4 because auto-sleep runs the nap unattended,
+  and an unattended failure with no way out is a member stuck awake all night.
+
 - **Where the launch directory and the awareness dirs come from.**
   Registry fields, set by `attn crew set <member> --cwd <dir>
   --awareness-dir <dir>`, never read out of the member's prose — the

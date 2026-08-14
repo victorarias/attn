@@ -32,12 +32,18 @@ correction is a new letter.
 Filing ends the day. The moment the letter lands, attn closes this session and
 wakes the member's successor, primed by what you just wrote — one motion.
 
+Writing the letter and turning the day over are one motion but two acts, and
+only the second one can fail. When it does, the letter stays filed and this day
+keeps running: --retry runs the turnover again against the letter already on
+disk, without writing a second one.
+
 Only the session living a member's day can file one, and only on the home
 daemon. The note for whoever tends a piece of work next is the other axis:
 attn seed note <id> -m "…" --handoff.
 
 flags:
   -m <text>          the letter; - reads it from stdin
+  --retry            turn the day over with the letter already filed; no -m
   --session <id>     the session closing its day (defaults to ATTN_SESSION_ID)
   --json             print the machine result as JSON
 `)
@@ -45,6 +51,7 @@ flags:
 
 type handoffArgs struct {
 	note    string
+	retry   bool
 	session string
 	json    bool
 }
@@ -53,6 +60,7 @@ func parseHandoffArgs(args []string, envSession string) (handoffArgs, error) {
 	fs := flag.NewFlagSet("handoff", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	message := fs.String("m", "", "the letter; - reads it from stdin")
+	retry := fs.Bool("retry", false, "turn the day over with the letter already filed")
 	session := fs.String("session", "", "the session closing its day (defaults to ATTN_SESSION_ID)")
 	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
 	if err := fs.Parse(args); err != nil {
@@ -61,10 +69,13 @@ func parseHandoffArgs(args []string, envSession string) (handoffArgs, error) {
 	if fs.NArg() != 0 {
 		return handoffArgs{}, fmt.Errorf("handoff takes its letter in -m, not %q", strings.Join(fs.Args(), " "))
 	}
-	if strings.TrimSpace(*message) == "" {
+	if *retry && strings.TrimSpace(*message) != "" {
+		return handoffArgs{}, errors.New("--retry turns the day over with the letter you already filed, so it takes no -m; drop one of the two")
+	}
+	if !*retry && strings.TrimSpace(*message) == "" {
 		return handoffArgs{}, errors.New(`the letter is the handoff — pass it with -m "<your letter>", or -m - to pipe it in`)
 	}
-	parsed := handoffArgs{note: *message, session: strings.TrimSpace(*session), json: *jsonOut}
+	parsed := handoffArgs{note: *message, retry: *retry, session: strings.TrimSpace(*session), json: *jsonOut}
 	if parsed.session == "" {
 		parsed.session = strings.TrimSpace(envSession)
 	}
@@ -87,7 +98,7 @@ func runHandoff(args []string) {
 		}
 		note = string(raw)
 	}
-	result, err := client.New("").CrewHandoff(parsed.session, note)
+	result, err := client.New("").CrewHandoff(parsed.session, note, parsed.retry)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "handoff: %v\n", err)
 		os.Exit(1)
@@ -96,11 +107,15 @@ func runHandoff(args []string) {
 		printJSON(result)
 		return
 	}
-	fmt.Printf("%s's letter is filed at %s.\n", result.Member, result.Path)
+	if parsed.retry {
+		fmt.Printf("%s's letter was already filed at %s.\n", result.Member, result.Path)
+	} else {
+		fmt.Printf("%s's letter is filed at %s.\n", result.Member, result.Path)
+	}
 	if napErr := strings.TrimSpace(protocol.Deref(result.NapError)); napErr != "" {
 		// The letter is on disk; only the successor is missing. Say both, and say
 		// which is which — this session is still alive and still the member.
-		fmt.Fprintf(os.Stderr, "handoff: no successor was woken: %s\nThis day is still running and %s is still bound to it.\n", napErr, result.Member)
+		fmt.Fprintf(os.Stderr, "handoff: no successor was woken: %s\nThis day is still running and %s is still bound to it. `attn handoff --retry` turns it over again with the letter above — it is filed, so do not write another.\n", napErr, result.Member)
 		os.Exit(1)
 	}
 	fmt.Printf("%s's next day is session %s, waking now. This one ends here.\n",

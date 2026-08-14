@@ -147,6 +147,45 @@ func (d *Daemon) readCrewMembers() ([]crew.Member, map[string]docstore.Document,
 	return members, docs, nil
 }
 
+// updateCrewMember reads a member, lets mutate decide its new body, and writes
+// it against the revision it was read at — remaking the decision when the record
+// moves underneath, because a conflict is not a refusal. mutate returns false to
+// abandon the write without an error: nothing needed changing, which a caller
+// racing the record's own owner must be able to say. Three attempts is a
+// tripwire; two writers contending is one retry.
+func (d *Daemon) updateCrewMember(memberID string, mutate func(*crew.Member) (bool, error)) (crew.Member, error) {
+	if err := d.requireHome(crew.Surface); err != nil {
+		return crew.Member{}, err
+	}
+	schema, err := d.crewCollection()
+	if err != nil {
+		return crew.Member{}, err
+	}
+	const attempts = 3
+	for range attempts {
+		members, docs, err := d.readCrewMembers()
+		if err != nil {
+			return crew.Member{}, err
+		}
+		member, ok := crew.Resolve(memberID, members)
+		if !ok {
+			return crew.Member{}, fmt.Errorf("no crew member %q is registered", memberID)
+		}
+		write, err := mutate(&member)
+		if err != nil || !write {
+			return member, err
+		}
+		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
+		if err == nil {
+			return member, nil
+		}
+		if !docstore.IsConflict(err) {
+			return crew.Member{}, err
+		}
+	}
+	return crew.Member{}, fmt.Errorf("the registry record for %q was rewritten under all %d attempts to update it; try again", memberID, attempts)
+}
+
 // crewBindingLive reports whether a stored binding still binds: a non-empty
 // session the daemon still knows. The read-time judgment, shared by the
 // single-holder claim, the roster read, and session decoration.

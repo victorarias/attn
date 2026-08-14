@@ -69,6 +69,25 @@ type Member struct {
 	// non-empty value still binds is judged at read against live sessions, so a
 	// day that ended without ceremony releases on its own.
 	BindingSession string `json:"binding_session"`
+	// LetterPath and LetterSession are the letter the current day has already
+	// filed, and who filed it. They exist so a turnover that failed after the
+	// filing can be retried against the letter already on disk rather than
+	// against a second one: append-only means the letter is not writable twice,
+	// so without this the only way out of a failed nap would be to wait out the
+	// minute and file a correction. Cleared when a day starts — a fresh day has
+	// written nothing yet.
+	LetterPath    string `json:"letter_path"`
+	LetterSession string `json:"letter_session"`
+}
+
+// FiledLetterFor answers whether sessionID has already filed this member's
+// closing letter, and where it landed. A letter recorded against a different
+// session belongs to a day that has ended and says nothing about this one.
+func (m Member) FiledLetterFor(sessionID string) (string, bool) {
+	if sessionID == "" || m.LetterPath == "" || m.LetterSession != sessionID {
+		return "", false
+	}
+	return m.LetterPath, true
 }
 
 // MembersSchema declares which fields a query may name. Everything else in the

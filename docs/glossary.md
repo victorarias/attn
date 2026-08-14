@@ -546,6 +546,14 @@ binding moves from one session to the other in a single write, so the member is
 never momentarily unbound. A nap that cannot run leaves the letter filed and the
 day running: a member is never torn down with its letter unfiled.
 
+That state has its own way out. Writing the letter and turning the day over are
+one motion but two acts, and only the second can fail, so `attn handoff --retry`
+runs the turnover again against the letter already filed — no second file, no
+overwrite, append-only untouched. The registry records which letter the current
+day filed so the two refusals stay apart: filing again after a failed turnover
+names the retry, and a retry with nothing filed names the verb that writes a
+letter.
+
 Tending is not a crew privilege: workers and errand sessions tend seeds too,
 under any free-string name. Where a tender's name happens to match a registered
 member it resolves to that member's id, so the claim compares addresses rather

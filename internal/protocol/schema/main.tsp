@@ -5149,6 +5149,10 @@ model CrewHandoffMessage {
   cmd: "crew_handoff";
   session_id: string;
   note: string;
+  // Turn the day over with the letter this day already filed, instead of
+  // writing one. The way out of a turnover that failed behind a filed letter:
+  // the line is append-only, so the letter cannot be written a second time.
+  retry?: boolean;
 }
 
 // Where the letter landed, and what became of the day. A filed letter is never

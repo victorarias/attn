@@ -1960,6 +1960,7 @@ export enum CreateWorktreeResultMessageEvent {
 export interface CrewHandoffMessage {
     cmd:        CrewHandoffMessageCmd;
     note:       string;
+    retry?:     boolean;
     session_id: string;
     [property: string]: any;
 }
@@ -13494,6 +13495,7 @@ const typeMap: any = {
     "CrewHandoffMessage": o([
         { json: "cmd", js: "cmd", typ: r("CrewHandoffMessageCmd") },
         { json: "note", js: "note", typ: "" },
+        { json: "retry", js: "retry", typ: u(undefined, true) },
         { json: "session_id", js: "session_id", typ: "" },
     ], "any"),
     "CrewHandoffResult": o([

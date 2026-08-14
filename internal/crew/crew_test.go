@@ -199,6 +199,23 @@ func TestEncode_WritesDeclaredFieldsEvenWhenEmpty(t *testing.T) {
 	}
 }
 
+// A filed letter answers only the day that wrote it: the record outlives the
+// binding on purpose, so the read is what makes it inert once the day changes.
+func TestFiledLetterFor_AnswersOnlyTheSessionThatFiledIt(t *testing.T) {
+	member := Member{ID: "keel", LetterPath: "/homes/keel/handoffs/a.md", LetterSession: "day-1"}
+	if path, ok := member.FiledLetterFor("day-1"); !ok || path != member.LetterPath {
+		t.Fatalf("FiledLetterFor(day-1) = %q, %t; want the letter it filed", path, ok)
+	}
+	for _, session := range []string{"day-2", ""} {
+		if path, ok := member.FiledLetterFor(session); ok {
+			t.Errorf("FiledLetterFor(%q) = %q; a letter another day wrote is not this day's", session, path)
+		}
+	}
+	if _, ok := (Member{ID: "keel", LetterSession: "day-1"}).FiledLetterFor("day-1"); ok {
+		t.Error("a member with no recorded letter reported one")
+	}
+}
+
 func TestMembersSchema_IsAValidDeclaration(t *testing.T) {
 	if err := MembersSchema().Validate(); err != nil {
 		t.Fatalf("MembersSchema is not declarable: %v", err)

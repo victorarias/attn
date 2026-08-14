@@ -1,0 +1,11 @@
+kind: added
+area: cli
+change: >
+  `attn handoff --retry` turns a crew member's day over with the letter it
+  already filed. Writing the letter and starting the next day are one motion but
+  two acts, and only the second one can fail — when it did, the letter was on
+  disk and the day was stuck: the line is append-only, so writing it again inside
+  the same minute was refused as if it were a correction. Now the retry runs the
+  turnover against the letter already there, no second file and no overwrite, and
+  the two refusals have been pulled apart: filing again after a failed turnover
+  names the retry, and a retry with nothing filed says to write a letter first.
