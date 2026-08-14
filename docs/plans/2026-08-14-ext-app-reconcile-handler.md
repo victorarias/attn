@@ -11,7 +11,10 @@ An app's collections are a materialized view over current state. A fact wakes
 the app, but the collection is what survives. Three real paths can leave that
 view stale:
 
-1. A disabled app is re-enabled after retention passed its cursor.
+1. A disabled app is re-enabled after retention passed its cursor. (Closed by
+   the retention policy at the end of this doc: an installed app's lane is
+   retained while disabled, so this path collapses into path 2's machinery
+   and only broken states reach it.)
 2. An enabled consumer resumes below the oldest surviving fact.
 3. A different app version derives different collection contents from the
    same current state.
@@ -33,32 +36,34 @@ headless app handlers and the collections they maintain.
 
 Recommendation: each condition writes a durable reconcile request. The
 consumer lane coalesces every request already pending for the app into one
-invocation. Reasons are a set, so a version move while disabled followed by
-re-enable invokes once with both `version_changed` and `re_enabled`.
+invocation. Reasons are a set, so a version move while disabled followed by a
+second version move invokes once with `version_changed` carrying both previous
+versions. Re-enable is not a trigger: under the retention policy at the end of
+this doc an installed app's facts wait while it is disabled, so re-enable is a
+paused durable consumer resuming from its frozen cursor — A1's ordinary
+contract, no rebuild. A version move that happened while disabled left its
+pending request, and the resuming consumer runs it before delivering anything.
 
 ```text
-version move / re-enable / resume below retention
+version move / resume below retention
   persist app_reconcile_request(reason, version, through_seq, detail)
   wake the app's ordinary bus consumer
     coalesce pending requests
     run version's reconcile handler
     mark claimed requests complete
     advance cursor through through_seq
-    deliver later facts in seq order
+    deliver every retained fact above the fence in seq order
 ```
 
-The three detectors are:
+The two detectors are:
 
 - **Resume with a gap.** `internal/bus.Bus` already reads `earliest`, `head`,
   and the consumer cursor before it advances. Durable registration gains a
   pre-drain hook. For an app consumer, the hook inserts a `gap` request carrying
-  `{cursor, earliest, through_seq: head, missed}` before anything moves. A
+  `{cursor, earliest, through_seq: earliest - 1, missed}` before anything
+  moves — the fence covers exactly the lost range, and retained facts from
+  `earliest` up are delivered after the run. A
   non-app consumer keeps A1's current log-and-resume behavior.
-- **Enable after disable.** `handleAppSetEnabled` already reads the consumer
-  record before setting its bit (`internal/daemon/apps.go`). A transition from
-  `enabled=false` to `true` inserts `re_enabled` in the same store transaction
-  as the bit flip. Enabling an already-enabled app is a no-op and creates no
-  request.
 - **Version change.** A pointer move to a different version inserts
   `version_changed` in the same transaction as the pointer move, carrying the
   previous and target version ids. Initial installation has no previous
@@ -67,10 +72,16 @@ The three detectors are:
   `publishAppVersionChanged` in `internal/daemon/app_apply.go`. Rollback is a
   version change and does reconcile.
 
-`through_seq` is the bus head read inside the triggering transaction. It is the
-fence the rebuilt view supersedes. A gap uses the head already read by the bus.
-Facts published after that fence wait in the log and are delivered after the
-reconcile succeeds.
+`through_seq` is the fence the rebuilt view supersedes, and it covers only
+facts the app has already received or can never receive — never a retained,
+undelivered fact. A `version_changed` request carries the consumer's cursor
+read inside the pointer transaction: the rebuild supersedes what the old
+version saw, and everything the app has not seen yet is delivered after the
+run, in order, under the new version. A `gap` request carries `earliest - 1`:
+the rebuild covers exactly the hole, and the retained facts from `earliest`
+up are delivered after. A head fence was the original shape and was rejected
+in review: it silently discarded retained facts a history-accumulating app
+was owed — the very facts the retention policy below exists to keep.
 
 `app.version.changed` and `app.enabled.changed` remain domain facts for other
 consumers and the UI. They are not the orchestration mechanism: consuming an
@@ -116,7 +127,7 @@ collisions between kinds are inexpressible.
 The SDK contract is:
 
 ```ts
-type ReconcileCause = "gap" | "re_enabled" | "version_changed"
+type ReconcileCause = "gap" | "version_changed"
 
 type ReconcileReason = {
   causes: readonly ReconcileCause[]
@@ -346,11 +357,14 @@ trigger while still enabled.
   error names the current and requested versions and says to declare and
   implement `reconcile`. Initial install is allowed because there is no old
   derived state.
-- **Re-enable:** refuse the enable and leave the consumer disabled. The CLI
-  caller is already present, so the named refusal is the loud surface.
-- **Gap discovered while enabled:** leave the cursor in place, disable the app,
-  record a `missing_reconcile` invocation, and write a durable notification.
-  Retrying code that does not exist cannot heal and would only pin retention.
+- **Re-enable:** allowed. Re-enable is not a trigger — the consumer resumes
+  from its frozen cursor and delivers the retained backlog, which needs no
+  handler. A gap discovered at that resume follows the gap rule below.
+- **Gap discovered:** leave the cursor in place, disable the app, record a
+  `missing_reconcile` invocation, and write a durable notification. Retrying
+  code that does not exist cannot heal. Under the retention policy at the end
+  of this doc, an installed app's gap means genuinely broken state —
+  corruption or a cursor from a removed install — so loud is correct.
 
 An app with no subscriptions has no durable app consumer and no derived handler
 state, so this rule does not apply to an A5 view-only app.
@@ -366,9 +380,10 @@ declarations, and their cursors do not move.
 
 `attn app status` reports `reconcile: unsupported` for a subscribed version
 whose frozen declaration predates the field. The next trigger follows the loud
-rules above: a version move or enable is refused, and a discovered gap disables
-and notifies. Re-applying byte-identical content is allowed because it moves no
-pointer and triggers nothing.
+rules above: a version move is refused, and a discovered gap disables and
+notifies; re-enable resumes from the frozen cursor and needs no handler.
+Re-applying byte-identical content is allowed because it moves no pointer and
+triggers nothing.
 
 The scaffold declares and implements reconcile from this stage forward. Its
 example rebuilds from `ctx.current.snapshot()`, deletes stale documents, and
@@ -383,9 +398,9 @@ Two small records keep trigger history separate from attempts:
 app_reconcile_requests
   id                  monotonic claim boundary
   app_name
-  reason              gap | re_enabled | version_changed
+  reason              gap | version_changed
   version_id          target version when requested
-  through_seq         bus-head fence
+  through_seq         fence: cursor at trigger (version_changed) or earliest-1 (gap)
   previous_version_id nullable
   cursor              gap only
   earliest            gap only
@@ -431,8 +446,12 @@ proof.
 
 1. **Durable trigger and lane fence.** Add the reconcile request/progress
    migration and store transactions; extend `internal/bus` registration with
-   the pre-drain hook; write the three trigger paths and completion-plus-cursor
-   transaction. Unit and integration tests cover coalescing, a trigger during a
+   the pre-drain hook; write the trigger paths and completion-plus-cursor
+   transaction. As built (PR #906), this slice shipped a third trigger —
+   `re_enabled` inserted on the enable flip — before review removed re-enable
+   from the design; a later slice deletes that insert and its enum value, and
+   re-fences `version_changed` and `gap` from bus head to cursor and
+   `earliest - 1` respectively. Unit and integration tests cover coalescing, a trigger during a
    run, restart before completion, cursor fencing, and non-app gap parity.
    Verification tier: full non-production app/daemon install because this
    changes a live durable consumer's background loop, plus direct inspection of
@@ -453,10 +472,12 @@ proof.
    edited by hand. Verification tier: full non-production app plus packaged-app
    harness. Prove an infinite loop loses its generation and another app resumes.
 4. **Scaffold and exit proof.** Teach the handler in `attn app new` and the SDK
-   docs. First demonstrate today's stale state. Then show disable, trim, enable
-   rebuilding the collection with one coalesced invocation; force an enabled
-   gap; apply a version deriving a new field; interrupt a reconcile by restarting
-   the dev daemon; and show each case converges before later facts run. Record
+   docs. First demonstrate today's stale state. Then show disable, publish
+   facts, enable delivering the retained backlog in order with no reconcile;
+   force a gap and show the loud disable; apply a version deriving a new field
+   and show the rebuild followed by delivery of facts the old version never
+   received; interrupt a reconcile by restarting the dev daemon; and show each
+   case converges before later facts run. Record
    the visible status and notification paths. Verification tier: full packaged
    app on a throwaway profile, with a Linux remote dispatch witness.
 
@@ -467,8 +488,12 @@ than an empty database.
 ## Retention is the gap story
 
 Added 2026-08-15, after asking how often gaps actually happen and what attn
-tells an app that hits one. The answer changes no gate above; it changes the
-retention policy underneath them.
+tells an app that hits one. The answer changes the retention policy underneath
+the gates, and review showed it reaches back into them: keeping facts is only
+half the promise, delivering them is the other. Gates 1, 5, 7, and 8 above
+already read as amended — re-enable is no longer a trigger, and fences sit at
+the consumer's cursor or `earliest - 1` instead of bus head, so a retained
+fact is never superseded undelivered.
 
 ### Receipts
 
@@ -491,8 +516,8 @@ behavior, and both are ours.
 ### Two kinds of apps, two exposures
 
 - **Projection apps** — collections derivable from the current-state
-  snapshot. Reconcile on re-enable rebuilds everything; a gap costs nothing
-  once the handler exists.
+  snapshot. A rebuild recovers everything; a gap costs nothing once the
+  handler exists.
 - **History apps** — collections that accumulate facts as they arrive. A
   missed fact is information the app never received. No handler rebuilds it,
   and no app-side checkpoint recovers it: checkpoints protect state the app
@@ -517,9 +542,26 @@ measuring real lane growth before it is written — crossed loudly with a
 durable notification naming the app, the size held, and the two exits (enable
 it or uninstall it). Forcing that conversation beats silent loss.
 
-Gate 7's gap rules stand exactly as written. Under this policy a live gap
-means corruption or a cursor from a removed install — genuinely broken states
-— and a broken thing being loud is the point.
+Two consequences follow, and they are why the gates read as they now do
+rather than as first approved:
+
+- **Re-enable stopped being a trigger.** The `re_enabled` reconcile existed
+  only because trim used to open a gap on the disable path. With the lane
+  retained, re-enable is a paused durable consumer resuming — A1's ordinary
+  contract delivers the backlog in order, correct for both app kinds, no
+  rebuild. A handler-less app can therefore be re-enabled when no gap exists:
+  there is nothing to reconcile. Review caught the first draft promising
+  retention while the head-high `re_enabled` fence quietly discarded the
+  retained facts on arrival; dropping the trigger, rather than fencing it
+  lower, was chosen because the rebuild the lower fence preserved was
+  redundant work the replay right behind it would supersede.
+- **Fences moved off bus head.** `version_changed` fences at the consumer's
+  cursor and `gap` at `earliest - 1` (Gate 1), so a fence can only cover
+  facts already seen or forever lost — never a retained, undelivered one.
+
+Gate 7's gap rules stand. Under this policy a live gap means corruption or a
+cursor from a removed install — genuinely broken states — and a broken thing
+being loud is the point.
 
 ## Open questions
 
