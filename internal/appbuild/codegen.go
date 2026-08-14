@@ -60,23 +60,36 @@ func GenerateTypes(m Manifest) string {
 	b.WriteString("// The context every handler of this app receives.\n")
 	b.WriteString("export type Ctx = AppContext<AppCollections>\n\n")
 
-	b.WriteString("// One entry per declared subscription, and one per declared command. The\n")
-	b.WriteString("// entrypoint's default export must `satisfies Handlers`, so a declaration with\n")
-	b.WriteString("// no handler and a handler with the wrong shape are both compile errors here\n")
-	b.WriteString("// rather than silence at runtime.\n")
+	b.WriteString("// One group per kind, one entry per declaration. The entrypoint's default\n")
+	b.WriteString("// export must `satisfies Handlers`, so a declaration with no handler, a\n")
+	b.WriteString("// handler with the wrong shape, and a handler nothing declared are all\n")
+	b.WriteString("// compile errors here rather than silence at runtime.\n")
 	b.WriteString("//\n")
-	b.WriteString("// A subscription's key is its event pattern; a command's carries the\n")
-	b.WriteString("// `command:` prefix, which is what keeps the two apart in one map — an event\n")
-	b.WriteString("// pattern is a dotted name and neither it nor a command name can hold a colon.\n")
+	b.WriteString("// A subscription is keyed by its event pattern and a command by its bare\n")
+	b.WriteString("// name. They cannot collide because they are not in the same map: which kind\n")
+	b.WriteString("// is being run is what attn already knows when it dispatches.\n")
 	b.WriteString("export type Handlers = {\n")
-	for _, pattern := range m.EventPatterns() {
-		b.WriteString(fmt.Sprintf("  %s: (event: AppEvent, ctx: Ctx) => void | Promise<void>\n", tsKey(pattern)))
-	}
-	for _, command := range m.CommandNames() {
-		b.WriteString(fmt.Sprintf("  %s: (payload: unknown, ctx: Ctx) => unknown\n", tsKey(apps.CommandHandlerKey(command))))
-	}
+	writeHandlerGroup(&b, "subscriptions", m.EventPatterns(),
+		"(event: AppEvent, ctx: Ctx) => void | Promise<void>")
+	writeHandlerGroup(&b, "commands", m.CommandNames(),
+		"(payload: unknown, ctx: Ctx) => unknown")
 	b.WriteString("}\n")
 	return b.String()
+}
+
+// writeHandlerGroup renders one kind's group. A kind an app declared nothing of
+// is optional and empty, so the entrypoint omits it — and adding a key to it
+// stays an error rather than becoming a handler nothing will ever call.
+func writeHandlerGroup(b *strings.Builder, group string, keys []string, signature string) {
+	if len(keys) == 0 {
+		b.WriteString(fmt.Sprintf("  %s?: Record<string, never>\n", group))
+		return
+	}
+	b.WriteString(fmt.Sprintf("  %s: {\n", group))
+	for _, key := range keys {
+		b.WriteString(fmt.Sprintf("    %s: %s\n", tsKey(key), signature))
+	}
+	b.WriteString("  }\n")
 }
 
 // tsKey renders a manifest string as a TypeScript property key. Event patterns

@@ -156,8 +156,8 @@ entrypoint = "src/views/Sessions.tsx"
 params = { label = "Filter by session id", placeholder = "leave empty for all" }
 
 # A command is how a view acts. Each one becomes a required handler under
-# `+"`command:<name>`"+` in src/generated.ts, and it runs where every other handler
-# runs — same process, same document access, same log.
+# `+"`commands`"+` in src/generated.ts, and it runs where every other handler runs —
+# same process, same document access, same log.
 [[commands]]
 name = "forget"
 description = "Drop one session from the list."
@@ -193,9 +193,11 @@ async function forget(payload: unknown, ctx: Ctx): Promise<{ forgotten: boolean 
   return { forgotten: await ctx.collections.seen.delete(id) }
 }
 
+// Handlers are grouped by kind, and attn knows which kind it is running: a
+// command and a subscription can share a name without either becoming ambiguous.
 export default {
-  "session.state.changed": onSessionState,
-  "command:forget": forget,
+  subscriptions: { "session.state.changed": onSessionState },
+  commands: { forget },
 } satisfies Handlers
 `, SDKModule, ManifestName)
 }
@@ -346,7 +348,9 @@ applies; you find out when a handler runs.
 ## Writing a handler
 
 Every pattern under `+"`[[subscribe]]`"+` and every `+"`[[commands]]`"+` block becomes a
-required key of the `+"`Handlers`"+` type in src/generated.ts. The default export of
+required key of the `+"`Handlers`"+` type in src/generated.ts — a subscription under
+`+"`subscriptions`"+`, keyed by its event pattern; a command under `+"`commands`"+`, keyed
+by its bare name. The default export of
 src/index.ts must `+"`satisfies Handlers`"+`, so the compiler — not a convention, not a
 runtime check — is what tells you the manifest and the code disagree:
 
@@ -354,8 +358,12 @@ runtime check — is what tells you the manifest and the code disagree:
     import type { AppEvent } from %q
 
     export default {
-      "session.state.changed": async (event: AppEvent, ctx: Ctx) => { ... },
-      "command:forget": async (payload: unknown, ctx: Ctx) => { ... },
+      subscriptions: {
+        "session.state.changed": async (event: AppEvent, ctx: Ctx) => { ... },
+      },
+      commands: {
+        forget: async (payload: unknown, ctx: Ctx) => { ... },
+      },
     } satisfies Handlers
 
 Declare either one with no handler and apply fails with

@@ -26,12 +26,6 @@ import (
 // Design: docs/plans/2026-08-13-ext-a5-ui-host-and-app-sdk.md, "The app UI
 // registry" and "Reload".
 
-// appViewCrashHandler is the invocation handler name a caught render error is
-// recorded under. Distinct from both keys a dispatched handler is invoked by —
-// a subscription's raw event pattern and a command's `command:` — so `attn app
-// logs` says which surface failed.
-const appViewCrashHandler = "view:"
-
 // appViewCrashEvent is the event name a render crash is recorded against. A
 // crash has no fact behind it, so it names itself rather than borrowing a bus
 // fact's name and claiming a seq it does not have.
@@ -222,7 +216,7 @@ func (d *Daemon) handleAppViewCrash(_ *wsClient, msg *protocol.AppViewCrashMessa
 		VersionID:    version.ID,
 		EventName:    appViewCrashEvent,
 		EventSubject: strings.TrimSpace(msg.TileID),
-		Handler:      appViewCrashHandler + view,
+		Handler:      apps.ViewLabel(view),
 		Status:       appInvocationStatusError,
 		Error:        text,
 		StartedAt:    now,

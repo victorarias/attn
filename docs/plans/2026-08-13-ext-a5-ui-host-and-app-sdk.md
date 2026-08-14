@@ -972,16 +972,28 @@ namespace, and there is no call that takes one.
 Commands, the components, and the scaffold landed as designed. Four departures
 and receipts, all found by building it.
 
-**Only commands carry a handler-key prefix.** The design drew
-`"subscribe:doc.changed"` beside `"command:approve"`, but A4 shipped
-subscription keys as the raw event pattern, and every installed app's bundle
-already exports them that way. Prefixing subscriptions now would make every one
-of those apps silently stop dispatching until it was re-applied, for a
-namespacing problem that does not exist: a colon can appear in neither an event
-pattern nor a command name, so `command:<name>` cannot collide with any
-subscription key. So commands are prefixed and subscriptions are not, and the
-handler an invocation names is the key it was invoked by — `view:` for a caught
-render crash, `command:` for a command, the bare pattern for a subscription.
+**Kind is structure, not a prefix on a key.** The design drew
+`"subscribe:doc.changed"` beside `"command:approve"` in one flat map, and the
+first build of this slice shipped half of that — raw patterns for subscriptions,
+a `command:` prefix for commands — defended by a proof that the two can never
+collide, since a colon appears in neither an event pattern nor a command name.
+That proof is a rule someone can break later. A bundle exports one map per kind
+instead: `subscriptions`, keyed by the raw event pattern, and `commands`, keyed
+by the bare name. The manifest already separates the kinds, so the bundle mirrors
+it rather than re-encoding kind as a string convention, codegen derives a typed
+group per kind — tsc enforces "every declared command has a command-shaped
+handler" structurally — and the sidecar indexes the map its dispatch context
+names (a fact arrived → `subscriptions`; a command envelope → `commands`),
+constructing no keys at all. Collision becomes inexpressible rather than
+proven-absent.
+
+Invocation **labels** are a separate thing: what `attn app logs` shows, so it
+names the kind — `command:approve`, `subscribe:ticket.*`, `view:approvals`. They
+have no dispatch meaning, which is what makes labelling every kind free.
+
+Existing installed apps export the flat shape and stop dispatching until they are
+re-applied. Pre-release, with no app installed anywhere but a dev profile, that
+costs one `attn app apply` and buys a shape that cannot be got wrong.
 
 **A command carries at most 256KB in either direction.** The same limit as a
 document body, and for the same reason: the payload lands in the sidecar's

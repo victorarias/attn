@@ -138,7 +138,7 @@ func (e buildEnv) dropScaffoldView(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(e.dir, ManifestName), []byte(text[:cut]+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	e.edit(t, "src/index.ts", "\n  \"command:forget\": forget,", "")
+	e.edit(t, "src/index.ts", "\n  commands: { forget },", "")
 	if err := os.RemoveAll(filepath.Join(e.dir, "src", "views")); err != nil {
 		t.Fatal(err)
 	}
@@ -238,13 +238,15 @@ func TestGeneratedTypesCarryTheAppsIdentityAndItsSubscriptions(t *testing.T) {
 	for _, want := range []string{
 		apps.ConsumerName("approval-gate"),
 		apps.Namespace("approval-gate"),
+		`  subscriptions: {`,
 		`"delegation.*": (event: AppEvent, ctx: Ctx)`,
 		`"session.state.changed": (event: AppEvent, ctx: Ctx)`,
 		`"decisions": Collection`,
-		// A command is one more key of the same map, under a prefix an event
-		// pattern can never collide with — that is the whole mechanism.
-		`"command:approve": (payload: unknown, ctx: Ctx) => unknown`,
-		`"command:reject": (payload: unknown, ctx: Ctx) => unknown`,
+		// A command lives in its own group, keyed by its bare name: the kind is
+		// structure, so nothing has to keep the two sets of keys apart.
+		`  commands: {`,
+		`"approve": (payload: unknown, ctx: Ctx) => unknown`,
+		`"reject": (payload: unknown, ctx: Ctx) => unknown`,
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("generated.ts does not contain %q:\n%s", want, types)
@@ -274,7 +276,7 @@ func TestBuild_DeclaredSubscriptionWithNoHandlerIsACompilerError(t *testing.T) {
 	}
 }
 
-// The same arrow, for the other half of the map: a button a view could press
+// The same arrow, for the other group: a button a view could press
 // with nothing behind it is a compile error at apply, not a 404 at click time.
 func TestBuild_DeclaredCommandWithNoHandlerIsACompilerError(t *testing.T) {
 	env := newBuildEnv(t, "uncommanded-app")
@@ -288,7 +290,7 @@ func TestBuild_DeclaredCommandWithNoHandlerIsACompilerError(t *testing.T) {
 	if !tscError.MatchString(msg) {
 		t.Fatalf("error does not carry file(line,col): %s", msg)
 	}
-	if !strings.Contains(msg, `"command:remember"`) {
+	if !strings.Contains(msg, `"remember"`) {
 		t.Errorf("error does not name the unhandled command: %s", msg)
 	}
 }
@@ -614,7 +616,7 @@ func TestBuild_AppWithAViewAndNoSubscriptionsBuilds(t *testing.T) {
 	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
 	env.editManifest(t, "[[subscribe]]\nevents = [\"session.state.changed\"]\n", "")
 	env.edit(t, "src/index.ts",
-		"export default {\n  \"session.state.changed\": onSessionState,\n} satisfies Handlers",
+		"export default {\n  subscriptions: { \"session.state.changed\": onSessionState },\n} satisfies Handlers",
 		"export default {} satisfies Handlers")
 
 	res := env.mustBuild(t)

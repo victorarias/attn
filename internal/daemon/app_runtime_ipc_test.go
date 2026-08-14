@@ -187,7 +187,7 @@ func TestAppWatchStreamsInvocationsAsTheyHappen(t *testing.T) {
 			// The auditor's invocation must not reach a watcher of greeter.
 			t.Fatalf("the stream carried %+v, want greeter's own invocation", info)
 		}
-		if info.Status != appInvocationStatusOK || info.Handler != "ticket.*" {
+		if info.Status != appInvocationStatusOK || info.Handler != apps.SubscriptionLabel("ticket.*") {
 			t.Fatalf("streamed invocation = %+v", info)
 		}
 	case <-time.After(2 * time.Second):

@@ -133,7 +133,7 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 		VersionID:    plan.versionID,
 		EventName:    appCommandEvent,
 		EventSubject: command,
-		Handler:      plan.handler,
+		Handler:      plan.label,
 		Duration:     took,
 		StartedAt:    started,
 	}
@@ -218,7 +218,8 @@ func (d *Daemon) planAppCommand(name, command string) (*appDispatchPlan, error) 
 		namespace: apps.Namespace(name),
 		versionID: version.ID,
 		artifact:  version.ArtifactPath,
-		handler:   apps.CommandHandlerKey(command),
+		handler:   command,
+		label:     apps.CommandLabel(command),
 	}
 	for _, collection := range manifest.Collections {
 		plan.collections = append(plan.collections, collection.Name)

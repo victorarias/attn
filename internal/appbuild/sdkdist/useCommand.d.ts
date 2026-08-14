@@ -32,7 +32,7 @@ export interface CommandRunner {
  * ```
  *
  * The command must appear in a `[[commands]]` block of attn-app.toml and the
- * bundle must export a handler under `command:<name>` — the generated `Handlers`
+ * bundle must export a handler under `commands` — the generated `Handlers`
  * type makes the second half a compile error at `attn app apply`.
  */
 export declare function useCommand(command: string): CommandRunner;

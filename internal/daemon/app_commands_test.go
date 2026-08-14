@@ -103,8 +103,8 @@ func TestAppCommandRunsTheHandlerAndAnswersTheCaller(t *testing.T) {
 		t.Fatalf("the sidecar ran %d commands", len(log))
 	}
 	got := log[0]
-	if got.Handler != apps.CommandHandlerKey("approve") {
-		t.Errorf("handler key is %q, want the command: prefix", got.Handler)
+	if got.Handler != "approve" {
+		t.Errorf("the sidecar was asked for handler %q, want the command's bare name", got.Handler)
 	}
 	if got.App != "reviewer" || got.VersionID != version.ID {
 		t.Errorf("the dispatch names %s version %d, want reviewer version %d", got.App, got.VersionID, version.ID)
@@ -117,7 +117,7 @@ func TestAppCommandRunsTheHandlerAndAnswersTheCaller(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("invocations = %+v, want the one command", rows)
 	}
-	if rows[0].Status != appInvocationStatusOK || rows[0].Handler != apps.CommandHandlerKey("approve") {
+	if rows[0].Status != appInvocationStatusOK || rows[0].Handler != apps.CommandLabel("approve") {
 		t.Errorf("invocation = %+v", rows[0])
 	}
 	if rows[0].EventName != appCommandEvent || rows[0].EventSubject != "approve" {

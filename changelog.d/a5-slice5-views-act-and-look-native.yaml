@@ -2,7 +2,7 @@ kind: added
 area: apps
 change: >
   An app's view can now act, not only read. An app declares `[[commands]]` in
-  its manifest, exports a handler for each under `command:<name>`, and a view
+  its manifest, exports a handler for each under `commands`, and a view
   invokes one by name — attn addresses it to the app that mounted the tile.
   The handler runs where every other handler runs: the shared runtime, the same
   document access, the same invocation log, the same sixty-second abandon.
@@ -18,7 +18,8 @@ change: >
   those components — with an AGENTS.md that teaches views, params, reading,
   acting and drawing.
 notes: >
-  A5 slice 5. Protocol 244: `app_command` and `app_command_result`. Command
-  handler keys carry a `command:` prefix; subscription keys stay the raw event
-  pattern, so no installed app's bundle changes meaning. One command carries at
+  A5 slice 5. Protocol 244: `app_command` and `app_command_result`. An app's
+  bundle now default-exports one handler map per kind — `subscriptions`, keyed
+  by event pattern, and `commands`, keyed by name — so an app installed before
+  this needs one `attn app apply` to keep dispatching. One command carries at
   most 256KB in either direction.

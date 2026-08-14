@@ -419,7 +419,9 @@ const appDispatchTimeout = 60 * time.Second
 //
 // Handler is resolved here rather than in the host: the daemon holds the frozen
 // declaration and the same pattern matching the bus filter uses, and a second
-// implementation of that rule in TypeScript is one free to drift.
+// implementation of that rule in TypeScript is one free to drift. It is a key of
+// the bundle's `subscriptions` map — which map to index in is what the method
+// name already says, so no key ever carries its kind.
 //
 // Artifact is an absolute path, and that is the whole of the hot-reload story:
 // versions are content-addressed, so each one has its own path, `import()`
@@ -459,7 +461,8 @@ type appDispatchResult struct {
 // depends on which half is populated is one every reader has to decode twice.
 // Everything either one needs to find and scope a handler — the artifact, the
 // key, the in-flight id, the declared collections — is identical, and so is
-// what the host does with it.
+// what the host does with it. Handler is the command's bare name, looked up in
+// the bundle's `commands` map.
 type appCommandRequest struct {
 	Dispatch    string          `json:"dispatch"`
 	App         string          `json:"app"`

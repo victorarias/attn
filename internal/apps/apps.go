@@ -162,19 +162,14 @@ func ValidateCommandName(name string) error {
 	return nil
 }
 
-// CommandHandlerKey is the key a command binds to in an app's default export,
-// and the handler name its invocations are recorded under.
-//
-// The prefix is what keeps a command and a subscription apart in one map: an
-// event pattern is a dotted name and can never contain a colon, and neither can
-// a command name, so `command:approve` collides with nothing. Deriving it here
-// means the codegen that writes the type, the daemon that resolves the handler
-// and the host that looks it up cannot disagree.
-func CommandHandlerKey(command string) string { return CommandHandlerPrefix + command }
-
-// CommandHandlerPrefix is that prefix, shared with anything that has to
-// recognise a command among an app's handlers.
-const CommandHandlerPrefix = "command:"
+// The labels an invocation is recorded under. They are a rendering choice for
+// `attn app logs` and nothing else: what runs is looked up in the map for its
+// kind — the bundle exports one per kind — so a label never has to be unique
+// against anything, and every kind gets one because a reader of the log wants
+// to know which of them ran.
+func CommandLabel(command string) string      { return "command:" + command }
+func SubscriptionLabel(pattern string) string { return "subscribe:" + pattern }
+func ViewLabel(view string) string            { return "view:" + view }
 
 // ViewTileKindPrefix is what makes a workspace layout's `tile_kind` an app's
 // rather than a built-in one. The prefix is reserved from A5 on: a built-in tile
