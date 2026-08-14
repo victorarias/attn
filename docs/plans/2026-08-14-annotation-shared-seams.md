@@ -18,7 +18,7 @@ Frontend annotation flows
                 -> shared useAnnotationSend -> existing domain send function
 ```
 
-Persisted terminal draft entries change only from `emoji` to `quickLabelId`; the session draft decoder translates old emoji-only entries while all new writes use IDs. Protocol 246 makes the new field optional beside the optional legacy field.
+Persisted terminal draft entries change only from `emoji` to `quickLabelId`; the session draft decoder translates old emoji-only entries while all new writes use IDs. Protocol 247 makes the new field optional beside the optional legacy field.
 
 ## Boundaries
 
