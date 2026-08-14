@@ -2778,6 +2778,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCrewSet(conn, msg.(*protocol.CrewSetMessage))
 	case protocol.CmdCrewPrime: // wire: crew_prime
 		d.handleCrewPrime(conn, msg.(*protocol.CrewPrimeMessage))
+	case protocol.CmdCrewHandoff: // wire: crew_handoff
+		d.handleCrewHandoff(conn, msg.(*protocol.CrewHandoffMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos

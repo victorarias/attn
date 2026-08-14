@@ -37,7 +37,8 @@ func TestPriming_BlockCarriesEverythingAWokenMemberNeeds(t *testing.T) {
 		"## Your predecessor's letter (2026-08-13T22-20Z-trellis.md)",
 		"#901 is waiting on review",
 		"2026-08-12T21-00Z-trellis.md",
-		"handoffs/<UTC timestamp>-trellis.md",
+		"attn handoff -m",
+		"Filing ends your day.",
 		"attn seed note <id> --handoff",
 		"Only one session is trellis at a time",
 	} {

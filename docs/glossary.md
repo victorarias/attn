@@ -531,6 +531,21 @@ handoff axes differ, that only one session is this member at a time. Skills
 retire into verbs and the verbs are taught, because an agent never told how to
 handoff cannot file one.
 
+A member's day ends with a **handoff**: `attn handoff -m "<letter>"`, the
+member's own letter to its successor. attn names the file and files it into the
+member's `handoffs/`; the line is **append-only**, so a name already taken is
+refused and a correction is a new letter rather than an edit. Only the session
+living the day can file one — the binding says whose day is closing.
+
+Filing runs the **nap**: attn closes that session and immediately starts the
+member's next day, primed by the letter that was just filed. The nap is a
+replacement rather than a resume, because carrying a transcript — or a
+compaction summary — into the new day is exactly what the member's letter is
+there instead of. The successor keeps the closed day's launch settings, and the
+binding moves from one session to the other in a single write, so the member is
+never momentarily unbound. A nap that cannot run leaves the letter filed and the
+day running: a member is never torn down with its letter unfiled.
+
 Tending is not a crew privilege: workers and errand sessions tend seeds too,
 under any free-string name. Where a tender's name happens to match a registered
 member it resolves to that member's id, so the claim compares addresses rather
