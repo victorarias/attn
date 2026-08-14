@@ -271,8 +271,14 @@ func runAppStatus(args []string) {
 			state = "enabled"
 		}
 		filter := app.Consumer.Filter
-		if filter == "" {
+		switch filter {
+		case "":
 			filter = "everything"
+		case apps.NoSubscriptionsPattern:
+			// An app can declare a view and no subscriptions, and its filter is
+			// then a fact name nothing publishes. Printing that name sends the
+			// reader looking for an event that does not exist.
+			filter = "nothing — it declares no subscriptions"
 		}
 		fmt.Printf("  consumer:   %s — %s, cursor %d, %d event(s) behind\n",
 			app.Consumer.Name, state, app.Consumer.Cursor, app.Consumer.Lag)

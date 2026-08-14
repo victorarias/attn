@@ -110,6 +110,41 @@ func ValidateName(name string) error {
 	return nil
 }
 
+// MaxViewNameLength bounds a view name, for the same reason MaxNameLength
+// bounds an app's: the name is addressed, not just displayed. It is a file name
+// under the version directory and a segment of the tile kind an app view docks
+// as, and 64 is far past any real name.
+const MaxViewNameLength = 64
+
+// ValidateViewName reports whether a string can name one of an app's views.
+//
+// It is the app-name rule again, minus the reserved set: a view name is scoped
+// to its app, so nothing it could collide with is global. It lives here rather
+// than in the manifest parser because the same string is a file name in the
+// version directory and a segment of the `app:<app>/<view>` tile kind, and a
+// parser with its own opinion is how those drift apart.
+func ValidateViewName(name string) error {
+	if name == "" {
+		return fmt.Errorf("a view name is required, as lowercase letters, digits and dashes (for example approvals)")
+	}
+	if len(name) > MaxViewNameLength {
+		return fmt.Errorf("view name %q is %d characters, over the %d-character limit", name, len(name), MaxViewNameLength)
+	}
+	if !nameRe.MatchString(name) {
+		return fmt.Errorf("view name %q must be lowercase letters, digits and dashes, starting with a letter or digit (for example pending-approvals)", name)
+	}
+	return nil
+}
+
+// NoSubscriptionsPattern is the bus filter of an app that declared no
+// subscriptions — a fact name nothing publishes. A filter has to be *something*,
+// and every other candidate ("", "*") means "everything" somewhere in the bus.
+//
+// It lives here because two surfaces that cannot see each other need the same
+// string: the daemon derives it, and the CLI recognises it to say "nothing"
+// where it would otherwise print a fact name no reader could look up.
+const NoSubscriptionsPattern = "app.subscribes.to.nothing"
+
 // ConsumerName is the app's durable bus consumer. The prefix is what keeps an
 // app from colliding with a platform consumer, and what makes `attn bus status`
 // readable at a glance.

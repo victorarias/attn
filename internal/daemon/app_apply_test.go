@@ -34,7 +34,15 @@ func appApplyDaemon(t *testing.T) *Daemon {
 // returns the hash that names it.
 func stageArtifact(t *testing.T, d *Daemon, name, declaration, bundle string) string {
 	t.Helper()
-	hash := appbuild.VersionHash(declaration, []byte(bundle))
+	return stageArtifacts(t, d, name, declaration, bundle, nil)
+}
+
+// stageArtifacts is stageArtifact for a version that also holds views: every
+// artifact goes where the daemon derives its path, and the hash covers all of
+// them.
+func stageArtifacts(t *testing.T, d *Daemon, name, declaration, bundle string, views []appbuild.ViewArtifact) string {
+	t.Helper()
+	hash := appbuild.VersionHash(declaration, []byte(bundle), views)
 	path := appbuild.ArtifactPath(d.appsDir, name, hash)
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		t.Fatal(err)
@@ -42,11 +50,27 @@ func stageArtifact(t *testing.T, d *Daemon, name, declaration, bundle string) st
 	if err := os.WriteFile(path, []byte(bundle), 0o644); err != nil {
 		t.Fatal(err)
 	}
+	for _, v := range views {
+		viewPath := appbuild.ViewArtifactPath(d.appsDir, name, hash, v.Name)
+		if err := os.MkdirAll(filepath.Dir(viewPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(viewPath, v.Content, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return hash
 }
 
 func declarationFor(name, note string) string {
 	return fmt.Sprintf(`{"name":%q,"attn_app_api":1,"entrypoint":"src/index.ts","note":%q}`, name, note)
+}
+
+// declarationWithView is the frozen snapshot of an app that declares one view —
+// the shape the daemon reads back to know which artifacts a version is made of.
+func declarationWithView(name, view string) string {
+	return fmt.Sprintf(`{"name":%q,"attn_app_api":1,"entrypoint":"src/index.ts","views":[{"name":%q,"kind":"tile","title":"Pending","entrypoint":"src/views/%s.tsx"}]}`,
+		name, view, view)
 }
 
 func appApply(t *testing.T, d *Daemon, name, hash, declaration string) protocol.Response {
@@ -213,7 +237,7 @@ func TestAppApplyRefusesAnArtifactThatDoesNotMatchItsHash(t *testing.T) {
 func TestAppApplyRefusesAMissingArtifact(t *testing.T) {
 	d := appApplyDaemon(t)
 	declaration := declarationFor("approval-gate", "first")
-	hash := appbuild.VersionHash(declaration, []byte("never written"))
+	hash := appbuild.VersionHash(declaration, []byte("never written"), nil)
 
 	resp := appApply(t, d, "approval-gate", hash, declaration)
 	if resp.Ok {
@@ -221,6 +245,61 @@ func TestAppApplyRefusesAMissingArtifact(t *testing.T) {
 	}
 	if msg := protocol.Deref(resp.Error); !strings.Contains(msg, d.appsDir) {
 		t.Errorf("error does not name where it looked: %s", msg)
+	}
+}
+
+// A version is every artifact it holds. The daemon reads the views its
+// declaration names and hashes them with the bundle, so a version whose views
+// moved cannot be recorded under a hash that describes the old ones.
+func TestAppApplyHashesTheViewsToo(t *testing.T) {
+	d := appApplyDaemon(t)
+	declaration := declarationWithView("approval-gate", "approvals")
+	views := []appbuild.ViewArtifact{{Name: "approvals", Content: []byte("export default function A(){}\n")}}
+	hash := stageArtifacts(t, d, "approval-gate", declaration, "export default {}\n", views)
+
+	if resp := appApply(t, d, "approval-gate", hash, declaration); !resp.Ok {
+		t.Fatalf("apply refused a correctly built version: %s", protocol.Deref(resp.Error))
+	}
+
+	// The same bundle and declaration with a different view is a different
+	// version, and claiming the old hash for it is refused.
+	edited := []appbuild.ViewArtifact{{Name: "approvals", Content: []byte("export default function B(){}\n")}}
+	if same := appbuild.VersionHash(declaration, []byte("export default {}\n"), edited); same == hash {
+		t.Fatal("editing only a view left the version hash unchanged")
+	}
+	viewPath := appbuild.ViewArtifactPath(d.appsDir, "approval-gate", hash, "approvals")
+	if err := os.WriteFile(viewPath, edited[0].Content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	resp := appApply(t, d, "approval-gate", hash, declaration)
+	if resp.Ok {
+		t.Fatal("apply accepted a version whose view does not hash to its name")
+	}
+	if msg := protocol.Deref(resp.Error); !strings.Contains(msg, "nothing was recorded") {
+		t.Errorf("error does not say nothing was recorded: %s", msg)
+	}
+}
+
+// A declared view with no artifact is refused by name: the daemon cannot check a
+// hash over content it does not have, and recording the version anyway would
+// leave a row naming a view nothing can serve.
+func TestAppApplyRefusesADeclaredViewWithNoArtifact(t *testing.T) {
+	d := appApplyDaemon(t)
+	declaration := declarationWithView("approval-gate", "approvals")
+	hash := stageArtifact(t, d, "approval-gate", declaration, "export default {}\n")
+
+	resp := appApply(t, d, "approval-gate", hash, declaration)
+	if resp.Ok {
+		t.Fatal("apply accepted a version missing a declared view's artifact")
+	}
+	msg := protocol.Deref(resp.Error)
+	for _, want := range []string{"approvals", "views/approvals.js"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("error does not carry %q: %s", want, msg)
+		}
+	}
+	if count, err := d.store.CountAppVersions("approval-gate"); err != nil || count != 0 {
+		t.Fatalf("versions = %d (%v), want none", count, err)
 	}
 }
 

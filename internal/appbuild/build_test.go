@@ -2,6 +2,9 @@ package appbuild
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -337,6 +340,183 @@ func TestBuild_FailureLeavesTheStoreUntouched(t *testing.T) {
 	staging, err := os.ReadDir(filepath.Join(env.store, ".staging"))
 	if err == nil && len(staging) != 0 {
 		t.Fatalf("staging left %d directories behind", len(staging))
+	}
+}
+
+// The view fixtures below import nothing that has to resolve. A view's real
+// imports are the SDK's, and the SDK is a package this slice does not build yet
+// — so these prove the build step (browser target, whole import graph, one
+// artifact per view, hash over all of them) with source that stands alone.
+const viewHelperMarker = "helper-from-the-import-graph"
+
+// addView writes a view's source and declares it in the manifest.
+func (e buildEnv) addView(t *testing.T, name, source string) {
+	t.Helper()
+	path := filepath.Join(e.dir, "src", "views", name+".tsx")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(source), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	manifest := filepath.Join(e.dir, ManifestName)
+	data, err := os.ReadFile(manifest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	block := fmt.Sprintf("\n[[views]]\nname = %q\nkind = \"tile\"\ntitle = \"Pending\"\nentrypoint = \"src/views/%s.tsx\"\n", name, name)
+	if err := os.WriteFile(manifest, append(data, []byte(block)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// The artifact layout the whole stage rests on: one module per declared view,
+// beside the handler bundle, in the same content-addressed version directory.
+func TestBuild_EachViewIsItsOwnArtifactBesideTheBundle(t *testing.T) {
+	env := newBuildEnv(t, "viewed-app")
+	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
+	env.addView(t, "history", "export default function History(): string { return \"history\" }\n")
+
+	res := env.mustBuild(t)
+
+	if len(res.ViewBytes) != 2 {
+		t.Fatalf("ViewBytes = %+v, want one entry per view", res.ViewBytes)
+	}
+	for _, v := range res.ViewBytes {
+		if v.Bytes == 0 {
+			t.Errorf("view %q built to nothing", v.Name)
+		}
+		want := ViewArtifactPath(env.store, "viewed-app", res.ContentHash, v.Name)
+		if v.Path != want {
+			t.Errorf("view %q is at %s, want %s", v.Name, v.Path, want)
+		}
+		if _, err := os.Stat(want); err != nil {
+			t.Errorf("view %q has no artifact: %v", v.Name, err)
+		}
+	}
+	if filepath.Dir(filepath.Dir(res.ViewBytes[0].Path)) != filepath.Dir(res.ArtifactPath) {
+		t.Errorf("views are not in the version directory: %s vs %s", res.ViewBytes[0].Path, res.ArtifactPath)
+	}
+}
+
+// The entrypoint is where the build starts, not what it contains: a view's local
+// imports land inside its one artifact, so one view is one file is one URL.
+func TestBuild_ViewCarriesItsWholeImportGraph(t *testing.T) {
+	env := newBuildEnv(t, "graph-app")
+	if err := os.MkdirAll(filepath.Join(env.dir, "src", "lib"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(env.dir, "src", "lib", "format.ts"),
+		[]byte("export const MARKER = \""+viewHelperMarker+"\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	env.addView(t, "approvals", "import { MARKER } from \"../lib/format\"\nexport default function Approvals(): string { return MARKER }\n")
+
+	res := env.mustBuild(t)
+
+	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(built), viewHelperMarker) {
+		t.Errorf("the view's local import is not inside its artifact:\n%s", built)
+	}
+}
+
+// The SDK specifiers stay external, so the module the frontend imports resolves
+// them against attn's own React rather than carrying a second copy.
+func TestBuild_ViewLeavesTheSDKSpecifierUnresolved(t *testing.T) {
+	env := newBuildEnv(t, "external-app")
+	env.addView(t, "approvals",
+		"import { useState } from \""+SDKModule+"\"\nexport default function Approvals(): unknown { return useState }\n")
+
+	res := env.mustBuild(t)
+
+	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(built), "from \""+SDKModule+"\"") {
+		t.Errorf("the SDK import was resolved into the artifact:\n%s", built)
+	}
+}
+
+// A view-only edit has to mint a new version. The declaration and the handler
+// bundle are both untouched by it, so a hash over those alone would reuse a row
+// whose artifacts had moved under it.
+func TestBuild_ViewOnlyEditIsANewVersion(t *testing.T) {
+	env := newBuildEnv(t, "reviewed-app")
+	env.addView(t, "approvals", "export default function Approvals(): string { return \"before\" }\n")
+	first := env.mustBuild(t)
+
+	env.edit(t, "src/views/approvals.tsx", `"before"`, `"after"`)
+	second := env.mustBuild(t)
+
+	if second.ContentHash == first.ContentHash {
+		t.Fatal("editing a view left the version hash unchanged, so the version row would name the old artifact")
+	}
+	if _, err := os.Stat(first.ViewBytes[0].Path); err != nil {
+		t.Errorf("the previous version's view must survive for rollback: %v", err)
+	}
+	if _, err := os.Stat(second.ViewBytes[0].Path); err != nil {
+		t.Errorf("the new version has no view artifact: %v", err)
+	}
+}
+
+// An app with no views hashes exactly as it did before views existed, so
+// re-applying an app built by an older attn lands on the row it already had.
+func TestBuild_ViewlessAppHashesAsItDidBeforeViews(t *testing.T) {
+	env := newBuildEnv(t, "unchanged-app")
+	res := env.mustBuild(t)
+
+	bundle, err := os.ReadFile(res.ArtifactPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy := sha256.New()
+	legacy.Write([]byte(res.Declaration))
+	legacy.Write([]byte{0})
+	legacy.Write(bundle)
+	if got := hex.EncodeToString(legacy.Sum(nil)); got != res.ContentHash {
+		t.Fatalf("hash of a view-less app moved: %s, was %s", res.ContentHash, got)
+	}
+}
+
+// A view is something that runs, so an app that declares one and no
+// subscriptions builds and applies — a tile that only reads the document store
+// is a legitimate whole app.
+func TestBuild_AppWithAViewAndNoSubscriptionsBuilds(t *testing.T) {
+	env := newBuildEnv(t, "board-app")
+	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
+	env.editManifest(t, "[[subscribe]]\nevents = [\"session.state.changed\"]\n", "")
+	env.edit(t, "src/index.ts",
+		"export default {\n  \"session.state.changed\": onSessionState,\n} satisfies Handlers",
+		"export default {} satisfies Handlers")
+
+	res := env.mustBuild(t)
+
+	if len(res.Manifest.Subscribe) != 0 || len(res.ViewBytes) != 1 {
+		t.Fatalf("manifest = %+v, views = %+v", res.Manifest, res.ViewBytes)
+	}
+}
+
+// A broken view fails the apply with the bundler's own words, and leaves the
+// store as it found it — the same guarantee the handler bundle already had.
+func TestBuild_BrokenViewFailsTheWholeApply(t *testing.T) {
+	env := newBuildEnv(t, "brokenview-app")
+	env.addView(t, "approvals", "import { missing } from \"./nowhere\"\nexport default function A(): unknown { return missing }\n")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a view whose import does not resolve")
+	}
+	for _, want := range []string{"approvals", "brokenview-app"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error does not name %q: %v", want, err)
+		}
+	}
+	if entries, err := os.ReadDir(filepath.Join(env.store, "brokenview-app")); err == nil && len(entries) != 0 {
+		t.Fatalf("store holds %d version directories, want none", len(entries))
 	}
 }
 
