@@ -1109,6 +1109,28 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// held it — an app on version B with A behind it becomes the two-step chain
 	// A → B, which walks exactly as it did before.
 	{105, "walk an app's serving history as a chain", ``},
+	{106, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
+    id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+    app_name            TEXT NOT NULL,
+    reason              TEXT NOT NULL,
+    version_id          INTEGER NOT NULL,
+    through_seq         INTEGER NOT NULL,
+    previous_version_id INTEGER,
+    cursor              INTEGER,
+    earliest            INTEGER,
+    missed              INTEGER,
+    created_at          TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_app_reconcile_requests_pending
+    ON app_reconcile_requests(app_name, id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_app_reconcile_requests_gap
+    ON app_reconcile_requests(app_name, cursor, earliest, through_seq)
+    WHERE reason = 'gap';
+CREATE TABLE IF NOT EXISTS app_reconcile_progress (
+    app_name             TEXT PRIMARY KEY,
+    completed_request_id INTEGER NOT NULL,
+    updated_at           TEXT NOT NULL
+);`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

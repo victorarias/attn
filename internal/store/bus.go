@@ -172,6 +172,21 @@ func (s *Store) SetBusConsumerCursor(name string, cursor int64, now time.Time) e
 	return err
 }
 
+// AdvanceBusConsumerCursor moves a cursor forward without allowing an older
+// fence observed by another transaction to rewind it.
+func (s *Store) AdvanceBusConsumerCursor(name string, cursor int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return nil
+	}
+	_, err := s.db.Exec(`
+		UPDATE bus_consumers SET cursor = MAX(cursor, ?), updated_at = ? WHERE name = ?
+	`, cursor, formatTicketTime(now), name)
+	return err
+}
+
 // SetBusConsumerEnabled flips the kill switch for a consumer, and reports
 // whether there was a row to flip.
 //
@@ -199,6 +214,57 @@ func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) 
 	}
 	n, err := res.RowsAffected()
 	return n > 0, err
+}
+
+// SetAppBusConsumerEnabled flips an app consumer and records a false-to-true
+// reconciliation trigger in the same transaction. changed distinguishes a real
+// transition from an idempotent request.
+func (s *Store) SetAppBusConsumerEnabled(appName string, enabled bool, now time.Time) (exists, changed bool, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return false, false, nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return false, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	consumerName := "app:" + appName
+	var current int
+	if err := tx.QueryRow(`SELECT enabled FROM bus_consumers WHERE name = ?`, consumerName).Scan(&current); err != nil {
+		if err == sql.ErrNoRows {
+			return false, false, nil
+		}
+		return false, false, err
+	}
+	want := 0
+	if enabled {
+		want = 1
+	}
+	if current == want {
+		return true, false, tx.Commit()
+	}
+	stamp := now.UTC().Format(sortableTimeFormat)
+	if _, err := tx.Exec(`UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?`, want, stamp, consumerName); err != nil {
+		return false, false, err
+	}
+	if enabled {
+		var versionID sql.NullInt64
+		if err := tx.QueryRow(`SELECT current_version_id FROM apps WHERE name = ?`, appName).Scan(&versionID); err != nil {
+			return false, false, err
+		}
+		if versionID.Valid {
+			head, err := busHeadWith(tx)
+			if err != nil {
+				return false, false, err
+			}
+			if err := appendAppReconcileRequest(tx, appName, AppReconcileReEnabled, versionID.Int64, head, 0, now); err != nil {
+				return false, false, err
+			}
+		}
+	}
+	return true, true, tx.Commit()
 }
 
 // DeleteBusConsumer removes a registration. Deleting a row that is not there is

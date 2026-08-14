@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -688,6 +689,130 @@ func TestConsumerBelowTheTrimPointResumesAtHead(t *testing.T) {
 	names, _ := rec.snapshot()
 	if names[0] != "e.happened" {
 		t.Fatalf("after resuming at head, delivered %v", names)
+	}
+}
+
+func TestPreDrainOwnsGapRepairAndKeepsLaterFactsBehindItsFence(t *testing.T) {
+	s := newMemStore()
+	for _, name := range []string{"one", "two", "three", "four"} {
+		if _, err := s.Append(Event{Name: name}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.dropEventsBelow(4)
+	s.consumers["app:projection"] = Consumer{Name: "app:projection", Cursor: 1, Filter: "*", Enabled: true}
+
+	b := testBus(t, s)
+	rec := newRecorder()
+	var got *Gap
+	checks := 0
+	d := b.newDurable("app:projection", All, func(_ context.Context, consumer Consumer, gap *Gap) error {
+		checks++
+		if checks == 2 {
+			if consumer.Cursor != 5 || gap != nil {
+				t.Fatalf("second pre-drain consumer/gap = %+v / %+v", consumer, gap)
+			}
+			return nil
+		}
+		if consumer.Cursor != 1 || gap == nil {
+			t.Fatalf("pre-drain consumer/gap = %+v / %+v", consumer, gap)
+		}
+		copy := *gap
+		got = &copy
+		if err := s.SetCursor(consumer.Name, gap.Head, time.Now()); err != nil {
+			return err
+		}
+		_, err := s.Append(Event{Name: "after-fence"}, time.Now())
+		return err
+	}, rec.handle)
+	t.Cleanup(d.cancel)
+	if err := b.drain(d); err != nil {
+		t.Fatal(err)
+	}
+	if checks != 2 || got == nil || got.Cursor != 1 || got.Earliest != 4 || got.Head != 4 || got.Missed != 2 {
+		t.Fatalf("checks/gap = %d / %+v", checks, got)
+	}
+	names, seqs := rec.snapshot()
+	if len(names) != 1 || names[0] != "after-fence" || seqs[0] != 5 {
+		t.Fatalf("delivered names/seqs = %v / %v", names, seqs)
+	}
+	c, _, _ := s.GetConsumer("app:projection")
+	if c.Cursor != 5 {
+		t.Fatalf("cursor = %d, want later fact 5", c.Cursor)
+	}
+}
+
+func TestPreDrainFailureMovesNeitherGapNorFactCursor(t *testing.T) {
+	s := newMemStore()
+	for _, name := range []string{"one", "two", "three"} {
+		if _, err := s.Append(Event{Name: name}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.dropEventsBelow(3)
+	s.consumers["app:projection"] = Consumer{Name: "app:projection", Cursor: 0, Filter: "*", Enabled: true}
+	b := testBus(t, s)
+	rec := newRecorder()
+	d := b.newDurable("app:projection", All, func(context.Context, Consumer, *Gap) error {
+		return errors.New("reconcile still owed")
+	}, rec.handle)
+	t.Cleanup(d.cancel)
+	if err := b.drain(d); err == nil || !strings.Contains(err.Error(), "reconcile still owed") {
+		t.Fatalf("drain error = %v", err)
+	}
+	c, _, _ := s.GetConsumer("app:projection")
+	if c.Cursor != 0 || rec.count() != 0 {
+		t.Fatalf("failed pre-drain moved cursor/delivered: cursor=%d delivered=%d", c.Cursor, rec.count())
+	}
+}
+
+func TestPreDrainRechecksObligationsBetweenBatches(t *testing.T) {
+	s := newMemStore()
+	if _, err := s.Append(Event{Name: "before-trigger"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.consumers["app:projection"] = Consumer{Name: "app:projection", Filter: "*", Enabled: true}
+	b := testBus(t, s)
+	b.batchSize = 1
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	owed := false
+	checks := 0
+	d := b.newDurable("app:projection", All, func(context.Context, Consumer, *Gap) error {
+		checks++
+		if owed {
+			return errors.New("reconcile still owed")
+		}
+		return nil
+	}, func(ctx context.Context, ev Event) error {
+		close(firstStarted)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-releaseFirst:
+			return nil
+		}
+	})
+	t.Cleanup(d.cancel)
+
+	drained := make(chan error, 1)
+	go func() { drained <- b.drain(d) }()
+	<-firstStarted
+	owed = true
+	for _, name := range []string{"after-trigger-one", "after-trigger-two"} {
+		if _, err := s.Append(Event{Name: name}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(releaseFirst)
+
+	if err := <-drained; err == nil || !strings.Contains(err.Error(), "reconcile still owed") {
+		t.Fatalf("drain error = %v", err)
+	}
+	consumer, _, _ := s.GetConsumer("app:projection")
+	if checks != 2 || consumer.Cursor != 1 {
+		t.Fatalf("pre-drain checks/cursor = %d/%d, want 2/1", checks, consumer.Cursor)
 	}
 }
 

@@ -221,6 +221,37 @@ func TestAppEnableDisableFlipsTheConsumerBitAndPublishes(t *testing.T) {
 	}
 }
 
+func TestAppReEnableRecordsOneReconcileAtTheCurrentBusHead(t *testing.T) {
+	d := newDaemonForTest(t)
+	seedApp(t, d, "approval-gate", true)
+	if _, err := d.store.AppendBusEvent(store.BusEvent{Name: "ticket.created"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if resp := appSetEnabled(t, d, "approval-gate", false); !resp.Ok {
+		t.Fatalf("disable: %v", protocol.Deref(resp.Error))
+	}
+	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
+		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
+	}
+	claim, err := d.store.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 1 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if got := claim.Requests[0]; got.Reason != store.AppReconcileReEnabled || got.ThroughSeq != 2 {
+		t.Fatalf("request = %+v, want re-enabled through the pre-existing fact and disable fact", got)
+	}
+	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
+		t.Fatalf("no-op enable: %v", protocol.Deref(resp.Error))
+	}
+	again, err := d.store.AppReconcilePending("approval-gate")
+	if err != nil || len(again.Requests) != 1 {
+		t.Fatalf("no-op enable added a request: %+v, %v", again, err)
+	}
+	if facts := appFacts(t, d, FactAppEnabledChanged); len(facts) != 2 {
+		t.Fatalf("enabled facts = %d, want only the disable and real re-enable", len(facts))
+	}
+}
+
 func TestAppRemoveKeepsHistoryAndDocuments(t *testing.T) {
 	d := newDaemonForTest(t)
 	version := seedApp(t, d, "approval-gate", true)

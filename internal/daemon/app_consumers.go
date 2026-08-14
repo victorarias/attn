@@ -186,10 +186,49 @@ func (d *Daemon) registerAppConsumer(name string) error {
 		}
 		return nil
 	}
-	if err := d.eventBus.Register(consumer, filter, d.appEventHandler(name)); err != nil {
+	if err := d.eventBus.RegisterWithPreDrain(consumer, filter, d.appPreDrain(name), d.appEventHandler(name)); err != nil {
 		return fmt.Errorf("registering the bus consumer for app %q: %w", name, err)
 	}
 	return nil
+}
+
+func (d *Daemon) appPreDrain(name string) bus.PreDrain {
+	return func(_ context.Context, consumer bus.Consumer, gap *bus.Gap) error {
+		manifest, _, err := d.appDeclaration(name)
+		if err != nil {
+			return err
+		}
+		if len(manifest.EventPatterns()) == 0 {
+			claim, err := d.store.AppReconcilePending(name)
+			if err != nil {
+				return err
+			}
+			if len(claim.Requests) != 0 {
+				if err := d.store.CompleteAppReconcile(name, claim.ThroughRequestID, claim.ThroughSeq, d.appNow()); err != nil {
+					return err
+				}
+			}
+			if gap != nil && gap.Head > claim.ThroughSeq {
+				if err := d.store.AdvanceBusConsumerCursor(consumer.Name, gap.Head, d.appNow()); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+		if gap != nil {
+			if _, err := d.store.RequestAppReconcileGap(name, gap.Cursor, gap.Earliest, gap.Head, d.appNow()); err != nil {
+				return fmt.Errorf("recording the gap reconciliation for app %q: %w", name, err)
+			}
+		}
+		claim, err := d.store.AppReconcilePending(name)
+		if err != nil {
+			return fmt.Errorf("reading reconciliation owed by app %q: %w", name, err)
+		}
+		if len(claim.Requests) == 0 {
+			return nil
+		}
+		return fmt.Errorf("app %q reconciliation is owed through bus seq %d; its handler has not completed", name, claim.ThroughSeq)
+	}
 }
 
 // appFilter reads an app's declared subscriptions off its current version.
