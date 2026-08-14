@@ -146,5 +146,50 @@ func (d *Daemon) PresenceTier() PresenceTier {
 			highest = tier
 		}
 	})
+	d.notePresence(highest, now)
 	return highest
+}
+
+// Presence answers "is the user here?" and nothing else — it is a tier, an
+// instant, with no memory. The crew lifecycle needs the other question, "how
+// long have they been gone?", because a pause and an absence look identical in
+// a snapshot and mean opposite things: one is worth keeping a cache warm for,
+// the other is what sleeping through is for.
+//
+// So the daemon stamps the last moment anybody was above `away`. It is the
+// second consumer's own extension rather than a change to the tier: activity
+// generation asks only whether to generate now, and giving it a memory it does
+// not read would be a second meaning for one number.
+
+// notePresence records that somebody was here. Called from PresenceTier so the
+// stamp cannot drift from the tier it is derived from.
+func (d *Daemon) notePresence(tier PresenceTier, now time.Time) {
+	if tier == PresenceAway {
+		return
+	}
+	d.presenceMu.Lock()
+	defer d.presenceMu.Unlock()
+	if now.After(d.presentSince) {
+		d.presentSince = now
+	}
+}
+
+// UserAwayFor is how long since anybody was above `away`, as of now. Zero while
+// the user is here.
+//
+// The stamp is seeded at daemon start rather than left zero, because a zero
+// would read as an absence stretching back to the epoch and would put every
+// member to bed the moment the daemon came up — the one moment somebody is most
+// likely to be sitting right there.
+func (d *Daemon) UserAwayFor(now time.Time) time.Duration {
+	if d.PresenceTier() != PresenceAway {
+		return 0
+	}
+	d.presenceMu.RLock()
+	since := d.presentSince
+	d.presenceMu.RUnlock()
+	if since.IsZero() || !now.After(since) {
+		return 0
+	}
+	return now.Sub(since)
 }

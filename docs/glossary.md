@@ -492,8 +492,22 @@ not the crown. It is computed when asked and never stored, so harvesting a
 blocker frees its dependent at the next call, with nobody clearing anything.
 `attn seed ready` answers for the whole garden unless told otherwise — a
 delegation dispatched at a crown is the exception, scoped to its plot — and
-every attn-launched agent starts knowing the garden's count (ruled 2026-08-13;
-slice 5 repoints the shipped workspace scoping).
+every attn-launched agent starts knowing the garden's count. The garden is one
+space: it has no workspace dimension at all, and plots are its only grouping
+(ruled 2026-08-13).
+
+**Dispatch-at-plot** aims a delegation at a crown (`attn delegate --plot
+<crown>`). It is scope inference and nothing more: inside that session a
+flag-free `ready` answers with the plot, and its launch guidance starts from
+the crown — the plan in the crown's body, the plot's ready seeds, the freshest
+handoff on each. It is not a fence and not an assignment. The delegate may tend
+or plant anything (`--all` steps back out to the garden), several agents may
+work one plot at once, and who holds what is always the per-seed tender.
+
+**Stale** is a seed claiming attention it is not getting: open, with no log
+movement — no note, no move, no edge — for a window (`attn seed ls --stale`,
+default seven days). It is a query for a person's judgment, never a reaper:
+nothing withers because a window passed.
 
 "Nobody holds it" is one rule, shared by `ready` and by the claim `tend` makes,
 so a seed offered by one is accepted by the other. A tender whose session the
@@ -501,13 +515,13 @@ daemon no longer knows has let go — which is how a successor picks up a seed
 somebody tended and then ended on. A tender that names only a crew member
 always holds: attn has no signal that a person in a terminal pane walked away.
 
-A **note** is one entry on a seed's trail: what happened and what was learned,
+A **note** is one entry on a seed's log: what happened and what was learned,
 written for whoever tends that seed next. Notes are anchored to the work and
 routed to nobody — a message with an addressee is a message, not a note — and
 they are read where the tender already looks, in the seed's own `show`.
 
 A **handoff** is a note kind: one written to your successor on this seed
-(`attn seed note <id> -m "…" --handoff`). It is still a note on the trail and
+(`attn seed note <id> -m "…" --handoff`). It is still a note on the log and
 still routed to nobody, but the freshest one is put in front of whoever picks
 the seed up — `attn seed show` renders it above the seed, and `attn seed tend`
 prints it on the claim — so pickup primes without anybody being told to go
@@ -517,6 +531,95 @@ independent.
 
 Plan:
 [docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
+
+## The crew
+
+The **crew** is the roster of durable named identities. A **crew member** —
+keel, alder, trellis — is a charter, a handoff line, and an address; its
+sessions are its **days**. A member belongs to a home daemon, for the same
+reason the garden does: one roster across a fleet is its whole point.
+
+A member's **home** is plain markdown on disk at `~/.attn/crew/<name>/`: a
+`CHARTER.md` saying what it cares about, and dated **handoffs** it writes to
+its successor at the end of a day. Files are canonical and hand-editable —
+which is what lets any agent be a member, claude or codex or something later.
+The **registry** is the daemon's index over those homes (member id, charter
+path, home dir, cwd, awareness dirs, active binding); it serves reads and is
+never a second authority for the prose. A home the user adds by hand joins the
+roster at the daemon's next start.
+
+**Identity is the invocation, never the files.** A session is a member because
+it was launched as one — the daemon stamps a **binding** at launch
+(`attn <agent> --member <name>`), and that binding is what `attn agent list`
+and `attn agent peek` report. Reading a charter confers nothing. One member has
+one active binding: **two agents with the same identity never run at once**, and
+waking a member whose day is live names that day rather than starting a second.
+Parallelism means another member, never a second copy. A binding naming a
+session the daemon no longer knows has let go on its own, the same liveness
+rule a seed's tender follows.
+
+To **wake** a member is to start its day: `attn crew wake <name>`, or one click
+on its row in the sidebar, where every member is drawn awake or asleep. The
+daemon binds the member, then launches a session in its recorded cwd — its own
+home when none is recorded — reaching its **awareness dirs**, the directories
+its charter is about. The launch carries **priming**: the charter, the freshest
+letter left for it, and the crew guidance — how a handoff is filed, how the two
+handoff axes differ, that only one session is this member at a time. Skills
+retire into verbs and the verbs are taught, because an agent never told how to
+handoff cannot file one.
+
+A member's day ends with a **handoff**: `attn handoff -m "<letter>"`, the
+member's own letter to its successor. attn names the file and files it into the
+member's `handoffs/`; the line is **append-only**, so a name already taken is
+refused and a correction is a new letter rather than an edit. Only the session
+living the day can file one — the binding says whose day is closing.
+
+Filing runs the **nap**: attn closes that session and immediately starts the
+member's next day, primed by the letter that was just filed. The nap is a
+replacement rather than a resume, because carrying a transcript — or a
+compaction summary — into the new day is exactly what the member's letter is
+there instead of. The successor keeps the closed day's launch settings, and the
+binding moves from one session to the other in a single write, so the member is
+never momentarily unbound. A nap that cannot run leaves the letter filed and the
+day running: a member is never torn down with its letter unfiled.
+
+That state has its own way out. Writing the letter and turning the day over are
+one motion but two acts, and only the second can fail, so `attn handoff --retry`
+runs the turnover again against the letter already filed — no second file, no
+overwrite, append-only untouched. The registry records which letter the current
+day filed so the two refusals stay apart: filing again after a failed turnover
+names the retry, and a retry with nothing filed names the verb that writes a
+letter.
+
+Filing does not always start the next day. Whether it naps or **sleeps** is
+attn's call, made from whether the user is around: a day that closes while
+nobody is there does not start another one, because the point of a fresh day is
+somebody to spend it with. A sleeping member is bound to nothing and shows in
+the sidebar one click from a new day. `attn handoff --sleep` and `--nap` decide
+it for one handoff rather than letting attn read presence.
+
+Between those two, the **crew lifecycle** is what watches an awake member and
+decides when either should happen. It reads two things: how long the user has
+been away, and how close the member's session is to losing its prompt cache —
+an **estimate**, since no API reports a cache entry's life, so it is time since
+the session last talked to the model against an assumed TTL for its harness.
+Cache pressure gates everything, which is what keeps the subsystem silent: a
+member whose cache is fresh is left alone whoever is around. Once it is close,
+who is here decides — the user present means a **heartbeat**, a nudge that reads
+the day's context so its lifetime starts over; the user gone means the member is
+asked to close its day. Wakes attn starts on its own are bounded per member by
+the **wake limit**, so an unattended night has a ceiling and every refusal names
+it.
+
+Tending is not a crew privilege: workers and errand sessions tend seeds too,
+under any free-string name. Where a tender's name happens to match a registered
+member it resolves to that member's id, so the claim compares addresses rather
+than spellings — but the registry is never a requirement to tend. The two
+handoffs stay apart on purpose: a **seed handoff** is the work item's thread,
+written by whoever tends it; a **crew handoff** is the member's day-line.
+
+Plan:
+[docs/plans/2026-08-11-the-crew-primitive.md](plans/2026-08-11-the-crew-primitive.md).
 
 ## Home daemon
 

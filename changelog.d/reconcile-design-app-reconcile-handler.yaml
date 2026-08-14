@@ -1,0 +1,7 @@
+kind: internal
+area: apps
+change: >
+  The approved app reconcile design defines how subscribed apps rebuild their
+  materialized collections after a retained-log gap, re-enable, or version
+  change. It fixes the trigger, ordering, retry, interruption, current-state
+  snapshot, legacy-app, and structured-export contracts before implementation.

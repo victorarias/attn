@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow, Seed, AppRegistryEntry } from '../hooks/useDaemonSocket';
+import { DaemonSession, DaemonPR, RepoState, AuthorState, TicketRow, Seed, CrewMember, AppRegistryEntry } from '../hooks/useDaemonSocket';
 
 interface DaemonStore {
   // Sessions from daemon (attn-tracked sessions)
@@ -18,6 +18,11 @@ interface DaemonStore {
   seeds: Seed[];
   seedsTotal: number;
   setSeeds: (seeds: Seed[], total: number) => void;
+
+  // The crew: every registered member, awake or asleep. Permanent — a member is
+  // in the sidebar whether or not it is living a day right now.
+  crew: CrewMember[];
+  setCrew: (crew: CrewMember[]) => void;
 
   // PRs from daemon
   prs: DaemonPR[];
@@ -59,6 +64,9 @@ export const useDaemonStore = create<DaemonStore>((set, get) => ({
   seeds: [],
   seedsTotal: 0,
   setSeeds: (seeds, total) => set({ seeds, seedsTotal: total }),
+
+  crew: [],
+  setCrew: (crew) => set({ crew }),
 
   prs: [],
   setPRs: (prs) => set({ prs }),

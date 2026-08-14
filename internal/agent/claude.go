@@ -116,6 +116,10 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 		args = append(args, claudePeerTools...)
 	}
 
+	// A woken crew member's charter is about places outside its cwd; claude
+	// takes them natively, so the member reaches them without asking.
+	args = append(args, opts.addDirArgs()...)
+
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
 	}

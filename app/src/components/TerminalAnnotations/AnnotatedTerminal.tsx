@@ -19,9 +19,10 @@ import {
   type MessageAnchor,
   type TerminalAnnotation,
 } from '../../utils/terminalAnnotations';
-import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelByEmoji } from './quickLabels';
+import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelById } from './quickLabels';
+import { QuickLabelPicker } from '../../annotations/QuickLabelPicker';
 import { clampToViewport, placePopup, type PlaceOptions, type Placement } from './placement';
-import { useShortcut } from '../../shortcuts/useShortcut';
+import { useAnnotationSend } from '../../annotations/useAnnotationSend';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
 import './TerminalAnnotations.css';
 
@@ -88,10 +89,8 @@ interface Notice {
   seq: number;
 }
 
-// The footer's whole vocabulary. `sending` exists because the delivery is a
-// round trip with a pause in it, and an idle-looking button gets pressed twice.
-type SendOutcome =
-  | { kind: 'sending' }
+// The terminal-specific results carried by the shared send state machine.
+type TerminalSendResult =
   // Annotated mid-flight, so not part of the send. Reported, not assumed zero:
   // a panel that does not empty otherwise reads as a failure.
   | { kind: 'sent'; count: number; kept: number }
@@ -117,10 +116,6 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // Mutating the store is invisible to React; this drives the repaint.
     const [version, setVersion] = useState(0);
     const [composer, setComposer] = useState<Composer | null>(null);
-    // What the last send did, shown in the panel's footer. Null between sends.
-    const [outcome, setOutcome] = useState<SendOutcome | null>(null);
-    // Guards the round trip: the send is reachable from the button and ⌘Enter.
-    const sendingRef = useRef(false);
     // What a gesture that resolved to nothing has to say, and where. Null
     // otherwise: it answers a question the pointer just asked.
     const [notice, setNotice] = useState<Notice | null>(null);
@@ -302,7 +297,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       const current = composer;
       if (current) {
         const annotation = store.list().find((entry) => entry.id === current.annotationId);
-        if (annotation && !annotation.emoji && !annotation.comment) {
+        if (annotation && !annotation.quickLabelId && !annotation.comment) {
           store.remove(current.annotationId);
           persist();
           bump();
@@ -468,10 +463,10 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       ? annotations.find((entry) => entry.id === composer.annotationId) ?? null
       : null;
 
-    const applyLabel = (emoji: string) => {
+    const applyLabel = (quickLabelId: string) => {
       if (!composed) return;
-      const next = composed.emoji === emoji ? '' : emoji;
-      store.update(composed.id, { emoji: next });
+      const next = composed.quickLabelId === quickLabelId ? '' : quickLabelId;
+      store.update(composed.id, { quickLabelId: next });
       // Toggling the only label off leaves an annotation that says nothing.
       if (!next && !composed.comment) store.remove(composed.id);
       persist();
@@ -482,7 +477,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     const saveComment = () => {
       if (!composed) return;
       store.update(composed.id, { comment: draft.trim() });
-      if (!draft.trim() && !composed.emoji) store.remove(composed.id);
+      if (!draft.trim() && !composed.quickLabelId) store.remove(composed.id);
       persist();
       bump();
       closeComposer();
@@ -520,15 +515,15 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
 
     // Delivers the set and submits it. The marks are spent only on `delivered`:
     // clearing undelivered work is the one failure the user cannot undo.
-    const send = () => {
-      if (annotations.length === 0 || !annotationApi || sendingRef.current) return;
+    const performSend = (): Promise<TerminalSendResult | null> | null => {
+      if (annotations.length === 0 || !annotationApi) return null;
       // Land any note still waiting on its typing pause before composing.
       flushNoteSave();
       // A comment being typed when the send fires is part of what was meant.
       if (composed && composer?.writing) {
         const comment = draft.trim();
         store.update(composed.id, { comment });
-        if (!comment && !composed.emoji) store.remove(composed.id);
+        if (!comment && !composed.quickLabelId) store.remove(composed.id);
       }
       // Re-read after that commit; the render's list predates it. Copied, not
       // referenced: `list()` hands back the store's own array, and this is held
@@ -538,25 +533,22 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       bump();
       if (sending.length === 0) {
         persist();
-        return;
+        return null;
       }
       // Snapshotted for the same reason: the box stays typable across the trip.
       const sendingNote = note.trim();
       const payload = buildAnnotationPayload(sending.map((entry) => ({
         quote: entry.quote,
-        emoji: entry.emoji,
+        quickLabelId: entry.quickLabelId,
         comment: entry.comment,
         start: entry.start,
       })), sendingNote);
-      sendingRef.current = true;
-      setOutcome({ kind: 'sending' });
-      void annotationApi.submitAnnotations(sessionId, payload)
+      return annotationApi.submitAnnotations(sessionId, payload)
         .then((result) => {
           if (result.status !== 'delivered') {
-            setOutcome(result.status === 'skipped_pending_approval'
+            return result.status === 'skipped_pending_approval'
               ? { kind: 'skipped' }
-              : { kind: 'error', message: 'The session did not take the feedback. Nothing was sent.' });
-            return;
+              : { kind: 'error', message: 'The session did not take the feedback. Nothing was sent.' };
           }
           // The surface stays live across the round trip, so an entry is spent
           // only if it still reads exactly as when composed.
@@ -564,57 +556,38 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
           sending.forEach((entry) => {
             const now = current.get(entry.id);
             if (!now) return;
-            if (now.emoji !== entry.emoji || now.comment !== entry.comment) return;
+            if (now.quickLabelId !== entry.quickLabelId || now.comment !== entry.comment) return;
             store.remove(entry.id);
           });
           // Same rule for the note: typed over mid-flight, it belongs to the next.
           if (sendingNote && noteRef.current.trim() === sendingNote) writeNote('');
           const kept = store.list().length;
-          setOutcome({ kind: 'sent', count: sending.length, kept });
           bump();
           // Either way the generation is raised, refusing a save already in
           // flight. A tombstone only when nothing survived — including a note
           // typed over mid-flight, since the clear zeroes the note column.
           if (kept > 0 || noteRef.current.trim()) {
             persist();
-            return;
+            return { kind: 'sent', count: sending.length, kept };
           }
           generationRef.current += 1;
-          return annotationApi.clearAnnotations(sessionId, generationRef.current)
+          void annotationApi.clearAnnotations(sessionId, generationRef.current)
             .then((cleared) => {
               generationRef.current = Math.max(generationRef.current, cleared.generation);
             })
             .catch(() => {
               // The feedback is in the session either way; the next save re-adds it.
             });
-        })
-        .catch((error: unknown) => {
-          setOutcome({
-            kind: 'error',
-            message: error instanceof Error ? error.message : 'Send failed',
-          });
-        })
-        .finally(() => {
-          sendingRef.current = false;
+          return { kind: 'sent', count: sending.length, kept };
         });
     };
 
-    // Registration-gated, not handler-gated: the dispatcher consumes ⌘Enter
-    // whenever a handler is registered, so an always-on no-op would swallow the
-    // terminal's. `editableTarget: 'native'` keeps it out of the comment box.
-    useShortcut(
-      'terminal.sendAnnotations',
-      send,
-      enabled && paneActive && annotations.length > 0,
-    );
-
-    // The confirmation lives in the panel's footer and expires on its own. A
-    // refusal does not: it is why the marks are still there.
-    useEffect(() => {
-      if (outcome?.kind !== 'sent') return;
-      const timer = window.setTimeout(() => setOutcome(null), 2200);
-      return () => window.clearTimeout(timer);
-    }, [outcome]);
+    const { outcome, send } = useAnnotationSend<TerminalSendResult>({
+      send: performSend,
+      shortcutId: 'terminal.sendAnnotations',
+      enabled: enabled && paneActive && annotations.length > 0,
+      sentClearMs: 2200,
+    });
 
     // Same measure-then-fit as the popup: the pointer is routinely near an edge.
     useLayoutEffect(() => {
@@ -728,25 +701,14 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               : { left: composer.clientX, top: composer.clientY }}
             onMouseDown={(event) => event.preventDefault()}
           >
-            <div className="anno-popup-labels">
-              {QUICK_LABEL_GROUPS.map((group, groupIndex) => (
-                <React.Fragment key={group[0].id}>
-                  {groupIndex > 0 ? <span className="anno-popup-divider" /> : null}
-                  {group.map((label) => (
-                    <button
-                      key={label.id}
-                      type="button"
-                      className={`anno-popup-label${composed.emoji === label.emoji ? ' anno-popup-label--on' : ''}`}
-                      title={label.text}
-                      aria-label={label.text}
-                      onClick={() => applyLabel(label.emoji)}
-                      {...hintProps(label.text)}
-                    >
-                      {label.emoji}
-                    </button>
-                  ))}
-                </React.Fragment>
-              ))}
+            <QuickLabelPicker
+              mode="chips"
+              className="anno-popup-labels"
+              groups={QUICK_LABEL_GROUPS}
+              isSelected={(label) => composed.quickLabelId === label.id}
+              onSelect={(label) => applyLabel(label.id)}
+              onHint={setHint}
+            >
               <span className="anno-popup-divider" />
               <button
                 type="button"
@@ -771,12 +733,12 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
               >
                 🗑
               </button>
-            </div>
+            </QuickLabelPicker>
             {/* Hovering names what a chip does; at rest the line names the mark
                 this annotation already carries, so reopening one says what it
                 says without a click. */}
             <div className="anno-popup-hint" data-testid="annotation-popup-hint">
-              {hint ?? labelByEmoji(composed.emoji)?.text ?? 'Pick a label, or write a comment'}
+              {hint ?? labelById(composed.quickLabelId)?.text ?? 'Pick a label, or write a comment'}
             </div>
             {composer.writing ? (
               <div className="anno-popup-compose">
@@ -849,7 +811,7 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                     onClick={(event) => reopenFromCard(annotation, event)}
                   >
                     <span className="anno-card-chip">
-                      {annotation.emoji || '💬'}
+                      {labelById(annotation.quickLabelId)?.emoji || '💬'}
                     </span>
                     <span className="anno-card-quote">{annotation.quote}</span>
                     {annotation.comment ? (

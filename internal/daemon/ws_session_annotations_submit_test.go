@@ -40,7 +40,7 @@ func TestSessionAnnotationsSubmitDelivers(t *testing.T) {
 
 	res := sendAnnotationSubmit(t, d, "session-1", submitAnnotationText)
 
-	if !res.Success || res.Status != markdownSubmitStatusDelivered || res.Error != nil {
+	if !res.Success || res.Status != annotationSubmitStatusDelivered || res.Error != nil {
 		t.Fatalf("result = %+v, want delivered", res)
 	}
 	wantPaste := bracketedPasteStart + submitAnnotationText + bracketedPasteEnd
@@ -64,7 +64,7 @@ func TestSessionAnnotationsSubmitSkipsPendingApproval(t *testing.T) {
 
 	res := sendAnnotationSubmit(t, d, "session-1", submitAnnotationText)
 
-	if res.Success || res.Status != markdownSubmitStatusSkipped || res.Error != nil {
+	if res.Success || res.Status != annotationSubmitStatusSkipped || res.Error != nil {
 		t.Fatalf("result = %+v, want skipped_pending_approval", res)
 	}
 	mu.Lock()
@@ -82,7 +82,7 @@ func TestSessionAnnotationsSubmitUnknownSession(t *testing.T) {
 
 	res := sendAnnotationSubmit(t, d, "nope", submitAnnotationText)
 
-	if res.Success || res.Status != markdownSubmitStatusError ||
+	if res.Success || res.Status != annotationSubmitStatusError ||
 		res.Error == nil || !strings.Contains(*res.Error, "unknown session nope") {
 		t.Fatalf("result = %+v, want unknown-session error", res)
 	}
@@ -104,7 +104,7 @@ func TestSessionAnnotationsSubmitRejectsEmptyText(t *testing.T) {
 
 	res := sendAnnotationSubmit(t, d, "session-1", "   \n ")
 
-	if res.Success || res.Status != markdownSubmitStatusError ||
+	if res.Success || res.Status != annotationSubmitStatusError ||
 		res.Error == nil || !strings.Contains(*res.Error, "text is required") {
 		t.Fatalf("result = %+v, want text-required error", res)
 	}
@@ -124,7 +124,7 @@ func TestSessionAnnotationsSubmitDeliveryFailure(t *testing.T) {
 
 	res := sendAnnotationSubmit(t, d, "session-1", submitAnnotationText)
 
-	if res.Success || res.Status != markdownSubmitStatusError || res.Error == nil {
+	if res.Success || res.Status != annotationSubmitStatusError || res.Error == nil {
 		t.Fatalf("result = %+v, want delivery error", res)
 	}
 }

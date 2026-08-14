@@ -16,9 +16,55 @@ export interface PendingRequest {
 
 export type PendingRequests = Map<string, PendingRequest>;
 
+export interface PendingKeyedRequest extends PendingRequest {
+  requestId: string;
+}
+
+export type PendingKeyedRequests = Map<string, PendingKeyedRequest>;
+
 /** `<kind>:<requestId>` — the correlation key both sides of a command agree on. */
 export function pendingRequestKey(kind: string, requestId: string): string {
   return `${kind}:${requestId}`;
+}
+
+/** Park one last-writer-wins request and reject the waiter it supersedes. */
+export function sendKeyedRequest<T>(
+  pending: PendingKeyedRequests,
+  key: string,
+  requestId: string,
+  send: () => void,
+  timeoutMessage: string,
+  timeoutMs: number,
+): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    pending.get(key)?.reject(new Error('Superseded by a newer request'));
+    pending.set(key, {
+      requestId,
+      resolve: resolve as (value: unknown) => void,
+      reject,
+    });
+    send();
+    setTimeout(() => {
+      if (pending.get(key)?.requestId === requestId) {
+        pending.delete(key);
+        reject(new Error(timeoutMessage));
+      }
+    }, timeoutMs);
+  });
+}
+
+/** Take the waiter only when the result still answers its request id. */
+export function takeKeyedRequest(
+  pending: PendingKeyedRequests,
+  key: string,
+  requestId: unknown,
+): PendingRequest | undefined {
+  const waiter = pending.get(key);
+  if (!waiter || waiter.requestId !== requestId) {
+    return undefined;
+  }
+  pending.delete(key);
+  return waiter;
 }
 
 /** The fields every `*_result` event carries, whatever else it adds. */

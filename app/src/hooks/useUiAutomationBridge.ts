@@ -1372,6 +1372,36 @@ function clickTestId(testid: string) {
 // Serialize what the TicketDetailPanel is actually rendering, for assertions.
 // `statusOptions` is the decisive signal that `crashed` is not a manual
 // destination; `disabled` exposes the in-flight gating the review fixes added.
+// The garden panel, as a scenario reads it: where you are in the garden, and
+// what is in front of you. The trail and the rows are the two things a
+// navigation scenario asserts on, so both come back whole.
+function collectGardenUiState() {
+  const panel = document.querySelector('.garden-panel');
+  if (!(panel instanceof HTMLElement)) {
+    return { present: false };
+  }
+  const trail = Array.from(panel.querySelectorAll('.garden-panel__trail-step')).map((step) => ({
+    label: step.textContent?.trim() ?? '',
+    here: step instanceof HTMLButtonElement ? step.disabled : false,
+  }));
+  const seeds = Array.from(panel.querySelectorAll('.garden-seed')).map((row) => ({
+    id: row.querySelector('.garden-seed__id')?.textContent?.trim() ?? '',
+    title: row.querySelector('.garden-seed__title')?.textContent?.trim() ?? '',
+    status: row.querySelector('.garden-seed__state')?.textContent?.trim() ?? '',
+    ready: Boolean(row.querySelector('.garden-seed__ready')),
+    blocked: row.querySelector('.garden-seed__blocked')?.textContent?.trim() ?? '',
+    tender: row.querySelector('.garden-seed__tender')?.textContent?.trim() ?? '',
+    plot: row.querySelector('.garden-seed__plot-counts')?.textContent?.trim() ?? '',
+  }));
+  return {
+    present: true,
+    trail,
+    crown: panel.querySelector('.garden-panel__crown-progress')?.textContent?.trim() ?? '',
+    empty: panel.querySelector('.garden-panel__empty')?.textContent?.trim() ?? '',
+    seeds,
+  };
+}
+
 function collectTicketDetailUiState() {
   const panel = document.querySelector('[data-testid="ticket-detail-panel"]');
   if (!(panel instanceof HTMLElement)) {
@@ -3249,6 +3279,34 @@ export function useUiAutomationBridge({
         closeTicketDetail();
         await settleUi(2);
         return { ok: true };
+      }
+      case 'garden_get_state':
+        return collectGardenUiState();
+      // Walking the garden is a click on a crown's plot; the trail climbs back.
+      case 'garden_open_plot': {
+        const seedId = typeof payload.seedId === 'string' ? payload.seedId : '';
+        if (!seedId) throw new Error('garden_open_plot requires seedId');
+        const row = Array.from(document.querySelectorAll('.garden-seed')).find(
+          (candidate) => candidate.querySelector('.garden-seed__id')?.textContent?.trim() === seedId,
+        );
+        const open = row?.querySelector('.garden-seed__plot');
+        if (!(open instanceof HTMLElement)) {
+          throw new Error(`no plot to open on ${seedId} (it is not a crown, or the panel is not showing it)`);
+        }
+        open.click();
+        await settleUi(2);
+        return collectGardenUiState();
+      }
+      case 'garden_climb_to': {
+        const depth = typeof payload.depth === 'number' ? payload.depth : 0;
+        const steps = Array.from(document.querySelectorAll('.garden-panel__trail-step'));
+        const step = steps[depth];
+        if (!(step instanceof HTMLElement)) {
+          throw new Error(`no trail step at depth ${depth} (the trail is ${steps.length} deep)`);
+        }
+        step.click();
+        await settleUi(2);
+        return collectGardenUiState();
       }
       case 'ticket_detail_get_state':
         return collectTicketDetailUiState();

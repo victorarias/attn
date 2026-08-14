@@ -82,7 +82,7 @@ func TestMarkdownAnnotationsSubmitDelivered(t *testing.T) {
 
 	res := sendSubmit(t, d, "target", nil)
 
-	if !res.Success || res.Status != markdownSubmitStatusDelivered || res.Error != nil {
+	if !res.Success || res.Status != annotationSubmitStatusDelivered || res.Error != nil {
 		t.Fatalf("result = %+v, want delivered", res)
 	}
 	if res.Generation == nil || *res.Generation != 5 {
@@ -138,7 +138,7 @@ func TestMarkdownAnnotationsSubmitSkippedPendingApproval(t *testing.T) {
 
 	res := sendSubmit(t, d, "target", nil)
 
-	if res.Success || res.Status != markdownSubmitStatusSkipped || res.Error != nil {
+	if res.Success || res.Status != annotationSubmitStatusSkipped || res.Error != nil {
 		t.Fatalf("result = %+v, want skipped_pending_approval", res)
 	}
 	mu.Lock()
@@ -158,7 +158,7 @@ func TestMarkdownAnnotationsSubmitUnknownSession(t *testing.T) {
 
 	res := sendSubmit(t, d, "nope", nil)
 
-	if res.Success || res.Status != markdownSubmitStatusError ||
+	if res.Success || res.Status != annotationSubmitStatusError ||
 		res.Error == nil || !strings.Contains(*res.Error, "session not found: nope") {
 		t.Fatalf("result = %+v, want session-not-found error", res)
 	}
@@ -177,7 +177,7 @@ func TestMarkdownAnnotationsSubmitEmptyDraft(t *testing.T) {
 
 	res := sendSubmit(t, d, "target", nil)
 
-	if res.Success || res.Status != markdownSubmitStatusError ||
+	if res.Success || res.Status != annotationSubmitStatusError ||
 		res.Error == nil || *res.Error != "no annotations to send" {
 		t.Fatalf("result = %+v, want no-annotations error", res)
 	}
@@ -197,7 +197,7 @@ func TestMarkdownAnnotationsSubmitDeliveryFailure(t *testing.T) {
 
 	res := sendSubmit(t, d, "target", nil)
 
-	if res.Success || res.Status != markdownSubmitStatusError ||
+	if res.Success || res.Status != annotationSubmitStatusError ||
 		res.Error == nil || !strings.Contains(*res.Error, "pty write exploded") {
 		t.Fatalf("result = %+v, want delivery error", res)
 	}
@@ -222,7 +222,7 @@ func TestMarkdownAnnotationsSubmitClearFailureStillDelivered(t *testing.T) {
 
 	res := sendSubmit(t, d, "target", nil)
 
-	if !res.Success || res.Status != markdownSubmitStatusDelivered {
+	if !res.Success || res.Status != annotationSubmitStatusDelivered {
 		t.Fatalf("result = %+v, want delivered despite clear failure", res)
 	}
 	if res.Error == nil || !strings.Contains(*res.Error, "delivered; failed to clear drafts") {

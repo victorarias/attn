@@ -95,11 +95,11 @@ func Unlink(seeds []Seed, fromID, kind, toID string) (Seed, error) {
 func linkEnds(seeds []Seed, fromID, kind, toID string) (Seed, Seed, error) {
 	from, ok := find(seeds, fromID)
 	if !ok {
-		return Seed{}, Seed{}, fmt.Errorf("no seed %s is planted here; `attn seed ls --all` lists the garden", fromID)
+		return Seed{}, Seed{}, fmt.Errorf("no seed %s is planted here; `attn seed ls` lists the garden", fromID)
 	}
 	to, ok := find(seeds, toID)
 	if !ok {
-		return Seed{}, Seed{}, fmt.Errorf("no seed %s is planted here; `attn seed ls --all` lists the garden", toID)
+		return Seed{}, Seed{}, fmt.Errorf("no seed %s is planted here; `attn seed ls` lists the garden", toID)
 	}
 	if from.ID == to.ID {
 		return Seed{}, Seed{}, fmt.Errorf("%s cannot %s itself", from.ID, kind)

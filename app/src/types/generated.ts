@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewDayClose, CrewHandoffMessage, CrewHandoffResult, CrewListMessage, CrewListResult, CrewMember, CrewPrimeMessage, CrewPrimeResult, CrewSetMessage, CrewSetResult, CrewUpdatedMessage, CrewWakeMessage, CrewWakeResult, CrewWakeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -110,6 +110,20 @@
 //   const createWorktreeFromBranchMessage = Convert.toCreateWorktreeFromBranchMessage(json);
 //   const createWorktreeMessage = Convert.toCreateWorktreeMessage(json);
 //   const createWorktreeResultMessage = Convert.toCreateWorktreeResultMessage(json);
+//   const crewDayClose = Convert.toCrewDayClose(json);
+//   const crewHandoffMessage = Convert.toCrewHandoffMessage(json);
+//   const crewHandoffResult = Convert.toCrewHandoffResult(json);
+//   const crewListMessage = Convert.toCrewListMessage(json);
+//   const crewListResult = Convert.toCrewListResult(json);
+//   const crewMember = Convert.toCrewMember(json);
+//   const crewPrimeMessage = Convert.toCrewPrimeMessage(json);
+//   const crewPrimeResult = Convert.toCrewPrimeResult(json);
+//   const crewSetMessage = Convert.toCrewSetMessage(json);
+//   const crewSetResult = Convert.toCrewSetResult(json);
+//   const crewUpdatedMessage = Convert.toCrewUpdatedMessage(json);
+//   const crewWakeMessage = Convert.toCrewWakeMessage(json);
+//   const crewWakeResult = Convert.toCrewWakeResult(json);
+//   const crewWakeResultMessage = Convert.toCrewWakeResultMessage(json);
 //   const daemonWarning = Convert.toDaemonWarning(json);
 //   const delegateMessage = Convert.toDelegateMessage(json);
 //   const delegateResult = Convert.toDelegateResult(json);
@@ -363,6 +377,10 @@
 //   const seedNotesResult = Convert.toSeedNotesResult(json);
 //   const seedPlantMessage = Convert.toSeedPlantMessage(json);
 //   const seedPlantResult = Convert.toSeedPlantResult(json);
+//   const seedPlotChild = Convert.toSeedPlotChild(json);
+//   const seedPlotMessage = Convert.toSeedPlotMessage(json);
+//   const seedPlotProgress = Convert.toSeedPlotProgress(json);
+//   const seedPlotResult = Convert.toSeedPlotResult(json);
 //   const seedReadyMessage = Convert.toSeedReadyMessage(json);
 //   const seedReadyResult = Convert.toSeedReadyResult(json);
 //   const seedRelation = Convert.toSeedRelation(json);
@@ -667,6 +685,7 @@ export enum AgentPeekMessageCmd {
 
 export interface AgentPeekResult {
     agent:                   string;
+    crew_member?:            string;
     label:                   string;
     last_assistant_message?: string;
     last_seen:               string;
@@ -1621,6 +1640,7 @@ export interface SessionObject {
     branch?:                    string;
     chief_of_staff?:            boolean;
     context_window_cap?:        number;
+    crew_member?:               string;
     delegated_from_chief?:      boolean;
     directory:                  string;
     endpoint_id?:               string;
@@ -2052,6 +2072,149 @@ export enum CreateWorktreeResultMessageEvent {
     CreateWorktreeResult = "create_worktree_result",
 }
 
+export interface CrewHandoffMessage {
+    close?:     CrewDayClose;
+    cmd:        CrewHandoffMessageCmd;
+    note:       string;
+    retry?:     boolean;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum CrewDayClose {
+    Nap = "nap",
+    Sleep = "sleep",
+}
+
+export enum CrewHandoffMessageCmd {
+    CrewHandoff = "crew_handoff",
+}
+
+export interface CrewHandoffResult {
+    member:      string;
+    nap_error?:  string;
+    outcome?:    CrewDayClose;
+    path:        string;
+    session_id?: string;
+    [property: string]: any;
+}
+
+export interface CrewListMessage {
+    cmd: CrewListMessageCmd;
+    [property: string]: any;
+}
+
+export enum CrewListMessageCmd {
+    CrewList = "crew_list",
+}
+
+export interface CrewListResult {
+    members: Member[];
+    [property: string]: any;
+}
+
+export interface Member {
+    awareness_dirs:   string[];
+    binding_session?: string;
+    charter_path:     string;
+    cwd?:             string;
+    home_dir:         string;
+    id:               string;
+    [property: string]: any;
+}
+
+export interface CrewMember {
+    awareness_dirs:   string[];
+    binding_session?: string;
+    charter_path:     string;
+    cwd?:             string;
+    home_dir:         string;
+    id:               string;
+    [property: string]: any;
+}
+
+export interface CrewPrimeMessage {
+    cmd:        CrewPrimeMessageCmd;
+    session_id: string;
+    [property: string]: any;
+}
+
+export enum CrewPrimeMessageCmd {
+    CrewPrime = "crew_prime",
+}
+
+export interface CrewPrimeResult {
+    awareness_dirs: string[];
+    guidance?:      string;
+    member?:        string;
+    priming_bytes:  number;
+    [property: string]: any;
+}
+
+export interface CrewSetMessage {
+    awareness_dirs?:       string[];
+    clear_awareness_dirs?: boolean;
+    cmd:                   CrewSetMessageCmd;
+    cwd?:                  string;
+    member:                string;
+    [property: string]: any;
+}
+
+export enum CrewSetMessageCmd {
+    CrewSet = "crew_set",
+}
+
+export interface CrewSetResult {
+    member: Member;
+    [property: string]: any;
+}
+
+export interface CrewUpdatedMessage {
+    event:   CrewUpdatedMessageEvent;
+    members: Member[];
+    [property: string]: any;
+}
+
+export enum CrewUpdatedMessageEvent {
+    CrewUpdated = "crew_updated",
+}
+
+export interface CrewWakeMessage {
+    agent?:      string;
+    cmd:         CrewWakeMessageCmd;
+    member:      string;
+    request_id?: string;
+    [property: string]: any;
+}
+
+export enum CrewWakeMessageCmd {
+    CrewWake = "crew_wake",
+}
+
+export interface CrewWakeResult {
+    already_awake: boolean;
+    member:        string;
+    session_id:    string;
+    workspace_id:  string;
+    [property: string]: any;
+}
+
+export interface CrewWakeResultMessage {
+    already_awake?: boolean;
+    error?:         string;
+    event:          CrewWakeResultMessageEvent;
+    member?:        string;
+    request_id:     string;
+    session_id?:    string;
+    success:        boolean;
+    workspace_id?:  string;
+    [property: string]: any;
+}
+
+export enum CrewWakeResultMessageEvent {
+    CrewWakeResult = "crew_wake_result",
+}
+
 export interface DaemonWarning {
     code:    string;
     message: string;
@@ -2069,6 +2232,7 @@ export interface DelegateMessage {
     label?:                string;
     model?:                string;
     placement?:            string;
+    plot?:                 string;
     request_id:            string;
     source_session_id:     string;
     ticket_id?:            string;
@@ -3166,6 +3330,7 @@ export interface SeedElement {
     id:              string;
     planter_member:  string;
     planter_session: string;
+    plot_progress?:  PlotProgress;
     ready:           boolean;
     reason?:         string;
     rev:             number;
@@ -3177,13 +3342,23 @@ export interface SeedElement {
     title:           string;
     updated_at:      string;
     vars:            VarElement[];
-    workspace_id:    string;
     [property: string]: any;
 }
 
 export interface EdgeElement {
     kind: string;
     to:   string;
+    [property: string]: any;
+}
+
+export interface PlotProgress {
+    blocked:  number;
+    done:     number;
+    dormant:  number;
+    growing:  number;
+    ready:    number;
+    total:    number;
+    withered: number;
     [property: string]: any;
 }
 
@@ -3609,6 +3784,7 @@ export enum HookStopFailureMessageCmd {
 export interface InitialStateMessage {
     apps?:               AppElement[];
     authors?:            AuthorElement[];
+    crew?:               Member[];
     daemon_instance_id?: string;
     endpoints?:          Endpoint[];
     event:               InitialStateMessageEvent;
@@ -5151,6 +5327,7 @@ export interface RegisterMessage {
     dir:          string;
     id:           string;
     label?:       string;
+    member?:      string;
     workspace_id: string;
     [property: string]: any;
 }
@@ -5295,6 +5472,11 @@ export interface Response {
     app_status_result?:                    AppStatusResultObject;
     app_watch_result?:                     AppWatchResultObject;
     authors?:                              AuthorElement[];
+    crew_handoff_result?:                  CrewHandoffResultObject;
+    crew_list_result?:                     CrewListResultObject;
+    crew_prime_result?:                    CrewPrimeResultObject;
+    crew_set_result?:                      CrewSetResultObject;
+    crew_wake_result?:                     CrewWakeResultObject;
     data?:                                 string;
     delegate_result?:                      DelegateResultObject;
     delegation_operation?:                 DelegationOperationObject;
@@ -5325,6 +5507,7 @@ export interface Response {
     seed_note_result?:                     SeedNoteResultObject;
     seed_notes_result?:                    SeedNotesResultObject;
     seed_plant_result?:                    SeedPlantResultObject;
+    seed_plot_result?:                     SeedPlotResultObject;
     seed_ready_result?:                    SeedReadyResultObject;
     seed_show_result?:                     SeedShowResultObject;
     seed_transition_result?:               SeedTransitionResultObject;
@@ -5367,6 +5550,7 @@ export interface AgentMsgResultObject {
 
 export interface AgentPeekResultObject {
     agent:                   string;
+    crew_member?:            string;
     label:                   string;
     last_assistant_message?: string;
     last_seen:               string;
@@ -5461,6 +5645,41 @@ export interface AppStatusResultObject {
 
 export interface AppWatchResultObject {
     invocation: InvocationElement;
+    [property: string]: any;
+}
+
+export interface CrewHandoffResultObject {
+    member:      string;
+    nap_error?:  string;
+    outcome?:    CrewDayClose;
+    path:        string;
+    session_id?: string;
+    [property: string]: any;
+}
+
+export interface CrewListResultObject {
+    members: Member[];
+    [property: string]: any;
+}
+
+export interface CrewPrimeResultObject {
+    awareness_dirs: string[];
+    guidance?:      string;
+    member?:        string;
+    priming_bytes:  number;
+    [property: string]: any;
+}
+
+export interface CrewSetResultObject {
+    member: Member;
+    [property: string]: any;
+}
+
+export interface CrewWakeResultObject {
+    already_awake: boolean;
+    member:        string;
+    session_id:    string;
+    workspace_id:  string;
     [property: string]: any;
 }
 
@@ -5577,10 +5796,9 @@ export interface SeedLinkResultObject {
 }
 
 export interface SeedListResultObject {
-    all:          boolean;
-    seeds:        SeedElement[];
-    total:        number;
-    workspace_id: string;
+    seeds:                 SeedElement[];
+    stale_window_seconds?: number;
+    total:                 number;
     [property: string]: any;
 }
 
@@ -5611,10 +5829,18 @@ export interface SeedPlantResultObject {
     [property: string]: any;
 }
 
+export interface SeedPlotResultObject {
+    children: SeedElement[];
+    crown:    SeedElement;
+    [property: string]: any;
+}
+
 export interface SeedReadyResultObject {
-    scope:    string;
-    scope_id: string;
-    seeds:    SeedElement[];
+    crown?:    SeedElement;
+    handoffs?: Note[];
+    scope:     string;
+    scope_id:  string;
+    seeds:     SeedElement[];
     [property: string]: any;
 }
 
@@ -5913,6 +6139,7 @@ export interface Seed {
     id:              string;
     planter_member:  string;
     planter_session: string;
+    plot_progress?:  PlotProgress;
     ready:           boolean;
     reason?:         string;
     rev:             number;
@@ -5924,7 +6151,6 @@ export interface Seed {
     title:           string;
     updated_at:      string;
     vars:            VarElement[];
-    workspace_id:    string;
     [property: string]: any;
 }
 
@@ -5954,10 +6180,10 @@ export interface SeedLinkResult {
 }
 
 export interface SeedListMessage {
-    all?:               boolean;
-    cmd:                SeedListMessageCmd;
-    source_session_id?: string;
-    workspace_id?:      string;
+    cmd:                   SeedListMessageCmd;
+    source_session_id?:    string;
+    stale?:                boolean;
+    stale_window_seconds?: number;
     [property: string]: any;
 }
 
@@ -5966,10 +6192,9 @@ export enum SeedListMessageCmd {
 }
 
 export interface SeedListResult {
-    all:          boolean;
-    seeds:        SeedElement[];
-    total:        number;
-    workspace_id: string;
+    seeds:                 SeedElement[];
+    stale_window_seconds?: number;
+    total:                 number;
     [property: string]: any;
 }
 
@@ -6024,9 +6249,9 @@ export interface SeedPlantMessage {
     body?:              string;
     cmd:                SeedPlantMessageCmd;
     member?:            string;
+    part_of?:           string;
     source_session_id?: string;
     title:              string;
-    workspace_id?:      string;
     [property: string]: any;
 }
 
@@ -6039,12 +6264,56 @@ export interface SeedPlantResult {
     [property: string]: any;
 }
 
+export interface SeedPlotChild {
+    blocks?: string[];
+    body?:   string;
+    title:   string;
+    [property: string]: any;
+}
+
+export interface SeedPlotMessage {
+    body?:              string;
+    children:           ChildElement[];
+    cmd:                SeedPlotMessageCmd;
+    member?:            string;
+    source_session_id?: string;
+    title:              string;
+    [property: string]: any;
+}
+
+export interface ChildElement {
+    blocks?: string[];
+    body?:   string;
+    title:   string;
+    [property: string]: any;
+}
+
+export enum SeedPlotMessageCmd {
+    SeedPlot = "seed_plot",
+}
+
+export interface SeedPlotProgress {
+    blocked:  number;
+    done:     number;
+    dormant:  number;
+    growing:  number;
+    ready:    number;
+    total:    number;
+    withered: number;
+    [property: string]: any;
+}
+
+export interface SeedPlotResult {
+    children: SeedElement[];
+    crown:    SeedElement;
+    [property: string]: any;
+}
+
 export interface SeedReadyMessage {
     all?:               boolean;
     cmd:                SeedReadyMessageCmd;
     plot?:              string;
     source_session_id?: string;
-    workspace_id?:      string;
     [property: string]: any;
 }
 
@@ -6053,9 +6322,11 @@ export enum SeedReadyMessageCmd {
 }
 
 export interface SeedReadyResult {
-    scope:    string;
-    scope_id: string;
-    seeds:    SeedElement[];
+    crown?:    SeedElement;
+    handoffs?: Note[];
+    scope:     string;
+    scope_id:  string;
+    seeds:     SeedElement[];
     [property: string]: any;
 }
 
@@ -6126,6 +6397,7 @@ export interface Session {
     branch?:                    string;
     chief_of_staff?:            boolean;
     context_window_cap?:        number;
+    crew_member?:               string;
     delegated_from_chief?:      boolean;
     directory:                  string;
     endpoint_id?:               string;
@@ -6152,13 +6424,14 @@ export interface Session {
 }
 
 export interface SessionAnnotation {
-    comment:     string;
-    emoji:       string;
-    end:         number;
-    id:          string;
-    message_key: string;
-    quote:       string;
-    start:       number;
+    comment:         string;
+    emoji?:          string;
+    end:             number;
+    id:              string;
+    message_key:     string;
+    quick_label_id?: string;
+    quote:           string;
+    start:           number;
     [property: string]: any;
 }
 
@@ -6212,13 +6485,14 @@ export interface SessionAnnotationsGetResultMessage {
 }
 
 export interface SessionAnnotationsGetResultMessageAnnotation {
-    comment:     string;
-    emoji:       string;
-    end:         number;
-    id:          string;
-    message_key: string;
-    quote:       string;
-    start:       number;
+    comment:         string;
+    emoji?:          string;
+    end:             number;
+    id:              string;
+    message_key:     string;
+    quick_label_id?: string;
+    quote:           string;
+    start:           number;
     [property: string]: any;
 }
 
@@ -8903,6 +9177,118 @@ export class Convert {
         return JSON.stringify(uncast(value, r("CreateWorktreeResultMessage")), null, 2);
     }
 
+    public static toCrewDayClose(json: string): CrewDayClose {
+        return cast(JSON.parse(json), r("CrewDayClose"));
+    }
+
+    public static crewDayCloseToJson(value: CrewDayClose): string {
+        return JSON.stringify(uncast(value, r("CrewDayClose")), null, 2);
+    }
+
+    public static toCrewHandoffMessage(json: string): CrewHandoffMessage {
+        return cast(JSON.parse(json), r("CrewHandoffMessage"));
+    }
+
+    public static crewHandoffMessageToJson(value: CrewHandoffMessage): string {
+        return JSON.stringify(uncast(value, r("CrewHandoffMessage")), null, 2);
+    }
+
+    public static toCrewHandoffResult(json: string): CrewHandoffResult {
+        return cast(JSON.parse(json), r("CrewHandoffResult"));
+    }
+
+    public static crewHandoffResultToJson(value: CrewHandoffResult): string {
+        return JSON.stringify(uncast(value, r("CrewHandoffResult")), null, 2);
+    }
+
+    public static toCrewListMessage(json: string): CrewListMessage {
+        return cast(JSON.parse(json), r("CrewListMessage"));
+    }
+
+    public static crewListMessageToJson(value: CrewListMessage): string {
+        return JSON.stringify(uncast(value, r("CrewListMessage")), null, 2);
+    }
+
+    public static toCrewListResult(json: string): CrewListResult {
+        return cast(JSON.parse(json), r("CrewListResult"));
+    }
+
+    public static crewListResultToJson(value: CrewListResult): string {
+        return JSON.stringify(uncast(value, r("CrewListResult")), null, 2);
+    }
+
+    public static toCrewMember(json: string): CrewMember {
+        return cast(JSON.parse(json), r("CrewMember"));
+    }
+
+    public static crewMemberToJson(value: CrewMember): string {
+        return JSON.stringify(uncast(value, r("CrewMember")), null, 2);
+    }
+
+    public static toCrewPrimeMessage(json: string): CrewPrimeMessage {
+        return cast(JSON.parse(json), r("CrewPrimeMessage"));
+    }
+
+    public static crewPrimeMessageToJson(value: CrewPrimeMessage): string {
+        return JSON.stringify(uncast(value, r("CrewPrimeMessage")), null, 2);
+    }
+
+    public static toCrewPrimeResult(json: string): CrewPrimeResult {
+        return cast(JSON.parse(json), r("CrewPrimeResult"));
+    }
+
+    public static crewPrimeResultToJson(value: CrewPrimeResult): string {
+        return JSON.stringify(uncast(value, r("CrewPrimeResult")), null, 2);
+    }
+
+    public static toCrewSetMessage(json: string): CrewSetMessage {
+        return cast(JSON.parse(json), r("CrewSetMessage"));
+    }
+
+    public static crewSetMessageToJson(value: CrewSetMessage): string {
+        return JSON.stringify(uncast(value, r("CrewSetMessage")), null, 2);
+    }
+
+    public static toCrewSetResult(json: string): CrewSetResult {
+        return cast(JSON.parse(json), r("CrewSetResult"));
+    }
+
+    public static crewSetResultToJson(value: CrewSetResult): string {
+        return JSON.stringify(uncast(value, r("CrewSetResult")), null, 2);
+    }
+
+    public static toCrewUpdatedMessage(json: string): CrewUpdatedMessage {
+        return cast(JSON.parse(json), r("CrewUpdatedMessage"));
+    }
+
+    public static crewUpdatedMessageToJson(value: CrewUpdatedMessage): string {
+        return JSON.stringify(uncast(value, r("CrewUpdatedMessage")), null, 2);
+    }
+
+    public static toCrewWakeMessage(json: string): CrewWakeMessage {
+        return cast(JSON.parse(json), r("CrewWakeMessage"));
+    }
+
+    public static crewWakeMessageToJson(value: CrewWakeMessage): string {
+        return JSON.stringify(uncast(value, r("CrewWakeMessage")), null, 2);
+    }
+
+    public static toCrewWakeResult(json: string): CrewWakeResult {
+        return cast(JSON.parse(json), r("CrewWakeResult"));
+    }
+
+    public static crewWakeResultToJson(value: CrewWakeResult): string {
+        return JSON.stringify(uncast(value, r("CrewWakeResult")), null, 2);
+    }
+
+    public static toCrewWakeResultMessage(json: string): CrewWakeResultMessage {
+        return cast(JSON.parse(json), r("CrewWakeResultMessage"));
+    }
+
+    public static crewWakeResultMessageToJson(value: CrewWakeResultMessage): string {
+        return JSON.stringify(uncast(value, r("CrewWakeResultMessage")), null, 2);
+    }
+
     public static toDaemonWarning(json: string): DaemonWarning {
         return cast(JSON.parse(json), r("DaemonWarning"));
     }
@@ -10927,6 +11313,38 @@ export class Convert {
         return JSON.stringify(uncast(value, r("SeedPlantResult")), null, 2);
     }
 
+    public static toSeedPlotChild(json: string): SeedPlotChild {
+        return cast(JSON.parse(json), r("SeedPlotChild"));
+    }
+
+    public static seedPlotChildToJson(value: SeedPlotChild): string {
+        return JSON.stringify(uncast(value, r("SeedPlotChild")), null, 2);
+    }
+
+    public static toSeedPlotMessage(json: string): SeedPlotMessage {
+        return cast(JSON.parse(json), r("SeedPlotMessage"));
+    }
+
+    public static seedPlotMessageToJson(value: SeedPlotMessage): string {
+        return JSON.stringify(uncast(value, r("SeedPlotMessage")), null, 2);
+    }
+
+    public static toSeedPlotProgress(json: string): SeedPlotProgress {
+        return cast(JSON.parse(json), r("SeedPlotProgress"));
+    }
+
+    public static seedPlotProgressToJson(value: SeedPlotProgress): string {
+        return JSON.stringify(uncast(value, r("SeedPlotProgress")), null, 2);
+    }
+
+    public static toSeedPlotResult(json: string): SeedPlotResult {
+        return cast(JSON.parse(json), r("SeedPlotResult"));
+    }
+
+    public static seedPlotResultToJson(value: SeedPlotResult): string {
+        return JSON.stringify(uncast(value, r("SeedPlotResult")), null, 2);
+    }
+
     public static toSeedReadyMessage(json: string): SeedReadyMessage {
         return cast(JSON.parse(json), r("SeedReadyMessage"));
     }
@@ -12516,6 +12934,7 @@ const typeMap: any = {
     ], "any"),
     "AgentPeekResult": o([
         { json: "agent", js: "agent", typ: "" },
+        { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "label", js: "label", typ: "" },
         { json: "last_assistant_message", js: "last_assistant_message", typ: u(undefined, "") },
         { json: "last_seen", js: "last_seen", typ: "" },
@@ -13125,6 +13544,7 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "context_window_cap", js: "context_window_cap", typ: u(undefined, 0) },
+        { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
@@ -13389,6 +13809,88 @@ const typeMap: any = {
         { json: "path", js: "path", typ: u(undefined, "") },
         { json: "success", js: "success", typ: true },
     ], "any"),
+    "CrewHandoffMessage": o([
+        { json: "close", js: "close", typ: u(undefined, r("CrewDayClose")) },
+        { json: "cmd", js: "cmd", typ: r("CrewHandoffMessageCmd") },
+        { json: "note", js: "note", typ: "" },
+        { json: "retry", js: "retry", typ: u(undefined, true) },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
+    "CrewHandoffResult": o([
+        { json: "member", js: "member", typ: "" },
+        { json: "nap_error", js: "nap_error", typ: u(undefined, "") },
+        { json: "outcome", js: "outcome", typ: u(undefined, r("CrewDayClose")) },
+        { json: "path", js: "path", typ: "" },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+    ], "any"),
+    "CrewListMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CrewListMessageCmd") },
+    ], "any"),
+    "CrewListResult": o([
+        { json: "members", js: "members", typ: a(r("Member")) },
+    ], "any"),
+    "Member": o([
+        { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
+        { json: "binding_session", js: "binding_session", typ: u(undefined, "") },
+        { json: "charter_path", js: "charter_path", typ: "" },
+        { json: "cwd", js: "cwd", typ: u(undefined, "") },
+        { json: "home_dir", js: "home_dir", typ: "" },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "CrewMember": o([
+        { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
+        { json: "binding_session", js: "binding_session", typ: u(undefined, "") },
+        { json: "charter_path", js: "charter_path", typ: "" },
+        { json: "cwd", js: "cwd", typ: u(undefined, "") },
+        { json: "home_dir", js: "home_dir", typ: "" },
+        { json: "id", js: "id", typ: "" },
+    ], "any"),
+    "CrewPrimeMessage": o([
+        { json: "cmd", js: "cmd", typ: r("CrewPrimeMessageCmd") },
+        { json: "session_id", js: "session_id", typ: "" },
+    ], "any"),
+    "CrewPrimeResult": o([
+        { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
+        { json: "guidance", js: "guidance", typ: u(undefined, "") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "priming_bytes", js: "priming_bytes", typ: 0 },
+    ], "any"),
+    "CrewSetMessage": o([
+        { json: "awareness_dirs", js: "awareness_dirs", typ: u(undefined, a("")) },
+        { json: "clear_awareness_dirs", js: "clear_awareness_dirs", typ: u(undefined, true) },
+        { json: "cmd", js: "cmd", typ: r("CrewSetMessageCmd") },
+        { json: "cwd", js: "cwd", typ: u(undefined, "") },
+        { json: "member", js: "member", typ: "" },
+    ], "any"),
+    "CrewSetResult": o([
+        { json: "member", js: "member", typ: r("Member") },
+    ], "any"),
+    "CrewUpdatedMessage": o([
+        { json: "event", js: "event", typ: r("CrewUpdatedMessageEvent") },
+        { json: "members", js: "members", typ: a(r("Member")) },
+    ], "any"),
+    "CrewWakeMessage": o([
+        { json: "agent", js: "agent", typ: u(undefined, "") },
+        { json: "cmd", js: "cmd", typ: r("CrewWakeMessageCmd") },
+        { json: "member", js: "member", typ: "" },
+        { json: "request_id", js: "request_id", typ: u(undefined, "") },
+    ], "any"),
+    "CrewWakeResult": o([
+        { json: "already_awake", js: "already_awake", typ: true },
+        { json: "member", js: "member", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
+    ], "any"),
+    "CrewWakeResultMessage": o([
+        { json: "already_awake", js: "already_awake", typ: u(undefined, true) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event", js: "event", typ: r("CrewWakeResultMessageEvent") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "request_id", js: "request_id", typ: "" },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+        { json: "success", js: "success", typ: true },
+        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+    ], "any"),
     "DaemonWarning": o([
         { json: "code", js: "code", typ: "" },
         { json: "message", js: "message", typ: "" },
@@ -13404,6 +13906,7 @@ const typeMap: any = {
         { json: "label", js: "label", typ: u(undefined, "") },
         { json: "model", js: "model", typ: u(undefined, "") },
         { json: "placement", js: "placement", typ: u(undefined, "") },
+        { json: "plot", js: "plot", typ: u(undefined, "") },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
         { json: "ticket_id", js: "ticket_id", typ: u(undefined, "") },
@@ -14062,6 +14565,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "planter_member", js: "planter_member", typ: "" },
         { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "plot_progress", js: "plot_progress", typ: u(undefined, r("PlotProgress")) },
         { json: "ready", js: "ready", typ: true },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "rev", js: "rev", typ: 0 },
@@ -14073,11 +14577,19 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "vars", js: "vars", typ: a(r("VarElement")) },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "EdgeElement": o([
         { json: "kind", js: "kind", typ: "" },
         { json: "to", js: "to", typ: "" },
+    ], "any"),
+    "PlotProgress": o([
+        { json: "blocked", js: "blocked", typ: 0 },
+        { json: "done", js: "done", typ: 0 },
+        { json: "dormant", js: "dormant", typ: 0 },
+        { json: "growing", js: "growing", typ: 0 },
+        { json: "ready", js: "ready", typ: 0 },
+        { json: "total", js: "total", typ: 0 },
+        { json: "withered", js: "withered", typ: 0 },
     ], "any"),
     "VarElement": o([
         { json: "default", js: "default", typ: u(undefined, "") },
@@ -14331,6 +14843,7 @@ const typeMap: any = {
     "InitialStateMessage": o([
         { json: "apps", js: "apps", typ: u(undefined, a(r("AppElement"))) },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "crew", js: "crew", typ: u(undefined, a(r("Member"))) },
         { json: "daemon_instance_id", js: "daemon_instance_id", typ: u(undefined, "") },
         { json: "endpoints", js: "endpoints", typ: u(undefined, a(r("Endpoint"))) },
         { json: "event", js: "event", typ: r("InitialStateMessageEvent") },
@@ -15238,6 +15751,7 @@ const typeMap: any = {
         { json: "dir", js: "dir", typ: "" },
         { json: "id", js: "id", typ: "" },
         { json: "label", js: "label", typ: u(undefined, "") },
+        { json: "member", js: "member", typ: u(undefined, "") },
         { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "RegisterWorkspaceMessage": o([
@@ -15318,6 +15832,11 @@ const typeMap: any = {
         { json: "app_status_result", js: "app_status_result", typ: u(undefined, r("AppStatusResultObject")) },
         { json: "app_watch_result", js: "app_watch_result", typ: u(undefined, r("AppWatchResultObject")) },
         { json: "authors", js: "authors", typ: u(undefined, a(r("AuthorElement"))) },
+        { json: "crew_handoff_result", js: "crew_handoff_result", typ: u(undefined, r("CrewHandoffResultObject")) },
+        { json: "crew_list_result", js: "crew_list_result", typ: u(undefined, r("CrewListResultObject")) },
+        { json: "crew_prime_result", js: "crew_prime_result", typ: u(undefined, r("CrewPrimeResultObject")) },
+        { json: "crew_set_result", js: "crew_set_result", typ: u(undefined, r("CrewSetResultObject")) },
+        { json: "crew_wake_result", js: "crew_wake_result", typ: u(undefined, r("CrewWakeResultObject")) },
         { json: "data", js: "data", typ: u(undefined, "") },
         { json: "delegate_result", js: "delegate_result", typ: u(undefined, r("DelegateResultObject")) },
         { json: "delegation_operation", js: "delegation_operation", typ: u(undefined, r("DelegationOperationObject")) },
@@ -15348,6 +15867,7 @@ const typeMap: any = {
         { json: "seed_note_result", js: "seed_note_result", typ: u(undefined, r("SeedNoteResultObject")) },
         { json: "seed_notes_result", js: "seed_notes_result", typ: u(undefined, r("SeedNotesResultObject")) },
         { json: "seed_plant_result", js: "seed_plant_result", typ: u(undefined, r("SeedPlantResultObject")) },
+        { json: "seed_plot_result", js: "seed_plot_result", typ: u(undefined, r("SeedPlotResultObject")) },
         { json: "seed_ready_result", js: "seed_ready_result", typ: u(undefined, r("SeedReadyResultObject")) },
         { json: "seed_show_result", js: "seed_show_result", typ: u(undefined, r("SeedShowResultObject")) },
         { json: "seed_transition_result", js: "seed_transition_result", typ: u(undefined, r("SeedTransitionResultObject")) },
@@ -15384,6 +15904,7 @@ const typeMap: any = {
     ], "any"),
     "AgentPeekResultObject": o([
         { json: "agent", js: "agent", typ: "" },
+        { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "label", js: "label", typ: "" },
         { json: "last_assistant_message", js: "last_assistant_message", typ: u(undefined, "") },
         { json: "last_seen", js: "last_seen", typ: "" },
@@ -15458,6 +15979,31 @@ const typeMap: any = {
     ], "any"),
     "AppWatchResultObject": o([
         { json: "invocation", js: "invocation", typ: r("InvocationElement") },
+    ], "any"),
+    "CrewHandoffResultObject": o([
+        { json: "member", js: "member", typ: "" },
+        { json: "nap_error", js: "nap_error", typ: u(undefined, "") },
+        { json: "outcome", js: "outcome", typ: u(undefined, r("CrewDayClose")) },
+        { json: "path", js: "path", typ: "" },
+        { json: "session_id", js: "session_id", typ: u(undefined, "") },
+    ], "any"),
+    "CrewListResultObject": o([
+        { json: "members", js: "members", typ: a(r("Member")) },
+    ], "any"),
+    "CrewPrimeResultObject": o([
+        { json: "awareness_dirs", js: "awareness_dirs", typ: a("") },
+        { json: "guidance", js: "guidance", typ: u(undefined, "") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "priming_bytes", js: "priming_bytes", typ: 0 },
+    ], "any"),
+    "CrewSetResultObject": o([
+        { json: "member", js: "member", typ: r("Member") },
+    ], "any"),
+    "CrewWakeResultObject": o([
+        { json: "already_awake", js: "already_awake", typ: true },
+        { json: "member", js: "member", typ: "" },
+        { json: "session_id", js: "session_id", typ: "" },
+        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "DocCollectionsResultObject": o([
         { json: "collections", js: "collections", typ: a(r("Schema")) },
@@ -15542,10 +16088,9 @@ const typeMap: any = {
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SeedListResultObject": o([
-        { json: "all", js: "all", typ: true },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedNoteResultObject": o([
         { json: "note", js: "note", typ: r("Note") },
@@ -15566,7 +16111,13 @@ const typeMap: any = {
     "SeedPlantResultObject": o([
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
+    "SeedPlotResultObject": o([
+        { json: "children", js: "children", typ: a(r("SeedElement")) },
+        { json: "crown", js: "crown", typ: r("SeedElement") },
+    ], "any"),
     "SeedReadyResultObject": o([
+        { json: "crown", js: "crown", typ: u(undefined, r("SeedElement")) },
+        { json: "handoffs", js: "handoffs", typ: u(undefined, a(r("Note"))) },
         { json: "scope", js: "scope", typ: "" },
         { json: "scope_id", js: "scope_id", typ: "" },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
@@ -15784,6 +16335,7 @@ const typeMap: any = {
         { json: "id", js: "id", typ: "" },
         { json: "planter_member", js: "planter_member", typ: "" },
         { json: "planter_session", js: "planter_session", typ: "" },
+        { json: "plot_progress", js: "plot_progress", typ: u(undefined, r("PlotProgress")) },
         { json: "ready", js: "ready", typ: true },
         { json: "reason", js: "reason", typ: u(undefined, "") },
         { json: "rev", js: "rev", typ: 0 },
@@ -15795,7 +16347,6 @@ const typeMap: any = {
         { json: "title", js: "title", typ: "" },
         { json: "updated_at", js: "updated_at", typ: "" },
         { json: "vars", js: "vars", typ: a(r("VarElement")) },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedEdge": o([
         { json: "kind", js: "kind", typ: "" },
@@ -15813,16 +16364,15 @@ const typeMap: any = {
         { json: "seed", js: "seed", typ: r("SeedElement") },
     ], "any"),
     "SeedListMessage": o([
-        { json: "all", js: "all", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("SeedListMessageCmd") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
+        { json: "stale", js: "stale", typ: u(undefined, true) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
     ], "any"),
     "SeedListResult": o([
-        { json: "all", js: "all", typ: true },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
+        { json: "stale_window_seconds", js: "stale_window_seconds", typ: u(undefined, 0) },
         { json: "total", js: "total", typ: 0 },
-        { json: "workspace_id", js: "workspace_id", typ: "" },
     ], "any"),
     "SeedNote": o([
         { json: "author_member", js: "author_member", typ: "" },
@@ -15857,21 +16407,53 @@ const typeMap: any = {
         { json: "body", js: "body", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("SeedPlantMessageCmd") },
         { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "part_of", js: "part_of", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
         { json: "title", js: "title", typ: "" },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "SeedPlantResult": o([
         { json: "seed", js: "seed", typ: r("SeedElement") },
+    ], "any"),
+    "SeedPlotChild": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a("")) },
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedPlotMessage": o([
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "children", js: "children", typ: a(r("ChildElement")) },
+        { json: "cmd", js: "cmd", typ: r("SeedPlotMessageCmd") },
+        { json: "member", js: "member", typ: u(undefined, "") },
+        { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "ChildElement": o([
+        { json: "blocks", js: "blocks", typ: u(undefined, a("")) },
+        { json: "body", js: "body", typ: u(undefined, "") },
+        { json: "title", js: "title", typ: "" },
+    ], "any"),
+    "SeedPlotProgress": o([
+        { json: "blocked", js: "blocked", typ: 0 },
+        { json: "done", js: "done", typ: 0 },
+        { json: "dormant", js: "dormant", typ: 0 },
+        { json: "growing", js: "growing", typ: 0 },
+        { json: "ready", js: "ready", typ: 0 },
+        { json: "total", js: "total", typ: 0 },
+        { json: "withered", js: "withered", typ: 0 },
+    ], "any"),
+    "SeedPlotResult": o([
+        { json: "children", js: "children", typ: a(r("SeedElement")) },
+        { json: "crown", js: "crown", typ: r("SeedElement") },
     ], "any"),
     "SeedReadyMessage": o([
         { json: "all", js: "all", typ: u(undefined, true) },
         { json: "cmd", js: "cmd", typ: r("SeedReadyMessageCmd") },
         { json: "plot", js: "plot", typ: u(undefined, "") },
         { json: "source_session_id", js: "source_session_id", typ: u(undefined, "") },
-        { json: "workspace_id", js: "workspace_id", typ: u(undefined, "") },
     ], "any"),
     "SeedReadyResult": o([
+        { json: "crown", js: "crown", typ: u(undefined, r("SeedElement")) },
+        { json: "handoffs", js: "handoffs", typ: u(undefined, a(r("Note"))) },
         { json: "scope", js: "scope", typ: "" },
         { json: "scope_id", js: "scope_id", typ: "" },
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
@@ -15923,6 +16505,7 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "context_window_cap", js: "context_window_cap", typ: u(undefined, 0) },
+        { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
         { json: "endpoint_id", js: "endpoint_id", typ: u(undefined, "") },
@@ -15948,10 +16531,11 @@ const typeMap: any = {
     ], "any"),
     "SessionAnnotation": o([
         { json: "comment", js: "comment", typ: "" },
-        { json: "emoji", js: "emoji", typ: "" },
+        { json: "emoji", js: "emoji", typ: u(undefined, "") },
         { json: "end", js: "end", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "message_key", js: "message_key", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
         { json: "quote", js: "quote", typ: "" },
         { json: "start", js: "start", typ: 0 },
     ], "any"),
@@ -15986,10 +16570,11 @@ const typeMap: any = {
     ], "any"),
     "SessionAnnotationsGetResultMessageAnnotation": o([
         { json: "comment", js: "comment", typ: "" },
-        { json: "emoji", js: "emoji", typ: "" },
+        { json: "emoji", js: "emoji", typ: u(undefined, "") },
         { json: "end", js: "end", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "message_key", js: "message_key", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
         { json: "quote", js: "quote", typ: "" },
         { json: "start", js: "start", typ: 0 },
     ], "any"),
@@ -17270,6 +17855,31 @@ const typeMap: any = {
     "CreateWorktreeResultMessageEvent": [
         "create_worktree_result",
     ],
+    "CrewDayClose": [
+        "nap",
+        "sleep",
+    ],
+    "CrewHandoffMessageCmd": [
+        "crew_handoff",
+    ],
+    "CrewListMessageCmd": [
+        "crew_list",
+    ],
+    "CrewPrimeMessageCmd": [
+        "crew_prime",
+    ],
+    "CrewSetMessageCmd": [
+        "crew_set",
+    ],
+    "CrewUpdatedMessageEvent": [
+        "crew_updated",
+    ],
+    "CrewWakeMessageCmd": [
+        "crew_wake",
+    ],
+    "CrewWakeResultMessageEvent": [
+        "crew_wake_result",
+    ],
     "DelegateMessageCmd": [
         "delegate",
     ],
@@ -17868,6 +18478,9 @@ const typeMap: any = {
     ],
     "SeedPlantMessageCmd": [
         "seed_plant",
+    ],
+    "SeedPlotMessageCmd": [
+        "seed_plot",
     ],
     "SeedReadyMessageCmd": [
         "seed_ready",

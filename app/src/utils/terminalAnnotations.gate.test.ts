@@ -61,7 +61,7 @@ function storeWithAnchor(markdown = MESSAGE, phrase = ANCHOR) {
   store.setMessages([{ key: 'turn-1', markdown }]);
   const start = markdown.indexOf(phrase);
   expect(start).toBeGreaterThanOrEqual(0);
-  const annotation = store.add('turn-1', start, start + phrase.length, '❓', 'why this?');
+  const annotation = store.add('turn-1', start, start + phrase.length, 'clarify-this', 'why this?');
   expect(annotation).not.toBeNull();
   return { store, annotation: annotation! };
 }
@@ -187,7 +187,7 @@ describe('annotationAt', () => {
   it('gives an overlap to the annotation drawn on top', () => {
     const { store, annotation } = storeWithAnchor();
     const start = MESSAGE.indexOf(ANCHOR);
-    const later = store.add('turn-1', start, start + ANCHOR.length, '🧪', '');
+    const later = store.add('turn-1', start, start + ANCHOR.length, 'test-label', '');
     const grid = new FakeGrid(render(MESSAGE, 62));
     const wash = store.project(grid)[0].rows[0];
 
@@ -307,7 +307,7 @@ describe('the annotatable window', () => {
 
   it('gives every annotation its own id', () => {
     const { store } = storeWithAnchor();
-    const second = store.add('turn-1', 0, 6, '🧪', '');
+    const second = store.add('turn-1', 0, 6, 'test-label', '');
 
     expect(second!.id).not.toBe(store.list()[0].id);
   });

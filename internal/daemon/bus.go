@@ -210,8 +210,8 @@ const (
 	FactGardenHarvested = "garden.harvested"
 	FactGardenWithered  = "garden.withered"
 	FactGardenReplanted = "garden.replanted"
-	// FactGardenNoted: a note was appended to a seed's trail. Subject is the
-	// seed, not the note — the trail is the seed's memory of itself, and the
+	// FactGardenNoted: a note was appended to a seed's log. Subject is the
+	// seed, not the note — the log is the seed's memory of itself, and the
 	// entity anybody reads is the seed.
 	FactGardenNoted = "garden.noted"
 	// FactGardenLinked/FactGardenUnlinked: an edge was added to or removed from
@@ -219,6 +219,15 @@ const (
 	// that changed; the seed at the other end is read from that document.
 	FactGardenLinked   = "garden.linked"
 	FactGardenUnlinked = "garden.unlinked"
+
+	// Crew facts; subject is the member id. The roster is what a client draws —
+	// every member, awake or asleep — so all three project the same whole-list
+	// push, and the name says which of the three things moved: a home became a
+	// member, a member's day started or ended, or its registry fields changed.
+	FactCrewRegistered = "crew.registered"
+	FactCrewBound      = "crew.bound"
+	FactCrewReleased   = "crew.released"
+	FactCrewUpdated    = "crew.updated"
 
 	// App registry facts; subject is the app's name.
 	//
@@ -410,6 +419,11 @@ func buildWireProjections() []projection {
 			// Every garden fact re-pushes the garden; the panel renders a list.
 			filter: bus.Filter{"garden.*"},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectGardenSeeds() },
+		},
+		{
+			// Every crew fact re-pushes the roster; the sidebar renders a list.
+			filter: bus.Filter{"crew.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectCrewRoster() },
 		},
 		{
 			filter: bus.Filter{"pr.*"},
@@ -656,6 +670,7 @@ const (
 	snapshotSessions    = "sessions_updated"
 	snapshotTickets     = "tickets_updated"
 	snapshotGarden      = "garden_seeds_updated"
+	snapshotCrew        = "crew_updated"
 	snapshotPRs         = "prs_updated"
 	snapshotRepos       = "repos_updated"
 	snapshotAuthors     = "authors_updated"

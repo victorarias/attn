@@ -441,6 +441,7 @@ function App() {
     setTickets,
     setSeeds,
     setApps,
+    setCrew,
     prs,
     setPRs,
     setRepoStates,
@@ -623,6 +624,7 @@ function App() {
     onTicketsUpdate: setTickets,
     onSeedsUpdate: setSeeds,
     onAppsUpdate: setApps,
+    onCrewUpdate: setCrew,
     onWorkspacesUpdate: setDaemonWorkspaces,
     onPRsUpdate: setPRs,
     onEndpointsUpdate: setDaemonEndpoints,
@@ -907,6 +909,7 @@ function AppContent({
     sendTicketEditDescription,
     sendTicketAttach,
     sendTicketResume,
+    sendCrewWake,
   } = useDaemonApi();
 
   // The presentation notice lives in the triggering session's pane header
@@ -1093,7 +1096,7 @@ function AppContent({
   const [workspaceContextsError, setWorkspaceContextsError] = useState<string | null>(null);
   const [workspaceContexts, setWorkspaceContexts] = useState<Awaited<ReturnType<typeof sendListWorkspaceContexts>>>([]);
   const whatsNew = useWhatsNew();
-  const { repoStates, authorStates, tickets, seeds, seedsTotal, apps } = useDaemonStore();
+  const { repoStates, authorStates, tickets, seeds, seedsTotal, apps, crew } = useDaemonStore();
   const mutedRepos = useMemo(() =>
     repoStates.filter(r => r.muted).map(r => r.repo),
     [repoStates],
@@ -1266,6 +1269,7 @@ function AppContent({
       activity: daemonSession?.activity,
       activityAt: daemonSession?.activity_at,
       pinnedAt: daemonSession?.pinned_at,
+      crewMember: daemonSession?.crew_member,
       contextWindowCap: daemonSession?.context_window_cap,
       parentSessionId: daemonSession?.parent_session_id,
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
@@ -3522,6 +3526,18 @@ function AppContent({
       .catch((error) => showError(error instanceof Error ? error.message : 'Failed to resume ticket'));
   }, [sendTicketResume, handleSelectSession, handleCloseTicketDetail, showError]);
 
+  // Start a crew member's day from the sidebar. The daemon owns the composite —
+  // bind, register the member's workspace, add the pane, spawn primed — so this
+  // sends one command and focuses the session it names; a member that turned out
+  // to be awake already resolves with the day it is living, which is the same
+  // thing to focus. A refusal (no such member, a cwd that moved, an outpost) is
+  // shown rather than swallowed: a click that does nothing is the worst answer.
+  const handleWakeCrewMember = useCallback((member: string) => {
+    sendCrewWake(member)
+      .then((result) => handleSelectSession(result.sessionId))
+      .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${member}`));
+  }, [sendCrewWake, handleSelectSession, showError]);
+
   // The daemon-facing ticket actions the pane-header ticket overlay wires into
   // its TicketDetailPanel. Memoized so the workspace's renderPaneSurface memo
   // does not rebuild every render. Same senders the dock panel uses; resume is
@@ -3921,6 +3937,8 @@ function AppContent({
           onChangeChiefOfStaff={handleChangeChiefOfStaff}
           showSessionless={showSessionlessWorkspaces}
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
+          crew={crew}
+          onWakeCrewMember={handleWakeCrewMember}
           queueModeEnabled={queueModeEnabled}
           onToggleQueueMode={handleToggleQueueMode}
           workspaceSelectionStyle={workspaceSelectionStyle}
@@ -4225,7 +4243,6 @@ function AppContent({
                   onClose={() => closeDockPanel('garden')}
                   seeds={seeds}
                   seedsTotal={seedsTotal}
-                  workspaceId={activeWorkspaceId ?? null}
                 />
               ),
             },

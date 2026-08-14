@@ -14,6 +14,7 @@
 
 import type { PendingRequests } from './daemonPendingRequests';
 import { settlePendingRequest } from './daemonPendingRequests';
+import { labelByEmoji } from '../annotations/quickLabels';
 
 /** The event shapes this module reads, loosely typed off the wire union. */
 type SessionAnnotationEvent = {
@@ -58,7 +59,7 @@ export interface DaemonSessionAnnotation {
   start: number;
   end: number;
   quote: string;
-  emoji: string;
+  quickLabelId: string;
   comment: string;
 }
 
@@ -80,7 +81,9 @@ function toAnnotations(raw: unknown): DaemonSessionAnnotation[] {
       start: Number(record?.start ?? 0),
       end: Number(record?.end ?? 0),
       quote: String(record?.quote ?? ''),
-      emoji: String(record?.emoji ?? ''),
+      quickLabelId: typeof record?.quick_label_id === 'string'
+        ? record.quick_label_id
+        : labelByEmoji(String(record?.emoji ?? ''))?.id ?? '',
       comment: String(record?.comment ?? ''),
     };
     // An entry with no id could never be addressed by a later save, so it is
@@ -96,7 +99,7 @@ export function annotationToWire(annotation: DaemonSessionAnnotation): Record<st
     start: annotation.start,
     end: annotation.end,
     quote: annotation.quote,
-    emoji: annotation.emoji,
+    quick_label_id: annotation.quickLabelId,
     comment: annotation.comment,
   };
 }

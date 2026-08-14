@@ -3,8 +3,8 @@
  * hovered code block). Ported from plannotator's AnnotationToolbar minus
  * math/images/keyboard-copy.
  *
- * Buttons: Copy, Delete (redline — creates instantly, no popover), Comment,
- * ⚡ quick-label picker toggle, a fixed one-click agreement button, Cancel.
+ * Buttons: Delete (redline — creates instantly, no popover), Comment,
+ * ⚡ quick-label picker toggle, three promoted quick labels, Cancel.
  *
  * Positioning: `center-above` for prose (centered over the selection rect),
  * `top-right` for code blocks (right-aligned above the block); recomputed on
@@ -30,8 +30,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useEscapeStack } from '../../../hooks/useEscapeStack';
-import { QuickLabelPicker } from './QuickLabelPicker';
-import { QUICK_LABELS, THUMBS_UP_LABEL, type QuickLabel } from './quickLabels';
+import { QuickLabelPicker } from '../../../annotations/QuickLabelPicker';
+import {
+  PROMOTED_LABELS,
+  QUICK_LABEL_PICKER_GROUPS,
+  QUICK_LABEL_PICKER_LABELS,
+  type QuickLabel,
+} from './quickLabels';
 
 export type ToolbarPositionMode = 'center-above' | 'top-right';
 
@@ -52,8 +57,6 @@ export interface SelectionToolbarProps {
   /** Live anchor rect — re-read on every scroll/resize tick. */
   getAnchorRect: () => DOMRect | null;
   positionMode: ToolbarPositionMode;
-  /** Text the Copy button places on the clipboard. */
-  copyText: string;
   onDelete: () => void;
   onRequestComment: (initialChar?: string) => void;
   onQuickLabel: (label: QuickLabel) => void;
@@ -70,7 +73,6 @@ export interface SelectionToolbarProps {
 export function SelectionToolbar({
   getAnchorRect,
   positionMode,
-  copyText,
   onDelete,
   onRequestComment,
   onQuickLabel,
@@ -83,29 +85,12 @@ export function SelectionToolbar({
   const [position, setPosition] = useState<{ top: number; left?: number; right?: number } | null>(
     null,
   );
-  const [copied, setCopied] = useState(false);
   const [showQuickLabels, setShowQuickLabels] = useState(false);
   const [pickerHint, setPickerHint] = useState<{ x: number; y: number } | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const zapButtonRef = useRef<HTMLButtonElement>(null);
   const showQuickLabelsRef = useRef(showQuickLabels);
   showQuickLabelsRef.current = showQuickLabels;
-
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(copyText);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = copyText;
-      textarea.style.cssText = 'position:fixed;opacity:0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      document.execCommand('copy');
-      textarea.remove();
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
-  };
 
   // Position on mount + capture-phase scroll + resize; scroll-out close.
   useEffect(() => {
@@ -152,8 +137,8 @@ export function SelectionToolbar({
         e.preventDefault();
         const digit = parseInt(e.code.slice(5), 10);
         const index = digit === 0 ? 9 : digit - 1;
-        if (index < QUICK_LABELS.length) {
-          onQuickLabel(QUICK_LABELS[index]);
+        if (index < QUICK_LABEL_PICKER_LABELS.length) {
+          onQuickLabel(QUICK_LABEL_PICKER_LABELS[index]);
         }
         return;
       }
@@ -215,15 +200,6 @@ export function SelectionToolbar({
     >
       <button
         type="button"
-        className={`md-toolbar-btn ${copied ? 'md-toolbar-btn--copied' : ''}`.trim()}
-        title={copied ? 'Copied!' : 'Copy'}
-        onClick={handleCopy}
-      >
-        {copied ? <CheckIcon /> : <CopyIcon />}
-      </button>
-      <span className="md-toolbar-divider" />
-      <button
-        type="button"
         className="md-toolbar-btn md-toolbar-btn--delete"
         title="Delete"
         onClick={onDelete}
@@ -250,16 +226,21 @@ export function SelectionToolbar({
       >
         <ZapIcon />
       </button>
-      <button
-        type="button"
-        className="md-toolbar-btn"
-        title={THUMBS_UP_LABEL.text}
-        onClick={() => onQuickLabel(THUMBS_UP_LABEL)}
-      >
-        <span className="md-toolbar-emoji">{THUMBS_UP_LABEL.emoji}</span>
-      </button>
+      {PROMOTED_LABELS.map((label) => (
+        <button
+          key={label.id}
+          type="button"
+          className="md-toolbar-btn"
+          title={label.text}
+          onClick={() => onQuickLabel(label)}
+        >
+          <span className="md-toolbar-emoji">{label.emoji}</span>
+        </button>
+      ))}
       {showQuickLabels && zapButtonRef.current && (
         <QuickLabelPicker
+          className="md-quick-label-picker"
+          groups={QUICK_LABEL_PICKER_GROUPS}
           anchorEl={zapButtonRef.current}
           cursorHint={pickerHint}
           onSelect={(label) => {
@@ -279,18 +260,6 @@ export function SelectionToolbar({
 }
 
 // ---- icons (donor SVGs, stroke=currentColor) --------------------------------
-
-const CopyIcon = () => (
-  <svg className="md-toolbar-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-  </svg>
-);
-
-const CheckIcon = () => (
-  <svg className="md-toolbar-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-    <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
-  </svg>
-);
 
 const TrashIcon = () => (
   <svg className="md-toolbar-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

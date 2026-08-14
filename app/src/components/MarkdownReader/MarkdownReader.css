@@ -985,10 +985,6 @@
   color: #f59e0b;
 }
 
-.md-toolbar-btn--copied {
-  color: var(--md-success, #3fb950);
-}
-
 .md-toolbar-icon {
   width: 16px;
   height: 16px;
@@ -1182,6 +1178,13 @@
 
 .md-quick-label-row:hover {
   background: var(--color-bg-button, #252528);
+}
+
+.md-quick-label-divider {
+  border: 0;
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--color-border, #2a2a2d);
 }
 
 .md-quick-label-text {

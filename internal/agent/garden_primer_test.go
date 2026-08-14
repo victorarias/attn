@@ -3,22 +3,24 @@ package agent
 import (
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/hooks"
 )
 
 // Both built-in agents are launched into the same garden, so both carry the
 // primer — and neither invents one when the daemon had no answer.
 func TestBuiltinAgentsCarryTheGardenPrimer(t *testing.T) {
-	ready := 3
+	ready := &hooks.GardenPrime{Ready: 3}
 
 	claude := argvValueAfter(
-		(&Claude{}).BuildCommand(SpawnOpts{SessionID: "s", Executable: "claude", GardenReady: &ready}).Args,
+		(&Claude{}).BuildCommand(SpawnOpts{SessionID: "s", Executable: "claude", Garden: ready}).Args,
 		"--append-system-prompt",
 	)
 	if !strings.Contains(claude, "attn seed ready") || !strings.Contains(claude, "3 seeds were ready") {
 		t.Fatalf("claude launch dropped the garden primer: %q", claude)
 	}
 
-	codex := strings.Join((&Codex{}).GenerateConfigOverrides(SpawnOpts{SessionID: "s", GardenReady: &ready}), "\n")
+	codex := strings.Join((&Codex{}).GenerateConfigOverrides(SpawnOpts{SessionID: "s", Garden: ready}), "\n")
 	if !strings.Contains(codex, "attn seed ready") || !strings.Contains(codex, "3 seeds were ready") {
 		t.Fatalf("codex launch dropped the garden primer: %q", codex)
 	}

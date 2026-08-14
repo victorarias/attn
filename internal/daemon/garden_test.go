@@ -265,11 +265,11 @@ func TestGarden_ConcurrentClaimsProduceOneTender(t *testing.T) {
 	}
 }
 
-// Notes are the trail. They read newest first, they say what they withheld, and
-// show carries them because a trail behind a verb nobody runs is not read.
-func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
+// Notes are the log. They read newest first, they say what they withheld, and
+// show carries them because a log behind a verb nobody runs is not read.
+func TestGarden_LogReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 	d := newGardenDaemon(t)
-	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a trail"})
+	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "with a log"})
 
 	bodies := []string{"first", "second", "third", "fourth", "fifth", "sixth", "seventh"}
 	for _, body := range bodies {
@@ -284,7 +284,7 @@ func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 		t.Fatalf("show rendered %d notes inline, want %d", len(shown.Notes), garden.ShowNotes)
 	}
 	if shown.Notes[0].Body != "seventh" {
-		t.Fatalf("the trail leads with %q, want the newest note", shown.Notes[0].Body)
+		t.Fatalf("the log leads with %q, want the newest note", shown.Notes[0].Body)
 	}
 	if shown.Notes[0].AuthorMember != "trellis" || shown.Notes[0].AuthorSession != "sess-a" {
 		t.Fatalf("a note does not record who wrote it: %+v", shown.Notes[0])
@@ -297,13 +297,13 @@ func TestGarden_TrailReadsNewestFirstAndSaysWhatItWithheld(t *testing.T) {
 		t.Fatalf("notes: %v", protocol.Deref(all.Error))
 	}
 	if len(all.SeedNotesResult.Notes) != len(bodies) || all.SeedNotesResult.Total != len(bodies) {
-		t.Fatalf("the full trail is %d of %d, want all %d", len(all.SeedNotesResult.Notes), all.SeedNotesResult.Total, len(bodies))
+		t.Fatalf("the full log is %d of %d, want all %d", len(all.SeedNotesResult.Notes), all.SeedNotesResult.Total, len(bodies))
 	}
 
-	// A trail belongs to its seed and to no other.
-	elsewhere := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "no trail"})
+	// A log belongs to its seed and to no other.
+	elsewhere := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "no log"})
 	if got := show(t, d, elsewhere.ID); len(got.Notes) != 0 || got.NotesTotal != 0 {
-		t.Fatalf("another seed's trail leaked: %+v", got.Notes)
+		t.Fatalf("another seed's log leaked: %+v", got.Notes)
 	}
 }
 
@@ -358,7 +358,7 @@ func TestGarden_EveryMovePublishesItsOwnFact(t *testing.T) {
 	defer unsubscribe()
 
 	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
-	note(t, d, "sess-a", seed.ID, "on the trail", "trellis")
+	note(t, d, "sess-a", seed.ID, "on the log", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbPark, "", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbHarvest, "done", "trellis")
 	move(t, d, "sess-a", seed.ID, garden.VerbReplant, "", "trellis")
@@ -392,9 +392,6 @@ func TestGarden_PlantListShowRoundTrip(t *testing.T) {
 		t.Fatalf("step slug = %q, want plant-and-see", planted.StepSlug)
 	}
 	// The whole point of the one-line plant: the daemon knows who is asking.
-	if planted.WorkspaceID != "ws-1" {
-		t.Fatalf("workspace = %q, want it stamped from the calling session", planted.WorkspaceID)
-	}
 	if planted.PlanterSession != "sess-a" || planted.PlanterMember != "trellis" {
 		t.Fatalf("planter not recorded: %+v", planted)
 	}
@@ -407,9 +404,6 @@ func TestGarden_PlantListShowRoundTrip(t *testing.T) {
 	}
 	if got := listResp.SeedListResult; len(got.Seeds) != 1 || got.Seeds[0].ID != planted.ID {
 		t.Fatalf("flag-free ls did not return the seed just planted: %+v", got)
-	}
-	if listResp.SeedListResult.WorkspaceID != "ws-1" {
-		t.Fatalf("ls scoped to %q, want the session's workspace", listResp.SeedListResult.WorkspaceID)
 	}
 
 	showResp := gardenCall(t, func(c net.Conn) {
@@ -432,53 +426,28 @@ func TestGarden_PlantListShowRoundTrip(t *testing.T) {
 	}
 }
 
-func TestGarden_ListScopesAndAllSeesTheWholeGarden(t *testing.T) {
+// The garden is one space: a flag-free list answers with all of it, newest
+// first, whether or not the caller is in a session (ruled 2026-08-13).
+func TestGarden_ListReadsTheWholeGarden(t *testing.T) {
 	d := newGardenDaemon(t)
-	mine := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "in my workspace"})
-	elsewhere := plant(t, d, protocol.SeedPlantMessage{Title: "planted outside any workspace"})
-	if elsewhere.WorkspaceID != "" {
-		t.Fatalf("a seed planted with no session carries workspace %q, want none", elsewhere.WorkspaceID)
-	}
+	first := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "planted from a session"})
+	second := plant(t, d, protocol.SeedPlantMessage{Title: "planted with no session at all"})
 
-	scoped := gardenCall(t, func(c net.Conn) {
+	fromSession := gardenCall(t, func(c net.Conn) {
 		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, SourceSessionID: protocol.Ptr("sess-a")})
 	}).SeedListResult
-	if len(scoped.Seeds) != 1 || scoped.Seeds[0].ID != mine.ID {
-		t.Fatalf("workspace scope leaked or dropped seeds: %+v", scoped.Seeds)
-	}
-
-	all := gardenCall(t, func(c net.Conn) {
-		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, All: protocol.Ptr(true)})
+	sessionless := gardenCall(t, func(c net.Conn) {
+		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList})
 	}).SeedListResult
-	if len(all.Seeds) != 2 || !all.All {
-		t.Fatalf("--all did not read the whole garden: %+v", all)
-	}
-	// Newest first, so a fresh planting is the first thing anybody reads.
-	if all.Seeds[0].ID != elsewhere.ID {
-		t.Fatalf("--all order = %q first, want the newest seed %q", all.Seeds[0].ID, elsewhere.ID)
-	}
-}
 
-// A list carries the count of what its own scope holds. Counting the whole
-// garden against a workspace-scoped list would report a shortfall that is not
-// there — "showing 1 of 2" for a workspace that holds exactly one seed.
-func TestGarden_ListCountsItsOwnScope(t *testing.T) {
-	d := newGardenDaemon(t)
-	plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "in my workspace"})
-	plant(t, d, protocol.SeedPlantMessage{Title: "planted outside any workspace"})
-
-	scoped := gardenCall(t, func(c net.Conn) {
-		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, SourceSessionID: protocol.Ptr("sess-a")})
-	}).SeedListResult
-	if scoped.Total != 1 {
-		t.Fatalf("scoped total = %d, want 1: the workspace holds one seed", scoped.Total)
-	}
-
-	all := gardenCall(t, func(c net.Conn) {
-		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, All: protocol.Ptr(true)})
-	}).SeedListResult
-	if all.Total != 2 {
-		t.Fatalf("--all total = %d, want 2", all.Total)
+	for name, got := range map[string]*protocol.SeedListResult{"from a session": fromSession, "with no session": sessionless} {
+		if len(got.Seeds) != 2 || got.Total != 2 {
+			t.Fatalf("ls %s returned %d of %d, want the whole garden: %+v", name, len(got.Seeds), got.Total, got.Seeds)
+		}
+		// Newest first, so a fresh planting is the first thing anybody reads.
+		if got.Seeds[0].ID != second.ID || got.Seeds[1].ID != first.ID {
+			t.Fatalf("ls %s is not newest first: %+v", name, got.Seeds)
+		}
 	}
 }
 
@@ -497,23 +466,6 @@ func TestGarden_PushCarriesTheWholeGardensCount(t *testing.T) {
 	}
 	if got := totals[len(totals)-1]; got != 2 {
 		t.Fatalf("push total = %d, want 2", got)
-	}
-}
-
-func TestGarden_ListWithNothingToScopeToRefusesLoudly(t *testing.T) {
-	d := newGardenDaemon(t)
-	resp := gardenCall(t, func(c net.Conn) {
-		d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList})
-	})
-	if resp.Ok {
-		t.Fatal("ls with no session and no scope answered instead of refusing")
-	}
-	// Handing back "no seeds" would read as an empty garden. The refusal has to
-	// name both ways to ask.
-	for _, want := range []string{"--all", "--workspace"} {
-		if !strings.Contains(protocol.Deref(resp.Error), want) {
-			t.Fatalf("refusal does not name %q: %s", want, protocol.Deref(resp.Error))
-		}
 	}
 }
 
@@ -553,7 +505,7 @@ func TestGarden_OutpostRefusesEverySeedCommand(t *testing.T) {
 			d.handleSeedPlant(c, &protocol.SeedPlantMessage{Cmd: protocol.CmdSeedPlant, Title: "anything"})
 		},
 		"ls": func(c net.Conn) {
-			d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList, All: protocol.Ptr(true)})
+			d.handleSeedList(c, &protocol.SeedListMessage{Cmd: protocol.CmdSeedList})
 		},
 		"show": func(c net.Conn) {
 			d.handleSeedShow(c, &protocol.SeedShowMessage{Cmd: protocol.CmdSeedShow, SeedID: "s-7k3f9m"})

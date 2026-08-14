@@ -20,10 +20,27 @@ export interface QueueBandSessionView {
   turnSnoozedUntil?: string;
   autoSettleFiresAt?: string;
   autoSettleHeld?: boolean;
+  /** The crew member whose day this session is, when it is one. */
+  crewMember?: string;
+}
+
+/** One registered crew member, as the sidebar draws it. */
+export interface CrewMemberView {
+  id: string;
+  /** The session living this member's day. Absent means asleep. */
+  binding_session?: string;
 }
 
 interface QueueBandsProps {
   bands: QueueBandsModel<QueueBandSessionView>;
+  /**
+   * The whole roster. Members are permanent rows: an awake one renders from its
+   * live session (bands.crew), a sleeping one from this list alone, so nobody
+   * has to go and find a member that is not running.
+   */
+  crew?: CrewMemberView[];
+  /** Start a sleeping member's day. Resolves once its session exists. */
+  onWakeCrewMember?: (member: string) => void;
   selectedId: string | null;
   onSelectSession: (id: string) => void;
   onSettleTurn: (id: string) => void;
@@ -244,6 +261,8 @@ function QueueRowView({
  */
 export function QueueBands({
   bands,
+  crew,
+  onWakeCrewMember,
   selectedId,
   onSelectSession,
   onSettleTurn,
@@ -256,6 +275,7 @@ export function QueueBands({
   const offScreen = (id: string) => !onScreenSessionIds?.has(id);
   const snoozeHandler = (session: QueueBandSessionView) =>
     onOpenSnooze && ((event: ReactMouseEvent) => onOpenSnooze(session, event));
+  const crewRows = buildCrewRows(crew, bands.crew);
 
   return (
     <div className="queue-bands" data-testid="sidebar-queue">
@@ -316,12 +336,34 @@ export function QueueBands({
           ))}
         </>
       )}
-      {bands.pinned.length > 0 && (
+      {(bands.pinned.length > 0 || crewRows.length > 0) && (
         <>
           <div className="queue-band-header">
             <span>Pinned</span>
-            <span className="queue-band-count">{bands.pinned.length}</span>
+            <span className="queue-band-count">{bands.pinned.length + crewRows.length}</span>
           </div>
+          {/*
+            The crew, first and permanent. A member is pin-shaped — it stepped
+            out of the queue the same way a pinned agent did — but it is not a
+            pin: nobody put it here and there is no unpin. The rail down its left
+            edge is what says so at a glance, and a sleeping member keeps its row
+            so waking it is one click rather than a hunt.
+          */}
+          {crewRows.map((crewRow) => (
+            <CrewRowView
+              key={crewRow.member}
+              member={crewRow.member}
+              row={crewRow.row}
+              selected={crewRow.row ? selectedId === crewRow.row.session.id : false}
+              onSelect={crewRow.row ? () => onSelectSession(crewRow.row!.session.id) : undefined}
+              onWake={onWakeCrewMember && (() => onWakeCrewMember(crewRow.member))}
+              onOpenActions={
+                crewRow.row && onOpenActions
+                  ? (event) => onOpenActions(crewRow.row!.session, event)
+                  : undefined
+              }
+            />
+          ))}
           {bands.pinned.map((row) => (
             // No settle and no snooze: both are ways of answering "whose turn is
             // it", and a pinned agent has stepped out of that question entirely.
@@ -337,6 +379,115 @@ export function QueueBands({
             />
           ))}
         </>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The roster and the live days, merged into one permanent row per member, in
+ * member-id order. A member with a live day carries its session; one without
+ * carries none and is asleep. The roster is the authority on who exists — a
+ * bound session whose member left the roster still gets a row, because the
+ * session is real and dropping it would hide a running agent.
+ */
+function buildCrewRows(
+  crew: CrewMemberView[] | undefined,
+  awake: QueueRow<QueueBandSessionView>[],
+): { member: string; row?: QueueRow<QueueBandSessionView> }[] {
+  const byMember = new Map<string, QueueRow<QueueBandSessionView>>();
+  for (const row of awake) {
+    const member = row.session.crewMember;
+    if (member && !byMember.has(member)) byMember.set(member, row);
+  }
+  const members = new Set<string>([...(crew ?? []).map((entry) => entry.id), ...byMember.keys()]);
+  return [...members]
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .map((member) => ({ member, row: byMember.get(member) }));
+}
+
+/**
+ * One crew member's row. Awake, it is the session's row with the crew rail;
+ * asleep, it is the member itself with one act on it — wake — and no state to
+ * report, because there is nothing running to have a state.
+ */
+function CrewRowView({
+  member,
+  row,
+  selected,
+  onSelect,
+  onWake,
+  onOpenActions,
+}: {
+  member: string;
+  row?: QueueRow<QueueBandSessionView>;
+  selected: boolean;
+  onSelect?: () => void;
+  onWake?: () => void;
+  onOpenActions?: (event: ReactMouseEvent) => void;
+}) {
+  const awake = Boolean(row);
+  const label = row?.session.label || member;
+  return (
+    <div
+      className={`session-item queue-row queue-row--crew ${selected ? 'selected' : ''}`.trim()}
+      data-testid={`queue-crew-${member}`}
+      data-crew-member={member}
+      data-crew-state={awake ? 'awake' : 'asleep'}
+      data-state={row?.session.state}
+      data-workspace-id={row?.workspaceId}
+    >
+      <button
+        type="button"
+        className="queue-row-select"
+        data-testid={`queue-crew-select-${member}`}
+        aria-label={awake ? `Open ${label}` : `Wake ${member}`}
+        onClick={awake ? onSelect : onWake}
+      />
+      {awake ? (
+        <StateIndicator state={row!.session.state} size="md" seed={row!.session.id} reason={row!.session.state_reason} />
+      ) : (
+        // No state to draw: nothing is running. The hollow ring is the same size
+        // as an indicator so every crew row's label starts on the same column.
+        <span className="crew-asleep-dot" aria-hidden="true" />
+      )}
+      <SessionLabel label={label} />
+      <span className="crew-row-mark" title={awake ? `${member} is awake` : `${member} is asleep`}>
+        {awake ? 'crew' : 'asleep'}
+      </span>
+      {!awake && onWake && (
+        <div className="queue-row-controls">
+          <button
+            type="button"
+            className="queue-row-wake"
+            data-testid={`queue-crew-wake-${member}`}
+            title={`Wake ${member} — start its day`}
+            aria-label={`Wake ${member}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onWake();
+            }}
+          >
+            ☀
+          </button>
+        </div>
+      )}
+      {awake && onOpenActions && (
+        <div className="queue-row-controls">
+          <button
+            type="button"
+            className="session-actions session-more-btn"
+            data-testid={`session-actions-${row!.session.id}`}
+            title="Session actions"
+            aria-label={`Actions for ${label}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onOpenActions(event);
+            }}
+          >
+            •••
+          </button>
+        </div>
       )}
     </div>
   );

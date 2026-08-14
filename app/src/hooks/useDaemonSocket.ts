@@ -24,6 +24,7 @@ import type {
   Ticket as GeneratedTicket,
   TicketRow as GeneratedTicketRow,
   Seed as GeneratedSeed,
+  CrewMember as GeneratedCrewMember,
   MarkdownAnnotation,
   Presentation,
   PresentationRound,
@@ -87,9 +88,14 @@ import {
 import {
   handleMarkdownAnnotationDaemonEvent,
   markdownAnnotationKey,
-  type PendingMarkdownAnnotations,
 } from './daemonMarkdownAnnotationEvents';
-import { pendingRequestKey, settlePendingRequest, type PendingRequests } from './daemonPendingRequests';
+import {
+  pendingRequestKey,
+  sendKeyedRequest as sendLastWriterWinsRequest,
+  settlePendingRequest,
+  type PendingKeyedRequests,
+  type PendingRequests,
+} from './daemonPendingRequests';
 import { BUILD_PROFILE, daemonProfileMatches, fetchDaemonHealthProfile, profileMismatchMessage } from '../utils/buildProfile';
 import { controlBrowserHost, serializeBrowserControlResultMessage } from '../browser/host';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
@@ -130,6 +136,10 @@ export type TicketRow = GeneratedTicketRow;
 // A seed as the garden pushes it: the whole document, because a seed is small
 // and the panel renders its body without a second round trip.
 export type Seed = GeneratedSeed;
+// A crew member as the roster pushes it. Every member is here, awake or asleep:
+// an awake one names the session living its day (binding_session), and that
+// presence IS "awake" — the daemon judged the binding live before sending it.
+export type CrewMember = GeneratedCrewMember;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -252,7 +262,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '244';
+export const PROTOCOL_VERSION = '250';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -635,6 +645,9 @@ interface UseDaemonSocketOptions {
   // apps_updated broadcast. A version flip moves an app's content hash, which is
   // how a docked tile learns its bundle URL moved — there is no other signal.
   onAppsUpdate?: (apps: AppRegistryEntry[]) => void;
+  // Fired with the whole crew roster on initial_state and on every crew_updated
+  // broadcast. Members are permanent, so the sidebar renders from this alone.
+  onCrewUpdate?: (members: CrewMember[]) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
@@ -942,6 +955,7 @@ export function useDaemonSocket({
   onTicketsUpdate,
   onSeedsUpdate,
   onAppsUpdate,
+  onCrewUpdate,
   onPresentationAdded,
   onPresentationUpdated,
   onWorkspacesUpdate,
@@ -977,6 +991,7 @@ export function useDaemonSocket({
     onTicketsUpdate,
     onSeedsUpdate,
     onAppsUpdate,
+    onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -1001,6 +1016,7 @@ export function useDaemonSocket({
     onTicketsUpdate,
     onSeedsUpdate,
     onAppsUpdate,
+    onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -1021,9 +1037,8 @@ export function useDaemonSocket({
   // Keyed `<kind>:<requestId>` — see daemonPendingRequests.ts for the format and
   // the settle helper the extracted event modules use.
   const pendingActionsRef = useRef<PendingRequests>(new Map());
-  // Markdown-annotation drafts use their own last-writer-wins correlation —
-  // see daemonMarkdownAnnotationEvents.ts, not daemonPendingRequests.ts.
-  const mdAnnotationsPendingRef = useRef<PendingMarkdownAnnotations>(new Map());
+  // Markdown-annotation drafts use shared last-writer-wins correlation.
+  const mdAnnotationsPendingRef = useRef<PendingKeyedRequests>(new Map());
   // Completed transcript messages invalidate only their own terminal. Keeping
   // listeners here avoids a global React tick and releases the session entry as
   // soon as its last pane unmounts.
@@ -1569,6 +1584,7 @@ export function useDaemonSocket({
               data.seeds_total ?? (data.seeds || []).length,
             );
             callbacksRef.current.onAppsUpdate?.(data.apps || []);
+            callbacksRef.current.onCrewUpdate?.(data.crew || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1732,6 +1748,10 @@ export function useDaemonSocket({
 
           case 'tickets_updated':
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
+            break;
+
+          case 'crew_updated':
+            callbacksRef.current.onCrewUpdate?.(data.members || []);
             break;
 
           case 'garden_seeds_updated':
@@ -1966,6 +1986,28 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Ticket attach failed'));
+            }
+            break;
+          }
+
+          case 'crew_wake_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `crew_wake:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && typeof data.session_id === 'string') {
+              pending.resolve({
+                sessionId: data.session_id,
+                alreadyAwake: data.already_awake === true,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Waking the member failed'));
             }
             break;
           }
@@ -4011,45 +4053,35 @@ export function useDaemonSocket({
     });
   }, []);
 
-  // Markdown annotation drafts (request/result pattern; save/clear can fail —
-  // stale-generation rejection — so no fire-and-forget). Pending entries are
-  // keyed `<op>:<path>` in a dedicated map: a newer request for the same
-  // path+op supersedes the in-flight one (rejects it), and results are
-  // matched by request_id so a late result for a superseded request can
-  // never settle its successor.
+  // Markdown annotation drafts use last-writer-wins request correlation keyed
+  // by operation, workspace, and path.
   const sendMarkdownAnnotationsCommand = useCallback(<T,>(
     op: 'get' | 'save' | 'clear' | 'submit',
     path: string,
     workspaceId: string,
     extra: Record<string, unknown>,
   ): Promise<T> => {
-    return new Promise<T>((resolve, reject) => {
-      const ws = wsRef.current;
-      if (!ws || ws.readyState !== WebSocket.OPEN) {
-        reject(new Error('WebSocket not connected'));
-        return;
-      }
-      // workspace-scoped: the same path open in two workspaces (possibly on
-      // two different endpoints) must not supersede each other's requests.
-      const key = markdownAnnotationKey(op, workspaceId, path);
-      const requestId = crypto.randomUUID();
-      mdAnnotationsPendingRef.current.get(key)?.reject(new Error('Superseded by a newer request'));
-      mdAnnotationsPendingRef.current.set(key, { requestId, resolve: resolve as (value: unknown) => void, reject });
-      ws.send(JSON.stringify({
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+      return Promise.reject(new Error('WebSocket not connected'));
+    }
+    // Workspace scope keeps identical paths on different endpoints independent.
+    const key = markdownAnnotationKey(op, workspaceId, path);
+    const requestId = crypto.randomUUID();
+    return sendLastWriterWinsRequest<T>(
+      mdAnnotationsPendingRef.current,
+      key,
+      requestId,
+      () => ws.send(JSON.stringify({
         cmd: `markdown_annotations_${op}`,
         path,
         workspace_id: workspaceId,
         request_id: requestId,
         ...extra,
-      }));
-      setTimeout(() => {
-        const pending = mdAnnotationsPendingRef.current.get(key);
-        if (pending?.requestId === requestId) {
-          mdAnnotationsPendingRef.current.delete(key);
-          reject(new Error('Timeout'));
-        }
-      }, 10000);
-    });
+      })),
+      'Timeout',
+      10000,
+    );
   }, []);
 
   // workspace_id is the requesting tile's owning workspace: on a hub it routes
@@ -4838,6 +4870,34 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
+  // Start a crew member's day. The daemon owns the whole composite — bind,
+  // register the member's workspace, add the pane, spawn primed — so this sends
+  // one command and resolves with the session to focus; the session and pane
+  // arrive over the normal broadcasts. A member already awake resolves with its
+  // running day (alreadyAwake), which is the same thing to focus.
+  const sendCrewWake = useCallback(
+    (member: string): Promise<{ sessionId: string; alreadyAwake: boolean }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('crew_wake');
+        const key = `crew_wake:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve, reject });
+        ws.send(JSON.stringify({ cmd: 'crew_wake', request_id: requestId, member }));
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new Error(`Waking ${member} timed out`));
+          }
+        }, 10000);
+      });
+    },
+    [nextRequestID],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
@@ -5600,6 +5660,7 @@ export function useDaemonSocket({
     sendTicketEditDescription,
     sendTicketAttach,
     sendTicketResume,
+    sendCrewWake,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,

@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "244"
+const ProtocolVersion = "250"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -205,6 +205,7 @@ const (
 	CmdAgentPeek                             = "agent_peek"
 	CmdAgentMsg                              = "agent_msg"
 	CmdSeedPlant                             = "seed_plant"
+	CmdSeedPlot                              = "seed_plot"
 	CmdSeedList                              = "seed_list"
 	CmdSeedShow                              = "seed_show"
 	CmdSeedTransition                        = "seed_transition"
@@ -212,6 +213,11 @@ const (
 	CmdSeedNotes                             = "seed_notes"
 	CmdSeedLink                              = "seed_link"
 	CmdSeedReady                             = "seed_ready"
+	CmdCrewList                              = "crew_list"
+	CmdCrewWake                              = "crew_wake"
+	CmdCrewSet                               = "crew_set"
+	CmdCrewPrime                             = "crew_prime"
+	CmdCrewHandoff                           = "crew_handoff"
 	CmdStop                                  = "stop"
 	CmdTodos                                 = "todos"
 	CmdFilesEdited                           = "files_edited"
@@ -387,6 +393,8 @@ const (
 	EventAppCommandResult                = "app_command_result"
 	EventDocSubscriptionDelivery         = "doc_subscription_delivery"
 	EventDocSubscriptionEnded            = "doc_subscription_ended"
+	EventCrewUpdated                     = "crew_updated"
+	EventCrewWakeResult                  = "crew_wake_result"
 	EventTicketResult                    = "ticket_result"
 	EventTicketActionResult              = "ticket_action_result"
 	EventTicketAttachResult              = "ticket_attach_result"
@@ -1227,8 +1235,50 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdCrewList:
+		var msg CrewListMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCrewWake:
+		var msg CrewWakeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCrewSet:
+		var msg CrewSetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCrewPrime:
+		var msg CrewPrimeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdCrewHandoff:
+		var msg CrewHandoffMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdSeedPlant:
 		var msg SeedPlantMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSeedPlot:
+		var msg SeedPlotMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

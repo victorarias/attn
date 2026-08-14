@@ -212,7 +212,7 @@ func TestLinkRefusals(t *testing.T) {
 			name:  "an unknown seed is named, with the way to list the garden",
 			seeds: []Seed{seedWith("s-a")},
 			from:  "s-a", kind: EdgeBlocks, to: "s-nope",
-			wants: []string{"s-nope", "attn seed ls --all"},
+			wants: []string{"s-nope", "attn seed ls"},
 		},
 		{
 			name:  "a direct blocks cycle names both seeds and the way out",

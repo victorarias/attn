@@ -3274,7 +3274,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
     unmount();
   });
 
-  it('resolves session_annotations_get with the stored list and its generation', async () => {
+  it('decodes an emoji-only old-format session annotation to its quick-label id', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
     const promise = result.current.sendSessionAnnotationsGet('session-1');
@@ -3308,7 +3308,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
         start: 4,
         end: 10,
         quote: 'parser',
-        emoji: '❓',
+        quickLabelId: 'clarify-this',
         comment: 'why this?',
       }],
       // A get that carried no note reads as an empty one: the panel's box has
@@ -3354,7 +3354,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
       start: 4,
       end: 10,
       quote: 'parser',
-      emoji: '❓',
+      quickLabelId: 'clarify-this',
       comment: 'why this?',
     }], 'and land the retry wrapper as is', 3);
     await Promise.resolve();
@@ -3370,7 +3370,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
         start: 4,
         end: 10,
         quote: 'parser',
-        emoji: '❓',
+        quick_label_id: 'clarify-this',
         comment: 'why this?',
       }],
     });

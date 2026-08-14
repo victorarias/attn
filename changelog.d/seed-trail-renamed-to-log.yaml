@@ -1,0 +1,11 @@
+kind: changed
+area: garden
+change: >
+  A seed's activity record is now its log, not its trail. Victor ruled
+  the rename: "trail" descends from the audit-trail idiom, which reads
+  corporate, while "log" sight-reads instantly beside git log and the
+  gardener's logbook. The word changes in seed help text, CLI output,
+  the stale query's wording, the glossary, and the plan; nothing on the
+  wire carried it, so no protocol change. The panel's navigation
+  breadcrumb keeps the name trail — that one really is a path walked,
+  and the rename removes the collision between the two.

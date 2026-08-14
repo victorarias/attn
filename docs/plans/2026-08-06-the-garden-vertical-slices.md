@@ -43,7 +43,7 @@ to fix.
   only, storage explicitly not adopted).
   - Core loop: one-line capture; `ready` = no open blockers,
     auto-surfacing when a blocker closes; atomic claim; close-with-reason;
-    audit trail in `show`; JSON everywhere.
+    audit log in `show`; JSON everywhere.
   - Workflow layer (`docs/workflows/{formulas,molecules}.md` in the beads
     repo): a **molecule is just an epic** — parent with children plus
     execution intent, children parallel by default, only explicit
@@ -271,8 +271,8 @@ stateDiagram-v2
   crown starts knowing its plot,
   its ready seeds, and the freshest handoffs. No agent should have to
   discover the garden exists.
-- **Audit trail = revisions + notes + facts.** Docstore revisions record
-  every mutation; notes carry the human/agent-authored trail; bus facts
+- **Audit log = revisions + notes + facts.** Docstore revisions record
+  every mutation; notes carry the human/agent-authored log; bus facts
   (`garden.planted`, `garden.tended`, …) drive projections. `attn seed show`
   assembles all three.
 
@@ -300,7 +300,7 @@ full set and the beads mapping.
 | sow | instantiate a packet, filling its variables | `bd mol pour` |
 | cutting | extract a packet from a proven plot | `bd mol distill` |
 | gate | a seed that needs a human; opens a turn when unblocked, never enters agent `ready` | `[steps.gate]` |
-| note | trail entry on a seed; the seed's memory of itself, routed to nobody | comment |
+| note | log entry on a seed; the seed's memory of itself, routed to nobody | comment |
 | handoff | a note kind addressed to whoever tends the seed next | — |
 | fruit / laurel | recognition attached to a seed | — |
 
@@ -348,7 +348,7 @@ Acceptance:
 
 ### Slice 2 — lifecycle and tending
 
-Goal: a seed moves through its life, and the trail is visible.
+Goal: a seed moves through its life, and the log is visible.
 
 Ships:
 
@@ -357,13 +357,13 @@ Ships:
       errors. The claim is guarded on `tend` alone (2026-08-12): the other four
       are fate calls, and guarding them would make a tender whose session ended
       a one-way door with no key.
-- [x] `attn seed note <id> -m` appends to the trail; `show` renders states,
+- [x] `attn seed note <id> -m` appends to the log; `show` renders states,
       tender, and notes newest-first. `show` renders the newest
       `garden.ShowNotes` and names what it withheld; `attn seed notes <id>`
-      reads the whole trail.
+      reads the whole log.
 - [x] App panel shows state and tender; state changes arrive live.
 - [x] Bus facts per transition (`garden.tended`, `garden.harvested`, …), plus
-      `garden.noted` for the trail.
+      `garden.noted` for the log.
 - [x] Slice 1's seed-list cap finished (Victor, 2026-08-12): the count the push
       already carried now has consumers — the panel says how many the garden
       holds when it outgrew one push, and `attn seed ls` names how many seeds it
@@ -451,7 +451,7 @@ picks up from. Both now read `Tender.Holds`.
 
 The handoff is not on the wire Seed and so not in the panel: the plan gives
 slice 4 no app line, and the panel renders no notes of any kind today. Whichever
-slice teaches it the trail teaches it handoffs in the same move.
+slice teaches it the log teaches it handoffs in the same move.
 
 Acceptance:
 
@@ -466,10 +466,10 @@ children, dispatch a delegation at it, watch it drain.
 
 Ships:
 
-- [ ] Planting under a crown: `attn seed plant --part-of <crown>` (or a
+- [x] Planting under a crown: `attn seed plant --part-of <crown>` (or a
       `plot` convenience that plants crown + children in one JSON payload
       for agents).
-- [ ] Dispatch-at-plot: a delegation can be dispatched at a crown and
+- [x] Dispatch-at-plot: a delegation can be dispatched at a crown and
       carries it as scope inference, nothing more — inside that
       session, flag-free `ready` answers with the plot's ready seeds
       and priming starts from the crown. It is not a fence and not an
@@ -477,23 +477,23 @@ Ships:
       may tend several seeds across plots at once, and who-holds-what
       stays the per-seed tender. Children are parallel by default;
       only `blocks` edges sequence.
-- [ ] Priming, delegate side: a delegate dispatched at a crown launches
+- [x] Priming, delegate side: a delegate dispatched at a crown launches
       already knowing its plot (crown body summary, ready seeds, freshest
       handoffs) — it never has to ask what it was sent to do.
-- [ ] App: the garden is navigable as a first-class experience — the
+- [x] App: the garden is navigable as a first-class experience — the
       whole garden, root to leaf: drill from a crown into its
       children, climb back up, cross into the next plot. A crown row
       shows its plot's progress (done / growing / ready / blocked
       counts). What the app shows about who works on what is the
       per-seed tender, never a delegation-to-crown assignment.
-- [ ] `attn seed show <crown>` includes plot progress; a stale query
+- [x] `attn seed show <crown>` includes plot progress; a stale query
       (`attn seed ls --stale`) exists as a *query*, not an automatic
       reaper — a person (or later a crew member) decides what withers.
       Stale means a seed claiming attention it is not getting: open,
-      with no trail movement (notes, moves, edges) for a window. The
+      with no log movement (notes, moves, edges) for a window. The
       window is a flag with a default that needs a receipt at build
       time, and the output names the rule and window it applied.
-- [ ] The scope ruling lands, destructively (ruled 2026-08-13): drop
+- [x] The scope ruling lands, destructively (ruled 2026-08-13): drop
       the `workspace_id` field and erase any stored values — no
       compatibility reads, no fallback, no migration shim, because no
       production install ever held seed data. The `--workspace` flag
@@ -504,12 +504,15 @@ Ships:
 
 Acceptance:
 
-- [ ] One real piece of work flows end to end in production use: a plot is
+- [x] One real piece of work flows end to end in production use: a plot is
       planted, a delegate dispatched at it tends and harvests children in
       dependency order, the panel shows it draining live.
-- [ ] Two delegates on one plot pick up parallel children without collision.
-- [ ] A fresh session re-orients from `ready`/`ls` alone (garden state lives
+- [x] Two delegates on one plot pick up parallel children without collision.
+- [x] A fresh session re-orients from `ready`/`ls` alone (garden state lives
       in the daemon, not in anyone's context).
+
+All three run against the packaged app on every checkout:
+`pnpm --dir app run real-app:scenario-garden-plot-dispatch`.
 
 ### Slice 6 — the plan lives in the garden
 
@@ -529,7 +532,7 @@ Ships:
       appear as the live ledger beneath it.
 - [ ] Annotations on a rendered seed route as feedback to its tender's
       session (the existing annotation→agent path); on an untended seed
-      they land as notes on the trail, so review feedback is never lost.
+      they land as notes on the log, so review feedback is never lost.
 - [ ] A chunk plan authored as a plot replaces its would-be
       `docs/plans/*.md` file for one real chunk — the first plan that never
       touches git.
@@ -552,15 +555,32 @@ Acceptance:
   has repeated and earned its packet.
 - **Gates as turns** — `gate` seeds opening turns when unblocked; the
   schema field exists from slice 1.
-- **Tickets retire** (decided 2026-08-06; supersedes "tickets as views").
-  There will be no era of two capture systems: the garden takes over as
-  soon as it is usable — slice 5 (capture + dispatch) is the bar — and
-  tickets are then removed, not kept as a parallel board.
+- **Tickets retire** (decided 2026-08-06; supersedes "tickets as views";
+  path ruled 2026-08-14). There will be no era of two capture systems:
+  the garden takes over as soon as it is usable — slice 5 (capture +
+  dispatch) is the bar — and tickets are then removed, not kept as a
+  parallel board. The retirement rides the garden-era epic alongside
+  slice 6, and the path is: a delegation binds a seed — the brief is the
+  seed's body, the delegate session its tender; status reports become
+  log notes; steering goes over agent-msg. The `attn ticket` verbs
+  become loud signposts to their garden equivalents, kept indefinitely
+  — their audience is agents on stale guidance, and a signpost is what
+  lets them self-correct. Unbound backlog todos bulk-convert to seeds
+  at cutover; in-flight delegations finish on their tickets; done
+  tickets stay readable, never migrated. Victor proves it by living on
+  the epic
+  branch for days without touching tickets before it merges. The
+  landmine to design around: delegation reporting IS tickets today
+  (briefs, status reports, artifacts all land there), so the garden must
+  carry that weight before tickets die. The outpost leg stays gated on
+  the uplink per
+  [the arc plan](2026-08-10-home-garden-crew-arc.md) — retiring outpost
+  tickets while outposts are fenced would strand outpost delegations.
 - **Laurels attach to seeds** — the recognition arc; seed ids are the
   attachment points, nothing in this plan blocks it.
 - **Ready nudges** — waking a tender when its blocker falls (doorbell path).
 - **No seed comments — deliberately** (decided 2026-08-06). A comment is a
-  message with no addressee: too noisy to be a good trail note, too
+  message with no addressee: too noisy to be a good log note, too
   undirected to be a good message. Notes are the seed's memory of itself and
   route to nobody; conversation between agents is the vision's "agents
   converse and observe" rock — directed, daemon-brokered messages that can
@@ -619,7 +639,8 @@ the current truth; the original question is kept for the record.
   seam first — A3.4 Stage 2's whole scope — to deliver a list of at most a
   few hundred small documents. `garden.planted` projects to one
   `garden_seeds_updated` push carrying the whole garden, coalesced like
-  every other snapshot; the panel scopes to its workspace client-side.
+  every other snapshot; the panel opens on the whole garden and scopes by
+  plot client-side.
   Revisit when the garden outgrows one push, not before. The panel is the
   first rendering, not a commitment — whether the garden becomes the app's
   front door is a named question in the vision.

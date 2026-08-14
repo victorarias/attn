@@ -46,7 +46,7 @@ export interface TerminalAnnotation {
   // The markdown the offsets covered when made; kept so the panel still lists
   // an annotation whose message fell out of the window.
   quote: string;
-  emoji: string;
+  quickLabelId: string;
   comment: string;
 }
 
@@ -134,7 +134,7 @@ export class TerminalAnnotationStore {
     this.annotations = annotations.map((annotation) => ({ ...annotation }));
   }
 
-  add(messageKey: string, start: number, end: number, emoji = '', comment = ''): TerminalAnnotation | null {
+  add(messageKey: string, start: number, end: number, quickLabelId = '', comment = ''): TerminalAnnotation | null {
     const markdown = this.markdownByKey.get(messageKey);
     if (markdown === undefined) return null;
     if (start < 0 || end > markdown.length || start >= end) return null;
@@ -144,17 +144,17 @@ export class TerminalAnnotationStore {
       start,
       end,
       quote: markdown.slice(start, end),
-      emoji,
+      quickLabelId,
       comment,
     };
     this.annotations.push(annotation);
     return annotation;
   }
 
-  update(id: string, patch: { emoji?: string; comment?: string }): TerminalAnnotation | null {
+  update(id: string, patch: { quickLabelId?: string; comment?: string }): TerminalAnnotation | null {
     const annotation = this.annotations.find((entry) => entry.id === id);
     if (!annotation) return null;
-    if (patch.emoji !== undefined) annotation.emoji = patch.emoji;
+    if (patch.quickLabelId !== undefined) annotation.quickLabelId = patch.quickLabelId;
     if (patch.comment !== undefined) annotation.comment = patch.comment;
     return annotation;
   }

@@ -138,19 +138,28 @@ type Daemon struct {
 	httpHandler    http.Handler
 	diagServer     *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
 	wsHub          *wsHub
-	done           chan struct{}
-	logger         *logging.Logger
-	debugLogging   bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry     *github.ClientRegistry
-	hubManager     *hub.Manager
-	classifier     Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches     map[string]*repoCache
-	repoCacheMu    sync.RWMutex
-	gitCoordMu     sync.Mutex
-	gitCoord       *gitCoordinator
-	warnings       []protocol.DaemonWarning
-	warningsMu     sync.RWMutex
-	ptyBackend     ptybackend.Backend
+	// presentSince is the last moment any client reported above `away`. See
+	// client_presence.go: the tier says whether the user is here, this says how
+	// long they have not been.
+	presentSince time.Time
+	presenceMu   sync.RWMutex
+	// crewLifecycleState is the crew tick's memory between fires; see
+	// crew_lifecycle.go. Built on first use, so only the tick knows about it.
+	crewLifecycleState *crewLifecycleMemo
+	crewMemoOnce       sync.Once
+	done               chan struct{}
+	logger             *logging.Logger
+	debugLogging       bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry         *github.ClientRegistry
+	hubManager         *hub.Manager
+	classifier         Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches         map[string]*repoCache
+	repoCacheMu        sync.RWMutex
+	gitCoordMu         sync.Mutex
+	gitCoord           *gitCoordinator
+	warnings           []protocol.DaemonWarning
+	warningsMu         sync.RWMutex
+	ptyBackend         ptybackend.Backend
 	// hostSessions runs the conversation sessions — the ones whose agent lives
 	// in a headless host process rather than a PTY. See host_session.go.
 	hostSessions    *hostsession.Manager
@@ -828,6 +837,7 @@ func New(socketPath string) *Daemon {
 		dataRoot:            dataRoot,
 		store:               sessionStore,
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              logger,
 		debugLogging:        logger != nil && logger.DebugEnabled(),
@@ -876,6 +886,7 @@ func NewForTesting(socketPath string) *Daemon {
 		dataRoot:            dataRoot,
 		store:               store.New(),
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              nil, // No logging in tests
 		ghRegistry:          github.NewClientRegistry(),
@@ -923,6 +934,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		dataRoot:            dataRoot,
 		store:               store.New(),
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              nil,
 		ghRegistry:          registry,
@@ -1012,6 +1024,8 @@ func (d *Daemon) Start() error {
 		return fmt.Errorf("ensure enrollment record: %w", err)
 	}
 	d.ensureGardenCollections()
+	d.ensureCrewCollections()
+	d.importCrewHomes()
 	if d.hubManager == nil {
 		d.hubManager = hub.NewManager(
 			d.store,
@@ -2113,6 +2127,8 @@ func (d *Daemon) unregisterSession(sessionID string, sig syscall.Signal) *protoc
 func (d *Daemon) forgetSession(sessionID string) {
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
+	d.releaseCrewBindingIfSession(sessionID)
+	d.crewMemo().forget(sessionID)
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
 	}
@@ -2123,6 +2139,7 @@ func (d *Daemon) forgetSession(sessionID string) {
 func (d *Daemon) removeReapedSession(sessionID string) {
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
+	d.releaseCrewBindingIfSession(sessionID)
 	d.dissociateSessionFromWorkspace(sessionID)
 	d.removeWorkspaceLayoutPaneForSession(sessionID)
 }
@@ -2752,6 +2769,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleAgentMsg(conn, msg.(*protocol.AgentMsgMessage))
 	case protocol.CmdSeedPlant: // wire: seed_plant
 		d.handleSeedPlant(conn, msg.(*protocol.SeedPlantMessage))
+	case protocol.CmdSeedPlot: // wire: seed_plot
+		d.handleSeedPlot(conn, msg.(*protocol.SeedPlotMessage))
 	case protocol.CmdSeedList: // wire: seed_list
 		d.handleSeedList(conn, msg.(*protocol.SeedListMessage))
 	case protocol.CmdSeedShow: // wire: seed_show
@@ -2766,6 +2785,16 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleSeedLink(conn, msg.(*protocol.SeedLinkMessage))
 	case protocol.CmdSeedReady: // wire: seed_ready
 		d.handleSeedReady(conn, msg.(*protocol.SeedReadyMessage))
+	case protocol.CmdCrewList: // wire: crew_list
+		d.handleCrewList(conn, msg.(*protocol.CrewListMessage))
+	case protocol.CmdCrewWake: // wire: crew_wake
+		d.handleCrewWake(conn, msg.(*protocol.CrewWakeMessage))
+	case protocol.CmdCrewSet: // wire: crew_set
+		d.handleCrewSet(conn, msg.(*protocol.CrewSetMessage))
+	case protocol.CmdCrewPrime: // wire: crew_prime
+		d.handleCrewPrime(conn, msg.(*protocol.CrewPrimeMessage))
+	case protocol.CmdCrewHandoff: // wire: crew_handoff
+		d.handleCrewHandoff(conn, msg.(*protocol.CrewHandoffMessage))
 	case protocol.CmdStop: // wire: stop
 		d.handleStop(conn, msg.(*protocol.StopMessage))
 	case protocol.CmdTodos: // wire: todos
@@ -2890,6 +2919,21 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 	if workspaceID == "" {
 		d.sendError(conn, "missing workspace_id")
 		return
+	}
+	// A member binding is claimed before any row is written: identity is the
+	// invocation, so a launch that cannot be its member does not register at
+	// all — the CLI surfaces the refusal and the agent never runs as nobody.
+	// A registration without a member is one: it releases any binding a prior
+	// invocation of this session id held.
+	if member := strings.TrimSpace(protocol.Deref(msg.Member)); member != "" {
+		memberID, err := d.claimCrewBinding(member, msg.ID)
+		if err != nil {
+			d.sendError(conn, fmt.Sprintf("crew bind %q: %v", member, err))
+			return
+		}
+		d.logf("session %s registering as crew member %s", msg.ID, memberID)
+	} else {
+		d.releaseCrewBindingIfSession(msg.ID)
 	}
 	session.WorkspaceID = workspaceID
 	// Re-deriving the workspace title from the session label would clobber a
@@ -3299,6 +3343,7 @@ func (d *Daemon) sessionForBroadcast(session *protocol.Session) *protocol.Sessio
 		session,
 		d.chiefOfStaffSessionID(),
 		d.delegatedFromChiefSessionIDs(),
+		d.crewMembersBySession(),
 	)
 }
 
@@ -3306,6 +3351,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	session *protocol.Session,
 	chiefOfStaffSessionID string,
 	delegatedFromChief map[string]bool,
+	crewBySession map[string]string,
 ) *protocol.Session {
 	clone := cloneSession(session)
 	if clone == nil {
@@ -3317,6 +3363,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateSessionWithSnooze(clone)
 	d.decorateChiefOfStaffWithSessionID(clone, chiefOfStaffSessionID)
 	d.decorateDelegatedFromChief(clone, delegatedFromChief)
+	d.decorateCrewMember(clone, crewBySession)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
 	// Last: turn ownership reads the chief flag and the workspace the earlier
@@ -3331,9 +3378,10 @@ func (d *Daemon) sessionsForBroadcast(sessions []*protocol.Session) []protocol.S
 	}
 	chiefOfStaffSessionID := d.chiefOfStaffSessionID()
 	delegatedFromChief := d.delegatedFromChiefSessionIDs()
+	crewBySession := d.crewMembersBySession()
 	out := make([]protocol.Session, 0, len(sessions))
 	for _, session := range sessions {
-		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief); decorated != nil {
+		if decorated := d.sessionForBroadcastWithChiefOfStaff(session, chiefOfStaffSessionID, delegatedFromChief, crewBySession); decorated != nil {
 			out = append(out, *decorated)
 		}
 	}

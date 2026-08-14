@@ -15,6 +15,7 @@ interface TestSession {
   turnSnoozedUntil?: string;
   pinnedAt?: string;
   parentSessionId?: string;
+  crewMember?: string;
 }
 
 const baseProps = {
@@ -403,5 +404,89 @@ describe('formatTurnAge', () => {
   it('is empty when there is no stamp', () => {
     expect(formatTurnAge(undefined, opened)).toBe('');
     expect(formatTurnAge('not a date', opened)).toBe('');
+  });
+});
+
+describe('the crew in the sidebar', () => {
+  const roster = [{ id: 'alder' }, { id: 'keel' }, { id: 'trellis' }];
+
+  function renderCrew(
+    crewSessions: TestSession[],
+    overrides: Record<string, unknown> = {},
+    crew: { id: string; binding_session?: string }[] = roster,
+  ) {
+    return renderSidebar([...sessions, ...crewSessions], true, { crew, ...overrides });
+  }
+
+  it('draws every member, awake or asleep, at the top of the pinned band', () => {
+    const { container } = renderCrew([
+      { id: 'sess-keel', label: 'keel of the day', state: 'working', workspaceId: 'ws-a', crewMember: 'keel' },
+    ]);
+
+    const rows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(rows.filter((id) => id?.startsWith('queue-crew-')))
+      .toEqual(['queue-crew-alder', 'queue-crew-keel', 'queue-crew-trellis']);
+    // Inside the pinned region, above the pins themselves.
+    const headers = Array.from(container.querySelectorAll('.queue-bands > *'))
+      .map((node) => node.textContent);
+    expect(headers.some((text) => text?.startsWith('Pinned'))).toBe(true);
+
+    // Awake vs asleep is visible without reading a label.
+    expect(screen.getByTestId('queue-crew-keel').getAttribute('data-crew-state')).toBe('awake');
+    expect(screen.getByTestId('queue-crew-alder').getAttribute('data-crew-state')).toBe('asleep');
+    // Pin-shaped, and distinct from an ordinary pinned session.
+    expect(screen.getByTestId('queue-crew-alder').className).toContain('queue-row--crew');
+  });
+
+  it('shows an awake member exactly once, under its own row', () => {
+    const { container } = renderCrew([
+      { id: 'sess-keel', label: 'keel of the day', state: 'working', workspaceId: 'ws-a', crewMember: 'keel', turnOwed: true, turnOpenedAt: '2026-07-26T08:00:00Z' },
+    ]);
+
+    const rows = Array.from(container.querySelectorAll('.queue-bands .queue-row'))
+      .map((row) => row.getAttribute('data-testid'));
+    expect(rows.filter((id) => id?.includes('keel'))).toEqual(['queue-crew-keel']);
+  });
+
+  it('wakes a sleeping member with one click and focuses an awake one', () => {
+    const onWakeCrewMember = vi.fn();
+    const onSelectSession = vi.fn();
+    renderCrew(
+      [{ id: 'sess-keel', label: 'keel of the day', state: 'working', workspaceId: 'ws-a', crewMember: 'keel' }] as TestSession[],
+      { onWakeCrewMember, onSelectSession },
+    );
+
+    fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+    expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
+
+    fireEvent.click(screen.getByTestId('queue-crew-select-keel'));
+    expect(onSelectSession.mock.calls).toEqual([['sess-keel']]);
+
+    // An awake member has no wake button: the way in is the way in only while
+    // there is nothing to focus.
+    expect(screen.queryByTestId('queue-crew-wake-keel')).toBeNull();
+  });
+
+  it('keeps the band when the crew is the only thing in it', () => {
+    // Without a crew the pinned band is absent, so the members had nowhere to
+    // render before this.
+    renderCrew([]);
+    expect(screen.getByTestId('queue-crew-alder')).toBeTruthy();
+  });
+
+  it('still draws a bound session whose member left the roster', () => {
+    // Dropping the row would hide a running agent.
+    renderCrew(
+      [{ id: 'sess-ghost', label: 'ghost', state: 'working', workspaceId: 'ws-a', crewMember: 'sable' }] as TestSession[],
+      {},
+      roster,
+    );
+    expect(screen.getByTestId('queue-crew-sable').getAttribute('data-crew-state')).toBe('awake');
+  });
+
+  it('renders no crew rows while the queue arrangement is off', () => {
+    renderSidebar(sessions, false, { crew: roster });
+    expect(screen.queryByTestId('queue-crew-alder')).toBeNull();
   });
 });

@@ -251,6 +251,12 @@ func main() {
 	case "seed":
 		maybePrintProfileBanner()
 		runSeed()
+	case "crew":
+		maybePrintProfileBanner()
+		runCrew()
+	case "handoff":
+		maybePrintProfileBanner()
+		runHandoff(os.Args[2:])
 	case "doc":
 		maybePrintProfileBanner()
 		runDoc()
@@ -661,6 +667,8 @@ commands:
   bus <command>                     event bus: consumer cursors, lag, kill switch
   enrollment <command>              this daemon's home: status, enroll, leave
   seed <command>                    the garden: plant, tend, harvest, note, ls
+  crew <command>                    the crew roster: who exists, who is awake
+  handoff -m "<letter>"             file this crew member's letter; the day turns over
   doc <command>                     document store: collections, documents, live queries
   app <command>                     apps: list, status, enable, disable, remove
   vision-check <image> <question>   answer a question about an image (single LLM call)
@@ -774,6 +782,12 @@ session options:
                              otherwise the directory name)
   --source-session <id>      source session (defaults to ATTN_SESSION_ID)
   --yolo                     bypass agent approval prompts
+  --plot <crown>             dispatch the delegate at a crown. It launches
+                             knowing that plot, and a flag-free "attn seed ready"
+                             inside it answers with the plot's ready seeds. It
+                             is scope, not a fence or an assignment: who holds
+                             what stays the per-seed tender, and --all steps
+                             back out to the whole garden.
 	--allow-worktree-reuse     explicitly allow another active session to share the worktree
 
 inspection:
@@ -2378,6 +2392,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	name := fs.String("name", "", "name for the agent and, when a new workspace is created, the workspace")
 	sourceSessionID := fs.String("source-session", "", "source session id (defaults to ATTN_SESSION_ID)")
 	yolo := fs.Bool("yolo", false, "launch the target agent in yolo mode")
+	plot := fs.String("plot", "", "dispatch the delegate at a crown: its plot is what flag-free `attn seed ready` answers with")
 	newWorkspace := fs.Bool("new-workspace", false, "create a new workspace for the delegated agent")
 	workspaceID := fs.String("workspace", "", "place the delegated agent in an existing workspace")
 	cwd := fs.String("cwd", "", "use an existing directory in a new workspace")
@@ -2467,6 +2482,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 			Label:              strings.TrimSpace(*name),
 			Yolo:               *yolo,
 			Placement:          placement,
+			Plot:               strings.TrimSpace(*plot),
 			WorkspaceID:        explicitWorkspace,
 			CWD:                customCWD,
 			WorktreeRepo:       repo,
@@ -2903,6 +2919,7 @@ type directLaunchArgs struct {
 	resumePicker      bool
 	yoloMode          bool
 	initialPromptFile string
+	member            string
 }
 
 func readInitialPromptFile(path string) (string, error) {
@@ -2915,8 +2932,8 @@ func readInitialPromptFile(path string) (string, error) {
 }
 
 // parseDirectLaunchArgs parses the wrapper launch flags. attn understands only
-// -s, --resume, --yolo, and the internal --initial-prompt-file flag; any other
-// argument is an error. We deliberately do not forward unrecognized args to the underlying agent — that implicit
+// -s, --resume, --yolo, --member, and the internal --initial-prompt-file flag;
+// any other argument is an error. We deliberately do not forward unrecognized args to the underlying agent — that implicit
 // passthrough was never used by attn itself and only created confusion (e.g.
 // `attn --help` printing the agent's help instead of attn's).
 func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
@@ -2940,6 +2957,12 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 			}
 		case "--yolo":
 			parsed.yoloMode = true
+		case "--member":
+			if i+1 >= len(args) {
+				return directLaunchArgs{}, fmt.Errorf("flag --member needs a value: the crew member this session launches as (`attn crew list` names the roster)")
+			}
+			parsed.member = args[i+1]
+			i++
 		case "--initial-prompt-file":
 			if i+1 >= len(args) {
 				return directLaunchArgs{}, fmt.Errorf("flag --initial-prompt-file needs a value")
@@ -2951,7 +2974,12 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 		}
 	}
 	if label == "" {
-		label = wrapper.DefaultLabel()
+		// A member's day is named after the member; -s still overrides.
+		if parsed.member != "" {
+			label = parsed.member
+		} else {
+			label = wrapper.DefaultLabel()
+		}
 	}
 	parsed.label = label
 	return parsed, nil
@@ -3033,8 +3061,22 @@ func runAgentDirectly(requestedAgent string) {
 	if sessionID == "" {
 		sessionID = wrapper.GenerateSessionID()
 	}
+	if managedMode && parsed.member != "" {
+		// A daemon-owned launch is bound by the daemon before the spawn — `attn
+		// crew wake` claims the binding, and this process is what it spawned.
+		// Passing the name again here would race that claim against itself.
+		fmt.Fprintf(os.Stderr, "attn: --member names a member to launch as; a daemon-managed launch is already bound by `attn crew wake`\n")
+		os.Exit(1)
+	}
 	if !managedMode {
-		if err := c.RegisterWithAgent(sessionID, parsed.label, cwd, driver.Name()); err != nil {
+		err := c.RegisterAsMember(sessionID, parsed.label, cwd, driver.Name(), parsed.member)
+		switch {
+		case err != nil && parsed.member != "":
+			// The binding IS the identity: a member launch that cannot bind does
+			// not run, or two trellises could exist the moment the daemon is down.
+			fmt.Fprintf(os.Stderr, "attn: %v\n", err)
+			os.Exit(1)
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "warning: could not register session: %v\n", err)
 		}
 	}
@@ -3087,14 +3129,22 @@ func runAgentDirectly(requestedAgent string) {
 		}
 	}
 	// The garden primer rides the same launch injection as the guidance above,
-	// for chief and workspace agents alike. The count comes from the daemon
+	// for chief and workspace agents alike. The answer comes from the daemon
 	// rather than a copy of the rule, so what an agent is primed with and what
-	// `attn seed ready` answers cannot drift apart; a refusal — an outpost, whose
-	// garden lives at its home — primes nothing rather than teaching a loop this
-	// session cannot run.
-	if ready, err := c.SeedReady(sessionID, "", nil, false); err == nil {
-		count := len(ready.Seeds)
-		opts.GardenReady = &count
+	// `attn seed ready` answers cannot drift apart: the whole garden, or — for a
+	// delegate dispatched at a crown — its plot, crown body and handoffs
+	// included. A refusal — an outpost, whose garden lives at its home — primes
+	// nothing rather than teaching a loop this session cannot run.
+	if ready, err := c.SeedReady(sessionID, "", false); err == nil {
+		opts.Garden = gardenPrimeFromReady(ready)
+	}
+	// The crew priming rides the same injection. The daemon composes it from
+	// the member's own home and logs its size at that moment, so what a member
+	// was told and what the receipt says are the same bytes. A session that is
+	// nobody — most of them — gets an empty answer and no crew block.
+	if prime, err := c.CrewPrime(sessionID); err == nil {
+		opts.CrewPriming = protocol.Deref(prime.Guidance)
+		opts.AwarenessDirs = prime.AwarenessDirs
 	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so

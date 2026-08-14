@@ -408,6 +408,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   live here. `Status.RequireHome` is the fence every garden/crew surface calls;
   reach it from the daemon through `Daemon.requireHome`, never by reading the
   record yourself
+- `internal/crew`: what a crew member IS — the id rule, the stored registry
+  record, and how a home directory under `~/.attn/crew/` becomes one. Files stay
+  canonical: the registry records where a home lives, never what it says. The
+  daemon half (`internal/daemon/crew.go`) owns the binding a session launches
+  with and the one-active-binding-per-member rule over it
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
 - `internal/docstore`: document-store query semantics, SQL compilation, and the
   physical naming (no DB handle; `internal/store/documents.go` executes what it
@@ -450,10 +455,9 @@ this is where daemon traffic lands:
   per-domain event bodies lifted out of the switch, reached from its `default`.
   Grep a wire name (`fs_write_result`) to find the module that owns it. Adding a
   domain means a new module plus one line in that `default` chain.
-- `hooks/daemonMarkdownAnnotationEvents.ts` uses a *second* correlation scheme —
-  keyed `<op>:<workspaceId>:<path>`, last-writer-wins, `request_id`-checked — so
-  annotation drafts supersede rather than queue. Do not route it through
-  `daemonPendingRequests`.
+- Markdown annotations use `daemonPendingRequests.ts`'s keyed correlation with
+  `<op>:<workspaceId>:<path>` keys, last-writer-wins superseding, and
+  `request_id` checks. `daemonMarkdownAnnotationEvents.ts` only decodes results.
 - `store/daemonSessions.ts`: Zustand store for session/PR state.
 - `pty/`: transport, attach planning, binary frame decode, runtime lifecycle.
 - Tests are topic-suffixed: `Source.concern.test.tsx`. Keep that — the suffix

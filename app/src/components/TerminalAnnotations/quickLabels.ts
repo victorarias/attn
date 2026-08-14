@@ -7,15 +7,15 @@
 export {
   QUICK_LABEL_GROUPS,
   QUICK_LABELS,
-  labelByEmoji,
+  labelById,
   type QuickLabel,
 } from '../../annotations/quickLabels';
 
-import { labelByEmoji } from '../../annotations/quickLabels';
+import { labelById } from '../../annotations/quickLabels';
 
 export interface PayloadAnnotation {
   quote: string;
-  emoji: string;
+  quickLabelId: string;
   comment: string;
   // Offset of the annotation's start in the message, used only to order the
   // payload the way the user reads the message.
@@ -44,10 +44,10 @@ export function buildAnnotationPayload(
   const trimmedNote = note.trim();
   if (trimmedNote) lines.push(trimmedNote, '');
   ordered.forEach((annotation, index) => {
-    const label = annotation.emoji ? labelByEmoji(annotation.emoji) : undefined;
+    const label = annotation.quickLabelId ? labelById(annotation.quickLabelId) : undefined;
     const heading = label
       ? `${label.emoji} ${label.text}`
-      : `${annotation.emoji || '💬'} Comment`;
+      : '💬 Comment';
     lines.push(`## ${index + 1}. ${heading}`, '');
     lines.push(`> ${annotation.quote.split('\n').join('\n> ')}`, '');
     if (label?.tip) lines.push(label.tip);

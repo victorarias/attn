@@ -133,6 +133,7 @@ model Session {
   state_updated_at: string;     // ISO timestamp, always set
   state_reason?: string;        // Why the resolver reached this state (e.g. "stuck", "classifier_verdict"); absent for states it does not own
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
+  crew_member?: string;         // The crew member whose active binding this session is — "this session is trellis today". Stamped by the daemon at launch, judged live at broadcast, absent for every unbound session.
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
@@ -641,6 +642,11 @@ model RegisterMessage {
   agent?: string;               // Optional for registered plugin IDs
   dir: string;
   workspace_id: string;
+  // The crew member this session launches as. The daemon resolves it against
+  // the registry and stamps the binding — identity is the invocation — or
+  // refuses the whole registration: an unknown name, an outpost daemon, or a
+  // member whose day is already live all fail here, before the agent runs.
+  member?: string;
 }
 
 model UnregisterMessage {
@@ -806,6 +812,7 @@ model DelegateMessage {
   `model`?: string; // Pin the delegated agent's model (alias or full id); empty = agent default
   effort?: string; // Pin the delegated agent's reasoning effort; empty = agent default
   allow_worktree_reuse?: boolean; // Exceptional opt-in to share an existing worktree
+  plot?: string; // A crown to dispatch the delegate at: scope inference for its flag-free `ready` and launch priming, never a fence or an assignment
 }
 
 model DelegateStatusMessage {
@@ -2626,7 +2633,9 @@ model SessionAnnotation {
   // The markdown the offsets covered when the annotation was made. Kept so the
   // panel can list it, and the draft can be submitted, without the message.
   quote: string;
-  emoji: string;
+  quick_label_id?: string;
+  // Read compatibility for drafts written before labels stored their stable id.
+  emoji?: string;
   comment: string;
 }
 
@@ -2981,6 +2990,9 @@ model InitialStateMessage {
   // it and the hub relays WebSocket messages rather than proxying HTTP, so a
   // remote endpoint's apps are deliberately never offered here.
   apps?: AppRegistryEntry[];
+  // The crew roster, so the sidebar draws every member — awake or asleep — from
+  // the first push rather than asking for one.
+  crew?: CrewMember[];
 }
 
 model EndpointStatusChangedMessage {
@@ -4326,9 +4338,6 @@ model Seed {
   "status": string;
   // The seed's stable name within its plot; derived from the title at planting.
   "step_slug": string;
-  // The workspace of the session that planted it. Empty means planted outside
-  // any workspace, which is a real state and why `attn seed ls` has an --all.
-  "workspace_id": string;
   "planter_session": string;
   "planter_member": string;
   "tender_session": string;
@@ -4343,6 +4352,11 @@ model Seed {
   // truth at query time, never a stored flag — so a client renders it rather
   // than re-deriving a rule it would eventually disagree about.
   "ready": boolean;
+  // How far this seed's plot has drained. Present exactly when the seed is a
+  // crown — something is part of it — and computed by the daemon over the
+  // whole garden on every read and push, like `ready`, so a crown row renders
+  // progress instead of re-deriving the readiness rules.
+  "plot_progress"?: SeedPlotProgress;
   // Why the seed was harvested or withered.
   "reason"?: string;
   // The document's own revision and stamps. `rev` is what a conditional write
@@ -4370,17 +4384,30 @@ model SeedVar {
   "enum"?: string[];
 }
 
-// Plant a seed. The workspace is stamped from the calling session unless
-// `workspace_id` overrides it, which is why planting costs one line: the daemon
-// already knows who is asking.
+// One plot's children counted by where they stand. The crown itself is not
+// counted: its work is its children, and it closes by harvest.
+model SeedPlotProgress {
+  "total": int32;
+  // Harvested. Withered children are counted apart — abandoned is not done.
+  "done": int32;
+  "withered": int32;
+  "growing": int32;
+  "dormant": int32;
+  "ready": int32;
+  // Open with at least one open blocker.
+  "blocked": int32;
+}
+
+// Plant a seed. Planting costs one line: the daemon already knows who is
+// asking, and the garden is one space — plots are its only grouping.
 model SeedPlantMessage {
   "cmd": "seed_plant";
   "source_session_id"?: string;
   "title": string;
   "body"?: string;
-  // Overrides the calling session's workspace. The empty string is not an
-  // override — omit the field to take the session's.
-  "workspace_id"?: string;
+  // A crown to plant under: the seed is born part of that plot. Refused when
+  // no such seed is planted.
+  "part_of"?: string;
   // The crew member planting, free-string until the crew primitive lands.
   "member"?: string;
 }
@@ -4389,25 +4416,52 @@ model SeedPlantResult {
   "seed": Seed;
 }
 
-// List seeds. Scope is the calling session's workspace unless `workspace_id`
-// or `all` says otherwise; a caller with no session and no scope is refused
-// rather than shown an empty list.
+// Plant a whole plot in one move: the crown and its children, with the
+// children's sequencing edges. Validation is all-before-anything — a payload
+// that cannot be a plot is refused before one seed is written.
+model SeedPlotMessage {
+  "cmd": "seed_plot";
+  "source_session_id"?: string;
+  "member"?: string;
+  "title": string;
+  "body"?: string;
+  "children": SeedPlotChild[];
+}
+
+// One child of a plot planting. `blocks` names sibling step slugs this child
+// holds back — children are parallel by default, only blocks edges sequence.
+model SeedPlotChild {
+  "title": string;
+  "body"?: string;
+  "blocks"?: string[];
+}
+
+model SeedPlotResult {
+  "crown": Seed;
+  "children": Seed[];
+}
+
+// List the garden, newest first. One space, no scope: plots group, `show`
+// drills.
 model SeedListMessage {
   "cmd": "seed_list";
   "source_session_id"?: string;
-  "workspace_id"?: string;
-  "all"?: boolean;
+  // Only the open seeds whose log has not moved for the window — a query for
+  // a person's judgment, never a reaper.
+  "stale"?: boolean;
+  // Overrides the stale window; 0 or absent takes the daemon's default.
+  "stale_window_seconds"?: int32;
 }
 
 model SeedListResult {
   "seeds": Seed[];
-  // The workspace the answer was scoped to; empty when the scope was `all`.
-  "workspace_id": string;
-  // Whether the answer covered the whole garden.
-  "all": boolean;
-  // How many seeds the scope holds. Equal to `seeds`'s length until the list
-  // hits its bound, and then the receipt that says a list ended early.
+  // How many seeds the garden holds. Equal to `seeds`'s length until the list
+  // hits its bound, and then the receipt that says a list ended early. Under
+  // `stale` it is the stale count itself.
   "total": int32;
+  // The window a stale listing applied, echoed so the output can name the rule
+  // it judged by. Absent on a plain listing.
+  "stale_window_seconds"?: int32;
 }
 
 model SeedShowMessage {
@@ -4417,8 +4471,8 @@ model SeedShowMessage {
 
 model SeedShowResult {
   "seed": Seed;
-  // The newest entries on the seed's trail, and how many it holds. Notes ride
-  // the read the tender already runs: a trail nobody is told to look at is the
+  // The newest entries on the seed's log, and how many it holds. Notes ride
+  // the read the tender already runs: a log nobody is told to look at is the
   // unread bulletin board this surface replaces. The list is bounded, so
   // `total` is what makes the shortfall visible rather than silent.
   "notes": SeedNote[];
@@ -4430,7 +4484,7 @@ model SeedShowResult {
   // The freshest handoff on this seed, absent when nobody left one. It rides
   // beside `notes` rather than being found in them: a handoff is written to
   // whoever tends the seed next, so it is rendered before the seed itself and
-  // not left to be recognised in a trail.
+  // not left to be recognised in a log.
   "handoff"?: SeedNote;
 }
 
@@ -4465,24 +4519,30 @@ model SeedLinkResult {
   "changed": boolean;
 }
 
-// What can be tended right now. Scope is inferred: the calling session's
-// workspace unless `plot`, `workspace_id` or `all` says otherwise — the daemon
-// knows who is asking, so the common form takes no flags at all.
+// What can be tended right now. Scope is inferred — the daemon knows who is
+// asking, so the common form takes no flags at all: the whole garden, unless
+// the calling session was dispatched at a crown, and then that plot.
 model SeedReadyMessage {
   "cmd": "seed_ready";
   "source_session_id"?: string;
-  // A crown: the answer is that plot's seeds, crown included.
+  // A crown: the answer is that plot's seeds.
   "plot"?: string;
-  "workspace_id"?: string;
+  // The whole garden, overriding a dispatched session's plot inference.
   "all"?: boolean;
 }
 
 model SeedReadyResult {
   "seeds": Seed[];
-  // What the answer was scoped to: plot | workspace | all, and the id of the
-  // plot or workspace when there is one.
+  // What the answer was scoped to: garden | plot, and the crown's id when it
+  // was a plot.
   "scope": string;
   "scope_id": string;
+  // The crown, carried when the scope is a plot so a launching delegate is
+  // primed — the crown's body is the plan — without a second read.
+  "crown"?: Seed;
+  // The freshest handoff on each ready seed that has one, newest first. What a
+  // delegate dispatched at the plot reads before any work.
+  "handoffs"?: SeedNote[];
 }
 
 // One lifecycle move. The five verbs share a command because they are one state
@@ -4508,7 +4568,7 @@ model SeedTransitionResult {
   "handoff"?: SeedNote;
 }
 
-// One entry on a seed's trail: what happened and what was learned, written for
+// One entry on a seed's log: what happened and what was learned, written for
 // whoever tends the seed next. A note is anchored to the work and routed to
 // nobody — directed messages are their own surface.
 model SeedNote {
@@ -4529,7 +4589,7 @@ model SeedNoteMessage {
   "seed_id": string;
   "body": string;
   "member"?: string;
-  // Omitted is a plain trail entry, so a caller that never heard of kinds
+  // Omitted is a plain log entry, so a caller that never heard of kinds
   // writes a note. An unknown kind is refused, naming the whole set.
   "kind"?: string;
 }
@@ -4538,7 +4598,7 @@ model SeedNoteResult {
   "note": SeedNote;
 }
 
-// The whole trail, newest first — what `show`'s bounded list points at.
+// The whole log, newest first — what `show`'s bounded list points at.
 model SeedNotesMessage {
   "cmd": "seed_notes";
   "seed_id": string;
@@ -5070,7 +5130,13 @@ model Response {
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
+  crew_list_result?: CrewListResult;
+  crew_wake_result?: CrewWakeResult;
+  crew_set_result?: CrewSetResult;
+  crew_prime_result?: CrewPrimeResult;
+  crew_handoff_result?: CrewHandoffResult;
   seed_plant_result?: SeedPlantResult;
+  seed_plot_result?: SeedPlotResult;
   seed_list_result?: SeedListResult;
   seed_show_result?: SeedShowResult;
   seed_transition_result?: SeedTransitionResult;
@@ -5158,6 +5224,158 @@ model AgentPeekResult {
   last_assistant_message?: string;
   // Absent when the backend cannot serve a snapshot (old worker, no frame).
   screen?: AgentPeekScreen;
+  // The crew member whose active binding this session is; absent when unbound.
+  crew_member?: string;
+}
+
+// ============================================================================
+// Crew
+// ============================================================================
+
+// Read the crew roster: every registered member, awake or asleep. The registry
+// serves the read; the member's home stays plain markdown on disk and is never
+// copied onto the wire. Home-only — an outpost is refused by the enrollment
+// fence.
+model CrewListMessage {
+  cmd: "crew_list";
+}
+
+// One registered crew member. Paths point at the canonical files.
+model CrewMember {
+  id: string;
+  charter_path: string;
+  home_dir: string;
+  // Where the member's sessions launch; absent until the wake slice records one.
+  cwd?: string;
+  // The places the member's charter is about.
+  awareness_dirs: string[];
+  // The session living this member's current day. Present only while that
+  // session is live — the daemon judges the binding at read, so presence IS
+  // "awake" and a caller never re-derives liveness.
+  binding_session?: string;
+}
+
+model CrewListResult {
+  members: CrewMember[];
+}
+
+// Start a member's day: launch a session bound to it, in the member's own cwd,
+// with its awareness dirs and its priming. Home-only. A member whose day is
+// already live is not woken twice — the result names that session instead, so
+// the caller focuses it rather than racing the single-holder rule.
+model CrewWakeMessage {
+  cmd: "crew_wake";
+  member: string;
+  // The harness to launch; the daemon's default agent when absent.
+  agent?: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// CrewWakeResultMessage replies to a websocket crew_wake, correlated by
+// request_id. session_id is the day to focus — the member's, whether this call
+// started it or found it already running. The session and its pane reach the UI
+// through the normal broadcasts, so the sidebar seeds nothing.
+model CrewWakeResultMessage {
+  event: "crew_wake_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  member?: string;
+  session_id?: string;
+  workspace_id?: string;
+  already_awake?: boolean;
+}
+
+model CrewWakeResult {
+  member: string;
+  session_id: string;
+  workspace_id: string;
+  // True when the member was already awake and session_id is the day that was
+  // already running — nothing was launched.
+  already_awake: boolean;
+}
+
+// Record where a member's sessions launch and which directories its charter is
+// about. Registry state, not prose: the home's markdown is never rewritten, and
+// an omitted field is left as it was.
+model CrewSetMessage {
+  cmd: "crew_set";
+  member: string;
+  cwd?: string;
+  awareness_dirs?: string[];
+
+  // The way out. An empty awareness_dirs cannot say "clear it": the field is
+  // optional, so an empty list marshals away and reaches the daemon as absent,
+  // which is how "leave it alone" is said.
+  clear_awareness_dirs?: boolean;
+}
+
+model CrewSetResult {
+  member: CrewMember;
+}
+
+// What a launching session needs to be its member: the composed priming block
+// and the directories to open. Asked by the attn wrapper for every launch, so
+// the answer is empty for the sessions — most of them — that are nobody.
+model CrewPrimeMessage {
+  cmd: "crew_prime";
+  session_id: string;
+}
+
+model CrewPrimeResult {
+  // Absent when this session holds no binding.
+  member?: string;
+  guidance?: string;
+  awareness_dirs: string[];
+  priming_bytes: int32;
+}
+
+// File the calling session's member letter and end its day. The note is the
+// member's own prose — attn names the file and never edits what is in it — and
+// the line is append-only, so a name already taken is refused rather than
+// overwritten. Home-only, and refused for a session that holds no binding: a
+// crew handoff is a member's day-line, and a session that is nobody has none.
+model CrewHandoffMessage {
+  cmd: "crew_handoff";
+  session_id: string;
+  note: string;
+  // Turn the day over with the letter this day already filed, instead of
+  // writing one. The way out of a turnover that failed behind a filed letter:
+  // the line is append-only, so the letter cannot be written a second time.
+  retry?: boolean;
+  // What the filing does to the day. Absent lets attn decide from whether the
+  // user is here: a day that closes while nobody is around does not start
+  // another one, because sleeping through an absence is the point.
+  close?: CrewDayClose;
+}
+
+// Whether a filed letter starts the next day or ends this one.
+enum CrewDayClose {
+  nap,
+  sleep,
+}
+
+// Where the letter landed, and what became of the day. A filed letter is never
+// undone by what follows it: when the nap cannot run, the letter is still filed
+// and `nap_error` says why the successor was not woken.
+model CrewHandoffResult {
+  member: string;
+  path: string;
+  // The session living the member's new day. Absent when no nap ran.
+  session_id?: string;
+  // Why no successor was woken, when none was.
+  nap_error?: string;
+  // What the day did: `nap` started the next one, `sleep` ended it. Absent when
+  // neither happened, which is what nap_error explains.
+  outcome?: CrewDayClose;
+}
+
+// The roster, pushed on initial_state and whenever a member is registered,
+// woken, or released. Every member is here, awake or asleep: the sidebar shows
+// a sleeping member one action from waking, so it cannot ask per member.
+model CrewUpdatedMessage {
+  event: "crew_updated";
+  members: CrewMember[];
 }
 
 // What became of a message. Never a silent drop: a message that could not be
@@ -5783,6 +6001,8 @@ alias DaemonEvent =
   | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
   | GardenSeedsUpdatedMessage
+  | CrewUpdatedMessage
+  | CrewWakeResultMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage

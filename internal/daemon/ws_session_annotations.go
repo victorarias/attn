@@ -4,10 +4,8 @@ import (
 	"encoding/json"
 	"errors"
 	"strings"
-	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/store"
 )
 
 // Terminal annotations persist per session: whole-list saves under a monotonic
@@ -19,119 +17,58 @@ import (
 // handleSessionAnnotationsGet replies with a session's persisted annotations.
 // generation is the floor, so a re-mounting client seeds past an earlier clear.
 func (d *Daemon) handleSessionAnnotationsGet(client *wsClient, msg *protocol.SessionAnnotationsGetMessage) {
-	sessionID := strings.TrimSpace(msg.SessionID)
-	result := protocol.SessionAnnotationsGetResultMessage{
-		Event:       protocol.EventSessionAnnotationsGetResult,
-		RequestID:   msg.RequestID,
-		SessionID:   sessionID,
-		Annotations: []protocol.SessionAnnotation{},
-	}
-	if sessionID == "" {
-		result.Error = protocol.Ptr("session_annotations_get: session_id is required")
-		d.sendToClient(client, result)
-		return
-	}
-	draft, err := d.store.GetSessionAnnotationDraft(sessionID)
-	if err != nil {
-		d.logf("session_annotations_get: %s: %v", sessionID, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	annotations, err := decodeSessionAnnotations(draft.Annotations)
-	if err != nil {
-		d.logf("session_annotations_get: %s: corrupt stored draft: %v", sessionID, err)
-		result.Error = protocol.Ptr("stored annotation draft is corrupt: " + err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	result.Annotations = annotations
-	if draft.Note != "" {
-		result.Note = protocol.Ptr(draft.Note)
-	}
-	result.Generation = draft.Generation
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, sessionAnnotationDraftAccessors(d.store), "session_id",
+		func(result annotationDraftResult[protocol.SessionAnnotation]) protocol.SessionAnnotationsGetResultMessage {
+			return protocol.SessionAnnotationsGetResultMessage{
+				Event:       protocol.EventSessionAnnotationsGetResult,
+				RequestID:   msg.RequestID,
+				SessionID:   result.key,
+				Annotations: result.annotations,
+				Note:        result.note,
+				Generation:  result.generation,
+				Success:     result.success,
+				Error:       result.err,
+			}
+		})
+	handler.get("session_annotations_get", msg.SessionID, decodeSessionAnnotations)
 }
 
 // handleSessionAnnotationsSave persists the full annotation list for a session.
 func (d *Daemon) handleSessionAnnotationsSave(client *wsClient, msg *protocol.SessionAnnotationsSaveMessage) {
-	sessionID := strings.TrimSpace(msg.SessionID)
-	result := protocol.SessionAnnotationsSaveResultMessage{
-		Event:      protocol.EventSessionAnnotationsSaveResult,
-		RequestID:  msg.RequestID,
-		SessionID:  sessionID,
-		Generation: msg.Generation,
-	}
-	if sessionID == "" {
-		result.Error = protocol.Ptr("session_annotations_save: session_id is required")
-		d.sendToClient(client, result)
-		return
-	}
 	annotations := msg.Annotations
 	if annotations == nil {
 		annotations = []protocol.SessionAnnotation{}
 	}
-	annotationsJSON, err := json.Marshal(annotations)
-	if err != nil {
-		result.Error = protocol.Ptr("session_annotations_save: encoding annotations: " + err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	err = d.store.SaveSessionAnnotationDraft(
-		sessionID,
-		string(annotationsJSON),
-		protocol.Deref(msg.Note),
-		msg.Generation,
-		time.Now(),
-	)
-	if errors.Is(err, store.ErrStaleAnnotationSave) {
-		d.logf("session_annotations_save: %s: stale save at generation %d rejected", sessionID, msg.Generation)
-		result.Stale = protocol.Ptr(true)
-		d.sendToClient(client, result)
-		return
-	}
-	if err != nil {
-		d.logf("session_annotations_save: %s: %v", sessionID, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, sessionAnnotationDraftAccessors(d.store), "session_id",
+		func(result annotationDraftResult[protocol.SessionAnnotation]) protocol.SessionAnnotationsSaveResultMessage {
+			return protocol.SessionAnnotationsSaveResultMessage{
+				Event:      protocol.EventSessionAnnotationsSaveResult,
+				RequestID:  msg.RequestID,
+				SessionID:  result.key,
+				Generation: result.generation,
+				Success:    result.success,
+				Stale:      result.stale,
+				Error:      result.err,
+			}
+		})
+	handler.save("session_annotations_save", msg.SessionID, annotations, protocol.Deref(msg.Note), msg.Generation)
 }
 
 // handleSessionAnnotationsClear tombstones a session's annotations and replies
 // with the new generation floor.
 func (d *Daemon) handleSessionAnnotationsClear(client *wsClient, msg *protocol.SessionAnnotationsClearMessage) {
-	sessionID := strings.TrimSpace(msg.SessionID)
-	result := protocol.SessionAnnotationsClearResultMessage{
-		Event:      protocol.EventSessionAnnotationsClearResult,
-		RequestID:  msg.RequestID,
-		SessionID:  sessionID,
-		Generation: msg.Generation,
-	}
-	if sessionID == "" {
-		result.Error = protocol.Ptr("session_annotations_clear: session_id is required")
-		d.sendToClient(client, result)
-		return
-	}
-	if err := d.store.ClearSessionAnnotationDraft(sessionID, msg.Generation, time.Now()); err != nil {
-		d.logf("session_annotations_clear: %s: %v", sessionID, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	draft, err := d.store.GetSessionAnnotationDraft(sessionID)
-	if err != nil {
-		d.logf("session_annotations_clear: %s: reading floor: %v", sessionID, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	result.Generation = draft.Generation
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, sessionAnnotationDraftAccessors(d.store), "session_id",
+		func(result annotationDraftResult[protocol.SessionAnnotation]) protocol.SessionAnnotationsClearResultMessage {
+			return protocol.SessionAnnotationsClearResultMessage{
+				Event:      protocol.EventSessionAnnotationsClearResult,
+				RequestID:  msg.RequestID,
+				SessionID:  result.key,
+				Generation: result.generation,
+				Success:    result.success,
+				Error:      result.err,
+			}
+		})
+	handler.clear("session_annotations_clear", msg.SessionID, msg.Generation)
 }
 
 // handleSessionAnnotationsSubmit delivers composed annotation feedback through
@@ -148,7 +85,7 @@ func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.
 		Event:     protocol.EventSessionAnnotationsSubmitResult,
 		RequestID: msg.RequestID,
 		SessionID: sessionID,
-		Status:    markdownSubmitStatusError,
+		Status:    annotationSubmitStatusError,
 	}
 	fail := func(errText string) {
 		result.Error = protocol.Ptr(errText)
@@ -168,7 +105,7 @@ func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.
 	}
 	if err := d.typeDoorbell(sessionID, msg.Text); err != nil {
 		if errors.Is(err, errDoorbellBlockedByApproval) {
-			result.Status = markdownSubmitStatusSkipped
+			result.Status = annotationSubmitStatusSkipped
 			d.sendToClient(client, result)
 			return
 		}
@@ -177,7 +114,7 @@ func (d *Daemon) handleSessionAnnotationsSubmit(client *wsClient, msg *protocol.
 		return
 	}
 	result.Success = true
-	result.Status = markdownSubmitStatusDelivered
+	result.Status = annotationSubmitStatusDelivered
 	d.sendToClient(client, result)
 }
 

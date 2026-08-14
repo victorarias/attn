@@ -73,10 +73,10 @@ func TestGarden_AHandoffReachesTheNextTender(t *testing.T) {
 	}
 }
 
-// A handoff outlives the trail window. It is the case a scan of `show`'s newest
+// A handoff outlives the log window. It is the case a scan of `show`'s newest
 // few notes would miss, and the one that matters most: a busy seed is exactly
 // where a successor needs the note that was written to them.
-func TestGarden_TheFreshestHandoffSurvivesABusyTrail(t *testing.T) {
+func TestGarden_TheFreshestHandoffSurvivesABusyLog(t *testing.T) {
 	d := newGardenDaemon(t)
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "busy"})
 
@@ -88,18 +88,18 @@ func TestGarden_TheFreshestHandoffSurvivesABusyTrail(t *testing.T) {
 
 	shown := show(t, d, seed.ID)
 	if shown.Handoff == nil {
-		t.Fatal("the handoff fell out of the trail window and was lost")
+		t.Fatal("the handoff fell out of the log window and was lost")
 	}
 	if shown.Handoff.ID != newest.ID {
 		t.Fatalf("show surfaced %q, want the freshest handoff %q", shown.Handoff.ID, newest.ID)
 	}
 	// The window itself is unchanged: `show` still renders the newest few notes
-	// and still counts the whole trail.
+	// and still counts the whole log.
 	if len(shown.Notes) != garden.ShowNotes {
 		t.Fatalf("show rendered %d notes, want the usual %d", len(shown.Notes), garden.ShowNotes)
 	}
 	if want := garden.ShowNotes + 4; shown.NotesTotal != want {
-		t.Fatalf("the trail counts %d, want %d — handoffs are notes and are counted as such", shown.NotesTotal, want)
+		t.Fatalf("the log counts %d, want %d — handoffs are notes and are counted as such", shown.NotesTotal, want)
 	}
 }
 
@@ -129,7 +129,7 @@ func TestGarden_OnlyTendCarriesTheHandoff(t *testing.T) {
 }
 
 // A seed nobody handed over says nothing about handoffs, and a note written the
-// way `attn seed note` always wrote one is still a plain trail entry.
+// way `attn seed note` always wrote one is still a plain log entry.
 func TestGarden_NoHandoffIsNoHandoff(t *testing.T) {
 	d := newGardenDaemon(t)
 	seed := plant(t, d, protocol.SeedPlantMessage{SourceSessionID: protocol.Ptr("sess-a"), Title: "quiet"})
@@ -167,7 +167,7 @@ func TestGarden_AnUnknownNoteKindIsRefusedByName(t *testing.T) {
 	}
 }
 
-// A handoff is a note: it rides `garden.noted` like every other trail entry, so
+// A handoff is a note: it rides `garden.noted` like every other log entry, so
 // the panel re-push a note already produced covers it and no new fact exists to
 // leave unprojected.
 func TestGarden_AHandoffPublishesTheNoteFact(t *testing.T) {

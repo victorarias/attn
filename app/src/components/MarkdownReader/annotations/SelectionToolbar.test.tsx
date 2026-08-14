@@ -1,17 +1,17 @@
 /**
  * SelectionToolbar — the interaction contract:
  * - positioning modes (center-above / top-right) and scroll-out close (E5);
- * - Delete / 👍 / Cancel buttons (E6, E7 wiring);
- * - Alt+1..Alt+0 quick labels (E8);
+ * - Delete / promoted labels / Cancel buttons (E6, E7 wiring);
+ * - Alt+1..Alt+9 picker labels (E8);
  * - the full type-to-comment guard set, one assertion per guard (E9);
  * - keyboard suppression while the picker is open (E16);
  * - outside-pointerdown dismiss.
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { SelectionToolbar, type SelectionToolbarProps } from './SelectionToolbar';
-import { QUICK_LABELS, THUMBS_UP_LABEL } from './quickLabels';
+import { PROMOTED_LABELS, QUICK_LABEL_PICKER_LABELS } from './quickLabels';
 
 function fakeRect(overrides: Partial<DOMRect> = {}): DOMRect {
   const base = { top: 200, bottom: 220, left: 100, right: 300, width: 200, height: 20, x: 100, y: 200 };
@@ -22,7 +22,6 @@ function renderToolbar(overrides: Partial<SelectionToolbarProps> = {}) {
   const props: SelectionToolbarProps = {
     getAnchorRect: () => fakeRect(),
     positionMode: 'center-above',
-    copyText: 'selected words',
     onDelete: vi.fn(),
     onRequestComment: vi.fn(),
     onQuickLabel: vi.fn(),
@@ -82,12 +81,26 @@ describe('SelectionToolbar', () => {
     expect(props.onRequestComment).not.toHaveBeenCalled();
   });
 
-  it('the one-click agreement button applies a label from the shared set (E7)', () => {
+  it('renders exactly the three promoted label buttons and no Copy action (E7)', () => {
     const { props } = renderToolbar();
-    fireEvent.click(screen.getByTitle(THUMBS_UP_LABEL.text));
-    expect(props.onQuickLabel).toHaveBeenCalledWith(THUMBS_UP_LABEL);
-    expect(THUMBS_UP_LABEL.emoji).toBe('👍');
-    expect(QUICK_LABELS).toContain(THUMBS_UP_LABEL);
+    const toolbar = document.querySelector<HTMLElement>('.md-selection-toolbar')!;
+
+    expect(within(toolbar).queryByTitle('Copy')).toBeNull();
+    expect(within(toolbar).getAllByRole('button').map((button) => button.title)).toEqual([
+      'Delete',
+      'Comment',
+      'Quick label',
+      'I agree',
+      'This is wrong',
+      'Clarify this',
+      'Cancel',
+    ]);
+
+    for (const label of PROMOTED_LABELS) {
+      fireEvent.click(within(toolbar).getByTitle(label.text));
+      expect(props.onQuickLabel).toHaveBeenLastCalledWith(label);
+    }
+    expect(PROMOTED_LABELS.map((label) => label.emoji)).toEqual(['👍', '❌', '❓']);
   });
 
   it('Cancel button closes', () => {
@@ -96,15 +109,14 @@ describe('SelectionToolbar', () => {
     expect(props.onClose).toHaveBeenCalledTimes(1);
   });
 
-  it('Alt+1..Alt+9 and Alt+0 apply quick labels 1..10 (E8)', () => {
+  it('Alt+1..Alt+9 apply the filtered picker labels and Alt+0 does nothing (E8)', () => {
     const { props } = renderToolbar();
     pressKey({ code: 'Digit1', key: '1', altKey: true });
-    expect(props.onQuickLabel).toHaveBeenLastCalledWith(QUICK_LABELS[0]);
+    expect(props.onQuickLabel).toHaveBeenLastCalledWith(QUICK_LABEL_PICKER_LABELS[0]);
     pressKey({ code: 'Digit9', key: '9', altKey: true });
-    expect(props.onQuickLabel).toHaveBeenLastCalledWith(QUICK_LABELS[8]);
+    expect(props.onQuickLabel).toHaveBeenLastCalledWith(QUICK_LABEL_PICKER_LABELS[8]);
     pressKey({ code: 'Digit0', key: '0', altKey: true });
-    expect(props.onQuickLabel).toHaveBeenLastCalledWith(QUICK_LABELS[9]);
-    expect(props.onQuickLabel).toHaveBeenCalledTimes(3);
+    expect(props.onQuickLabel).toHaveBeenCalledTimes(2);
     expect(props.onRequestComment).not.toHaveBeenCalled();
   });
 
@@ -141,7 +153,7 @@ describe('SelectionToolbar', () => {
       expect(props.onRequestComment).not.toHaveBeenCalled();
       // ...but digits now select labels via the picker.
       pressKey({ code: 'Digit2', key: '2' });
-      expect(props.onQuickLabel).toHaveBeenCalledWith(QUICK_LABELS[1]);
+      expect(props.onQuickLabel).toHaveBeenCalledWith(QUICK_LABEL_PICKER_LABELS[1]);
     });
 
     it('guard 4: Escape closes the toolbar', () => {

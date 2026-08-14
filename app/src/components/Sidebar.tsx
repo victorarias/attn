@@ -9,7 +9,7 @@ import { GridLayoutControl } from './grid/GridLayoutControl';
 import type { GridLayout } from './grid/gridLayout';
 import { StateIndicator } from './StateIndicator';
 import { SessionLabel } from './SessionLabel';
-import { QueueBands, QueueSnoozedSection } from './QueueBands';
+import { QueueBands, QueueSnoozedSection, type CrewMemberView } from './QueueBands';
 import { SidebarNudgeBar, deriveNudgeMode } from './NudgeIndicator';
 import { CriticalNotificationStrip } from './CriticalNotificationStrip';
 import type { CriticalNotificationState } from '../hooks/useDaemonSocket';
@@ -42,6 +42,7 @@ interface LocalSession {
   state_reason?: string;
   turnOwed?: boolean;
   turnOpenedAt?: string;
+  crewMember?: string;
 }
 
 type SidebarWorkspace = WorkspaceWithSessions<LocalSession>;
@@ -148,6 +149,10 @@ interface SidebarProps {
   // is on the tree below is reduced to what the bands exclude: pinned and
   // tile-only workspaces.
   queue?: QueueBandsModel<LocalSession> | null;
+  /** The crew roster: every member, awake or asleep, drawn in the pinned region. */
+  crew?: CrewMemberView[];
+  /** Start a sleeping member's day. */
+  onWakeCrewMember?: (member: string) => void;
   onSettleTurn?: (id: string) => void;
   /** Open the snooze duration menu for a row, anchored at the click. */
   onOpenSnooze?: (session: { id: string; label: string }, event: ReactMouseEvent) => void;
@@ -362,6 +367,8 @@ export function Sidebar({
   dockCollapsed = false,
   onToggleDockCollapsed,
   queue = null,
+  crew,
+  onWakeCrewMember,
   onSettleTurn,
   onOpenSnooze,
   onWakeTurn,
@@ -1028,6 +1035,8 @@ export function Sidebar({
       {queue && (
         <QueueBands
           bands={queue}
+          crew={crew}
+          onWakeCrewMember={onWakeCrewMember}
           selectedId={selectedId}
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}

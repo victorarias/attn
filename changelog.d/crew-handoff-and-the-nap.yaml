@@ -1,0 +1,14 @@
+kind: added
+area: cli
+change: >
+  A crew member can now end its day in one motion. `attn handoff -m "<letter>"`
+  files the letter the member wrote to its successor — attn names the file and
+  never touches the prose, and the line is append-only, so a filed letter is
+  never overwritten and a correction is a new letter. Filing turns the day over
+  by itself: attn closes the session and immediately starts the member's next
+  day, primed by the letter that was just filed and nothing else. No compacting,
+  no summary competing with the member's own words, nothing left for anyone to
+  run afterwards. A member woken with particular settings comes back with the
+  same ones, and if the new day cannot start, the letter stays filed and the
+  current day keeps running — a member is never torn down with its letter
+  unfiled.

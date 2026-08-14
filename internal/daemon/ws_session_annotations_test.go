@@ -57,13 +57,13 @@ func annotationsClear(t *testing.T, d *Daemon, sessionID string, generation int)
 
 func annotation(id, messageKey, quote string) protocol.SessionAnnotation {
 	return protocol.SessionAnnotation{
-		ID:         id,
-		MessageKey: messageKey,
-		Start:      0,
-		End:        len(quote),
-		Quote:      quote,
-		Emoji:      "🔄",
-		Comment:    "",
+		ID:           id,
+		MessageKey:   messageKey,
+		Start:        0,
+		End:          len(quote),
+		Quote:        quote,
+		QuickLabelID: protocol.Ptr("consider-alternatives"),
+		Comment:      "",
 	}
 }
 
