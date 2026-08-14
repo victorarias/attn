@@ -475,7 +475,7 @@ func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
 // A woken member's crew block rides beside everything else a launch injects, and
 // comes last — it is the most specific thing this session is.
 func TestLaunchInstructionsCarryTheCrewPrimingLast(t *testing.T) {
-	const block = "You are **trellis**, a crew member of this attn home."
+	const block = "You are **Trellis**, a crew member of this attn home."
 
 	launch := Launch{
 		WorkspaceContextPath: "/tmp/context.md",

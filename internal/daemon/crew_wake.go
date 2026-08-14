@@ -32,6 +32,24 @@ import (
 // another, and a member is plain markdown so any harness can live in one.
 const crewWakeAgent = "claude"
 
+// crewWakeModel is what a member wakes on, hardcoded on purpose. A member's
+// session is one Victor drives himself and those run Fable; a per-member model
+// knob is a quiet way to end up with a member subtly wrong in a way only a
+// spirit-read of its prose catches. It names a Claude model, so it is pinned
+// only for the default harness — `--agent codex` still picks that harness's own
+// default.
+const crewWakeModel = "claude-fable-5"
+
+// crewWakeModelPin is the pin as a spawn field: set for the default harness,
+// nil for any other, so it can be applied by every path that starts a member's
+// day without each one restating the rule.
+func crewWakeModelPin(agent string) *string {
+	if strings.TrimSpace(strings.ToLower(agent)) != crewWakeAgent {
+		return nil
+	}
+	return protocol.Ptr(crewWakeModel)
+}
+
 // crewWakePrompt is the first thing a woken member is asked to do. Without it a
 // member launches primed and silent, and the user has to open the session to
 // find out anybody is there.
@@ -228,6 +246,7 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		Cwd:           directory,
 		WorkspaceID:   workspaceID,
 		Agent:         agent,
+		Model:         crewWakeModelPin(agent),
 		Cols:          80,
 		Rows:          24,
 		Label:         protocol.Ptr(member.ID),

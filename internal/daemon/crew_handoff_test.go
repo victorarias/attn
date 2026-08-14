@@ -191,6 +191,29 @@ func TestCrewHandoff_FilesTheLetterAndTurnsTheDayOver(t *testing.T) {
 	}
 }
 
+// The successor wakes on the pinned model too. The nap otherwise inherits the
+// closed day's launch intent, so a member that once started on another model
+// would carry it forever without this.
+func TestCrewHandoff_TheSuccessorWakesOnThePinnedModel(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	resp := crewHandoffCall(t, d, woken.SessionID, "Filed and gone.")
+	if !resp.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(resp.Error))
+	}
+	spawns := spawnedSessions(t, backend)
+	if len(spawns) != 2 {
+		t.Fatalf("the nap spawned %d sessions in total, want 2", len(spawns))
+	}
+	if spawns[1].Model != crewWakeModel {
+		t.Fatalf("the successor woke on model %q, want %q", spawns[1].Model, crewWakeModel)
+	}
+}
+
 // Ordering, asserted where it matters: at the instant the successor spawns, the
 // registry already names it. A release-then-rebind would show the member
 // unbound here, which is the gap another wake could claim.
@@ -468,8 +491,8 @@ func TestCrewHandoff_ANewDayInheritsNoLetterToRetry(t *testing.T) {
 }
 
 // The successor is the same member running the same way. A member woken yolo
-// with a pinned model must not come back attended and unpinned at its first
-// nap — the launch intent of the day that closed is the authority.
+// must not come back attended at its first nap — the launch intent of the day
+// that closed is the authority for everything but the model, which is pinned.
 func TestCrewHandoff_TheSuccessorCarriesTheClosedDaysLaunchParams(t *testing.T) {
 	d, backend, _ := newWakeableDaemon(t)
 	woken, err := d.crewWake("keel", "")
@@ -495,8 +518,13 @@ func TestCrewHandoff_TheSuccessorCarriesTheClosedDaysLaunchParams(t *testing.T) 
 	if successor.ApprovalRoute != launchcontract.ApprovalRouteBypass || !successor.YoloMode {
 		t.Errorf("the successor launched route=%q yolo=%t; a nap must not silently change how a member runs", successor.ApprovalRoute, successor.YoloMode)
 	}
-	if successor.Model != "opus" || successor.Effort != "high" {
-		t.Errorf("the successor launched model=%q effort=%q, want the closed day's opus/high", successor.Model, successor.Effort)
+	if successor.Effort != "high" {
+		t.Errorf("the successor launched effort=%q, want the closed day's high", successor.Effort)
+	}
+	// The one thing a nap does not inherit: an intent naming another model is
+	// overruled, so no member drifts onto one nap by nap.
+	if successor.Model != crewWakeModel {
+		t.Errorf("the successor launched model=%q, want the pinned %q", successor.Model, crewWakeModel)
 	}
 }
 

@@ -54,8 +54,9 @@ commands:
 
   wake <member> [--agent <name>] [--json]
         start a member's day: a session bound to it, launched in the member's
-        own cwd with its awareness dirs, primed with its charter, the freshest
-        letter left for it, and how its home works. A member that is already
+        own cwd with its awareness dirs, on the pinned crew model, primed with
+        where to read its charter, the freshest letter left for it, and how its
+        home works. A member that is already
         awake is not woken twice — the answer names the session it is living.
 
   set <member> [--cwd <dir>] [--awareness-dir <dir>]...
