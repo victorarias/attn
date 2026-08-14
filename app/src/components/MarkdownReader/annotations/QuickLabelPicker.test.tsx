@@ -64,6 +64,9 @@ describe('QuickLabelPicker', () => {
     expect(Array.from(rows, (row) => row.querySelector('.md-ql-chip')?.textContent)).toEqual([
       '💯', '😕', '🔍', '🧾', '🔬', '🔄', '🪓', '🪙', '🙋',
     ]);
+    expect(Array.from(rows, (row) => row.getAttribute('data-quick-label-id'))).toEqual(
+      QUICK_LABEL_PICKER_LABELS.map((label) => label.id),
+    );
     expect(rows[0].textContent).toContain(QUICK_LABEL_PICKER_LABELS[0].text);
     expect(rows[0].querySelector('.md-quick-label-num')!.textContent).toBe('1');
     expect(rows[8].querySelector('.md-quick-label-num')!.textContent).toBe('9');

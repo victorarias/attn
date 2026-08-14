@@ -353,7 +353,8 @@ async function main() {
         `The annotation editor only opened after the held tool stopped: ${JSON.stringify(observer.getSession(sessionId))}`,
       );
 
-      await client.request('dom_click', { selector: `[aria-label="${LABEL.name}"]` });
+      await client.request('dom_click', { selector: '[aria-label="More labels"]' });
+      await client.request('dom_click', { selector: `[data-quick-label-id="${LABEL.id}"]` });
       const filed = await pollFor(
         async () => {
           const state = await client.request('get_annotation_state', {});

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   LABEL_COLOR_MAP,
+  PROMOTED_LABELS,
+  QUICK_LABEL_PICKER_GROUPS,
+  QUICK_LABEL_PICKER_LABELS,
   QUICK_LABELS,
   QUICK_LABEL_GROUPS,
   labelById,
@@ -31,6 +34,20 @@ describe('the shared label set', () => {
     for (const label of QUICK_LABELS) {
       expect(LABEL_COLOR_MAP[label.color], label.id).toBeDefined();
     }
+  });
+
+  it('offers the same promoted trio and filtered picker groups to both surfaces', async () => {
+    const markdown = await import('../components/MarkdownReader/annotations/quickLabels');
+
+    expect(PROMOTED_LABELS.map((label) => label.id)).toEqual([
+      'i-agree',
+      'this-is-wrong',
+      'clarify-this',
+    ]);
+    expect(QUICK_LABEL_PICKER_LABELS).toEqual(QUICK_LABEL_PICKER_GROUPS.flat());
+    expect(QUICK_LABEL_PICKER_LABELS).toHaveLength(9);
+    expect(markdown.PROMOTED_LABELS).toBe(PROMOTED_LABELS);
+    expect(markdown.QUICK_LABEL_PICKER_GROUPS).toBe(QUICK_LABEL_PICKER_GROUPS);
   });
 });
 

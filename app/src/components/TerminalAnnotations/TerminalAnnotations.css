@@ -24,10 +24,8 @@
   border: 1px solid var(--color-border);
   background: var(--color-bg-elevated);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.36);
-  /* The chip row on one line is ~490px, which is wider than a pane in a
-     three-way split — and a popup that cannot fit its pane falls back to the
-     window, where it lands on the sidebar. Two shorter rows keep it inside the
-     pane it belongs to, which is worth more than a single row of glyphs. */
+  /* The comment editor is the widest popup state; the grouped label picker is
+     portalled separately and does not change this placement footprint. */
   max-width: 320px;
 }
 

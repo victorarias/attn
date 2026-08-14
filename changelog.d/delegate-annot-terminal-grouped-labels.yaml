@@ -1,0 +1,6 @@
+kind: changed
+area: annotations
+change: >
+  Terminal annotations now keep I agree, This is wrong, and Clarify this as
+  one-click marks, with the other nine labeled choices in the same grouped
+  picker used for markdown annotations.
