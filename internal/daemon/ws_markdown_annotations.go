@@ -2,12 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
-	"errors"
 	"strings"
-	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
-	"github.com/victorarias/attn/internal/store"
 )
 
 // Markdown annotation drafts are keyed by absolute file path on the daemon
@@ -33,37 +30,20 @@ import (
 // generation is the current floor — max(stored generation, tombstone) — so a
 // re-mounting client seeds its counter past any tombstone.
 func (d *Daemon) handleMarkdownAnnotationsGet(client *wsClient, msg *protocol.MarkdownAnnotationsGetMessage) {
-	path := strings.TrimSpace(msg.Path)
-	result := protocol.MarkdownAnnotationsGetResultMessage{
-		Event:       protocol.EventMarkdownAnnotationsGetResult,
-		RequestID:   msg.RequestID,
-		Path:        path,
-		WorkspaceID: msg.WorkspaceID,
-		Annotations: []protocol.MarkdownAnnotation{},
-	}
-	if path == "" {
-		result.Error = protocol.Ptr("markdown_annotations_get: path is required")
-		d.sendToClient(client, result)
-		return
-	}
-	draft, err := d.store.GetMarkdownAnnotationDraft(path)
-	if err != nil {
-		d.logf("markdown_annotations_get: %s: %v", path, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	annotations, err := decodeMarkdownAnnotations(draft.Annotations)
-	if err != nil {
-		d.logf("markdown_annotations_get: %s: corrupt stored draft: %v", path, err)
-		result.Error = protocol.Ptr("stored annotation draft is corrupt: " + err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	result.Annotations = annotations
-	result.Generation = draft.Generation
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, markdownAnnotationDraftAccessors(d.store), "path",
+		func(result annotationDraftResult[protocol.MarkdownAnnotation]) protocol.MarkdownAnnotationsGetResultMessage {
+			return protocol.MarkdownAnnotationsGetResultMessage{
+				Event:       protocol.EventMarkdownAnnotationsGetResult,
+				RequestID:   msg.RequestID,
+				Path:        result.key,
+				WorkspaceID: msg.WorkspaceID,
+				Annotations: result.annotations,
+				Generation:  result.generation,
+				Success:     result.success,
+				Error:       result.err,
+			}
+		})
+	handler.get("markdown_annotations_get", msg.Path, decodeMarkdownAnnotations)
 }
 
 // handleMarkdownAnnotationsSave persists the full annotation list for a path.
@@ -71,40 +51,20 @@ func (d *Daemon) handleMarkdownAnnotationsGet(client *wsClient, msg *protocol.Ma
 // as stale=true, success=false — benign; the client drops its pending list
 // and re-hydrates.
 func (d *Daemon) handleMarkdownAnnotationsSave(client *wsClient, msg *protocol.MarkdownAnnotationsSaveMessage) {
-	path := strings.TrimSpace(msg.Path)
-	result := protocol.MarkdownAnnotationsSaveResultMessage{
-		Event:       protocol.EventMarkdownAnnotationsSaveResult,
-		RequestID:   msg.RequestID,
-		Path:        path,
-		WorkspaceID: msg.WorkspaceID,
-		Generation:  msg.Generation,
-	}
-	if path == "" {
-		result.Error = protocol.Ptr("markdown_annotations_save: path is required")
-		d.sendToClient(client, result)
-		return
-	}
-	annotationsJSON, err := json.Marshal(msg.Annotations)
-	if err != nil {
-		result.Error = protocol.Ptr("markdown_annotations_save: encoding annotations: " + err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	err = d.store.SaveMarkdownAnnotationDraft(path, string(annotationsJSON), msg.Generation, time.Now())
-	if errors.Is(err, store.ErrStaleMarkdownAnnotationSave) {
-		d.logf("markdown_annotations_save: %s: stale save at generation %d rejected", path, msg.Generation)
-		result.Stale = protocol.Ptr(true)
-		d.sendToClient(client, result)
-		return
-	}
-	if err != nil {
-		d.logf("markdown_annotations_save: %s: %v", path, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, markdownAnnotationDraftAccessors(d.store), "path",
+		func(result annotationDraftResult[protocol.MarkdownAnnotation]) protocol.MarkdownAnnotationsSaveResultMessage {
+			return protocol.MarkdownAnnotationsSaveResultMessage{
+				Event:       protocol.EventMarkdownAnnotationsSaveResult,
+				RequestID:   msg.RequestID,
+				Path:        result.key,
+				WorkspaceID: msg.WorkspaceID,
+				Generation:  result.generation,
+				Success:     result.success,
+				Stale:       result.stale,
+				Error:       result.err,
+			}
+		})
+	handler.save("markdown_annotations_save", msg.Path, msg.Annotations, "", msg.Generation)
 }
 
 // handleMarkdownAnnotationsClear tombstones the draft for a path at the given
@@ -112,35 +72,19 @@ func (d *Daemon) handleMarkdownAnnotationsSave(client *wsClient, msg *protocol.M
 // generation floor. Today only the sidebar "clear all" calls it; PR6's
 // clear-on-send reuses the same primitive.
 func (d *Daemon) handleMarkdownAnnotationsClear(client *wsClient, msg *protocol.MarkdownAnnotationsClearMessage) {
-	path := strings.TrimSpace(msg.Path)
-	result := protocol.MarkdownAnnotationsClearResultMessage{
-		Event:       protocol.EventMarkdownAnnotationsClearResult,
-		RequestID:   msg.RequestID,
-		Path:        path,
-		WorkspaceID: msg.WorkspaceID,
-		Generation:  msg.Generation,
-	}
-	if path == "" {
-		result.Error = protocol.Ptr("markdown_annotations_clear: path is required")
-		d.sendToClient(client, result)
-		return
-	}
-	if err := d.store.ClearMarkdownAnnotationDraft(path, msg.Generation, time.Now()); err != nil {
-		d.logf("markdown_annotations_clear: %s: %v", path, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	draft, err := d.store.GetMarkdownAnnotationDraft(path)
-	if err != nil {
-		d.logf("markdown_annotations_clear: %s: reading floor: %v", path, err)
-		result.Error = protocol.Ptr(err.Error())
-		d.sendToClient(client, result)
-		return
-	}
-	result.Success = true
-	result.Generation = draft.Generation
-	d.sendToClient(client, result)
+	handler := newAnnotationDraftHandler(d, client, markdownAnnotationDraftAccessors(d.store), "path",
+		func(result annotationDraftResult[protocol.MarkdownAnnotation]) protocol.MarkdownAnnotationsClearResultMessage {
+			return protocol.MarkdownAnnotationsClearResultMessage{
+				Event:       protocol.EventMarkdownAnnotationsClearResult,
+				RequestID:   msg.RequestID,
+				Path:        result.key,
+				WorkspaceID: msg.WorkspaceID,
+				Generation:  result.generation,
+				Success:     result.success,
+				Error:       result.err,
+			}
+		})
+	handler.clear("markdown_annotations_clear", msg.Path, msg.Generation)
 }
 
 // decodeMarkdownAnnotations unmarshals a stored draft blob into protocol

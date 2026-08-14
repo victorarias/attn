@@ -6262,13 +6262,14 @@ export interface Session {
 }
 
 export interface SessionAnnotation {
-    comment:     string;
-    emoji:       string;
-    end:         number;
-    id:          string;
-    message_key: string;
-    quote:       string;
-    start:       number;
+    comment:         string;
+    emoji?:          string;
+    end:             number;
+    id:              string;
+    message_key:     string;
+    quick_label_id?: string;
+    quote:           string;
+    start:           number;
     [property: string]: any;
 }
 
@@ -6322,13 +6323,14 @@ export interface SessionAnnotationsGetResultMessage {
 }
 
 export interface SessionAnnotationsGetResultMessageAnnotation {
-    comment:     string;
-    emoji:       string;
-    end:         number;
-    id:          string;
-    message_key: string;
-    quote:       string;
-    start:       number;
+    comment:         string;
+    emoji?:          string;
+    end:             number;
+    id:              string;
+    message_key:     string;
+    quick_label_id?: string;
+    quote:           string;
+    start:           number;
     [property: string]: any;
 }
 
@@ -16187,10 +16189,11 @@ const typeMap: any = {
     ], "any"),
     "SessionAnnotation": o([
         { json: "comment", js: "comment", typ: "" },
-        { json: "emoji", js: "emoji", typ: "" },
+        { json: "emoji", js: "emoji", typ: u(undefined, "") },
         { json: "end", js: "end", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "message_key", js: "message_key", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
         { json: "quote", js: "quote", typ: "" },
         { json: "start", js: "start", typ: 0 },
     ], "any"),
@@ -16225,10 +16228,11 @@ const typeMap: any = {
     ], "any"),
     "SessionAnnotationsGetResultMessageAnnotation": o([
         { json: "comment", js: "comment", typ: "" },
-        { json: "emoji", js: "emoji", typ: "" },
+        { json: "emoji", js: "emoji", typ: u(undefined, "") },
         { json: "end", js: "end", typ: 0 },
         { json: "id", js: "id", typ: "" },
         { json: "message_key", js: "message_key", typ: "" },
+        { json: "quick_label_id", js: "quick_label_id", typ: u(undefined, "") },
         { json: "quote", js: "quote", typ: "" },
         { json: "start", js: "start", typ: 0 },
     ], "any"),

@@ -6073,7 +6073,7 @@ type SessionAnnotation struct {
 	Comment string `json:"comment"`
 
 	// Emoji corresponds to the JSON schema field "emoji".
-	Emoji string `json:"emoji"`
+	Emoji *string `json:"emoji,omitempty,omitzero"`
 
 	// End corresponds to the JSON schema field "end".
 	End int `json:"end"`
@@ -6083,6 +6083,9 @@ type SessionAnnotation struct {
 
 	// MessageKey corresponds to the JSON schema field "message_key".
 	MessageKey string `json:"message_key"`
+
+	// QuickLabelID corresponds to the JSON schema field "quick_label_id".
+	QuickLabelID *string `json:"quick_label_id,omitempty,omitzero"`
 
 	// Quote corresponds to the JSON schema field "quote".
 	Quote string `json:"quote"`

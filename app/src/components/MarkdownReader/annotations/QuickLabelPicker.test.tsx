@@ -6,7 +6,10 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
-import { QuickLabelPicker, type QuickLabelPickerProps } from './QuickLabelPicker';
+import {
+  QuickLabelPicker,
+  type FloatingQuickLabelPickerProps,
+} from '../../../annotations/QuickLabelPicker';
 import { QUICK_LABELS } from './quickLabels';
 
 function makeAnchor(rect: Partial<DOMRect> = {}): HTMLElement {
@@ -17,9 +20,11 @@ function makeAnchor(rect: Partial<DOMRect> = {}): HTMLElement {
   return el;
 }
 
-function renderPicker(overrides: Partial<QuickLabelPickerProps> = {}) {
+function renderPicker(overrides: Partial<FloatingQuickLabelPickerProps> = {}) {
   const anchorEl = overrides.anchorEl ?? makeAnchor();
-  const props: QuickLabelPickerProps = {
+  const props: FloatingQuickLabelPickerProps = {
+    className: 'md-quick-label-picker',
+    labels: QUICK_LABELS,
     cursorHint: { x: 300, y: 110 },
     onSelect: vi.fn(),
     onDismiss: vi.fn(),

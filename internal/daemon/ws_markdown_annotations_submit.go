@@ -8,13 +8,6 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// Submit statuses on the wire (plain strings in the protocol).
-const (
-	markdownSubmitStatusDelivered = "delivered"
-	markdownSubmitStatusSkipped   = "skipped_pending_approval"
-	markdownSubmitStatusError     = "error"
-)
-
 // handleMarkdownAnnotationsSubmit formats the persisted annotation draft for
 // a path into the feedback payload and delivers it into the target session's
 // PTY via typeDoorbell (bracketed paste, then Enter, both under doorbellMu).
@@ -36,7 +29,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 		RequestID:       msg.RequestID,
 		Path:            path,
 		TargetSessionID: target,
-		Status:          markdownSubmitStatusError,
+		Status:          annotationSubmitStatusError,
 	}
 	fail := func(errText string) {
 		result.Error = protocol.Ptr(errText)
@@ -74,7 +67,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 	// UX pre-check; typeDoorbell re-checks the state under doorbellMu — that
 	// in-lock check is the fence, this one just avoids formatting for nothing.
 	if !isNudgeDeliveryAllowed(string(session.State)) {
-		result.Status = markdownSubmitStatusSkipped
+		result.Status = annotationSubmitStatusSkipped
 		d.sendToClient(client, result)
 		return
 	}
@@ -85,7 +78,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 	payload := formatMarkdownAnnotationPayload(path, annotations, orphaned)
 	if err := d.typeDoorbell(target, payload); err != nil {
 		if errors.Is(err, errDoorbellBlockedByApproval) {
-			result.Status = markdownSubmitStatusSkipped
+			result.Status = annotationSubmitStatusSkipped
 			d.sendToClient(client, result)
 			return
 		}
@@ -99,7 +92,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 	// still reports delivered — never risk a re-delivery — but carries an
 	// error so the UI can re-hydrate instead of assuming an empty draft.
 	result.Success = true
-	result.Status = markdownSubmitStatusDelivered
+	result.Status = annotationSubmitStatusDelivered
 	if err := d.store.ClearMarkdownAnnotationDraft(path, draft.Generation, time.Now()); err != nil {
 		d.logf("markdown_annotations_submit: %s: delivered but clearing drafts failed: %v", path, err)
 		result.Error = protocol.Ptr("delivered; failed to clear drafts: " + err.Error())

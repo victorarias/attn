@@ -20,7 +20,7 @@ describe('buildAnnotationPayload', () => {
     // The agent cannot see the highlight. The quote is the only thing that
     // tells it which part of its own answer the feedback lands on.
     const payload = buildAnnotationPayload([
-      { start: 40, emoji: '🧾', comment: '', quote: 'ship it without tests' },
+      { start: 40, quickLabelId: 'show-the-receipt', comment: '', quote: 'ship it without tests' },
     ]);
 
     expect(payload).toContain('> ship it without tests');
@@ -33,7 +33,7 @@ describe('buildAnnotationPayload', () => {
     const verify = QUICK_LABELS.find((label) => label.id === 'verify-this')!;
 
     const payload = buildAnnotationPayload([
-      { start: 0, emoji: verify.emoji, comment: '', quote: 'the parser already handles this' },
+      { start: 0, quickLabelId: verify.id, comment: '', quote: 'the parser already handles this' },
     ]);
 
     expect(payload).toContain(verify.tip!);
@@ -41,8 +41,8 @@ describe('buildAnnotationPayload', () => {
 
   it('orders items by position in the message, not by when they were made', () => {
     const payload = buildAnnotationPayload([
-      { start: 900, emoji: '❓', comment: '', quote: 'the last claim' },
-      { start: 10, emoji: '❓', comment: '', quote: 'the first claim' },
+      { start: 900, quickLabelId: 'clarify-this', comment: '', quote: 'the last claim' },
+      { start: 10, quickLabelId: 'clarify-this', comment: '', quote: 'the first claim' },
     ]);
 
     expect(payload.indexOf('the first claim')).toBeLessThan(payload.indexOf('the last claim'));
@@ -51,7 +51,7 @@ describe('buildAnnotationPayload', () => {
 
   it('carries a bare comment with no label', () => {
     const payload = buildAnnotationPayload([
-      { start: 0, emoji: '', comment: 'this contradicts the paragraph above', quote: 'always safe' },
+      { start: 0, quickLabelId: '', comment: 'this contradicts the paragraph above', quote: 'always safe' },
     ]);
 
     expect(payload).toContain('💬 Comment');
@@ -60,7 +60,7 @@ describe('buildAnnotationPayload', () => {
 
   it('sends agreement as the label alone', () => {
     const payload = buildAnnotationPayload([
-      { start: 0, emoji: '💯', comment: '', quote: 'the retry only fires on idempotent verbs' },
+      { start: 0, quickLabelId: 'exactly-this', comment: '', quote: 'the retry only fires on idempotent verbs' },
     ]);
 
     expect(payload).toContain('💯 Exactly this');
@@ -72,7 +72,7 @@ describe('buildAnnotationPayload', () => {
     // own last message. Telling it to "address each annotation" on top of that
     // is an instruction the annotations already are.
     const payload = buildAnnotationPayload([
-      { start: 0, emoji: '❓', comment: '', quote: 'always safe' },
+      { start: 0, quickLabelId: 'clarify-this', comment: '', quote: 'always safe' },
     ]);
 
     expect(payload.split('\n')[0]).toBe('Feedback on your last message.');
@@ -84,8 +84,8 @@ describe('buildAnnotationPayload', () => {
 
   describe('with a note', () => {
     const MARKS = [
-      { start: 40, emoji: '🧾', comment: '', quote: 'the retry wrapper' },
-      { start: 4, emoji: '❓', comment: 'which parser?', quote: 'the parser' },
+      { start: 40, quickLabelId: 'show-the-receipt', comment: '', quote: 'the retry wrapper' },
+      { start: 4, quickLabelId: 'clarify-this', comment: 'which parser?', quote: 'the parser' },
     ];
 
     it('puts the note ahead of the marks it qualifies', () => {
