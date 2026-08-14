@@ -462,6 +462,7 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       });
     }, [fitPane, runtimePanes]);
     const getPaneSize = runtime.getPaneSize;
+    const setPaneSurfaceReleased = runtime.setPaneSurfaceReleased;
     const paneOverflowsContainer = runtime.paneOverflowsContainer;
     const splitLayoutActive = workspace.layoutTree?.type === 'split';
     // Show the pane header (which doubles as the drag-to-move handle) whenever the
@@ -711,6 +712,19 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
         window.clearTimeout(secondLateRefitTimeout);
       };
     }, [fitPane, getPaneSize, paneOverflowsContainer]);
+
+    // An inactive session's wrapper is display:none, so its panes hold two
+    // window-sized GPU surfaces each for frames nobody can see. Hand those back
+    // while hidden; the model and its scrollback stay warm, so switching back
+    // still costs one repaint rather than a replay. The trigger is
+    // `isActiveSession` and not `sessionVisible`, which also goes false behind a
+    // modal that leaves the panes on screen. Declared before the refit effect so
+    // a revealed pane has its buffer back before anything measures or paints it.
+    useLayoutEffect(() => {
+      for (const paneId of renderedPaneIds) {
+        setPaneSurfaceReleased(paneId, !isActiveSession);
+      }
+    }, [isActiveSession, renderedPaneIds, renderedPaneIdsKey, setPaneSurfaceReleased]);
 
     useLayoutEffect(() => {
       if (!sessionVisible) {

@@ -365,6 +365,9 @@ export class WebGlTerminalRenderer {
   // Set by setFontSize() so the next resize() re-sizes the canvas even when cols/rows
   // are unchanged — otherwise a hidden pane keeps the old font's canvas until fit().
   private metricsDirty = false;
+  // True between releaseDrawingBuffer() and restoreDrawingBuffer(): the canvas is
+  // 1×1 and resize() records geometry without re-allocating it.
+  private bufferReleased = false;
 
   constructor(canvas: HTMLCanvasElement, fontSize: number, fontFamily: string, theme: RendererTheme) {
     this.canvas = canvas;
@@ -450,12 +453,44 @@ export class WebGlTerminalRenderer {
     this.metricsDirty = false;
     this.cols = cols;
     this.rows = rows;
-    this.canvas.width = Math.ceil(cols * this.cellWidth * this.dpr);
-    this.canvas.height = Math.ceil(rows * this.cellHeight * this.dpr);
-    this.canvas.style.width = `${cols * this.cellWidth}px`;
-    this.canvas.style.height = `${rows * this.cellHeight}px`;
+    if (this.bufferReleased) {
+      // The pane is off-screen and holds no drawing buffer; restoreDrawingBuffer()
+      // allocates at this geometry when it is revealed.
+      this.resetRowCache(rows);
+      return;
+    }
+    this.applyCanvasGeometry();
+  }
+
+  // A pane hidden behind another session keeps its drawing buffer — two
+  // window-sized surfaces, ~45MB per pane at 2x DPR — for a frame nobody can
+  // see. Shrinking the canvas to 1×1 frees them while the GL context, its
+  // program, and the glyph atlas stay alive, so waking costs one full repaint
+  // instead of the context rebuild that WKWebView's small context pool
+  // punishes. The caller must restore before the pane is painted again.
+  releaseDrawingBuffer(): void {
+    if (this.bufferReleased) return;
+    this.bufferReleased = true;
+    this.canvas.width = 1;
+    this.canvas.height = 1;
+    // CSS size is left alone: it is layout, and the pane's container measures
+    // itself, not the canvas.
+    this.resetRowCache(this.rows);
+  }
+
+  restoreDrawingBuffer(): void {
+    if (!this.bufferReleased) return;
+    this.bufferReleased = false;
+    this.applyCanvasGeometry();
+  }
+
+  private applyCanvasGeometry(): void {
+    this.canvas.width = Math.ceil(this.cols * this.cellWidth * this.dpr);
+    this.canvas.height = Math.ceil(this.rows * this.cellHeight * this.dpr);
+    this.canvas.style.width = `${this.cols * this.cellWidth}px`;
+    this.canvas.style.height = `${this.rows * this.cellHeight}px`;
     this.gl.viewport(0, 0, this.canvas.width, this.canvas.height);
-    this.resetRowCache(rows);
+    this.resetRowCache(this.rows);
   }
 
   render(

@@ -293,9 +293,9 @@ function makeRenderer(fontSize = 14, fontFamily = 'monospace', recorder?: GlReco
   }) as any);
 
   let renderer: WebGlTerminalRenderer;
+  const mainCanvas = makeFakeCanvas(recorder);
   try {
-    const mainCanvas = makeFakeCanvas(recorder) as unknown as HTMLCanvasElement;
-    renderer = new WebGlTerminalRenderer(mainCanvas, fontSize, fontFamily, {
+    renderer = new WebGlTerminalRenderer(mainCanvas as unknown as HTMLCanvasElement, fontSize, fontFamily, {
       background: '#000000',
       foreground: '#ffffff',
       cursor: '#ffffff',
@@ -306,7 +306,7 @@ function makeRenderer(fontSize = 14, fontFamily = 'monospace', recorder?: GlReco
 
   const atlasContext = created[1].recordingContext as RecordingContext;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return { renderer: renderer as any, atlasContext };
+  return { renderer: renderer as any, atlasContext, canvas: mainCanvas };
 }
 
 function makeFakeTerminal(
@@ -507,6 +507,69 @@ function makeControllableTerminal(cols: number, rows: number) {
   } as unknown as GhosttyTerminal;
   return { terminal, cells, state, markClean };
 }
+
+// A pane hidden behind another session holds two window-sized GPU surfaces for
+// a frame nobody can see. Release hands them back without touching the context,
+// the glyph atlas, or the model — so the only thing a reveal owes is a repaint.
+describe('WebGlTerminalRenderer off-screen drawing buffer', () => {
+  it('hands the drawing buffer back and takes it again at the same geometry', () => {
+    const { renderer, canvas } = makeRenderer();
+    renderer.resize(50, 40);
+    const { width, height } = canvas;
+    expect(width).toBeGreaterThan(1);
+
+    renderer.releaseDrawingBuffer();
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 1, height: 1 });
+
+    renderer.restoreDrawingBuffer();
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width, height });
+  });
+
+  it('records a resize that lands while released and allocates at that geometry on restore', () => {
+    const { renderer, canvas } = makeRenderer();
+    renderer.resize(50, 40);
+    renderer.releaseDrawingBuffer();
+
+    renderer.resize(20, 10);
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width: 1, height: 1 });
+
+    renderer.restoreDrawingBuffer();
+    expect(canvas.width).toBe(20 * renderer.cellWidth * renderer.dpr);
+    expect(canvas.height).toBe(10 * renderer.cellHeight * renderer.dpr);
+  });
+
+  it('repaints the whole grid on the first frame after a restore', () => {
+    const { renderer } = makeRenderer();
+    const { terminal, state } = makeControllableTerminal(50, 50);
+    renderer.resize(50, 50);
+    renderer.render(terminal);
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: false });
+
+    renderer.releaseDrawingBuffer();
+    renderer.restoreDrawingBuffer();
+
+    state.dirty = 1;
+    state.rows = new Set([25]);
+    expect(renderer.render(terminal)).toMatchObject({ fullPaint: true, paintedRows: 50 });
+  });
+
+  it('ignores a repeated release and a restore that was never released', () => {
+    const { renderer, canvas } = makeRenderer();
+    renderer.resize(50, 40);
+    const { width, height } = canvas;
+
+    renderer.restoreDrawingBuffer();
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width, height });
+
+    renderer.releaseDrawingBuffer();
+    renderer.releaseDrawingBuffer();
+    renderer.restoreDrawingBuffer();
+    expect({ width: canvas.width, height: canvas.height }).toEqual({ width, height });
+  });
+});
 
 describe('WebGlTerminalRenderer dirty rows', () => {
   it('rebuilds small grids directly instead of paying to copy a row cache', () => {

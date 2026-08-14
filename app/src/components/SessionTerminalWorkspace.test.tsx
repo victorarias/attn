@@ -109,6 +109,10 @@ const { mockTerminalFit } = vi.hoisted(() => ({
   mockTerminalFit: vi.fn(),
 }));
 
+const { mockTerminalSetSurfaceReleased } = vi.hoisted(() => ({
+  mockTerminalSetSurfaceReleased: vi.fn(),
+}));
+
 const { mockTerminalOverflowsContainer } = vi.hoisted(() => ({
   mockTerminalOverflowsContainer: vi.fn(() => false),
 }));
@@ -146,6 +150,7 @@ vi.mock('./GhosttyTerminal', () => ({
       write: vi.fn(() => Promise.resolve()),
       resizeLocal: vi.fn(),
       reset: vi.fn(),
+      setSurfaceReleased: mockTerminalSetSurfaceReleased,
       scrollToTop: vi.fn(() => true),
       getText: vi.fn(() => ''),
       getSize: vi.fn(() => ({ cols: 80, rows: 24 })),
@@ -214,6 +219,7 @@ describe('SessionTerminalWorkspace', () => {
     terminalLifecycleCounts.clear();
     vi.mocked(mockEventRouter.registerBinding).mockClear();
     mockTerminalFit.mockReset();
+    mockTerminalSetSurfaceReleased.mockReset();
     mockTerminalOverflowsContainer.mockReset().mockReturnValue(false);
     mockPtyAttach.mockReset();
     mockPtyDetach.mockReset();
@@ -279,6 +285,62 @@ describe('SessionTerminalWorkspace', () => {
     );
     expect(screen.queryByTestId('mock-terminal')).toBeNull();
     expect(screen.getByTestId(`pane-virtualized-${SESSION_PANE_ID}`)).toBeTruthy();
+  });
+
+  // An inactive session's wrapper is display:none, so its panes' GPU drawing
+  // buffers show nothing and can go back. A pane behind a modal is still on
+  // screen, which is why `enabled` must not drive this.
+  it('releases pane drawing buffers while the session is inactive and takes them back on reveal', () => {
+    const releasedCalls = () => mockTerminalSetSurfaceReleased.mock.calls.map(([released]) => released);
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+      />,
+    );
+    expect(releasedCalls()).toEqual([false]);
+
+    mockTerminalSetSurfaceReleased.mockClear();
+    rerender(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession={false}
+      />,
+    );
+    expect(releasedCalls()).toEqual([true]);
+
+    mockTerminalSetSurfaceReleased.mockClear();
+    rerender(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+      />,
+    );
+    expect(releasedCalls()).toEqual([false]);
+  });
+
+  it('keeps the drawing buffer when a modal disables the session', () => {
+    const { rerender } = render(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+      />,
+    );
+
+    mockTerminalSetSurfaceReleased.mockClear();
+    rerender(
+      <SessionTerminalWorkspace
+        {...virtualizationProps}
+        workspace={createSingleAgentWorkspace()}
+        isActiveSession
+        enabled={false}
+      />,
+    );
+    expect(mockTerminalSetSurfaceReleased.mock.calls.map(([released]) => released)).not.toContain(true);
   });
 
   it('virtualizes every pane of a split workspace, not just the active one', () => {
