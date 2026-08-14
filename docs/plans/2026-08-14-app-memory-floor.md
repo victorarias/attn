@@ -38,7 +38,7 @@ Same window (1710×1073), all sessions mounted, physical footprint in MB:
 |---|---|---|---|
 | before | 358.7 | 783.2 | 1055.6 |
 | + closed dock panels drop their layer | 248.4 | 744.3 | 1017.6 |
-| + WebGL depth/stencil off | ~248 | 610.6 | 840.4 |
+| + WebGL depth buffer off | ~248 | 610.6 | 840.4 |
 | + hidden panes release the drawing buffer | 249.6 | **472.0** | **696.9** |
 
 Marginal cost per session: **87MB → 56MB**. At 8 sessions, −34%.
@@ -57,12 +57,13 @@ never drew: 74MB of the empty app's 212MB of GPU surface. The hint now
 applies only under `.is-open`, which is the only time these move.
 Empty-app histogram went `{15.2:2, 13.8:1, 16.0:1, 14.5:1}` → `{27.0:4}`.
 
-**2. Every pane reserved a depth and a stencil buffer it never read.**
-`depth` defaults to `true` on a WebGL2 context and the renderer draws 2D
-text in draw order — it never enables a depth or stencil test. Each is a
-drawing-buffer-sized allocation per pane. Turning both off removed one
-whole 23.2MB bucket per session from the histogram, which is how we know
-that is what it was.
+**2. Every pane reserved a depth buffer it never read.** `depth` defaults
+to `true` on a WebGL2 context, and it is a drawing-buffer-sized
+allocation per pane. The renderer draws 2D text in draw order — it never
+enables a depth or a stencil test. Turning it off removed one whole
+23.2MB bucket per session from the histogram, which is how we know that
+is what it was. `stencil` already defaults to `false`, so asking for
+neither is one word of insurance, not the other half of the win.
 
 **3. A hidden session's panes held a full window of drawing buffer.**
 An inactive session's wrapper is `display:none`, but a canvas's drawing
@@ -119,6 +120,16 @@ is what the footprint drop measures. The corpses are WebKit's to keep.
 
 ## What is left
 
+- **A whole view still hides panes that keep their buffers.** The
+  release keys on `isActiveSession`, so parking on Home or the grid
+  leaves the active session's panes off-screen — the container is
+  `display:none` without unmounting — and paying. It is the same shape as
+  the modal case, on a different wall: invisible-by-view rather than
+  invisible-by-session. The conservative trigger was chosen because
+  `sessionVisible` also folds in the modal case, which must not release;
+  the fix is a trigger that reads view visibility without it, and the
+  reveal path (Home → session) needs the same no-blank-frame
+  verification the switch path got.
 - **The glyph atlas is per-pane** — a 1024²-growing-to-2048² canvas plus
   its own GPU texture for every mounted pane — while font, size, and
   theme are app-wide. A shared atlas is the obvious next cut, and it is

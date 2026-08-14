@@ -379,10 +379,10 @@ export class WebGlTerminalRenderer {
     this.cursorBgPacked = parsePackedColor(theme.cursor);
     this.dpr = Math.max(window.devicePixelRatio || 1, 1);
 
-    // depth/stencil default to on for a WebGL2 context, and each is a
-    // drawing-buffer-sized allocation per pane. This renderer draws 2D text in
-    // draw order -- it never enables a depth or stencil test -- so both are
-    // allocated and never read.
+    // `depth` defaults to on for a WebGL2 context and is a drawing-buffer-sized
+    // allocation per pane. This renderer draws 2D text in draw order -- it never
+    // enables a depth or a stencil test -- so it was allocated and never read.
+    // `stencil` already defaults to off; asking is insurance.
     const gl = canvas.getContext('webgl2', {
       alpha: false,
       antialias: false,

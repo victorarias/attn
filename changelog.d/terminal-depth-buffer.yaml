@@ -1,7 +1,7 @@
 kind: fixed
 area: app
 change: >
-  Terminal panes no longer reserve depth and stencil buffers they never read.
-  Every pane asked the GPU for them because they are on by default, and each
-  one is as large as the pane itself -- around 30MB per pane at 8 sessions,
-  never touched, since terminal text is drawn flat and in order.
+  Terminal panes no longer reserve a depth buffer they never read. Every pane
+  asked the GPU for one because it is on by default, and it is as large as the
+  pane itself -- around 30MB per pane at 8 sessions, never touched, since
+  terminal text is drawn flat and in order.

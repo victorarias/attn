@@ -207,10 +207,12 @@ pnpm run e2e:headed -- e2e/component-harness.spec.ts  # Debug visually
      open state, not on the base rule — and check whether the component is
      conditionally rendered before reaching for the hint at all. The same
      applies to `translateZ`, `backdrop-filter`, `isolation`, and `contain`.
-   - **WebGL context attributes default to on.** `depth` is `true` unless you
-     say otherwise, and each attachment is another drawing-buffer-sized
-     allocation per canvas. Ask for what you read; the terminal renderer reads
-     neither depth nor stencil.
+   - **A WebGL context hands you attachments you did not ask for.** `depth`
+     is `true` unless you say otherwise, and every attachment is another
+     drawing-buffer-sized allocation per canvas. Ask for what you read; the
+     terminal renderer reads neither depth nor stencil, so it asks for
+     neither — `stencil` already defaults to `false`, which makes that half
+     insurance rather than a saving.
    - **A hidden canvas still owns its drawing buffer.** `display:none` hides
      an element; the buffer is sized by the canvas's width/height attributes.
      An inactive session's panes hand theirs back via
