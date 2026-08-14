@@ -147,9 +147,23 @@ events.
 - At ticket conversion, a ticket's main attached plan becomes the
   seed's body; its other artifacts become `attach` entries.
 
+- The seed tile's artifact set opens a referenced markdown document as
+  its own file tile — the reading-surface step carries this affordance.
+- Ruled 2026-08-15: annotations on an *attached* document route as file
+  annotations do today (to the live driving session), not to the seed.
+  Deliberate deferral, not an oversight: the main plan is the seed's
+  body, so the common annotate-the-plan case already addresses the
+  seed, and a seed-provenance field on file tiles is machinery for a
+  gap nobody has felt. The known cost: annotate an attached doc of a
+  parked seed and the feedback reaches whoever is driving, or nobody —
+  it does not land in the seed's log. If that cost is ever paid for
+  real, the fix is typed seed provenance on tiles opened from a seed,
+  with submit offering the seed as a destination (consistent with
+  ruling B).
+
 ## Implementation steps
 
-- [ ] Open `epic/garden-era` from main once #900 (annot-seams) merges.
+- [x] Open `epic/garden-era` from main once #900 (annot-seams) merges.
 - [ ] Seed document source in the reader + `attn open <seed-id>` +
       panel read-only drill (ruling A).
 - [ ] `attn://seed/<id>` URI, draft-key generalization, typed
