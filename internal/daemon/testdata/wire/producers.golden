@@ -217,6 +217,7 @@
     "notebook.root.effective": "<home>/attn-notebook",
     "notebook.summarize_session.enabled": "true",
     "notebook.tasks_enabled": "true",
+    "open_sent_files_enabled": "true",
     "pty_backend_mode": "embedded",
     "queue_mode_enabled": "false",
     "tailscale_enabled": "false",

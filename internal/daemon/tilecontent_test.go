@@ -814,3 +814,90 @@ func TestOpenMarkdownForgetsMissingFile(t *testing.T) {
 		t.Fatalf("tile leaves = %+v, want the existing tile untouched", leaves)
 	}
 }
+
+func openSentFiles(t *testing.T, d *Daemon, msg *protocol.OpenSentFilesMessage) protocol.Response {
+	t.Helper()
+	clientConn, serverConn := net.Pipe()
+	defer clientConn.Close()
+	go d.handleOpenSentFiles(serverConn, msg)
+	_ = clientConn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	var resp protocol.Response
+	if err := json.NewDecoder(clientConn).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return resp
+}
+
+func TestOpenSentFilesRoutesMarkdownAndDropsTheRest(t *testing.T) {
+	d, _, workspaceID := setupMarkdownWorkspace(t)
+	dir := t.TempDir()
+	first := filepath.Join(dir, "plan.md")
+	second := filepath.Join(dir, "notes.markdown")
+	report := filepath.Join(dir, "report.html")
+	for _, f := range []string{first, second, report} {
+		if err := os.WriteFile(f, []byte("content"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	resp := openSentFiles(t, d, &protocol.OpenSentFilesMessage{
+		Cmd:       protocol.CmdOpenSentFiles,
+		Paths:     []string{first, second, report},
+		SessionID: protocol.Ptr("session-1"),
+	})
+	if !resp.Ok {
+		t.Fatalf("open_sent_files failed: %v", protocol.Deref(resp.Error))
+	}
+
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("workspace layout missing after open")
+	}
+	for _, f := range []string{first, second} {
+		if _, ok := workspacelayout.TileParamsByID(snapshot.Layout, markdownTileIDForPath(f)); !ok {
+			t.Fatalf("markdown %s not docked", f)
+		}
+	}
+	// Both markdown files docked and nothing else: html has no tile to land in.
+	if leaves := workspacelayout.TileLeaves(snapshot.Layout); len(leaves) != 2 {
+		t.Fatalf("tiles = %+v, want exactly the two markdown tiles", leaves)
+	}
+}
+
+func TestOpenSentFilesDisabledDoesNothing(t *testing.T) {
+	d, _, workspaceID := setupMarkdownWorkspace(t)
+	d.store.SetSetting(SettingOpenSentFilesEnabled, "false")
+	file := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(file, []byte("# Plan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	resp := openSentFiles(t, d, &protocol.OpenSentFilesMessage{
+		Cmd:       protocol.CmdOpenSentFiles,
+		Paths:     []string{file},
+		SessionID: protocol.Ptr("session-1"),
+	})
+	if !resp.Ok {
+		t.Fatalf("disabled open_sent_files must still answer OK, got %v", protocol.Deref(resp.Error))
+	}
+	snapshot := d.store.GetWorkspaceLayout(workspaceID)
+	if snapshot == nil {
+		t.Fatal("workspace layout missing")
+	}
+	if leaves := workspacelayout.TileLeaves(snapshot.Layout); len(leaves) != 0 {
+		t.Fatalf("tiles = %+v, want none while disabled", leaves)
+	}
+}
+
+func TestOpenSentFilesUnresolvableSessionStaysOK(t *testing.T) {
+	// No workspace, no selected session: every path fails to open, and the
+	// hook on the other end must still see OK.
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	resp := openSentFiles(t, d, &protocol.OpenSentFilesMessage{
+		Cmd:   protocol.CmdOpenSentFiles,
+		Paths: []string{filepath.Join(t.TempDir(), "x.md")},
+	})
+	if !resp.Ok {
+		t.Fatalf("open_sent_files must never error toward the hook, got %v", protocol.Deref(resp.Error))
+	}
+}

@@ -3517,6 +3517,14 @@ func runHookToolUse() {
 			fmt.Fprintf(os.Stderr, "warning: could not record edited files: %v\n", err)
 		}
 	}
+
+	// Same contract for files the agent handed the user: a daemon that is
+	// down, gated off, or too old to know the command must not fail the hook.
+	if sent := hooks.SentFiles(input.ToolName, input.ToolInput, input.CWD); len(sent) > 0 {
+		if err := c.OpenSentFiles(sessionID, sent); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: could not open sent files: %v\n", err)
+		}
+	}
 }
 
 func runHookTodo() {

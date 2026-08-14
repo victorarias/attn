@@ -1,0 +1,9 @@
+kind: added
+area: app
+change: >
+  When a Claude session hands you a file with its SendUserFile tool, attn now
+  opens it for you: markdown files dock as live-reloading tiles beside the
+  session's terminal, so "look at this" means the file is already on screen
+  instead of a transcript card to chase. File types attn cannot show are left
+  alone, quietly. A toggle in Settings → General ("Sent files", on by default)
+  turns it off.

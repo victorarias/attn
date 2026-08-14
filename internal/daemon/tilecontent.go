@@ -540,6 +540,52 @@ func (d *Daemon) handleOpenMarkdown(conn net.Conn, msg *protocol.OpenMarkdownMes
 	d.sendOK(conn)
 }
 
+// openSentFilesEnabled gates auto-opening files an agent hands the user.
+// Default ON; only an explicit "false" disables.
+func (d *Daemon) openSentFilesEnabled() bool {
+	if d.store == nil {
+		return true
+	}
+	raw := strings.TrimSpace(d.store.GetSetting(SettingOpenSentFilesEnabled))
+	if raw == "" {
+		return true
+	}
+	return parseBooleanSetting(raw)
+}
+
+// handleOpenSentFiles opens the files an agent handed the user (SendUserFile,
+// forwarded by the catch-all PostToolUse hook). Only types attn can show
+// today are routed — markdown, into the same per-path tiles as `attn open` —
+// and anything else is dropped with a daemon log line and no user-visible
+// noise. The whole command answers OK regardless: the hook must never see an
+// error it could surface into the agent's transcript, and a path that fails
+// to open is a nicety lost, not a fault.
+func (d *Daemon) handleOpenSentFiles(conn net.Conn, msg *protocol.OpenSentFilesMessage) {
+	if !d.openSentFilesEnabled() {
+		d.sendOK(conn)
+		return
+	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
+	if sessionID == "" {
+		sessionID = d.currentlySelectedSession()
+	}
+	for _, path := range msg.Paths {
+		path = strings.TrimSpace(path)
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".md", ".markdown":
+			workspaceID, tileID, err := d.openMarkdownTile(path, sessionID)
+			if err != nil {
+				d.logf("open_sent_files: %s: %v", path, err)
+				continue
+			}
+			d.logf("open_sent_files: docked %s as %s into workspace %s (session %s)", path, tileID, workspaceID, sessionID)
+		default:
+			d.logf("open_sent_files: dropped %s (no tile can show it)", path)
+		}
+	}
+	d.sendOK(conn)
+}
+
 // handleOpenMarkdownWS is the websocket flavor of open_markdown, used by the
 // frontend when the user cmd+clicks a markdown path in a session terminal.
 // The clicked pane's session id rides in the message and becomes the tile's

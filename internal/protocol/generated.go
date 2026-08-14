@@ -4141,6 +4141,17 @@ type OpenMarkdownResultMessage struct {
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
 }
 
+type OpenSentFilesMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Paths corresponds to the JSON schema field "paths".
+	Paths []string `json:"paths"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+}
+
 type PR struct {
 	// ApprovedByMe corresponds to the JSON schema field "approved_by_me".
 	ApprovedByMe bool `json:"approved_by_me"`

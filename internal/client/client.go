@@ -1081,6 +1081,21 @@ func (c *Client) OpenMarkdown(path, sessionID string) error {
 	return err
 }
 
+// OpenSentFiles forwards the files an agent handed the user (SendUserFile)
+// so the daemon can open the ones attn can show. The daemon owns the gate
+// and the type routing; unroutable paths are dropped silently.
+func (c *Client) OpenSentFiles(sessionID string, paths []string) error {
+	msg := protocol.OpenSentFilesMessage{
+		Cmd:   protocol.CmdOpenSentFiles,
+		Paths: paths,
+	}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // OpenBrowser docks or retargets the in-app browser tile.
 func (c *Client) OpenBrowser(url, sessionID string) error {
 	msg := protocol.OpenBrowserMessage{

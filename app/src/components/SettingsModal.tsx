@@ -53,6 +53,8 @@ import {
 import { SessionActivitySettings } from './SessionActivitySettings';
 import './SettingsModal.css';
 
+const OPEN_SENT_FILES_ENABLED_SETTING = 'open_sent_files_enabled';
+
 interface SettingsModalProps {
   isOpen: boolean;
   onClose: () => void;
@@ -536,6 +538,13 @@ export function SettingsModal({
   const handleToggleAutoSettle = useCallback(() => {
     onSetSetting(AUTO_SETTLE_ENABLED_SETTING, autoSettleEnabled ? 'false' : 'true');
   }, [onSetSetting, autoSettleEnabled]);
+
+  // Default ON: the daemon always broadcasts the effective value, so the
+  // fallback only covers a read before the first settings push.
+  const openSentFilesEnabled = (settings[OPEN_SENT_FILES_ENABLED_SETTING] || 'true') === 'true';
+  const handleToggleOpenSentFiles = useCallback(() => {
+    onSetSetting(OPEN_SENT_FILES_ENABLED_SETTING, openSentFilesEnabled ? 'false' : 'true');
+  }, [onSetSetting, openSentFilesEnabled]);
 
   const commitAutoSettleArm = useCallback(() => {
     const next = autoSettleArm.trim();
@@ -1343,6 +1352,37 @@ export function SettingsModal({
                 </button>
               )}
             </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="settings-block">
+        <div className="settings-block-intro">
+          <div className="settings-kicker">Workspace</div>
+          <h3>Sent files</h3>
+          <p className="settings-description">
+            When an agent hands you a file with its send-file tool, attn opens the ones it
+            can show as workspace tiles. On by default.
+          </p>
+        </div>
+        <div className="settings-block-body">
+          <div className="settings-row-card">
+            <div>
+              <p className="settings-row-title">Open files agents send you</p>
+              <p className="settings-row-copy">
+                A markdown file an agent sends opens as a live-reloading tile beside its
+                terminal, so you see it without hunting through the transcript. File types
+                attn cannot show are left alone.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="settings-action"
+              data-testid="settings-open-sent-files-toggle"
+              onClick={handleToggleOpenSentFiles}
+            >
+              {openSentFilesEnabled ? 'Disable' : 'Enable'}
+            </button>
           </div>
         </div>
       </section>
