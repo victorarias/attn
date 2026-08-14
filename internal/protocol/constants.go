@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "240"
+const ProtocolVersion = "241"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -438,6 +438,7 @@ const (
 	EventWorkflowRunUpdated              = "workflow_run_updated"
 	EventWorkflowActionResult            = "workflow_action_result"
 	EventPtyOutput                       = "pty_output"
+	EventPtyInputProbeResult             = "pty_input_probe_result"
 	EventAgentEvent                      = "agent_event"
 	EventSpawnResult                     = "spawn_result"
 	EventReloadSessionResult             = "reload_session_result"

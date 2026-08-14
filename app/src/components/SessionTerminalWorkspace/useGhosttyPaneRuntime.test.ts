@@ -83,7 +83,7 @@ describe('useGhosttyPaneRuntime', () => {
     await act(async () => {
       result.current.setTerminalHandle('pane-session', terminal);
       await result.current.handleTerminalReady('pane-session')(terminal);
-      result.current.handleTerminalInput('pane-session')('hello');
+      result.current.handleTerminalInput('pane-session')('hello', 'user');
     });
 
     expect(mockPtyAttach).toHaveBeenCalledWith({
@@ -97,7 +97,7 @@ describe('useGhosttyPaneRuntime', () => {
       },
       forceResizeBeforeAttach: false,
     });
-    expect(mockPtyWrite).toHaveBeenCalledWith({ id: 'runtime-1', data: 'hello' });
+    expect(mockPtyWrite).toHaveBeenCalledWith({ id: 'runtime-1', data: 'hello', source: 'user' });
     expect((window as Window & {
       __TEST_SESSION_INPUT_EVENTS?: Array<{ sessionId: string; event: string; data?: string }>;
     }).__TEST_SESSION_INPUT_EVENTS).toEqual([

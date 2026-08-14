@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/bus"
@@ -639,6 +640,11 @@ func (d *Daemon) forwardPTYStreamEvents(client *wsClient, sessionID string, stre
 
 func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage) {
 	source := strings.TrimSpace(protocol.Deref(msg.Source))
+	probeID := strings.TrimSpace(protocol.Deref(msg.ProbeID))
+	var probeStartedAt time.Time
+	if probeID != "" {
+		probeStartedAt = time.Now()
+	}
 	// Record genuine user keystrokes for the nudge splice guard. A doorbell that fires
 	// within userInputGuardWindow of a keystroke would splice onto the half-typed line.
 	userTyped := d.noteUserInput(msg.ID, source)
@@ -653,12 +659,26 @@ func (d *Daemon) handlePtyInput(client *wsClient, msg *protocol.PtyInputMessage)
 	}
 	// Under the session's write fence: a keystroke that races a doorbell's
 	// paste-then-Enter pair lands after it, never inside it.
-	if err := d.writePTY(msg.ID, []byte(msg.Data)); err != nil {
-		if shouldLogPtyCommandError(err) {
-			d.logf("pty_input failed for %s: %v", msg.ID, err)
+	writeErr := d.writePTY(msg.ID, []byte(msg.Data))
+	if writeErr != nil {
+		if shouldLogPtyCommandError(writeErr) {
+			d.logf("pty_input failed for %s: %v", msg.ID, writeErr)
 		}
 	} else if d.debugLogging {
 		d.logf("pty_input ok: id=%s bytes=%d", msg.ID, len(msg.Data))
+	}
+	if probeID != "" && client != nil {
+		result := &protocol.PtyInputProbeResultMessage{
+			Event:           protocol.EventPtyInputProbeResult,
+			ID:              msg.ID,
+			ProbeID:         probeID,
+			Success:         writeErr == nil,
+			WriteDurationUs: int(time.Since(probeStartedAt).Microseconds()),
+		}
+		if writeErr != nil {
+			result.Error = protocol.Ptr(writeErr.Error())
+		}
+		d.sendToClient(client, result)
 	}
 
 	// After the bytes are away, never before: freezing a pending settle can

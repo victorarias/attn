@@ -1,0 +1,8 @@
+kind: internal
+area: terminal
+change: >
+  Terminal typing stalls now leave useful evidence without continuously writing
+  every keystroke to disk. The app measures delays before a key reaches its
+  handler and sparsely samples the round trip through the daemon and PTY worker;
+  only delays long enough to feel like a freeze are added to the existing,
+  size-capped terminal incident log.

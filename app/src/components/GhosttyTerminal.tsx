@@ -129,6 +129,7 @@ import {
   type TerminalAnnotationStore,
 } from '../utils/terminalAnnotations';
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
+import { noteTerminalKeyEvent } from '../utils/terminalInputLatency';
 import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
   KittyPlacementStore,
@@ -159,7 +160,7 @@ export interface GhosttyTerminalProps {
     isActiveSession: boolean;
     paneCount: number;
   };
-  onInput: (data: string) => void;
+  onInput: (data: string, source?: string) => void;
   // User pointer movement inside this terminal. Kept separate from onInput:
   // application-mouse bytes belong to the TUI, while this signal only keeps an
   // auto-settle countdown from closing under an engaged user.
@@ -1550,7 +1551,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const normalized = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
       onInputRef.current(terminalRef.current?.hasBracketedPaste()
         ? `\x1b[200~${normalized}\x1b[201~`
-        : normalized);
+        : normalized, 'user');
     }, []);
 
     const runBlockFilter = useCallback((blockId: number | null, caseSensitive: boolean) => {
@@ -2473,10 +2474,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         inputRef.current = new InputHandler(
           ghostty,
           container,
-          (data) => onInputRef.current(data),
+          (data) => onInputRef.current(data, 'user'),
           () => undefined,
           undefined,
-          (event) => !installTerminalKeyHandler((data) => onInputRef.current(data))(event),
+          (event) => {
+            const meta = runtimeMetaRef.current;
+            if (event.type === 'keydown' && meta) {
+              noteTerminalKeyEvent(event, {
+                runtimeId: meta.runtimeId,
+                sessionId: meta.sessionId,
+                paneId: meta.paneId,
+              });
+            }
+            return !installTerminalKeyHandler((data) => onInputRef.current(data, 'user'))(event);
+          },
           (mode) => terminal.getMode(mode),
         );
         fit();
