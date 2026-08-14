@@ -79,8 +79,10 @@ type agentListRow struct {
 	State     string `json:"state"`
 	TurnOwed  bool   `json:"turn_owed"`
 	// Member is the crew member this session is bound as — "this session is
-	// trellis today" — empty for the unbound majority.
-	Member string `json:"member,omitempty"`
+	// trellis today" — empty for the unbound majority. Always written, like
+	// every other column: a key that disappears makes every reader of this
+	// address book guard for it.
+	Member string `json:"member"`
 }
 
 func runAgentList(args []string) {

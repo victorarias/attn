@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -66,6 +67,15 @@ func TestAgentListRows_CarryTheCrewMember(t *testing.T) {
 	}
 	if rows[1].Member != "" {
 		t.Errorf("unbound row member = %q, want empty", rows[1].Member)
+	}
+	// The column is always on the wire, empty rather than absent: a reader of
+	// the address book must not have to guard for a missing key.
+	encoded, err := json.Marshal(rows[1])
+	if err != nil {
+		t.Fatalf("marshal row: %v", err)
+	}
+	if !strings.Contains(string(encoded), `"member"`) {
+		t.Errorf("an unbound row drops the member key: %s", encoded)
 	}
 
 	var out bytes.Buffer

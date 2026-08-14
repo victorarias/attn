@@ -234,6 +234,10 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 // session list costs one roster read rather than one per session. Empty —
 // never an error — when the roster is empty or unreadable: decoration must not
 // fail a broadcast.
+//
+// This rides every session broadcast, which runs all day. Measured 2026-08-14
+// at a three-member roster: 25µs per read on an M5. The crew is people the
+// user named one by one, so that size is the real one.
 func (d *Daemon) crewMembersBySession() map[string]string {
 	if d.store == nil {
 		return nil
