@@ -438,7 +438,7 @@ func TestBuild_ViewLeavesTheSDKSpecifierUnresolved(t *testing.T) {
 	}
 	// The artifact is minified, so `from` and the specifier may or may not have a
 	// space between them; what matters is that the specifier survived as one.
-	if !regexp.MustCompile(`from\s*"`+regexp.QuoteMeta(SDKModule)+`"`).MatchString(string(built)) {
+	if !regexp.MustCompile(`from\s*"` + regexp.QuoteMeta(SDKModule) + `"`).MatchString(string(built)) {
 		t.Errorf("the SDK import was resolved into the artifact:\n%s", built)
 	}
 }
