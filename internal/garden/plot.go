@@ -60,16 +60,16 @@ func PlotProgress(seeds []Seed, crownID string, ready map[string]bool) Progress 
 	return p
 }
 
-// DefaultStaleWindow is how long an open seed may sit without trail movement
+// DefaultStaleWindow is how long an open seed may sit without log movement
 // before `attn seed ls --stale` names it. Measured 2026-08-14 against
-// production ticket activity (the nearest real trail): 276 gaps between
+// production ticket activity (the nearest real log): 276 gaps between
 // consecutive activity on the same ticket; p50 0.3h, p99 45h, max 356h. Healthy
 // continued work essentially never pauses more than two days, so a week is a
 // tripwire ~3.7× past the p99 — a seed quiet that long is claiming attention it
 // is not getting.
 const DefaultStaleWindow = 7 * 24 * time.Hour
 
-// Stale reports the open seeds whose trail has not moved within window, in the
+// Stale reports the open seeds whose log has not moved within window, in the
 // order given. lastMoved is the newest movement per seed — the document's own
 // updated stamp or its newest note, whichever is later; a seed missing from it
 // is skipped rather than judged on no evidence. Stale is a query, never a

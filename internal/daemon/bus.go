@@ -210,8 +210,8 @@ const (
 	FactGardenHarvested = "garden.harvested"
 	FactGardenWithered  = "garden.withered"
 	FactGardenReplanted = "garden.replanted"
-	// FactGardenNoted: a note was appended to a seed's trail. Subject is the
-	// seed, not the note — the trail is the seed's memory of itself, and the
+	// FactGardenNoted: a note was appended to a seed's log. Subject is the
+	// seed, not the note — the log is the seed's memory of itself, and the
 	// entity anybody reads is the seed.
 	FactGardenNoted = "garden.noted"
 	// FactGardenLinked/FactGardenUnlinked: an edge was added to or removed from

@@ -228,14 +228,14 @@ func TestGardenPlot_StaleNamesTheQuietOpenSeeds(t *testing.T) {
 	}
 }
 
-// A note is trail movement even when the seed document itself never changed:
+// A note is log movement even when the seed document itself never changed:
 // somebody writing down what they learned is exactly the seed not being
 // neglected.
 func TestGardenPlot_StaleReadsTheTrailNotJustTheDocument(t *testing.T) {
 	d := newGardenDaemon(t)
-	quiet := plantAt(t, d, "old document, live trail", time.Now().Add(-30*24*time.Hour))
+	quiet := plantAt(t, d, "old document, live log", time.Now().Add(-30*24*time.Hour))
 	if got := list(t, d, protocol.SeedListMessage{Stale: protocol.Ptr(true)}); len(got.Seeds) != 1 {
-		t.Fatalf("stale = %+v, want the quiet seed before its trail moves", got.Seeds)
+		t.Fatalf("stale = %+v, want the quiet seed before its log moves", got.Seeds)
 	}
 
 	resp := gardenCall(t, func(c net.Conn) {
@@ -247,7 +247,7 @@ func TestGardenPlot_StaleReadsTheTrailNotJustTheDocument(t *testing.T) {
 		t.Fatalf("note: %v", protocol.Deref(resp.Error))
 	}
 	if got := list(t, d, protocol.SeedListMessage{Stale: protocol.Ptr(true)}); len(got.Seeds) != 0 {
-		t.Fatalf("stale = %+v, want nothing: the trail moved just now", got.Seeds)
+		t.Fatalf("stale = %+v, want nothing: the log moved just now", got.Seeds)
 	}
 }
 

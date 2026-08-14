@@ -553,7 +553,7 @@ func fprintHandoff(w io.Writer, handoff *protocol.SeedNote) {
 	fmt.Fprintln(w)
 }
 
-// withoutNote drops one note from a trail by id, so a note rendered elsewhere on
+// withoutNote drops one note from a log by id, so a note rendered elsewhere on
 // the same screen is not printed twice.
 func withoutNote(notes []protocol.SeedNote, drop *protocol.SeedNote) []protocol.SeedNote {
 	if drop == nil {

@@ -113,7 +113,7 @@ func TestStaleSkipsASeedItHasNoEvidenceFor(t *testing.T) {
 	synctest.Test(t, func(t *testing.T) {
 		seeds := []Seed{{ID: "s-unknown", Status: StatusPlanted}}
 		if got := Stale(seeds, map[string]time.Time{}, time.Hour, time.Now()); len(got) != 0 {
-			t.Fatalf("stale = %+v, want nothing: there is no trail to judge", got)
+			t.Fatalf("stale = %+v, want nothing: there is no log to judge", got)
 		}
 	})
 }
