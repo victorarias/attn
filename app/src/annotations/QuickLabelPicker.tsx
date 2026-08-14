@@ -37,6 +37,16 @@ const PICKER_WIDTH = 192;
 const GAP = 6;
 const VIEWPORT_PADDING = 12;
 
+function addDeferredPointerDownListener(listener: (event: PointerEvent) => void): () => void {
+  const timer = window.setTimeout(() => {
+    document.addEventListener('pointerdown', listener, true);
+  }, 0);
+  return () => {
+    window.clearTimeout(timer);
+    document.removeEventListener('pointerdown', listener, true);
+  };
+}
+
 function computePosition(
   anchorEl: HTMLElement,
   cursorHint: { x: number; y: number } | null | undefined,
@@ -115,13 +125,7 @@ function FloatingQuickLabelPicker({
         onDismiss();
       }
     };
-    const timer = setTimeout(() => {
-      document.addEventListener('pointerdown', handlePointerDown, true);
-    }, 0);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener('pointerdown', handlePointerDown, true);
-    };
+    return addDeferredPointerDownListener(handlePointerDown);
   }, [onDismiss]);
 
   if (!position) {
