@@ -372,6 +372,14 @@ forgets that position and `--since <RFC3339>` replays from an instant.
 - No continuously repainting animations. attn renders GPU terminals, often on
   high-refresh displays, beside agents that run all day — a permanent repaint
   loop is a battery and thermal bug no test will catch.
+- Nothing invisible holds a GPU surface. A compositing layer, a canvas drawing
+  buffer, or an attachment the graphics API hands you by default all cost the
+  element's area in device pixels — whether it is ever drawn, and whether
+  anyone can see it. An always-mounted component must not hold one while it is
+  closed, and a pane behind another session must not hold one at all. `ps` RSS
+  cannot see any of this, so a change here is measured by physical footprint
+  and by which surfaces exist, never by RSS:
+  [docs/plans/2026-08-14-app-memory-floor.md](docs/plans/2026-08-14-app-memory-floor.md).
 - Comments state what the code cannot show — a constraint, an invariant, a
   measured receipt — in one or two lines, and move when the code moves. A
   comment claims only what this commit does: describing the design you
