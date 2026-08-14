@@ -1,0 +1,13 @@
+kind: internal
+area: docs
+change: >
+  The crew primitive plan, rewritten from Victor's annotation pass on
+  the first draft. Seven days of the hand-run simulation settled the
+  constraints — identity is the invocation, handoffs are append-only
+  letters, the ceremony is the pain — and the plan turns them into six
+  slices: registry and binding, wake as an app surface, handoff that
+  reloads in place instead of compacting, an activity subsystem that
+  extends the existing presence system with cache state and cost,
+  crew addressing that wakes a sleeping member, and the chief's
+  migration into the first standing member. The wake limit and
+  heartbeat policy stay open forks, each waiting on a receipt.
