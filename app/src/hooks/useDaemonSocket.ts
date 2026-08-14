@@ -73,6 +73,11 @@ import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
+  DocumentSubscriptions,
+  documentSubscribePayload,
+  type DocumentSubscriber,
+} from './daemonDocumentEvents';
+import {
   annotationToWire,
   handleSessionAnnotationDaemonEvent,
   type DaemonSessionAnnotation,
@@ -246,7 +251,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '242';
+export const PROTOCOL_VERSION = '243';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -1028,6 +1033,9 @@ export function useDaemonSocket({
   const pendingOutboundCommandsRef = useRef<string[]>([]);
   const recoveryNoticeTimeoutRef = useRef<number | null>(null);
   const gitStatusSubscriptionRef = useRef<string | null>(null);
+  // Live document queries. They live on the daemon's connection, so a reconnect
+  // has to re-send them; the registry is what remembers they are still wanted.
+  const docSubscriptionsRef = useRef(new DocumentSubscriptions());
   const ptyTransportRef = useRef(createPtyTransportState<AttachRequestContext>());
   const canceledAttachIdsRef = useRef(new Set<string>());
   // Per-session attach serialization chain — see sendAttachSession.
@@ -1427,6 +1435,11 @@ export function useDaemonSocket({
       if (gitStatusSubscriptionRef.current) {
         ws.send(JSON.stringify({ cmd: 'subscribe_git_status', directory: gitStatusSubscriptionRef.current }));
       }
+
+      // Every live query the daemon lost when this socket's predecessor closed.
+      // Each subscriber is asked for its `have()` right now, so the resume
+      // carries only what changed while we were away.
+      docSubscriptionsRef.current.resubscribeAll((payload) => ws.send(JSON.stringify(payload)));
 
       if (selectedSessionRef.current) {
         ws.send(JSON.stringify({ cmd: 'session_selected', id: selectedSessionRef.current }));
@@ -2988,6 +3001,7 @@ export function useDaemonSocket({
               }
             })) break;
             if (handleBusDaemonEvent(data, pending)) break;
+            if (docSubscriptionsRef.current.handleEvent(data)) break;
             break;
           }
         }
@@ -3000,6 +3014,7 @@ export function useDaemonSocket({
       wsRef.current = null;
       hasReceivedInitialStateRef.current = false;
       canceledAttachIdsRef.current.clear();
+      docSubscriptionsRef.current.markDisconnected();
 
       // Circuit breaker: if open, don't retry
       if (circuitOpenRef.current) {
@@ -3394,6 +3409,35 @@ export function useDaemonSocket({
   // authoring agent reads in `attn app logs`, stamped with the version that
   // served the bundle, and a report the daemon never answers must not become a
   // second failure inside an error boundary.
+  /**
+   * Open a live document query. Returns the way to close it, which the caller
+   * must call: a subscription left open makes the daemon re-run its query on
+   * every write to that collection, for nobody.
+   *
+   * The subscribe never goes through the outbound queue. A queued one would be
+   * flushed on the next open *and* re-sent by `resubscribeAll`, and the daemon
+   * refuses the second id as already open — so when the socket is down the
+   * registry alone carries it, and the connect handler sends it once.
+   */
+  const subscribeDocuments = useCallback((subscriber: DocumentSubscriber) => {
+    const registry = docSubscriptionsRef.current;
+    const id = registry.add(subscriber);
+    const ws = wsRef.current;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify(documentSubscribePayload(id, subscriber)));
+      subscriber.onLive(true);
+    } else {
+      subscriber.onLive(false);
+    }
+    return () => {
+      if (!registry.remove(id)) return;
+      const open = wsRef.current;
+      if (open && open.readyState === WebSocket.OPEN) {
+        open.send(JSON.stringify({ cmd: 'doc_unsubscribe', subscription_id: id }));
+      }
+    };
+  }, []);
+
   const sendAppViewCrash = useCallback((report: {
     app: string;
     view: string;
@@ -5587,6 +5631,7 @@ export function useDaemonSocket({
     sendSetClientPresence,
     sendSetTerminalTheme,
     sendAppViewCrash,
+    subscribeDocuments,
     isRuntimeAttached,
     sendGetFileDiff,
     getRepoInfo,

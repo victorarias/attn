@@ -928,6 +928,45 @@ is not built with `--external`, so a handler importing an SDK **value** fails at
 bundle time with a resolution error naming the specifier — unchanged from A4,
 where the ambient declaration had no JavaScript either.
 
+## Slice 4 as-built
+
+The four envelopes and `useQuery` landed as designed. Four things the design did
+not name, all found by building it.
+
+**The refusal and the ending are one envelope.** The design gave
+`doc_subscription_ended` the post-acceptance codes and left refusals implicit. On
+a multiplexed connection a refusal has to name the subscription it refused, and
+`command_error` cannot — so every way a subscription is not running arrives as
+`doc_subscription_ended`, told apart by code: `invalid_query`,
+`undeclared_collection` and `subscription_limit` refuse one that never started,
+`collection_undefined` and `collection_redeclared` end one that did. A client has
+exactly one place to learn a query is not being served.
+
+**The subscribe never goes through the outbound queue.** The frontend queues a
+command issued while the socket is down and flushes it on the next open — and the
+connect handler also re-sends every wanted subscription, because the daemon lost
+them all with the old connection. Both together would send one subscription
+twice, and the second is refused as an id already open. So a subscribe is sent
+only over an open socket; when there is none, the registry alone carries it and
+the connect handler is what sends it. That registry is also what makes a resume
+correct across a reconnect rather than only across a remount: each subscriber is
+asked for its `have()` at re-send time, not at first subscribe.
+
+**`useQuery`'s cache outlives its mount, so it needs a bound.** Resume-by-`have`
+means the bodies survive unmount, which makes them a module-level cache keyed by
+the query's identity. It keeps 64, the same receipt as the per-client
+subscription tripwire: a client cannot hold more live queries than that, so
+retaining more caches is retaining for tiles that cannot all exist. Eviction
+costs one fuller first delivery and nothing else, which is why this bound is the
+one limit in the slice that is deliberately silent.
+
+**The host composes the namespace; the SDK cannot.** `sdk/attn-app` is its own
+package and cannot import the app's socket, so it exports the seam
+(`AppViewRuntimeProvider`, `AppViewRuntime`) and `AppTileHost` implements it —
+handing over `app/<app>` and the frontend's `subscribeDocuments`. That is what
+makes "a view cannot read another app's documents" structural: a view is given a
+namespace, and there is no call that takes one.
+
 ## Out of scope
 
 - Panels, windows, and any mount kind other than tiles. Designed for, not

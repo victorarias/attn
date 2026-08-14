@@ -200,6 +200,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdDocQuery:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocCount:       commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdDocSubscribe:   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdDocUnsubscribe: commandMetadata(ScopeHubLocal, false, true),
 	// The app registry is the daemon's own database and its own bus, so a hub
 	// answers these itself. None touches a PTY, so none blocks during recovery.
 	protocol.CmdAppList:       commandMetadata(ScopeHubLocal, false, true),

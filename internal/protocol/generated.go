@@ -2083,6 +2083,9 @@ type DocSubscribeMessage struct {
 
 	// Query corresponds to the JSON schema field "query".
 	Query DocumentQuery `json:"query"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID *string `json:"subscription_id,omitempty,omitzero"`
 }
 
 type DocSubscribeResult struct {
@@ -2097,6 +2100,40 @@ type DocSubscribeResult struct {
 
 	// Upsert corresponds to the JSON schema field "upsert".
 	Upsert []StoredDocument `json:"upsert"`
+}
+
+type DocSubscriptionDeliveryMessage struct {
+	// AsOfSeq corresponds to the JSON schema field "as_of_seq".
+	AsOfSeq int `json:"as_of_seq"`
+
+	// Delivery corresponds to the JSON schema field "delivery".
+	Delivery int `json:"delivery"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Order corresponds to the JSON schema field "order".
+	Order []string `json:"order"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
+
+	// Upsert corresponds to the JSON schema field "upsert".
+	Upsert []StoredDocument `json:"upsert"`
+}
+
+type DocSubscriptionEndedMessage struct {
+	// Code corresponds to the JSON schema field "code".
+	Code string `json:"code"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error string `json:"error"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
 }
 
 type DocUndefineMessage struct {
@@ -2119,6 +2156,14 @@ type DocUndefineResult struct {
 
 	// Namespace corresponds to the JSON schema field "namespace".
 	Namespace string `json:"namespace"`
+}
+
+type DocUnsubscribeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SubscriptionID corresponds to the JSON schema field "subscription_id".
+	SubscriptionID string `json:"subscription_id"`
 }
 
 type DocumentCollectionSchema struct {
