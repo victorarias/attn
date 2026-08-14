@@ -464,6 +464,63 @@ Every slice adds focused tests. The bus timing tests run under `synctest`; no
 sleeps or polling. The live proof uses a seeded realistic app collection rather
 than an empty database.
 
+## Retention is the gap story
+
+Added 2026-08-15, after asking how often gaps actually happen and what attn
+tells an app that hits one. The answer changes no gate above; it changes the
+retention policy underneath them.
+
+### Receipts
+
+- The retention window is 30 days, trimmed hourly (`internal/bus/bus.go`,
+  `DefaultRetention`, `DefaultTrimInterval`).
+- Trim deletes only rows older than the window AND at or below the minimum
+  cursor across *enabled* consumers (`internal/store/bus.go`,
+  `TrimBusEvents`). An enabled consumer can never gap, however far behind it
+  falls; one that pins the floor too long raises the pin alarm
+  (`DefaultPinAlarmAge`) rather than losing anything.
+- Disabled consumers are excluded from that floor on purpose — "a killed
+  consumer must not pin the log" — and disabling an app flips its consumer's
+  enabled bit (`internal/daemon/apps.go` on the manual path,
+  `internal/daemon/app_consumers.go` on auto-disable).
+
+So a gap has exactly one cause: an app stayed disabled while subscribed facts
+aged past the window. Gap frequency is not weather; it is one knob against one
+behavior, and both are ours.
+
+### Two kinds of apps, two exposures
+
+- **Projection apps** — collections derivable from the current-state
+  snapshot. Reconcile on re-enable rebuilds everything; a gap costs nothing
+  once the handler exists.
+- **History apps** — collections that accumulate facts as they arrive. A
+  missed fact is information the app never received. No handler rebuilds it,
+  and no app-side checkpoint recovers it: checkpoints protect state the app
+  already had, and a gap is by definition facts it never got. App-side
+  snapshot machinery was considered for this and rejected. Only retention
+  closes the loss, and retention is what opened it.
+
+### Decision: installed apps pin retention
+
+An installed app's consumer pins the retention floor whether enabled or
+disabled. "Disabled must not pin" narrows to its real target — orphaned rows
+no install serves — which `Unregister` already deletes on uninstall.
+
+The story this buys: **an installed app never loses facts.** Disabled for a
+year, its lane waited. Reconcile exists for version moves, corruption, and
+cursors from removed installs — not as an apology for pruning.
+
+The cost is a disabled app with chatty subscriptions holding its slice of the
+log indefinitely. Facts are small rows in attn's own single-tenant SQLite, so
+reserve big: a generous per-lane cap — its number needs a receipt from
+measuring real lane growth before it is written — crossed loudly with a
+durable notification naming the app, the size held, and the two exits (enable
+it or uninstall it). Forcing that conversation beats silent loss.
+
+Gate 7's gap rules stand exactly as written. Under this policy a live gap
+means corruption or a cursor from a removed install — genuinely broken states
+— and a broken thing being loud is the point.
+
 ## Open questions
 
 None. Victor approved the two review calls on 2026-08-14:
