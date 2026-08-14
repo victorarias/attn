@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -50,7 +51,7 @@ const (
 	// case this guards is an old binary inside a stale app bundle meeting a new
 	// daemon, where every symptom of the skew would otherwise appear later and
 	// somewhere else.
-	appRuntimeAPIVersion = 2
+	appRuntimeAPIVersion = 3
 )
 
 // appRuntimeHostOverride lets a test — and a developer running a checkout's
@@ -448,6 +449,34 @@ type appDispatchEvent struct {
 type appDispatchResult struct {
 	OK    bool   `json:"ok"`
 	Error string `json:"error,omitempty"`
+}
+
+// appCommandRequest is `app.command`, the daemon's other call into the sidecar.
+//
+// It is appDispatchRequest with the fact replaced by the caller's payload.
+// Deliberately a second method rather than one with an optional event: the two
+// carry different things and answer differently, and a shape whose meaning
+// depends on which half is populated is one every reader has to decode twice.
+// Everything either one needs to find and scope a handler — the artifact, the
+// key, the in-flight id, the declared collections — is identical, and so is
+// what the host does with it.
+type appCommandRequest struct {
+	Dispatch    string          `json:"dispatch"`
+	App         string          `json:"app"`
+	VersionID   int64           `json:"version_id"`
+	Artifact    string          `json:"artifact"`
+	Handler     string          `json:"handler"`
+	Collections []string        `json:"collections"`
+	Payload     json.RawMessage `json:"payload,omitempty"`
+}
+
+// appCommandDispatchResult is appDispatchResult plus what the handler returned.
+// A handler that returned nothing carries no payload, which is different from
+// one that returned null.
+type appCommandDispatchResult struct {
+	OK      bool            `json:"ok"`
+	Error   string          `json:"error,omitempty"`
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 // appDispatch is one in-flight handler run, as the daemon sees it.

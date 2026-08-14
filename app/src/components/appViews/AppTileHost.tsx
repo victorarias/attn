@@ -7,6 +7,9 @@ import { appBundleURL } from '../../utils/appBundle';
 import { AppViewBoundary } from './AppViewBoundary';
 import { AppViewLoadError, errorText, loadAppView, type AppViewComponent } from './loadAppView';
 import './AppTileHost.css';
+// The SDK components a view renders are styled from attn's build, not the SDK's
+// own chunk — see the header of sdk/attn-app/src/components.tsx.
+import './appSdkComponents.css';
 
 // The host: what stands between a docked tile and an app author's component.
 //
@@ -37,7 +40,7 @@ interface Mounted {
 }
 
 export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params }: AppTileHostProps) {
-  const { sendAppViewCrash, subscribeDocuments } = useDaemonApi();
+  const { sendAppCommand, sendAppViewCrash, subscribeDocuments } = useDaemonApi();
   const entry = useDaemonStore((state) => state.apps.find((a) => a.name === app));
 
   const declared = entry?.views?.some((v) => v.name === view) ?? false;
@@ -125,9 +128,15 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
   // The namespace is composed here, from the mount's identity, and never taken
   // from the view: an app addresses its own documents because that is the only
   // namespace it is handed.
+  // The app a command is addressed to is bound here for the same reason: a view
+  // names the command, and where it runs is the mount's to decide.
   const runtime = useMemo<AppViewRuntime>(
-    () => ({ namespace: `app/${app}`, subscribe: subscribeDocuments }),
-    [app, subscribeDocuments],
+    () => ({
+      namespace: `app/${app}`,
+      subscribe: subscribeDocuments,
+      command: (command: string, payload?: unknown) => sendAppCommand(app, command, payload),
+    }),
+    [app, subscribeDocuments, sendAppCommand],
   );
 
   const body = (() => {

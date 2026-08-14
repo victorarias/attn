@@ -179,6 +179,13 @@ importers:
         version: 8.18.3
 
   ../sdk/attn-app:
+    dependencies:
+      react-markdown:
+        specifier: ^10.1.0
+        version: 10.1.0(@types/react@19.2.7)(react@19.2.1)
+      remark-gfm:
+        specifier: ^4.0.1
+        version: 4.0.1
     devDependencies:
       '@types/react':
         specifier: ^19.1.8

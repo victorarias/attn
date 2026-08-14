@@ -60,12 +60,20 @@ func GenerateTypes(m Manifest) string {
 	b.WriteString("// The context every handler of this app receives.\n")
 	b.WriteString("export type Ctx = AppContext<AppCollections>\n\n")
 
-	b.WriteString("// One entry per declared subscription. The entrypoint's default export must\n")
-	b.WriteString("// `satisfies Handlers`, so a subscription with no handler and a handler with\n")
-	b.WriteString("// the wrong shape are both compile errors here rather than silence at runtime.\n")
+	b.WriteString("// One entry per declared subscription, and one per declared command. The\n")
+	b.WriteString("// entrypoint's default export must `satisfies Handlers`, so a declaration with\n")
+	b.WriteString("// no handler and a handler with the wrong shape are both compile errors here\n")
+	b.WriteString("// rather than silence at runtime.\n")
+	b.WriteString("//\n")
+	b.WriteString("// A subscription's key is its event pattern; a command's carries the\n")
+	b.WriteString("// `command:` prefix, which is what keeps the two apart in one map — an event\n")
+	b.WriteString("// pattern is a dotted name and neither it nor a command name can hold a colon.\n")
 	b.WriteString("export type Handlers = {\n")
 	for _, pattern := range m.EventPatterns() {
 		b.WriteString(fmt.Sprintf("  %s: (event: AppEvent, ctx: Ctx) => void | Promise<void>\n", tsKey(pattern)))
+	}
+	for _, command := range m.CommandNames() {
+		b.WriteString(fmt.Sprintf("  %s: (payload: unknown, ctx: Ctx) => unknown\n", tsKey(apps.CommandHandlerKey(command))))
 	}
 	b.WriteString("}\n")
 	return b.String()

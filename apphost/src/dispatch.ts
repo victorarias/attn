@@ -45,6 +45,26 @@ export interface DispatchResult {
   error?: string
 }
 
+/** What the daemon sends to run one command a view invoked. */
+export interface CommandParams {
+  dispatch: string
+  app: string
+  version_id: number
+  artifact: string
+  /** The `command:<name>` key to invoke — a key of the bundle's default export. */
+  handler: string
+  collections: string[]
+  /** The caller's argument, already parsed. Absent when the command takes none. */
+  payload?: unknown
+}
+
+/** What the daemon gets back from a command, plus whatever the handler returned. */
+export interface CommandResult {
+  ok: boolean
+  error?: string
+  payload?: unknown
+}
+
 type Handler = (event: DispatchParams["event"], ctx: unknown) => unknown
 
 /**
@@ -149,16 +169,7 @@ export async function runDispatch(
 
   const handler = handlers[params.handler]
   if (typeof handler !== "function") {
-    const declared = Object.keys(handlers)
-    return {
-      ok: false,
-      error:
-        `app ${params.app} version ${params.version_id} subscribes to ${params.handler} but its default export has no handler under that key. ` +
-        (declared.length > 0
-          ? `It exports: ${declared.join(", ")}.`
-          : "It exports no handlers at all.") +
-        " The generated Handlers type makes this a compile error — the bundle is out of step with its manifest.",
-    }
+    return { ok: false, error: missingHandler(handlers, params.app, params.version_id, params.handler) }
   }
 
   const ctx = {
@@ -185,6 +196,78 @@ export async function runDispatch(
   } finally {
     conn.notify("app_runtime.left", scope)
   }
+}
+
+/**
+ * Runs one command a view invoked, and describes what happened.
+ *
+ * It is runDispatch with a different argument and an answer that carries a
+ * value. Everything that makes a handler run — the module cache keyed by the
+ * content-addressed artifact, the app-scoped collections, the entered/left
+ * announcements that let the daemon name whoever froze the shared loop — is the
+ * same code, because a command is one more key of the same default export.
+ */
+export async function runCommand(
+  conn: RpcConnection,
+  params: CommandParams,
+): Promise<CommandResult> {
+  appByArtifact.set(params.artifact, params.app)
+
+  let handlers: Record<string, Handler>
+  try {
+    handlers = await loadHandlers(params.artifact)
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  }
+
+  const handler = handlers[params.handler] as
+    | ((payload: unknown, ctx: unknown) => unknown)
+    | undefined
+  if (typeof handler !== "function") {
+    return { ok: false, error: missingHandler(handlers, params.app, params.version_id, params.handler) }
+  }
+
+  const ctx = {
+    app: params.app,
+    version: params.version_id,
+    collections: collectionsFor(conn, params.dispatch, params.collections),
+  }
+  const scope = { dispatch: params.dispatch, app: params.app }
+  conn.notify("app_runtime.entered", scope)
+  try {
+    const payload = await handler(params.payload, ctx)
+    // undefined is "returned nothing", and JSON has no word for it: leaving the
+    // field off is what tells the caller that apart from a handler that
+    // deliberately returned null.
+    return payload === undefined ? { ok: true } : { ok: true, payload }
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  } finally {
+    conn.notify("app_runtime.left", scope)
+  }
+}
+
+/**
+ * What to say when the manifest declared something the bundle does not export.
+ *
+ * The generated Handlers type makes this a compile error at apply time, so
+ * reaching it means the bundle is out of step with the declaration it was
+ * stored beside — worth naming exactly, because nothing else in the system can.
+ */
+function missingHandler(
+  handlers: Record<string, unknown>,
+  app: string,
+  version: number,
+  key: string,
+): string {
+  const declared = Object.keys(handlers)
+  return (
+    `app ${app} version ${version} declares ${key} but its default export has no handler under that key. ` +
+    (declared.length > 0
+      ? `It exports: ${declared.join(", ")}.`
+      : "It exports no handlers at all.") +
+    " The generated Handlers type makes this a compile error — the bundle is out of step with its manifest."
+  )
 }
 
 function describeFailure(err: unknown): string {

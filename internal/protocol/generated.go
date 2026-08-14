@@ -267,6 +267,48 @@ type AppApplyResult struct {
 	VersionID int `json:"version_id"`
 }
 
+type AppCommandInfo struct {
+	// Description corresponds to the JSON schema field "description".
+	Description *string `json:"description,omitempty,omitzero"`
+
+	// Name corresponds to the JSON schema field "name".
+	Name string `json:"name"`
+}
+
+type AppCommandMessage struct {
+	// App corresponds to the JSON schema field "app".
+	App string `json:"app"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Command corresponds to the JSON schema field "command".
+	Command string `json:"command"`
+
+	// Payload corresponds to the JSON schema field "payload".
+	Payload *string `json:"payload,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+}
+
+type AppCommandResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Payload corresponds to the JSON schema field "payload".
+	Payload *string `json:"payload,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type AppConsumerInfo struct {
 	// Cursor corresponds to the JSON schema field "cursor".
 	Cursor int `json:"cursor"`
@@ -581,6 +623,9 @@ type AppStatusResult struct {
 }
 
 type AppSummary struct {
+	// Commands corresponds to the JSON schema field "commands".
+	Commands []AppCommandInfo `json:"commands,omitempty,omitzero"`
+
 	// Consumer corresponds to the JSON schema field "consumer".
 	Consumer *AppConsumerInfo `json:"consumer,omitempty,omitzero"`
 

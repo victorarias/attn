@@ -69,6 +69,7 @@ import { completeTerminalInputProbe, maybeStartTerminalInputProbe } from '../uti
 import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
 import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
+import { handleAppDaemonEvent, type AppCommandResult } from './daemonAppEvents';
 import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
@@ -251,7 +252,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '243';
+export const PROTOCOL_VERSION = '244';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -826,6 +827,11 @@ const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
 // of production, 209ms at 945k rows — so 30s is roughly a hundred times the
 // worst real log, a tripwire for a scan that has hung rather than a budget.
 const BUS_STATUS_TIMEOUT_MS = 30_000;
+// An app command is bounded by the daemon, which abandons a handler at 60s and
+// answers with a refusal naming the app, the command and that limit. This sits
+// past it so that refusal is what a view shows: a shorter one here would win the
+// race and replace it with "timed out".
+const APP_COMMAND_TIMEOUT_MS = 75_000;
 const GIT_METADATA_TIMEOUT_MS = 30 * 60_000;
 const GIT_DIFF_TIMEOUT_MS = 10 * 60_000;
 const GIT_WORKTREE_TIMEOUT_MS = 30 * 60_000;
@@ -3002,6 +3008,7 @@ export function useDaemonSocket({
               }
             })) break;
             if (handleBusDaemonEvent(data, pending)) break;
+            if (handleAppDaemonEvent(data, pending)) break;
             if (docSubscriptions.handleEvent(data)) break;
             break;
           }
@@ -3455,6 +3462,30 @@ export function useDaemonSocket({
       error: report.error,
     });
   }, [sendOrQueueCommand]);
+
+  /**
+   * Run one of an app's declared commands and resolve with what its handler
+   * returned. Which app is asked comes from the host that mounted the view, not
+   * from the view — the same rule the document namespace follows.
+   *
+   * The timeout is past the daemon's own dispatch budget (60s) on purpose. The
+   * daemon's refusal names the app, the command and the limit; a shorter one
+   * here would replace that with "timed out" and lose everything worth reading.
+   */
+  const sendAppCommand = useCallback((app: string, command: string, payload?: unknown): Promise<unknown> => {
+    return sendRequest<AppCommandResult>(
+      'app_command',
+      {
+        app,
+        command,
+        // JSON text, exactly as a document body travels. Absent when the command
+        // takes no argument.
+        ...(payload === undefined ? {} : { payload: JSON.stringify(payload) }),
+      },
+      `${app} did not answer the command “${command}”`,
+      APP_COMMAND_TIMEOUT_MS,
+    ).then((result) => result.value);
+  }, [sendRequest]);
 
   const sendPtyResize = useCallback((
     id: string,
@@ -5632,6 +5663,7 @@ export function useDaemonSocket({
     sendSetClientPresence,
     sendSetTerminalTheme,
     sendAppViewCrash,
+    sendAppCommand,
     subscribeDocuments,
     isRuntimeAttached,
     sendGetFileDiff,

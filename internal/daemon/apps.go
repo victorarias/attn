@@ -377,6 +377,7 @@ func (d *Daemon) appSummary(row store.App, head int64) (protocol.AppSummary, err
 			// From the serving version's frozen declaration, not the manifest on
 			// disk: after a rollback those differ, and what docks is what serves.
 			summary.Views = appViewsForWire(version.Declaration, d.logf)
+			summary.Commands = appDeclaredCommands(version.Declaration, d.logf)
 		}
 	}
 	consumer, ok, err := d.store.GetBusConsumer(apps.ConsumerName(row.Name))

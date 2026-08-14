@@ -967,6 +967,49 @@ handing over `app/<app>` and the frontend's `subscribeDocuments`. That is what
 makes "a view cannot read another app's documents" structural: a view is given a
 namespace, and there is no call that takes one.
 
+## Slice 5 as-built
+
+Commands, the components, and the scaffold landed as designed. Four departures
+and receipts, all found by building it.
+
+**Only commands carry a handler-key prefix.** The design drew
+`"subscribe:doc.changed"` beside `"command:approve"`, but A4 shipped
+subscription keys as the raw event pattern, and every installed app's bundle
+already exports them that way. Prefixing subscriptions now would make every one
+of those apps silently stop dispatching until it was re-applied, for a
+namespacing problem that does not exist: a colon can appear in neither an event
+pattern nor a command name, so `command:<name>` cannot collide with any
+subscription key. So commands are prefixed and subscriptions are not, and the
+handler an invocation names is the key it was invoked by — `view:` for a caught
+render crash, `command:` for a command, the bare pattern for a subscription.
+
+**A command carries at most 256KB in either direction.** The same limit as a
+document body, and for the same reason: the payload lands in the sidecar's
+single-threaded loop and in the invocation log's error text. Over it, the
+refusal names the command, the app, the limit and the ask, and says where
+larger data belongs — a document, which is the surface built to hold it.
+
+**The frontend waits longer than the daemon.** `APP_COMMAND_TIMEOUT_MS` is 75s
+against the daemon's 60s dispatch budget. That ordering is the whole point: a
+handler that never yields is abandoned by the daemon, which knows which app and
+which command froze the shared loop, and its refusal reaches the view naming all
+three. A frontend that gave up first would replace that with "the daemon did not
+answer", which no agent can act on. A failed command never advances the app's
+stall clock — that clock exists for a consumer pinning the durable log's
+retention floor, and a docked tile pins nothing, so clicking must not be able to
+disable a healthy app.
+
+**Component styles live in the app, not in the SDK.** A CSS import inside the
+SDK's rollup entry emits an asset the import map's three fixed-name chunks
+cannot link, so the components emit `attn-app-*` class names only and
+`app/src/components/appViews/appSdkComponents.css` — imported by `AppTileHost` —
+carries every rule, over attn's own tokens. A test asserts both directions of
+that pairing, so a component that grows a class without a rule, or a rule with
+no component, fails rather than shipping unstyled. The shipped slice is Button,
+TextInput, TextArea, List, ListRow, EmptyState and Markdown; nothing in them
+animates, which is why the spinner and the relative-time label the design
+excluded stay excluded.
+
 ## Out of scope
 
 - Panels, windows, and any mount kind other than tiles. Designed for, not

@@ -27,8 +27,9 @@ import (
 // registry" and "Reload".
 
 // appViewCrashHandler is the invocation handler name a caught render error is
-// recorded under. `view:` rather than the `subscribe:`/`command:` prefixes a
-// dispatched handler uses, so `attn app logs` says which surface failed.
+// recorded under. Distinct from both keys a dispatched handler is invoked by —
+// a subscription's raw event pattern and a command's `command:` — so `attn app
+// logs` says which surface failed.
 const appViewCrashHandler = "view:"
 
 // appViewCrashEvent is the event name a render crash is recorded against. A

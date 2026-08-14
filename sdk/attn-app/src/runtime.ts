@@ -65,6 +65,17 @@ export interface AppViewRuntime {
   readonly namespace: string
   /** Opens a live query; the returned function closes it and must be called. */
   subscribe: (subscriber: DocumentSubscriber) => () => void
+  /**
+   * Invokes one command on the app this tile belongs to, and resolves with
+   * whatever its handler returned. Which app is asked is the host's to say, for
+   * the same reason the namespace is: a view names a command, never an app.
+   *
+   * It rejects when the command does not run — the app is disabled, the serving
+   * version declares no such command, the handler threw or never returned. The
+   * rejection carries the daemon's own words, which name the app, the command
+   * and what to do about it.
+   */
+  command: (command: string, payload?: unknown) => Promise<unknown>
 }
 
 const AppViewRuntimeContext = createContext<AppViewRuntime | null>(null)

@@ -336,6 +336,89 @@ entrypoint = "src/index.ts"
 	}
 }
 
+// commandBlock is what a view's button is bound to.
+const commandBlock = `
+[[commands]]
+name = "approve"
+description = "Approve the request."
+
+[[commands]]
+name = "reject"
+`
+
+func TestParseManifest_Commands(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+	if names := m.CommandNames(); len(names) != 2 || names[0] != "approve" || names[1] != "reject" {
+		t.Fatalf("CommandNames() = %v", names)
+	}
+	if m.Commands[0].Description != "Approve the request." || m.Commands[1].Description != "" {
+		t.Fatalf("commands = %+v", m.Commands)
+	}
+}
+
+func TestParseManifest_CommandRefusals(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		block string
+		want  string
+	}{
+		{"no name", "\n[[commands]]\ndescription = \"x\"\n", "name"},
+		{"not a name", "\n[[commands]]\nname = \"Approve!\"\n", "Approve!"},
+		{"declared twice", commandBlock + "\n[[commands]]\nname = \"approve\"\n", "approve"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseManifest(validManifest(t, viewBlock+tc.block))
+			if err == nil {
+				t.Fatalf("ParseManifest accepted %s", tc.block)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("err = %v, want it to name %q", err, tc.want)
+			}
+		})
+	}
+}
+
+// A command is invoked from a view. An app that declares one and has neither a
+// view nor a subscription could never run it, and the refusal says which of the
+// two is missing rather than repeating the generic "nothing would run it".
+func TestParseManifest_ACommandAloneIsNotSomethingThatRuns(t *testing.T) {
+	text := `
+name = "board"
+attn_app_api = 1
+entrypoint = "src/index.ts"
+` + commandBlock
+	_, err := ParseManifest(text)
+	if err == nil {
+		t.Fatal("ParseManifest accepted an app whose only declaration is a command")
+	}
+	if !strings.Contains(err.Error(), "[[views]]") || !strings.Contains(err.Error(), "invoked from") {
+		t.Fatalf("err = %v, want it to say a command needs a view", err)
+	}
+}
+
+// The daemon holds the frozen declaration and nothing else, so what an app
+// answers is read back out of it — same rule as the views beside it.
+func TestDeclaredCommands(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	names, err := DeclaredCommands(declaration)
+	if err != nil || len(names) != 2 || names[0] != "approve" {
+		t.Fatalf("DeclaredCommands() = %v, %v", names, err)
+	}
+	if _, err := DeclaredCommands(`{"name":"x","commands":[{"name":"Approve!"}]}`); err == nil {
+		t.Fatal("DeclaredCommands accepted a name that is not a command name")
+	}
+}
+
 // The daemon holds a version's declaration and nothing else, so reading the
 // views back out of it is what tells it which artifacts the version is made of.
 func TestDeclaredViewNames(t *testing.T) {

@@ -54,6 +54,21 @@ type Manifest struct {
 	Subscribe   []Subscribe  `toml:"subscribe" json:"subscribe,omitempty"`
 	Collections []Collection `toml:"collections" json:"collections,omitempty"`
 	Views       []View       `toml:"views" json:"views,omitempty"`
+	Commands    []Command    `toml:"commands" json:"commands,omitempty"`
+}
+
+// Command is one `[[commands]]` block: something a view can ask this app to do.
+//
+// A subscription is attn waking the app; a command is a person acting through
+// one of its views. Both end in the same place — a key of the generated
+// `Handlers` type, dispatched into the shared runtime — which is why a command
+// is a declaration here rather than a second mechanism.
+type Command struct {
+	Name string `toml:"name" json:"name"`
+	// Description is what the command does, for a reader of `attn app status`.
+	// Optional: attn renders no UI from it, so an app is not made to write prose
+	// for a button it draws itself.
+	Description string `toml:"description" json:"description,omitempty"`
 }
 
 // Subscribe is one `[[subscribe]]` block: the event patterns that wake this app.
@@ -111,7 +126,7 @@ var viewKinds = []string{ViewKindTile}
 // knownTables is what a manifest may declare, named in the error an unknown
 // table produces. Future stages add entries here as they add the runtime that
 // honors them — C1 `[[hooks]]`, B2 `[[workflows]]`.
-var knownTables = []string{"subscribe", "collections", "views"}
+var knownTables = []string{"subscribe", "collections", "views", "commands"}
 
 // LoadManifest reads and validates the manifest in dir.
 func LoadManifest(dir string) (Manifest, error) {
@@ -172,6 +187,9 @@ func ParseManifest(text string) (Manifest, error) {
 		return Manifest{}, err
 	}
 	if err := m.checkViews(); err != nil {
+		return Manifest{}, err
+	}
+	if err := m.checkCommands(); err != nil {
 		return Manifest{}, err
 	}
 	if err := m.checkSomethingRuns(); err != nil {
@@ -266,9 +284,15 @@ func (m Manifest) checkSubscriptions() error {
 // a tile that only reads the document store is the shape this exists to allow.
 // What is still refused is a manifest declaring neither, which would install as
 // a version that can never execute and never render.
+//
+// A command is not a third way in. It is invoked from a view of the same app,
+// so commands with no view are handlers nothing can reach.
 func (m Manifest) checkSomethingRuns() error {
 	if len(m.EventPatterns()) > 0 || len(m.Views) > 0 {
 		return nil
+	}
+	if len(m.Commands) > 0 {
+		return fmt.Errorf("declares commands but no view, and a command is invoked from one of this app's own views; add a [[views]] block naming the component that calls it, or a [[subscribe]] block if the app is meant to run on events instead")
 	}
 	return fmt.Errorf("declares neither a subscription nor a view, so nothing would ever run it; add a [[subscribe]] block with events = [\"session.state.changed\"] (patterns end in .* to match a family), or a [[views]] block naming a component to render")
 }
@@ -344,6 +368,29 @@ func (m *Manifest) checkViews() error {
 				return fmt.Errorf("view %q declares params with no label, and the label is what the dock picker puts on the field it asks for; add label = \"Repository\", or drop params to take none", v.Name)
 			}
 		}
+	}
+	return nil
+}
+
+// checkCommands validates every `[[commands]]` block.
+//
+// A duplicate is refused for the reason a duplicate subscription is: each name
+// becomes one key of the generated `Handlers` type, and two blocks naming the
+// same command would collapse into one slot an author believes they declared
+// twice.
+func (m *Manifest) checkCommands() error {
+	seen := map[string]bool{}
+	for i := range m.Commands {
+		c := &m.Commands[i]
+		c.Name = strings.TrimSpace(c.Name)
+		c.Description = strings.TrimSpace(c.Description)
+		if err := apps.ValidateCommandName(c.Name); err != nil {
+			return err
+		}
+		if seen[c.Name] {
+			return fmt.Errorf("declares command %q twice; a command name binds one handler, so name each one once", c.Name)
+		}
+		seen[c.Name] = true
 	}
 	return nil
 }
@@ -436,6 +483,39 @@ func (m Manifest) ViewNames() []string {
 		out = append(out, v.Name)
 	}
 	return out
+}
+
+// CommandNames is every declared command, in declaration order.
+func (m Manifest) CommandNames() []string {
+	out := make([]string, 0, len(m.Commands))
+	for _, c := range m.Commands {
+		out = append(out, c.Name)
+	}
+	return out
+}
+
+// DeclaredCommands reads the command names back out of a frozen declaration.
+//
+// The serving version's declaration is the contract, exactly as it is for
+// views: after a rollback, what an app answers is what the version now serving
+// declared, not what the manifest on disk says today. Every name is validated
+// rather than trusted — the declaration arrived over the wire, and the name
+// becomes a dispatch key.
+func DeclaredCommands(declaration string) ([]string, error) {
+	var snapshot struct {
+		Commands []Command `json:"commands"`
+	}
+	if err := json.Unmarshal([]byte(declaration), &snapshot); err != nil {
+		return nil, fmt.Errorf("reading the commands of a declaration snapshot: %w", err)
+	}
+	out := make([]string, 0, len(snapshot.Commands))
+	for _, c := range snapshot.Commands {
+		if err := apps.ValidateCommandName(c.Name); err != nil {
+			return nil, err
+		}
+		out = append(out, c.Name)
+	}
+	return out, nil
 }
 
 // DeclaredViews reads the views back out of a frozen declaration. The daemon

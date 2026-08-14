@@ -109,5 +109,9 @@ export interface ViewProps {
 }
 export { useQuery } from "./useQuery";
 export type { LiveQueryOptions, QueryError, QueryResult } from "./useQuery";
+export { useCommand } from "./useCommand";
+export type { CommandOutcome, CommandRunner } from "./useCommand";
+export { Button, EmptyState, List, ListRow, Markdown, TextArea, TextInput } from "./components";
+export type { ButtonProps, ButtonVariant, EmptyStateProps, ListProps, ListRowProps, MarkdownProps, TextAreaProps, TextInputProps, } from "./components";
 export { AppViewRuntimeProvider, useAppViewRuntime } from "./runtime";
 export type { AppViewRuntime, DocumentRevision, DocumentSubscriber, LiveQueryRequest, QueryDelivery, RawDocument, } from "./runtime";
