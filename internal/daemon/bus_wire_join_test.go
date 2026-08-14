@@ -298,6 +298,13 @@ var wireFixtures = map[string]wireFixture{
 			return &protocol.WorkflowRun{RunID: "run-1", Status: protocol.WorkflowRunStatusRunning}
 		},
 	},
+	// Crew. Every fact re-pushes the whole roster: the sidebar draws every
+	// member, awake or asleep, so there is nothing smaller to send.
+	FactCrewRegistered: {events: []string{protocol.EventCrewUpdated}},
+	FactCrewBound:      {events: []string{protocol.EventCrewUpdated}},
+	FactCrewReleased:   {events: []string{protocol.EventCrewUpdated}},
+	FactCrewUpdated:    {events: []string{protocol.EventCrewUpdated}},
+
 	FactPresentationAdded: {
 		events:  []string{protocol.EventPresentationAdded},
 		subject: (*wireWorld).presentation,

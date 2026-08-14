@@ -42,6 +42,7 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 				NotebookRoot:   root,
 				HasSelfMonitor: d.sessionHasSelfMonitor(sessionID),
 				Garden:         d.gardenPrimeForLaunch(sessionID),
+				Crew:           d.crewPrimeForLaunch(sessionID),
 			}.Instructions(),
 			WorkspaceID:  workspaceID,
 			NotebookRoot: root,
@@ -69,6 +70,7 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 			WorkspaceContextPath: result.Path,
 			InjectWorkflow:       parseBooleanSetting(d.store.GetSetting(SettingWorkflowsEnabled)),
 			Garden:               d.gardenPrimeForLaunch(sessionID),
+			Crew:                 d.crewPrimeForLaunch(sessionID),
 		}.Instructions(),
 		WorkspaceID:     workspaceID,
 		ContextPath:     result.Path,
@@ -85,4 +87,12 @@ func (d *Daemon) gardenPrimeForLaunch(sessionID string) *hooks.GardenPrime {
 		return nil
 	}
 	return prime
+}
+
+// crewPrimeForLaunch is the crew block for a plugin-driver launch, the same one
+// a built-in driver's wrapper fetches over `crew_prime`. Empty for a session
+// that is nobody.
+func (d *Daemon) crewPrimeForLaunch(sessionID string) string {
+	_, block, _ := d.crewPrimeForSession(sessionID)
+	return block
 }

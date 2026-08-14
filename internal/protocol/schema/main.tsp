@@ -2982,6 +2982,9 @@ model InitialStateMessage {
   // as well as on garden_seeds_updated so a client that connects to an
   // over-large garden knows it is short before anything moves.
   seeds_total?: int32;
+  // The crew roster, so the sidebar draws every member — awake or asleep — from
+  // the first push rather than asking for one.
+  crew?: CrewMember[];
 }
 
 model EndpointStatusChangedMessage {
@@ -4936,6 +4939,9 @@ model Response {
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
   crew_list_result?: CrewListResult;
+  crew_wake_result?: CrewWakeResult;
+  crew_set_result?: CrewSetResult;
+  crew_prime_result?: CrewPrimeResult;
   seed_plant_result?: SeedPlantResult;
   seed_plot_result?: SeedPlotResult;
   seed_list_result?: SeedListResult;
@@ -5057,6 +5063,80 @@ model CrewMember {
 }
 
 model CrewListResult {
+  members: CrewMember[];
+}
+
+// Start a member's day: launch a session bound to it, in the member's own cwd,
+// with its awareness dirs and its priming. Home-only. A member whose day is
+// already live is not woken twice — the result names that session instead, so
+// the caller focuses it rather than racing the single-holder rule.
+model CrewWakeMessage {
+  cmd: "crew_wake";
+  member: string;
+  // The harness to launch; the daemon's default agent when absent.
+  agent?: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// CrewWakeResultMessage replies to a websocket crew_wake, correlated by
+// request_id. session_id is the day to focus — the member's, whether this call
+// started it or found it already running. The session and its pane reach the UI
+// through the normal broadcasts, so the sidebar seeds nothing.
+model CrewWakeResultMessage {
+  event: "crew_wake_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  member?: string;
+  session_id?: string;
+  workspace_id?: string;
+  already_awake?: boolean;
+}
+
+model CrewWakeResult {
+  member: string;
+  session_id: string;
+  workspace_id: string;
+  // True when the member was already awake and session_id is the day that was
+  // already running — nothing was launched.
+  already_awake: boolean;
+}
+
+// Record where a member's sessions launch and which directories its charter is
+// about. Registry state, not prose: the home's markdown is never rewritten, and
+// an omitted field is left as it was.
+model CrewSetMessage {
+  cmd: "crew_set";
+  member: string;
+  cwd?: string;
+  awareness_dirs?: string[];
+}
+
+model CrewSetResult {
+  member: CrewMember;
+}
+
+// What a launching session needs to be its member: the composed priming block
+// and the directories to open. Asked by the attn wrapper for every launch, so
+// the answer is empty for the sessions — most of them — that are nobody.
+model CrewPrimeMessage {
+  cmd: "crew_prime";
+  session_id: string;
+}
+
+model CrewPrimeResult {
+  // Absent when this session holds no binding.
+  member?: string;
+  guidance?: string;
+  awareness_dirs: string[];
+  priming_bytes: int32;
+}
+
+// The roster, pushed on initial_state and whenever a member is registered,
+// woken, or released. Every member is here, awake or asleep: the sidebar shows
+// a sleeping member one action from waking, so it cannot ask per member.
+model CrewUpdatedMessage {
+  event: "crew_updated";
   members: CrewMember[];
 }
 
@@ -5683,6 +5763,8 @@ alias DaemonEvent =
   | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
   | GardenSeedsUpdatedMessage
+  | CrewUpdatedMessage
+  | CrewWakeResultMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage

@@ -26,6 +26,10 @@ func runCrew() {
 	switch os.Args[2] {
 	case "list", "ls":
 		runCrewList(os.Args[3:])
+	case "wake":
+		runCrewWake(os.Args[3:])
+	case "set":
+		runCrewSet(os.Args[3:])
 	default:
 		fmt.Fprintf(os.Stderr, "crew: unknown command %q\n", os.Args[2])
 		writeCrewHelp(os.Stderr)
@@ -47,6 +51,18 @@ commands:
   list [--json]
         every registered member, awake or asleep. An awake member names the
         session living its current day.
+
+  wake <member> [--agent <name>] [--json]
+        start a member's day: a session bound to it, launched in the member's
+        own cwd with its awareness dirs, primed with its charter, the freshest
+        letter left for it, and how its home works. A member that is already
+        awake is not woken twice — the answer names the session it is living.
+
+  set <member> [--cwd <dir>] [--awareness-dir <dir>]...
+        record where the member's sessions launch and which directories its
+        charter is about. Registry state; the home's markdown is never
+        rewritten. --awareness-dir repeats and replaces the whole list; pass it
+        once with an empty value to clear it.
 `)
 }
 
@@ -84,6 +100,139 @@ func runCrewList(args []string) {
 		return
 	}
 	printCrewList(os.Stdout, result.Members)
+}
+
+type crewWakeArgs struct {
+	member string
+	agent  string
+	json   bool
+}
+
+func parseCrewWakeArgs(args []string) (crewWakeArgs, error) {
+	fs := flag.NewFlagSet("crew wake", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	agent := fs.String("agent", "", "the harness to launch (default claude)")
+	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
+	member, err := parseMemberAndFlags(fs, args, "crew wake")
+	if err != nil {
+		return crewWakeArgs{}, err
+	}
+	return crewWakeArgs{member: member, agent: strings.TrimSpace(*agent), json: *jsonOut}, nil
+}
+
+// parseMemberAndFlags reads `<member>` and its flags in either order. Go's flag
+// package stops at the first positional, and `attn crew wake trellis --agent
+// codex` is how anyone types it — so the member is lifted out and the rest
+// parsed behind it.
+func parseMemberAndFlags(fs *flag.FlagSet, args []string, verb string) (string, error) {
+	if err := fs.Parse(args); err != nil {
+		return "", err
+	}
+	if fs.NArg() == 0 {
+		return "", errors.New(verb + " takes one member name")
+	}
+	member, rest := fs.Arg(0), fs.Args()[1:]
+	if len(rest) > 0 {
+		if err := fs.Parse(rest); err != nil {
+			return "", err
+		}
+		if fs.NArg() != 0 {
+			return "", fmt.Errorf("%s takes one member name, not %q", verb, strings.Join(fs.Args(), " "))
+		}
+	}
+	return member, nil
+}
+
+func runCrewWake(args []string) {
+	parsed, err := parseCrewWakeArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew wake: %v\n", err)
+		writeCrewHelp(os.Stderr)
+		os.Exit(2)
+	}
+	result, err := client.New("").CrewWake(parsed.member, parsed.agent)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew wake: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.json {
+		printJSON(result)
+		return
+	}
+	if result.AlreadyAwake {
+		fmt.Printf("%s is already awake in session %s — nothing was launched.\n", result.Member, agentShortID(result.SessionID))
+		return
+	}
+	fmt.Printf("%s is awake in session %s. `attn agent peek %[2]s` watches the day; the priming size is in the daemon log (grep `crew: priming`).\n",
+		result.Member, agentShortID(result.SessionID))
+}
+
+// crewDirList collects a repeatable flag. An explicit empty value clears the
+// list — the way out of every awareness dir the member has.
+type crewDirList struct {
+	values []string
+	set    bool
+}
+
+func (l *crewDirList) String() string { return strings.Join(l.values, ",") }
+
+func (l *crewDirList) Set(value string) error {
+	l.set = true
+	if strings.TrimSpace(value) != "" {
+		l.values = append(l.values, value)
+	}
+	return nil
+}
+
+func runCrewSet(args []string) {
+	fs := flag.NewFlagSet("crew set", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	cwd := fs.String("cwd", "", "where the member's sessions launch")
+	var dirs crewDirList
+	fs.Var(&dirs, "awareness-dir", "a directory the member's charter is about; repeat for several")
+	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
+	member, err := parseMemberAndFlags(fs, args, "crew set")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew set: %v\n", err)
+		writeCrewHelp(os.Stderr)
+		os.Exit(2)
+	}
+	var cwdArg *string
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "cwd" {
+			cwdArg = cwd
+		}
+	})
+	if cwdArg == nil && !dirs.set {
+		fmt.Fprintln(os.Stderr, "crew set: nothing to set — pass --cwd, --awareness-dir, or both")
+		os.Exit(2)
+	}
+	var awareness []string
+	if dirs.set {
+		awareness = dirs.values
+		if awareness == nil {
+			awareness = []string{}
+		}
+	}
+	result, err := client.New("").CrewSet(member, cwdArg, awareness)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew set: %v\n", err)
+		os.Exit(1)
+	}
+	if *jsonOut {
+		printJSON(result.Member)
+		return
+	}
+	record := result.Member
+	fmt.Printf("%s launches in %s\n", record.ID, valueOrDash(protocol.Deref(record.Cwd)))
+	fmt.Printf("awareness dirs: %s\n", valueOrDash(strings.Join(record.AwarenessDirs, ", ")))
+}
+
+func valueOrDash(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return "-"
+	}
+	return value
 }
 
 func printCrewList(w io.Writer, members []protocol.CrewMember) {

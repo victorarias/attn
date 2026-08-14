@@ -81,6 +81,7 @@ func (d *Daemon) importCrewHomes() {
 			d.logf("crew: importing %s: %v", member.ID, err)
 			continue
 		}
+		d.publishFact(FactCrewRegistered, member.ID, nil)
 		d.logf("crew: imported member %s from %s", member.ID, member.HomeDir)
 	}
 }
@@ -196,6 +197,7 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 		member.BindingSession = sessionID
 		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
 		if err == nil {
+			d.publishFact(FactCrewBound, member.ID, nil)
 			d.logf("crew: session %s bound as %s", sessionID, member.ID)
 			return member.ID, nil
 		}
@@ -242,6 +244,7 @@ func (d *Daemon) releaseCrewBindingsExcept(schema docstore.CollectionSchema, mem
 			d.logf("crew: releasing %s's binding for session %s: %v", member.ID, sessionID, err)
 			continue
 		}
+		d.publishFact(FactCrewReleased, member.ID, nil)
 		d.logf("crew: session %s released %s's binding", sessionID, member.ID)
 	}
 }
@@ -325,6 +328,70 @@ func (d *Daemon) sendCrewError(conn net.Conn, verb string, err error) {
 	d.sendError(conn, fmt.Sprintf("crew %s: %v", verb, err))
 }
 
+// crewMemberWire is the one projection of a member onto the wire, shared by the
+// roster read, the set result, and the sidebar's push.
+func (d *Daemon) crewMemberWire(member crew.Member) protocol.CrewMember {
+	wire := protocol.CrewMember{
+		ID:          member.ID,
+		CharterPath: member.CharterPath,
+		HomeDir:     member.HomeDir,
+	}
+	if member.CWD != "" {
+		wire.Cwd = protocol.Ptr(member.CWD)
+	}
+	wire.AwarenessDirs = append([]string{}, member.AwarenessDirs...)
+	// The wire carries only a binding that still binds: whether a session is
+	// live is judged here, at read, so a caller never has to.
+	if d.crewBindingLive(member) {
+		wire.BindingSession = protocol.Ptr(member.BindingSession)
+	}
+	return wire
+}
+
+// crewForBroadcast is the payload of both initial_state and crew_updated. An
+// outpost has no roster to push; not an error here, because initial_state is
+// not a crew command and a refusal in a snapshot would be noise on every
+// connect.
+func (d *Daemon) crewForBroadcast() []protocol.CrewMember {
+	if d.store == nil {
+		return nil
+	}
+	if err := d.requireHome(crew.Surface); err != nil {
+		return nil
+	}
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		if !docstore.IsUndeclaredCollection(err) {
+			d.logf("crew: reading roster for broadcast: %v", err)
+		}
+		return nil
+	}
+	out := make([]protocol.CrewMember, 0, len(members))
+	for _, member := range members {
+		out = append(out, d.crewMemberWire(member))
+	}
+	return out
+}
+
+// projectCrewRoster re-pushes the roster to every client. The sidebar draws
+// every member, awake or asleep, so there is nothing smaller to send than the
+// whole list.
+func (d *Daemon) projectCrewRoster() {
+	if d.store == nil {
+		return
+	}
+	d.projectSnapshot(snapshotCrew, func() {
+		members := d.crewForBroadcast()
+		if d.wsHub == nil {
+			return
+		}
+		d.broadcastMessage(&protocol.CrewUpdatedMessage{
+			Event:   protocol.EventCrewUpdated,
+			Members: members,
+		})
+	})
+}
+
 func (d *Daemon) handleCrewList(conn net.Conn, _ *protocol.CrewListMessage) {
 	if err := d.requireHome(crew.Surface); err != nil {
 		d.sendCrewError(conn, "list", err)
@@ -337,21 +404,7 @@ func (d *Daemon) handleCrewList(conn net.Conn, _ *protocol.CrewListMessage) {
 	}
 	out := make([]protocol.CrewMember, 0, len(members))
 	for _, member := range members {
-		wire := protocol.CrewMember{
-			ID:          member.ID,
-			CharterPath: member.CharterPath,
-			HomeDir:     member.HomeDir,
-		}
-		if member.CWD != "" {
-			wire.Cwd = protocol.Ptr(member.CWD)
-		}
-		wire.AwarenessDirs = append([]string{}, member.AwarenessDirs...)
-		// The wire carries only a binding that still binds: whether a session is
-		// live is judged here, at read, so a caller never has to.
-		if d.crewBindingLive(member) {
-			wire.BindingSession = protocol.Ptr(member.BindingSession)
-		}
-		out = append(out, wire)
+		out = append(out, d.crewMemberWire(member))
 	}
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:             true,

@@ -3058,9 +3058,10 @@ func runAgentDirectly(requestedAgent string) {
 		sessionID = wrapper.GenerateSessionID()
 	}
 	if managedMode && parsed.member != "" {
-		// The daemon-owned spawn path does not carry a binding yet (the wake
-		// slice adds it); running anyway would silently drop the identity.
-		fmt.Fprintf(os.Stderr, "attn: --member is not supported on daemon-managed launches yet\n")
+		// A daemon-owned launch is bound by the daemon before the spawn — `attn
+		// crew wake` claims the binding, and this process is what it spawned.
+		// Passing the name again here would race that claim against itself.
+		fmt.Fprintf(os.Stderr, "attn: --member names a member to launch as; a daemon-managed launch is already bound by `attn crew wake`\n")
 		os.Exit(1)
 	}
 	if !managedMode {
@@ -3132,6 +3133,14 @@ func runAgentDirectly(requestedAgent string) {
 	// nothing rather than teaching a loop this session cannot run.
 	if ready, err := c.SeedReady(sessionID, "", false); err == nil {
 		opts.Garden = gardenPrimeFromReady(ready)
+	}
+	// The crew priming rides the same injection. The daemon composes it from
+	// the member's own home and logs its size at that moment, so what a member
+	// was told and what the receipt says are the same bytes. A session that is
+	// nobody — most of them — gets an empty answer and no crew block.
+	if prime, err := c.CrewPrime(sessionID); err == nil {
+		opts.CrewPriming = protocol.Deref(prime.Guidance)
+		opts.AwarenessDirs = prime.AwarenessDirs
 	}
 	// The daemon's worker exports ATTN_WORKFLOW_GUIDANCE_ENABLED when the
 	// workflows_enabled setting is on. This launch path is the worker process, so
