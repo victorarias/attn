@@ -563,9 +563,12 @@ Acceptance:
   slice 6, and the path is: a delegation binds a seed — the brief is the
   seed's body, the delegate session its tender; status reports become
   log notes; steering goes over agent-msg. The `attn ticket` verbs
-  become loud signposts to their garden equivalents for a window rather
-  than vanishing. Open tickets convert to seeds; done tickets stay
-  readable, never migrated. Victor proves it by living on the epic
+  become loud signposts to their garden equivalents, kept indefinitely
+  — their audience is agents on stale guidance, and a signpost is what
+  lets them self-correct. Unbound backlog todos bulk-convert to seeds
+  at cutover; in-flight delegations finish on their tickets; done
+  tickets stay readable, never migrated. Victor proves it by living on
+  the epic
   branch for days without touching tickets before it merges. The
   landmine to design around: delegation reporting IS tickets today
   (briefs, status reports, artifacts all land there), so the garden must

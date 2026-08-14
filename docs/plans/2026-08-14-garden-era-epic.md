@@ -90,9 +90,18 @@ The path is encoded at the ["Tickets retire" entry](2026-08-06-the-garden-vertic
   session its tender. Status reports become log notes; steering goes
   over agent-msg.
 - `attn ticket` verbs become loud signposts to their garden equivalents
-  for a window, not silent removals.
-- Open tickets convert to seeds; done tickets stay readable forever,
-  never migrated.
+  — each prints where the capability went and exits nonzero. The
+  signposts stay indefinitely (ruled 2026-08-14): their audience is
+  mostly agents running on stale memories and guidance, a signpost is
+  what lets them self-correct, and a few inert lines of code cost
+  nothing. No removal is scheduled; a later cleanup may delete them
+  once long silent.
+- Conversion (ruled 2026-08-14): unbound backlog todos bulk-convert to
+  seeds at cutover — they are inert, nothing reports to them. In-flight
+  delegations finish on their tickets; new dispatches start on seeds.
+  The board drains itself within days, and "done tickets stay readable"
+  covers the tail.
+- Done tickets stay readable forever, never migrated.
 - The outpost leg stays gated on the uplink per
   [the arc plan](2026-08-10-home-garden-crew-arc.md).
 
@@ -102,6 +111,28 @@ skill's contract all land on the ticket. The garden takes that weight
 *before* the ticket verbs go signpost, or the first delegation on the
 epic branch has nowhere to report. That ordering is the epic's internal
 sequencing rule.
+
+### Artifacts
+
+Ruled 2026-08-14: artifacts are part of the seed, and the association
+is a typed `attach` entry in its log. Storage does not move — the
+canonical-artifact lifecycle
+([2026-07-18](2026-07-18-canonical-plan-artifact-lifecycle.md)) keeps
+deciding *where documents live* (committed plans in git behind a
+reference, untracked staging files promoted into the Notebook); the
+seed records only the association, the way tickets already model an
+attach as an activity event with the artifact list derived from those
+events.
+
+- An `attach` log note carries a typed reference — notebook doc id,
+  repository path + repo, or plain URL — never a string the daemon
+  parses meaning from.
+- The seed's "current artifacts" is a projection over the log (attach
+  minus detach), rendered as a small set in the panel drill and the
+  tile, not buried in the timeline.
+- `detach` is the way out.
+- At ticket conversion, a ticket's main attached plan becomes the
+  seed's body; its other artifacts become `attach` entries.
 
 ## Implementation steps
 
@@ -113,9 +144,10 @@ sequencing rule.
 - [ ] Live re-anchor on body edits (ruling C).
 - [ ] Split-button submit with the untended flip (ruling D).
 - [ ] Delegation reporting on seeds: bind at dispatch, log-note status,
-      agent-msg steering — the weight transfer.
-- [ ] Ticket verbs → signposts; open-ticket conversion; done tickets
-      readable.
+      typed `attach`/`detach` with the artifact projection, agent-msg
+      steering — the weight transfer.
+- [ ] Ticket verbs → permanent signposts; bulk-convert backlog todos;
+      done tickets readable.
 - [ ] Victor lives on the branch for days without tickets.
 - [ ] Epic merge to main on his explicit OK.
 
@@ -128,15 +160,8 @@ sequencing rule.
 - Retirement rides this epic rather than waiting for a separate pass —
   living without tickets is the only honest test of the garden carrying
   the weight, and a lived epic branch is the cheapest place to run it.
-
-## Open questions
-
-- Where ticket *artifacts* (attached plans, references) land after
-  retirement — a seed's log can carry links, but the attach-plan
-  lifecycle (`docs/plans/2026-07-18-canonical-plan-artifact-lifecycle.md`)
-  names the Notebook and repository as homes; the seed's role there is
-  undesigned.
-- The signpost window's length — a window, not forever; when it closes
-  is a call for Victor during the lived period.
-- Exact conversion UX for open tickets (bulk vs. per-ticket) — decide
-  when converting the real board, with the real tickets in front of us.
+- Artifacts associate through the log, not a schema field or child
+  seeds (rejected: child seeds conflate documents with units of work;
+  a dedicated attachments collection duplicates what the log plus a
+  projection already express). Storage stays with the canonical
+  lifecycle; the seed holds associations only.
