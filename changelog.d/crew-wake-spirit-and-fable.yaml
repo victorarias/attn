@@ -1,0 +1,12 @@
+kind: changed
+area: crew
+change: >
+  A crew member now wakes on Fable, and wakes into prose about being a member
+  rather than filing procedure. The model is hardcoded for every path that
+  starts a member's day (the sidebar, `attn crew wake`, and the nap that
+  follows a filed letter), because a member running on the wrong model is
+  wrong in a way only a read of its prose catches. The priming text opens on
+  what a member is and closes on why the letter is written for a person, with
+  the mechanics in the middle: the charter is no longer pasted into the wake,
+  the member is told to read it in its own home, and the predecessor's letter
+  is still carried inline.

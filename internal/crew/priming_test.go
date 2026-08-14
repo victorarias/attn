@@ -20,31 +20,62 @@ func fullPriming() Priming {
 	}
 }
 
-// The block is the whole of what a woken member knows about being itself: its
-// name, where it lives, what it launched into, its charter, the letter left for
-// it, and how to leave the next one.
+// The block is the whole of what a woken member knows about being itself: what
+// a member is, where it lives, what it launched into, where to read its own
+// charter, the letter left for it, and how to leave the next one.
 func TestPriming_BlockCarriesEverythingAWokenMemberNeeds(t *testing.T) {
 	block := fullPriming().Block()
 
 	for _, want := range []string{
-		"You are **trellis**",
+		"You are **Trellis**",
+		"The last Trellis left you what they knew",
+		"Presence over persistence",
+		"You are not playing a part.",
 		"/home/victor/.attn/crew/trellis",
+		"Begin by reading `CHARTER.md` there.",
 		"/home/victor/projects/attn",
 		"/home/victor/projects/pi",
 		"/home/victor/notes",
-		"## Your charter (/home/victor/.attn/crew/trellis/CHARTER.md)",
-		"I care about the shape of the work.",
 		"## Your predecessor's letter (2026-08-13T22-20Z-trellis.md)",
 		"#901 is waiting on review",
 		"2026-08-12T21-00Z-trellis.md",
+		"## Closure",
 		"attn handoff -m",
-		"Filing ends your day.",
-		"attn seed note <id> --handoff",
-		"Only one session is trellis at a time",
+		"Filing is the turning of the page",
+		"a seed's handoff note belongs to the seed",
+		"Someone wakes as Trellis after you",
 	} {
 		if !strings.Contains(block, want) {
 			t.Errorf("the block does not carry %q", want)
 		}
+	}
+}
+
+// The charter is read, never inlined: a member opens its own file, so the wake
+// never carries a stale copy of the self it is about to read.
+func TestPriming_TheCharterIsReadRatherThanInlined(t *testing.T) {
+	p := fullPriming()
+	p.Charter = "# trellis\n\nI care about the shape of the work."
+
+	block := p.Block()
+	if strings.Contains(block, "I care about the shape of the work.") {
+		t.Error("the charter's text was inlined into the block")
+	}
+	if !strings.Contains(block, "Begin by reading `CHARTER.md` there.") {
+		t.Error("the block does not send the member to its charter")
+	}
+}
+
+// The name is a name in prose and an address everywhere else: Trellis speaking
+// to Trellis, living in a lowercase home.
+func TestPriming_TheNameIsCapitalizedOnlyInProse(t *testing.T) {
+	block := fullPriming().Block()
+
+	if strings.Contains(block, "You are **trellis**") {
+		t.Error("the member is addressed by its id rather than by its name")
+	}
+	if !strings.Contains(block, "`/home/victor/.attn/crew/trellis`") {
+		t.Error("the home path was capitalized along with the name")
 	}
 }
 
@@ -64,8 +95,9 @@ func TestPriming_AFirstDayNamesWhatIsMissing(t *testing.T) {
 
 	for _, want := range []string{
 		"this is your first day",
+		"a self, not a job description",
 		"/homes/sable/CHARTER.md",
-		"No letter was left for you",
+		"No letter is waiting for you",
 		"/homes/sable/handoffs",
 	} {
 		if !strings.Contains(block, want) {
@@ -74,18 +106,18 @@ func TestPriming_AFirstDayNamesWhatIsMissing(t *testing.T) {
 	}
 }
 
-// A file nothing like a real one is cut rather than inlined whole, and the cut
-// says where the rest is — a member told half a charter with no path has no way
+// A letter nothing like a real one is cut rather than inlined whole, and the cut
+// says where the rest is — a member told half a letter with no path has no way
 // back to the other half.
 func TestPriming_AnOversizeFileIsCutWithWhereTheRestIs(t *testing.T) {
 	p := fullPriming()
-	p.Charter = strings.Repeat("charter. ", CharterLimit/4)
+	p.Handoff = strings.Repeat("letter. ", HandoffLimit/4)
 	block := p.Block()
 
-	if len(block) > CharterLimit+HandoffLimit+8000 {
-		t.Fatalf("block is %d bytes; the limits did not bound it", len(block))
+	if len(block) > HandoffLimit+8000 {
+		t.Fatalf("block is %d bytes; the limit did not bound it", len(block))
 	}
-	if !strings.Contains(block, "[cut at ") || !strings.Contains(block, p.CharterPath) {
+	if !strings.Contains(block, "[cut at ") || !strings.Contains(block, p.HandoffName) {
 		t.Error("the cut does not say where the whole file is")
 	}
 }
@@ -93,16 +125,16 @@ func TestPriming_AnOversizeFileIsCutWithWhereTheRestIs(t *testing.T) {
 // Markdown carries any Unicode, so a cut lands on a rune boundary — a block
 // ending mid-rune is invalid UTF-8 in a system prompt.
 func TestPriming_ACutLandsOnARuneBoundary(t *testing.T) {
-	p := Priming{Member: "keel", HomeDir: "/homes/keel", CharterPath: "/homes/keel/CHARTER.md"}
+	p := Priming{Member: "keel", HomeDir: "/homes/keel", HandoffName: "2026-08-13T22-20Z-keel.md"}
 	// 3-byte runes never align with the limit, so a naive slice splits one.
-	p.Charter = strings.Repeat("日", CharterLimit)
+	p.Handoff = strings.Repeat("日", HandoffLimit)
 
 	block := p.Block()
 	if !utf8.ValidString(block) {
 		t.Fatal("the cut split a rune: the block is not valid UTF-8")
 	}
 	if !strings.Contains(block, "[cut at ") {
-		t.Fatal("an oversize charter was not cut")
+		t.Fatal("an oversize letter was not cut")
 	}
 }
 

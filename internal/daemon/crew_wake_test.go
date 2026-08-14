@@ -91,6 +91,34 @@ func TestCrewWake_StartsADayBoundInTheMembersOwnDirectory(t *testing.T) {
 	}
 }
 
+// A member runs on the pinned model, and nothing in the registry can change
+// that: a member on another model is wrong in a way only reading its prose
+// catches, so the wake decides it rather than a per-member setting.
+func TestCrewWake_AMemberWakesOnThePinnedModel(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if _, err := d.crewWake("trellis", ""); err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	backend.mu.Lock()
+	model := backend.spawnOpts[0].Model
+	backend.mu.Unlock()
+	if model != crewWakeModel {
+		t.Fatalf("member woke on model %q, want %q", model, crewWakeModel)
+	}
+}
+
+// The pin names a Claude model, so a wake onto another harness takes that
+// harness's own default rather than a model it cannot run.
+func TestCrewWake_AnotherHarnessIsNotGivenTheClaudeModel(t *testing.T) {
+	if pin := crewWakeModelPin("codex"); pin != nil {
+		t.Fatalf("a codex wake was pinned to %q", *pin)
+	}
+	if pin := crewWakeModelPin("CLAUDE"); pin == nil || *pin != crewWakeModel {
+		t.Fatalf("the default harness was not pinned: %v", pin)
+	}
+}
+
 // Two agents with the same identity never run at once. The sidebar's one action
 // must not fail exactly when the member is present, so a second wake names the
 // live day instead of refusing — and launches nothing.
@@ -199,9 +227,8 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 		t.Fatalf("primed as %q, want trellis", member.ID)
 	}
 	for _, want := range []string{
-		"You are **trellis**",
-		"What I care about.", // the charter on disk
-		"Where I left off.",  // the freshest letter
+		"You are **Trellis**",
+		"Where I left off.", // the freshest letter
 		"2026-08-13T22-20Z-trellis.md",
 	} {
 		if !strings.Contains(block, want) {

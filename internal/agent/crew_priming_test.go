@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-const crewBlock = "You are **trellis**, a crew member of this attn home."
+const crewBlock = "You are **Trellis**, a crew member of this attn home."
 
 // A woken member is its member on both built-in harnesses: the priming rides the
 // same launch-guidance path the garden primer does, and a session nobody woke as

@@ -525,11 +525,12 @@ To **wake** a member is to start its day: `attn crew wake <name>`, or one click
 on its row in the sidebar, where every member is drawn awake or asleep. The
 daemon binds the member, then launches a session in its recorded cwd — its own
 home when none is recorded — reaching its **awareness dirs**, the directories
-its charter is about. The launch carries **priming**: the charter, the freshest
-letter left for it, and the crew guidance — how a handoff is filed, how the two
-handoff axes differ, that only one session is this member at a time. Skills
-retire into verbs and the verbs are taught, because an agent never told how to
-handoff cannot file one.
+its charter is about. Every wake runs on the same pinned model, hardcoded
+rather than configurable: a member subtly wrong takes a read of its prose to
+notice. The launch carries **priming**: what a member is, where its charter is
+to be read, the freshest letter left for it inline, and how a day is closed.
+Skills retire into verbs and the verbs are taught, because an agent never told
+how to handoff cannot file one.
 
 A member's day ends with a **handoff**: `attn handoff -m "<letter>"`, the
 member's own letter to its successor. attn names the file and files it into the
