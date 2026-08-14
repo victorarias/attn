@@ -1,5 +1,8 @@
 packages:
   - '.'
+  # The app SDK. One TypeScript source, imported by the frontend through its own
+  # specifier so a view's React is attn's React.
+  - '../sdk/attn-app'
 
 allowBuilds:
   esbuild: true

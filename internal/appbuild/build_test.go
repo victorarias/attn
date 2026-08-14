@@ -576,3 +576,71 @@ func TestWriteGenerated_LeavesUnchangedFilesAlone(t *testing.T) {
 		t.Fatal("codegen rewrote an unchanged generated file")
 	}
 }
+
+// The proof the SDK-as-a-package slice owes: an app can write React, and the
+// only specifier it needs is the SDK's own.
+//
+// The typecheck rather than a whole apply, because bundling a view is the next
+// slice's work — a handler bundle carries no SDK JavaScript by design, and the
+// materialized package has none to give it. What is proven here is the half this
+// slice owns: hooks, JSX and a view's props resolve, with no npm install and no
+// `react` anywhere in the app.
+func TestTypecheck_AnEntrypointWritingReactResolvesTheSDKAlone(t *testing.T) {
+	env := newBuildEnv(t, "tsx-app")
+	env.editManifest(t, `entrypoint = "src/index.ts"`, `entrypoint = "src/index.tsx"`)
+	if err := os.Remove(filepath.Join(env.dir, "src", "index.ts")); err != nil {
+		t.Fatal(err)
+	}
+	write(t, filepath.Join(env.dir, "src", "index.tsx"), `
+import { useState, type ReactNode, type ViewProps } from "@victorarias/attn-app"
+
+export default function Approvals({ params, tileId }: ViewProps): ReactNode {
+  const [open, setOpen] = useState(true)
+  return (
+    <div data-tile={tileId}>
+      <button onClick={() => setOpen(!open)}>{open ? "hide" : "show"}</button>
+      {open ? <p>{params || "everything"}</p> : null}
+    </div>
+  )
+}
+`)
+	manifest, err := LoadManifest(env.dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tools, err := ResolveToolchain(env.store, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := EnsureSDK(env.store, env.dir, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := typecheck(context.Background(), tools, env.dir, manifest); err != nil {
+		t.Fatalf("an entrypoint using the SDK's React does not typecheck: %v", err)
+	}
+}
+
+// The other half of "one React": an app cannot reach React except through the
+// SDK, so there is no way to end up with a second instance.
+func TestBuild_ImportingReactDirectlyIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "two-reacts-app")
+	env.edit(t, "src/index.ts", `import type { Ctx, Handlers } from "./generated"`,
+		"import { useState } from \"react\"\nexport const unused = useState\nimport type { Ctx, Handlers } from \"./generated\"")
+
+	_, err := env.build(t)
+
+	if err == nil {
+		t.Fatal("an app imported react and applied")
+	}
+	if !strings.Contains(err.Error(), "Cannot find module 'react'") {
+		t.Fatalf("the error does not name the missing module: %v", err)
+	}
+}
+
+func write(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(strings.TrimLeft(content, "\n")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+}

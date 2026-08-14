@@ -123,6 +123,11 @@ func Build(ctx context.Context, opts Options) (Result, error) {
 	if err != nil {
 		return Result{}, err
 	}
+	// The SDK is materialized before the typecheck because it is what the
+	// typecheck resolves the specifier to.
+	if _, err := EnsureSDK(opts.StoreDir, dir, opts.Log); err != nil {
+		return Result{}, err
+	}
 
 	logf(opts.Log, "typechecking %s", manifest.Entrypoint)
 	if err := typecheck(ctx, tools, dir, manifest); err != nil {
@@ -194,14 +199,12 @@ func Build(ctx context.Context, opts Options) (Result, error) {
 	}, nil
 }
 
-// WriteGenerated rewrites the two files codegen owns. It runs before the
-// typecheck because it is what the typecheck checks against, and it writes into
-// the app's own tree because the author's editor has to see the same errors
-// apply does.
+// WriteGenerated rewrites the file codegen owns. It runs before the typecheck
+// because it is what the typecheck checks against, and it writes into the app's
+// own tree because the author's editor has to see the same errors apply does.
 func WriteGenerated(dir string, m Manifest) error {
 	files := map[string]string{
 		GeneratedFile: GenerateTypes(m),
-		SDKFile:       GenerateSDK(),
 	}
 	for name, content := range files {
 		path := filepath.Join(dir, filepath.FromSlash(name))
@@ -240,9 +243,11 @@ func typecheck(ctx context.Context, tools Toolchain, dir string, m Manifest) err
 		"--moduleResolution", "bundler",
 		"--skipLibCheck",
 		"--pretty", "false",
-		// The ambient module declaration for the SDK: it is reachable from no
-		// import, so it has to be named or the generated types resolve to nothing.
-		filepath.FromSlash(SDKFile),
+		// TSX compiles to an import of the SDK's jsx-runtime rather than React's,
+		// which is what makes React a specifier an app cannot write: there is no
+		// `react` in an app's node_modules and nothing declares it.
+		"--jsx", "react-jsx",
+		"--jsxImportSource", SDKModule,
 		filepath.FromSlash(m.Entrypoint),
 	}
 	cmd := exec.CommandContext(ctx, tools.TSC, args...)
