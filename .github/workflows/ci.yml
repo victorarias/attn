@@ -48,6 +48,12 @@ jobs:
               - 'app/playwright.config.ts'
               - 'app/tsconfig*.json'
               - 'app/vite.config.ts'
+              - 'app/pnpm-workspace.yaml'
+              # The app SDK is a workspace package of the frontend and the source
+              # its committed declarations are emitted from, so an edit to either
+              # has to reach the typecheck and the drift check.
+              - 'sdk/attn-app/**'
+              - 'internal/appbuild/sdkdist/**'
               - 'internal/protocol/schema/**'
               - '.github/workflows/ci.yml'
             # Every input to the type pipeline plus both of its outputs. The
@@ -197,6 +203,13 @@ jobs:
 
       - name: Type check
         run: pnpm run build
+
+      # The declarations the attn binary embeds are emitted from sdk/attn-app by
+      # the same TypeScript this job just installed. Committed, so //go:embed can
+      # read them — and therefore able to go stale.
+      - name: Check app SDK declarations
+        working-directory: .
+        run: make check-sdk
 
       - name: Test
         run: pnpm test

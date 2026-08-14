@@ -483,6 +483,22 @@ Never hand-edit generated `internal/protocol/generated.go` or
 `app/src/types/generated.ts`. The daemon survives app rebuilds; version skew
 must fail explicitly.
 
+### The app SDK
+
+`sdk/attn-app/` is the one TypeScript source apps import
+(`@victorarias/attn-app`), and it has two consumers that must not disagree. The
+frontend depends on it as a pnpm workspace package, so a view's React is attn's
+React by construction. The binary embeds its declarations and `attn app apply`
+materializes a types-only package under `<data-dir>/apps/sdk/<hash>`, linked
+into the app's `node_modules`.
+
+After editing `sdk/attn-app/src`, run `make generate-sdk` and commit
+`internal/appbuild/sdkdist/` — `//go:embed` reads from the Go tree, so the
+emitted `.d.ts` is generated *and* committed like `generated.go`. `make
+check-sdk` fails on a stale copy and runs in CI's Frontend job. React's own
+declarations are pinned in `appbuild.ReactTypesVersion` and must match what the
+frontend's lockfile resolves.
+
 ### WebSocket and state
 
 - Fallible async UI actions use request/result: daemon emits `*_result`; frontend

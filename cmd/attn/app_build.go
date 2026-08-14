@@ -54,7 +54,13 @@ func runAppNew(args []string) {
 		fmt.Fprintln(os.Stderr, "usage: attn app new <path> [--name <name>] [--description <text>]")
 		os.Exit(2)
 	}
-	manifest, err := appbuild.Scaffold(appbuild.ScaffoldOptions{Dir: dir, Name: name, Description: description})
+	manifest, err := appbuild.Scaffold(appbuild.ScaffoldOptions{
+		Dir:         dir,
+		Name:        name,
+		Description: description,
+		StoreDir:    config.AppsDir(),
+		Log:         func(line string) { fmt.Fprintf(os.Stderr, "  %s\n", line) },
+	})
 	if err != nil {
 		appFail("new", err)
 	}
@@ -322,13 +328,13 @@ func devInvocationLine(inv protocol.AppInvocationInfo) string {
 }
 
 // devRelevant filters the noise. node_modules and .git are large and never part
-// of what is built from here; the generated files are rewritten by the build
+// of what is built from here; the generated file is rewritten by the build
 // itself, and while WriteGenerated skips an unchanged write, a manifest edit does
-// change them — without this the rebuild they trigger would trigger another.
+// change it — without this the rebuild it triggers would trigger another.
 func devRelevant(path string) bool {
 	base := filepath.Base(path)
 	switch base {
-	case filepath.Base(appbuild.GeneratedFile), filepath.Base(appbuild.SDKFile):
+	case filepath.Base(appbuild.GeneratedFile):
 		return false
 	}
 	for _, part := range strings.Split(filepath.ToSlash(path), "/") {

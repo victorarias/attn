@@ -16,10 +16,15 @@ import (
 // touch first is a scaffold that does not work, and the test asserts exactly
 // that sequence.
 //
-// It writes no package.json and no node_modules. An app has no runtime
-// dependency to install — the SDK arrives as generated types and the compiler
-// belongs to attn — so a new app is a directory of text files that builds
-// offline.
+// It writes no package.json and installs nothing. An app has no runtime
+// dependency of its own — the compiler belongs to attn, and the SDK is a symlink
+// into a package attn materializes — so a new app is a directory of text files
+// plus one link.
+//
+// That link is best-effort here and mandatory at apply. Materializing the SDK
+// can need the network once per machine (the toolchain install), and `attn app
+// new` on a plane must still produce a complete, appliable app: when it cannot
+// be made, the scaffold says so and names the command that will make it.
 
 // ScaffoldOptions is one `attn app new`.
 type ScaffoldOptions struct {
@@ -29,6 +34,11 @@ type ScaffoldOptions struct {
 	Name string
 	// Description is optional prose for the manifest.
 	Description string
+	// StoreDir is the artifact root, `<data-dir>/apps`, where the SDK is
+	// materialized from. Empty skips the link entirely.
+	StoreDir string
+	// Log receives progress lines. Optional.
+	Log func(string)
 }
 
 // Scaffold writes a complete, appliable app into opts.Dir.
@@ -88,6 +98,13 @@ func Scaffold(opts ScaffoldOptions) (Manifest, error) {
 	}
 	if err := WriteGenerated(dir, manifest); err != nil {
 		return Manifest{}, err
+	}
+	if opts.StoreDir != "" {
+		if _, err := ResolveToolchain(opts.StoreDir, opts.Log); err != nil {
+			logf(opts.Log, "the SDK's types are not linked yet (%v); `attn app apply %s` installs them, and your editor will show unresolved imports until then", err, dir)
+		} else if _, err := EnsureSDK(opts.StoreDir, dir, opts.Log); err != nil {
+			logf(opts.Log, "the SDK's types are not linked yet (%v); `attn app apply %s` installs them, and your editor will show unresolved imports until then", err, dir)
+		}
 	}
 	return manifest, nil
 }
@@ -158,7 +175,9 @@ func scaffoldTSConfig() string {
     "module": "esnext",
     "moduleResolution": "bundler",
     "skipLibCheck": true,
-    "noEmit": true
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "` + SDKModule + `"
   },
   "include": ["src"]
 }
@@ -178,8 +197,8 @@ You can write the whole thing from this file. Nothing else needs reading.
     `+ManifestName+`      what wakes the app and what state it owns
     src/index.ts        your handlers — the only file you edit
     src/generated.ts    derived from the manifest; do not edit
-    src/attn-app.d.ts   the SDK's types; do not edit
     tsconfig.json       so your editor sees what apply sees
+    node_modules/       one symlink to the SDK, written by apply; do not commit
 
 ## The loop
 
@@ -243,7 +262,11 @@ that will not start says why.
 
 - The manifest is the source of truth. Change what the app subscribes to there,
   never in code, and let the compiler tell you what to fix.
-- Never edit src/generated.ts or src/attn-app.d.ts. Apply rewrites both.
+- Never edit src/generated.ts. Apply rewrites it.
+- The SDK is `+"`"+SDKModule+"`"+`, and it is the only package you can import.
+  Apply links it into node_modules; nothing is installed from a registry. There
+  is no `+"`react`"+` to import — a view's JSX compiles to the SDK's own runtime,
+  which is how an app and attn share one React.
 - An unknown table in the manifest is a hard error, not a warning. An app must
   not half-load.
 - Versions are content-addressed: applying the same content twice is the same

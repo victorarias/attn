@@ -82,10 +82,10 @@ commands:
         has to be edited first. attn does not remember where the directory is.
 
   apply <path> [--json]
-        build and install: parse the manifest, regenerate src/generated.ts and
-        src/attn-app.d.ts, typecheck, bundle, then record the version and point
-        the app at it. It stops at the first failure with nothing installed, and
-        it never runs your code — a module that throws at import still applies.
+        build and install: parse the manifest, regenerate src/generated.ts, link
+        the SDK into node_modules, typecheck, bundle, then record the version and
+        point the app at it. It stops at the first failure with nothing installed,
+        and it never runs your code — a module that throws at import still applies.
 
         A version is identified by the content it was built from, so applying
         byte-identical content again is the same version, not a new one.
