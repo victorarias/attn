@@ -136,6 +136,21 @@ func ValidateViewName(name string) error {
 	return nil
 }
 
+// ViewTileKindPrefix is what makes a workspace layout's `tile_kind` an app's
+// rather than a built-in one. The prefix is reserved from A5 on: a built-in tile
+// kind may never start with it, so a future kind cannot collide with an app's
+// name.
+//
+// `tile_kind` stays daemon-opaque — internal/workspacelayout accepts any
+// non-empty string and never looks inside one. This is a naming rule the CLI and
+// the frontend both derive from, not a validation the layout performs.
+const ViewTileKindPrefix = ConsumerPrefix
+
+// ViewTileKind is how one of an app's views docks: `app:<app>/<view>`. Both
+// segments are validated names, so the string has exactly one `/` and parses by
+// splitting on the first one.
+func ViewTileKind(app, view string) string { return ViewTileKindPrefix + app + "/" + view }
+
 // NoSubscriptionsPattern is the bus filter of an app that declared no
 // subscriptions — a fact name nothing publishes. A filter has to be *something*,
 // and every other candidate ("", "*") means "everything" somewhere in the bus.

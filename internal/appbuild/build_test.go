@@ -436,8 +436,34 @@ func TestBuild_ViewLeavesTheSDKSpecifierUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(built), "from \""+SDKModule+"\"") {
+	// The artifact is minified, so `from` and the specifier may or may not have a
+	// space between them; what matters is that the specifier survived as one.
+	if !regexp.MustCompile(`from\s*"`+regexp.QuoteMeta(SDKModule)+`"`).MatchString(string(built)) {
 		t.Errorf("the SDK import was resolved into the artifact:\n%s", built)
+	}
+}
+
+// The JSX runtime a view links against, which is a landmine rather than a
+// preference: React's production build exports `jsxDEV` as `undefined`, so a
+// view built in bun's default mode resolves cleanly against attn's frontend and
+// then throws on its first element in the packaged app — where no test looks.
+// `--production` is the only thing that selects the other runtime; the app
+// tsconfig's `"jsx": "react-jsx"` does not, and neither does a NODE_ENV define.
+func TestBuild_ViewLinksAgainstTheProductionJSXRuntime(t *testing.T) {
+	env := newBuildEnv(t, "jsx-app")
+	env.addView(t, "approvals", "export default function Approvals() { return <div>ok</div> }\n")
+
+	res := env.mustBuild(t)
+
+	built, err := os.ReadFile(res.ViewBytes[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(built), SDKModule+"/jsx-runtime") {
+		t.Errorf("the view does not import the production JSX runtime:\n%s", built)
+	}
+	if strings.Contains(string(built), SDKModule+"/jsx-dev-runtime") {
+		t.Errorf("the view imports the development JSX runtime, whose jsxDEV is undefined in production React:\n%s", built)
 	}
 }
 

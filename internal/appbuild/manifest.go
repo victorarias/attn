@@ -438,21 +438,38 @@ func (m Manifest) ViewNames() []string {
 	return out
 }
 
-// DeclaredViewNames reads the views back out of a frozen declaration. The daemon
-// uses it to know which artifacts a version is made of before it has a manifest
-// — the declaration is the only description of a version it ever holds.
-func DeclaredViewNames(declaration string) ([]string, error) {
+// DeclaredViews reads the views back out of a frozen declaration. The daemon
+// uses it to know what a version offers before it has a manifest — the
+// declaration is the only description of a version it ever holds.
+//
+// Every name is validated here rather than trusted: the declaration arrived over
+// the wire, and a view name becomes a path segment of the bundle URL and a
+// segment of the `app:<app>/<view>` tile kind. This is the trust boundary for
+// both.
+func DeclaredViews(declaration string) ([]View, error) {
 	var snapshot struct {
 		Views []View `json:"views"`
 	}
 	if err := json.Unmarshal([]byte(declaration), &snapshot); err != nil {
 		return nil, fmt.Errorf("reading the views of a declaration snapshot: %w", err)
 	}
-	out := make([]string, 0, len(snapshot.Views))
 	for _, v := range snapshot.Views {
 		if err := apps.ValidateViewName(v.Name); err != nil {
 			return nil, err
 		}
+	}
+	return snapshot.Views, nil
+}
+
+// DeclaredViewNames is DeclaredViews reduced to the names — which artifacts a
+// version is made of.
+func DeclaredViewNames(declaration string) ([]string, error) {
+	views, err := DeclaredViews(declaration)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(views))
+	for _, v := range views {
 		out = append(out, v.Name)
 	}
 	return out, nil

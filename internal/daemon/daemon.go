@@ -474,6 +474,7 @@ type Daemon struct {
 	workflowBroadcastHook func(*protocol.WorkflowRunUpdatedMessage) // optional, tests only
 	ticketsBroadcastHook  func([]protocol.TicketRow)                // optional, tests only
 	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
+	appsBroadcastHook     func([]protocol.AppRegistryEntry)         // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
 	gardenMintNoteID      func() (string, error)                    // optional, tests only
 
@@ -2218,6 +2219,7 @@ func (d *Daemon) initHTTPServer() {
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
 	mux.HandleFunc("/web-instrumentation", d.handleWebInstrumentation)
+	mux.HandleFunc(appBundleRoutePrefix, d.handleAppBundle)
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		setNoStoreHeaders(w.Header())
 		w.WriteHeader(http.StatusNoContent)

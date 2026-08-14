@@ -129,7 +129,7 @@ func Build(ctx context.Context, opts Options) (Result, error) {
 		return Result{}, err
 	}
 
-	logf(opts.Log, "typechecking %s", manifest.Entrypoint)
+	logf(opts.Log, "typechecking %s", strings.Join(append([]string{manifest.Entrypoint}, viewEntrypoints(manifest)...), ", "))
 	if err := typecheck(ctx, tools, dir, manifest); err != nil {
 		return Result{}, err
 	}
@@ -250,6 +250,12 @@ func typecheck(ctx context.Context, tools Toolchain, dir string, m Manifest) err
 		"--jsxImportSource", SDKModule,
 		filepath.FromSlash(m.Entrypoint),
 	}
+	// Every view is checked too. A view is code an author writes against the SDK,
+	// and a view that only ever met the bundler would reach a tile with type
+	// errors the compiler was standing right there to name.
+	for _, v := range m.Views {
+		args = append(args, filepath.FromSlash(v.Entrypoint))
+	}
 	cmd := exec.CommandContext(ctx, tools.TSC, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
@@ -263,6 +269,17 @@ func typecheck(ctx context.Context, tools Toolchain, dir string, m Manifest) err
 	// The compiler's own text, verbatim: it already carries file, line and column,
 	// and rewording it would cost the reader the one thing they need.
 	return fmt.Errorf("app %q does not typecheck against its manifest:\n%s", m.Name, text)
+}
+
+// viewEntrypoints is what the typecheck line names beside the app's own
+// entrypoint, so a compiler error in a view is not a surprise about a file the
+// build never said it was reading.
+func viewEntrypoints(m Manifest) []string {
+	out := make([]string, 0, len(m.Views))
+	for _, v := range m.Views {
+		out = append(out, v.Entrypoint)
+	}
+	return out
 }
 
 // bundleApp runs bun's bundler. `--target bun` is the runtime apps execute in
@@ -301,15 +318,24 @@ type ViewArtifact struct {
 // give the view a second React and a hook dispatcher that is not the one
 // rendering it. Everything else an app imports is bundled in, unchanged from the
 // handler build: a version has to be the whole of what runs.
+//
+// `--production` is what selects the JSX runtime, and it is not optional.
+// Measured: without it bun emits `import { jsxDEV } from
+// "@victorarias/attn-app/jsx-dev-runtime"` regardless of the app tsconfig's
+// `"jsx": "react-jsx"` and regardless of a NODE_ENV define — and React's
+// production build exports `jsxDEV` as `undefined`, so such a view would link
+// cleanly against attn's frontend and then throw on its first element. The dev
+// runtime is still marked external, because whether bun reaches for it is bun's
+// decision and a build that resolves it into a second React would be worse.
+//
+// The bytes are a side effect, not the reason: `--production` also minifies.
 func bundleView(ctx context.Context, tools Toolchain, dir string, m Manifest, v View, outfile string) error {
-	cmd := exec.CommandContext(ctx, tools.Bun, "build",
-		filepath.FromSlash(v.Entrypoint),
-		"--target", "browser",
-		"--format", "esm",
-		"--external", SDKModule,
-		"--external", SDKModule+"/jsx-runtime",
-		"--outfile", outfile,
-	)
+	args := []string{"build", filepath.FromSlash(v.Entrypoint), "--target", "browser", "--format", "esm", "--production"}
+	for _, specifier := range SDKSpecifiers() {
+		args = append(args, "--external", specifier)
+	}
+	args = append(args, "--outfile", outfile)
+	cmd := exec.CommandContext(ctx, tools.Bun, args...)
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	if err != nil {

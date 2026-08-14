@@ -290,6 +290,20 @@ func runAppStatus(args []string) {
 			apps.ConsumerName(app.Name))
 	}
 	fmt.Printf("  documents:  %s\n", apps.Namespace(app.Name))
+	if len(app.Views) > 0 {
+		// One line per view, naming how it docks: an author reading this needs
+		// the tile kind to place it, and a person reading it needs to see that a
+		// view they declared actually made it into the serving version.
+		fmt.Println("  views:")
+		for _, v := range app.Views {
+			line := fmt.Sprintf("              %s (%s) — %s", v.Name, v.Kind, v.Title)
+			if v.ParamsLabel != nil {
+				line += fmt.Sprintf("; asks for %q when docking", *v.ParamsLabel)
+			}
+			fmt.Println(line)
+			fmt.Printf("              dock as %s\n", apps.ViewTileKind(app.Name, v.Name))
+		}
+	}
 	fmt.Printf("  runtime:    %s\n", appRuntimeCell(result.Runtime))
 	if result.Stall != nil {
 		// The stall clock is the only thing here that ends with the app being

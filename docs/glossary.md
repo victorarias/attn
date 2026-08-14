@@ -294,6 +294,22 @@ again from there, so the way back from a fix is whatever was running when it was
 applied. The history is not the version list: a version the walk went past is
 still a version, still reachable by name.
 
+A **view** is an app's UI: a React component the app declares in its manifest,
+built for the browser as its own artifact beside the handler bundle. A view docks
+as a tile of kind `app:<app>/<view>`, and the string the user types when docking
+reaches it as `params` — opaque to attn, meaning whatever the app decides. A view
+imports the SDK (`@victorarias/attn-app`) and never React: the specifier is left
+unresolved at build time and answered in the browser by attn's own import map, so
+an app's component and attn's UI share one React instance rather than two that
+cannot share a hook dispatcher.
+
+Views are served over the daemon's own listener at a URL naming the version's
+content hash, so a version flip *is* the reload signal: the URL a docked tile
+imports moves, and the tile remounts against the new one. A view that fails —
+will not load, exports no component, or throws while rendering — costs its own
+tile and nothing beyond it, and the failure is recorded as an invocation of the
+app stamped with the version that served it, so `attn app logs` has it.
+
 **Applying** is how a directory becomes a version: parse the manifest, generate
 the types the handlers are checked against, typecheck, bundle, hash, write the
 artifact, insert the row, move the pointer. Apply never evaluates the app's
