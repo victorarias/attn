@@ -295,6 +295,26 @@ func TestBuild_DeclaredCommandWithNoHandlerIsACompilerError(t *testing.T) {
 	}
 }
 
+// The other direction, which is what grouping by kind buys: a handler under a
+// kind nothing declared is an excess property, so a command a view could never
+// reach cannot be exported by accident either.
+func TestBuild_UndeclaredCommandHandlerIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "overcommanded-app")
+	env.edit(t, "src/index.ts", "commands: { forget },", "commands: { forget, remember: forget },")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a command handler the manifest never declared")
+	}
+	msg := err.Error()
+	if !tscError.MatchString(msg) {
+		t.Fatalf("error does not carry file(line,col): %s", msg)
+	}
+	if !strings.Contains(msg, "remember") {
+		t.Errorf("error does not name the undeclared handler: %s", msg)
+	}
+}
+
 func TestBuild_WrongShapedHandlerIsACompilerError(t *testing.T) {
 	env := newBuildEnv(t, "misshapen-app")
 	env.edit(t, "src/index.ts", "event: AppEvent, ctx: Ctx", "event: string, ctx: Ctx")

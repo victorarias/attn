@@ -570,9 +570,9 @@ Dispatch reuses everything A4 built rather than adding a second path:
 attn-app.toml   [[commands]] name = "approve"
       ↓ codegen
 handlers.ts     type Handlers = {
-                  "subscribe:doc.changed": …   A4
-                  "command:approve": …         ← A5, missing = tsc error
-                }
+                  subscriptions: { "doc.changed": … }   A4
+                  commands: { approve: … }              ← A5,
+                }                                       missing = tsc error
       ↓ apply → sidecar
 runtime         ordinary dispatch: same invocation log, same timeout,
                 same drain on version flip, same failure attribution
