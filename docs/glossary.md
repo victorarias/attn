@@ -516,10 +516,20 @@ it was launched as one — the daemon stamps a **binding** at launch
 (`attn <agent> --member <name>`), and that binding is what `attn agent list`
 and `attn agent peek` report. Reading a charter confers nothing. One member has
 one active binding: **two agents with the same identity never run at once**, and
-waking a member whose day is live is refused rather than duplicated.
+waking a member whose day is live names that day rather than starting a second.
 Parallelism means another member, never a second copy. A binding naming a
 session the daemon no longer knows has let go on its own, the same liveness
 rule a seed's tender follows.
+
+To **wake** a member is to start its day: `attn crew wake <name>`, or one click
+on its row in the sidebar, where every member is drawn awake or asleep. The
+daemon binds the member, then launches a session in its recorded cwd — its own
+home when none is recorded — reaching its **awareness dirs**, the directories
+its charter is about. The launch carries **priming**: the charter, the freshest
+letter left for it, and the crew guidance — how a handoff is filed, how the two
+handoff axes differ, that only one session is this member at a time. Skills
+retire into verbs and the verbs are taught, because an agent never told how to
+handoff cannot file one.
 
 Tending is not a crew privilege: workers and errand sessions tend seeds too,
 under any free-string name. Where a tender's name happens to match a registered

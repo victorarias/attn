@@ -219,6 +219,21 @@ sequenceDiagram
 - **Recognition stays out**: its own rock; this plan only gives it the
   address (the member id).
 
+## Ruled (2026-08-14)
+
+- **The crew renders in the pinned-agents region, pin-shaped.** No
+  section of its own: a member is drawn like a permanent pin, because
+  it stepped out of the queue the same way a pinned agent did — but
+  visually distinct from an ordinary pinned session, since nobody put
+  it there and there is no unpin. Every member is present, awake or
+  asleep, and is one action from waking: clicking an awake member
+  focuses its day, clicking a sleeping one wakes it.
+- **Where the launch directory and the awareness dirs come from.**
+  Registry fields, set by `attn crew set <member> --cwd <dir>
+  --awareness-dir <dir>`, never read out of the member's prose — the
+  registry records where a home lives, not what it says. A member with
+  no recorded cwd launches in its own home.
+
 ## Open forks
 
 - **The wake limit.** How many autonomous wakes (reload cycles and

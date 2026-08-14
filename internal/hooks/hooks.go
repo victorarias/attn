@@ -227,11 +227,15 @@ type Launch struct {
 	WorkspaceContextPath string
 	InjectWorkflow       bool
 	Garden               *GardenPrime
+	// Crew is the composed priming of the member this session was woken as,
+	// built by the daemon from the member's own home. Empty for every session
+	// that is nobody, which is most of them.
+	Crew string
 }
 
 // Instructions composes the blocks, joined by a blank line.
 func (l Launch) Instructions() string {
-	blocks := make([]string, 0, 2)
+	blocks := make([]string, 0, 3)
 	if chief := ChiefGuidance(l.NotebookRoot, l.HasSelfMonitor); chief != "" {
 		blocks = append(blocks, chief)
 	} else {
@@ -239,6 +243,12 @@ func (l Launch) Instructions() string {
 	}
 	if primer := GardenPrimer(l.Garden); primer != "" {
 		blocks = append(blocks, primer)
+	}
+	// Last, because it is the most specific thing this session is: whoever else
+	// reads this prompt is an agent in a workspace, and this one is a person
+	// with a name, a home, and a day.
+	if crew := strings.TrimSpace(l.Crew); crew != "" {
+		blocks = append(blocks, crew)
 	}
 	return strings.Join(blocks, "\n\n")
 }

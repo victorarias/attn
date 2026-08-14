@@ -471,3 +471,27 @@ func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
 		t.Fatalf("a garden-less launch changed the instructions:\n%s", bare)
 	}
 }
+
+// A woken member's crew block rides beside everything else a launch injects, and
+// comes last — it is the most specific thing this session is.
+func TestLaunchInstructionsCarryTheCrewPrimingLast(t *testing.T) {
+	const block = "You are **trellis**, a crew member of this attn home."
+
+	launch := Launch{
+		WorkspaceContextPath: "/tmp/context.md",
+		Garden:               &GardenPrime{Ready: 2},
+		Crew:                 block,
+	}.Instructions()
+
+	if !strings.Contains(launch, "2 seeds were ready") {
+		t.Fatalf("the crew block replaced the primer:\n%s", launch)
+	}
+	if !strings.HasSuffix(strings.TrimSpace(launch), strings.TrimSpace(block)) {
+		t.Fatalf("the crew block is not the last thing injected:\n%s", launch)
+	}
+
+	bare := Launch{WorkspaceContextPath: "/tmp/context.md"}.Instructions()
+	if strings.Contains(bare, "crew member of this attn home") {
+		t.Fatalf("a launch that woke nobody carried a crew block:\n%s", bare)
+	}
+}

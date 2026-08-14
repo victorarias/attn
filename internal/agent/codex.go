@@ -79,6 +79,9 @@ func (c *Codex) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	}
 
 	args = append(args, "-C", opts.CWD)
+	// A woken crew member's awareness dirs, which codex spells the same way
+	// claude does.
+	args = append(args, opts.addDirArgs()...)
 	if model := strings.TrimSpace(opts.Model); model != "" {
 		args = append(args, "--model", model)
 	}
@@ -406,6 +409,7 @@ func (c *Codex) GenerateConfigOverrides(opts SpawnOpts) []string {
 			WorkspaceContextPath: opts.WorkspaceContextPath,
 			InjectWorkflow:       opts.InjectWorkflowGuidance,
 			Garden:               opts.Garden,
+			Crew:                 opts.CrewPriming,
 		},
 	)
 	if opts.TrustWorkingDirectory {

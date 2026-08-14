@@ -22,6 +22,7 @@ import type {
   Ticket as GeneratedTicket,
   TicketRow as GeneratedTicketRow,
   Seed as GeneratedSeed,
+  CrewMember as GeneratedCrewMember,
   MarkdownAnnotation,
   Presentation,
   PresentationRound,
@@ -122,6 +123,10 @@ export type TicketRow = GeneratedTicketRow;
 // A seed as the garden pushes it: the whole document, because a seed is small
 // and the panel renders its body without a second round trip.
 export type Seed = GeneratedSeed;
+// A crew member as the roster pushes it. Every member is here, awake or asleep:
+// an awake one names the session living its day (binding_session), and that
+// presence IS "awake" — the daemon judged the binding live before sending it.
+export type CrewMember = GeneratedCrewMember;
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -240,7 +245,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '243';
+export const PROTOCOL_VERSION = '245';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -619,6 +624,9 @@ interface UseDaemonSocketOptions {
   // when the garden outgrew one push, and the panel says so rather than ending
   // silently at the cap.
   onSeedsUpdate?: (seeds: Seed[], total: number) => void;
+  // Fired with the whole crew roster on initial_state and on every crew_updated
+  // broadcast. Members are permanent, so the sidebar renders from this alone.
+  onCrewUpdate?: (members: CrewMember[]) => void;
   // Fired when a presentation is created or its status/latest-round state changes.
   onPresentationAdded?: (presentation: Presentation) => void;
   onPresentationUpdated?: (presentation: Presentation) => void;
@@ -920,6 +928,7 @@ export function useDaemonSocket({
   onFsChanged,
   onTicketsUpdate,
   onSeedsUpdate,
+  onCrewUpdate,
   onPresentationAdded,
   onPresentationUpdated,
   onWorkspacesUpdate,
@@ -954,6 +963,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -977,6 +987,7 @@ export function useDaemonSocket({
     onFsChanged,
     onTicketsUpdate,
     onSeedsUpdate,
+    onCrewUpdate,
     onPresentationAdded,
     onPresentationUpdated,
     onWorkspacesUpdate,
@@ -1535,6 +1546,7 @@ export function useDaemonSocket({
               data.seeds || [],
               data.seeds_total ?? (data.seeds || []).length,
             );
+            callbacksRef.current.onCrewUpdate?.(data.crew || []);
             const nextWorkspaces = data.workspaces || [];
             workspacesRef.current = nextWorkspaces;
             callbacksRef.current.onWorkspacesUpdate(nextWorkspaces);
@@ -1698,6 +1710,10 @@ export function useDaemonSocket({
 
           case 'tickets_updated':
             callbacksRef.current.onTicketsUpdate?.(data.tickets || []);
+            break;
+
+          case 'crew_updated':
+            callbacksRef.current.onCrewUpdate?.(data.members || []);
             break;
 
           case 'garden_seeds_updated':
@@ -1928,6 +1944,28 @@ export function useDaemonSocket({
               pending.resolve(data.result);
             } else {
               pending.reject(new Error(data.error || 'Ticket attach failed'));
+            }
+            break;
+          }
+
+          case 'crew_wake_result': {
+            const requestId = data.request_id;
+            if (typeof requestId !== 'string') {
+              break;
+            }
+            const key = `crew_wake:${requestId}`;
+            const pending = pendingActionsRef.current.get(key);
+            if (!pending) {
+              break;
+            }
+            pendingActionsRef.current.delete(key);
+            if (data.success && typeof data.session_id === 'string') {
+              pending.resolve({
+                sessionId: data.session_id,
+                alreadyAwake: data.already_awake === true,
+              });
+            } else {
+              pending.reject(new Error(data.error || 'Waking the member failed'));
             }
             break;
           }
@@ -4722,6 +4760,34 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
+  // Start a crew member's day. The daemon owns the whole composite — bind,
+  // register the member's workspace, add the pane, spawn primed — so this sends
+  // one command and resolves with the session to focus; the session and pane
+  // arrive over the normal broadcasts. A member already awake resolves with its
+  // running day (alreadyAwake), which is the same thing to focus.
+  const sendCrewWake = useCallback(
+    (member: string): Promise<{ sessionId: string; alreadyAwake: boolean }> => {
+      return new Promise((resolve, reject) => {
+        const ws = wsRef.current;
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          reject(new Error('WebSocket not connected'));
+          return;
+        }
+        const requestId = nextRequestID('crew_wake');
+        const key = `crew_wake:${requestId}`;
+        pendingActionsRef.current.set(key, { resolve, reject });
+        ws.send(JSON.stringify({ cmd: 'crew_wake', request_id: requestId, member }));
+        setTimeout(() => {
+          if (pendingActionsRef.current.has(key)) {
+            pendingActionsRef.current.delete(key);
+            reject(new Error(`Waking ${member} timed out`));
+          }
+        }, 10000);
+      });
+    },
+    [nextRequestID],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
@@ -5484,6 +5550,7 @@ export function useDaemonSocket({
     sendTicketEditDescription,
     sendTicketAttach,
     sendTicketResume,
+    sendCrewWake,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,

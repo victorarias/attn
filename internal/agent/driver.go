@@ -252,6 +252,28 @@ type SpawnOpts struct {
 	// count, and the plot when this session was dispatched at a crown. Nil when
 	// the daemon had no answer: no garden reachable from here.
 	Garden *hooks.GardenPrime
+
+	// CrewPriming is the composed block that makes this session its crew member
+	// — charter, the freshest letter, the verbs of the member's home. The daemon
+	// composes it (and logs its size); empty for every session that is nobody.
+	CrewPriming string
+
+	// AwarenessDirs are the places a woken member's charter is about, opened
+	// natively by every driver whose harness takes extra directories. The
+	// priming names them either way, so a harness without the flag still knows.
+	AwarenessDirs []string
+}
+
+// addDirArgs is `--add-dir <dir>` per awareness dir — the flag claude and codex
+// spell the same way.
+func (o SpawnOpts) addDirArgs() []string {
+	args := make([]string, 0, len(o.AwarenessDirs)*2)
+	for _, dir := range o.AwarenessDirs {
+		if dir = strings.TrimSpace(dir); dir != "" {
+			args = append(args, "--add-dir", dir)
+		}
+	}
+	return args
 }
 
 // launchGuidance is the system-prompt block for this launch: chief guidance or
@@ -264,6 +286,7 @@ func (o SpawnOpts) launchGuidance(hasSelfMonitor bool) string {
 		WorkspaceContextPath: o.WorkspaceContextPath,
 		InjectWorkflow:       o.InjectWorkflowGuidance,
 		Garden:               o.Garden,
+		Crew:                 o.CrewPriming,
 	}.Instructions()
 }
 

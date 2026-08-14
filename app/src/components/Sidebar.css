@@ -1210,6 +1210,45 @@
   margin: 0 6px;
 }
 
+/* A crew member's row lives in the pinned region and is pin-shaped, but it is
+   not a pin: nobody put it there and there is no unpin. The rail down its left
+   edge is what says "crew" at a glance — no other row in the sidebar carries
+   one — and it is drawn in the theme-invariant brand accent, so it reads the
+   same in light and dark. A sleeping member dims to the same weight as the
+   sidebar's other quiet text; its label is legible, its absence is not loud. */
+.queue-row--crew {
+  border-left: 2px solid var(--accent);
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.queue-row--crew[data-crew-state='asleep'] .session-label,
+.queue-row--crew[data-crew-state='asleep'] .crew-row-mark {
+  color: var(--color-text-tertiary);
+}
+
+/* Same footprint as a StateIndicator so every crew row's label starts on the
+   same column, awake or asleep. A ring, not a dot: there is no state to report
+   because nothing is running. */
+.crew-asleep-dot {
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  border: 1.5px solid var(--color-text-dimmed);
+}
+
+/* The word beside the label, so "crew" survives for anyone who cannot see the
+   rail — a colour and a border are not a label. It sits where a row's age sits
+   and yields to the hover controls the same way. */
+.crew-row-mark {
+  margin-left: auto;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+
 /* Fills the row from behind, so a click lands on it wherever it falls. Absolute
    rather than a wrapper: the row's other children stay direct children of
    .session-item and keep their layout. */

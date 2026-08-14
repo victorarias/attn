@@ -583,3 +583,40 @@ describe('advanceAfterTurnClosed and the pinned band', () => {
     expect(advanceAfterTurnClosed(before.turns, after, 'pinned-one')).toBeNull();
   });
 });
+
+describe('the crew band', () => {
+  it('takes a member day out of every other band, whatever it is doing', () => {
+    const bands = buildQueueBands(views([
+      { id: 'sess-trellis', label: 'trellis', workspaceId: 'ws-a', crewMember: 'trellis', turnOwed: true, turnOpenedAt: '2026-08-14T09:00:00Z' },
+      { id: 'sess-keel', label: 'keel', workspaceId: 'ws-a', crewMember: 'keel', pinnedAt: '2026-08-14T08:00:00Z' },
+      { id: 'worker', label: 'worker', workspaceId: 'ws-b', turnOwed: true, turnOpenedAt: '2026-08-14T09:30:00Z' },
+    ]));
+
+    // Member id order, not state order: a member's row is where the user
+    // learned it is, every day.
+    expect(bands.crew.map((row) => row.session.id)).toEqual(['sess-keel', 'sess-trellis']);
+    // Exactly once on the sidebar — a day that also appeared under turns or
+    // pinned would be the same agent in two places.
+    expect(bands.turns.map((row) => row.session.id)).toEqual(['worker']);
+    expect(bands.pinned).toHaveLength(0);
+    expect(bands.settled).toHaveLength(0);
+  });
+
+  it('keeps a member visible from a pinned or muted workspace', () => {
+    const bands = buildQueueBands(buildWorkspaceViewModels(
+      [{ id: 'ws-hidden', title: 'Hidden', directory: '/repo/hidden', rank: 'a', pinned: true }],
+      [{ id: 'sess-alder', label: 'alder', workspaceId: 'ws-hidden', crewMember: 'alder' }],
+    ));
+
+    expect(bands.crew.map((row) => row.session.id)).toEqual(['sess-alder']);
+  });
+
+  it('leaves the chief the chief', () => {
+    const bands = buildQueueBands(views([
+      { id: 'sess-chief', label: 'chief', workspaceId: 'ws-a', chiefOfStaff: true, crewMember: 'keel' },
+    ]));
+
+    expect(bands.chief?.session.id).toBe('sess-chief');
+    expect(bands.crew).toHaveLength(0);
+  });
+});

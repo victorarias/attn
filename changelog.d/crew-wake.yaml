@@ -1,0 +1,13 @@
+kind: added
+area: app
+change: >
+  The crew is now on the sidebar and one click from awake. Every registered
+  member draws in the pinned region — pin-shaped, distinct from an ordinary
+  pin, present whether it is awake or asleep. Clicking an awake member opens
+  the day it is living; clicking a sleeping one starts its day: a session
+  bound to the member, launched in its own directory, reaching the directories
+  its charter is about, and primed with its charter, the freshest letter its
+  predecessor left it, and how its home works — so a member knows how to hand
+  off without being told again. `attn crew wake <name>` is the same verb from
+  the command line, and `attn crew set <name> --cwd <dir> --awareness-dir
+  <dir>` records where a member works.

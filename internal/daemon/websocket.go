@@ -795,6 +795,7 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 		Tickets:           d.ticketsForBroadcast(),
 		Seeds:             d.seedsForBroadcast(),
 		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
+		Crew:              d.crewForBroadcast(),
 	}
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -1119,6 +1120,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		go d.handleTicketAttachWS(client, msg.(*protocol.TicketAttachMessage))
 	case protocol.CmdTicketResume: // wire: ticket_resume
 		go d.handleTicketResume(client, msg.(*protocol.TicketResumeMessage))
+	case protocol.CmdCrewWake: // wire: crew_wake
+		// Waking spawns a session; the composite is the daemon's, so it runs off
+		// the read loop like every other spawning command.
+		go d.handleCrewWakeWS(client, msg.(*protocol.CrewWakeMessage))
 	case protocol.CmdFsList: // wire: fs_list
 		fsList := msg.(*protocol.FsListMessage)
 		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path), protocol.Deref(fsList.Root))

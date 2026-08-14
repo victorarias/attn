@@ -90,3 +90,44 @@ func TestAgentListRows_CarryTheCrewMember(t *testing.T) {
 		t.Errorf("an unbound row has no placeholder:\n%s", text)
 	}
 }
+
+func TestParseCrewWakeArgs(t *testing.T) {
+	parsed, err := parseCrewWakeArgs([]string{"trellis", "--agent", "codex", "--json"})
+	if err != nil {
+		t.Fatalf("parseCrewWakeArgs: %v", err)
+	}
+	if parsed.member != "trellis" || parsed.agent != "codex" || !parsed.json {
+		t.Fatalf("parsed = %+v, want trellis on codex as JSON", parsed)
+	}
+	// The harness is optional: a wake with no --agent takes the daemon's default.
+	if parsed, err := parseCrewWakeArgs([]string{"keel"}); err != nil || parsed.agent != "" {
+		t.Fatalf("parseCrewWakeArgs(keel) = %+v, %v", parsed, err)
+	}
+	for _, args := range [][]string{{}, {"one", "two"}, {"--nope", "keel"}} {
+		if _, err := parseCrewWakeArgs(args); err == nil {
+			t.Errorf("parseCrewWakeArgs(%v) accepted what it should refuse", args)
+		}
+	}
+}
+
+// --awareness-dir repeats and replaces the whole list; passing it once empty is
+// the way out of every dir a member has.
+func TestCrewDirList_RepeatsAndClears(t *testing.T) {
+	var dirs crewDirList
+	for _, value := range []string{"/a", "/b"} {
+		if err := dirs.Set(value); err != nil {
+			t.Fatalf("Set(%q): %v", value, err)
+		}
+	}
+	if len(dirs.values) != 2 || !dirs.set {
+		t.Fatalf("dirs = %+v, want both recorded", dirs)
+	}
+
+	var cleared crewDirList
+	if err := cleared.Set(""); err != nil {
+		t.Fatalf("Set(\"\"): %v", err)
+	}
+	if !cleared.set || len(cleared.values) != 0 {
+		t.Fatalf("an empty value = %+v, want the flag seen with no dirs", cleared)
+	}
+}

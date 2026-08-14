@@ -1648,6 +1648,112 @@ type CrewMember struct {
 	ID string `json:"id"`
 }
 
+type CrewPrimeMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+}
+
+type CrewPrimeResult struct {
+	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
+	AwarenessDirs []string `json:"awareness_dirs"`
+
+	// Guidance corresponds to the JSON schema field "guidance".
+	Guidance *string `json:"guidance,omitempty,omitzero"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// PrimingBytes corresponds to the JSON schema field "priming_bytes".
+	PrimingBytes int `json:"priming_bytes"`
+}
+
+type CrewSetMessage struct {
+	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
+	AwarenessDirs []string `json:"awareness_dirs,omitempty,omitzero"`
+
+	// ClearAwarenessDirs corresponds to the JSON schema field "clear_awareness_dirs".
+	ClearAwarenessDirs *bool `json:"clear_awareness_dirs,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd *string `json:"cwd,omitempty,omitzero"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member string `json:"member"`
+}
+
+type CrewSetResult struct {
+	// Member corresponds to the JSON schema field "member".
+	Member CrewMember `json:"member"`
+}
+
+type CrewUpdatedMessage struct {
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Members corresponds to the JSON schema field "members".
+	Members []CrewMember `json:"members"`
+}
+
+type CrewWakeMessage struct {
+	// Agent corresponds to the JSON schema field "agent".
+	Agent *string `json:"agent,omitempty,omitzero"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member string `json:"member"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type CrewWakeResult struct {
+	// AlreadyAwake corresponds to the JSON schema field "already_awake".
+	AlreadyAwake bool `json:"already_awake"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member string `json:"member"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID string `json:"session_id"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID string `json:"workspace_id"`
+}
+
+type CrewWakeResultMessage struct {
+	// AlreadyAwake corresponds to the JSON schema field "already_awake".
+	AlreadyAwake *bool `json:"already_awake,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WorkspaceID corresponds to the JSON schema field "workspace_id".
+	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
+}
+
 type DaemonWarning struct {
 	// Code corresponds to the JSON schema field "code".
 	Code string `json:"code"`
@@ -3208,6 +3314,9 @@ type HookStopFailureMessage struct {
 type InitialStateMessage struct {
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
+
+	// Crew corresponds to the JSON schema field "crew".
+	Crew []CrewMember `json:"crew,omitempty,omitzero"`
 
 	// DaemonInstanceID corresponds to the JSON schema field "daemon_instance_id".
 	DaemonInstanceID *string `json:"daemon_instance_id,omitempty,omitzero"`
@@ -5221,6 +5330,15 @@ type Response struct {
 
 	// CrewListResult corresponds to the JSON schema field "crew_list_result".
 	CrewListResult *CrewListResult `json:"crew_list_result,omitempty,omitzero"`
+
+	// CrewPrimeResult corresponds to the JSON schema field "crew_prime_result".
+	CrewPrimeResult *CrewPrimeResult `json:"crew_prime_result,omitempty,omitzero"`
+
+	// CrewSetResult corresponds to the JSON schema field "crew_set_result".
+	CrewSetResult *CrewSetResult `json:"crew_set_result,omitempty,omitzero"`
+
+	// CrewWakeResult corresponds to the JSON schema field "crew_wake_result".
+	CrewWakeResult *CrewWakeResult `json:"crew_wake_result,omitempty,omitzero"`
 
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty,omitzero"`
