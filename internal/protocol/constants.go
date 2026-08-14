@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "239"
+const ProtocolVersion = "240"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -306,6 +306,7 @@ const (
 	CmdWorkspaceLayoutMoveLeafToNewWorkspace = "workspace_layout_move_leaf_to_new_workspace"
 	CmdWorkspaceTileContentGet               = "workspace_tile_content_get"
 	CmdOpenMarkdown                          = "open_markdown"
+	CmdOpenSentFiles                         = "open_sent_files"
 	CmdSessionMessagesGet                    = "session_messages_get"
 	CmdSessionAnnotationsGet                 = "session_annotations_get"
 	CmdSessionAnnotationsSave                = "session_annotations_save"
@@ -1962,6 +1963,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg OpenMarkdownMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal open_markdown: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdOpenSentFiles:
+		var msg OpenSentFilesMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal open_sent_files: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

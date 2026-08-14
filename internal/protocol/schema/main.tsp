@@ -2483,6 +2483,18 @@ model WorkspaceTileContentGetMessage {
   tile_id: string;
 }
 
+// Files an agent handed the user with its send-file tool (Claude's
+// SendUserFile), forwarded by the catch-all PostToolUse hook over the unix
+// socket. The daemon gates on the open_sent_files_enabled setting and opens
+// each path attn can show (markdown today); anything else is dropped
+// silently. paths are absolute; session_id binds the tiles to the sending
+// session's workspace, falling back to the currently selected session.
+model OpenSentFilesMessage {
+  cmd: "open_sent_files";
+  paths: string[];
+  session_id?: string;
+}
+
 // Open a markdown file into a docked, live-reloading tile. Sent by the
 // `attn open` CLI over the unix socket and by the frontend over the websocket
 // when the user cmd+clicks a markdown path in a session terminal. The tile is

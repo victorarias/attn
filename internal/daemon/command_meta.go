@@ -166,6 +166,7 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdSetWorkspaceRank:                      commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdWorkspaceTileContentGet:               commandMetadata(ScopeSession, true, true),
 	protocol.CmdOpenMarkdown:                          commandMetadata(ScopeSession, true, true),
+	protocol.CmdOpenSentFiles:                         commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsGet:                commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsSave:               commandMetadata(ScopeSession, true, true),
 	protocol.CmdMarkdownAnnotationsClear:              commandMetadata(ScopeSession, true, true),

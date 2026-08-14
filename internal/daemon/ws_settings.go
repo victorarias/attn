@@ -52,6 +52,10 @@ const (
 	// SettingAutoApproveEnabled launches interactive agents in their native
 	// auto-approve mode. Off by default; yolo overrides it.
 	SettingAutoApproveEnabled = "auto_approve_enabled"
+	// SettingOpenSentFilesEnabled gates auto-opening the files an agent hands
+	// the user (Claude's SendUserFile) as workspace tiles. Default ON; only an
+	// explicit "false" disables.
+	SettingOpenSentFilesEnabled = "open_sent_files_enabled"
 	// SettingAutoSettleEnabled closes a turn for the user once they have steered
 	// the agent back to work. Off by default — it mutates state unasked.
 	SettingAutoSettleEnabled = "auto_settle_enabled"
@@ -340,6 +344,7 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 	settings[SettingNotebookTasksEnabled] = strconv.FormatBool(d.notebookTasksEnabled())
 	settings[SettingNotebookSummarizeSessionEnabled] = strconv.FormatBool(d.notebookSummariesEnabled())
 	settings[SettingNotebookNarrateWorkspaceEnabled] = strconv.FormatBool(d.notebookWorkspaceNarrationEnabled())
+	settings[SettingOpenSentFilesEnabled] = strconv.FormatBool(d.openSentFilesEnabled())
 	// EFFECTIVE token caps too, so the UI shows the concrete default.
 	settings[SettingChiefContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingChiefContextWindowCap]))
 	settings[SettingHeadlessContextWindowCap] = strconv.Itoa(resolveContextWindowCap(stored[SettingHeadlessContextWindowCap]))
@@ -497,7 +502,7 @@ func (d *Daemon) validateSetting(key, value string) error {
 		return d.validateNewSessionAgent(value)
 	case SettingTheme:
 		return validateTheme(value)
-	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingNotebookNarrateWorkspaceEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled, SettingActivityEnabled:
+	case SettingTailscaleEnabled, SettingWorkflowsEnabled, SettingAutoApproveEnabled, SettingNotebookTasksEnabled, SettingNotebookSummarizeSessionEnabled, SettingNotebookNarrateWorkspaceEnabled, SettingQueueModeEnabled, SettingAutoSettleEnabled, SettingModelCaptureEnabled, SettingActivityEnabled, SettingOpenSentFilesEnabled:
 		return validateBooleanSetting(value)
 	case SettingModelCaptureIntervalSeconds:
 		return validateModelCaptureInterval(value)

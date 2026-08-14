@@ -1634,3 +1634,58 @@ describe('SettingsModal automation handle', () => {
   });
 
 });
+
+describe('SettingsModal sent files', () => {
+  function renderModal(
+    settings: Record<string, string>,
+    onSetSetting = vi.fn(),
+  ) {
+    render(
+      <SettingsModal
+        isOpen
+        onClose={vi.fn()}
+        mutedRepos={[]}
+        githubHosts={[]}
+        onUnmuteRepo={vi.fn()}
+        mutedAuthors={[]}
+        onUnmuteAuthor={vi.fn()}
+        settings={settings}
+        endpoints={[]}
+        plugins={[]}
+        pluginIssues={[]}
+        onAddEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onUpdateEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onRemoveEndpoint={vi.fn().mockResolvedValue({ success: true })}
+        onSetEndpointRemoteWeb={vi.fn().mockResolvedValue({ success: true })}
+        onListPlugins={vi.fn().mockResolvedValue({ plugins: [], issues: [] })}
+        onInstallPlugin={vi.fn().mockResolvedValue({ success: true })}
+        onRemovePlugin={vi.fn().mockResolvedValue({ success: true })}
+        onSetPluginPriority={vi.fn().mockResolvedValue({ success: true })}
+        onSetSetting={onSetSetting}
+        themePreference="system"
+        onSetTheme={vi.fn()}
+      />,
+    );
+    return onSetSetting;
+  }
+
+  it('reads as on by default and toggles off', async () => {
+    const onSetSetting = renderModal({});
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+
+    const toggle = await screen.findByTestId('settings-open-sent-files-toggle');
+    expect(toggle).toHaveTextContent('Disable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('open_sent_files_enabled', 'false');
+  });
+
+  it('re-enables when off', async () => {
+    const onSetSetting = renderModal({ open_sent_files_enabled: 'false' });
+    fireEvent.click(screen.getByTestId('settings-nav-general'));
+
+    const toggle = await screen.findByTestId('settings-open-sent-files-toggle');
+    expect(toggle).toHaveTextContent('Enable');
+    fireEvent.click(toggle);
+    expect(onSetSetting).toHaveBeenCalledWith('open_sent_files_enabled', 'true');
+  });
+});
