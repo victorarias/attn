@@ -376,7 +376,16 @@ export class WebGlTerminalRenderer {
     this.cursorBgPacked = parsePackedColor(theme.cursor);
     this.dpr = Math.max(window.devicePixelRatio || 1, 1);
 
-    const gl = canvas.getContext('webgl2', { alpha: false, antialias: false });
+    // depth/stencil default to on for a WebGL2 context, and each is a
+    // drawing-buffer-sized allocation per pane. This renderer draws 2D text in
+    // draw order -- it never enables a depth or stencil test -- so both are
+    // allocated and never read.
+    const gl = canvas.getContext('webgl2', {
+      alpha: false,
+      antialias: false,
+      depth: false,
+      stencil: false,
+    });
     if (!gl) {
       throw new Error('WebGL2 is unavailable; the Ghostty terminal cannot render');
     }
