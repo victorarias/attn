@@ -2,6 +2,7 @@ import {
   useEffect,
   Fragment,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
   type CSSProperties,
@@ -14,7 +15,7 @@ import { LABEL_COLOR_MAP, type QuickLabel } from './quickLabels';
 export interface FloatingQuickLabelPickerProps {
   mode?: 'floating';
   className: string;
-  labels: readonly QuickLabel[];
+  groups: readonly (readonly QuickLabel[])[];
   anchorEl: HTMLElement;
   cursorHint?: { x: number; y: number } | null;
   onSelect: (label: QuickLabel) => void;
@@ -71,7 +72,7 @@ function computePosition(
 
 function FloatingQuickLabelPicker({
   className,
-  labels,
+  groups,
   anchorEl,
   cursorHint,
   onSelect,
@@ -80,6 +81,16 @@ function FloatingQuickLabelPicker({
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [height, setHeight] = useState(0);
   const ref = useRef<HTMLDivElement>(null);
+  const { labels, indexedGroups } = useMemo(() => {
+    const flattened = groups.flat();
+    let nextIndex = 0;
+    return {
+      labels: flattened,
+      indexedGroups: groups.map((group) =>
+        group.map((label) => ({ label, index: nextIndex++ })),
+      ),
+    };
+  }, [groups]);
 
   useEffect(() => {
     const update = () => setPosition(computePosition(anchorEl, cursorHint, height));
@@ -139,33 +150,38 @@ function FloatingQuickLabelPicker({
       style={{ top: position.top, left: position.left, width: PICKER_WIDTH }}
       onMouseDown={(event) => event.stopPropagation()}
     >
-      {labels.map((label, index) => {
-        const color = LABEL_COLOR_MAP[label.color];
-        return (
-          <button
-            key={label.id}
-            type="button"
-            className="md-quick-label-row"
-            onClick={() => onSelect(label)}
-            title={label.tip}
-          >
-            <span
-              className="md-ql-chip"
-              style={color
-                ? ({
-                    background: color.bg,
-                    '--md-ql-text': color.text,
-                    '--md-ql-text-dark': color.darkText,
-                  } as CSSProperties)
-                : undefined}
-            >
-              {label.emoji}
-            </span>
-            <span className="md-quick-label-text">{label.text}</span>
-            {index < 10 && <span className="md-quick-label-num">{(index + 1) % 10}</span>}
-          </button>
-        );
-      })}
+      {indexedGroups.map((group, groupIndex) => (
+        <Fragment key={group[0].label.id}>
+          {groupIndex > 0 ? <hr className="md-quick-label-divider" /> : null}
+          {group.map(({ label, index }) => {
+            const color = LABEL_COLOR_MAP[label.color];
+            return (
+              <button
+                key={label.id}
+                type="button"
+                className="md-quick-label-row"
+                onClick={() => onSelect(label)}
+                title={label.tip}
+              >
+                <span
+                  className="md-ql-chip"
+                  style={color
+                    ? ({
+                        background: color.bg,
+                        '--md-ql-text': color.text,
+                        '--md-ql-text-dark': color.darkText,
+                      } as CSSProperties)
+                    : undefined}
+                >
+                  {label.emoji}
+                </span>
+                <span className="md-quick-label-text">{label.text}</span>
+                {index < 10 && <span className="md-quick-label-num">{(index + 1) % 10}</span>}
+              </button>
+            );
+          })}
+        </Fragment>
+      ))}
     </div>,
     document.body,
   );

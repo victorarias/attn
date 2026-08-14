@@ -18,6 +18,11 @@ describe('the shared label set', () => {
 
   it('flattens the groups in row order, with no repeated identity', () => {
     expect(QUICK_LABELS).toEqual(QUICK_LABEL_GROUPS.flat());
+    expect(QUICK_LABELS).toHaveLength(12);
+    expect(QUICK_LABEL_GROUPS).toHaveLength(5);
+    expect(QUICK_LABEL_GROUPS[3]).toEqual([
+      { id: 'cut-this', emoji: '🪓', text: 'Cut this', color: 'amber' },
+    ]);
     expect(new Set(QUICK_LABELS.map((label) => label.emoji)).size).toBe(QUICK_LABELS.length);
     expect(new Set(QUICK_LABELS.map((label) => label.id)).size).toBe(QUICK_LABELS.length);
   });
@@ -33,6 +38,8 @@ describe('label lookups', () => {
   it('resolve a mark back to the label it was made with', () => {
     expect(labelByEmoji('💯')?.id).toBe('exactly-this');
     expect(labelByEmoji('👍')?.id).toBe('i-agree');
+    expect(labelByEmoji('🪓')?.id).toBe('cut-this');
+    expect(labelByEmoji('✂️')).toBeUndefined();
     expect(labelById('verify-this')?.text).toBe('Verify this');
     expect(labelByEmoji('🦄')).toBeUndefined();
     expect(labelById('never-existed')).toBeUndefined();

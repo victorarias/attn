@@ -26,8 +26,7 @@ export const LABEL_COLOR_MAP: Record<string, { bg: string; text: string; darkTex
   amber: { bg: 'rgba(180,83,9,0.15)', text: '#b45309', darkText: '#fbbf24' },
 };
 
-// The label row. A group is what the terminal picker draws a divider between;
-// the Markdown reader draws one flat list.
+// The label row. A group is what both pickers draw a divider between.
 export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
   [
     { id: 'i-agree', emoji: '👍', text: 'I agree', color: 'green' },
@@ -69,8 +68,7 @@ export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
     },
   ],
   [
-    { id: 'cut-this', emoji: '✂️', text: 'Cut this', color: 'amber' },
-    { id: 'simplify-this', emoji: '🪓', text: 'Simplify this', color: 'purple' },
+    { id: 'cut-this', emoji: '🪓', text: 'Cut this', color: 'amber' },
   ],
   [
     { id: 'your-call', emoji: '🪙', text: 'Your call', color: 'green' },
