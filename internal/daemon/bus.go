@@ -64,6 +64,9 @@ const (
 	// correct because the store was written before the publish and the bus fans
 	// out inline.
 	FactSessionActivityChanged = "session.activity.changed"
+	// FactSessionCostChanged: durable token usage changed, or a price override
+	// repriced it. The projection derives the current USD value onto the session.
+	FactSessionCostChanged = "session.cost.changed"
 	// FactSessionConversationChanged: the provider-owned conversation hosted by
 	// this stable attn session changed. The store already carries the new binding;
 	// the small payload is only the exact live transcript path reported by the
@@ -318,6 +321,10 @@ func buildWireProjections() []projection {
 			// An activity line has no event of its own: it rides on the session
 			// snapshot, so it re-pushes that session alone.
 			filter: bus.Filter{FactSessionActivityChanged},
+			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
+		},
+		{
+			filter: bus.Filter{FactSessionCostChanged},
 			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionStateChanged(ev.Subject) },
 		},
 		{

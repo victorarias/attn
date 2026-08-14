@@ -89,6 +89,94 @@ describe('SessionTerminalWorkspace pane header', () => {
     expect(dot?.className).toContain('state-indicator--working');
   });
 
+  it('shows a priced session in USD rounded to cents', () => {
+    renderLonePane({
+      workspaceSessions: [{
+        id: 'sess-1',
+        label: GENERATED_NAME,
+        agent: 'claude',
+        cwd: '/tmp/project',
+        costUsd: 1.234,
+      }],
+    });
+
+    expect(screen.getByLabelText('Session cost $1.23 USD')).toHaveTextContent('$1.23');
+  });
+
+  it('does not round real sub-cent usage down to free', () => {
+    renderLonePane({
+      workspaceSessions: [{
+        id: 'sess-1',
+        label: GENERATED_NAME,
+        agent: 'claude',
+        cwd: '/tmp/project',
+        costUsd: 0.004,
+      }],
+    });
+
+    expect(screen.getByLabelText('Session cost <$0.01 USD')).toHaveTextContent('<$0.01');
+  });
+
+  it('shows unknown when usage exists but its model has no price', () => {
+    renderLonePane({
+      workspaceSessions: [{
+        id: 'sess-1',
+        label: GENERATED_NAME,
+        agent: 'claude',
+        cwd: '/tmp/project',
+        costUnknown: true,
+      }],
+    });
+
+    expect(screen.getByLabelText('Session cost unknown')).toHaveTextContent('unknown');
+  });
+
+  it('shows no cost before the session has usage', () => {
+    renderLonePane();
+
+    expect(screen.queryByLabelText(/Session cost/)).not.toBeInTheDocument();
+  });
+
+  it('updates the visible cost when fresh session usage arrives', () => {
+    const { rerender } = renderLonePane({
+      workspaceSessions: [{
+        id: 'sess-1',
+        label: GENERATED_NAME,
+        agent: 'claude',
+        cwd: '/tmp/project',
+        costUsd: 0.42,
+      }],
+    });
+
+    expect(screen.getByLabelText('Session cost $0.42 USD')).toBeInTheDocument();
+
+    rerender(
+      <SessionTerminalWorkspace
+        workspaceId="workspace-1"
+        workspaceSessions={[{
+          id: 'sess-1',
+          label: GENERATED_NAME,
+          agent: 'claude',
+          cwd: '/tmp/project',
+          costUsd: 0.73,
+        }]}
+        workspace={loneAgentWorkspace()}
+        activePaneId="pane-1"
+        fontSize={13}
+        enabled
+        isActiveSession
+        eventRouter={createPaneRuntimeEventRouterController()}
+        onSplitPane={vi.fn()}
+        onClosePane={vi.fn()}
+        onFocusPane={vi.fn()}
+        onNavigateOutOfSession={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByLabelText('Session cost $0.42 USD')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Session cost $0.73 USD')).toBeInTheDocument();
+  });
+
   it('falls back to the pane title when the session carries no label', () => {
     const { container } = renderLonePane({ workspaceSessions: [] });
 

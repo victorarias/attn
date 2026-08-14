@@ -1,0 +1,9 @@
+kind: added
+area: sessions
+change: >
+  Agent pane headers now show the live USD cost of token usage beside the
+  session name. attn prices input, output, cache reads, and 5-minute and 1-hour
+  cache writes separately, persists the per-session total across daemon
+  restarts, and says `unknown` instead of implying an unpriced model was free.
+  Settings can add or correct exact-model USD-per-million-token rates when the
+  built-in price table is missing or stale.

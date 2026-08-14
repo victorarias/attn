@@ -344,14 +344,32 @@
    headline, and inactive panes are already dimmed wholesale by
    `.workspace-pane`'s opacity, so the title does not need to whisper to show
    which leaf is unfocused. */
-.workspace-pane-title {
+.workspace-pane-identity {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.workspace-pane-title {
+  flex: 0 1 auto;
   min-width: 0;
   color: var(--color-text-primary);
   font-size: var(--font-size-sm);
   font-weight: 600;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-pane-cost {
+  flex: none;
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
 }
 

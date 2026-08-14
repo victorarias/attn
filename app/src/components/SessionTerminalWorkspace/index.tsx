@@ -46,6 +46,7 @@ import { WorkspaceDockTile } from './WorkspaceDockTile';
 import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
+import { HeaderSessionCost } from './SessionCost';
 
 const ZOOM_PATH_RATIO = 0.76;
 const RESIZE_MOUSE_SUPPRESSION_MS = 1_500;
@@ -124,6 +125,8 @@ interface SessionTerminalWorkspaceProps {
     cwd: string;
     endpointId?: string;
     state?: UISessionState;
+    costUsd?: number;
+    costUnknown?: boolean;
     ticketUnread?: boolean;
     nudgeFiresAt?: string;
     // The deadline an auto-settle countdown will close this session's turn at.
@@ -977,7 +980,13 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   seed={agentPane.sessionId}
                 />
               ) : null}
-              <span className="workspace-pane-title">{paneTitle}</span>
+              <span className="workspace-pane-identity">
+                <span className="workspace-pane-title">{paneTitle}</span>
+                <HeaderSessionCost
+                  costUsd={paneSession?.costUsd}
+                  unknown={paneSession?.costUnknown}
+                />
+              </span>
               {onRenameSession ? (
                 <button
                   type="button"

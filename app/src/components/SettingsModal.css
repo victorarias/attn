@@ -617,6 +617,58 @@
   gap: 10px;
 }
 
+.settings-price-list {
+  display: grid;
+  gap: 10px;
+}
+
+.settings-price-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-elevated);
+  padding: 14px;
+}
+
+.settings-price-card--new {
+  border-style: dashed;
+}
+
+.settings-price-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settings-price-model {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: var(--font-size-sm);
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.settings-price-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.settings-price-input {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.settings-price-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .endpoint-card,
 .plugin-card {
   border: 1px solid var(--color-border);
@@ -837,6 +889,10 @@
   .endpoint-summary {
     grid-template-columns: 1fr;
   }
+
+  .settings-price-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 560px) {
@@ -863,6 +919,16 @@
   .settings-row-inline {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .settings-price-card-head,
+  .settings-price-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .settings-price-grid {
+    grid-template-columns: 1fr;
   }
 
   .settings-segmented {

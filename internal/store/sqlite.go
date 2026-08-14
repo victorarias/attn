@@ -1109,6 +1109,8 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// held it — an app on version B with A behind it becomes the two-step chain
 	// A → B, which walks exactly as it did before.
 	{105, "walk an app's serving history as a chain", ``},
+	// Applied by applyMigration106, whose ALTER is column-guarded.
+	{106, "add durable per-session token cost state", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1495,6 +1497,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 105 {
 			if err := applyMigration105(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 106 {
+			if err := applyMigration106(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2655,6 +2662,17 @@ func applyMigration103(tx *sql.Tx) error {
 		return err
 	}
 	_, err = tx.Exec("ALTER TABLE apps ADD COLUMN previous_version_id INTEGER")
+	return err
+}
+
+// applyMigration106 adds the opaque per-session cost ledger. The guard makes
+// schema-migration rewind tests and interrupted upgrade recovery idempotent.
+func applyMigration106(tx *sql.Tx) error {
+	has, err := columnExists(tx, "sessions", "session_cost_json")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE sessions ADD COLUMN session_cost_json TEXT NOT NULL DEFAULT ''")
 	return err
 }
 

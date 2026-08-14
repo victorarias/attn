@@ -1271,6 +1271,8 @@ function AppContent({
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
       autoSettleDismissArmed: daemonSession?.auto_settle_dismiss_armed ?? false,
+      costUsd: daemonSession?.cost_usd,
+      costUnknown: daemonSession?.cost_unknown ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -3985,6 +3987,8 @@ function AppContent({
                       autoSettleFiresAt: entry.autoSettleFiresAt,
                       autoSettleHeld: entry.autoSettleHeld,
                       autoSettleDismissArmed: entry.autoSettleDismissArmed,
+                      costUsd: entry.costUsd,
+                      costUnknown: entry.costUnknown,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),

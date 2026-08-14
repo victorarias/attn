@@ -3364,6 +3364,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateCrewMember(clone, crewBySession)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
+	d.decorateSessionWithCost(clone)
 	// Last: turn ownership reads the chief flag and the workspace the earlier
 	// decorations resolved.
 	d.decorateSessionWithTurn(clone)

@@ -1526,6 +1526,8 @@ export interface SessionObject {
     branch?:                    string;
     chief_of_staff?:            boolean;
     context_window_cap?:        number;
+    cost_unknown?:              boolean;
+    cost_usd?:                  number;
     crew_member?:               string;
     delegated_from_chief?:      boolean;
     directory:                  string;
@@ -6245,6 +6247,8 @@ export interface Session {
     branch?:                    string;
     chief_of_staff?:            boolean;
     context_window_cap?:        number;
+    cost_unknown?:              boolean;
+    cost_usd?:                  number;
     crew_member?:               string;
     delegated_from_chief?:      boolean;
     directory:                  string;
@@ -13244,6 +13248,8 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "context_window_cap", js: "context_window_cap", typ: u(undefined, 0) },
+        { json: "cost_unknown", js: "cost_unknown", typ: u(undefined, true) },
+        { json: "cost_usd", js: "cost_usd", typ: u(undefined, 3.14) },
         { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
@@ -16185,6 +16191,8 @@ const typeMap: any = {
         { json: "branch", js: "branch", typ: u(undefined, "") },
         { json: "chief_of_staff", js: "chief_of_staff", typ: u(undefined, true) },
         { json: "context_window_cap", js: "context_window_cap", typ: u(undefined, 0) },
+        { json: "cost_unknown", js: "cost_unknown", typ: u(undefined, true) },
+        { json: "cost_usd", js: "cost_usd", typ: u(undefined, 3.14) },
         { json: "crew_member", js: "crew_member", typ: u(undefined, "") },
         { json: "delegated_from_chief", js: "delegated_from_chief", typ: u(undefined, true) },
         { json: "directory", js: "directory", typ: "" },
