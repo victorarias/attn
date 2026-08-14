@@ -634,7 +634,25 @@ function maybeFlushIncident(pane: string, reason: string, detail: Record<string,
   if (health) {
     health.lastIncidentAt = now;
   }
-  const marker: DiagEvent = { at: now, kind: 'incident', pane, session: health?.session, reason, ...detail };
+  recordTerminalIncident(pane, health?.session, reason, detail, now);
+}
+
+// Persists one already-deduped terminal incident. Detection and cooldown stay
+// with the producer because different signals have different episode keys;
+// this owns the shared bounded file and surrounding terminal context.
+export function recordTerminalIncident(
+  pane: string,
+  session: string | undefined,
+  reason: string,
+  detail: Record<string, unknown>,
+  now = Date.now(),
+): void {
+  if (typeof window === 'undefined' || !isEnabled()) {
+    ensureGlobals();
+    return;
+  }
+  ensureGlobals();
+  const marker: DiagEvent = { at: now, kind: 'incident', pane, session, reason, ...detail };
   pushRing(marker);
   enqueueWrite('lifecycle', `${JSON.stringify(marker)}\n`);
   // Full incident record carries the surrounding ring context for diagnosis.
@@ -642,7 +660,7 @@ function maybeFlushIncident(pane: string, reason: string, detail: Record<string,
     at: now,
     kind: 'incident',
     pane,
-    session: health?.session,
+    session,
     reason,
     detail,
     context: ringSnapshot().slice(-INCIDENT_CONTEXT_EVENTS),

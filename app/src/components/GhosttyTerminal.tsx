@@ -129,6 +129,10 @@ import {
   type TerminalAnnotationStore,
 } from '../utils/terminalAnnotations';
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
+import {
+  forgetTerminalInputLatencyRuntime,
+  noteTerminalKeyEvent,
+} from '../utils/terminalInputLatency';
 import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
   KittyPlacementStore,
@@ -159,7 +163,7 @@ export interface GhosttyTerminalProps {
     isActiveSession: boolean;
     paneCount: number;
   };
-  onInput: (data: string) => void;
+  onInput: (data: string, source?: string) => void;
   // User pointer movement inside this terminal. Kept separate from onInput:
   // application-mouse bytes belong to the TUI, while this signal only keeps an
   // auto-settle countdown from closing under an engaged user.
@@ -491,6 +495,34 @@ function emptyStartup(): TerminalPerfStartupSnapshot {
   };
 }
 
+function createRendererEffectResources() {
+  let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+  let resizeObserver: ResizeObserver | null = null;
+
+  return {
+    isRecoveryScheduled: () => recoveryTimer !== null,
+    scheduleRecovery: (callback: () => void, delayMs: number) => {
+      if (recoveryTimer !== null) return;
+      recoveryTimer = setTimeout(() => {
+        recoveryTimer = null;
+        callback();
+      }, delayMs);
+    },
+    observeResize: (target: Element, callback: ResizeObserverCallback) => {
+      resizeObserver = new ResizeObserver(callback);
+      resizeObserver.observe(target);
+    },
+    dispose: () => {
+      if (recoveryTimer !== null) {
+        clearTimeout(recoveryTimer);
+        recoveryTimer = null;
+      }
+      resizeObserver?.disconnect();
+      resizeObserver = null;
+    },
+  };
+}
+
 function normalizeSelection(range: SelectionRange): SelectionRange {
   if (range.startRow < range.endRow || (range.startRow === range.endRow && range.startCol <= range.endCol)) {
     return range;
@@ -729,6 +761,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // debugName can change (its agent/title segment is reassigned on relabel).
     // A ref keeps the key out of callback dependency arrays.
     diagKeyRef.current = runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName;
+
+    const inputLatencyRuntimeId = runtimeLogMeta?.runtimeId;
+    useEffect(() => {
+      if (!inputLatencyRuntimeId) return;
+      return () => forgetTerminalInputLatencyRuntime(inputLatencyRuntimeId);
+    }, [inputLatencyRuntimeId]);
 
     useEffect(() => {
       onPointerActivityRef.current = onPointerActivity;
@@ -1550,7 +1588,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const normalized = text.replace(/\r\n/g, '\r').replace(/\n/g, '\r');
       onInputRef.current(terminalRef.current?.hasBracketedPaste()
         ? `\x1b[200~${normalized}\x1b[201~`
-        : normalized);
+        : normalized, 'user');
     }, []);
 
     const runBlockFilter = useCallback((blockId: number | null, caseSensitive: boolean) => {
@@ -2330,23 +2368,21 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
 
     useEffect(() => {
       let active = true;
-      let observer: ResizeObserver | null = null;
       const container = containerRef.current;
       const canvas = canvasRef.current;
       if (!container || !canvas) return;
       const perfId = `ghostty-${debugNameRef.current}`;
-      // The pending recovery timer. Owned by this effect run rather than by a
-      // ref, so the cleanup below is visibly the thing that cancels it and a
-      // torn-down pane can leave nothing behind. The attempt COUNT is a ref:
-      // it has to survive the epoch bump that rebuilds the renderer.
-      let recoveryTimer: ReturnType<typeof setTimeout> | null = null;
+      // One resource owner per effect run; disposing it below cancels the
+      // recovery timer and disconnects the resize observer together.
+      // The attempt COUNT is a ref because it survives the renderer epoch bump.
+      const resources = createRendererEffectResources();
 
       // Schedules the next WebGL-recovery attempt (a lost context or a failed
       // renderer construction land here) with escalating backoff. A pending
       // timer is never doubled: a context-lost event and a construction
       // failure could otherwise both fire for the same dead renderer.
       const scheduleRecovery = () => {
-        if (recoveryTimer !== null) return;
+        if (resources.isRecoveryScheduled()) return;
         recoveryAttemptRef.current += 1;
         const attempt = recoveryAttemptRef.current;
         const delay = recoveryDelayMs(attempt);
@@ -2358,8 +2394,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           return;
         }
         noteRecovery(diagKeyRef.current, { session, paneKind, attempt, outcome: 'scheduled', delayMs: delay });
-        recoveryTimer = setTimeout(() => {
-          recoveryTimer = null;
+        resources.scheduleRecovery(() => {
           // A stale timer must not resurrect a pane that has since unmounted
           // (or been torn down for an unrelated reason, e.g. this same effect
           // already cleaned up) — cleanup below also cancels this outright,
@@ -2473,10 +2508,20 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         inputRef.current = new InputHandler(
           ghostty,
           container,
-          (data) => onInputRef.current(data),
+          (data) => onInputRef.current(data, 'user'),
           () => undefined,
           undefined,
-          (event) => !installTerminalKeyHandler((data) => onInputRef.current(data))(event),
+          (event) => {
+            const meta = runtimeMetaRef.current;
+            if (event.type === 'keydown' && meta) {
+              noteTerminalKeyEvent(event, {
+                runtimeId: meta.runtimeId,
+                sessionId: meta.sessionId,
+                paneId: meta.paneId,
+              });
+            }
+            return !installTerminalKeyHandler((data) => onInputRef.current(data, 'user'))(event);
+          },
           (mode) => terminal.getMode(mode),
         );
         fit();
@@ -2496,8 +2541,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         startupRef.current.firstReadyAt = Date.now();
         startupRef.current.firstReadyCols = terminal.cols;
         startupRef.current.firstReadyRows = terminal.rows;
-        observer = new ResizeObserver(fit);
-        observer.observe(container);
+        resources.observeResize(container, fit);
         onReadyRef.current({
           fit,
           openFind,
@@ -2615,10 +2659,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
       return () => {
         active = false;
-        if (recoveryTimer !== null) {
-          clearTimeout(recoveryTimer);
-          recoveryTimer = null;
-        }
+        resources.dispose();
         recordDiag({
           kind: 'pane_unmount',
           pane: diagKeyRef.current,
@@ -2627,7 +2668,6 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           model: modelInstanceRef.current,
         });
         disposePaneDiagnostics(diagKeyRef.current);
-        observer?.disconnect();
         if (overflowRefitRafRef.current !== null) {
           cancelAnimationFrame(overflowRefitRafRef.current);
           overflowRefitRafRef.current = null;

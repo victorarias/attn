@@ -4762,8 +4762,31 @@ type PtyInputMessage struct {
 	// ID corresponds to the JSON schema field "id".
 	ID string `json:"id"`
 
+	// ProbeID corresponds to the JSON schema field "probe_id".
+	ProbeID *string `json:"probe_id,omitempty,omitzero"`
+
 	// Source corresponds to the JSON schema field "source".
 	Source *string `json:"source,omitempty,omitzero"`
+}
+
+type PtyInputProbeResultMessage struct {
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
+
+	// ProbeID corresponds to the JSON schema field "probe_id".
+	ProbeID string `json:"probe_id"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+
+	// WriteDurationUs corresponds to the JSON schema field "write_duration_us".
+	WriteDurationUs int `json:"write_duration_us"`
 }
 
 type PtyOutputMessage struct {
@@ -7395,6 +7418,9 @@ type WebSocketEvent struct {
 	// Priority corresponds to the JSON schema field "priority".
 	Priority *int `json:"priority,omitempty,omitzero"`
 
+	// ProbeID corresponds to the JSON schema field "probe_id".
+	ProbeID *string `json:"probe_id,omitempty,omitzero"`
+
 	// ProtocolVersion corresponds to the JSON schema field "protocol_version".
 	ProtocolVersion *string `json:"protocol_version,omitempty,omitzero"`
 
@@ -7519,6 +7545,9 @@ type WebSocketEvent struct {
 
 	// Worktrees corresponds to the JSON schema field "worktrees".
 	Worktrees []Worktree `json:"worktrees,omitempty,omitzero"`
+
+	// WriteDurationUs corresponds to the JSON schema field "write_duration_us".
+	WriteDurationUs *int `json:"write_duration_us,omitempty,omitzero"`
 
 	// Xpixel corresponds to the JSON schema field "xpixel".
 	Xpixel *int `json:"xpixel,omitempty,omitzero"`

@@ -63,6 +63,7 @@ import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
 import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
+import { completeTerminalInputProbe, maybeStartTerminalInputProbe } from '../utils/terminalInputLatency';
 import { decodeBinaryFrame } from '../pty/binaryPtyFrame';
 import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCache';
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
@@ -239,7 +240,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '240';
+export const PROTOCOL_VERSION = '241';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -2291,6 +2292,19 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'pty_input_probe_result': {
+            if (data.id && data.probe_id && typeof data.write_duration_us === 'number') {
+              completeTerminalInputProbe({
+                id: data.id,
+                probe_id: data.probe_id,
+                success: data.success === true,
+                write_duration_us: data.write_duration_us,
+                error: data.error,
+              });
+            }
+            break;
+          }
+
           case 'past_conversations_result':
             settlePendingRequest(
               pendingActionsRef.current,
@@ -3163,9 +3177,16 @@ export function useDaemonSocket({
         initialStateReceived: hasReceivedInitialStateRef.current,
       });
     }
+    const probeId = maybeStartTerminalInputProbe(id, source);
     recordPtyCommand('pty_input', id, data.length, source);
     sendOrQueueCommand(
-      { cmd: 'pty_input', id, data, ...(source ? { source } : {}) },
+      {
+        cmd: 'pty_input',
+        id,
+        data,
+        ...(source ? { source } : {}),
+        ...(probeId ? { probe_id: probeId } : {}),
+      },
       { waitForInitialState: true },
     );
   }, [sendOrQueueCommand]);

@@ -1964,6 +1964,9 @@ model PtyInputMessage {
   id: string;
   data: string;
   source?: string;
+  // Sparse diagnostic correlation. Absent on nearly every input; when present,
+  // the daemon acknowledges after the PTY backend accepts this write.
+  probe_id?: string;
 }
 
 // Reports genuine pointer movement inside a terminal pane. No bytes are written
@@ -3788,6 +3791,18 @@ model PtyOutputMessage {
   seq: int32;
 }
 
+// A sampled input acknowledgement. The app measures the whole round trip on
+// its own monotonic clock; write_duration_us isolates the daemon write fence and
+// PTY backend portion without requiring synchronized clocks on remote hosts.
+model PtyInputProbeResultMessage {
+  event: "pty_input_probe_result";
+  id: string;
+  probe_id: string;
+  success: boolean;
+  write_duration_us: safeint;
+  error?: string;
+}
+
 // One event from a conversation session's headless host. Two streams share one
 // envelope and one `seq` spine, so a render delta and the semantic event that
 // brackets it stay ordered against each other.
@@ -5532,6 +5547,8 @@ model WebSocketEvent {
   // PTY lifecycle
   data?: string;
   seq?: int32;
+  probe_id?: string;
+  write_duration_us?: safeint;
   scrollback_truncated?: boolean;
   screen_snapshot?: string;
   screen_rows?: int32;
@@ -5652,6 +5669,7 @@ alias DaemonEvent =
   | AttachResultMessage
   | GetScreenSnapshotResultMessage
   | PtyOutputMessage
+  | PtyInputProbeResultMessage
   | AgentEventMessage
   | SessionExitedMessage
   | PtyDesyncMessage
