@@ -52,7 +52,7 @@ func TestReadLinesFile_LongLine(t *testing.T) {
 	}
 }
 
-func TestReadLinesFile_NoLogingNewline(t *testing.T) {
+func TestReadLinesFile_NoTrailingNewline(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "notrail.txt")
 	if err := os.WriteFile(path, []byte("a\nb\nc"), 0644); err != nil {
 		t.Fatalf("WriteFile: %v", err)

@@ -113,7 +113,7 @@ func TestOSCScannerAbandonsAnOversizedSequence(t *testing.T) {
 		scannedOSC{0, "recovered"})
 }
 
-func TestOSCScannerHoldsALogingEscape(t *testing.T) {
+func TestOSCScannerHoldsATrailingEscape(t *testing.T) {
 	assertScanned(t, scanAll("text\x1b", "]0;title\x07"), scannedOSC{0, "title"})
 }
 

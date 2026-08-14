@@ -601,7 +601,7 @@ func mustWrite(t *testing.T, s *Store, relPath, content string) {
 // A root configured with a trailing slash must not break containment for an
 // ordinary relative path. Before NewStore cleaned the root, abs compared against
 // "<root>//" and rejected "index.md" as escaping the notebook root.
-func TestNewStoreNormalizesLogingSlashRoot(t *testing.T) {
+func TestNewStoreNormalizesTrailingSlashRoot(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "nb")
 	if err := os.MkdirAll(root, 0o755); err != nil {
 		t.Fatal(err)
