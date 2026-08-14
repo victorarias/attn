@@ -145,3 +145,17 @@ export interface ViewProps {
   /** Opaque to attn — the app decides what it means. Empty when none was given. */
   readonly params: string
 }
+
+// Live queries. The runtime seam is exported because the HOST implements it;
+// a view only ever calls the hook.
+export { useQuery } from "./useQuery"
+export type { LiveQueryOptions, QueryError, QueryResult } from "./useQuery"
+export { AppViewRuntimeProvider, useAppViewRuntime } from "./runtime"
+export type {
+  AppViewRuntime,
+  DocumentRevision,
+  DocumentSubscriber,
+  LiveQueryRequest,
+  QueryDelivery,
+  RawDocument,
+} from "./runtime"

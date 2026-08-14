@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "242"
+const ProtocolVersion = "243"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -44,7 +44,23 @@ const (
 	// never be answered again as written, so the tile's query is what has to
 	// change; resubscribing unchanged would fail the same way.
 	ErrorCodeCollectionRedeclared = "collection_redeclared"
+	// ErrorCodeSubscriptionLimit refuses a live query because the client already
+	// holds DocSubscriptionsPerClient of them. The refusal names the limit and
+	// the ask, because a silently dropped subscription is a tile that renders
+	// nothing forever with nothing to read.
+	ErrorCodeSubscriptionLimit = "subscription_limit"
 )
+
+// DocSubscriptionsPerClient bounds how many live queries one WebSocket client
+// may hold at once.
+//
+// Measured 2026-08-13 against Victor's production database: seven live
+// workspaces, of which three hold exactly one docked tile and four hold none. A
+// view can reasonably open more than one query, so the healthy ceiling is single
+// digits and this sits an order of magnitude past it. It is a tripwire — a
+// working client never learns it exists — and reaching it is a named refusal,
+// never a dropped subscription.
+const DocSubscriptionsPerClient = 64
 
 // AgentMessageMaxChars bounds one agent_msg. Measured 2026-08-10 against a live
 // session: a bracketed paste through the doorbell's own mechanics arrived intact
@@ -126,6 +142,7 @@ const (
 	CmdDocQuery                              = "doc_query"
 	CmdDocCount                              = "doc_count"
 	CmdDocSubscribe                          = "doc_subscribe"
+	CmdDocUnsubscribe                        = "doc_unsubscribe"
 	CmdAppList                               = "app_list"
 	CmdAppStatus                             = "app_status"
 	CmdAppSetEnabled                         = "app_set_enabled"
@@ -366,6 +383,8 @@ const (
 	EventTicketsUpdated                  = "tickets_updated"
 	EventGardenSeedsUpdated              = "garden_seeds_updated"
 	EventAppsUpdated                     = "apps_updated"
+	EventDocSubscriptionDelivery         = "doc_subscription_delivery"
+	EventDocSubscriptionEnded            = "doc_subscription_ended"
 	EventTicketResult                    = "ticket_result"
 	EventTicketActionResult              = "ticket_action_result"
 	EventTicketAttachResult              = "ticket_attach_result"
@@ -753,6 +772,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdDocSubscribe:
 		var msg DocSubscribeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdDocUnsubscribe:
+		var msg DocUnsubscribeMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

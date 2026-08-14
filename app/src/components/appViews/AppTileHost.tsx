@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { FocusEvent as ReactFocusEvent } from 'react';
+import { AppViewRuntimeProvider, type AppViewRuntime } from '@victorarias/attn-app';
 import { useDaemonApi } from '../../contexts/DaemonApiContext';
 import { useDaemonStore } from '../../store/daemonSessions';
 import { appBundleURL } from '../../utils/appBundle';
@@ -36,7 +37,7 @@ interface Mounted {
 }
 
 export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params }: AppTileHostProps) {
-  const { sendAppViewCrash } = useDaemonApi();
+  const { sendAppViewCrash, subscribeDocuments } = useDaemonApi();
   const entry = useDaemonStore((state) => state.apps.find((a) => a.name === app));
 
   const declared = entry?.views?.some((v) => v.name === view) ?? false;
@@ -121,6 +122,14 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
     [workspaceId, sessionId, tileId, params],
   );
 
+  // The namespace is composed here, from the mount's identity, and never taken
+  // from the view: an app addresses its own documents because that is the only
+  // namespace it is handed.
+  const runtime = useMemo<AppViewRuntime>(
+    () => ({ namespace: `app/${app}`, subscribe: subscribeDocuments }),
+    [app, subscribeDocuments],
+  );
+
   const body = (() => {
     if (!entry) {
       return (
@@ -188,7 +197,9 @@ export function AppTileHost({ app, view, workspaceId, sessionId, tileId, params 
           />
         )}
       >
-        <View {...viewProps} />
+        <AppViewRuntimeProvider value={runtime}>
+          <View {...viewProps} />
+        </AppViewRuntimeProvider>
       </AppViewBoundary>
     );
   })();

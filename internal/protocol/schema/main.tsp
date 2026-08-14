@@ -4206,10 +4206,28 @@ model DocumentRevision {
 // page it named a write ago. Use `limit` and let each delivery carry the current
 // window. One-shot doc_query keeps `after` exactly as it is, because a single
 // read has one instant and nothing to move under it.
+// On the WebSocket the connection is multiplexed, so the subscription needs an
+// identity of its own: `subscription_id` is client-minted, required there, and
+// refused on the unix socket where a second subscription means a second
+// connection and an id would name nothing. Deliveries then arrive as
+// DocSubscriptionDeliveryMessage rather than as responses on this connection,
+// and doc_unsubscribe is the way out.
 model DocSubscribeMessage {
   "cmd": "doc_subscribe";
   "query": DocumentQuery;
   "have"?: DocumentRevision[];
+  "subscription_id"?: string;
+}
+
+// End one live query. The way out for doc_subscribe's way in, and the only one
+// a WebSocket client has short of dropping the socket: a tile that unmounts must
+// stop the daemon re-running its query on every write to that collection.
+//
+// Unknown ids are ignored rather than refused — an unsubscribe racing the
+// daemon's own doc_subscription_ended is the ordinary case, not an error.
+model DocUnsubscribeMessage {
+  "cmd": "doc_unsubscribe";
+  "subscription_id": string;
 }
 
 // One delivery of a live query's window, and the whole client contract is one
@@ -4243,6 +4261,40 @@ model DocSubscribeResult {
   "as_of_seq": safeint;
   "order": string[];
   "upsert": StoredDocument[];
+}
+
+// One delivery of a WebSocket subscription: DocSubscribeResult's four fields
+// verbatim, plus the id that says which subscription they belong to. The client
+// rule is unchanged — render `order`, take bodies from `upsert` or cache, forget
+// the rest — because this is the same delivery travelling over a multiplexed
+// connection rather than a dedicated one.
+model DocSubscriptionDeliveryMessage {
+  event: "doc_subscription_delivery";
+  "subscription_id": string;
+  "delivery": int32;
+  "as_of_seq": safeint;
+  "order": string[];
+  "upsert": StoredDocument[];
+}
+
+// A WebSocket subscription is over, and no further delivery carries its id.
+//
+// It is the only failure channel a subscription has: a refusal at subscribe time
+// (an invalid query, an `after` cursor, a collection never declared, or one
+// client holding too many subscriptions) and an ending after acceptance (the
+// collection was undefined, or redeclared without a field the query reads) both
+// arrive here. `code` is what a host acts on and `error` is what a person reads;
+// nothing may match on the English.
+//
+// The codes: `invalid_query`, `undeclared_collection`, `subscription_limit`
+// refuse a subscription that never started; `collection_undefined` and
+// `collection_redeclared` end one that did — which is what lets a UI host tell
+// "kill the tile" from "resubscribe".
+model DocSubscriptionEndedMessage {
+  event: "doc_subscription_ended";
+  "subscription_id": string;
+  "code": string;
+  "error": string;
 }
 
 // ============================================================================
@@ -5782,4 +5834,6 @@ alias DaemonEvent =
   | PastConversationsResultMessage
   | BusStatusResultMessage
   | BusSetConsumerEnabledResultMessage
-  | AppsUpdatedMessage;
+  | AppsUpdatedMessage
+  | DocSubscriptionDeliveryMessage
+  | DocSubscriptionEndedMessage;

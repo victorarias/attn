@@ -54,6 +54,10 @@ type wsClient struct {
 	pendingRemote   map[string]struct{}          // remote runtime IDs awaiting attach_result
 	attachMu        sync.Mutex
 
+	// Live document queries this client holds, by client-minted id. See
+	// documents_ws.go; the ceiling is protocol.DocSubscriptionsPerClient.
+	docSubscriptions clientDocSubscriptions
+
 	// Docked tile content subscriptions keyed by workspace + tile ID.
 	tileContentSubscriptions map[string]struct{}
 	tileContentPending       map[string]time.Time
@@ -963,6 +967,7 @@ func (d *Daemon) wsReadPump(client *wsClient) {
 		d.dropPendingInitialState(client)
 		d.cleanupRemoteGitStatusSubscription(client)
 		d.dropFsWatchClient(client)
+		d.dropDocSubscriptions(client)
 		d.detachAllSessions(client)
 		close(client.recv) // signal wsMsgPump to exit
 		d.wsHub.unregister <- client
@@ -1342,6 +1347,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceLayoutSetSplitRatio(client, msg.(*protocol.WorkspaceLayoutSetSplitRatioMessage))
 	case protocol.CmdAppViewCrash: // wire: app_view_crash
 		d.handleAppViewCrash(client, msg.(*protocol.AppViewCrashMessage))
+	case protocol.CmdDocSubscribe: // wire: doc_subscribe
+		d.handleDocSubscribeWS(client, msg.(*protocol.DocSubscribeMessage))
+	case protocol.CmdDocUnsubscribe: // wire: doc_unsubscribe
+		d.handleDocUnsubscribeWS(client, msg.(*protocol.DocUnsubscribeMessage))
 	case protocol.CmdWorkspaceLayoutDockTile: // wire: workspace_layout_dock_tile
 		d.handleWorkspaceLayoutDockTile(client, msg.(*protocol.WorkspaceLayoutDockTileMessage))
 	case protocol.CmdWorkspaceLayoutUndockTile: // wire: workspace_layout_undock_tile
@@ -1839,12 +1848,15 @@ func (d *Daemon) sendCommandError(client *wsClient, cmd, errMsg string) {
 	d.sendToClient(client, event)
 }
 
-func (d *Daemon) sendToClient(client *wsClient, message interface{}) {
+// sendToClient queues one message for a client. The bool says whether it was
+// queued — a caller that keeps state alive for this client (a live subscription)
+// needs to know it has lost them; the rest of the callers do not, and ignore it.
+func (d *Daemon) sendToClient(client *wsClient, message interface{}) bool {
 	data, err := json.Marshal(message)
 	if err != nil {
-		return
+		return false
 	}
-	_ = d.sendOutbound(client, outboundMessage{
+	return d.sendOutbound(client, outboundMessage{
 		kind:    messageKindText,
 		payload: data,
 	})
