@@ -1,0 +1,8 @@
+kind: fixed
+area: app
+change: >
+  The app holds about 110MB less memory at rest. All five dock panels are
+  mounted from the moment the window opens, and each one asked the renderer
+  to keep a full-height GPU layer ready even while it was closed and
+  invisible, so an app with nothing open carried five surfaces it never
+  drew. Panels now claim that layer only while they are open.
