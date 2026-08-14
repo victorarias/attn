@@ -236,6 +236,8 @@ func (e *UsageExtractor) extractCodexUsage(line []byte, sourceKey string) (Token
 	if last.InputTokens < 0 || last.CachedInputTokens < 0 || last.OutputTokens < 0 || last.CachedInputTokens > last.InputTokens {
 		return TokenUsage{}, false
 	}
+	// Captured Codex totals equal input_tokens + output_tokens; the reported
+	// reasoning_output_tokens is an output breakdown, so pricing it again would double-charge.
 	return TokenUsage{
 		Key:             "codex:" + strings.TrimSpace(sourceKey),
 		Model:           e.codexModel,

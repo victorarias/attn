@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"database/sql"
+	"errors"
 	"strings"
 
 	"github.com/victorarias/attn/internal/protocol"
@@ -13,6 +15,9 @@ func (d *Daemon) decorateSessionWithCost(session *protocol.Session) {
 	}
 	state, err := d.store.SessionCost(session.ID)
 	if err != nil {
+		if !errors.Is(err, sql.ErrNoRows) {
+			session.CostUnknown = protocol.Ptr(true)
+		}
 		return
 	}
 	if state.UsageUnavailable {

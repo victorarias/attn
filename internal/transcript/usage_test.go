@@ -53,7 +53,7 @@ func TestFollowerExtractsClaudeUsageFromCapturedTranscript(t *testing.T) {
 	}
 }
 
-func TestFollowerExtractsCodexLastUsageWithCachedInputAsSubset(t *testing.T) {
+func TestFollowerExtractsCodexLastUsageWithCachedAndReasoningSubsets(t *testing.T) {
 	follower, err := NewFollower(usageFixture(t, "codex-0.147.0.jsonl"), "codex", 0)
 	if err != nil {
 		t.Fatal(err)
@@ -66,6 +66,8 @@ func TestFollowerExtractsCodexLastUsageWithCachedInputAsSubset(t *testing.T) {
 		t.Fatalf("usage = %+v, want two non-null token_count observations", batch.Usage)
 	}
 	first := batch.Usage[0]
+	// The captured record reports 256 reasoning tokens within 563 output tokens:
+	// total_tokens is exactly input_tokens + output_tokens, not reasoning on top.
 	if first.Model != "gpt-5.5" || first.InputTokens != 8427 || first.CacheReadTokens != 24448 || first.OutputTokens != 563 {
 		t.Fatalf("first usage = %+v", first)
 	}

@@ -54,6 +54,40 @@ func TestSessionCostWireStates(t *testing.T) {
 	}
 }
 
+func TestSessionCostWireMarksUnreadableDurableStateUnknown(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "attn.db")
+	persistent, err := store.NewWithDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newTurnDaemon(t)
+	_ = d.store.Close()
+	d.store = persistent
+	t.Cleanup(func() { _ = persistent.Close() })
+	addCostSession(t, d, "corrupt", protocol.SessionAgentClaude)
+
+	direct, err := store.OpenDB(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := direct.Exec(
+		"UPDATE sessions SET session_cost_json = ? WHERE id = ?",
+		`{"ledger":`, "corrupt",
+	); err != nil {
+		_ = direct.Close()
+		t.Fatal(err)
+	}
+	if err := direct.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	got := d.store.Get("corrupt")
+	d.decorateSessionWithCost(got)
+	if got.CostUsd != nil || !protocol.Deref(got.CostUnknown) {
+		t.Fatalf("session with unreadable cost state = %+v", got)
+	}
+}
+
 func TestSessionCostForwardOnlyThenAccumulatesCapturedUsage(t *testing.T) {
 	d := newTurnDaemon(t)
 	addCostSession(t, d, "cost", protocol.SessionAgentClaude)
