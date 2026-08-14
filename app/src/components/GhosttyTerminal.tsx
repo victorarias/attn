@@ -129,7 +129,10 @@ import {
   type TerminalAnnotationStore,
 } from '../utils/terminalAnnotations';
 import { installTerminalKeyHandler } from './SessionTerminalWorkspace/terminalKeyHandler';
-import { noteTerminalKeyEvent } from '../utils/terminalInputLatency';
+import {
+  forgetTerminalInputLatencyRuntime,
+  noteTerminalKeyEvent,
+} from '../utils/terminalInputLatency';
 import { ensureTerminalIconFont } from '../utils/terminalIconFont';
 import {
   KittyPlacementStore,
@@ -758,6 +761,12 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // debugName can change (its agent/title segment is reassigned on relabel).
     // A ref keeps the key out of callback dependency arrays.
     diagKeyRef.current = runtimeLogMeta?.paneId ?? runtimeLogMeta?.sessionId ?? debugName;
+
+    const inputLatencyRuntimeId = runtimeLogMeta?.runtimeId;
+    useEffect(() => {
+      if (!inputLatencyRuntimeId) return;
+      return () => forgetTerminalInputLatencyRuntime(inputLatencyRuntimeId);
+    }, [inputLatencyRuntimeId]);
 
     useEffect(() => {
       onPointerActivityRef.current = onPointerActivity;

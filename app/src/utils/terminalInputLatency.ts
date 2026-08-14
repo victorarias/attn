@@ -254,6 +254,21 @@ export function completeTerminalInputProbe(
   }
 }
 
+export function forgetTerminalInputLatencyRuntime(runtimeId: string): void {
+  runtimeContexts.delete(runtimeId);
+  lastProbeAt.delete(runtimeId);
+  lastHealthyKeySampleAt.delete(runtimeId);
+
+  const probeId = pendingProbeByRuntime.get(runtimeId);
+  if (probeId) pendingProbes.delete(probeId);
+  pendingProbeByRuntime.delete(runtimeId);
+
+  const episodePrefix = `${runtimeId}:`;
+  for (const episodeKey of incidentEpisodes.keys()) {
+    if (episodeKey.startsWith(episodePrefix)) incidentEpisodes.delete(episodeKey);
+  }
+}
+
 export function resetTerminalInputLatencyForTests(): void {
   samples.length = 0;
   runtimeContexts.clear();

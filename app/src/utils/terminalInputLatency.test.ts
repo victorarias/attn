@@ -8,6 +8,7 @@ vi.mock('./terminalDiagnosticsLog', () => ({ recordTerminalIncident }));
 
 import {
   completeTerminalInputProbe,
+  forgetTerminalInputLatencyRuntime,
   maybeStartTerminalInputProbe,
   noteTerminalKeyEvent,
   resetTerminalInputLatencyForTests,
@@ -89,6 +90,49 @@ describe('terminal input latency diagnostics', () => {
       'terminal_key_event_delay',
       expect.objectContaining({ suppressed: 1, maxSuppressedLatencyMs: 400 }),
       61_000,
+    );
+  });
+
+  it('forgets per-runtime probes, throttles, context, and cooldown state', () => {
+    const runtimeId = 'runtime-disposed';
+    const epoch = performance.timeOrigin;
+    noteTerminalKeyEvent(
+      { timeStamp: epoch + 1_000 } as KeyboardEvent,
+      { runtimeId, sessionId: 'session-old', paneId: 'pane-old' },
+      1_300,
+      30_000,
+    );
+    const staleProbeId = maybeStartTerminalInputProbe(runtimeId, 'user', 1_300, 30_000)!;
+
+    forgetTerminalInputLatencyRuntime(runtimeId);
+
+    completeTerminalInputProbe({
+      id: runtimeId,
+      probe_id: staleProbeId,
+      success: true,
+      write_duration_us: 1_000,
+    }, 1_350, 30_050);
+    expect(window.__ATTN_TERMINAL_INPUT_LATENCY_DUMP?.()).not.toContainEqual(
+      expect.objectContaining({ stage: 'pty_round_trip', runtimeId }),
+    );
+
+    const freshProbeId = maybeStartTerminalInputProbe(runtimeId, 'user', 1_350, 30_050);
+    expect(freshProbeId).toBeTruthy();
+    expect(freshProbeId).not.toBe(staleProbeId);
+
+    noteTerminalKeyEvent(
+      { timeStamp: epoch + 1_100 } as KeyboardEvent,
+      { runtimeId, sessionId: 'session-new', paneId: 'pane-new' },
+      1_500,
+      30_100,
+    );
+    expect(recordTerminalIncident).toHaveBeenCalledTimes(2);
+    expect(recordTerminalIncident).toHaveBeenLastCalledWith(
+      'pane-new',
+      'session-new',
+      'terminal_key_event_delay',
+      expect.any(Object),
+      30_100,
     );
   });
 });
