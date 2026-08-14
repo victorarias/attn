@@ -192,6 +192,12 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 }
 
 func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, delivery *crewWakeDelivery) (*protocol.CrewWakeResult, error) {
+	if d.crewWakeStartHook != nil {
+		d.crewWakeStartHook(strings.TrimSpace(strings.ToLower(name)))
+	}
+	d.crewWakeMu.Lock()
+	defer d.crewWakeMu.Unlock()
+
 	member, _, err := d.crewMember(name)
 	if err != nil {
 		return nil, err
@@ -231,6 +237,9 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 	// whose day is claimed by a launch that then fails is released below.
 	if _, err := d.claimCrewBinding(member.ID, sessionID); err != nil {
 		return nil, err
+	}
+	if d.crewWakeAfterClaimHook != nil {
+		d.crewWakeAfterClaimHook(member.ID, sessionID)
 	}
 
 	workspaceID := crewWorkspaceID(member.ID)

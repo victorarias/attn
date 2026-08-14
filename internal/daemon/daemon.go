@@ -259,8 +259,17 @@ type Daemon struct {
 	// day's initial prompt. The row stays queued until a prompt-submit hook
 	// proves the agent took it; across a daemon restart the ordinary queue drain
 	// is the conservative fallback, so the message can duplicate but not vanish.
-	agentMessageInitialPrompt map[string]string                     // session id -> message id
-	agentMessageDrainHook     func(sessionID string, delivered int) // tests only; nil in production
+	agentMessageInitialPrompt map[string]string // session id -> message id
+	// Deterministic drain seams; nil outside tests.
+	agentMessageDrainScheduledHook func(sessionID string)
+	agentMessageDrainHook          func(sessionID string, delivered int)
+	// A wake owns the member from its liveness read through durable session
+	// creation. Without this fence, a second wake can steal the binding while
+	// the first claimed session is not yet visible to crewBindingLive.
+	crewWakeMu sync.Mutex
+	// Deterministic concurrency seams; nil outside tests.
+	crewWakeStartHook      func(memberID string)
+	crewWakeAfterClaimHook func(memberID, sessionID string)
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.

@@ -50,6 +50,10 @@ var agentMessageTakenWindow = 3 * time.Second
 // errDoorbellNotTaken is a delivery whose target never picked it up.
 var errDoorbellNotTaken = errors.New("doorbell typed but the target did not take it")
 
+// An initial-prompt delivery owns the prompt until its submit hook. Anything
+// behind it must queue rather than paste into priming or a trust dialog.
+var errAgentMessageInitialPromptPending = errors.New("target is still taking its initial prompt")
+
 // agentMessageGuardVerdict is empty when a message is accepted. Otherwise it is
 // the sentence the sender is told: which limit it hit, that limit's value, and
 // what it asked for. An agent can act on that; "refused" alone it cannot.
@@ -222,6 +226,9 @@ func (d *Daemon) replyAgentMsgError(conn net.Conn, code, message string) {
 // not the same sentence in both cases: an approval clears on its own, a dead
 // session does not, and a sender that waits for a reply from one is stuck.
 func agentMessageQueuedDetail(err error) string {
+	if errors.Is(err, errAgentMessageInitialPromptPending) {
+		return "queued (target is waking and still reading its priming — lands immediately after its first prompt starts)"
+	}
 	if errors.Is(err, errDoorbellBlockedByApproval) {
 		return "queued (target is waiting on an approval — lands when the approval clears)"
 	}
@@ -237,6 +244,9 @@ func agentMessageQueuedDetail(err error) string {
 // took it, and stamps the row. Shared by the send path and the redelivery drain
 // so a queued message and a live one land identically.
 func (d *Daemon) deliverAgentMessage(record store.AgentMessage) error {
+	if d.initialAgentMessagePending(record.TargetSessionID, "") {
+		return errAgentMessageInitialPromptPending
+	}
 	sender := d.store.Get(record.SenderSessionID)
 	target := d.store.Get(record.TargetSessionID)
 	confirmable := target != nil && string(target.State) != protocol.StateWorking
@@ -415,7 +425,10 @@ func (d *Daemon) noteInitialAgentMessageSubmitted(sessionID, state string) {
 		return
 	}
 	_ = d.stampAgentMessageDelivered(messageID)
-	d.forgetQueuedAgentMessages(sessionID)
+	// Another sender can address this now-live member while its initial prompt
+	// is still blocked on priming. Keep the queue armed and drain anything behind
+	// the initial message now that the prompt-submit receipt opened the gate.
+	d.drainAgentMessagesAfterStateChange(sessionID, state)
 }
 
 // rollbackInitialAgentMessage is reached only when the wake itself failed. No
@@ -518,6 +531,9 @@ func (d *Daemon) seedQueuedAgentMessages() {
 func (d *Daemon) drainAgentMessagesAfterStateChange(sessionID, state string) {
 	if d.initialAgentMessagePending(sessionID, "") || !isNudgeDeliveryAllowed(state) || !d.hasQueuedAgentMessages(sessionID) {
 		return
+	}
+	if d.agentMessageDrainScheduledHook != nil {
+		d.agentMessageDrainScheduledHook(sessionID)
 	}
 	// Never inline: typeDoorbell takes doorbellMu and sleeps between the paste
 	// and its Enter, and applyState is on the state-report path.

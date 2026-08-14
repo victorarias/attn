@@ -224,6 +224,64 @@ func TestHandleAgentMsgWakesASleepingMemberWithTheMessageAsItsFirstPrompt(t *tes
 	}
 }
 
+// A member is live as soon as its day is durably created, before the initial
+// prompt clears priming. Messages arriving in that interval queue behind the
+// first ask; the prompt-submit receipt must open their drain rather than clear
+// the only bit that remembers they exist.
+func TestHandleAgentMsgDuringWakePrimingDrainsAfterTheInitialPrompt(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	doorbell := &recordingDoorbell{}
+	backend.onInput = doorbell.backend().onInput
+
+	first := callAgentMsg(t, d, "keel", "sender-session-id", "first ask")
+	if !first.Ok || first.AgentMsgResult == nil {
+		t.Fatalf("first response = %+v", first)
+	}
+	sessionID := first.AgentMsgResult.TargetSessionID
+	second := callAgentMsg(t, d, "keel", "sender-session-id", "second ask")
+	if !second.Ok || second.AgentMsgResult == nil || second.AgentMsgResult.TargetSessionID != sessionID || second.AgentMsgResult.Status != protocol.AgentMsgStatusQueued {
+		t.Fatalf("second response = %+v, want a queue behind the same waking day", second)
+	}
+	queued, err := d.store.UndeliveredAgentMessages(sessionID)
+	if err != nil || len(queued) != 2 {
+		t.Fatalf("messages queued during priming = %+v, %v", queued, err)
+	}
+	if prompts := doorbell.pasted(); len(prompts) != 0 {
+		t.Fatalf("a message jumped ahead of priming: %q", prompts)
+	}
+
+	scheduled := make(chan string, 1)
+	drained := make(chan int, 1)
+	d.agentMessageDrainScheduledHook = func(sessionID string) { scheduled <- sessionID }
+	d.agentMessageDrainHook = func(_ string, delivered int) { drained <- delivered }
+	hook := callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{ID: sessionID, State: protocol.StateWorking})
+	})
+	if !hook.Ok {
+		t.Fatalf("prompt-submit hook: %+v", hook)
+	}
+	select {
+	case got := <-scheduled:
+		if got != sessionID {
+			t.Fatalf("drain scheduled for %q, want %q", got, sessionID)
+		}
+	default:
+		t.Fatal("prompt-submit receipt did not open the queued-message drain")
+	}
+	if delivered := <-drained; delivered != 1 {
+		t.Fatalf("drained %d messages behind the initial prompt, want 1", delivered)
+	}
+	queued, err = d.store.UndeliveredAgentMessages(sessionID)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("queue after prompt submit = %+v, %v", queued, err)
+	}
+	prompts := doorbell.pasted()
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "second ask") || strings.Contains(prompts[0], "first ask") {
+		t.Fatalf("doorbell prompts after priming = %q", prompts)
+	}
+}
+
 // A message-triggered wake is autonomous. The lifecycle's own limit decides,
 // and its loud refusal reaches the caller with the additional fact that no
 // message landed.
