@@ -126,6 +126,29 @@ const (
 	// the `present` tier survives. Default 90, UNMEASURED; safe because `away`
 	// is self-healing.
 	SettingActivityPresenceIdleSeconds = "activity.presence_idle_seconds"
+	// SettingCrewHeartbeatEnabled gates the cache-warming heartbeat. Default ON
+	// (blank means enabled); only an explicit "false" disables it.
+	SettingCrewHeartbeatEnabled = "crew.heartbeat_enabled"
+	// SettingCrewAutoSleepEnabled gates auto-sleep — the prompted handoff that
+	// ends a member's day when the user is truly gone. Default ON.
+	SettingCrewAutoSleepEnabled = "crew.autosleep_enabled"
+	// SettingCrewCacheTTLSeconds is the assumed prompt-cache lifetime for a
+	// harness this daemon has no shipped assumption for. Per-harness override:
+	// SettingCrewCacheTTLPrefix + agent.
+	SettingCrewCacheTTLSeconds = "crew.cache_ttl_seconds"
+	// SettingCrewCacheTTLPrefix + agent overrides the assumption for one harness,
+	// e.g. `crew.cache_ttl_seconds.claude`.
+	SettingCrewCacheTTLPrefix = "crew.cache_ttl_seconds."
+	// SettingCrewHeartbeatLeadSeconds is how far ahead of the estimated expiry
+	// attn acts.
+	SettingCrewHeartbeatLeadSeconds = "crew.heartbeat_lead_seconds"
+	// SettingCrewAwaySeconds is how long an absence must last to count as one.
+	SettingCrewAwaySeconds = "crew.away_seconds"
+	// SettingCrewWakeLimit caps autonomous wakes per member per window. 0 turns
+	// every autonomous wake off, loudly.
+	SettingCrewWakeLimit = "crew.wake_limit"
+	// SettingCrewWakeLimitWindowSeconds is the window that limit counts over.
+	SettingCrewWakeLimitWindowSeconds = "crew.wake_limit_window_seconds"
 	// SettingChiefContextWindowCap caps the chief session's effective context
 	// window (tokens) so each cache-cold wake re-reads less. Empty =>
 	// DefaultContextWindowCap; chief launches only.
@@ -360,6 +383,19 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 			settings[SettingActivityIntervals] = string(encoded)
 		}
 	}
+	// The crew lifecycle, surfaced EFFECTIVE for the same reason: a member's
+	// daily rhythm is set by these numbers, and an absent key reads as "off"
+	// when every one of them is on by default. Per-harness cache-TTL overrides
+	// (crew.cache_ttl_seconds.<agent>) are not surfaced — they are exceptions,
+	// and listing every harness attn might ever launch would be noise.
+	settings[SettingCrewHeartbeatEnabled] = strconv.FormatBool(d.crewBoolSetting(SettingCrewHeartbeatEnabled))
+	settings[SettingCrewAutoSleepEnabled] = strconv.FormatBool(d.crewBoolSetting(SettingCrewAutoSleepEnabled))
+	settings[SettingCrewCacheTTLSeconds] = strconv.Itoa(int(d.crewCacheTTL("") / time.Second))
+	settings[SettingCrewHeartbeatLeadSeconds] = strconv.Itoa(int(d.crewHeartbeatLead() / time.Second))
+	settings[SettingCrewAwaySeconds] = strconv.Itoa(int(d.crewAwayLimit() / time.Second))
+	crewWakes := d.crewWakeLedger()
+	settings[SettingCrewWakeLimit] = strconv.Itoa(crewWakes.Limit)
+	settings[SettingCrewWakeLimitWindowSeconds] = strconv.Itoa(int(crewWakes.Window / time.Second))
 	// The presence tier is deliberately NOT here. It is live state, and settings
 	// are only re-pushed when a setting changes, so a copy parked in this
 	// snapshot goes stale within seconds of the user moving. `attn activity`
@@ -532,6 +568,20 @@ func (d *Daemon) validateSetting(key, value string) error {
 			activityPresenceIdleMinSeconds,
 			activityPresenceIdleMaxSeconds,
 		)
+	case SettingCrewHeartbeatEnabled, SettingCrewAutoSleepEnabled:
+		return validateBooleanSetting(value)
+	case SettingCrewCacheTTLSeconds:
+		return validateBoundedIntSetting("crew cache TTL", value, crewCacheTTLMinSeconds, crewCacheTTLMaxSeconds)
+	case SettingCrewHeartbeatLeadSeconds:
+		return validateBoundedIntSetting("crew heartbeat lead", value, crewHeartbeatLeadMinSeconds, crewHeartbeatLeadMaxSeconds)
+	case SettingCrewAwaySeconds:
+		return validateBoundedIntSetting("crew away threshold", value, crewAwayMinSeconds, crewAwayMaxSeconds)
+	case SettingCrewWakeLimit:
+		// Zero is meaningful — it turns autonomous wakes off — so the floor is 0,
+		// not 1.
+		return validateBoundedIntSetting("crew wake limit", value, 0, crewWakeLimitMax)
+	case SettingCrewWakeLimitWindowSeconds:
+		return validateBoundedIntSetting("crew wake limit window", value, crewWakeLimitWindowMinSecs, crewWakeLimitWindowMaxSecs)
 	case SettingNotebookRoot:
 		return validateNotebookRoot(value)
 	case SettingNotebookCronFrequency:
@@ -543,6 +593,9 @@ func (d *Daemon) validateSetting(key, value string) error {
 	case SettingReviewerModel:
 		return nil
 	default:
+		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingCrewCacheTTLPrefix) {
+			return validateBoundedIntSetting("crew cache TTL", value, crewCacheTTLMinSeconds, crewCacheTTLMaxSeconds)
+		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingNewSessionYoloPrefix) {
 			return validateBooleanSetting(value)
 		}

@@ -27,6 +27,80 @@ func crewHandoffRetryCall(t *testing.T, d *Daemon, sessionID string) protocol.Re
 	return gardenCall(t, func(c net.Conn) { d.handleCrewHandoff(c, &msg) })
 }
 
+// A retry is retrying a turnover, so an absence must not answer a different
+// question than the one it asked: the member ran --retry to get the successor
+// its letter was written for, and sleeping instead would quietly change what
+// the verb means. Saying so is one word away, and it is the member's word.
+func TestCrewHandoff_ARetryTurnsTheDayOverEvenWithTheUserAway(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	backend.spawnErr = errors.New("no room to launch")
+	backend.mu.Unlock()
+
+	first := crewHandoffCall(t, d, woken.SessionID, "The letter, written once.")
+	if !first.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(first.Error))
+	}
+	if protocol.Deref(first.CrewHandoffResult.NapError) == "" {
+		t.Fatal("the nap was supposed to fail")
+	}
+
+	backend.mu.Lock()
+	backend.spawnErr = nil
+	backend.mu.Unlock()
+	setUserAway(d, time.Now().Add(-3*time.Hour))
+
+	retried := crewHandoffRetryCall(t, d, woken.SessionID)
+	if !retried.Ok {
+		t.Fatalf("retry: %v", protocol.Deref(retried.Error))
+	}
+	result := retried.CrewHandoffResult
+	if got := protocol.Deref(result.Outcome); got != protocol.CrewDayCloseNap {
+		t.Fatalf("outcome = %q, want the turnover the retry asked for", got)
+	}
+	if successor := protocol.Deref(result.SessionID); successor == "" || successor == woken.SessionID {
+		t.Fatalf("the successor's session is %q; the retry must start the next day", successor)
+	}
+}
+
+// The member can still end the day on a retry — it just has to say so.
+func TestCrewHandoff_ARetryCanBeToldToSleepInstead(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	backend.mu.Lock()
+	backend.spawnErr = errors.New("no room to launch")
+	backend.mu.Unlock()
+
+	if first := crewHandoffCall(t, d, woken.SessionID, "The letter, written once."); !first.Ok {
+		t.Fatalf("handoff: %v", protocol.Deref(first.Error))
+	}
+	backend.mu.Lock()
+	backend.spawnErr = nil
+	backend.mu.Unlock()
+
+	msg := protocol.CrewHandoffMessage{
+		Cmd: protocol.CmdCrewHandoff, SessionID: woken.SessionID,
+		Retry: protocol.Ptr(true), Close: protocol.Ptr(protocol.CrewDayCloseSleep),
+	}
+	resp := gardenCall(t, func(c net.Conn) { d.handleCrewHandoff(c, &msg) })
+	if !resp.Ok {
+		t.Fatalf("retry --sleep: %v", protocol.Deref(resp.Error))
+	}
+	if got := protocol.Deref(resp.CrewHandoffResult.Outcome); got != protocol.CrewDayCloseSleep {
+		t.Fatalf("outcome = %q, want sleep", got)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "alder").BindingSession); got != "" {
+		t.Fatalf("the member is still bound to %q after being told to sleep", got)
+	}
+}
+
 func spawnedSessions(t *testing.T, backend *fakeSpawnBackend) []ptybackend.SpawnOptions {
 	t.Helper()
 	backend.mu.Lock()

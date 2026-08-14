@@ -98,7 +98,7 @@ func (d *Daemon) crewMemberForSession(sessionID string) (crew.Member, bool) {
 // day over are one motion but two acts, and only the second one can fail. A
 // retry runs the turnover against the letter already on disk: no second file, no
 // overwrite, append-only untouched.
-func (d *Daemon) crewHandoff(sessionID, note string, retry bool) (*protocol.CrewHandoffResult, error) {
+func (d *Daemon) crewHandoff(sessionID, note string, retry bool, close protocol.CrewDayClose) (*protocol.CrewHandoffResult, error) {
 	if err := d.requireHome(crew.Surface); err != nil {
 		return nil, err
 	}
@@ -114,7 +114,22 @@ func (d *Daemon) crewHandoff(sessionID, note string, retry bool) (*protocol.Crew
 		return nil, err
 	}
 
+	// A retry is retrying a turnover, so it asks for one. Letting presence decide
+	// here would quietly change what --retry means: the member ran it to get the
+	// successor its letter was written for, and an absence would answer a
+	// different question than the one it asked. Sleeping instead is still one
+	// word away, and it is the member's word: `attn handoff --retry --sleep`.
+	if retry && close == "" {
+		close = protocol.CrewDayCloseNap
+	}
+
 	result := &protocol.CrewHandoffResult{Member: member.ID, Path: path}
+	if d.crewDayEndsHere(close, time.Now()) {
+		d.closeNappedSession(sessionID)
+		d.logf("crew: %s went to sleep — session %s ended and nobody was woken behind it", member.ID, sessionID)
+		result.Outcome = protocol.Ptr(protocol.CrewDayCloseSleep)
+		return result, nil
+	}
 	newSessionID, err := d.crewNap(member, sessionID)
 	if err != nil {
 		// The letter is filed and the day's session is untouched: say why nobody
@@ -124,7 +139,23 @@ func (d *Daemon) crewHandoff(sessionID, note string, retry bool) (*protocol.Crew
 		return result, nil
 	}
 	result.SessionID = protocol.Ptr(newSessionID)
+	result.Outcome = protocol.Ptr(protocol.CrewDayCloseNap)
 	return result, nil
+}
+
+// crewDayEndsHere decides what a filed letter does to the day. The caller may
+// say — a member closing on the user's own ask can insist on either — and when
+// it does not, presence decides: a day that closes while nobody is there does
+// not start another one, because a fresh day nobody uses is warmth bought for
+// nobody and the whole point of sleeping through an absence.
+func (d *Daemon) crewDayEndsHere(close protocol.CrewDayClose, now time.Time) bool {
+	switch close {
+	case protocol.CrewDayCloseSleep:
+		return true
+	case protocol.CrewDayCloseNap:
+		return false
+	}
+	return d.UserAwayFor(now) >= d.crewAwayLimit()
 }
 
 // crewLetterForHandoff settles which letter this handoff turns the day over
@@ -186,6 +217,16 @@ func (d *Daemon) crewNap(member crew.Member, oldSessionID string) (string, error
 	session := d.store.Get(oldSessionID)
 	if session == nil {
 		return "", fmt.Errorf("session %s is no longer here", shortSessionID(oldSessionID))
+	}
+	// A turnover the user is not around for is a wake nobody asked for, and it
+	// is bounded like any other. Checked before anything is spawned, so a member
+	// past its allowance keeps the day it has rather than losing it to a wake
+	// that then refuses.
+	now := time.Now()
+	if d.UserAwayFor(now) >= d.crewAwayLimit() {
+		if err := d.chargeAutonomousWake(member.ID, now); err != nil {
+			return "", err
+		}
 	}
 	spawnMsg, policy := d.crewNapSpawn(member, session)
 	newSessionID := spawnMsg.ID
@@ -308,7 +349,7 @@ func (d *Daemon) closeNappedSession(sessionID string) {
 // IPC handlers.
 
 func (d *Daemon) handleCrewHandoff(conn net.Conn, msg *protocol.CrewHandoffMessage) {
-	result, err := d.crewHandoff(strings.TrimSpace(msg.SessionID), msg.Note, protocol.Deref(msg.Retry))
+	result, err := d.crewHandoff(strings.TrimSpace(msg.SessionID), msg.Note, protocol.Deref(msg.Retry), protocol.Deref(msg.Close))
 	if err != nil {
 		d.sendCrewError(conn, "handoff", err)
 		return

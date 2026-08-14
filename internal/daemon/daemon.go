@@ -138,19 +138,28 @@ type Daemon struct {
 	httpHandler    http.Handler
 	diagServer     *diag.Server // opt-in loopback pprof/expvar; nil unless ATTN_PPROF set
 	wsHub          *wsHub
-	done           chan struct{}
-	logger         *logging.Logger
-	debugLogging   bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
-	ghRegistry     *github.ClientRegistry
-	hubManager     *hub.Manager
-	classifier     Classifier // Optional, uses package-level classifier.Classify if nil
-	repoCaches     map[string]*repoCache
-	repoCacheMu    sync.RWMutex
-	gitCoordMu     sync.Mutex
-	gitCoord       *gitCoordinator
-	warnings       []protocol.DaemonWarning
-	warningsMu     sync.RWMutex
-	ptyBackend     ptybackend.Backend
+	// presentSince is the last moment any client reported above `away`. See
+	// client_presence.go: the tier says whether the user is here, this says how
+	// long they have not been.
+	presentSince time.Time
+	presenceMu   sync.RWMutex
+	// crewLifecycleState is the crew tick's memory between fires; see
+	// crew_lifecycle.go. Built on first use, so only the tick knows about it.
+	crewLifecycleState *crewLifecycleMemo
+	crewMemoOnce       sync.Once
+	done               chan struct{}
+	logger             *logging.Logger
+	debugLogging       bool // cached DEBUG>=debug; gates per-chunk PTY hot-path logs
+	ghRegistry         *github.ClientRegistry
+	hubManager         *hub.Manager
+	classifier         Classifier // Optional, uses package-level classifier.Classify if nil
+	repoCaches         map[string]*repoCache
+	repoCacheMu        sync.RWMutex
+	gitCoordMu         sync.Mutex
+	gitCoord           *gitCoordinator
+	warnings           []protocol.DaemonWarning
+	warningsMu         sync.RWMutex
+	ptyBackend         ptybackend.Backend
 	// hostSessions runs the conversation sessions — the ones whose agent lives
 	// in a headless host process rather than a PTY. See host_session.go.
 	hostSessions    *hostsession.Manager
@@ -827,6 +836,7 @@ func New(socketPath string) *Daemon {
 		dataRoot:            dataRoot,
 		store:               sessionStore,
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              logger,
 		debugLogging:        logger != nil && logger.DebugEnabled(),
@@ -875,6 +885,7 @@ func NewForTesting(socketPath string) *Daemon {
 		dataRoot:            dataRoot,
 		store:               store.New(),
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              nil, // No logging in tests
 		ghRegistry:          github.NewClientRegistry(),
@@ -922,6 +933,7 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 		dataRoot:            dataRoot,
 		store:               store.New(),
 		wsHub:               newWSHub(),
+		presentSince:        time.Now(),
 		done:                make(chan struct{}),
 		logger:              nil,
 		ghRegistry:          registry,
@@ -2115,6 +2127,7 @@ func (d *Daemon) forgetSession(sessionID string) {
 	d.dropSessionRecord(sessionID)
 	d.clearChiefOfStaffIfSession(sessionID)
 	d.releaseCrewBindingIfSession(sessionID)
+	d.crewMemo().forget(sessionID)
 	if d.hubManager != nil {
 		d.hubManager.ForgetSession(sessionID)
 	}

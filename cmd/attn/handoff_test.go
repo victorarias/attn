@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 func TestParseHandoffArgs_TakesTheLetterAndFallsBackToTheSessionEnv(t *testing.T) {
@@ -78,5 +80,45 @@ func TestParseHandoffArgs_APositionalIsRefusedByName(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "trellis") {
 		t.Errorf("the refusal %q does not name what it did not understand", err)
+	}
+}
+
+// Whether filing starts the next day or ends this one is attn's call by
+// default; either flag takes it back.
+func TestParseHandoffArgs_SleepAndNapDecideWhatFilingDoesToTheDay(t *testing.T) {
+	for _, tc := range []struct {
+		flag string
+		want protocol.CrewDayClose
+	}{
+		{"--sleep", protocol.CrewDayCloseSleep},
+		{"--nap", protocol.CrewDayCloseNap},
+	} {
+		parsed, err := parseHandoffArgs([]string{"-m", "x", tc.flag}, "session-1")
+		if err != nil {
+			t.Fatalf("parse(%s): %v", tc.flag, err)
+		}
+		if parsed.close != tc.want {
+			t.Errorf("parse(%s) close = %q, want %q", tc.flag, parsed.close, tc.want)
+		}
+	}
+	// Neither is the default, and the default is a decision attn makes from
+	// whether the user is around.
+	parsed, err := parseHandoffArgs([]string{"-m", "x"}, "session-1")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if parsed.close != "" {
+		t.Errorf("close = %q with neither flag, want attn's own call", parsed.close)
+	}
+}
+
+// They are opposite instructions, so a call carrying both has not decided.
+func TestParseHandoffArgs_SleepAndNapTogetherAreRefused(t *testing.T) {
+	_, err := parseHandoffArgs([]string{"-m", "x", "--sleep", "--nap"}, "session-1")
+	if err == nil {
+		t.Fatal("--sleep and --nap were accepted together")
+	}
+	if !strings.Contains(err.Error(), "--sleep") || !strings.Contains(err.Error(), "--nap") {
+		t.Errorf("the refusal %q does not name both flags", err)
 	}
 }

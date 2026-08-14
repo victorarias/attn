@@ -255,6 +255,14 @@ sequenceDiagram
   names the retry, a retry with nothing filed names the verb that writes a
   letter. Ships ahead of slice 4 because auto-sleep runs the nap unattended,
   and an unattended failure with no way out is a member stuck awake all night.
+- **Session cost is deferred out of slice 4, and has its shape for whenever it
+  is built.** The lifecycle listed cost beside cache state as a signal; nothing
+  in slice 4 consumes it, and the daemon has no source for it today. When cost
+  accounting is built — its own piece of work, not part of this arc — it ships
+  one built-in price table, with configurable per-model costs in settings to
+  fill the table's gaps. The no-price case is explicit: a session whose model
+  has no price shows **unknown**, never a silent 0, because a 0 reads as free
+  and free is the one answer nobody can act on.
 
 - **Where the launch directory and the awareness dirs come from.**
   Registry fields, set by `attn crew set <member> --cwd <dir>

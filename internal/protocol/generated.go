@@ -1618,7 +1618,15 @@ type CreateWorktreeResultMessage struct {
 	Success bool `json:"success"`
 }
 
+type CrewDayClose string
+
+const CrewDayCloseNap CrewDayClose = "nap"
+const CrewDayCloseSleep CrewDayClose = "sleep"
+
 type CrewHandoffMessage struct {
+	// Close corresponds to the JSON schema field "close".
+	Close *CrewDayClose `json:"close,omitempty,omitzero"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -1638,6 +1646,9 @@ type CrewHandoffResult struct {
 
 	// NapError corresponds to the JSON schema field "nap_error".
 	NapError *string `json:"nap_error,omitempty,omitzero"`
+
+	// Outcome corresponds to the JSON schema field "outcome".
+	Outcome *CrewDayClose `json:"outcome,omitempty,omitzero"`
 
 	// Path corresponds to the JSON schema field "path".
 	Path string `json:"path"`
