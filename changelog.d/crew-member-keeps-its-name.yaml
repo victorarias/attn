@@ -1,0 +1,9 @@
+kind: fixed
+area: sessions
+change: >
+  A crew member no longer loses its name. A member launches in its own
+  home, so the auto-titler's "nobody has named this session" check —
+  label equals the directory basename — could not tell an unnamed
+  session apart from one named trellis, and replaced the member's name
+  with a title generated from the waking conversation at the first turn
+  end. A session a member is bound to is never auto-titled.

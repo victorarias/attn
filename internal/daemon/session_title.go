@@ -47,7 +47,7 @@ func (d *Daemon) maybeGenerateSessionTitle(sessionID, transcriptPath string) {
 	if session == nil {
 		return
 	}
-	if session.Label != defaultSessionLabel(session.Directory, session.ID) {
+	if !d.sessionMayBeAutoTitled(session) {
 		return
 	}
 
@@ -109,12 +109,25 @@ func (d *Daemon) maybeGenerateSessionTitle(sessionID, transcriptPath string) {
 	// Re-fetch and re-check: the label may have been renamed (by the user or a
 	// concurrent caller) while the LLM run was in flight.
 	session = d.store.Get(sessionID)
-	if session == nil || session.Label != defaultSessionLabel(session.Directory, session.ID) {
+	if session == nil || !d.sessionMayBeAutoTitled(session) {
 		return
 	}
 	d.store.UpdateSessionLabel(sessionID, title)
 	session.Label = title
 	d.publishFact(FactSessionRenamed, sessionID, nil)
+}
+
+// sessionMayBeAutoTitled reports whether nobody has named this session yet.
+// Two ways a session is already named: a crew member is bound to it — the
+// member's name IS its identity — or its label was moved off the cwd basename
+// the launch gave it. The member check cannot be folded into the label one: a
+// member launches in its own home, so its name and its default label are the
+// same string.
+func (d *Daemon) sessionMayBeAutoTitled(session *protocol.Session) bool {
+	if session.Label != defaultSessionLabel(session.Directory, session.ID) {
+		return false
+	}
+	return d.crewMemberBoundTo(session.ID) == ""
 }
 
 // execSessionTitle dispatches the title generation run per the session's own
