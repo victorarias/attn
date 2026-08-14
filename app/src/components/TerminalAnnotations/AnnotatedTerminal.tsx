@@ -19,10 +19,16 @@ import {
   type MessageAnchor,
   type TerminalAnnotation,
 } from '../../utils/terminalAnnotations';
-import { QUICK_LABEL_GROUPS, buildAnnotationPayload, labelById } from './quickLabels';
+import { buildAnnotationPayload, labelById } from './quickLabels';
+import {
+  PROMOTED_LABELS,
+  QUICK_LABEL_PICKER_GROUPS,
+  QUICK_LABEL_PICKER_LABELS,
+} from '../../annotations/quickLabels';
 import { QuickLabelPicker } from '../../annotations/QuickLabelPicker';
 import { clampToViewport, placePopup, type PlaceOptions, type Placement } from './placement';
 import { useAnnotationSend } from '../../annotations/useAnnotationSend';
+import { useEscapeStack } from '../../hooks/useEscapeStack';
 import { formatShortcut } from '../../shortcuts/formatShortcut';
 import './TerminalAnnotations.css';
 
@@ -133,6 +139,8 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // native tooltip arrives a second late. Always drawn, so naming a chip
     // cannot change the popup's height and move it out from under the pointer.
     const [hint, setHint] = useState<string | null>(null);
+    const [labelPickerOpen, setLabelPickerOpen] = useState(false);
+    const labelPickerTriggerRef = useRef<HTMLButtonElement>(null);
     const hintProps = useCallback((text: string) => ({
       onMouseEnter: () => setHint(text),
       onMouseLeave: () => setHint((current) => (current === text ? null : current)),
@@ -286,6 +294,8 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     // elsewhere deliberately: that press owns where focus goes.
     const closeComposer = useCallback((restoreFocus = true) => {
       setComposer(null);
+      setLabelPickerOpen(false);
+      setHint(null);
       setPopupAt(null);
       setDraft('');
       if (restoreFocus) terminalRef.current?.focus();
@@ -305,6 +315,8 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       }
       closeComposer(restoreFocus);
     }, [bump, closeComposer, composer, persist, store]);
+
+    useEscapeStack(dismissComposer, Boolean(composer));
 
     const handleAnchor = useCallback(
       (anchor: MessageAnchor, at: { clientX: number; clientY: number }) => {
@@ -361,30 +373,19 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
       [store],
     );
 
-    useEffect(() => {
-      if (!composer) return;
-      const onKey = (event: KeyboardEvent) => {
-        if (event.key === 'Escape') {
-          event.stopPropagation();
-          dismissComposer();
-        }
-      };
-      window.addEventListener('keydown', onKey, true);
-      return () => window.removeEventListener('keydown', onKey, true);
-    }, [composer, dismissComposer]);
-
     // A press elsewhere closes the popup; capture phase, so the terminal's own
-    // mousedown still runs and the click can start the next selection.
+    // pointerdown still runs and the click can start the next selection.
     useEffect(() => {
       if (!composer) return;
-      const onDown = (event: MouseEvent) => {
+      const onDown = (event: PointerEvent) => {
+        if (labelPickerOpen) return;
         if (popupRef.current?.contains(event.target as Node)) return;
         // The press decides where focus lands, including one in the panel.
         dismissComposer(false);
       };
-      window.addEventListener('mousedown', onDown, true);
-      return () => window.removeEventListener('mousedown', onDown, true);
-    }, [composer, dismissComposer]);
+      window.addEventListener('pointerdown', onDown, true);
+      return () => window.removeEventListener('pointerdown', onDown, true);
+    }, [composer, dismissComposer, labelPickerOpen]);
 
     // What placement respects beyond the window: the popup's pane and the panel
     // it must not cover, both read at placement time since both move.
@@ -462,6 +463,9 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
     const composed = composer
       ? annotations.find((entry) => entry.id === composer.annotationId) ?? null
       : null;
+    const selectedPickerLabel = composed
+      ? QUICK_LABEL_PICKER_LABELS.find((label) => label.id === composed.quickLabelId)
+      : undefined;
 
     const applyLabel = (quickLabelId: string) => {
       if (!composed) return;
@@ -704,11 +708,23 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
             <QuickLabelPicker
               mode="chips"
               className="anno-popup-labels"
-              groups={QUICK_LABEL_GROUPS}
+              groups={[PROMOTED_LABELS]}
               isSelected={(label) => composed.quickLabelId === label.id}
               onSelect={(label) => applyLabel(label.id)}
               onHint={setHint}
             >
+              <button
+                ref={labelPickerTriggerRef}
+                type="button"
+                className={`anno-popup-label${selectedPickerLabel ? ' anno-popup-label--on' : ''}`}
+                title="More labels"
+                aria-label="More labels"
+                aria-expanded={labelPickerOpen}
+                onClick={() => setLabelPickerOpen(!labelPickerOpen)}
+                {...hintProps('More labels')}
+              >
+                {selectedPickerLabel?.emoji ?? '⚡'}
+              </button>
               <span className="anno-popup-divider" />
               <button
                 type="button"
@@ -734,6 +750,23 @@ export const AnnotatedTerminal = forwardRef<GhosttyTerminalHandle, AnnotatedTerm
                 🗑
               </button>
             </QuickLabelPicker>
+            {labelPickerOpen && labelPickerTriggerRef.current ? (
+              <QuickLabelPicker
+                className="md-quick-label-picker"
+                groups={QUICK_LABEL_PICKER_GROUPS}
+                anchorEl={labelPickerTriggerRef.current}
+                onSelect={(label) => {
+                  setLabelPickerOpen(false);
+                  setHint(null);
+                  applyLabel(label.id);
+                }}
+                onDismiss={() => {
+                  setLabelPickerOpen(false);
+                  setHint(null);
+                }}
+                onHint={setHint}
+              />
+            ) : null}
             {/* Hovering names what a chip does; at rest the line names the mark
                 this annotation already carries, so reopening one says what it
                 says without a click. */}

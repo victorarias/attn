@@ -225,6 +225,25 @@ function stored() {
   return terminal.annotations?.list() ?? [];
 }
 
+function openLabelPicker() {
+  fireEvent.click(screen.getByLabelText('More labels'));
+  return document.querySelector<HTMLElement>('.md-quick-label-picker')!;
+}
+
+function pickLabel(text: string) {
+  const promoted = screen.queryByLabelText(text);
+  if (promoted) {
+    fireEvent.click(promoted);
+    return;
+  }
+  if (!document.querySelector('.md-quick-label-picker')) openLabelPicker();
+  const picker = document.querySelector('.md-quick-label-picker')!;
+  const row = Array.from(picker.querySelectorAll<HTMLElement>('.md-quick-label-row'))
+    .find((candidate) => candidate.querySelector('.md-quick-label-text')?.textContent === text);
+  expect(row, `grouped quick label "${text}"`).toBeDefined();
+  fireEvent.click(row!);
+}
+
 /** The panel row for the nth annotation, and its two controls. */
 function card(index = 0) {
   const cards = document.querySelectorAll('.anno-card');
@@ -301,7 +320,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
     expect(stored()).toHaveLength(1);
 
     act(() => daemon.notifyMessagesChanged());
@@ -318,7 +337,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
     const before = stored()[0];
 
     daemon.messages = [
@@ -340,7 +359,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 4, 10);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     daemon.messages = [{ key: 'turn-2', markdown: TURN_2 }];
     act(() => daemon.notifyMessagesChanged());
@@ -357,13 +376,93 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     expect(screen.getByTestId('annotation-popup')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     // One click is the whole gesture: the popup closes and the panel takes over.
     expect(screen.queryByTestId('annotation-popup')).toBeNull();
     expect(screen.getByTestId('annotation-panel')).toBeTruthy();
     expect(stored()[0]?.quickLabelId).toBe('verify-this');
     expect(stored()[0]?.quote).toBe(TURN_1.slice(0, 26));
+  });
+
+  it('renders the promoted trio and keeps their selected-state toggle behavior', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    const popup = screen.getByTestId('annotation-popup');
+    expect(Array.from(popup.querySelectorAll('.anno-popup-label'), (button) => button.getAttribute('aria-label')))
+      .toEqual([
+        'I agree',
+        'This is wrong',
+        'Clarify this',
+        'More labels',
+        'Write a comment',
+        'Remove this annotation',
+      ]);
+
+    pickLabel('I agree');
+    expect(stored()[0]?.quickLabelId).toBe('i-agree');
+
+    activate(stored()[0].id);
+    expect(screen.getByLabelText('I agree').classList.contains('anno-popup-label--on')).toBe(true);
+    pickLabel('I agree');
+    expect(stored()).toHaveLength(0);
+  });
+
+  it('shows a selected grouped label on the trigger', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    pickLabel('Verify this');
+    activate(stored()[0].id);
+
+    const trigger = screen.getByLabelText('More labels');
+    expect(trigger.textContent).toBe('🔍');
+    expect(trigger.classList.contains('anno-popup-label--on')).toBe(true);
+  });
+
+  it('closes only the grouped picker on Escape', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    openLabelPicker();
+    expect(document.querySelector('.md-quick-label-picker')).not.toBeNull();
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    expect(document.querySelector('.md-quick-label-picker')).toBeNull();
+    expect(screen.getByTestId('annotation-popup')).toBeTruthy();
+    expect(stored()).toHaveLength(1);
+  });
+
+  it('toggles the grouped picker from its trigger', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    openLabelPicker();
+    expect(document.querySelector('.md-quick-label-picker')).not.toBeNull();
+
+    fireEvent.click(screen.getByLabelText('More labels'));
+
+    expect(document.querySelector('.md-quick-label-picker')).toBeNull();
+    expect(screen.getByTestId('annotation-popup')).toBeTruthy();
+  });
+
+  it('applies the grouped picker digit shortcut and closes both layers', async () => {
+    renderTerminal();
+    await windowReady('turn-1');
+
+    anchor('turn-1', 0, 26);
+    openLabelPicker();
+    fireEvent.keyDown(window, { code: 'Digit3', key: '3' });
+
+    expect(stored()[0]?.quickLabelId).toBe('verify-this');
+    expect(document.querySelector('.md-quick-label-picker')).toBeNull();
+    expect(screen.queryByTestId('annotation-popup')).toBeNull();
   });
 
   it('discards a highlight dismissed without a label or a comment', async () => {
@@ -401,9 +500,9 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     fireEvent.click(screen.getByText('Send all'));
 
@@ -423,12 +522,12 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     activate(stored()[0].id);
     expect(screen.getByTestId('annotation-popup')).toBeTruthy();
 
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     expect(stored()).toHaveLength(1);
     expect(stored()[0].quickLabelId).toBe('show-the-receipt');
@@ -461,7 +560,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     activate(stored()[0].id);
 
     fireEvent.click(screen.getByLabelText('Remove this annotation'));
@@ -477,10 +576,10 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     activate(stored()[0].id);
 
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     expect(stored()).toHaveLength(0);
   });
@@ -494,7 +593,7 @@ describe('AnnotatedTerminal', () => {
     anchor('turn-1', 0, 26);
     expect(stored()).toHaveLength(1);
 
-    fireEvent.mouseDown(screen.getByTestId('terminal'));
+    fireEvent.pointerDown(screen.getByTestId('terminal'));
 
     expect(screen.queryByTestId('annotation-popup')).toBeNull();
     expect(stored()).toHaveLength(0);
@@ -505,7 +604,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.mouseDown(screen.getByLabelText('Verify this'));
+    fireEvent.pointerDown(screen.getByLabelText('This is wrong'));
 
     expect(screen.getByTestId('annotation-popup')).toBeTruthy();
   });
@@ -515,7 +614,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     const panel = screen.getByTestId('annotation-panel');
     // Pinned to its corner until moved, so the default costs no state.
     expect(panel.style.left).toBe('');
@@ -539,7 +638,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     fireEvent.click(screen.getByLabelText('Remove annotation'));
 
     expect(stored()).toHaveLength(0);
@@ -577,7 +676,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     fireEvent.click(card().open);
 
@@ -653,9 +752,9 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     fireEvent.click(card(0).open);
     terminalFocusCalls = 0;
@@ -669,7 +768,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
@@ -703,7 +802,7 @@ describe('AnnotatedTerminal', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     fireEvent.keyDown(window, { key: 'Enter', metaKey: true });
 
@@ -733,19 +832,20 @@ describe('AnnotatedTerminal', () => {
   });
 });
 
-// Fourteen emoji-only chips is a row nobody can read. The line under it is what
-// makes the row learnable without hovering each one and waiting for a tooltip.
+// The line under the controls names both the promoted chips and the deliberate
+// marks in the picker without waiting for a native tooltip.
 describe('AnnotatedTerminal label hint', () => {
   function hint(): string {
     return screen.getByTestId('annotation-popup-hint').textContent ?? '';
   }
 
-  it('names a chip while the pointer is on it', async () => {
+  it('names a grouped picker row while the pointer is on it', async () => {
     renderTerminal();
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
 
-    fireEvent.mouseEnter(screen.getByLabelText('Show the receipt'));
+    openLabelPicker();
+    fireEvent.mouseEnter(screen.getByText('Show the receipt').closest('button')!);
 
     expect(hint()).toBe('Show the receipt');
   });
@@ -756,7 +856,7 @@ describe('AnnotatedTerminal label hint', () => {
     renderTerminal();
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
     // Marking closes the popup, so this is the reopen a user does from the grid.
     activate(stored()[0].id);
 
@@ -803,7 +903,7 @@ describe('AnnotatedTerminal note', () => {
     const { daemon } = renderTerminal();
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     writeNote('Split this into two PRs.');
 
@@ -818,7 +918,7 @@ describe('AnnotatedTerminal note', () => {
     const first = renderTerminal({ api: daemon });
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     writeNote('Split this into two PRs.');
     await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
     first.unmount();
@@ -832,7 +932,7 @@ describe('AnnotatedTerminal note', () => {
     const { daemon } = renderTerminal({ paneActive: true });
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     writeNote('Split this into two PRs.');
 
     // From inside the box: the last sentence is typed there, and reaching for
@@ -848,7 +948,7 @@ describe('AnnotatedTerminal note', () => {
     const { daemon } = renderTerminal({ paneActive: true });
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     writeNote('Split this into two PRs.');
     await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
 
@@ -868,7 +968,7 @@ describe('AnnotatedTerminal note', () => {
     daemon.releaseSubmit = () => {};
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     writeNote('Split this into two PRs.');
     await waitFor(() => expect(daemon.note).toBe('Split this into two PRs.'));
 
@@ -895,7 +995,7 @@ describe('AnnotatedTerminal note', () => {
     daemon.nextSubmitStatus = 'skipped_pending_approval';
     await windowReady('turn-1');
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     writeNote('Split this into two PRs.');
 
     fireEvent.click(screen.getByText('Send all'));
@@ -919,7 +1019,7 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     fireEvent.click(screen.getByText('Send all'));
 
     await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
@@ -936,7 +1036,7 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     fireEvent.click(screen.getByText('Send all'));
 
     await waitFor(() => expect(screen.getByTestId('annotation-send-note')).toBeTruthy());
@@ -956,7 +1056,7 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     fireEvent.click(screen.getByText('Send all'));
 
     await waitFor(() => expect(screen.getByText('Sending…')).toBeTruthy());
@@ -981,14 +1081,14 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     const sentId = stored()[0].id;
 
     fireEvent.click(screen.getByText('Send all'));
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
     // Mid-flight, the user marks something else.
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
     const keptId = stored().find((entry) => entry.id !== sentId)!.id;
 
     await act(async () => {
@@ -1017,7 +1117,7 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     const id = stored()[0].id;
 
     fireEvent.click(screen.getByText('Send all'));
@@ -1026,7 +1126,7 @@ describe('AnnotatedTerminal sending', () => {
 
     // Mid-flight, the user changes their mind about the label.
     activate(id);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     await act(async () => {
       daemon.releaseSubmit?.();
@@ -1048,10 +1148,10 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     const editedId = stored()[0].id;
     anchor('turn-1', 31, 55);
-    fireEvent.click(screen.getByLabelText('Show the receipt'));
+    pickLabel('Show the receipt');
 
     fireEvent.click(screen.getByText('Send all'));
     await waitFor(() => expect(daemon.submitted).toHaveLength(1));
@@ -1073,7 +1173,7 @@ describe('AnnotatedTerminal sending', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     await waitFor(() => expect(daemon.annotations).toHaveLength(1));
 
     fireEvent.click(screen.getByText('Send all'));
@@ -1099,7 +1199,7 @@ describe('AnnotatedTerminal persistence', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     await waitFor(() => expect(daemon.annotations).toHaveLength(1));
     expect(daemon.annotations[0].quickLabelId).toBe('verify-this');
     expect(daemon.annotations[0].quote).toBe(TURN_1.slice(0, 26));
@@ -1136,7 +1236,7 @@ describe('AnnotatedTerminal persistence', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     await waitFor(() => expect(daemon.annotations).toHaveLength(1));
 
     first.unmount();
@@ -1166,7 +1266,7 @@ describe('AnnotatedTerminal persistence', () => {
     }];
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
 
     await waitFor(() => expect(stored().map((entry) => entry.id)).toEqual(['theirs-1']));
 
@@ -1183,7 +1283,7 @@ describe('AnnotatedTerminal persistence', () => {
     await windowReady('turn-1');
 
     anchor('turn-1', 0, 26);
-    fireEvent.click(screen.getByLabelText('Verify this'));
+    pickLabel('Verify this');
     await waitFor(() => expect(daemon.annotations).toHaveLength(1));
 
     fireEvent.click(screen.getByText('Send all'));
