@@ -316,6 +316,28 @@ func (d *Daemon) crewMembersBySession() map[string]string {
 	return out
 }
 
+// crewMemberBoundTo names the member a session is living as, or "" when it is
+// nobody. Read the roster rather than the session record: CrewMember is a
+// broadcast decoration, so it is nil on everything d.store.Get returns.
+func (d *Daemon) crewMemberBoundTo(sessionID string) string {
+	if d.store == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		if !docstore.IsUndeclaredCollection(err) {
+			d.logf("crew: reading roster for session %s: %v", sessionID, err)
+		}
+		return ""
+	}
+	for _, member := range members {
+		if member.BindingSession == sessionID && d.crewBindingLive(member) {
+			return member.ID
+		}
+	}
+	return ""
+}
+
 // decorateCrewMember marks the session living a member's current day. Mirrors
 // decorateChiefOfStaffWithSessionID: set only when bound, cleared otherwise so
 // it round-trips as an omitted field.
@@ -337,8 +359,8 @@ func (d *Daemon) decorateCrewMember(session *protocol.Session, membersBySession 
 // through untouched: the registry never becomes a requirement to tend.
 func (d *Daemon) resolveTenderMember(memberName, sessionID string) string {
 	memberName = strings.TrimSpace(memberName)
-	if memberName == "" && sessionID == "" {
-		return ""
+	if memberName == "" {
+		return d.crewMemberBoundTo(sessionID)
 	}
 	members, _, err := d.readCrewMembers()
 	if err != nil {
@@ -347,18 +369,10 @@ func (d *Daemon) resolveTenderMember(memberName, sessionID string) string {
 		}
 		return memberName
 	}
-	if memberName != "" {
-		if member, ok := crew.Resolve(memberName, members); ok {
-			return member.ID
-		}
-		return memberName
+	if member, ok := crew.Resolve(memberName, members); ok {
+		return member.ID
 	}
-	for _, member := range members {
-		if member.BindingSession == sessionID && sessionID != "" && d.crewBindingLive(member) {
-			return member.ID
-		}
-	}
-	return ""
+	return memberName
 }
 
 // IPC handlers.
