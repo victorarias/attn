@@ -89,13 +89,26 @@ The path is encoded at the ["Tickets retire" entry](2026-08-06-the-garden-vertic
 - A delegation binds a seed: the brief is the seed's body, the delegate
   session its tender. Status reports become log notes; steering goes
   over agent-msg.
-- `attn ticket` verbs become loud signposts to their garden equivalents
-  — each prints where the capability went and exits nonzero. The
-  signposts stay indefinitely (ruled 2026-08-14): their audience is
-  mostly agents running on stale memories and guidance, a signpost is
-  what lets them self-correct, and a few inert lines of code cost
-  nothing. No removal is scheduled; a later cleanup may delete them
-  once long silent.
+- The `attn ticket` *write* verbs become loud signposts to their garden
+  equivalents — each prints where the capability went and exits
+  nonzero. The signposts stay indefinitely (ruled 2026-08-14): their
+  audience is mostly agents running on stale memories and guidance, a
+  signpost is what lets them self-correct, and a few inert lines of
+  code cost nothing. No removal is scheduled; a later cleanup may
+  delete them once long silent.
+- The *read* verbs are the explicit exception, not signposts: "done
+  tickets stay readable forever" is a mechanism, and this is it.
+  `attn ticket show` and `attn ticket list` keep reading the archived
+  store — a done ticket has no garden equivalent to point at, so a
+  stale agent reading one gets the ticket, never a signpost aimed at
+  nothing.
+- The signposts live at the CLI; the daemon keeps serving the read
+  path. That makes the signpost step itself wire-neutral. The app's
+  ticket surfaces are replaced by garden surfaces inside the epic —
+  that is where the wire moves, and that step's checklist carries the
+  ProtocolVersion bump in all its lockstep spots. Removing the then
+  orphaned daemon ticket-write commands is a later cleanup with its
+  own bump, not part of the signpost step.
 - Conversion (ruled 2026-08-14): unbound backlog todos bulk-convert to
   seeds at cutover — they are inert, nothing reports to them. In-flight
   delegations finish on their tickets; new dispatches start on seeds.
@@ -146,8 +159,10 @@ events.
 - [ ] Delegation reporting on seeds: bind at dispatch, log-note status,
       typed `attach`/`detach` with the artifact projection, agent-msg
       steering — the weight transfer.
-- [ ] Ticket verbs → permanent signposts; bulk-convert backlog todos;
-      done tickets readable.
+- [ ] App ticket surfaces → garden surfaces; this step moves the wire
+      and carries the ProtocolVersion bump in every lockstep spot.
+- [ ] Ticket write verbs → permanent CLI signposts; read verbs keep
+      the archived store; bulk-convert backlog todos.
 - [ ] Victor lives on the branch for days without tickets.
 - [ ] Epic merge to main on his explicit OK.
 
