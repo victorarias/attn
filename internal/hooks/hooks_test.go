@@ -420,11 +420,12 @@ func TestGardenPrimerCapsACrownBody(t *testing.T) {
 }
 
 // The cap is in bytes and a plan is markdown, so the cut lands wherever it
-// lands: a body of multi-byte runes must still leave the block readable rather
-// than ending it on half a character.
+// lands. The body is three-byte runes against an even limit, so the cut is
+// guaranteed to fall mid-rune: a two-byte rune divides into 4000 and would let
+// a plain byte slice pass this.
 func TestGardenPrimerCapsACrownBodyWithoutSplittingARune(t *testing.T) {
 	primer := GardenPrimer(&GardenPrime{
-		Crown: &CrownPrime{ID: "s-crown", Title: "big", Body: strings.Repeat("é", crownPrimeBodyLimit)},
+		Crown: &CrownPrime{ID: "s-crown", Title: "big", Body: strings.Repeat("€", crownPrimeBodyLimit)},
 	})
 	if !utf8.ValidString(primer) {
 		t.Fatal("the capped primer is not valid UTF-8")
