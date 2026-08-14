@@ -449,9 +449,13 @@ proof.
    the pre-drain hook; write the trigger paths and completion-plus-cursor
    transaction. As built (PR #906), this slice shipped a third trigger —
    `re_enabled` inserted on the enable flip — before review removed re-enable
-   from the design; a later slice deletes that insert and its enum value, and
+   from the design; slice 3 deletes that insert and its enum value and
    re-fences `version_changed` and `gap` from bus head to cursor and
-   `earliest - 1` respectively. Unit and integration tests cover coalescing, a trigger during a
+   `earliest - 1` respectively, replacing the tests that pin the shipped
+   behavior with witnesses for the new contract: re-enable resumes with no
+   request and delivers the retained backlog in order, `version_changed`
+   delivers facts the old version never received, and no fence ever covers a
+   retained undelivered fact. Unit and integration tests cover coalescing, a trigger during a
    run, restart before completion, cursor fencing, and non-app gap parity.
    Verification tier: full non-production app/daemon install because this
    changes a live durable consumer's background loop, plus direct inspection of
