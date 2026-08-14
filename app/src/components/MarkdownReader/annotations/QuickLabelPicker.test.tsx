@@ -1,7 +1,7 @@
 /**
  * QuickLabelPicker — cursor-hint positioning with viewport clamping (E14),
  * one-tick-deferred outside dismiss (E15), digit/Alt+digit selection and
- * Escape (E16), and the full label row set.
+ * Escape (E16), and grouped label rendering.
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,7 +10,7 @@ import {
   QuickLabelPicker,
   type FloatingQuickLabelPickerProps,
 } from '../../../annotations/QuickLabelPicker';
-import { QUICK_LABELS } from './quickLabels';
+import { QUICK_LABEL_PICKER_GROUPS, QUICK_LABEL_PICKER_LABELS } from './quickLabels';
 
 function makeAnchor(rect: Partial<DOMRect> = {}): HTMLElement {
   const el = document.createElement('button');
@@ -24,7 +24,7 @@ function renderPicker(overrides: Partial<FloatingQuickLabelPickerProps> = {}) {
   const anchorEl = overrides.anchorEl ?? makeAnchor();
   const props: FloatingQuickLabelPickerProps = {
     className: 'md-quick-label-picker',
-    labels: QUICK_LABELS,
+    groups: QUICK_LABEL_PICKER_GROUPS,
     cursorHint: { x: 300, y: 110 },
     onSelect: vi.fn(),
     onDismiss: vi.fn(),
@@ -56,16 +56,18 @@ afterEach(() => {
 });
 
 describe('QuickLabelPicker', () => {
-  it('renders the whole label set, numbering the ten that have a shortcut', () => {
-    // Past the tenth there is no digit to press, and a badge there would name
-    // a key that applies a different label.
+  it('renders the filtered groups with dividers and nine digit shortcuts', () => {
     renderPicker();
     const rows = document.querySelectorAll('.md-quick-label-row');
-    expect(rows).toHaveLength(QUICK_LABELS.length);
-    expect(rows[0].textContent).toContain(QUICK_LABELS[0].text);
+    expect(rows).toHaveLength(9);
+    expect(document.querySelectorAll('.md-quick-label-divider')).toHaveLength(4);
+    expect(Array.from(rows, (row) => row.querySelector('.md-ql-chip')?.textContent)).toEqual([
+      '💯', '😕', '🔍', '🧾', '🔬', '🔄', '🪓', '🪙', '🙋',
+    ]);
+    expect(rows[0].textContent).toContain(QUICK_LABEL_PICKER_LABELS[0].text);
     expect(rows[0].querySelector('.md-quick-label-num')!.textContent).toBe('1');
-    expect(rows[9].querySelector('.md-quick-label-num')!.textContent).toBe('0');
-    expect(rows[10]?.querySelector('.md-quick-label-num')).toBeNull();
+    expect(rows[8].querySelector('.md-quick-label-num')!.textContent).toBe('9');
+    expect(document.querySelectorAll('.md-quick-label-num')).toHaveLength(9);
   });
 
   it('positions at the cursor hint (x − 28) below the anchor (E14)', () => {
@@ -124,22 +126,22 @@ describe('QuickLabelPicker', () => {
     outside.remove();
   });
 
-  it('bare digits and Alt+digits select labels; 0 is the tenth (E16)', () => {
+  it('bare digits and Alt+digits select the flattened group order; 0 does nothing (E16)', () => {
     const { props } = renderPicker();
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit1', key: '1', bubbles: true }));
     });
-    expect(props.onSelect).toHaveBeenLastCalledWith(QUICK_LABELS[0]);
+    expect(props.onSelect).toHaveBeenLastCalledWith(QUICK_LABEL_PICKER_LABELS[0]);
     act(() => {
       window.dispatchEvent(
         new KeyboardEvent('keydown', { code: 'Digit3', key: '3', altKey: true, bubbles: true }),
       );
     });
-    expect(props.onSelect).toHaveBeenLastCalledWith(QUICK_LABELS[2]);
+    expect(props.onSelect).toHaveBeenLastCalledWith(QUICK_LABEL_PICKER_LABELS[2]);
     act(() => {
       window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Digit0', key: '0', bubbles: true }));
     });
-    expect(props.onSelect).toHaveBeenLastCalledWith(QUICK_LABELS[9]);
+    expect(props.onSelect).toHaveBeenCalledTimes(2);
   });
 
   it('ctrl/meta digits are left alone (app shortcuts)', () => {
@@ -162,7 +164,7 @@ describe('QuickLabelPicker', () => {
 
   it('clicking a row selects its label', () => {
     const { props } = renderPicker();
-    fireEvent.click(screen.getByText(QUICK_LABELS[4].text));
-    expect(props.onSelect).toHaveBeenCalledWith(QUICK_LABELS[4]);
+    fireEvent.click(screen.getByText(QUICK_LABEL_PICKER_LABELS[4].text));
+    expect(props.onSelect).toHaveBeenCalledWith(QUICK_LABEL_PICKER_LABELS[4]);
   });
 });

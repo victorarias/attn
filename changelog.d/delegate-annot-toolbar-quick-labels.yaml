@@ -1,0 +1,6 @@
+kind: changed
+area: annotations
+change: >
+  Markdown selection actions now put agreement, disagreement, and clarification
+  labels directly in the toolbar, group the remaining quick labels in the picker,
+  and use the axe icon for Cut this. The redundant Copy action was removed.

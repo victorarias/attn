@@ -37,7 +37,7 @@ type PopoverState =
 
 interface HoverBlock {
   blockId: string;
-  /** The .md-codeblock wrapper (toolbar anchor + copy text source). */
+  /** The .md-codeblock wrapper used as the toolbar anchor. */
   element: HTMLElement;
 }
 
@@ -281,15 +281,12 @@ export function AnnotationLayer({ api, rootRef, path }: AnnotationLayerProps) {
   const showSelectionToolbar = pending !== null && popover === null;
   const showHoverToolbar = !showSelectionToolbar && popover === null && hoverBlock !== null;
 
-  const hoverCopyText = hoverBlock?.element.querySelector('pre')?.textContent ?? '';
-
   return (
     <>
       {showSelectionToolbar && pending && (
         <SelectionToolbar
           getAnchorRect={getPendingRect}
           positionMode={pending.isCodeBlock ? 'top-right' : 'center-above'}
-          copyText={pending.selectionText}
           onDelete={handleDelete}
           onRequestComment={handleRequestComment}
           onQuickLabel={handleQuickLabel}
@@ -302,7 +299,6 @@ export function AnnotationLayer({ api, rootRef, path }: AnnotationLayerProps) {
         <SelectionToolbar
           getAnchorRect={getHoverRect}
           positionMode="top-right"
-          copyText={hoverCopyText}
           onDelete={handleDelete}
           onRequestComment={handleRequestComment}
           onQuickLabel={handleQuickLabel}
