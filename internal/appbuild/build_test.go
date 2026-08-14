@@ -463,6 +463,34 @@ func TestBuild_ViewOnlyEditIsANewVersion(t *testing.T) {
 	}
 }
 
+// The digest is over a set of named artifacts, not a list: reordering two
+// [[views]] blocks changes nothing about what the version holds, so it must not
+// mint a new one. The claim rests on one sort inside versionHash, which is
+// exactly the kind of line a later refactor drops while the claim quietly dies.
+func TestVersionHash_DoesNotDependOnViewOrder(t *testing.T) {
+	declaration := `{"name":"ordered","attn_app_api":1}`
+	bundle := []byte("export default {}\n")
+	approvals := ViewArtifact{Name: "approvals", Content: []byte("export default 1\n")}
+	history := ViewArtifact{Name: "history", Content: []byte("export default 2\n")}
+
+	forward := VersionHash(declaration, bundle, []ViewArtifact{approvals, history})
+	backward := VersionHash(declaration, bundle, []ViewArtifact{history, approvals})
+	if forward != backward {
+		t.Fatalf("reordering the views moved the hash: %s then %s", forward, backward)
+	}
+
+	// The names are hashed too, so two views cannot swap contents unnoticed —
+	// which is what stops the ordering rule from collapsing the whole digest into
+	// "some bytes, in some order".
+	swapped := VersionHash(declaration, bundle, []ViewArtifact{
+		{Name: approvals.Name, Content: history.Content},
+		{Name: history.Name, Content: approvals.Content},
+	})
+	if swapped == forward {
+		t.Fatal("two views swapping contents left the version hash unchanged")
+	}
+}
+
 // An app with no views hashes exactly as it did before views existed, so
 // re-applying an app built by an older attn lands on the row it already had.
 func TestBuild_ViewlessAppHashesAsItDidBeforeViews(t *testing.T) {
