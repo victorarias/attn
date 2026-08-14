@@ -53,7 +53,14 @@ implementation begins. The stage's detailed plan records the answers.
   and delivery guarantees; timer granularity.
 - **C1 (hook points):** hook claim/registry semantics; single vs multiple
   claimants per hook; the delegation parked-state UX (what the app shows
-  while parked).
+  while parked). Prior art pinned for the claimants question (from the
+  deepseek-harness grounding read, `docs/grounding/deepseek-harness.md` on
+  branch `tipsy-walrus`, 5d4b4a62): their answer is multiple, ordered —
+  each listener receives `next()` and either delegates or returns without
+  calling it to own the decision; a policy listener may short-circuit, a
+  listener that only annotates must delegate. They also make each hook
+  point's dispatch mode a machine-checked part of its public contract,
+  which is a richer contract than fail-open/fail-closed + timeout alone.
 - **C2 (gate):** the approval UX itself (where the panel lives, what
   reject-with-feedback delivers back to the delegating agent); **app
   capability discoverability** — how an agent in an unrelated session
@@ -66,7 +73,16 @@ implementation begins. The stage's detailed plan records the answers.
   (something like `attn app run <name> <action>`; undesigned), and a
   scoping question that needs a receipt before apps are numerous: do all
   enabled apps' one-liners belong in every session's context, or does the
-  index scope per workspace/repo?
+  index scope per workspace/repo? Prior art pinned for both halves (same
+  grounding read as C1's): for discoverability, one generated capability
+  catalog rendered three ways — SDK types, docs, and a model-facing
+  inspect report — from a single source, with a build gate that fails
+  when a declared capability is not actually reachable, so the catalog
+  never advertises a call that cannot be made. For the panel, theirs is
+  frame-wide and never session-filtered, because a blocked request can
+  name a session nobody is looking at; rows blocking an agent sort
+  first, the selected session's rows group first, everyone else's stay
+  listed below.
 - **C3 (Present v2):** record shapes for presentations/stops; parity
   checklist defining what "the parts actually used" means before old
   Present is deleted.
