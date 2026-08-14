@@ -170,7 +170,6 @@ type CurrentStateSnapshot = {
   repos: RepoState[]
   authors: AuthorState[]
   githubHosts: string[]
-  settings: Record<string, unknown>
   tickets: TicketRow[]
   seeds: Seed[]
   crew: CrewMember[]
@@ -178,13 +177,16 @@ type CurrentStateSnapshot = {
 }
 ```
 
-These are the state-bearing fields assembled for `InitialStateMessage` in
-`internal/daemon/websocket.go`; A5 adds `apps` to that projection. Protocol
-identity, warnings, and client-only metadata are not app state and are not
-included. The builder reads local and relayed state exactly as Initial State
-does. The snapshot call captures `asOfSeq` first, then builds the projection;
-every mutation committed at or below that position is therefore already
-visible, while a later mutation still has a fact above the fence.
+These are the state-bearing domain fields assembled for `InitialStateMessage`
+in `internal/daemon/websocket.go`; A5 adds `apps` to that projection. Protocol
+identity, warnings, client-only metadata, and the untyped `settings` map are
+not app state and are not included. In particular, `settings` is the daemon's
+entire settings table plus derived client capability flags, not a bounded app
+read contract. An app that needs configuration gets a purpose-built typed
+reader later. The builder reads local and relayed domain state exactly as
+Initial State does. The snapshot call captures `asOfSeq` first, then builds the
+projection; every mutation committed at or below that position is therefore
+already visible, while a later mutation still has a fact above the fence.
 
 The complete reconcile-time surface is deliberately small:
 
@@ -437,9 +439,9 @@ proof.
    cursor and request rows; no new app code runs yet.
 2. **Manifest, SDK, and sidecar dispatch.** Add `reconcile = true`, the typed
    reconcile export beside A5's subscription and command maps,
-   `ReconcileReason`, `ctx.current.snapshot()`, the shared Initial State
-   builder, and the reconcile sidecar dispatch. Extend the version hash through
-   the frozen declaration as today. Verification tier:
+   `ReconcileReason`, `ctx.current.snapshot()`, the shared Initial State domain
+   projection builder, and the reconcile sidecar dispatch. Extend the version
+   hash through the frozen declaration as today. Verification tier:
    full non-production app install because the daemon/runtime RPC and packaged
    sidecar change; Linux host build and tests apply because `apphost` and
    `internal/**` run on remotes.
@@ -466,8 +468,9 @@ than an empty database.
 
 None. Victor approved the two review calls on 2026-08-14:
 
-- expose the state-bearing Initial State projection as one snapshot and no raw
-  store API; typed domain readers may be added later without breaking it;
+- expose the state-bearing Initial State domain projection as one snapshot and
+  no raw store or settings API; typed domain readers may be added later without
+  breaking it;
 - refuse a subscribed legacy version's pointer move before it happens rather
   than install a version attn already knows it cannot serve safely.
 
