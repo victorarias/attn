@@ -105,8 +105,8 @@ type Gap struct {
 	Missed   int64
 }
 
-// PreDrain runs after the consumer registration and log bounds are read, but
-// before any event is selected. It may durably move the cursor; the bus re-reads
+// PreDrain runs after the consumer registration and log bounds are read, before
+// each event batch is selected. It may durably move the cursor; the bus re-reads
 // the registration after it returns.
 type PreDrain func(ctx context.Context, consumer Consumer, gap *Gap) error
 
@@ -777,48 +777,57 @@ func (b *Bus) deliver(d *durable) {
 
 // drain reads forward from the consumer's cursor until the log is exhausted.
 func (b *Bus) drain(d *durable) error {
-	// The enabled bit is the kill switch and lives only in the database; re-read
-	// it, never cache it for the process lifetime.
-	rec, ok, err := b.store.GetConsumer(d.name)
-	if err != nil {
-		return fmt.Errorf("reading registration: %w", err)
-	}
-	if !ok {
-		return fmt.Errorf("registration for %s disappeared", d.name)
-	}
-	d.setPosition(rec.Cursor, rec.Enabled)
-	if !rec.Enabled {
-		return nil
-	}
-
-	earliest, head, err := b.store.Bounds()
-	if err != nil {
-		return fmt.Errorf("reading log bounds: %w", err)
-	}
-	var gap *Gap
-	if earliest != 0 && d.position() < earliest-1 {
-		gap = &Gap{
-			Cursor: d.position(), Earliest: earliest, Head: head,
-			Missed: earliest - 1 - d.position(),
-		}
-	}
-	if d.preDrain != nil {
-		if err := d.preDrain(d.ctx, rec, gap); err != nil {
-			return fmt.Errorf("before draining: %w", err)
-		}
-		rec, ok, err = b.store.GetConsumer(d.name)
+	prepare := func() (bool, error) {
+		// The enabled bit is the kill switch and lives only in the database;
+		// re-read it, never cache it for the process lifetime.
+		rec, ok, err := b.store.GetConsumer(d.name)
 		if err != nil {
-			return fmt.Errorf("reading registration after pre-drain: %w", err)
+			return false, fmt.Errorf("reading registration: %w", err)
 		}
 		if !ok {
-			return fmt.Errorf("registration for %s disappeared during pre-drain", d.name)
+			return false, fmt.Errorf("registration for %s disappeared", d.name)
 		}
 		d.setPosition(rec.Cursor, rec.Enabled)
 		if !rec.Enabled {
-			return nil
+			return false, nil
 		}
-	} else if gap != nil {
-		if err := b.reconcileGap(d, *gap); err != nil {
+
+		earliest, head, err := b.store.Bounds()
+		if err != nil {
+			return false, fmt.Errorf("reading log bounds: %w", err)
+		}
+		var gap *Gap
+		if earliest != 0 && d.position() < earliest-1 {
+			gap = &Gap{
+				Cursor: d.position(), Earliest: earliest, Head: head,
+				Missed: earliest - 1 - d.position(),
+			}
+		}
+		if d.preDrain == nil {
+			if gap != nil {
+				if err := b.reconcileGap(d, *gap); err != nil {
+					return false, err
+				}
+			}
+			return true, nil
+		}
+		if err := d.preDrain(d.ctx, rec, gap); err != nil {
+			return false, fmt.Errorf("before draining: %w", err)
+		}
+		rec, ok, err = b.store.GetConsumer(d.name)
+		if err != nil {
+			return false, fmt.Errorf("reading registration after pre-drain: %w", err)
+		}
+		if !ok {
+			return false, fmt.Errorf("registration for %s disappeared during pre-drain", d.name)
+		}
+		d.setPosition(rec.Cursor, rec.Enabled)
+		return rec.Enabled, nil
+	}
+
+	if d.preDrain == nil {
+		ready, err := prepare()
+		if err != nil || !ready {
 			return err
 		}
 	}
@@ -845,6 +854,12 @@ func (b *Bus) drain(d *durable) error {
 	for {
 		if d.ctx.Err() != nil {
 			return nil
+		}
+		if d.preDrain != nil {
+			ready, err := prepare()
+			if err != nil || !ready {
+				return err
+			}
 		}
 		events, err := b.store.Since(d.position(), b.batchSize)
 		if err != nil {

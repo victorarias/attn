@@ -705,7 +705,15 @@ func TestPreDrainOwnsGapRepairAndKeepsLaterFactsBehindItsFence(t *testing.T) {
 	b := testBus(t, s)
 	rec := newRecorder()
 	var got *Gap
+	checks := 0
 	d := b.newDurable("app:projection", All, func(_ context.Context, consumer Consumer, gap *Gap) error {
+		checks++
+		if checks == 2 {
+			if consumer.Cursor != 5 || gap != nil {
+				t.Fatalf("second pre-drain consumer/gap = %+v / %+v", consumer, gap)
+			}
+			return nil
+		}
 		if consumer.Cursor != 1 || gap == nil {
 			t.Fatalf("pre-drain consumer/gap = %+v / %+v", consumer, gap)
 		}
@@ -721,8 +729,8 @@ func TestPreDrainOwnsGapRepairAndKeepsLaterFactsBehindItsFence(t *testing.T) {
 	if err := b.drain(d); err != nil {
 		t.Fatal(err)
 	}
-	if got == nil || got.Cursor != 1 || got.Earliest != 4 || got.Head != 4 || got.Missed != 2 {
-		t.Fatalf("gap = %+v", got)
+	if checks != 2 || got == nil || got.Cursor != 1 || got.Earliest != 4 || got.Head != 4 || got.Missed != 2 {
+		t.Fatalf("checks/gap = %d / %+v", checks, got)
 	}
 	names, seqs := rec.snapshot()
 	if len(names) != 1 || names[0] != "after-fence" || seqs[0] != 5 {
@@ -755,6 +763,56 @@ func TestPreDrainFailureMovesNeitherGapNorFactCursor(t *testing.T) {
 	c, _, _ := s.GetConsumer("app:projection")
 	if c.Cursor != 0 || rec.count() != 0 {
 		t.Fatalf("failed pre-drain moved cursor/delivered: cursor=%d delivered=%d", c.Cursor, rec.count())
+	}
+}
+
+func TestPreDrainRechecksObligationsBetweenBatches(t *testing.T) {
+	s := newMemStore()
+	if _, err := s.Append(Event{Name: "before-trigger"}, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	s.consumers["app:projection"] = Consumer{Name: "app:projection", Filter: "*", Enabled: true}
+	b := testBus(t, s)
+	b.batchSize = 1
+
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	owed := false
+	checks := 0
+	d := b.newDurable("app:projection", All, func(context.Context, Consumer, *Gap) error {
+		checks++
+		if owed {
+			return errors.New("reconcile still owed")
+		}
+		return nil
+	}, func(ctx context.Context, ev Event) error {
+		close(firstStarted)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-releaseFirst:
+			return nil
+		}
+	})
+	t.Cleanup(d.cancel)
+
+	drained := make(chan error, 1)
+	go func() { drained <- b.drain(d) }()
+	<-firstStarted
+	owed = true
+	for _, name := range []string{"after-trigger-one", "after-trigger-two"} {
+		if _, err := s.Append(Event{Name: name}, time.Now()); err != nil {
+			t.Fatal(err)
+		}
+	}
+	close(releaseFirst)
+
+	if err := <-drained; err == nil || !strings.Contains(err.Error(), "reconcile still owed") {
+		t.Fatalf("drain error = %v", err)
+	}
+	consumer, _, _ := s.GetConsumer("app:projection")
+	if checks != 2 || consumer.Cursor != 1 {
+		t.Fatalf("pre-drain checks/cursor = %d/%d, want 2/1", checks, consumer.Cursor)
 	}
 }
 
