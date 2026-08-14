@@ -1,0 +1,13 @@
+kind: internal
+area: docs
+change: >
+  A5's plan doc designs the extension platform's UI stage: apps declare
+  views in their manifest, the build compiles each for the browser into the
+  content-addressed version, the daemon serves them at an immutable URL, and
+  a tile host mounts one behind a per-app error boundary. It records
+  Victor's gate answers — tiles as the only mount kind with a seam that
+  keeps a second kind additive, an SDK materialized locally from one source
+  rather than published to npm, a single shared React reached through an
+  import map, the first design-system slice, and the protocol envelopes for
+  windowed document subscriptions and app commands — and breaks the stage
+  into six slices with their verification tiers.
