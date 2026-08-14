@@ -218,6 +218,14 @@ func (c *Client) Register(id, label, dir string) error {
 // RegisterWithAgent registers a new session with an explicit agent.
 // agent should be "claude", "codex", or "copilot"; empty preserves daemon default behavior.
 func (c *Client) RegisterWithAgent(id, label, dir, agent string) error {
+	return c.RegisterAsMember(id, label, dir, agent, "")
+}
+
+// RegisterAsMember is RegisterWithAgent with a crew member binding: the daemon
+// resolves the name against the registry and stamps the binding, or refuses
+// the whole registration — the caller must treat that as launch-fatal, because
+// a member launch that runs unbound is an identity silently dropped.
+func (c *Client) RegisterAsMember(id, label, dir, agent, member string) error {
 	msg := protocol.RegisterMessage{
 		Cmd:         protocol.CmdRegister,
 		ID:          id,
@@ -228,6 +236,9 @@ func (c *Client) RegisterWithAgent(id, label, dir, agent string) error {
 	if agent != "" {
 		normalized := protocol.NormalizeSessionAgentString(agent, string(protocol.SessionAgentCodex))
 		msg.Agent = protocol.Ptr(normalized)
+	}
+	if member != "" {
+		msg.Member = protocol.Ptr(member)
 	}
 	_, err := c.send(msg)
 	return err

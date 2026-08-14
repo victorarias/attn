@@ -481,6 +481,42 @@ independent.
 Plan:
 [docs/plans/2026-08-06-the-garden-vertical-slices.md](plans/2026-08-06-the-garden-vertical-slices.md).
 
+## The crew
+
+The **crew** is the roster of durable named identities. A **crew member** —
+keel, alder, trellis — is a charter, a handoff line, and an address; its
+sessions are its **days**. A member belongs to a home daemon, for the same
+reason the garden does: one roster across a fleet is its whole point.
+
+A member's **home** is plain markdown on disk at `~/.attn/crew/<name>/`: a
+`CHARTER.md` saying what it cares about, and dated **handoffs** it writes to
+its successor at the end of a day. Files are canonical and hand-editable —
+which is what lets any agent be a member, claude or codex or something later.
+The **registry** is the daemon's index over those homes (member id, charter
+path, home dir, cwd, awareness dirs, active binding); it serves reads and is
+never a second authority for the prose. A home the user adds by hand joins the
+roster at the daemon's next start.
+
+**Identity is the invocation, never the files.** A session is a member because
+it was launched as one — the daemon stamps a **binding** at launch
+(`attn <agent> --member <name>`), and that binding is what `attn agent list`
+and `attn agent peek` report. Reading a charter confers nothing. One member has
+one active binding: **two agents with the same identity never run at once**, and
+waking a member whose day is live is refused rather than duplicated.
+Parallelism means another member, never a second copy. A binding naming a
+session the daemon no longer knows has let go on its own, the same liveness
+rule a seed's tender follows.
+
+Tending is not a crew privilege: workers and errand sessions tend seeds too,
+under any free-string name. Where a tender's name happens to match a registered
+member it resolves to that member's id, so the claim compares addresses rather
+than spellings — but the registry is never a requirement to tend. The two
+handoffs stay apart on purpose: a **seed handoff** is the work item's thread,
+written by whoever tends it; a **crew handoff** is the member's day-line.
+
+Plan:
+[docs/plans/2026-08-11-the-crew-primitive.md](plans/2026-08-11-the-crew-primitive.md).
+
 ## Home daemon
 
 A daemon that is **its own home** — standalone, complete, owning its garden,

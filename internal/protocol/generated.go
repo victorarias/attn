@@ -142,6 +142,9 @@ type AgentPeekResult struct {
 	// Agent corresponds to the JSON schema field "agent".
 	Agent string `json:"agent"`
 
+	// CrewMember corresponds to the JSON schema field "crew_member".
+	CrewMember *string `json:"crew_member,omitempty,omitzero"`
+
 	// Label corresponds to the JSON schema field "label".
 	Label string `json:"label"`
 
@@ -1613,6 +1616,36 @@ type CreateWorktreeResultMessage struct {
 
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
+}
+
+type CrewListMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+}
+
+type CrewListResult struct {
+	// Members corresponds to the JSON schema field "members".
+	Members []CrewMember `json:"members"`
+}
+
+type CrewMember struct {
+	// AwarenessDirs corresponds to the JSON schema field "awareness_dirs".
+	AwarenessDirs []string `json:"awareness_dirs"`
+
+	// BindingSession corresponds to the JSON schema field "binding_session".
+	BindingSession *string `json:"binding_session,omitempty,omitzero"`
+
+	// CharterPath corresponds to the JSON schema field "charter_path".
+	CharterPath string `json:"charter_path"`
+
+	// Cwd corresponds to the JSON schema field "cwd".
+	Cwd *string `json:"cwd,omitempty,omitzero"`
+
+	// HomeDir corresponds to the JSON schema field "home_dir".
+	HomeDir string `json:"home_dir"`
+
+	// ID corresponds to the JSON schema field "id".
+	ID string `json:"id"`
 }
 
 type DaemonWarning struct {
@@ -4984,6 +5017,9 @@ type RegisterMessage struct {
 	// Label corresponds to the JSON schema field "label".
 	Label *string `json:"label,omitempty,omitzero"`
 
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID string `json:"workspace_id"`
 }
@@ -5179,6 +5215,9 @@ type Response struct {
 
 	// Authors corresponds to the JSON schema field "authors".
 	Authors []AuthorState `json:"authors,omitempty,omitzero"`
+
+	// CrewListResult corresponds to the JSON schema field "crew_list_result".
+	CrewListResult *CrewListResult `json:"crew_list_result,omitempty,omitzero"`
 
 	// Data corresponds to the JSON schema field "data".
 	Data *string `json:"data,omitempty,omitzero"`
@@ -5744,6 +5783,9 @@ type Session struct {
 
 	// ContextWindowCap corresponds to the JSON schema field "context_window_cap".
 	ContextWindowCap *int `json:"context_window_cap,omitempty,omitzero"`
+
+	// CrewMember corresponds to the JSON schema field "crew_member".
+	CrewMember *string `json:"crew_member,omitempty,omitzero"`
 
 	// DelegatedFromChief corresponds to the JSON schema field "delegated_from_chief".
 	DelegatedFromChief *bool `json:"delegated_from_chief,omitempty,omitzero"`

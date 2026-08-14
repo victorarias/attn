@@ -413,7 +413,7 @@ func (d *Daemon) handleSeedPlant(conn net.Conn, msg *protocol.SeedPlantMessage) 
 		StepSlug:       garden.StepSlug(title),
 		WorkspaceID:    workspaceID,
 		PlanterSession: sessionID,
-		PlanterMember:  strings.TrimSpace(protocol.Deref(msg.Member)),
+		PlanterMember:  d.resolveTenderMember(protocol.Deref(msg.Member), sessionID),
 		Edges:          []garden.Edge{},
 		Vars:           []garden.Var{},
 	}
@@ -791,9 +791,13 @@ func (d *Daemon) handleSeedTransition(conn net.Conn, msg *protocol.SeedTransitio
 		d.sendGardenError(conn, string(verb), err)
 		return
 	}
+	sessionID := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
 	actor := garden.Tender{
-		Session: strings.TrimSpace(protocol.Deref(msg.SourceSessionID)),
-		Member:  strings.TrimSpace(protocol.Deref(msg.Member)),
+		Session: sessionID,
+		// A registered member's free-string name becomes its registry id, so
+		// Tender.Is compares real addresses; an unregistered name passes through
+		// and keeps tending exactly as before.
+		Member: d.resolveTenderMember(protocol.Deref(msg.Member), sessionID),
 	}
 	seed, doc, err := d.applySeedTransition(msg.SeedID, verb, actor, protocol.Deref(msg.Reason))
 	if err != nil {
@@ -888,12 +892,13 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
+	authorSession := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
 	note := garden.Note{
 		Seed:          seed.ID,
 		Kind:          kind,
 		Body:          msg.Body,
-		AuthorSession: strings.TrimSpace(protocol.Deref(msg.SourceSessionID)),
-		AuthorMember:  strings.TrimSpace(protocol.Deref(msg.Member)),
+		AuthorSession: authorSession,
+		AuthorMember:  d.resolveTenderMember(protocol.Deref(msg.Member), authorSession),
 	}
 	written, doc, err := d.mintAndWriteNote(*schema, note)
 	if err != nil {

@@ -78,6 +78,9 @@ type agentListRow struct {
 	Directory string `json:"directory"`
 	State     string `json:"state"`
 	TurnOwed  bool   `json:"turn_owed"`
+	// Member is the crew member this session is bound as — "this session is
+	// trellis today" — empty for the unbound majority.
+	Member string `json:"member,omitempty"`
 }
 
 func runAgentList(args []string) {
@@ -115,6 +118,7 @@ func agentListRows(result *client.ListResult) []agentListRow {
 			Directory: session.Directory,
 			State:     string(session.State),
 			TurnOwed:  protocol.Deref(session.TurnOwed),
+			Member:    protocol.Deref(session.CrewMember),
 		})
 	}
 	sort.Slice(rows, func(i, j int) bool {
@@ -131,7 +135,7 @@ func printAgentList(w io.Writer, rows []agentListRow) {
 		fmt.Fprintln(w, "No sessions on this daemon.")
 		return
 	}
-	fmt.Fprintf(w, "%-*s  %-18s  %-8s  %-20s  %-16s  %s\n", agentShortIDLength, "ID", "NAME", "AGENT", "WORKSPACE", "STATE", "TURN")
+	fmt.Fprintf(w, "%-*s  %-18s  %-8s  %-10s  %-20s  %-16s  %s\n", agentShortIDLength, "ID", "NAME", "AGENT", "MEMBER", "WORKSPACE", "STATE", "TURN")
 	for _, row := range rows {
 		turn := "-"
 		if row.TurnOwed {
@@ -139,10 +143,11 @@ func printAgentList(w io.Writer, rows []agentListRow) {
 		}
 		fmt.Fprintf(
 			w,
-			"%-*s  %-18s  %-8s  %-20s  %-16s  %s\n",
+			"%-*s  %-18s  %-8s  %-10s  %-20s  %-16s  %s\n",
 			agentShortIDLength, agentShortID(row.ID),
 			agentListCell(row.Label, 18),
 			agentListCell(row.Agent, 8),
+			agentListCell(row.Member, 10),
 			agentListCell(row.Workspace, 20),
 			agentListCell(row.State, 16),
 			turn,
@@ -228,6 +233,9 @@ func agentPeekErrorMessage(target string, err error) string {
 
 func printAgentPeek(w io.Writer, result *protocol.AgentPeekResult) {
 	fmt.Fprintf(w, "session %s (%s) — %s\n", result.SessionID, result.Agent, result.Label)
+	if member := strings.TrimSpace(protocol.Deref(result.CrewMember)); member != "" {
+		fmt.Fprintf(w, "crew member: this session is %s today\n", member)
+	}
 	workspace := strings.TrimSpace(protocol.Deref(result.WorkspaceTitle))
 	if workspace != "" {
 		fmt.Fprintf(w, "workspace: %s\n", workspace)

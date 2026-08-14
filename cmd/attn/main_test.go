@@ -256,8 +256,34 @@ func TestParseDirectLaunchArgs_LabelAndYolo(t *testing.T) {
 	}
 }
 
-// parseDirectLaunchArgs understands only -s/--resume/--yolo. Everything else is
-// rejected rather than silently forwarded to the underlying agent.
+// A member launch names who the session is. The label follows the member, so a
+// member's day is titled after it without anybody typing -s.
+func TestParseDirectLaunchArgs_MemberNamesTheSession(t *testing.T) {
+	parsed, err := parseDirectLaunchArgs([]string{"--member", "trellis"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.member != "trellis" {
+		t.Fatalf("member = %q, want trellis", parsed.member)
+	}
+	if parsed.label != "trellis" {
+		t.Fatalf("label = %q, want the member's name", parsed.label)
+	}
+}
+
+// -s still wins: the member decides identity, the label decides display.
+func TestParseDirectLaunchArgs_LabelOverridesTheMemberName(t *testing.T) {
+	parsed, err := parseDirectLaunchArgs([]string{"--member", "trellis", "-s", "crew slice 1"})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if parsed.member != "trellis" || parsed.label != "crew slice 1" {
+		t.Fatalf("member/label = %q/%q, want trellis/crew slice 1", parsed.member, parsed.label)
+	}
+}
+
+// parseDirectLaunchArgs understands only -s/--resume/--yolo/--member.
+// Everything else is rejected rather than silently forwarded to the agent.
 func TestParseDirectLaunchArgs_RejectsUnrecognizedArgs(t *testing.T) {
 	for _, args := range [][]string{
 		{"--model", "foo"}, // arbitrary agent flag
@@ -265,6 +291,7 @@ func TestParseDirectLaunchArgs_RejectsUnrecognizedArgs(t *testing.T) {
 		{"--help"},         // must not reach the agent
 		{"random"},         // bare positional
 		{"-s"},             // missing label value
+		{"--member"},       // missing member value
 	} {
 		if _, err := parseDirectLaunchArgs(args); err == nil {
 			t.Fatalf("expected error for args %#v, got nil", args)

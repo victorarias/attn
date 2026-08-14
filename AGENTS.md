@@ -408,6 +408,11 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   live here. `Status.RequireHome` is the fence every garden/crew surface calls;
   reach it from the daemon through `Daemon.requireHome`, never by reading the
   record yourself
+- `internal/crew`: what a crew member IS — the id rule, the stored registry
+  record, and how a home directory under `~/.attn/crew/` becomes one. Files stay
+  canonical: the registry records where a home lives, never what it says. The
+  daemon half (`internal/daemon/crew.go`) owns the binding a session launches
+  with and the one-active-binding-per-member rule over it
 - `internal/bus`: durable event bus (domain facts, per-consumer cursors)
 - `internal/docstore`: document-store query semantics, SQL compilation, and the
   physical naming (no DB handle; `internal/store/documents.go` executes what it

@@ -133,6 +133,7 @@ model Session {
   state_updated_at: string;     // ISO timestamp, always set
   state_reason?: string;        // Why the resolver reached this state (e.g. "stuck", "classifier_verdict"); absent for states it does not own
   chief_of_staff?: boolean;     // True when this session holds the profile-wide coordinator role
+  crew_member?: string;         // The crew member whose active binding this session is — "this session is trellis today". Stamped by the daemon at launch, judged live at broadcast, absent for every unbound session.
   delegated_from_chief?: boolean; // True when this session was delegated from the chief of staff (assignee of a chief-authored ticket)
   ticket_unread?: boolean;      // True when this session has unread ticket events (drives the incoming-nudge indicator)
   nudge_fires_at?: string;      // ISO timestamp a pending ticket-nudge countdown will fire; absent when paused (active session) or no countdown
@@ -641,6 +642,11 @@ model RegisterMessage {
   agent?: string;               // Optional for registered plugin IDs
   dir: string;
   workspace_id: string;
+  // The crew member this session launches as. The daemon resolves it against
+  // the registry and stamps the binding — identity is the invocation — or
+  // refuses the whole registration: an unknown name, an outpost daemon, or a
+  // member whose day is already live all fail here, before the agent runs.
+  member?: string;
 }
 
 model UnregisterMessage {
@@ -4880,6 +4886,7 @@ model Response {
   state_explain_result?: StateExplainResult;
   agent_peek_result?: AgentPeekResult;
   agent_msg_result?: AgentMsgResult;
+  crew_list_result?: CrewListResult;
   seed_plant_result?: SeedPlantResult;
   seed_list_result?: SeedListResult;
   seed_show_result?: SeedShowResult;
@@ -4968,6 +4975,39 @@ model AgentPeekResult {
   last_assistant_message?: string;
   // Absent when the backend cannot serve a snapshot (old worker, no frame).
   screen?: AgentPeekScreen;
+  // The crew member whose active binding this session is; absent when unbound.
+  crew_member?: string;
+}
+
+// ============================================================================
+// Crew
+// ============================================================================
+
+// Read the crew roster: every registered member, awake or asleep. The registry
+// serves the read; the member's home stays plain markdown on disk and is never
+// copied onto the wire. Home-only — an outpost is refused by the enrollment
+// fence.
+model CrewListMessage {
+  cmd: "crew_list";
+}
+
+// One registered crew member. Paths point at the canonical files.
+model CrewMember {
+  id: string;
+  charter_path: string;
+  home_dir: string;
+  // Where the member's sessions launch; absent until the wake slice records one.
+  cwd?: string;
+  // The places the member's charter is about.
+  awareness_dirs: string[];
+  // The session living this member's current day. Present only while that
+  // session is live — the daemon judges the binding at read, so presence IS
+  // "awake" and a caller never re-derives liveness.
+  binding_session?: string;
+}
+
+model CrewListResult {
+  members: CrewMember[];
 }
 
 // What became of a message. Never a silent drop: a message that could not be

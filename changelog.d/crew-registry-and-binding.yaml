@@ -1,0 +1,15 @@
+kind: added
+area: cli
+change: >
+  attn now knows the crew. A crew member is a durable named identity — its
+  home stays plain, hand-editable markdown at `~/.attn/crew/<name>/`, and the
+  daemon registers every home it finds there at startup, including one you add
+  by hand. `attn crew list` names the roster and says who is awake. A session
+  launches as a member with `attn <agent> --member <name>`, which is what makes
+  it that member: the binding is stamped at launch, `attn agent list` and
+  `attn agent peek` show it, and two agents with the same identity never run at
+  once — waking a member whose day is already live is refused, naming the
+  session that holds it. Where a garden tender's name matches a registered
+  member it now resolves to that member; workers and errand sessions keep
+  tending under any name they like. Nothing changes for a session launched
+  without `--member`.
