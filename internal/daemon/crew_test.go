@@ -157,6 +157,56 @@ func TestCrew_SecondClaimOnALiveMemberIsRefusedByName(t *testing.T) {
 	}
 }
 
+// One session answers to one name. Binding a session that already holds a
+// member to a second member moves the identity rather than handing that session
+// both — otherwise "two agents with the same identity never run at once" holds
+// while one agent quietly runs as two.
+func TestCrew_ASessionTakingASecondNameDropsTheFirst(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "sess-one")
+
+	if _, err := d.claimCrewBinding("keel", "sess-one"); err != nil {
+		t.Fatalf("first claim: %v", err)
+	}
+	if _, err := d.claimCrewBinding("trellis", "sess-one"); err != nil {
+		t.Fatalf("second claim: %v", err)
+	}
+
+	members := crewList(t, d)
+	if got := protocol.Deref(memberByID(t, members, "trellis").BindingSession); got != "sess-one" {
+		t.Errorf("trellis binding = %q, want sess-one", got)
+	}
+	if got := protocol.Deref(memberByID(t, members, "keel").BindingSession); got != "" {
+		t.Errorf("keel is still bound to %q after the session became trellis", got)
+	}
+	// The session decorates as exactly one member, not whichever the roster
+	// order happened to reach first.
+	if got := d.crewMembersBySession()["sess-one"]; got != "trellis" {
+		t.Errorf("session decorates as %q, want trellis", got)
+	}
+}
+
+// A refused second name leaves the session the member it already was: the
+// release runs only once the claim is certain to land.
+func TestCrew_ARefusedSecondNameKeepsTheFirst(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "sess-one")
+	addSession(t, d, "sess-two")
+
+	if _, err := d.claimCrewBinding("keel", "sess-one"); err != nil {
+		t.Fatalf("claim keel: %v", err)
+	}
+	if _, err := d.claimCrewBinding("trellis", "sess-two"); err != nil {
+		t.Fatalf("claim trellis: %v", err)
+	}
+	if _, err := d.claimCrewBinding("trellis", "sess-one"); err == nil {
+		t.Fatal("a live trellis was handed to a second session")
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "keel").BindingSession); got != "sess-one" {
+		t.Errorf("keel binding = %q, want sess-one — a refused claim wrote something", got)
+	}
+}
+
 // A binding naming a session the daemon no longer knows has let go on its own —
 // the same liveness rule the garden's tender uses — so a member whose day ended
 // without ceremony can be woken again.

@@ -117,6 +117,10 @@ func (d *Daemon) writeCrewMember(schema docstore.CollectionSchema, member crew.M
 // readCrewMembers reads the whole roster. The crew is people the user named
 // one by one — three today — so docstore.MaxLimit is not a bound anything
 // real approaches; a roster past it would be a different product.
+//
+// Every crew read is this one query, so one receipt covers them all: measured
+// 2026-08-14 at a three-member roster, 25µs on an M5. That is what a session
+// broadcast pays, and what a garden action pays to resolve its tender.
 func (d *Daemon) readCrewMembers() ([]crew.Member, map[string]docstore.Document, error) {
 	read, _, err := d.runDocQuery(docstore.Query{
 		Namespace:  crew.Namespace,
@@ -154,7 +158,8 @@ func (d *Daemon) crewBindingLive(member crew.Member) bool {
 // at its launch. It refuses an unregistered name, and refuses a member whose
 // current day is still live, because two agents with the same identity never
 // run at once. Re-claiming the binding a session already holds is idempotent,
-// so a client re-announcing a live session keeps its identity.
+// so a client re-announcing a live session keeps its identity, and claiming a
+// second member for one session moves it rather than doubling it.
 //
 // A conflict is not a refusal — the record moved between the read and the
 // write, so the decision is remade against what is there now. Three attempts
@@ -184,6 +189,10 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 			return "", fmt.Errorf("%s is already awake in session %s; two agents with the same identity never run at once — wait for that day to end, or wake another member",
 				member.ID, shortSessionID(member.BindingSession))
 		}
+		// Past every refusal, so the claim is going to land: drop any other name
+		// this session already answered to. A refused claim is not reached here,
+		// and leaves the session the member it already was.
+		d.releaseCrewBindingsExcept(*schema, members, docs, member.ID, sessionID)
 		member.BindingSession = sessionID
 		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
 		if err == nil {
@@ -217,12 +226,19 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 		}
 		return
 	}
+	d.releaseCrewBindingsExcept(*schema, members, docs, "", sessionID)
+}
+
+// releaseCrewBindingsExcept clears every binding naming sessionID other than
+// keepID's, against a roster the caller already read. One session answers to
+// one name: a session that becomes somebody drops whoever it was first.
+func (d *Daemon) releaseCrewBindingsExcept(schema docstore.CollectionSchema, members []crew.Member, docs map[string]docstore.Document, keepID, sessionID string) {
 	for _, member := range members {
-		if member.BindingSession != sessionID {
+		if member.BindingSession != sessionID || member.ID == keepID {
 			continue
 		}
 		member.BindingSession = ""
-		if err := d.writeCrewMember(*schema, member, docs[member.ID].Rev); err != nil {
+		if err := d.writeCrewMember(schema, member, docs[member.ID].Rev); err != nil {
 			d.logf("crew: releasing %s's binding for session %s: %v", member.ID, sessionID, err)
 			continue
 		}
@@ -233,11 +249,7 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 // crewMembersBySession maps live bindings for one broadcast, so decorating a
 // session list costs one roster read rather than one per session. Empty —
 // never an error — when the roster is empty or unreadable: decoration must not
-// fail a broadcast.
-//
-// This rides every session broadcast, which runs all day. Measured 2026-08-14
-// at a three-member roster: 25µs per read on an M5. The crew is people the
-// user named one by one, so that size is the real one.
+// fail a broadcast. Receipt for the read on readCrewMembers.
 func (d *Daemon) crewMembersBySession() map[string]string {
 	if d.store == nil {
 		return nil
@@ -283,6 +295,9 @@ func (d *Daemon) decorateCrewMember(session *protocol.Session, membersBySession 
 // through untouched: the registry never becomes a requirement to tend.
 func (d *Daemon) resolveTenderMember(memberName, sessionID string) string {
 	memberName = strings.TrimSpace(memberName)
+	if memberName == "" && sessionID == "" {
+		return ""
+	}
 	members, _, err := d.readCrewMembers()
 	if err != nil {
 		if !docstore.IsUndeclaredCollection(err) {
