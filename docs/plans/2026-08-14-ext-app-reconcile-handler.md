@@ -471,7 +471,15 @@ proof.
 3. **Failure, interruption, and operator surfaces.** Start/settle reconcile
    invocation rows, startup interruption repair, timeout-driven generation
    recycle, app status, command refusal, auto-disable, notifications, and the
-   loud missing-handler paths. Protocol changes follow `main.tsp` generation
+   loud missing-handler paths. This slice also lands the retention policy from
+   the end of this doc as code, both halves of one promise: keep the facts —
+   `TrimBusEvents` floors at the minimum cursor across installed app
+   consumers, enabled or disabled, with "disabled must not pin" narrowed to
+   rows no install serves — and deliver the facts: slice 1's as-built cleanup
+   (delete the `re_enabled` insert and enum value, re-fence `version_changed`
+   to cursor and `gap` to `earliest - 1`) with the three witnesses named in
+   slice 1's note. The per-lane cap stays out until its number has a receipt
+   from measured lane growth. Protocol changes follow `main.tsp` generation
    and increment `ProtocolVersion`; generated Go and TypeScript are never
    edited by hand. Verification tier: full non-production app plus packaged-app
    harness. Prove an infinite loop loses its generation and another app resumes.
