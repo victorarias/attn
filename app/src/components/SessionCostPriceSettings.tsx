@@ -156,16 +156,15 @@ interface SessionCostPriceSettingsProps {
 }
 
 export function SessionCostPriceSettings({ settings, onSetSetting }: SessionCostPriceSettingsProps) {
-  const overrides = useMemo(() => (
-    Object.entries(settings)
-      .filter(([key, value]) => key.startsWith(SESSION_COST_PRICE_PREFIX) && value.trim() !== '')
-      .map(([key, raw]) => ({
-        modelId: key.slice(SESSION_COST_PRICE_PREFIX.length),
-        raw,
-      }))
-      .filter(({ modelId }) => modelId.trim() !== '')
-      .sort((left, right) => left.modelId.localeCompare(right.modelId))
-  ), [settings]);
+  const overrides = useMemo(() => {
+    const result: Array<{ modelId: string; raw: string }> = [];
+    for (const [key, raw] of Object.entries(settings)) {
+      if (!key.startsWith(SESSION_COST_PRICE_PREFIX) || raw.trim() === '') continue;
+      const modelId = key.slice(SESSION_COST_PRICE_PREFIX.length);
+      if (modelId.trim() !== '') result.push({ modelId, raw });
+    }
+    return result.sort((left, right) => left.modelId.localeCompare(right.modelId));
+  }, [settings]);
   const existingModelIds = useMemo(() => new Set(overrides.map(({ modelId }) => modelId)), [overrides]);
   const [modelId, setModelId] = useState('');
   const [draft, setDraft] = useState<PriceDraft>(blankDraft);

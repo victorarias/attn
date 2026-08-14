@@ -10,7 +10,7 @@ const usdFormatter = new Intl.NumberFormat('en-US', {
   maximumFractionDigits: 2,
 });
 
-export function formatSessionCostUSD(costUsd: number): string {
+function formatSessionCostUSD(costUsd: number): string {
   if (costUsd > 0 && costUsd < 0.01) {
     return '<$0.01';
   }
