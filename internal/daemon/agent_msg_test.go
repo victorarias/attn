@@ -137,6 +137,9 @@ func TestHandleAgentMsgResolvesAnAwakeCrewMemberToItsLiveSession(t *testing.T) {
 	if resp.AgentMsgResult.TargetSessionID != "keels-live-session" {
 		t.Fatalf("target = %q, want keel's live day", resp.AgentMsgResult.TargetSessionID)
 	}
+	if resp.AgentMsgResult.Detail != "delivered to Keel" {
+		t.Fatalf("detail = %q, want the member's display name", resp.AgentMsgResult.Detail)
+	}
 	if prompts := doorbell.pasted(); len(prompts) != 1 || !strings.Contains(prompts[0], "the garden is ready") {
 		t.Fatalf("delivered prompts = %q", prompts)
 	}
@@ -174,6 +177,9 @@ func TestHandleAgentMsgWakesASleepingMemberWithTheMessageAsItsFirstPrompt(t *tes
 	result := resp.AgentMsgResult
 	if result.Status != protocol.AgentMsgStatusQueued || result.MessageID == "" || result.TargetSessionID == "" {
 		t.Fatalf("result = %+v, want a durable queued delivery to the new day", result)
+	}
+	if !strings.Contains(result.Detail, "woke Trellis") {
+		t.Fatalf("detail = %q, want the member's display name", result.Detail)
 	}
 	for _, want := range []string{"📨 from session sender-s", "please inspect the broken build", "reply: attn agent msg sender-s"} {
 		if !strings.Contains(initialPrompt, want) {
@@ -295,7 +301,7 @@ func TestHandleAgentMsgWakeLimitRefusalDeliversNothing(t *testing.T) {
 		t.Fatalf("wake past the limit succeeded: %+v", resp)
 	}
 	detail := protocol.Deref(resp.Error)
-	for _, want := range []string{"crew.wake_limit=0", "alder", "sidebar", "nothing was delivered"} {
+	for _, want := range []string{"crew.wake_limit=0", "Alder", "sidebar", "nothing was delivered"} {
 		if !strings.Contains(detail, want) {
 			t.Errorf("refusal %q does not name %q", detail, want)
 		}

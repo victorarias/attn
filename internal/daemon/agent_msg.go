@@ -122,14 +122,15 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 			}
 			target = d.store.Get(woken.SessionID)
 			if !woken.AlreadyAwake {
+				memberName := crew.DisplayName(member.ID)
 				result.MessageID = record.ID
 				result.TargetSessionID = woken.SessionID
 				if d.initialAgentMessagePending(woken.SessionID, record.ID) {
 					result.Status = protocol.AgentMsgStatusQueued
-					result.Detail = fmt.Sprintf("woke %s in session %s; queued as its first prompt after priming", member.ID, shortSessionID(woken.SessionID))
+					result.Detail = fmt.Sprintf("woke %s in session %s; queued as its first prompt after priming", memberName, shortSessionID(woken.SessionID))
 				} else {
 					result.Status = protocol.AgentMsgStatusDelivered
-					result.Detail = fmt.Sprintf("woke %s and delivered as its first prompt after priming", member.ID)
+					result.Detail = fmt.Sprintf("woke %s and delivered as its first prompt after priming", memberName)
 				}
 				d.replyAgentMsg(conn, result)
 				return
@@ -192,7 +193,11 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 		result.Detail = agentMessageQueuedDetail(err)
 	} else {
 		result.Status = protocol.AgentMsgStatusDelivered
-		result.Detail = fmt.Sprintf("delivered to %s", sessionDisplayName(target))
+		targetName := sessionDisplayName(target)
+		if memberFound {
+			targetName = crew.DisplayName(member.ID)
+		}
+		result.Detail = fmt.Sprintf("delivered to %s", targetName)
 	}
 	d.replyAgentMsg(conn, result)
 }
