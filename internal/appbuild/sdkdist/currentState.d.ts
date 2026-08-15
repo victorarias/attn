@@ -9,6 +9,8 @@ export interface Session {
     readonly branch?: string;
     readonly chief_of_staff?: boolean;
     readonly context_window_cap?: number;
+    readonly cost_unknown?: boolean;
+    readonly cost_usd?: number;
     readonly crew_member?: string;
     readonly delegated_from_chief?: boolean;
     readonly directory: string;
