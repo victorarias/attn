@@ -703,6 +703,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				ExitCode:                   attachResult.ExitCode,
 				ExitSignal:                 attachResult.ExitSignal,
 				GhosttySnapshot:            attachResult.GhosttySnapshot,
+				GhosttySnapshotFormat:      attachResult.GhosttySnapshotFormat,
 				GhosttyBlocks:              attachBlocksFromWire(attachResult.GhosttyBlocks),
 				GhosttyPlacements:          ptyworker.PlacementsFromWire(attachResult.GhosttyPlacements),
 				GhosttyScrollbackTruncated: attachResult.GhosttyScrollbackTruncated,

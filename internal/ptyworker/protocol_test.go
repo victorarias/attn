@@ -128,3 +128,31 @@ func mustRawJSON(t *testing.T, v any) json.RawMessage {
 	}
 	return payload
 }
+
+func TestAttachResultCarriesSnapshotFormat(t *testing.T) {
+	payload, err := json.Marshal(AttachResult{
+		GhosttySnapshot:       []byte("snapshot bytes"),
+		GhosttySnapshotFormat: "cafef00d1234",
+	})
+	if err != nil {
+		t.Fatalf("marshal attach result: %v", err)
+	}
+	var decoded AttachResult
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("unmarshal attach result: %v", err)
+	}
+	if decoded.GhosttySnapshotFormat != "cafef00d1234" {
+		t.Fatalf("snapshot format = %q, want %q", decoded.GhosttySnapshotFormat, "cafef00d1234")
+	}
+
+	// A worker that predates the field is exactly the case this exists for: it
+	// answers attach with bytes and no format, and empty must survive the
+	// decode so the client can refuse them.
+	var old AttachResult
+	if err := json.Unmarshal([]byte(`{"ghostty_snapshot":"c25hcHNob3Q="}`), &old); err != nil {
+		t.Fatalf("unmarshal legacy attach result: %v", err)
+	}
+	if old.GhosttySnapshotFormat != "" {
+		t.Fatalf("legacy snapshot format = %q, want empty", old.GhosttySnapshotFormat)
+	}
+}

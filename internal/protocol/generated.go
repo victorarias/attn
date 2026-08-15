@@ -710,6 +710,9 @@ type AttachSnapshot struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
 
+	// Format corresponds to the JSON schema field "format".
+	Format *string `json:"format,omitempty,omitzero"`
+
 	// Placements corresponds to the JSON schema field "placements".
 	Placements []KittyPlacement `json:"placements,omitempty,omitzero"`
 

@@ -9,6 +9,7 @@ export type {
   RGB,
   RenderStateColors,
   RenderStateCursor,
+  SnapshotHistory,
 } from './terminal';
 export { DIRTY_FALSE, DIRTY_FULL, DIRTY_PARTIAL } from './abi';
 

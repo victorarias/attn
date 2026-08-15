@@ -2038,11 +2038,12 @@ func TestDaemon_HandleAttachSession_ServesGhosttySnapshotWhenAvailable(t *testin
 	backend := &fakeAttachBackend{}
 	snapshot := []byte("\x1b[H\x1b[2JOpenAI Codex\r\n\r\nRun /review on my current changes")
 	backend.SetAttachInfo(ptybackend.AttachInfo{
-		Running:         true,
-		LastSeq:         12,
-		Cols:            58,
-		Rows:            46,
-		GhosttySnapshot: snapshot,
+		Running:               true,
+		LastSeq:               12,
+		Cols:                  58,
+		Rows:                  46,
+		GhosttySnapshot:       snapshot,
+		GhosttySnapshotFormat: "cafef00d1234",
 	})
 	d.ptyBackend = backend
 
@@ -2080,6 +2081,13 @@ func TestDaemon_HandleAttachSession_ServesGhosttySnapshotWhenAvailable(t *testin
 		}
 		if protocol.Deref(result.LastSeq) != 12 {
 			t.Fatalf("last_seq = %d, want 12", protocol.Deref(result.LastSeq))
+		}
+		// The format the worker encoded in travels with the bytes: the client
+		// owns the decoder, so it is the only participant that can tell whether
+		// these bytes are readable. A worker outlives an install, so this is
+		// routinely not the client's own format.
+		if got := protocol.Deref(result.Snapshot.Format); got != "cafef00d1234" {
+			t.Fatalf("snapshot format = %q, want %q", got, "cafef00d1234")
 		}
 	case <-time.After(1 * time.Second):
 		t.Fatal("timed out waiting for attach_result")

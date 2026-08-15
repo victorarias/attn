@@ -119,6 +119,7 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		ExitCode:                   info.ExitCode,
 		ExitSignal:                 info.ExitSignal,
 		GhosttySnapshot:            info.GhosttySnapshot,
+		GhosttySnapshotFormat:      info.GhosttySnapshotFormat,
 		GhosttyBlocks:              info.GhosttyBlocks,
 		GhosttyPlacements:          info.GhosttyPlacements,
 		GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,

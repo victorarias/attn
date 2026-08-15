@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptyReload, ptySpawn } from '../pty/bridge';
+import { LOCAL_SNAPSHOT_FORMAT } from '../pty/attachPlanning';
 import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
@@ -2138,6 +2139,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
           cols: 56,
           rows: 35,
           snapshot_b64: btoa('fresh-daemon-frame'),
+          format: LOCAL_SNAPSHOT_FORMAT,
         },
         last_seq: 29376,
         running: true,

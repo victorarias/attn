@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import { InputHandler } from 'ghostty-web';
-import { CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from '../ghostty';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel, type SnapshotHistory } from '../ghostty';
 import { loadGhostty } from '../ghostty/wasm';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { exists } from '@tauri-apps/plugin-fs';
@@ -1800,7 +1800,25 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         const terminal = terminalRef.current;
         if (!terminal) return;
         modelOpRingRef.current.noteRestoreChunk(snapshot, terminal.cols, terminal.rows);
-        const history = terminal.adoptSnapshot(snapshot);
+        let history: SnapshotHistory;
+        try {
+          history = terminal.adoptSnapshot(snapshot);
+        } catch (reason) {
+          // Bytes this decoder cannot read are a payload fault, not a model
+          // fault: replacing the model would remount the pane, reattach, and be
+          // served the same bytes forever. adoptSnapshot throws before it swaps
+          // the handle, so the model it declined to replace is still usable and
+          // the live stream keeps painting on it.
+          recordUiDiag({
+            kind: 'snapshot_decode_rejected',
+            diagnosticFile: UI_DIAGNOSTICS_FILE,
+            pane: diagKeyRef.current,
+            session: runtimeMetaRef.current?.sessionId ?? undefined,
+            bytes: snapshot.length,
+            error: reason instanceof Error ? reason.message : String(reason),
+          });
+          return;
+        }
         // The decoded terminal carries the worker's modes, and the worker never
         // asserted the app's grapheme clustering.
         graphemeResetCarryRef.current = false;

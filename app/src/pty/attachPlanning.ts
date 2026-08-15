@@ -12,7 +12,27 @@ export interface AttachGhosttySnapshot {
   cols: number;
   rows: number;
   snapshot_b64: string;
+  format?: string;
   scrollback_truncated?: boolean;
+}
+
+// The snapshot wire format this build decodes. A pty-worker outlives an
+// install, so an upgraded app is routinely offered bytes an older worker
+// encoded; only the client knows what its own decoder reads, which is why the
+// comparison lives here and not in the daemon.
+// See docs/plans/2026-08-16-snapshot-format-skew.md.
+export const LOCAL_SNAPSHOT_FORMAT = __ATTN_SNAPSHOT_FORMAT__;
+
+// A snapshot is decodable when it names this build's format. An unnamed format
+// — a worker from before the field existed — is one nobody speaks, which is
+// exactly the case that produced the incident this guards.
+export function snapshotIsDecodable(
+  snapshot: Pick<AttachGhosttySnapshot, 'format'> | null | undefined,
+  localFormat: string = LOCAL_SNAPSHOT_FORMAT,
+): boolean {
+  if (!snapshot) return false;
+  const format = typeof snapshot.format === 'string' ? snapshot.format.trim() : '';
+  return format !== '' && format === localFormat;
 }
 
 export interface AttachRestoreData {
@@ -90,8 +110,16 @@ function normalizeAttachAgent(agent?: string | null, shell?: boolean): string | 
 export function classifyAttachRestore(
   data: AttachRestoreData,
   context?: AttachRequestContext,
+  localFormat: string = LOCAL_SNAPSHOT_FORMAT,
 ) {
-  const ghosttySnapshot = data.snapshot && data.snapshot.snapshot_b64 ? data.snapshot : null;
+  // A snapshot this build cannot decode is no snapshot: everything downstream
+  // of hasSnapshot already handles that case — no reset, the client's own
+  // watermark as the dedup baseline, the live stream painting on.
+  const ghosttySnapshot = data.snapshot
+    && data.snapshot.snapshot_b64
+    && snapshotIsDecodable(data.snapshot, localFormat)
+    ? data.snapshot
+    : null;
   const hasSnapshot = ghosttySnapshot !== null;
   const attachedCols = typeof data.cols === 'number' ? data.cols : null;
   const attachedRows = typeof data.rows === 'number' ? data.rows : null;

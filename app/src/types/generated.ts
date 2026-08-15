@@ -1105,6 +1105,7 @@ export enum AttachResultMessageEvent {
 export interface Snapshot {
     blocks?:              BlockElement[];
     cols:                 number;
+    format?:              string;
     placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
@@ -1168,6 +1169,7 @@ export enum AttachSessionMessageCmd {
 export interface AttachSnapshot {
     blocks?:              BlockElement[];
     cols:                 number;
+    format?:              string;
     placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
@@ -13068,6 +13070,7 @@ const typeMap: any = {
     "Snapshot": o([
         { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "format", js: "format", typ: u(undefined, "") },
         { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
@@ -13112,6 +13115,7 @@ const typeMap: any = {
     "AttachSnapshot": o([
         { json: "blocks", js: "blocks", typ: u(undefined, a(r("BlockElement"))) },
         { json: "cols", js: "cols", typ: 0 },
+        { json: "format", js: "format", typ: u(undefined, "") },
         { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
