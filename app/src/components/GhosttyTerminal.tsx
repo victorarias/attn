@@ -2778,7 +2778,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     // fontSize is intentionally NOT a dependency: see the font-size effect
     // below for why a size change must re-metric the existing renderer in
     // place instead of rebuilding the model/renderer for every mounted pane.
-    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, rendererEpoch, resizeLocal, resolvedTheme, setSurfaceReleased, write]);
+    }, [cancelScheduledOutputRender, clearSynchronizedOutputRenderTimer, fit, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, rendererEpoch, resizeLocal, resolvedTheme, restoreSnapshot, setSurfaceReleased, write]);
 
     // React to a font-size change without tearing down the WASM model or the
     // WebGL renderer. Rebuilding on every font-size change (the previous
