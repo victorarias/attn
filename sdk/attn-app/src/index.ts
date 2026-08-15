@@ -10,6 +10,8 @@
 //
 // Design: docs/plans/2026-08-13-ext-a5-ui-host-and-app-sdk.md.
 
+import type { CurrentStateSnapshot } from "./currentState"
+
 // React, re-exported by name.
 //
 // An app never writes the specifier `react` — there is no `react` in an app's
@@ -117,6 +119,10 @@ export interface AppContext<Collections> {
   readonly version: number
   /** The collections declared in attn-app.toml, by name. */
   readonly collections: Collections
+  /** Read-only current truth, from the same domain projection as Initial State. */
+  readonly current: {
+    snapshot(): Promise<CurrentStateSnapshot>
+  }
 }
 
 /**
@@ -127,6 +133,53 @@ export interface AppContext<Collections> {
  */
 export type Handler<Collections> = (
   event: AppEvent,
+  ctx: AppContext<Collections>,
+) => void | Promise<void>
+
+/** Why attn requires the app to rebuild its derived collections. */
+export type ReconcileCause = "gap" | "re_enabled" | "version_changed"
+
+export type {
+  AppRegistryEntry,
+  AppViewInfo,
+  AuthorState,
+  CrewMember,
+  CurrentStateSnapshot,
+  EndpointCapabilities,
+  EndpointInfo,
+  PR,
+  RepoState,
+  Seed,
+  SeedEdge,
+  SeedPlotProgress,
+  SeedVar,
+  Session,
+  TicketRow,
+  Workspace,
+  WorkspaceLayout,
+  WorkspacePane,
+} from "./currentState"
+
+/** The durable requests coalesced into one reconcile invocation. */
+export interface ReconcileReason {
+  /** Sorted as gap, re_enabled, version_changed, independent of arrival order. */
+  readonly causes: readonly ReconcileCause[]
+  /** The version whose reconcile handler is running. */
+  readonly version: number
+  /** The bus position the rebuilt state supersedes. */
+  readonly throughSeq: number
+  readonly gap?: {
+    readonly cursor: number
+    readonly earliest: number
+    readonly missed: number
+  }
+  /** Distinct prior versions named by pointer moves, in request order. */
+  readonly previousVersions: readonly number[]
+}
+
+/** Rebuilds the app's collections from current truth. It must be idempotent. */
+export type ReconcileHandler<Collections> = (
+  reason: ReconcileReason,
   ctx: AppContext<Collections>,
 ) => void | Promise<void>
 

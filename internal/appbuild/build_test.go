@@ -230,7 +230,8 @@ func TestScaffoldRefusesADirectoryNameThatIsNotAnAppName(t *testing.T) {
 }
 
 func TestGeneratedTypesCarryTheAppsIdentityAndItsSubscriptions(t *testing.T) {
-	m, err := ParseManifest(validManifest(t, viewBlock+commandBlock))
+	text := strings.Replace(validManifest(t, viewBlock+commandBlock), `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true", 1)
+	m, err := ParseManifest(text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -247,6 +248,7 @@ func TestGeneratedTypesCarryTheAppsIdentityAndItsSubscriptions(t *testing.T) {
 		`  commands: {`,
 		`"approve": (payload: unknown, ctx: Ctx) => unknown`,
 		`"reject": (payload: unknown, ctx: Ctx) => unknown`,
+		`reconcile: ReconcileHandler<AppCollections>`,
 	} {
 		if !strings.Contains(types, want) {
 			t.Errorf("generated.ts does not contain %q:\n%s", want, types)
@@ -312,6 +314,40 @@ func TestBuild_UndeclaredCommandHandlerIsACompilerError(t *testing.T) {
 	}
 	if !strings.Contains(msg, "remember") {
 		t.Errorf("error does not name the undeclared handler: %s", msg)
+	}
+}
+
+func TestBuild_DeclaredReconcileWithNoHandlerIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "unreconciled-app")
+	env.editManifest(t, `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a reconcile declaration with no handler")
+	}
+	msg := err.Error()
+	if !tscError.MatchString(msg) {
+		t.Fatalf("error does not carry file(line,col): %s", msg)
+	}
+	if !strings.Contains(msg, "reconcile") {
+		t.Errorf("error does not name the missing reconcile handler: %s", msg)
+	}
+}
+
+func TestBuild_UndeclaredReconcileHandlerIsACompilerError(t *testing.T) {
+	env := newBuildEnv(t, "overreconciled-app")
+	env.edit(t, "src/index.ts", "commands: { forget },", "commands: { forget },\n  reconcile: onSessionState,")
+
+	_, err := env.build(t)
+	if err == nil {
+		t.Fatal("build accepted a reconcile handler the manifest never declared")
+	}
+	msg := err.Error()
+	if !tscError.MatchString(msg) {
+		t.Fatalf("error does not carry file(line,col): %s", msg)
+	}
+	if !strings.Contains(msg, "reconcile") {
+		t.Errorf("error does not name the undeclared reconcile handler: %s", msg)
 	}
 }
 

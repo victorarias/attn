@@ -22,9 +22,10 @@ import (
 // plugin registry: a plugin is an extension the user installed, and this is one
 // process attn ships and owns.
 //
-// The methods the sidecar may call are exactly the collection operations, and
-// each one is scoped by the daemon's own record of the dispatch in flight — see
-// appDispatch. There is no namespace on the wire to get wrong.
+// The methods the sidecar may call are the collection operations and the
+// bounded current-state snapshot. Each is scoped by the daemon's own record of
+// the dispatch in flight — see appDispatch. There is no namespace on the wire
+// to get wrong.
 
 const appRuntimeHelloMethod = "app_runtime.hello"
 
@@ -59,6 +60,14 @@ func (c *appRuntimeConnection) command(ctx context.Context, req appCommandReques
 	var result appCommandDispatchResult
 	if err := c.request(ctx, "app runtime", "app.command", req, &result); err != nil {
 		return appCommandDispatchResult{}, err
+	}
+	return result, nil
+}
+
+func (c *appRuntimeConnection) reconcile(ctx context.Context, req appReconcileRequest) (appDispatchResult, error) {
+	var result appDispatchResult
+	if err := c.request(ctx, "app runtime", "app.reconcile", req, &result); err != nil {
+		return appDispatchResult{}, err
 	}
 	return result, nil
 }
@@ -309,12 +318,25 @@ type appCollectionParams struct {
 	Query      *docstore.Query `json:"query"`
 }
 
+type appCurrentStateParams struct {
+	Dispatch string `json:"dispatch"`
+}
+
 func (d *Daemon) appRuntimeMethod(msg jsonRPCMessage) (any, error) {
 	if msg.Method == appRuntimeCrashedMethod {
 		return d.appRuntimeCrashed(msg)
 	}
 
 	switch msg.Method {
+	case "app.current.snapshot":
+		var params appCurrentStateParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			return nil, fmt.Errorf("decode %s params: %w", msg.Method, err)
+		}
+		if _, err := d.lookupAppDispatch(params.Dispatch); err != nil {
+			return nil, err
+		}
+		return d.appCurrentStateSnapshot()
 	case "app.collection.get", "app.collection.put", "app.collection.delete",
 		"app.collection.query", "app.collection.count":
 	default:

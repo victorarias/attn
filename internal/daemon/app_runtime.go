@@ -56,7 +56,7 @@ const (
 	// app's bundle: the host loads it. Bump it here and in apphost/src/index.ts
 	// together — TestAppRuntimeAPIVersionMatchesTheHost is what fails when only
 	// one moves.
-	appRuntimeAPIVersion = 4
+	appRuntimeAPIVersion = 5
 )
 
 // appRuntimeHostOverride lets a test — and a developer running a checkout's
@@ -476,6 +476,32 @@ type appCommandRequest struct {
 	Handler     string          `json:"handler"`
 	Collections []string        `json:"collections"`
 	Payload     json.RawMessage `json:"payload,omitempty"`
+}
+
+// appReconcileRequest is `app.reconcile`, the lifecycle call that rebuilds an
+// app's collections through a durable bus fence. Reconcile is a sibling export,
+// so there is no handler key: the method itself selects it.
+type appReconcileRequest struct {
+	Dispatch    string             `json:"dispatch"`
+	App         string             `json:"app"`
+	VersionID   int64              `json:"version_id"`
+	Artifact    string             `json:"artifact"`
+	Collections []string           `json:"collections"`
+	Reason      appReconcileReason `json:"reason"`
+}
+
+type appReconcileReason struct {
+	Causes           []string         `json:"causes"`
+	Version          int64            `json:"version"`
+	ThroughSeq       int64            `json:"throughSeq"`
+	Gap              *appReconcileGap `json:"gap,omitempty"`
+	PreviousVersions []int64          `json:"previousVersions"`
+}
+
+type appReconcileGap struct {
+	Cursor   int64 `json:"cursor"`
+	Earliest int64 `json:"earliest"`
+	Missed   int64 `json:"missed"`
 }
 
 // appCommandDispatchResult is appDispatchResult plus what the handler returned.

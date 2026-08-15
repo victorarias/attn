@@ -51,6 +51,7 @@ type Manifest struct {
 	Description string       `toml:"description" json:"description,omitempty"`
 	AttnAppAPI  int          `toml:"attn_app_api" json:"attn_app_api"`
 	Entrypoint  string       `toml:"entrypoint" json:"entrypoint"`
+	Reconcile   bool         `toml:"reconcile" json:"reconcile,omitempty"`
 	Subscribe   []Subscribe  `toml:"subscribe" json:"subscribe,omitempty"`
 	Collections []Collection `toml:"collections" json:"collections,omitempty"`
 	Views       []View       `toml:"views" json:"views,omitempty"`
@@ -228,7 +229,7 @@ func refuseUnknownKeys(md toml.MetaData) error {
 	if len(keys) > 1 {
 		subject, verb = "these", "they"
 	}
-	return fmt.Errorf("declares %s, which this attn does not understand (attn_app_api %d supports the tables %s, and the top-level keys name, description, attn_app_api, entrypoint). "+
+	return fmt.Errorf("declares %s, which this attn does not understand (attn_app_api %d supports the tables %s, and the top-level keys name, description, attn_app_api, entrypoint, reconcile). "+
 		"An app must not half-load: %s ignored, %s would leave the app declaring behavior nothing provides",
 		strings.Join(quoteAll(keys), ", "), APIVersion, strings.Join(knownTables, ", "), subject, verb)
 }

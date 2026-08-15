@@ -5,6 +5,7 @@
   "description": "attn's shared app runtime: the supervised Bun sidecar every installed app's handlers execute in.",
   "type": "module",
   "scripts": {
+    "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {

@@ -1,3 +1,4 @@
+import type { CurrentStateSnapshot } from "./currentState";
 export { Fragment, useCallback, useEffect, useMemo, useReducer, useRef, useState, } from "react";
 export type { ReactElement, ReactNode } from "react";
 /** The app contract version this SDK describes — attn-app.toml's attn_app_api. */
@@ -84,6 +85,10 @@ export interface AppContext<Collections> {
     readonly version: number;
     /** The collections declared in attn-app.toml, by name. */
     readonly collections: Collections;
+    /** Read-only current truth, from the same domain projection as Initial State. */
+    readonly current: {
+        snapshot(): Promise<CurrentStateSnapshot>;
+    };
 }
 /**
  * A handler. Throwing fails that delivery: the bus retries it with backoff
@@ -92,6 +97,27 @@ export interface AppContext<Collections> {
  * log open for everyone.
  */
 export type Handler<Collections> = (event: AppEvent, ctx: AppContext<Collections>) => void | Promise<void>;
+/** Why attn requires the app to rebuild its derived collections. */
+export type ReconcileCause = "gap" | "re_enabled" | "version_changed";
+export type { AppRegistryEntry, AppViewInfo, AuthorState, CrewMember, CurrentStateSnapshot, EndpointCapabilities, EndpointInfo, PR, RepoState, Seed, SeedEdge, SeedPlotProgress, SeedVar, Session, TicketRow, Workspace, WorkspaceLayout, WorkspacePane, } from "./currentState";
+/** The durable requests coalesced into one reconcile invocation. */
+export interface ReconcileReason {
+    /** Sorted as gap, re_enabled, version_changed, independent of arrival order. */
+    readonly causes: readonly ReconcileCause[];
+    /** The version whose reconcile handler is running. */
+    readonly version: number;
+    /** The bus position the rebuilt state supersedes. */
+    readonly throughSeq: number;
+    readonly gap?: {
+        readonly cursor: number;
+        readonly earliest: number;
+        readonly missed: number;
+    };
+    /** Distinct prior versions named by pointer moves, in request order. */
+    readonly previousVersions: readonly number[];
+}
+/** Rebuilds the app's collections from current truth. It must be idempotent. */
+export type ReconcileHandler<Collections> = (reason: ReconcileReason, ctx: AppContext<Collections>) => void | Promise<void>;
 /**
  * What a view is given. A view is a function of where it sits: the first three
  * are ambient, and `params` is what the user typed when docking, which is what

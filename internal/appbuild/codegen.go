@@ -47,7 +47,7 @@ func GenerateTypes(m Manifest) string {
 	b.WriteString(fmt.Sprintf("// app %s — bus consumer %s, documents under %s\n",
 		m.Name, apps.ConsumerName(m.Name), apps.Namespace(m.Name)))
 	b.WriteString("\n")
-	b.WriteString(fmt.Sprintf("import type { AppContext, AppEvent, Collection } from %q\n\n", SDKModule))
+	b.WriteString(fmt.Sprintf("import type { AppContext, AppEvent, Collection, ReconcileHandler } from %q\n\n", SDKModule))
 
 	b.WriteString("// The collections this app declared. Reachable as ctx.collections.<name>;\n")
 	b.WriteString("// a name that is not declared is a compile error, not an empty read.\n")
@@ -73,6 +73,11 @@ func GenerateTypes(m Manifest) string {
 		"(event: AppEvent, ctx: Ctx) => void | Promise<void>")
 	writeHandlerGroup(&b, "commands", m.CommandNames(),
 		"(payload: unknown, ctx: Ctx) => unknown")
+	if m.Reconcile {
+		b.WriteString("  reconcile: ReconcileHandler<AppCollections>\n")
+	} else {
+		b.WriteString("  reconcile?: never\n")
+	}
 	b.WriteString("}\n")
 	return b.String()
 }

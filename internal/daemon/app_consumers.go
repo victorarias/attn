@@ -193,8 +193,8 @@ func (d *Daemon) registerAppConsumer(name string) error {
 }
 
 func (d *Daemon) appPreDrain(name string) bus.PreDrain {
-	return func(_ context.Context, consumer bus.Consumer, gap *bus.Gap) error {
-		manifest, _, err := d.appDeclaration(name)
+	return func(ctx context.Context, consumer bus.Consumer, gap *bus.Gap) error {
+		manifest, version, err := d.appDeclaration(name)
 		if err != nil {
 			return err
 		}
@@ -227,8 +227,100 @@ func (d *Daemon) appPreDrain(name string) bus.PreDrain {
 		if len(claim.Requests) == 0 {
 			return nil
 		}
-		return fmt.Errorf("app %q reconciliation is owed through bus seq %d; its handler has not completed", name, claim.ThroughSeq)
+		if !manifest.Reconcile {
+			return fmt.Errorf("app %q reconciliation is owed through bus seq %d, but version %d does not declare reconcile", name, claim.ThroughSeq, version.ID)
+		}
+		return d.runAppReconcile(ctx, name, manifest, version, claim)
 	}
+}
+
+func (d *Daemon) runAppReconcile(ctx context.Context, name string, manifest appbuild.Manifest, version store.AppVersion, claim store.AppReconcileClaim) error {
+	plan := &appDispatchPlan{
+		app:       name,
+		namespace: apps.Namespace(name),
+		versionID: version.ID,
+		artifact:  version.ArtifactPath,
+		label:     "reconcile",
+	}
+	for _, collection := range manifest.Collections {
+		plan.collections = append(plan.collections, collection.Name)
+	}
+
+	reason := foldAppReconcileReason(version.ID, claim)
+	result, err := d.dispatchAppReconcile(ctx, plan, reason)
+	if err != nil {
+		return err
+	}
+	if !result.OK {
+		return fmt.Errorf("app %s reconcile threw: %s", name, firstLine(result.Error))
+	}
+	return d.store.CompleteAppReconcile(name, claim.ThroughRequestID, claim.ThroughSeq, d.appNow())
+}
+
+func foldAppReconcileReason(versionID int64, claim store.AppReconcileClaim) appReconcileReason {
+	reason := appReconcileReason{
+		Version:          versionID,
+		ThroughSeq:       claim.ThroughSeq,
+		Causes:           make([]string, 0, 3),
+		PreviousVersions: []int64{},
+	}
+	seenCauses := make(map[string]bool, 3)
+	seenVersions := make(map[int64]bool)
+	for _, request := range claim.Requests {
+		seenCauses[request.Reason] = true
+		if request.Reason == store.AppReconcileGap && reason.Gap == nil {
+			reason.Gap = &appReconcileGap{Cursor: request.Cursor, Earliest: request.Earliest, Missed: request.Missed}
+		}
+		if request.Reason == store.AppReconcileVersionChange && request.PreviousVersionID != 0 && !seenVersions[request.PreviousVersionID] {
+			seenVersions[request.PreviousVersionID] = true
+			reason.PreviousVersions = append(reason.PreviousVersions, request.PreviousVersionID)
+		}
+	}
+	for _, cause := range []string{store.AppReconcileGap, store.AppReconcileReEnabled, store.AppReconcileVersionChange} {
+		if seenCauses[cause] {
+			reason.Causes = append(reason.Causes, cause)
+		}
+	}
+	return reason
+}
+
+func (d *Daemon) dispatchAppReconcile(ctx context.Context, plan *appDispatchPlan, reason appReconcileReason) (appDispatchResult, error) {
+	runtime, err := d.awaitAppRuntime(ctx)
+	if err != nil {
+		return appDispatchResult{}, err
+	}
+	dispatch := &appDispatch{
+		app:         plan.app,
+		namespace:   plan.namespace,
+		versionID:   plan.versionID,
+		collections: make(map[string]struct{}, len(plan.collections)),
+	}
+	for _, collection := range plan.collections {
+		dispatch.collections[collection] = struct{}{}
+	}
+	d.registerAppDispatch(dispatch)
+	defer d.releaseAppDispatch(dispatch.id)
+
+	request := appReconcileRequest{
+		Dispatch: dispatch.id, App: plan.app, VersionID: plan.versionID,
+		Artifact: plan.artifact, Collections: plan.collections, Reason: reason,
+	}
+	if request.Collections == nil {
+		request.Collections = []string{}
+	}
+	callCtx, cancel := context.WithTimeout(ctx, d.appDispatchBudget())
+	defer cancel()
+	result, err := runtime.reconcile(callCtx, request)
+	if err != nil {
+		if ctx.Err() == nil && callCtx.Err() != nil {
+			return appDispatchResult{}, d.attributeWedgedDispatch(ctx, runtime, plan.app)
+		}
+		if ctx.Err() != nil {
+			return appDispatchResult{}, ctx.Err()
+		}
+		return appDispatchResult{}, runtimeFailure("%v", err)
+	}
+	return result, nil
 }
 
 // appFilter reads an app's declared subscriptions off its current version.
