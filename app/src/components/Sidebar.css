@@ -1349,6 +1349,22 @@
   color: var(--color-text-primary);
 }
 
+/* The wake button holds a drawn sun rather than a glyph, so it centers its art
+   instead of a line of text. Armed, it stays lit whether or not the row is
+   hovered: the reveal rules above must not hide the thing waiting for its
+   second click. See CrewWake.css for the sun itself. */
+.queue-row-wake {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.queue-row--crew[data-crew-wake] .queue-row-controls,
+.queue-row--crew[data-crew-wake] .queue-row-wake {
+  opacity: 1;
+  pointer-events: auto;
+}
+
 /* When a deferred agent comes back. It sits where the turn age sits on a queued
    row — same column, same weight — because both answer the row's one question:
    a turn's is how long you have owed it, a snooze's is when it returns. */
