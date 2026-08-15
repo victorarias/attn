@@ -459,6 +459,16 @@ func (d *Daemon) commitSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome {
 		plan.rollback(d, msg.ID)
 		return &spawnOutcome{err: persistErr}
 	}
+	if !req.isShell && req.existingSession == nil && req.resumeSessionID == "" {
+		// This durable marker precedes transcript discovery, so a new session's
+		// first provider response counts even when the transcript appears between
+		// watcher polls. Sessions carried across the migration or launched by
+		// resuming provider history have no marker and seed at transcript head
+		// instead of backfilling history.
+		if err := d.store.InitializeSessionCostTracking(session.ID); err != nil {
+			d.logf("initialize session cost tracking for %s: %v", session.ID, err)
+		}
+	}
 	if req.hasPluginDriver && !d.store.BeginAgentDriverRun(session.ID, req.pluginDriver.PluginName, plan.pluginRunID) {
 		d.abortPluginSessionLaunch(msg.ID, "launch_failed")
 		if plan.chiefAssigned {

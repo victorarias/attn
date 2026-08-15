@@ -51,6 +51,7 @@ import {
   type KeeperDutyKey,
 } from '../utils/keeperDuties';
 import { SessionActivitySettings } from './SessionActivitySettings';
+import { SessionCostPriceSettings } from './SessionCostPriceSettings';
 import './SettingsModal.css';
 
 const OPEN_SENT_FILES_ENABLED_SETTING = 'open_sent_files_enabled';
@@ -2452,6 +2453,8 @@ export function SettingsModal({
           )}
         </div>
       </section>
+
+      <SessionCostPriceSettings settings={settings} onSetSetting={onSetSetting} />
 
       <section className="settings-block">
         <div className="settings-block-intro">

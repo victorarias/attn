@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strings"
 )
 
 // FollowRecord is one complete source record and the provider-neutral events
@@ -14,12 +15,14 @@ import (
 type FollowRecord struct {
 	Raw    []byte
 	Events []Event
+	Usage  *TokenUsage
 }
 
 // FollowBatch is the append-only delta since the follower's previous read.
 type FollowBatch struct {
 	Records []FollowRecord
 	Events  []Event
+	Usage   []TokenUsage
 }
 
 // Follower reads each complete transcript record once while preserving the
@@ -31,6 +34,7 @@ type Follower struct {
 	fingerprint      string
 	previousEvent    Event
 	hasPreviousEvent bool
+	usage            *UsageExtractor
 }
 
 // NewFollower starts at startOffset. A non-zero offset may point into a record;
@@ -61,6 +65,10 @@ func NewFollower(path, agent string, startOffset int64) (*Follower, error) {
 	if err != nil {
 		return nil, err
 	}
+	usage := NewUsageExtractor(agent)
+	if err := usage.seedCodexModelBefore(f, startOffset); err != nil {
+		return nil, err
+	}
 	return &Follower{
 		path:             path,
 		agent:            agent,
@@ -68,7 +76,58 @@ func NewFollower(path, agent string, startOffset int64) (*Follower, error) {
 		fingerprint:      fingerprint,
 		previousEvent:    previous,
 		hasPreviousEvent: hasPrevious,
+		usage:            usage,
 	}, nil
+}
+
+// NewFollowerAfterCursor resumes after the last complete record read by a
+// prior Follower. Unlike a bare byte offset, cursor also binds the checkpoint
+// to the transcript's first record, so rotation or replacement fails loudly.
+func NewFollowerAfterCursor(path, agent, cursor string) (*Follower, error) {
+	cursor = strings.TrimSpace(cursor)
+	if cursor == "" {
+		return NewFollower(path, agent, 0)
+	}
+	expectedFingerprint, offset, eventIndex, err := decodeEventCursor(cursor)
+	if err != nil || eventIndex != 0 {
+		return nil, ErrInvalidCursor
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+	info, err := file.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if offset > info.Size() {
+		return nil, ErrCursorPastEnd
+	}
+	fingerprint, hasCompleteRecord, err := transcriptFingerprint(file)
+	if err != nil {
+		return nil, err
+	}
+	if !hasCompleteRecord || fingerprint != expectedFingerprint {
+		return nil, ErrCursorMismatch
+	}
+	if offset > 0 {
+		var previous [1]byte
+		if _, err := file.ReadAt(previous[:], offset-1); err != nil || previous[0] != '\n' {
+			return nil, ErrInvalidCursor
+		}
+	}
+	return NewFollower(path, agent, offset)
+}
+
+// Cursor returns the durable checkpoint after the last complete record read.
+// A partially written final record is not included.
+func (f *Follower) Cursor() string {
+	if f == nil || f.fingerprint == "" {
+		return ""
+	}
+	return encodeEventCursor(f.fingerprint, f.offset, 0)
 }
 
 // Read returns complete records appended since the previous call. A partial
@@ -128,7 +187,12 @@ func (f *Follower) Read() (FollowBatch, error) {
 		}
 		f.previousEvent = previousEvent
 		f.hasPreviousEvent = hasPreviousEvent
-		batch.Records = append(batch.Records, FollowRecord{Raw: append([]byte(nil), raw...), Events: events})
+		followRecord := FollowRecord{Raw: append([]byte(nil), raw...), Events: events}
+		if usage, ok := f.usage.Observe(raw, encodeEventCursor(f.fingerprint, lineOffset, 0)); ok {
+			followRecord.Usage = &usage
+			batch.Usage = append(batch.Usage, usage)
+		}
+		batch.Records = append(batch.Records, followRecord)
 		batch.Events = append(batch.Events, events...)
 	}
 }
