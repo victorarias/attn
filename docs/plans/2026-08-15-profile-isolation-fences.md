@@ -52,7 +52,7 @@ User-global side effects
 - [x] Add focused Go, Rust, and frontend tests; run `make test-quick` and the frontend suite.
 - [x] Install an isolated profile, run preflight, prove the marker/profile env/synthetic crew behavior live, and record visible evidence.
 - [x] Confirm the branch is based on current main before live verification.
-- [ ] Commit, push, and open a ready PR without merging.
+- [x] Commit, push, and open a ready PR without merging.
 
 ## Decisions
 
