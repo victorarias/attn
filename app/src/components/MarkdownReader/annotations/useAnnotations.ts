@@ -147,8 +147,11 @@ export function useAnnotations({
   // Written by the hydrate effect (not render) so its CLEANUP still sees the
   // previous document and can flush that document's pending save.
   const sourceRef = useRef(source);
-  const incomingSourceRef = useRef(source);
-  incomingSourceRef.current = source;
+  const sourceUri = source.uri;
+  const sourceKind = source.kind;
+  const sourceWorkspaceId = source.kind === 'file' ? source.workspaceId : '';
+  const sourcePath = source.kind === 'file' ? source.path : '';
+  const sourceSeedId = source.kind === 'seed' ? source.seedId : '';
   const generationRef = useRef(0);
   const hasHydratedRef = useRef(false);
   const hydrateTokenRef = useRef(0);
@@ -491,9 +494,18 @@ export function useAnnotations({
     if (!enabled) {
       return;
     }
-    // Cleanup for the previous URI runs before this callback, so keep its
-    // typed source intact until the pending save has flushed.
-    sourceRef.current = incomingSourceRef.current;
+    sourceRef.current = sourceKind === 'file'
+      ? {
+        kind: 'file',
+        uri: sourceUri,
+        workspaceId: sourceWorkspaceId,
+        path: sourcePath,
+      }
+      : {
+        kind: 'seed',
+        uri: sourceUri as `attn://seed/${string}`,
+        seedId: sourceSeedId,
+      };
     generationRef.current = 0;
     annotationsRef.current = [];
     orphansRef.current = new Map();
@@ -515,7 +527,16 @@ export function useAnnotations({
       }
       hasHydratedRef.current = false;
     };
-  }, [source.uri, enabled, hydrate, flushPendingSave]);
+  }, [
+    sourceUri,
+    sourceKind,
+    sourceWorkspaceId,
+    sourcePath,
+    sourceSeedId,
+    enabled,
+    hydrate,
+    flushPendingSave,
+  ]);
 
   // Flush the debounce window when the app is backgrounded or the window
   // closes — best-effort fire-through-socket, no keepalive equivalent needed.
