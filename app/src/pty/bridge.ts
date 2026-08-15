@@ -52,19 +52,15 @@ export type PtyAttachPolicy =
   | 'same_app_remount'
   | 'revive';
 
-export type PtyDataEventSource =
-  | 'attach_replay';
-
-export interface PtyReplaySegment {
-  cols: number;
-  rows: number;
-  data: string;
-}
+// The only geometry that is not a live resize: the grid an attach's snapshot
+// restores the model to.
+export type PtyResizeSource =
+  | 'attach_restore';
 
 export type PtyEventPayload =
-  | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
-  | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
-  | { event: 'replay_complete'; id: string }
+  | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; suppressResponses?: boolean }
+  | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyResizeSource }
+  | { event: 'restore_complete'; id: string }
   // A server-authoritative snapshot (base64), decoded into the pane's model
   // rather than written to it. It carries its own grid and its own scrollback.
   | { event: 'restore_snapshot'; id: string; data: string }

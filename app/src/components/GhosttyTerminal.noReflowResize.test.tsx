@@ -165,12 +165,12 @@ describe('GhosttyTerminal no-reflow resize', () => {
     expect(model.ops).toEqual([{ kind: 'resize', cols: 100, rows: 30 }]);
   });
 
-  it('keeps the historical-replay resize on the same path', async () => {
+  it('keeps the restore resize on the same path', async () => {
     mocks.control.wraparound = true;
     const { handle, model } = await mountTerminal();
 
     await act(async () => {
-      await handle.resizeLocal(90, 20, { historicalReplay: true });
+      await handle.resizeLocal(90, 20, { restore: true });
     });
 
     expect(model.ops).toEqual(noReflowRecipe(90, 20));

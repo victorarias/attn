@@ -60,33 +60,6 @@ export function fitShouldBailAsSuspicious(
   return !(isSuspiciousTerminalSize(modelCols, modelRows) && !shrinksModel);
 }
 
-// Geometry the queued (not yet applied) historical replay will end at.
-export interface PendingReplayGeometry extends TerminalDimensions {
-  resizes: number;
-  lastQueuedAt: number;
-}
-
-// Measured: a healthy write chain applies a queued replay resize in
-// milliseconds; past this the promise is stale and stops suppressing.
-export const REPLAY_GEOMETRY_STALE_MS = 3000;
-
-// A live fit arriving mid-replay only cancels the queued history when it
-// targets a different geometry than the replay already ends at; a stale
-// queued replay suppresses nothing.
-export function liveResizeConflictsWithQueuedReplay(
-  pendingReplay: PendingReplayGeometry | null,
-  target: TerminalDimensions,
-  nowMs: number,
-): 'skip' | 'cancel' | 'none' | 'stale' {
-  if (!pendingReplay || pendingReplay.resizes <= 0) {
-    return 'none';
-  }
-  if (nowMs - pendingReplay.lastQueuedAt > REPLAY_GEOMETRY_STALE_MS) {
-    return 'stale';
-  }
-  return fitRequiresTerminalResize(pendingReplay, target) ? 'cancel' : 'skip';
-}
-
 // Backoff for WebGL renderer-recovery retries; `attempt` is 1-indexed. Null
 // once exhausted, so a dead GPU/context falls back to the error state.
 export function recoveryDelayMs(attempt: number): number | null {

@@ -2161,7 +2161,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       id: 'sess-existing',
       cols: 56,
       rows: 35,
-      source: 'attach_replay',
+      source: 'attach_restore',
     });
     expect(ptyEvents).toContainEqual({
       event: 'reset',
@@ -2173,15 +2173,15 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       id: 'sess-existing',
       data: btoa('fresh-daemon-frame'),
     });
-    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
+    expect(ptyEvents).toContainEqual({ event: 'restore_complete', id: 'sess-existing' });
     const snapshotIndex = ptyEvents.findIndex((event) => event.event === 'restore_snapshot');
     const queuedLiveIndex = ptyEvents.findIndex((event) => (
       event.event === 'data' && event.data === btoa('live-after-snapshot')
     ));
-    const replayCompleteIndex = ptyEvents.findIndex((event) => event.event === 'replay_complete');
+    const restoreCompleteIndex = ptyEvents.findIndex((event) => event.event === 'restore_complete');
     expect(snapshotIndex).toBeGreaterThanOrEqual(0);
     expect(queuedLiveIndex).toBeGreaterThan(snapshotIndex);
-    expect(replayCompleteIndex).toBeGreaterThan(queuedLiveIndex);
+    expect(restoreCompleteIndex).toBeGreaterThan(queuedLiveIndex);
     unmount();
   });
 

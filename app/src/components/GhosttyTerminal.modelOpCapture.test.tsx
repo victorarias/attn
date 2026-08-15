@@ -41,6 +41,9 @@ const mocks = vi.hoisted(() => {
       free: () => undefined,
       isAlternateScreen: () => false,
       hasMouseTracking: () => false,
+      // A restore swaps the model's whole state; the ring records the bytes,
+      // and this mock only has to hand back an empty history driver.
+      adoptSnapshot: () => ({ rows: 0, next: () => null, close: () => undefined }),
     };
     terminals.push(terminal);
     return terminal;
@@ -154,7 +157,7 @@ describe('GhosttyTerminal model-op capture', () => {
       // A restore (the attach snapshot the model is rebuilt from), then live
       // output, a reset, a fit resize, and one more write.
       await act(async () => {
-        await terminal.write(new Uint8Array([0x64, 0x75, 0x6d, 0x70]), { historicalReplay: true });
+        await terminal.restoreSnapshot(new Uint8Array([0x64, 0x75, 0x6d, 0x70]));
         await terminal.write('live output');
         terminal.reset();
         await terminal.drain();
