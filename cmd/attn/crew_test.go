@@ -124,6 +124,73 @@ func TestParseCrewWakeArgs(t *testing.T) {
 	}
 }
 
+func TestParseCrewSleepArgs(t *testing.T) {
+	parsed, err := parseCrewSleepArgs([]string{"trellis", "--json"})
+	if err != nil {
+		t.Fatalf("parseCrewSleepArgs: %v", err)
+	}
+	if parsed.member != "trellis" || !parsed.json {
+		t.Fatalf("parsed = %+v, want trellis as JSON", parsed)
+	}
+	for _, args := range [][]string{{}, {"one", "two"}, {"--nope", "keel"}} {
+		if _, err := parseCrewSleepArgs(args); err == nil {
+			t.Errorf("parseCrewSleepArgs(%v) accepted what it should refuse", args)
+		}
+	}
+}
+
+func TestCrewWakeRepairLine_NamesTheExitedSession(t *testing.T) {
+	result := &protocol.CrewWakeResult{ReleasedSessionID: protocol.Ptr("sess-abcdef123456")}
+	line := crewWakeRepairLine(result)
+	for _, want := range []string{"sess-abc", "had exited", "binding was released"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("repair line %q is missing %q", line, want)
+		}
+	}
+	if got := crewWakeRepairLine(&protocol.CrewWakeResult{}); got != "" {
+		t.Fatalf("ordinary wake invented repair text %q", got)
+	}
+}
+
+func TestCrewSleepOutcomeLine_NamesDeliveredQueuedAndAlreadyAsleep(t *testing.T) {
+	for _, tt := range []struct {
+		name   string
+		result protocol.CrewSleepResult
+		want   []string
+	}{
+		{
+			name: "delivered",
+			result: protocol.CrewSleepResult{
+				Member: "trellis", SessionID: protocol.Ptr("sess-abcdef123456"),
+				DeliveryStatus: protocol.Ptr(protocol.AgentMsgStatusDelivered),
+			},
+			want: []string{"Asked Trellis", "sess-abc", "attn handoff --sleep"},
+		},
+		{
+			name: "queued",
+			result: protocol.CrewSleepResult{
+				Member: "keel", SessionID: protocol.Ptr("sess-fedcba654321"),
+				DeliveryStatus: protocol.Ptr(protocol.AgentMsgStatusQueued), Detail: "target is waiting on an approval",
+			},
+			want: []string{"Sleep request for Keel is queued", "sess-fed", "waiting on an approval"},
+		},
+		{
+			name:   "already asleep",
+			result: protocol.CrewSleepResult{Member: "keel", AlreadyAsleep: true, Detail: "Keel is already asleep; no sleep request was sent"},
+			want:   []string{"Keel is already asleep", "no sleep request was sent"},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			line := crewSleepOutcomeLine(&tt.result)
+			for _, want := range tt.want {
+				if !strings.Contains(line, want) {
+					t.Errorf("outcome %q is missing %q", line, want)
+				}
+			}
+		})
+	}
+}
+
 // --awareness-dir repeats and replaces the whole list; passing it once empty is
 // the way out of every dir a member has.
 func TestCrewDirList_RepeatsAndClears(t *testing.T) {

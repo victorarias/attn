@@ -428,13 +428,13 @@ func (d *Daemon) forgetPostInitialPrompt(sessionID string) {
 	delete(d.postInitialPrompt, sessionID)
 }
 
-// initialPromptPending covers both forms of wake-carried delivery. It is the
-// anti-splice gate for agent messages and ticket countdowns while a new member
-// day is still taking its first prompt.
+// initialPromptPending is the anti-splice gate for agent messages and ticket
+// countdowns while a new member day is still taking its first prompt.
 func (d *Daemon) initialPromptPending(sessionID string) bool {
 	d.agentMessageMu.Lock()
 	defer d.agentMessageMu.Unlock()
-	return d.agentMessageInitialPrompt[sessionID] != "" || d.postInitialPrompt[sessionID] != nil
+	_, postPending := d.postInitialPrompt[sessionID]
+	return d.agentMessageInitialPrompt[sessionID] != "" || postPending
 }
 
 func (d *Daemon) runPostInitialPrompt(sessionID, state string) {
@@ -442,14 +442,15 @@ func (d *Daemon) runPostInitialPrompt(sessionID, state string) {
 		return
 	}
 	d.agentMessageMu.Lock()
-	after := d.postInitialPrompt[sessionID]
+	after, pending := d.postInitialPrompt[sessionID]
 	delete(d.postInitialPrompt, sessionID)
 	d.agentMessageMu.Unlock()
-	if after != nil {
-		after()
-		// Messages addressed to the member while the ticket-triggered wake was
-		// priming queued behind the same gate. This hook is their first reliable
-		// drain signal too.
+	if pending {
+		if after != nil {
+			after()
+		}
+		// Messages addressed while the member was taking priming and its greeting
+		// queued behind this gate. This hook is their first reliable drain signal.
 		d.drainAgentMessagesAfterStateChange(sessionID, state)
 	}
 }
@@ -492,10 +493,13 @@ func (d *Daemon) rollbackInitialAgentMessage(sessionID, messageID string) {
 	d.forgetQueuedAgentMessages(sessionID)
 }
 
-// composeAgentMessage builds what the target actually reads. The format is the
-// daemon's, never the sender's: the attribution line, the consent boundary
-// repeated on every delivery, and the exact command to answer with.
+// composeAgentMessage builds what the target actually reads. Agent-originated
+// deliveries get the daemon's attribution and consent boundary. A senderless
+// record is an internal user-origin request whose content is already complete.
 func (d *Daemon) composeAgentMessage(sender *protocol.Session, record store.AgentMessage) string {
+	if strings.TrimSpace(record.SenderSessionID) == "" {
+		return record.Content
+	}
 	shortID := shortSessionID(record.SenderSessionID)
 	origin := shortID
 	if sender != nil {

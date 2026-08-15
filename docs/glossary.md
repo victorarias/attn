@@ -541,6 +541,12 @@ what a member is, where its charter is to be read, the freshest letter left
 for it inline, and how a day is closed. Skills retire into verbs and the verbs
 are taught, because an agent never told how to handoff cannot file one.
 
+To **ask a member to sleep** is `attn crew sleep <name>`, or the moon on its
+awake row. The request is delivered into the member's day; it never kills the
+session. The member finishes its letter and files it with `attn handoff
+--sleep`, which is the user's explicit sleep request carried through to the
+closure: nobody wakes behind it.
+
 A member is also an address: `attn agent msg <member> "…"` reaches its live
 day when it is awake. When it is asleep, the message wakes it within the same
 wake limit as every autonomous wake and becomes the new day's first attributed
@@ -576,7 +582,14 @@ attn's call, made from whether the user is around: a day that closes while
 nobody is there does not start another one, because the point of a fresh day is
 somebody to spend it with. A sleeping member is bound to nothing and shows in
 the sidebar one click from a new day. `attn handoff --sleep` and `--nap` decide
-it for one handoff rather than letting attn read presence.
+it for one handoff rather than letting attn read presence. Plain `attn handoff`
+is presence-decided day turnover; `--nap` explicitly requests a successor, and
+a user-requested sleep is always filed with `--sleep`.
+
+A binding owns a seat only while its process is live. Process exit releases the
+member immediately even when the generic session row remains recoverable; a
+wake that finds stale state releases it, names the exited session, and starts a
+fresh day.
 
 Between those two, the **crew lifecycle** is what watches an awake member and
 decides when either should happen. It reads two things: how long the user has

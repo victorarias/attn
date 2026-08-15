@@ -451,12 +451,13 @@ describe('the crew in the sidebar', () => {
     expect(rows.filter((id) => id?.includes('keel'))).toEqual(['queue-crew-keel']);
   });
 
-  it('wakes a sleeping member on the second click and focuses an awake one with the first', () => {
+  it('wakes a sleeping member on the second click, asks an awake one to sleep, and focuses its day', () => {
     const onWakeCrewMember = vi.fn();
+    const onSleepCrewMember = vi.fn();
     const onSelectSession = vi.fn();
     renderCrew(
       [{ id: 'sess-keel', label: 'keel of the day', state: 'working', workspaceId: 'ws-a', crewMember: 'keel' }] as TestSession[],
-      { onWakeCrewMember, onSelectSession },
+      { onWakeCrewMember, onSleepCrewMember, onSelectSession },
     );
 
     fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
@@ -464,13 +465,18 @@ describe('the crew in the sidebar', () => {
     fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
     expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
 
+    fireEvent.click(screen.getByTestId('queue-crew-sleep-keel'));
+    expect(onSleepCrewMember.mock.calls).toEqual([['keel']]);
+    expect(onSelectSession).not.toHaveBeenCalled();
+
     // Focusing an awake member is not consequential and stays one click.
     fireEvent.click(screen.getByTestId('queue-crew-select-keel'));
     expect(onSelectSession.mock.calls).toEqual([['sess-keel']]);
 
-    // An awake member has no wake button: the way in is the way in only while
-    // there is nothing to focus.
+    // Each act exists only on the side of the day where it makes sense.
     expect(screen.queryByTestId('queue-crew-wake-keel')).toBeNull();
+    expect(screen.queryByTestId('queue-crew-sleep-trellis')).toBeNull();
+    expect(screen.getByTestId('queue-crew-sleep-keel').getAttribute('aria-label')).toBe('Ask Keel to sleep');
   });
 
   it('writes a sleeping member as a name while the id stays the address', () => {

@@ -155,6 +155,8 @@ interface SidebarProps {
   crew?: CrewMemberView[];
   /** Start a sleeping member's day. */
   onWakeCrewMember?: (member: string) => void;
+  /** Ask an awake member to close its day and sleep. */
+  onSleepCrewMember?: (member: string) => void;
   onSettleTurn?: (id: string) => void;
   /** Open the snooze duration menu for a row, anchored at the click. */
   onOpenSnooze?: (session: { id: string; label: string }, event: ReactMouseEvent) => void;
@@ -372,6 +374,7 @@ export function Sidebar({
   queue = null,
   crew,
   onWakeCrewMember,
+  onSleepCrewMember,
   onSettleTurn,
   onOpenSnooze,
   onWakeTurn,
@@ -1050,6 +1053,7 @@ export function Sidebar({
           bands={queue}
           crew={crew}
           onWakeCrewMember={onWakeCrewMember}
+          onSleepCrewMember={onSleepCrewMember}
           selectedId={selectedId}
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}

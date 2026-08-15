@@ -1124,6 +1124,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		// Waking spawns a session; the composite is the daemon's, so it runs off
 		// the read loop like every other spawning command.
 		go d.handleCrewWakeWS(client, msg.(*protocol.CrewWakeMessage))
+	case protocol.CmdCrewSleep: // wire: crew_sleep
+		// Delivering can wait for the member to take the prompt, so it runs off
+		// the websocket read loop like every other fallible async action.
+		go d.handleCrewSleepWS(client, msg.(*protocol.CrewSleepMessage))
 	case protocol.CmdFsList: // wire: fs_list
 		fsList := msg.(*protocol.FsListMessage)
 		go d.sendFsListWSResult(client, protocol.Deref(fsList.RequestID), protocol.Deref(fsList.Path), protocol.Deref(fsList.Root))

@@ -133,6 +133,13 @@ export type Seed = GeneratedSeed;
 // an awake one names the session living its day (binding_session), and that
 // presence IS "awake" — the daemon judged the binding live before sending it.
 export type CrewMember = GeneratedCrewMember;
+export interface CrewSleepResult {
+  member: string;
+  sessionId?: string;
+  alreadyAsleep: boolean;
+  deliveryStatus?: string;
+  detail?: string;
+}
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -251,7 +258,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '250';
+export const PROTOCOL_VERSION = '251';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -1974,6 +1981,25 @@ export function useDaemonSocket({
             }
             break;
           }
+
+          case 'crew_sleep_result':
+            settlePendingRequest(
+              pendingActionsRef.current,
+              'crew_sleep',
+              data,
+              (event): CrewSleepResult | undefined => {
+                if (typeof event.member !== 'string') return undefined;
+                return {
+                  member: event.member,
+                  ...(typeof event.session_id === 'string' ? { sessionId: event.session_id } : {}),
+                  alreadyAsleep: event.already_asleep === true,
+                  ...(typeof event.delivery_status === 'string' ? { deliveryStatus: event.delivery_status } : {}),
+                  ...(typeof event.detail === 'string' ? { detail: event.detail } : {}),
+                };
+              },
+              'Asking the member to sleep failed',
+            );
+            break;
 
           case 'ticket_resume_result': {
             const requestId = data.request_id;
@@ -4783,6 +4809,17 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
+  // Ask an awake member to close its day. The daemon delivers the request over
+  // the agent-message rail; the member remains awake until it files its letter.
+  const sendCrewSleep = useCallback(
+    (member: string): Promise<CrewSleepResult> => sendRequest(
+      'crew_sleep',
+      { member },
+      `Asking ${crewDisplayName(member)} to sleep timed out`,
+    ),
+    [sendRequest],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
@@ -5546,6 +5583,7 @@ export function useDaemonSocket({
     sendTicketAttach,
     sendTicketResume,
     sendCrewWake,
+    sendCrewSleep,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,

@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -13,6 +15,8 @@ import (
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -209,6 +213,7 @@ func (d *Daemon) handleCrewWakeWS(client *wsClient, msg *protocol.CrewWakeMessag
 		if result.AlreadyAwake {
 			response.AlreadyAwake = protocol.Ptr(true)
 		}
+		response.ReleasedSessionID = result.ReleasedSessionID
 	}
 	d.sendToClient(client, response)
 }
@@ -228,16 +233,28 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 	if err != nil {
 		return nil, err
 	}
-	if d.crewBindingLive(member) {
-		awake := &protocol.CrewWakeResult{
-			Member:       member.ID,
-			SessionID:    member.BindingSession,
-			AlreadyAwake: true,
+	releasedSessionID := d.takeCrewExitedSession(member.ID)
+	if boundSessionID := strings.TrimSpace(member.BindingSession); boundSessionID != "" {
+		live, err := d.crewSessionActuallyLive(boundSessionID)
+		if err != nil {
+			return nil, fmt.Errorf("check %s's bound session %s: %w", crew.DisplayName(member.ID), shortSessionID(boundSessionID), err)
 		}
-		if session := d.store.Get(member.BindingSession); session != nil {
-			awake.WorkspaceID = session.WorkspaceID
+		if !live {
+			if _, err := d.releaseCrewBinding(member.ID, boundSessionID); err != nil {
+				return nil, fmt.Errorf("release %s's exited session %s: %w", crew.DisplayName(member.ID), shortSessionID(boundSessionID), err)
+			}
+			releasedSessionID = boundSessionID
+		} else {
+			awake := &protocol.CrewWakeResult{
+				Member:       member.ID,
+				SessionID:    boundSessionID,
+				AlreadyAwake: true,
+			}
+			if session := d.store.Get(boundSessionID); session != nil {
+				awake.WorkspaceID = session.WorkspaceID
+			}
+			return awake, nil
 		}
-		return awake, nil
 	}
 	if agent == "" {
 		agent = crewWakeAgent
@@ -295,7 +312,12 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 	}
 
 	initialPrompt := crewWakePrompt
-	if delivery != nil {
+	if delivery == nil {
+		// A crew binding becomes visible before the launching agent has crossed
+		// priming and its trust dialog. Gate messages addressed in that window;
+		// the first hook on the far side of the greeting opens and drains it.
+		d.notePostInitialPrompt(sessionID, nil)
+	} else {
 		if delivery.Record != nil {
 			delivery.Record.TargetSessionID = sessionID
 			if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
@@ -326,22 +348,50 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
-		if delivery != nil {
-			if delivery.Record != nil {
-				d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
-			}
-			d.forgetPostInitialPrompt(sessionID)
+		if delivery != nil && delivery.Record != nil {
+			d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
 		}
+		d.forgetPostInitialPrompt(sessionID)
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)
 		return nil, fmt.Errorf("wake %s: %w", crew.DisplayName(member.ID), err)
 	}
 	d.logf("crew: woke %s in session %s at %s", crew.DisplayName(member.ID), sessionID, directory)
-	return &protocol.CrewWakeResult{
+	result := &protocol.CrewWakeResult{
 		Member:      member.ID,
 		SessionID:   sessionID,
 		WorkspaceID: workspaceID,
-	}, nil
+	}
+	if releasedSessionID != "" {
+		result.ReleasedSessionID = protocol.Ptr(releasedSessionID)
+	}
+	return result, nil
+}
+
+// crewSessionActuallyLive is the single-holder check used before wake returns
+// AlreadyAwake. The store row is identity and history; SessionInfo.Running is
+// whether an agent process still occupies the seat.
+func (d *Daemon) crewSessionActuallyLive(sessionID string) (bool, error) {
+	if d.isHostSession(sessionID) {
+		return true, nil
+	}
+	if d.store == nil || d.store.Get(sessionID) == nil {
+		return false, nil
+	}
+	provider, ok := d.ptyBackend.(ptybackend.SessionInfoProvider)
+	if !ok {
+		// Test and third-party backends without runtime inspection preserve their
+		// existing row-based contract. Production PTY backends implement it.
+		return true, nil
+	}
+	info, err := provider.SessionInfo(context.Background(), sessionID)
+	if err == nil {
+		return info.Running, nil
+	}
+	if errors.Is(err, pty.ErrSessionNotFound) || errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (d *Daemon) handleCrewPrime(conn net.Conn, msg *protocol.CrewPrimeMessage) {

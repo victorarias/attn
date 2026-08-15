@@ -204,4 +204,88 @@ describe('useDaemonSocket crew', () => {
 
     await expect(woken!).rejects.toThrow('/gone');
   });
+
+  it('asks an awake member to sleep and carries the delivery receipt', async () => {
+    const { ws, result } = await renderWithCrew([member('keel', 'sess-keel')]);
+
+    let asked: Promise<{
+      member: string;
+      sessionId?: string;
+      alreadyAsleep: boolean;
+      deliveryStatus?: string;
+      detail?: string;
+    }>;
+    act(() => {
+      asked = result.current.sendCrewSleep('keel');
+    });
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(sent.cmd).toBe('crew_sleep');
+    expect(sent.member).toBe('keel');
+
+    act(() => {
+      ws.emit({
+        event: 'crew_sleep_result',
+        request_id: sent.request_id,
+        success: true,
+        member: 'keel',
+        session_id: 'sess-keel',
+        delivery_status: 'delivered',
+        detail: 'asked Keel to close its day and sleep',
+      });
+    });
+
+    await expect(asked!).resolves.toEqual({
+      member: 'keel',
+      sessionId: 'sess-keel',
+      alreadyAsleep: false,
+      deliveryStatus: 'delivered',
+      detail: 'asked Keel to close its day and sleep',
+    });
+  });
+
+  it('names an already-asleep sleep request as a no-op', async () => {
+    const { ws, result } = await renderWithCrew([member('keel')]);
+
+    let asked: ReturnType<typeof result.current.sendCrewSleep>;
+    act(() => {
+      asked = result.current.sendCrewSleep('keel');
+    });
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    act(() => {
+      ws.emit({
+        event: 'crew_sleep_result',
+        request_id: sent.request_id,
+        success: true,
+        member: 'keel',
+        already_asleep: true,
+        detail: 'Keel is already asleep',
+      });
+    });
+
+    await expect(asked!).resolves.toEqual({
+      member: 'keel',
+      alreadyAsleep: true,
+      detail: 'Keel is already asleep',
+    });
+  });
+
+  it('rejects a refused sleep request with what the daemon said', async () => {
+    const { ws, result } = await renderWithCrew([member('keel', 'sess-keel')]);
+
+    let asked: Promise<unknown>;
+    act(() => {
+      asked = result.current.sendCrewSleep('keel');
+    });
+    const sent = JSON.parse(ws.sent[ws.sent.length - 1]);
+    act(() => {
+      ws.emit({
+        event: 'crew_sleep_result',
+        request_id: sent.request_id,
+        success: false,
+        error: 'session sess-keel cannot receive agent messages',
+      });
+    });
+
+    await expect(asked!).rejects.toThrow('cannot receive agent messages');
+  });
 });

@@ -4944,6 +4944,7 @@ model Response {
   agent_msg_result?: AgentMsgResult;
   crew_list_result?: CrewListResult;
   crew_wake_result?: CrewWakeResult;
+  crew_sleep_result?: CrewSleepResult;
   crew_set_result?: CrewSetResult;
   crew_prime_result?: CrewPrimeResult;
   crew_handoff_result?: CrewHandoffResult;
@@ -5096,6 +5097,10 @@ model CrewWakeResultMessage {
   session_id?: string;
   workspace_id?: string;
   already_awake?: boolean;
+  // Present when wake found a stale binding, released it, and started this
+  // fresh day. The caller names the repair instead of silently focusing a
+  // replacement for a process that had already exited.
+  released_session_id?: string;
 }
 
 model CrewWakeResult {
@@ -5105,6 +5110,44 @@ model CrewWakeResult {
   // True when the member was already awake and session_id is the day that was
   // already running — nothing was launched.
   already_awake: boolean;
+  // The dead day whose stale binding this wake released before launching the
+  // returned session. Absent when there was no stale binding.
+  released_session_id?: string;
+}
+
+// Ask an awake member to close its day and sleep. This is consented closure:
+// the daemon delivers a user-originated request telling the member to write its
+// handoff and file it with `attn handoff --sleep`; it does not kill the member.
+// Home-only. An asleep member is a named no-op rather than a silent success.
+model CrewSleepMessage {
+  cmd: "crew_sleep";
+  member: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// CrewSleepResultMessage replies to a websocket crew_sleep. The request may be
+// queued when the member cannot take input immediately; the durable message
+// rail retries it on the target's next state change.
+model CrewSleepResultMessage {
+  event: "crew_sleep_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  member?: string;
+  session_id?: string;
+  already_asleep?: boolean;
+  delivery_status?: AgentMsgStatus;
+  detail?: string;
+}
+
+model CrewSleepResult {
+  member: string;
+  // Absent when the member was already asleep and no request was sent.
+  session_id?: string;
+  already_asleep: boolean;
+  // Absent on the already-asleep no-op.
+  delivery_status?: AgentMsgStatus;
+  detail: string;
 }
 
 // Record where a member's sessions launch and which directories its charter is
@@ -5815,6 +5858,7 @@ alias DaemonEvent =
   | GardenSeedsUpdatedMessage
   | CrewUpdatedMessage
   | CrewWakeResultMessage
+  | CrewSleepResultMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage
