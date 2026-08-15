@@ -1310,11 +1310,16 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           }
         }
         // `wrapped` joins this line onto the previous one, so the flag that
-        // answers it belongs to the row above.
-        lines.push({ runs, wrapped: activeRow > 0 && terminal.rowWrapsIntoNext(activeRow - 1) });
+        // answers it belongs to the row above — and once that row has fallen
+        // into scrollback it carries no flag, which is the same fold
+        // isContinuationRow covers with a full-row heuristic.
+        const wrapped = row > 0 && (activeRow > 0
+          ? terminal.rowWrapsIntoNext(activeRow - 1)
+          : selectionLineAtBufferRow(row - 1, 0, terminal.cols).length === terminal.cols);
+        lines.push({ runs, wrapped });
       }
       return terminalStyledSelectionToMarkdown(lines);
-    }, [resolvedTheme]);
+    }, [resolvedTheme, selectionLineAtBufferRow]);
 
     const getText = useCallback(() => {
       const terminal = terminalRef.current;
