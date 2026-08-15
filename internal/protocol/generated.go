@@ -720,8 +720,8 @@ type AttachSnapshot struct {
 	// "scrollback_truncated".
 	ScrollbackTruncated bool `json:"scrollback_truncated"`
 
-	// VtDumpB64 corresponds to the JSON schema field "vt_dump_b64".
-	VtDumpB64 string `json:"vt_dump_b64"`
+	// SnapshotB64 corresponds to the JSON schema field "snapshot_b64".
+	SnapshotB64 string `json:"snapshot_b64"`
 }
 
 type AuthorState struct {

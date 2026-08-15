@@ -26,7 +26,6 @@ import (
 	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/github"
 	"github.com/victorarias/attn/internal/github/mockserver"
-	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
@@ -2072,12 +2071,12 @@ func TestDaemon_HandleAttachSession_ServesGhosttySnapshotWhenAvailable(t *testin
 		if result.Snapshot.ScrollbackTruncated {
 			t.Fatal("expected ScrollbackTruncated=false for an untruncated snapshot")
 		}
-		decoded, err := base64.StdEncoding.DecodeString(result.Snapshot.VtDumpB64)
+		decoded, err := base64.StdEncoding.DecodeString(result.Snapshot.SnapshotB64)
 		if err != nil {
-			t.Fatalf("decode vt_dump_b64: %v", err)
+			t.Fatalf("decode snapshot_b64: %v", err)
 		}
 		if !bytes.Equal(decoded, snapshot) {
-			t.Fatal("expected vt_dump_b64 to carry the ghostty serialization verbatim")
+			t.Fatal("expected snapshot_b64 to carry the ghostty serialization verbatim")
 		}
 		if protocol.Deref(result.LastSeq) != 12 {
 			t.Fatalf("last_seq = %d, want 12", protocol.Deref(result.LastSeq))
@@ -2980,176 +2979,7 @@ func TestDaemon_HealthEndpoint(t *testing.T) {
 	}
 }
 
-func TestDaemon_WebRootServesEmbeddedClient(t *testing.T) {
-	tmpDir := shortTempDir(t)
-	sockPath := filepath.Join(tmpDir, "test.sock")
-
-	wsPort := useFreeWSPort(t)
-
-	d := NewForTesting(sockPath)
-	go d.Start()
-	defer d.Stop()
-
-	waitForSocket(t, sockPath, 5*time.Second)
-
-	rootURL := "http://127.0.0.1:" + wsPort + "/"
-	var resp *http.Response
-	logDeadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(logDeadline) {
-		r, err := http.Get(rootURL)
-		if err == nil {
-			resp = r
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if resp == nil {
-		t.Fatalf("root endpoint not ready after 5s")
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("read root body: %v", err)
-	}
-	if resp.StatusCode != http.StatusOK {
-		t.Fatalf("root status = %d, want 200", resp.StatusCode)
-	}
-	bodyText := string(body)
-	if !strings.Contains(bodyText, `data-attn-web-client="ghostty-web"`) {
-		t.Fatalf("root body did not contain ghostty-web client marker")
-	}
-	if !strings.Contains(bodyText, `rel="icon"`) {
-		t.Fatalf("root body did not include favicon link")
-	}
-	if !strings.Contains(bodyText, "/vendor/ghostty-web/ghostty-web.js") {
-		t.Fatalf("root body did not reference ghostty-web bundle")
-	}
-	if !strings.Contains(bodyText, "/vendor/ghostty-web/ghostty-vt.wasm") {
-		t.Fatalf("root body did not reference ghostty-web wasm asset")
-	}
-	if !strings.Contains(bodyText, `data-testid="session-list"`) {
-		t.Fatalf("root body did not include session list marker")
-	}
-	if !strings.Contains(bodyText, `data-quick-action="esc"`) {
-		t.Fatalf("root body did not include quick action markers")
-	}
-	if !strings.Contains(bodyText, `id="font-size-decrease"`) || !strings.Contains(bodyText, `id="font-size-increase"`) {
-		t.Fatalf("root body did not include font size controls")
-	}
-	if !strings.Contains(bodyText, "attn ghostty-web") {
-		t.Fatalf("root body did not include ghostty-web heading")
-	}
-	if strings.Contains(bodyText, "xterm.min.js") || strings.Contains(bodyText, "xterm-addon-fit") {
-		t.Fatalf("root body still referenced xterm-era assets")
-	}
-	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
-		t.Fatalf("root Cache-Control = %q, want no-store, max-age=0", got)
-	}
-}
-
-func TestDaemon_WebGhosttyAssetsServeNoStore(t *testing.T) {
-	tmpDir := shortTempDir(t)
-	sockPath := filepath.Join(tmpDir, "test.sock")
-
-	port, err := freeTCPPort()
-	if err != nil {
-		t.Fatalf("freeTCPPort: %v", err)
-	}
-	wsPort := strconv.Itoa(port)
-	t.Setenv("ATTN_WS_PORT", wsPort)
-
-	d := NewForTesting(sockPath)
-	go d.Start()
-	defer d.Stop()
-
-	waitForSocket(t, sockPath, 5*time.Second)
-
-	healthURL := "http://127.0.0.1:" + wsPort + "/health"
-	healthReady := false
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			healthReady = true
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !healthReady {
-		t.Fatalf("health endpoint not ready after 5s")
-	}
-
-	jsURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/ghostty-web.js"
-	jsResp, err := http.Get(jsURL)
-	if err != nil {
-		t.Fatalf("get ghostty-web bundle: %v", err)
-	}
-	defer jsResp.Body.Close()
-
-	jsBody, err := io.ReadAll(jsResp.Body)
-	if err != nil {
-		t.Fatalf("read ghostty-web bundle: %v", err)
-	}
-	if jsResp.StatusCode != http.StatusOK {
-		t.Fatalf("ghostty-web bundle status = %d, want 200", jsResp.StatusCode)
-	}
-	if !strings.Contains(string(jsBody), "ghostty-vt.wasm") {
-		t.Fatalf("ghostty-web bundle did not reference wasm payload")
-	}
-	if got := jsResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
-		t.Fatalf("ghostty-web bundle Cache-Control = %q, want no-store, max-age=0", got)
-	}
-
-	sidecar := extractGhosttySidecarPath(string(jsBody))
-	if sidecar == "" {
-		t.Fatal("ghostty-web bundle did not include vite browser external sidecar path")
-	}
-	sidecarURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/" + sidecar
-	sidecarResp, err := http.Get(sidecarURL)
-	if err != nil {
-		t.Fatalf("get ghostty-web sidecar: %v", err)
-	}
-	defer sidecarResp.Body.Close()
-
-	sidecarBody, err := io.ReadAll(sidecarResp.Body)
-	if err != nil {
-		t.Fatalf("read ghostty-web sidecar: %v", err)
-	}
-	if sidecarResp.StatusCode != http.StatusOK {
-		t.Fatalf("ghostty-web sidecar status = %d, want 200", sidecarResp.StatusCode)
-	}
-	if len(sidecarBody) == 0 {
-		t.Fatal("ghostty-web sidecar was empty")
-	}
-	if got := sidecarResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
-		t.Fatalf("ghostty-web sidecar Cache-Control = %q, want no-store, max-age=0", got)
-	}
-
-	wasmURL := "http://127.0.0.1:" + wsPort + "/vendor/ghostty-web/ghostty-vt.wasm"
-	wasmResp, err := http.Get(wasmURL)
-	if err != nil {
-		t.Fatalf("get ghostty-web wasm: %v", err)
-	}
-	defer wasmResp.Body.Close()
-
-	wasmBody, err := io.ReadAll(wasmResp.Body)
-	if err != nil {
-		t.Fatalf("read ghostty-web wasm: %v", err)
-	}
-	if wasmResp.StatusCode != http.StatusOK {
-		t.Fatalf("ghostty-web wasm status = %d, want 200", wasmResp.StatusCode)
-	}
-	if len(wasmBody) < 100000 {
-		t.Fatalf("ghostty-web wasm length = %d, want substantial payload", len(wasmBody))
-	}
-	if got := wasmResp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
-		t.Fatalf("ghostty-web wasm Cache-Control = %q, want no-store, max-age=0", got)
-	}
-}
-
-func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
+func TestDaemon_FaviconDoesNot404(t *testing.T) {
 	tmpDir := shortTempDir(t)
 	sockPath := filepath.Join(tmpDir, "test.sock")
 
@@ -3192,89 +3022,7 @@ func TestDaemon_WebFaviconDoesNot404(t *testing.T) {
 	}
 }
 
-func TestDaemon_WebInstrumentationLogsPayload(t *testing.T) {
-	tmpDir := shortTempDir(t)
-	sockPath := filepath.Join(tmpDir, "test.sock")
-	logPath := filepath.Join(tmpDir, "daemon.log")
-
-	port, err := freeTCPPort()
-	if err != nil {
-		t.Fatalf("freeTCPPort: %v", err)
-	}
-	wsPort := strconv.Itoa(port)
-	t.Setenv("ATTN_WS_PORT", wsPort)
-
-	logger, err := logging.New(logPath)
-	if err != nil {
-		t.Fatalf("new test logger: %v", err)
-	}
-	defer logger.Close()
-
-	d := NewForTesting(sockPath)
-	d.logger = logger
-	go d.Start()
-	defer d.Stop()
-
-	waitForSocket(t, sockPath, 5*time.Second)
-
-	healthURL := "http://127.0.0.1:" + wsPort + "/health"
-	healthReady := false
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		resp, err := http.Get(healthURL)
-		if err == nil {
-			resp.Body.Close()
-			healthReady = true
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-	if !healthReady {
-		t.Fatalf("health endpoint not ready after 5s")
-	}
-
-	payload := `{"event":"keyboard-close-request","sessionID":"web-debug-smoke","liveViewport":{"scale":1.25,"offsetTop":42}}`
-	req, err := http.NewRequest(http.MethodPost, "http://127.0.0.1:"+wsPort+"/web-instrumentation", strings.NewReader(payload))
-	if err != nil {
-		t.Fatalf("new instrumentation request: %v", err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatalf("post instrumentation payload: %v", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusNoContent {
-		t.Fatalf("instrumentation status = %d, want %d", resp.StatusCode, http.StatusNoContent)
-	}
-	if got := resp.Header.Get("Cache-Control"); got != "no-store, max-age=0" {
-		t.Fatalf("instrumentation Cache-Control = %q, want no-store, max-age=0", got)
-	}
-
-	logDeadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(logDeadline) {
-		body, err := os.ReadFile(logPath)
-		if err == nil {
-			text := string(body)
-			if strings.Contains(text, "web instrumentation:") &&
-				strings.Contains(text, `"event":"keyboard-close-request"`) &&
-				strings.Contains(text, `"scale":1.25`) {
-				return
-			}
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
-
-	body, err := os.ReadFile(logPath)
-	if err != nil {
-		t.Fatalf("read instrumentation log: %v", err)
-	}
-	t.Fatalf("instrumentation log did not contain compacted payload: %s", string(body))
-}
-
-func TestDaemon_WebClientAttachFlowOverWebSocket(t *testing.T) {
+func TestDaemon_AttachFlowOverWebSocket(t *testing.T) {
 	port, err := freeTCPPort()
 	if err != nil {
 		t.Fatalf("freeTCPPort: %v", err)

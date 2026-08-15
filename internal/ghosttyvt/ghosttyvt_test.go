@@ -20,6 +20,20 @@ func newT(t *testing.T, cols, rows int) *Terminal {
 	return term
 }
 
+// restoreT rebuilds a terminal from a snapshot, the way a client does.
+func restoreT(t *testing.T, snap Snapshot) *Terminal {
+	t.Helper()
+	term, err := Restore(snap.Payload, Options{})
+	if err != nil {
+		t.Fatalf("Restore(): %v", err)
+	}
+	t.Cleanup(term.Close)
+	if cols, rows := term.Size(); cols != snap.Cols || rows != snap.Rows {
+		t.Fatalf("restored size = %dx%d, want %dx%d", cols, rows, snap.Cols, snap.Rows)
+	}
+	return term
+}
+
 // styledCorpus produces a byte stream with scrollback, SGR styling, a soft-wrap,
 // a hyperlink, and a trailing prompt — a representative session slice.
 func styledCorpus() []byte {
@@ -138,12 +152,11 @@ func TestRoundTripPlainText(t *testing.T) {
 	a.Write(styledCorpus())
 
 	snap := a.Serialize()
-	if len(snap.VTDump) == 0 {
-		t.Fatal("empty VT dump")
+	if len(snap.Payload) == 0 {
+		t.Fatal("empty snapshot")
 	}
 
-	b := newT(t, snap.Cols, snap.Rows)
-	b.Write(snap.VTDump)
+	b := restoreT(t, snap)
 
 	plainA, plainB := a.PlainText(), b.PlainText()
 	if plainA != plainB {
@@ -166,8 +179,7 @@ func TestRoundTripCursor(t *testing.T) {
 	a.Write([]byte("hello\r\nworld\x1b[3;7H"))
 	ax, ay := a.cursorXY()
 
-	b := newT(t, 80, 10)
-	b.Write(a.Serialize().VTDump)
+	b := restoreT(t, a.Serialize())
 	bx, by := b.cursorXY()
 
 	if ax != bx || ay != by {
@@ -184,8 +196,7 @@ func TestReflowAfterRestore(t *testing.T) {
 	a := newT(t, 80, 10)
 	a.Write(raw)
 
-	b := newT(t, 80, 10)
-	b.Write(a.Serialize().VTDump)
+	b := restoreT(t, a.Serialize())
 	b.Resize(40, 10)
 
 	c := newT(t, 80, 10)
@@ -217,12 +228,11 @@ func TestRoundTripAltScreen(t *testing.T) {
 	a.Write([]byte("\x1b[2J\x1b[HVIM-EDITOR-SCREEN\r\n~\r\n~"))
 
 	snap := a.Serialize()
-	if len(snap.VTDump) == 0 {
-		t.Fatal("empty VT dump")
+	if len(snap.Payload) == 0 {
+		t.Fatal("empty snapshot")
 	}
 
-	b := newT(t, snap.Cols, snap.Rows)
-	b.Write(snap.VTDump)
+	b := restoreT(t, snap)
 
 	// While alt is active, B must match A and show the alt frame — not the
 	// primary content behind it.
@@ -295,28 +305,21 @@ func TestMalformedInputSafe(t *testing.T) {
 	}
 }
 
-// TestDumpHasNoInterrogativeSequences asserts a serialized dump never contains
-// queries or OSC 52 clipboard writes — bytes that would affect the host if the
-// client model tried to answer them. (Phase 2 hardens this further.)
-func TestDumpHasNoInterrogativeSequences(t *testing.T) {
+// TestRestoreAnswersNoQueries pins the property the client depends on: a
+// restore must not put bytes on the pty. The source terminal is asked for CPR
+// and DA1 — it answers those itself, to its own sink — and the restored one
+// must come up silent, because a snapshot is decoded rather than replayed.
+func TestRestoreAnswersNoQueries(t *testing.T) {
 	term := newT(t, 80, 10)
 	term.Write(styledCorpus())
-	// Provoke query state without leaving queries in the grid.
 	term.Write([]byte("\x1b[6n\x1b[c"))
-	dump := term.Serialize().VTDump
-
-	banned := map[string][]byte{
-		"CPR request (ESC[6n)":   []byte("\x1b[6n"),
-		"DA1 request (ESC[c)":    []byte("\x1b[c"),
-		"OSC 52 clipboard":       []byte("\x1b]52;"),
-		"DA1 secondary (ESC[>c)": []byte("\x1b[>c"),
-		"XTVERSION (ESC[>q)":     []byte("\x1b[>q"),
-		"kitty query (ESC[?u)":   []byte("\x1b[?u"),
+	if len(term.DrainResponses()) == 0 {
+		t.Fatal("source terminal answered no query; the test proves nothing")
 	}
-	for name, seq := range banned {
-		if bytes.Contains(dump, seq) {
-			t.Errorf("serialized dump contains %s", name)
-		}
+
+	restored := restoreT(t, term.Serialize())
+	if got := restored.DrainResponses(); len(got) != 0 {
+		t.Errorf("restore produced pty output: %q", got)
 	}
 }
 

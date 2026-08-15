@@ -1108,7 +1108,7 @@ export interface Snapshot {
     placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
-    vt_dump_b64:          string;
+    snapshot_b64:         string;
     [property: string]: any;
 }
 
@@ -1171,7 +1171,7 @@ export interface AttachSnapshot {
     placements?:          PlacementElement[];
     rows:                 number;
     scrollback_truncated: boolean;
-    vt_dump_b64:          string;
+    snapshot_b64:         string;
     [property: string]: any;
 }
 
@@ -13071,7 +13071,7 @@ const typeMap: any = {
         { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
-        { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
+        { json: "snapshot_b64", js: "snapshot_b64", typ: "" },
     ], "any"),
     "BlockElement": o([
         { json: "command", js: "command", typ: u(undefined, "") },
@@ -13115,7 +13115,7 @@ const typeMap: any = {
         { json: "placements", js: "placements", typ: u(undefined, a(r("PlacementElement"))) },
         { json: "rows", js: "rows", typ: 0 },
         { json: "scrollback_truncated", js: "scrollback_truncated", typ: true },
-        { json: "vt_dump_b64", js: "vt_dump_b64", typ: "" },
+        { json: "snapshot_b64", js: "snapshot_b64", typ: "" },
     ], "any"),
     "AuthorState": o([
         { json: "author", js: "author", typ: "" },

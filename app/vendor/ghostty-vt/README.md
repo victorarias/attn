@@ -46,8 +46,6 @@ references, which upstream warns are not render-loop material: measured at
 volume through the render state, so a scrolled pane stays inside a frame.
 
 `ghostty-web` remains a dependency for its key encoder alone, which
-`InputHandler` drives; the daemon's embedded mobile web client
-(`internal/daemon/web/vendor/ghostty-web`) is a separate, self-contained copy
-with its own bundled wasm and is unaffected by this pin.
+`InputHandler` drives.
 
 Ghostty is MIT licensed; the license text is included beside the binary.

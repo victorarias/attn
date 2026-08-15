@@ -17,6 +17,7 @@ import {
   CURSOR_STYLE_UNDERLINE,
   DIRTY_FALSE,
   DIRTY_FULL,
+  GHOSTTY_NO_VALUE,
   GHOSTTY_SUCCESS,
   GRID_REF_SIZE,
   MOUSE_TRACKING_NONE,
@@ -43,6 +44,8 @@ import {
   ROW_RAW_DATA_GRAPHEME,
   ROW_RAW_DATA_WRAP,
   SCREEN_TYPE_ALTERNATE,
+  SNAPSHOT_DATA_HISTORY_ROWS_PRIMARY,
+  SNAPSHOT_DATA_PROGRESS_ROWS,
   STYLE_OFF_BLINK,
   STYLE_OFF_BOLD,
   STYLE_OFF_FAINT,
@@ -53,10 +56,12 @@ import {
   STYLE_OFF_UNDERLINE,
   STYLE_SIZE,
   TERMINAL_DATA_ACTIVE_SCREEN,
+  TERMINAL_DATA_COLS,
   TERMINAL_DATA_COLOR_BACKGROUND,
   TERMINAL_DATA_COLOR_FOREGROUND,
   TERMINAL_DATA_MODE,
   TERMINAL_DATA_MOUSE_TRACKING,
+  TERMINAL_DATA_ROWS,
   TERMINAL_DATA_SCROLLBACK_ROWS,
   TERMINAL_OPT_COLOR_BACKGROUND,
   TERMINAL_OPT_COLOR_CURSOR,
@@ -132,6 +137,22 @@ export interface GhosttyTerminalConfig {
   palette?: number[];
 }
 
+/**
+ * The scrollback half of a snapshot restore, decoded a page at a time so the
+ * first paint does not wait on it.
+ */
+export interface SnapshotHistory {
+  /** Scrollback rows the snapshot declares, before any page is applied. */
+  readonly rows: number;
+  /**
+   * Prepend one page, returning the rows it added — zero when the page no
+   * longer fits the live terminal — or null once there are none left.
+   */
+  next(): number | null;
+  /** Give up on the rest. The terminal keeps what was already prepended. */
+  close(): void;
+}
+
 const HYPERLINK_URI_CAP = 2048;
 // Codepoints in one grapheme cluster. Unicode's longest legitimate clusters are
 // well under this; anything longer is truncated rather than grown for.
@@ -191,6 +212,11 @@ export class GhosttyTerminal {
 
   private responses: string[] = [];
 
+  // Kept so a decoded handle comes up configured like the one it replaces.
+  private readonly config: GhosttyTerminalConfig;
+  private writePtyFn = 0;
+  private history: SnapshotHistory | null = null;
+
   // A DataView is far more expensive to allocate than any wasm call it wraps,
   // so it is cached and only rebuilt when memory growth detaches the buffer.
   private view: DataView;
@@ -224,15 +250,18 @@ export class GhosttyTerminal {
     this.pGraphemes = exports.ghostty_wasm_alloc_u8_array(GRAPHEME_CAP * 4);
     this.pUri = exports.ghostty_wasm_alloc_u8_array(HYPERLINK_URI_CAP);
 
+    this.config = config;
     this.applyConfig(config);
 
     // Query responses (DSR, DA, DECRQM) come back through this callback rather
-    // than a poll, so hasResponse/readResponse drain a JS queue.
-    const writePty = installCallback(exports.__indirect_function_table, (_t, _u, ptr, len) => {
+    // than a poll, so hasResponse/readResponse drain a JS queue. The table entry
+    // is never reclaimed, so it is installed once and re-pointed at whatever
+    // handle this object currently owns.
+    this.writePtyFn = installCallback(exports.__indirect_function_table, (_t, _u, ptr, len) => {
       if (len <= 0) return;
       this.responses.push(this.decoder.decode(new Uint8Array(this.e.memory.buffer, ptr, len)));
     });
-    exports.ghostty_terminal_set(this.handle, TERMINAL_OPT_WRITE_PTY, writePty);
+    exports.ghostty_terminal_set(this.handle, TERMINAL_OPT_WRITE_PTY, this.writePtyFn);
 
     const stateOut = exports.ghostty_wasm_alloc_opaque();
     exports.ghostty_render_state_new(0, stateOut);
@@ -334,9 +363,92 @@ export class GhosttyTerminal {
     this.stale = true;
   }
 
+  /**
+   * Replace this terminal's state with the one a snapshot holds.
+   *
+   * Only the libghostty handle is swapped. The render state, the scratch
+   * buffers, the cell pool, and every reference a renderer holds survive, so a
+   * restore does not rebuild the pane around it.
+   *
+   * The renderable prefix lands before this returns; the returned history is
+   * the part that scales with scrollback and belongs after the first paint.
+   * Finish or close it — until then the decoder borrows both the snapshot bytes
+   * and this terminal.
+   */
+  adoptSnapshot(snapshot: Uint8Array): SnapshotHistory {
+    const e = this.e;
+    this.history?.close();
+
+    const src = e.ghostty_wasm_alloc_u8_array(snapshot.length);
+    new Uint8Array(e.memory.buffer, src, snapshot.length).set(snapshot);
+    const out = e.ghostty_wasm_alloc_opaque();
+    const releaseSource = () => {
+      e.ghostty_wasm_free_opaque(out);
+      e.ghostty_wasm_free_u8_array(src, snapshot.length);
+    };
+
+    if (e.ghostty_snapshot_decoder_new_buf(0, out, src, snapshot.length) !== GHOSTTY_SUCCESS) {
+      releaseSource();
+      throw new Error('ghostty_snapshot_decoder_new_buf failed');
+    }
+    const decoder = this.dv().getUint32(out, true);
+    if (e.ghostty_snapshot_decoder_ready(decoder, out) !== GHOSTTY_SUCCESS) {
+      e.ghostty_snapshot_decoder_free(decoder);
+      releaseSource();
+      throw new Error('ghostty_snapshot_decoder_ready failed');
+    }
+    const handle = this.dv().getUint32(out, true);
+
+    e.ghostty_terminal_free(this.handle);
+    this.handle = handle;
+    e.ghostty_terminal_set(handle, TERMINAL_OPT_WRITE_PTY, this.writePtyFn);
+    this.applyConfig(this.config);
+    // Anything the old handle queued answered a query nobody is waiting on any
+    // more, and a decode of its own puts nothing on the pty.
+    this.responses.length = 0;
+
+    e.ghostty_terminal_get(handle, TERMINAL_DATA_COLS, this.pScratch);
+    this._cols = this.dv().getUint16(this.pScratch, true);
+    e.ghostty_terminal_get(handle, TERMINAL_DATA_ROWS, this.pScratch);
+    this._rows = this.dv().getUint16(this.pScratch, true);
+    this.resizePool();
+    this.stale = true;
+
+    e.ghostty_snapshot_decoder_get(decoder, SNAPSHOT_DATA_HISTORY_ROWS_PRIMARY, this.pScratch);
+    const rows = Number(this.dv().getBigUint64(this.pScratch, true));
+
+    let done = false;
+    const history: SnapshotHistory = {
+      rows,
+      next: () => {
+        if (done) return null;
+        const rc = e.ghostty_snapshot_decoder_next(decoder);
+        if (rc !== GHOSTTY_SUCCESS) {
+          history.close();
+          if (rc !== GHOSTTY_NO_VALUE) throw new Error(`ghostty_snapshot_decoder_next failed: ${rc}`);
+          return null;
+        }
+        e.ghostty_snapshot_decoder_get(decoder, SNAPSHOT_DATA_PROGRESS_ROWS, this.pScratch);
+        const prepended = this.dv().getUint32(this.pScratch, true);
+        if (prepended > 0) this.stale = true;
+        return prepended;
+      },
+      close: () => {
+        if (done) return;
+        done = true;
+        if (this.history === history) this.history = null;
+        e.ghostty_snapshot_decoder_free(decoder);
+        releaseSource();
+      },
+    };
+    this.history = history;
+    return history;
+  }
+
   free(): void {
     if (this.freed) return;
     this.freed = true;
+    this.history?.close();
     this.e.ghostty_render_state_row_cells_free(this.cells);
     this.e.ghostty_render_state_row_iterator_free(this.iterator);
     this.e.ghostty_render_state_free(this.state);

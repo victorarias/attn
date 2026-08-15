@@ -258,7 +258,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '251';
+export const PROTOCOL_VERSION = '252';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -2230,9 +2230,9 @@ export function useDaemonSocket({
                   previousSeq: ptyTransportRef.current.getLastSeq(data.id),
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                 });
-                // A Ghostty snapshot is a raw VT dump authored at the daemon
-                // worker's exact grid; the fresh model must be resized to that
-                // grid before the dump is written or its line-wrapping desyncs.
+                // A Ghostty snapshot carries the daemon worker's exact grid.
+                // The decoded model comes up at it; the pane's surface is sized
+                // to match here so the two agree before the first paint.
                 const snapshotGeometry = restorePlan.hasSnapshot
                   && typeof restorePlan.restoreCols === 'number'
                   && typeof restorePlan.restoreRows === 'number'
@@ -2263,21 +2263,16 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
-                // The daemon worker already answered CPR/DA1/OSC during live
-                // parsing and forwarded the query gap over the wire, so the
-                // frontend must never re-answer queries embedded in the dump.
                 const restoreWasEmitted = attachEffects.restoreAction.kind === 'ghostty_snapshot';
                 if (attachEffects.restoreAction.kind === 'ghostty_snapshot') {
                   emitPtyEvent({
-                    event: 'data',
+                    event: 'restore_snapshot',
                     id: data.id,
                     data: attachEffects.restoreAction.data,
-                    source: 'attach_replay',
-                    suppressResponses: true,
                   });
-                  // Seed OSC 133 command blocks from the snapshot: the VT dump is
-                  // marker-stripped, so the live parser rebuilds none on restore.
-                  // Enqueued after the dump write (seedBlocks runs on the write
+                  // Seed OSC 133 command blocks from the snapshot: a decode
+                  // replays no markers, so the client rebuilds none on restore.
+                  // Enqueued after the adoption (seedBlocks runs on the same
                   // chain) so anchor text reads the restored buffer. Wire shape
                   // (snake_case) → client-domain SeededBlock.
                   const snapshotBlocks = data.snapshot?.blocks;

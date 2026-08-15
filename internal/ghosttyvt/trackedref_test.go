@@ -34,7 +34,7 @@ func feedLines(t *Terminal, from, to int) {
 // Free is called.
 func TestTrackedRefLeakAccounting(t *testing.T) {
 	base := LiveTrackedRefs()
-	term, err := New(80, 10, Options{MaxScrollback: 50})
+	term, err := New(80, 10, Options{ScrollbackBytes: 50})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -65,7 +65,7 @@ func TestTrackedRefLeakAccounting(t *testing.T) {
 // scrollback past the cap, and reflows on resize — and reports "no value"
 // (rather than a wrong position) once the row is pruned away.
 func TestSpikeTrackedRefFollowsScrollPruneReflow(t *testing.T) {
-	term, err := New(80, 10, Options{MaxScrollback: 50})
+	term, err := New(80, 10, Options{ScrollbackBytes: 50})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -135,13 +135,13 @@ func TestSpikeTrackedRefFollowsScrollPruneReflow(t *testing.T) {
 func TestSpikeScreenCoordsAlignAcrossRestore(t *testing.T) {
 	for _, tc := range []struct {
 		name  string
-		lines int // enough to overflow MaxScrollback=50 in the "pruned" case
+		lines int // enough to overflow ScrollbackBytes=50 in the "pruned" case
 	}{
 		{name: "within_cap", lines: 20},
 		{name: "pruned_at_cap", lines: 8000},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			src, err := New(80, 10, Options{MaxScrollback: 50})
+			src, err := New(80, 10, Options{ScrollbackBytes: 50})
 			if err != nil {
 				t.Fatalf("New src: %v", err)
 			}
@@ -182,12 +182,11 @@ func TestSpikeScreenCoordsAlignAcrossRestore(t *testing.T) {
 			}
 
 			snap := src.Serialize()
-			restored, err := New(snap.Cols, snap.Rows, Options{MaxScrollback: 50})
+			restored, err := Restore(snap.Payload, Options{ScrollbackBytes: 50})
 			if err != nil {
-				t.Fatalf("New restored: %v", err)
+				t.Fatalf("Restore: %v", err)
 			}
 			defer restored.Close()
-			restored.Write(snap.VTDump)
 
 			gotLines := screenLines(restored)
 			if y >= len(gotLines) {
@@ -210,7 +209,7 @@ func TestSpikeScreenCoordsAlignAcrossRestore(t *testing.T) {
 // vim/less at snapshot time — and that the resolved row aligns with the
 // restored terminal's primary screen after leaving alt.
 func TestSpikeTrackedRefResolvesWhileAltScreenActive(t *testing.T) {
-	src, err := New(80, 10, Options{MaxScrollback: 50})
+	src, err := New(80, 10, Options{ScrollbackBytes: 50})
 	if err != nil {
 		t.Fatalf("New src: %v", err)
 	}
@@ -232,12 +231,11 @@ func TestSpikeTrackedRefResolvesWhileAltScreenActive(t *testing.T) {
 	}
 
 	snap := src.Serialize()
-	restored, err := New(snap.Cols, snap.Rows, Options{MaxScrollback: 50})
+	restored, err := Restore(snap.Payload, Options{ScrollbackBytes: 50})
 	if err != nil {
-		t.Fatalf("New restored: %v", err)
+		t.Fatalf("Restore: %v", err)
 	}
 	defer restored.Close()
-	restored.Write(snap.VTDump)
 
 	// Leave alt on both; primary content must align at the ref's row.
 	src.Write([]byte("\x1b[?1049l"))

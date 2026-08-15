@@ -5,17 +5,6 @@ function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function decodeBase64Utf8(value) {
-  if (!value) {
-    return '';
-  }
-  return Buffer.from(value, 'base64').toString('utf8');
-}
-
-export function attachSnapshotText(message) {
-  return decodeBase64Utf8(message?.snapshot?.vt_dump_b64 ?? message?.scrollback);
-}
-
 function workspacePaneIds(workspace) {
   return (workspace?.panes || []).map((pane) => pane.pane_id);
 }
@@ -231,42 +220,23 @@ export class DaemonObserver {
     return workspace.panes.find(isNewRuntimePane) || null;
   }
 
-  async readScrollback(runtimeId, timeoutMs = 5_000) {
-    return readScrollback(this.wsUrl, runtimeId, timeoutMs);
+  async attachOnce(runtimeId, timeoutMs = 5_000) {
+    return attachOnce(this.wsUrl, runtimeId, timeoutMs);
   }
 
-  async waitForScrollbackContains(runtimeId, needle, timeoutMs = 12_000) {
-    const startedAt = Date.now();
-    let lastScrollback = '';
-    while (Date.now() - startedAt < timeoutMs) {
-      try {
-        lastScrollback = await this.readScrollback(runtimeId, Math.min(5_000, timeoutMs));
-        if (lastScrollback.includes(needle)) {
-          return lastScrollback;
-        }
-      } catch {
-        // Retry while the runtime is still attaching.
-      }
-      await delay(400);
-    }
-    throw new Error(
-      `Timed out waiting for scrollback ${runtimeId} to contain ${JSON.stringify(needle)}. Last scrollback tail:\n${lastScrollback.slice(-400)}`
-    );
-  }
-
-  async waitForScrollbackReady(runtimeId, timeoutMs = 12_000) {
+  async waitForAttachable(runtimeId, timeoutMs = 12_000) {
     const startedAt = Date.now();
     let lastError = null;
     while (Date.now() - startedAt < timeoutMs) {
       try {
-        return await this.readScrollback(runtimeId, Math.min(5_000, timeoutMs));
+        return await this.attachOnce(runtimeId, Math.min(5_000, timeoutMs));
       } catch (error) {
         lastError = error;
       }
       await delay(250);
     }
     throw new Error(
-      `Timed out waiting for scrollback ${runtimeId} to become attachable: ${lastError instanceof Error ? lastError.message : String(lastError || 'unknown error')}`
+      `Timed out waiting for ${runtimeId} to become attachable: ${lastError instanceof Error ? lastError.message : String(lastError || 'unknown error')}`
     );
   }
 
@@ -476,7 +446,11 @@ export class DaemonObserver {
   }
 }
 
-export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
+// Attach once and report that it succeeded. This observer cannot read terminal
+// text: attach carries the worker's terminal as binary snapshot data only a
+// ghostty decoder understands, so anything that needs rendered text goes
+// through the app's `read_pane_text`.
+export async function attachOnce(wsUrl, runtimeId, timeoutMs = 5_000) {
   return new Promise((resolve, reject) => {
     const ws = new WebSocket(wsUrl);
     const timeout = setTimeout(() => {
@@ -504,12 +478,7 @@ export async function readScrollback(wsUrl, runtimeId, timeoutMs = 5_000) {
         reject(new Error(data.error || `attach_session failed for ${runtimeId}`));
         return;
       }
-      // Restore is server-authoritative: attach carries the parsed terminal as
-      // a self-contained VT dump, and its rendered text is what the harness
-      // completion/token checks read. `scrollback` is not a product fallback —
-      // the daemon no longer sends it (see AGENTS.md, "Terminal") — it only
-      // lets this script read a packaged build predating that change.
-      resolve(attachSnapshotText(data));
+      resolve(data);
     });
 
     ws.once('error', (error) => {

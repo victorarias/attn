@@ -2137,7 +2137,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         snapshot: {
           cols: 56,
           rows: 35,
-          vt_dump_b64: btoa('fresh-daemon-frame'),
+          snapshot_b64: btoa('fresh-daemon-frame'),
         },
         last_seq: 29376,
         running: true,
@@ -2169,16 +2169,12 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       reason: 'snapshot_restore',
     });
     expect(ptyEvents).toContainEqual({
-      event: 'data',
+      event: 'restore_snapshot',
       id: 'sess-existing',
       data: btoa('fresh-daemon-frame'),
-      source: 'attach_replay',
-      suppressResponses: true,
     });
     expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
-    const snapshotIndex = ptyEvents.findIndex((event) => (
-      event.event === 'data' && event.source === 'attach_replay'
-    ));
+    const snapshotIndex = ptyEvents.findIndex((event) => event.event === 'restore_snapshot');
     const queuedLiveIndex = ptyEvents.findIndex((event) => (
       event.event === 'data' && event.data === btoa('live-after-snapshot')
     ));

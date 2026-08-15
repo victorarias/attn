@@ -1,0 +1,25 @@
+kind: internal
+area: terminal
+change: >
+  Reattaching a session now restores its terminal by decoding a snapshot
+  instead of replaying a VT stream into a blank model. The daemon worker
+  encodes its terminal with ghostty's own snapshot API and the client
+  decodes it: the visible screen comes back first and scrollback is
+  prepended page by page afterwards, so the first frame no longer waits on
+  the history behind it. Nothing is parsed on the way in, which removes the
+  cursor correction the old dump needed and the whole class of restores
+  that answered a terminal query the daemon had already answered.
+notes: >
+  Steps 2 and 3 of docs/plans/2026-08-16-snapshot-restore.md. Three things
+  travel with it. The carried native patch is gone — it existed only to
+  expose the VT serializer the snapshot API replaces — so attn now links an
+  unmodified libghostty-vt and the prebuilt archives are keyed by the pin
+  alone. Retained scrollback was budgeted in bytes while being named and
+  passed as lines, so every session kept 10,000 bytes — measured at 289 rows
+  at 200 columns — rather than 10,000 rows; the budget is now 8 MB, measured
+  at roughly 4,400 rows. And the daemon's unmaintained browser client is
+  deleted: it was a third VT implementation on a build that did not move
+  with the shared pin, and the parity corpus could not see it. The remote
+  plumbing around it stays. Cross-runtime restore is pinned by a snapshot
+  the native encoder produces and the browser module decodes, held as a
+  committed fixture both test suites read.

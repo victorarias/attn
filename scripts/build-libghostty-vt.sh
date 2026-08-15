@@ -4,11 +4,11 @@
 # server-authoritative terminal restore path (internal/ghosttyvt).
 #
 # DOWNLOAD-FIRST: ordinary contributors never build from source. The default
-# path fetches the prebuilt asset for the TARGET platform (keyed by pin+patch)
+# path fetches the prebuilt asset for the TARGET platform (keyed by the pin)
 # from the repo's rolling release and verifies it against ghostty-vt-native.lock.
 # A source build (zig 0.16.x, see scripts/lib/libghostty-vt.sh) runs only when
 # there is no published asset for the current key — i.e. you have edited the
-# shared ghostty-vt.pin or native patch — or when ATTN_VT_FROM_SOURCE=1 forces it.
+# shared ghostty-vt.pin — or when ATTN_VT_FROM_SOURCE=1 forces it.
 # Maintainers publish new assets with `make publish-native-vt`.
 #
 # The target platform defaults to the effective Go target; the Makefile passes
@@ -44,10 +44,10 @@ fi
 lock_key="$(vt_lock_field key)"
 lock_sha="$(vt_lock_field "sha256_${platform}")"
 
-# A locally-edited pin/patch has no published asset yet (its key won't match the
+# A locally-edited pin has no published asset yet (its key won't match the
 # committed lock). Skip the guaranteed-404 and build from source directly.
 if [[ -z "$lock_key" || "$key" != "$lock_key" ]]; then
-  echo "==> no published asset for key ${key:0:12} (pin/patch edited locally?); building $platform from source"
+  echo "==> no published asset for key ${key:0:12} (pin edited locally?); building $platform from source"
   build_from_source
   exit 0
 fi

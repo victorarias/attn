@@ -43,6 +43,7 @@
     "real-app:scenario-tr401-local-codex": "node scripts/real-app-harness/scenario-tr401-local-window-resize.mjs --agent codex",
     "real-app:scenario-tr401-codex-main": "node scripts/real-app-harness/scenario-tr401-local-codex-main-window-resize.mjs",
     "real-app:scenario-ghostty-scroll": "node scripts/real-app-harness/scenario-ghostty-scrollback-anchor.mjs",
+    "real-app:scenario-snapshot-scrollback-restore": "node scripts/real-app-harness/scenario-snapshot-scrollback-restore.mjs",
     "real-app:scenario-tr205": "node scripts/real-app-harness/scenario-tr205-remote-relaunch-close-redraw.mjs",
     "real-app:scenario-tr402": "node scripts/real-app-harness/scenario-tr402-remote-close-redraw.mjs",
     "real-app:scenario-tr402-local-codex": "node scripts/real-app-harness/scenario-tr402-local-close-redraw.mjs --agent codex",
