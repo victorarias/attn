@@ -1,4 +1,4 @@
-import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal } from '../ghostty';
 import { cursorRowInViewport, viewportBufferStart } from '../utils/ghosttyScroll';
 import {
   GLYPH_MODE_COLOR,

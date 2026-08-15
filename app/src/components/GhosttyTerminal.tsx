@@ -7,7 +7,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
+import { InputHandler } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from '../ghostty';
 import { loadGhostty } from '../ghostty/wasm';
 import { CooperativeReplayBudget } from '../utils/cooperativeReplay';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
@@ -27,7 +28,6 @@ import {
   type LogicalLine,
   type LogicalSpan,
 } from '../utils/terminalLinks';
-import { hyperlinkUriAt, scrollbackHyperlinkUri } from '../utils/ghosttyHyperlinks';
 import {
   initialFocusedMatch,
   startFindScan,
@@ -365,8 +365,6 @@ interface SelectionRange {
   endCol: number;
 }
 
-// OSC 8 hyperlink URIs are read via ghosttyHyperlinks.ts, which reaches into
-// the vendored wasm's render-state/scrollback exports directly.
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
@@ -1235,8 +1233,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         hyperlinkUri: (row, col) => {
           const history = terminal.getScrollbackLength();
           return row < history
-            ? scrollbackHyperlinkUri(terminal, row, col)
-            : hyperlinkUriAt(terminal, row - history, col);
+            ? terminal.getScrollbackHyperlinkUri(row, col)
+            : terminal.getHyperlinkUri(row - history, col);
         },
       };
     }, [selectionLineAtBufferRow]);
@@ -2506,7 +2504,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fitRef.current();
         });
         inputRef.current = new InputHandler(
-          ghostty,
+          ghostty.keyInput,
           container,
           (data) => onInputRef.current(data, 'user'),
           () => undefined,
@@ -2887,8 +2885,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const history = terminal.getScrollbackLength();
       const bufferRow = bufferRowFromViewportRow(row, history, viewportOffsetRef.current);
       return bufferRow >= history
-        ? hyperlinkUriAt(terminal, bufferRow - history, col)
-        : scrollbackHyperlinkUri(terminal, bufferRow, col);
+        ? terminal.getHyperlinkUri(bufferRow - history, col)
+        : terminal.getScrollbackHyperlinkUri(bufferRow, col);
     }, []);
 
     const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {

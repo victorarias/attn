@@ -38,5 +38,9 @@ app/src-tauri/*.gen.conf.json
 # Native libghostty-vt build output (source of truth: scripts/build-libghostty-vt.sh)
 /third_party/
 
+# Browser ghostty-vt module: ghostty-org's build, mirrored per pin and fetched
+# by app/scripts/ensure-ghostty-vt-wasm.sh. Provenance lives in ghostty-vt-wasm.lock.
+/app/vendor/ghostty-vt/ghostty-vt.wasm
+
 # activity-bench corpus and results: real transcript excerpts, never committed
 .activity-bench/

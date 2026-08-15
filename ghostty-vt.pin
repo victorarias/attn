@@ -4,6 +4,12 @@
 # expose different embedding APIs, but terminal parsing and storage come from
 # this exact commit on every supported platform.
 #
+# The frontend no longer builds its module: it mirrors ghostty-org's own
+# prebuilt ghostty-vt.wasm, which exists only for the commit their rolling "tip"
+# release was last built from. Moving this pin therefore means moving it to that
+# commit and re-mirroring in the same sitting (make publish-ghostty-vt-wasm),
+# then republishing the native archives for it (make publish-native-vt).
+#
 # Verified for native darwin/arm64 + linux/amd64 + linux/arm64 and frontend
-# wasm32-freestanding at ab0b9da (2026-08-05). Never float this commit.
-ab0b9da9e88fcb4b0533a1854e84628f663930af
+# wasm32-freestanding at d760ee9 (2026-08-15). Never float this commit.
+d760ee96e54657416eb427b793c7e839f003df7d

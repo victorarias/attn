@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal } from '../ghostty';
 import { TERMINAL_FLOATS_PER_QUAD } from './terminalVertexBuffer';
 import {
   graphemeAtViewportCell,

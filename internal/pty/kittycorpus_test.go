@@ -482,12 +482,15 @@ func kittyCorpusInputs() []kittyCorpusInput {
 			},
 		},
 		{
-			// A scroll one SU cannot carry: kitty's `r=` makes a 2x2 image claim
-			// 15 rows on an 8-row screen, and ghostty clamps SU to the scroll
-			// region, so the wire would have pushed 8 rows into history where
-			// the worker pushed 9. The trailing text is what makes the lost row
-			// reach history at all.
-			name: "placement scrolling further than one su can carry",
+			// kitty's `r=` makes a 2x2 image claim 15 rows on an 8-row screen.
+			// This used to scroll proportionally — 9 rows into history where one
+			// SU could only carry 8 — and was the shape that reached
+			// kittyResyncScrollClamped. On this ghostty pin the scroll no longer
+			// tracks the claimed row count and stays inside the screen, so one
+			// SU carries it and nothing resyncs. Kept at the same shape: it is
+			// the stream that would trip the tripwire again if that changed. The
+			// trailing text is what makes the scroll reach history at all.
+			name: "placement claiming far more rows than the screen holds",
 			cols: 20, rows: 8,
 			chunks: []string{
 				"\x1b[2;2Hkeep",

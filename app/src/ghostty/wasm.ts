@@ -1,5 +1,5 @@
 import ghosttyWasmUrl from '../../vendor/ghostty-vt/ghostty-vt.wasm?url';
-import { Ghostty } from 'ghostty-web';
+import { Ghostty } from './index';
 
 export { ghosttyWasmUrl };
 

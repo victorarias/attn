@@ -4,7 +4,7 @@
   "version": "0.11.1",
   "type": "module",
   "scripts": {
-    "verify:ghostty-vt": "bash scripts/ghostty-vt-wasm-lock.sh verify",
+    "verify:ghostty-vt": "bash scripts/ensure-ghostty-vt-wasm.sh",
     "dev": "tauri dev",
     "dev:vite": "pnpm run verify:ghostty-vt && pnpm run build:browser-runtime && vite",
     "build": "pnpm run verify:ghostty-vt && pnpm run build:browser-runtime && tsc && vite build",

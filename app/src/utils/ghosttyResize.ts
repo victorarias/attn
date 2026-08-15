@@ -1,4 +1,4 @@
-import type { GhosttyTerminal } from 'ghostty-web';
+import type { GhosttyTerminal } from '../ghostty';
 
 const DEC_WRAPAROUND_MODE = 7;
 const DISABLE_WRAPAROUND = '\x1b[?7l';
