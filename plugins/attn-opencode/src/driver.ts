@@ -416,6 +416,7 @@ export class OpenCodeDriver {
   // same startup budget the server itself gets.
   private async stagePinnedTurn(client: OpenCodeHTTP, binding: NativeBinding, prompt: string, signal: AbortSignal): Promise<void> {
     const deadline = Date.now() + this.startupDeadline;
+    const before = new Set(await this.sessionIDs(client, signal));
     for (;;) {
       if (signal.aborted || binding.pinError) return;
       if (binding.claimedID) return;
@@ -429,7 +430,46 @@ export class OpenCodeDriver {
         request.dispose();
       }
       await sleep(this.stageRetryDelay, signal);
+      if (signal.aborted || binding.claimedID || binding.pinError) return;
+      // An SSE drop can lose the receipt for a prompt the TUI did take, and a
+      // second submission into that session creates no new one to receive. The
+      // session carrying this run's prompt is the same receipt, read directly.
+      const opened = await this.sessionOpenedFor(client, prompt, before, signal);
+      if (opened) {
+        binding.claimedID = opened;
+        await this.bindNativeSession(client, binding, opened, signal);
+        return;
+      }
     }
+  }
+
+  private async sessionIDs(client: OpenCodeHTTP, signal: AbortSignal): Promise<string[]> {
+    const request = this.requestDeadline(signal);
+    try {
+      return await client.listSessionIDs(request.signal);
+    } finally {
+      request.dispose();
+    }
+  }
+
+  // Sessions are stored per project directory, so a session this run did not
+  // open is only ruled out by the prompt it carries.
+  private async sessionOpenedFor(
+    client: OpenCodeHTTP,
+    prompt: string,
+    before: Set<string>,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const candidates = (await this.sessionIDs(client, signal)).filter((id) => !before.has(id));
+    for (const id of candidates.reverse()) {
+      const request = this.requestDeadline(signal);
+      try {
+        if ((await client.userPromptText(id, request.signal))?.includes(prompt)) return id;
+      } finally {
+        request.dispose();
+      }
+    }
+    return undefined;
   }
 
   // OpenCode drops a variant the pinned model does not declare — MiMo declares

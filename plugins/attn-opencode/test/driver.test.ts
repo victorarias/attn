@@ -280,6 +280,47 @@ describe("OpenCode server-backed driver", () => {
     expect(target.tuiSubmissions).toHaveLength(1);
   });
 
+  test("binds the session its staged prompt opened when the event announcing it is lost", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    // The TUI takes the prompt and opens a session, but its `session.created`
+    // never reaches the driver.
+    target.dropSessionCreatedEvent = true;
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-lost-receipt"));
+
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      () => `bind from the opened session; submissions=${target.tuiSubmissions.length}; health=${JSON.stringify(driver.health())}`,
+    );
+    expect(target.tuiSubmissions).toHaveLength(1);
+    expect((await registry.get("run-lost-receipt"))?.opencode_session_id).toBe("native-1");
+    expect(driver.health().ok).toBe(true);
+  });
+
+  test("leaves a promptless pinned launch to the pane and binds what it opens", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn({ ...params("run-no-prompt"), initial_prompt: undefined });
+
+    await eventually(() => target.eventSubscriberCount === 1, "subscribed run");
+    expect(target.tuiSubmissions).toHaveLength(0);
+    // The TUI opens on the pinned model either way, so the first session the
+    // user submits there is this run's session.
+    target.sessions.set("native-1", { id: "native-1", model: target.tuiModel });
+    target.emit("session.created", { sessionID: "native-1" });
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "bind from the pane's own session",
+    );
+    expect((await registry.get("run-no-prompt"))?.opencode_session_id).toBe("native-1");
+  });
+
   test("refuses a delegated effort the pinned model does not offer", async () => {
     const rpc = new RecordingRPC();
     const target = server("*");

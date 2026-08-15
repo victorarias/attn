@@ -97,6 +97,25 @@ export class OpenCodeHTTP {
     throw new Error("OpenCode message list response was invalid");
   }
 
+  // Sessions are stored per project directory, so this lists every session in
+  // the run's directory, not only the ones this run opened.
+  async listSessionIDs(signal?: AbortSignal): Promise<string[]> {
+    const body = await this.request<unknown>("/session", { signal });
+    if (!Array.isArray(body)) throw new Error("OpenCode session list response was invalid");
+    return body.map((entry) => asString(asObject(entry)?.id)).filter((id): id is string => id !== undefined);
+  }
+
+  async userPromptText(sessionID: string, signal?: AbortSignal): Promise<string | undefined> {
+    const messages = await this.listMessages(sessionID, 1, signal);
+    const first = asObject(messages[0]);
+    const info = asObject(first?.info) ?? first;
+    if (asString(info?.role) !== "user") return undefined;
+    const parts = Array.isArray(first?.parts) ? first.parts : [];
+    const text = parts.map((part) => asObject(part)).filter((part) => asString(part?.type) === "text")
+      .map((part) => asString(part?.text) ?? "").join("");
+    return text === "" ? undefined : text;
+  }
+
   async listToolIDs(signal?: AbortSignal): Promise<string[]> {
     const body = await this.request<unknown>("/experimental/tool/ids", { signal });
     const root = asObject(body);

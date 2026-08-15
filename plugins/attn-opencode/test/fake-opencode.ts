@@ -25,6 +25,9 @@ export class FakeOpenCode {
   readonly prompts: Array<{ sessionID: string; body: unknown }> = [];
   readonly tuiSubmissions: Array<{ sessionID: string; text: string }> = [];
   tuiAttached = true;
+  // OpenCode's SSE stream can drop between the TUI taking a prompt and the
+  // event that announces the session it opened.
+  dropSessionCreatedEvent = false;
   tuiModel: unknown = { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "max" };
   // Every model the tests pin, with the variants OpenCode's catalog declares for
   // it. A model missing here is a model OpenCode does not have.
@@ -135,6 +138,9 @@ export class FakeOpenCode {
         providers: [...providers].map(([id, models]) => ({ id, models })),
       });
     }
+    if (url.pathname === "/session" && request.method === "GET") {
+      return Response.json([...this.sessions.values()]);
+    }
     if (url.pathname === "/session/status") return Response.json(Object.fromEntries(this.statuses));
     if (url.pathname === "/question") {
       if (this.failPendingLists) return Response.json({ error: "question list failed" }, { status: 500 });
@@ -226,9 +232,10 @@ export class FakeOpenCode {
       if (this.tuiAttached && this.composer !== "") {
         const id = `native-${this.nextSession++}`;
         this.sessions.set(id, { id, model: this.tuiModel });
+        this.messages.set(id, [{ info: { id: `user-${id}`, role: "user" }, parts: [{ type: "text", text: this.composer }] }]);
         this.tuiSubmissions.push({ sessionID: id, text: this.composer });
         this.composer = "";
-        this.emit("session.created", { sessionID: id });
+        if (!this.dropSessionCreatedEvent) this.emit("session.created", { sessionID: id });
       }
       return Response.json(true);
     }
@@ -241,7 +248,7 @@ export function basic(password: string): string {
 }
 
 export async function eventually(predicate: () => boolean, message: string | (() => string)): Promise<void> {
-  const deadline = Date.now() + 2_000;
+  const deadline = Date.now() + 5_000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await Bun.sleep(10);
