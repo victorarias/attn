@@ -316,7 +316,10 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 		t.Fatalf("wake: %v", err)
 	}
 
-	member, block, bound := d.crewPrimeForSession(result.SessionID)
+	member, block, bound, err := d.crewPrimeForSession(result.SessionID)
+	if err != nil {
+		t.Fatalf("prime: %v", err)
+	}
 	if !bound {
 		t.Fatal("the session a wake just bound was primed as nobody")
 	}
@@ -348,10 +351,10 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 func TestCrewPrime_AnUnboundSessionIsNobody(t *testing.T) {
 	d, _, _ := newWakeableDaemon(t)
 	addSession(t, d, "sess-worker")
-	if _, block, bound := d.crewPrimeForSession("sess-worker"); bound || block != "" {
+	if _, block, bound, err := d.crewPrimeForSession("sess-worker"); err != nil || bound || block != "" {
 		t.Fatalf("an unbound session was primed as somebody: %q", block)
 	}
-	if _, _, bound := d.crewPrimeForSession(""); bound {
+	if _, _, bound, err := d.crewPrimeForSession(""); err != nil || bound {
 		t.Fatal("a session with no id was primed")
 	}
 }
@@ -451,6 +454,57 @@ func TestCrewSet_ADirectoryThatIsNotThereIsRefused(t *testing.T) {
 	}
 }
 
+func TestCrewSet_ACwdInsideAnotherProfilesCrewIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreign := filepath.Join(userHome, ".attn-fixture", crew.HomesDirName, "ember", "project")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatalf("create foreign crew cwd: %v", err)
+	}
+
+	_, err := d.resolveCrewWorkDirForHome(foreign, userHome)
+	if err == nil {
+		t.Fatal("a cwd inside another profile's crew homes was accepted")
+	}
+	for _, want := range []string{foreign, filepath.Join(userHome, ".attn-fixture", crew.HomesDirName), filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+}
+
+func TestCrewSet_ASymlinkedForeignProfileRootIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreignTarget := filepath.Join(t.TempDir(), "foreign-profile")
+	foreign := filepath.Join(foreignTarget, crew.HomesDirName, "quartz", "project")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatalf("create symlinked foreign crew cwd: %v", err)
+	}
+	profileLink := filepath.Join(userHome, ".attn-fixture")
+	if err := os.Symlink(foreignTarget, profileLink); err != nil {
+		t.Fatalf("symlink foreign profile: %v", err)
+	}
+	linkedCWD := filepath.Join(profileLink, crew.HomesDirName, "quartz", "project")
+
+	_, err := d.resolveCrewWorkDirForHome(linkedCWD, userHome)
+	if err == nil {
+		t.Fatal("a cwd under a symlinked foreign profile root was accepted")
+	}
+	for _, want := range []string{linkedCWD, filepath.Join(userHome, ".attn-fixture", crew.HomesDirName), filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+	canonicalCWD, err := filepath.EvalSymlinks(linkedCWD)
+	if err != nil {
+		t.Fatalf("canonicalize linked cwd: %v", err)
+	}
+	if _, err := d.resolveCrewWorkDirForHome(canonicalCWD, userHome); err == nil {
+		t.Fatal("the canonical target of a symlinked foreign profile root was accepted")
+	}
+}
+
 // Every crew verb passes the fence. An outpost holds no part of the crew, so a
 // wake, a set and a prime all refuse there by name.
 func TestCrewWake_AnOutpostHoldsNoneOfIt(t *testing.T) {
@@ -477,7 +531,7 @@ func TestCrewWake_AnOutpostHoldsNoneOfIt(t *testing.T) {
 		t.Errorf("set refusal %q does not name the home", protocol.Deref(resp.Error))
 	}
 
-	if _, _, bound := d.crewPrimeForSession("sess-anything"); bound {
+	if _, _, bound, _ := d.crewPrimeForSession("sess-anything"); bound {
 		t.Fatal("an outpost primed a session as a crew member")
 	}
 }

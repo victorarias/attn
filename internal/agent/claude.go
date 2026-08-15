@@ -551,7 +551,7 @@ func claudeHasBareModeAuthentication() bool {
 // PrepareLaunch copies resume transcripts into the target project folder so
 // Claude can resolve --resume when the resumed transcript belongs to another project folder.
 func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
-	if err := ensureAttnClaudeSkillInstalled(); err != nil {
+	if _, err := EnsureClaudeSkillInstalled(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(opts.ResumeSessionID) == "" {

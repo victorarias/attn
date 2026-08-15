@@ -249,6 +249,7 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 		d.logf("reload: remove returned error for %s (continuing): %v", sessionID, removeErr)
 	}
 
+	opts.DaemonEnv = d.spawnRoutingEnv()
 	if spawnErr := d.ptyBackend.Spawn(ctx, opts); spawnErr != nil {
 		// Respawn failed and the old worker is already dead. Never leave a live-looking
 		// pane over a dead session: clear the flag and run normal exit finalization so
@@ -498,12 +499,20 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 		prepared.abort()
 		return nil, err
 	}
+	externalCWD := strings.TrimSpace(result.CWD)
+	if externalCWD != "" {
+		externalCWD, err = d.validateCrewBoundLaunchDir(session.ID, externalCWD)
+		if err != nil {
+			prepared.abort()
+			return nil, err
+		}
+	}
 	opts.Agent = reg.Agent
 	opts.ResumeSessionID = ""
 	opts.LifecycleID = runID
 	opts.ExternalCommand = append([]string(nil), result.Argv...)
 	opts.ExternalEnv = commandEnv
-	opts.ExternalCWD = strings.TrimSpace(result.CWD)
+	opts.ExternalCWD = externalCWD
 	return prepared, nil
 }
 

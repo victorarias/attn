@@ -47,7 +47,10 @@ type SpawnOptions struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
-	LifecycleID       string
+	// DaemonEnv is the daemon's exact routing contract. Every runtime reapplies
+	// it after login-shell and plugin environment.
+	DaemonEnv   []string
+	LifecycleID string
 
 	// ResumeConversationFile is an existing conversation file this session
 	// picks up from, chosen by the user in the new-session flow. Only a

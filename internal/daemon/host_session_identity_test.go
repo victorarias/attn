@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -63,7 +64,19 @@ func TestConversationHostCarriesTheSessionIdentity(t *testing.T) {
 	}
 	t.Setenv("ATTN_WRAPPER_PATH", activeAttn)
 
-	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	socketPath := filepath.Join(t.TempDir(), "test.sock")
+	t.Setenv("ATTN_PROFILE", "fixture-lab")
+	t.Setenv("ATTN_SOCKET_PATH", socketPath)
+	d := NewForTesting(socketPath)
+	d.loginShellEnv = []string{
+		"ATTN_PROFILE=default",
+		"ATTN_DATA_DIR=/tmp/login-data",
+		"ATTN_DB_PATH=/tmp/login.db",
+		"ATTN_SOCKET_PATH=/tmp/login-shell.sock",
+		"ATTN_CONFIG_PATH=/tmp/login-config.json",
+		"ATTN_PLUGIN_DIR=/tmp/login-plugins",
+		"PATH=" + os.Getenv("PATH"),
+	}
 	backend := &fakeSpawnBackend{}
 	workspaceID, _, cwd := setupDelegationSource(t, d, backend)
 	pipe, done := startPluginPipe(t, d, "pi-fixture-plugin", nil)
@@ -98,6 +111,12 @@ func TestConversationHostCarriesTheSessionIdentity(t *testing.T) {
 		"ATTN_AGENT":          "pi-fixture",
 		"ATTN_DAEMON_MANAGED": "1",
 		"ATTN_INSIDE_APP":     "1",
+		"ATTN_PROFILE":        "fixture-lab",
+		"ATTN_DATA_DIR":       d.dataRoot,
+		"ATTN_DB_PATH":        config.DBPath(),
+		"ATTN_SOCKET_PATH":    socketPath,
+		"ATTN_CONFIG_PATH":    config.ConfigPath(),
+		"ATTN_PLUGIN_DIR":     d.pluginDir,
 	} {
 		if env[name] != want {
 			t.Errorf("host env %s = %q, want %q — the agent's tools cannot report as this session", name, env[name], want)

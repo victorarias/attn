@@ -484,6 +484,12 @@ func runPTYWorker() {
 			os.Exit(1)
 		}
 	}
+	if daemonEnvJSON := os.Getenv("ATTN_PTY_DAEMON_ENV"); daemonEnvJSON != "" {
+		if err := json.Unmarshal([]byte(daemonEnvJSON), &cfg.DaemonEnv); err != nil {
+			fmt.Fprintf(os.Stderr, "pty-worker error: invalid ATTN_PTY_DAEMON_ENV: %v\n", err)
+			os.Exit(1)
+		}
+	}
 	if cols > 0 {
 		if cols > 65535 {
 			fmt.Fprintf(os.Stderr, "pty-worker error: --cols must be <= 65535 (got %d)\n", cols)

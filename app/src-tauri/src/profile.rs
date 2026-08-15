@@ -3,9 +3,9 @@
 //! The `ATTN_BUILD_PROFILE` env var is read at *compile* time and baked
 //! into the binary. At startup a profile-baked app makes that profile
 //! authoritative for daemon routing: it sets `ATTN_PROFILE` and
-//! `ATTN_WS_PORT`, and removes socket/database/config paths inherited from
-//! a parent attn terminal. That prevents the dev bundle from reaching the
-//! production daemon while being launched from a production session.
+//! `ATTN_WS_PORT`, and removes path overrides inherited from a parent attn
+//! terminal. That prevents any bundle from reaching another profile while
+//! being launched from one of its sessions.
 //!
 //! A named per-profile build additionally bakes `ATTN_BUILD_WS_PORT` and
 //! `ATTN_BUILD_BUNDLE_ID`, both resolved by the single authority
@@ -27,6 +27,15 @@ const BUILD_PROFILE: Option<&str> = option_env!("ATTN_BUILD_PROFILE");
 // crate. Default/prod builds leave these unset and use the fallbacks below.
 const BUILD_WS_PORT: Option<&str> = option_env!("ATTN_BUILD_WS_PORT");
 const BUILD_BUNDLE_ID: Option<&str> = option_env!("ATTN_BUILD_BUNDLE_ID");
+const ROUTING_PATH_OVERRIDES: [&str; 7] = [
+    "ATTN_SOCKET_PATH",
+    "ATTN_DB_PATH",
+    "ATTN_CONFIG_PATH",
+    "ATTN_DATA_DIR",
+    "ATTN_PLUGIN_DIR",
+    "ATTN_DAEMON_BINARY",
+    "ATTN_BUNDLED_PLUGIN_DIR",
+];
 
 /// Returns the compile-time profile name (empty string for default).
 pub fn build_profile() -> &'static str {
@@ -68,13 +77,15 @@ pub fn default_port_for_build_profile() -> &'static str {
 /// `ATTN_WS_PORT` (directly or via a spawned subprocess).
 pub fn apply_build_profile_env() {
     let profile = build_profile();
-    if !profile.is_empty() {
-        for key in ["ATTN_SOCKET_PATH", "ATTN_DB_PATH", "ATTN_CONFIG_PATH"] {
-            env::remove_var(key);
-        }
-        env::set_var("ATTN_PROFILE", profile);
-        env::set_var("ATTN_WS_PORT", default_port_for_build_profile());
+    for key in ROUTING_PATH_OVERRIDES {
+        env::remove_var(key);
     }
+    if profile.is_empty() {
+        env::remove_var("ATTN_PROFILE");
+    } else {
+        env::set_var("ATTN_PROFILE", profile);
+    }
+    env::set_var("ATTN_WS_PORT", default_port_for_build_profile());
 }
 
 fn data_dir() -> Result<PathBuf, String> {
@@ -176,6 +187,19 @@ fn decide_automation_enabled(automation: Option<&str>, profile: Option<&str>) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_path_that_can_redirect_a_bundle_is_scrubbed() {
+        for key in ROUTING_PATH_OVERRIDES {
+            env::set_var(key, format!("foreign-{key}"));
+        }
+
+        apply_build_profile_env();
+
+        for key in ROUTING_PATH_OVERRIDES {
+            assert_eq!(env::var_os(key), None, "{key} survived app startup");
+        }
+    }
 
     #[test]
     fn unbaked_build_falls_back_to_prod_resources() {

@@ -1,9 +1,28 @@
 package hub
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/config"
 )
+
+func TestRemoteCachesStayInsideTheActiveProfileDataDir(t *testing.T) {
+	dataDir := t.TempDir()
+	t.Setenv("ATTN_DATA_DIR", dataDir)
+	platform := RemotePlatform{GOOS: "linux", GOARCH: "arm64", ArtifactName: "attn-linux-arm64"}
+
+	if got, want := remoteBinaryCachePath("build-key", platform), filepath.Join(dataDir, "remotes", "binaries", "build-key", platform.ArtifactName); got != want {
+		t.Errorf("binary cache = %q, want %q", got, want)
+	}
+	if got, want := appRuntimeCacheDir("runtime-key"), filepath.Join(dataDir, "remotes", "app-runtime", "runtime-key"); got != want {
+		t.Errorf("app runtime cache = %q, want %q", got, want)
+	}
+	if got := config.DataDir(); got != dataDir {
+		t.Fatalf("test profile data dir = %q, want %q", got, dataDir)
+	}
+}
 
 func TestShouldInstallRemoteBinary(t *testing.T) {
 	tests := []struct {

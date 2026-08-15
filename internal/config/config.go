@@ -267,6 +267,14 @@ func DataDir() string {
 	return attnDir()
 }
 
+// ConfigPath returns the config file whose routing this process loaded.
+func ConfigPath() string {
+	if envPath := strings.TrimSpace(os.Getenv("ATTN_CONFIG_PATH")); envPath != "" {
+		return filepath.Clean(envPath)
+	}
+	return filepath.Join(attnDir(), "config.json")
+}
+
 // PluginDir returns the installed plugin directory for the active profile.
 // Priority: ATTN_PLUGIN_DIR env var > per-profile data directory default.
 func PluginDir() string {

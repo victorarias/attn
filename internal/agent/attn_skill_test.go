@@ -174,3 +174,31 @@ func TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 	}
 	assertAttnSkillTree(t, skillDir)
 }
+
+func TestUserGlobalSkillSyncIsSkippedOutsideTheDefaultProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(toolhome.EnvVar, home)
+	t.Setenv("ATTN_PROFILE", "fixture-lab")
+
+	for name, ensure := range map[string]func() (bool, error){
+		"claude":  EnsureClaudeSkillInstalled,
+		"agents":  EnsureAgentsSkillInstalled,
+		"copilot": EnsureCopilotSkillInstalled,
+	} {
+		t.Run(name, func(t *testing.T) {
+			synced, err := ensure()
+			if err != nil {
+				t.Fatalf("ensure skill: %v", err)
+			}
+			if synced {
+				t.Fatal("a non-default profile synchronized a user-global skill")
+			}
+		})
+	}
+
+	for _, root := range []string{".claude", ".agents", ".copilot"} {
+		if _, err := os.Stat(filepath.Join(home, root)); !os.IsNotExist(err) {
+			t.Fatalf("non-default profile wrote %s: stat err = %v", root, err)
+		}
+	}
+}

@@ -115,6 +115,7 @@ import {
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { boundTicketForSession } from './utils/tickets';
+import { BUILD_PROFILE } from './utils/buildProfile';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import {
   advanceAfterTurnClosed,
@@ -3854,6 +3855,7 @@ function AppContent({
           selectedTile={selectedTile}
           tileContents={tileContents}
           collapsed={sidebarCollapsed}
+          profile={BUILD_PROFILE}
           headerActions={sidebarHeaderActions}
           criticalNotifications={criticalNotifications}
           onOpenNotifications={openNotificationsPanel}

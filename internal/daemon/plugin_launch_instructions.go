@@ -92,6 +92,10 @@ func (d *Daemon) gardenPrimeForLaunch(sessionID string) *hooks.GardenPrime {
 // a built-in driver's wrapper fetches over `crew_prime`. Empty for a session
 // that is nobody.
 func (d *Daemon) crewPrimeForLaunch(sessionID string) string {
-	_, block, _ := d.crewPrimeForSession(sessionID)
+	_, block, _, err := d.crewPrimeForSession(sessionID)
+	if err != nil {
+		d.logf("crew: refusing launch priming for session %s: %v", sessionID, err)
+		return ""
+	}
 	return block
 }
