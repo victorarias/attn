@@ -57,9 +57,8 @@ func (c *Codex) Capabilities() Capabilities {
 		HasYolo:              true,
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
-		// HasSelfMonitor: false — the shared daemon nudge covers unread tickets.
-		HasModelPin:  true,
-		HasEffortPin: true,
+		HasModelPin:          true,
+		HasEffortPin:         true,
 	}
 }
 

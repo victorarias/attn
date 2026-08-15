@@ -11,12 +11,11 @@ import (
 	"github.com/victorarias/attn/internal/protocol"
 )
 
-// watchTicketInbox runs unbabysat behind a harness Monitor, so its noise behavior
-// matters: it must print new bundles, stay silent when nothing is new, and report a
-// sustained daemon outage once rather than every poll (a Monitor treats each printed
-// line as fresh activity and would nudge the chief every interval). This drives the
-// loop deterministically with a manual tick channel and a scripted fetch so every
-// poll is controlled — no daemon, signals, or wall-clock timer.
+// watchTicketInbox may run unattended, so its noise behavior matters: it must print
+// new bundles, stay silent when nothing is new, and report a sustained daemon outage
+// once rather than every poll. This drives the loop deterministically with a manual
+// tick channel and a scripted fetch so every poll is controlled — no daemon, signals,
+// or wall-clock timer.
 func TestWatchTicketInboxDedupesErrorsAndPrintsBundles(t *testing.T) {
 	type step struct {
 		result *protocol.TicketInboxResult

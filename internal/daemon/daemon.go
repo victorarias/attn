@@ -297,7 +297,7 @@ type Daemon struct {
 	deliveryMu                 sync.Mutex                                 // serializes consumes, catch-up, deadline rebuilds, and nudge fire-time checks
 	watchLeaseUntil            map[string]time.Time                       // ephemeral live-watch lease per session
 	nudgeWindowOverride        time.Duration                              // 0 => defaultNudgeCountdownWindow; a short test override otherwise
-	ticketBufferWindowOverride time.Duration                              // 0 => defaultTicketBufferWindow; test-only override
+	ticketBundleWindowOverride time.Duration                              // 0 => defaultTicketBundleWindow; test-only override
 	nudgeFireHook              func(sessionID, action string)             // tests only: invoked at the end of a countdown fire
 	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex

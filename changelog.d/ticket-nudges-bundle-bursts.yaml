@@ -1,0 +1,7 @@
+kind: fixed
+area: tickets
+change: >
+  Ticket nudges now arrive promptly after a quiet period instead of making
+  observers wait up to 30 minutes. Follow-up activity within a burst is bundled
+  into one nudge for every participant, and `attn ticket inbox --watch` returns
+  unread activity immediately.

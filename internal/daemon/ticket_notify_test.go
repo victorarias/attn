@@ -369,8 +369,8 @@ func TestChiefTicketContinuityAcrossRoleTransfer(t *testing.T) {
 		if deadline := currentNudgeDeadline(d, chiefA); !deadline.IsZero() {
 			t.Fatalf("retired chief still has a countdown armed for %s", deadline)
 		}
-		// Past the longest window any observer of this ticket could have been given.
-		time.Sleep(2 * d.ticketBufferWindow())
+		// Past the longest window any participant of this ticket could have been given.
+		time.Sleep(2 * d.ticketBundleWindow())
 		synctest.Wait()
 		if !wasNudged(inputs(chiefB)) {
 			t.Fatal("replacement chief was not nudged about unread chief-owned ticket activity")
@@ -414,8 +414,8 @@ func TestChiefRoleAndExplicitSubscriptionDeliverOnce(t *testing.T) {
 	}
 }
 
-// A Claude `ticket inbox --watch` remains a valid optional consumer. It drains the
-// same queue and clears the shared countdown before the doorbell fires.
+// A direct `ticket inbox --watch` caller drains the same queue and clears the
+// shared countdown before the doorbell fires.
 func TestTicketWatchDrainClearsSharedCountdown(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.nudgeWindowOverride = time.Hour

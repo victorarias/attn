@@ -1111,6 +1111,7 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	{105, "walk an app's serving history as a chain", ``},
 	// Applied by applyMigration106, whose ALTER is column-guarded.
 	{106, "add durable per-session token cost state", ``},
+	{107, "record which ticket event a delivery covered", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1505,6 +1506,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 107 {
+			if err := applyMigration107(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -1527,6 +1533,20 @@ func migrateDB(db *sql.DB, dbPath string) error {
 	}
 
 	return nil
+}
+
+// applyMigration107 records the newest ticket event covered by a delivery. The
+// guard keeps migration-rewind tests and branch databases with the column safe.
+func applyMigration107(tx *sql.Tx) error {
+	has, err := columnExists(tx, "ticket_delivery_attention", "delivered_through_seq")
+	if err != nil {
+		return err
+	}
+	if has {
+		return nil
+	}
+	_, err = tx.Exec(`ALTER TABLE ticket_delivery_attention ADD COLUMN delivered_through_seq INTEGER NOT NULL DEFAULT 0`)
+	return err
 }
 
 func applyMigration73(tx *sql.Tx) error {

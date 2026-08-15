@@ -77,10 +77,6 @@ type Capabilities struct {
 	// context checkout.
 	HasWorkspaceContext bool
 
-	// HasSelfMonitor: the agent can watch its own ticket/event stream via a
-	// live Monitor. Selects chief guidance only; nudge eligibility is shared.
-	HasSelfMonitor bool
-
 	// HasModelPin: launch accepts SpawnOpts.Model; delegation rejects --model without it.
 	HasModelPin bool
 
@@ -143,9 +139,6 @@ func EffectiveCapabilities(d Driver) Capabilities {
 	}
 	if v, ok := boolEnv(prefix + "WORKSPACE_CONTEXT"); ok {
 		caps.HasWorkspaceContext = v
-	}
-	if v, ok := boolEnv(prefix + "SELF_MONITOR"); ok {
-		caps.HasSelfMonitor = v
 	}
 	if v, ok := boolEnv(prefix + "MODEL_PIN"); ok {
 		caps.HasModelPin = v
@@ -279,10 +272,9 @@ func (o SpawnOpts) addDirArgs() []string {
 // launchGuidance is the system-prompt block for this launch: chief guidance or
 // the workspace agent's, plus the garden primer. hasSelfMonitor is the driver's
 // own capability, which is why the driver composes rather than the caller.
-func (o SpawnOpts) launchGuidance(hasSelfMonitor bool) string {
+func (o SpawnOpts) launchGuidance() string {
 	return hooks.Launch{
 		NotebookRoot:         o.NotebookRoot,
-		HasSelfMonitor:       hasSelfMonitor,
 		WorkspaceContextPath: o.WorkspaceContextPath,
 		InjectWorkflow:       o.InjectWorkflowGuidance,
 		Garden:               o.Garden,

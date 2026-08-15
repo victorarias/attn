@@ -165,7 +165,7 @@ func TestBufferedNudgePreservesDeadlineAcrossSelectionPause(t *testing.T) {
 	d := newBubbleDaemon(t)
 	synctest.Test(t, func(t *testing.T) {
 		d.nudgeWindowOverride = time.Second
-		d.ticketBufferWindowOverride = time.Hour
+		d.ticketBundleWindowOverride = time.Hour
 		stopDaemonBackground(t, d)
 		chiefID, agentID, _ := delegateForNotify(t, d, "codex")
 		ticketID := boundTicketID(t, d, agentID)

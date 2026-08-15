@@ -16,10 +16,11 @@ import (
 // it never streams the message into the PTY.
 const ticketNudgePrompt = "📋 New ticket activity — run `attn ticket inbox` to catch up."
 
-// defaultTicketBufferWindow is the interruption budget for every observer that
-// is not currently assigned to the ticket. The assignee keeps the short nudge
-// countdown because it is the agent actively doing the work.
-const defaultTicketBufferWindow = 30 * time.Minute
+// defaultTicketBundleWindow is the quiet threshold after a ticket doorbell.
+// Busy delegation tickets in the production event history had a median
+// inter-event gap of 9m49s (440 gaps across 67 tickets with at least five events),
+// so ten minutes sits just past the observed burst cadence.
+const defaultTicketBundleWindow = 10 * time.Minute
 const ticketWatchLeaseWindow = 5 * time.Second
 
 func ticketWatchLeaseWindowFor(intervalMS *string) time.Duration {
@@ -45,44 +46,29 @@ func ticketWatchLeaseWindowFor(intervalMS *string) time.Duration {
 	return interval + grace
 }
 
-func (d *Daemon) ticketBufferWindow() time.Duration {
-	if d.ticketBufferWindowOverride > 0 {
-		return d.ticketBufferWindowOverride
+func (d *Daemon) ticketBundleWindow() time.Duration {
+	if d.ticketBundleWindowOverride > 0 {
+		return d.ticketBundleWindowOverride
 	}
-	return defaultTicketBufferWindow
+	return defaultTicketBundleWindow
 }
 
-func (d *Daemon) ticketDeadline(sessionID string, event store.TicketEvent, now time.Time) (time.Time, bool, error) {
-	ticket, err := d.store.GetTicket(event.TicketID)
-	if err != nil || ticket == nil {
-		return time.Time{}, false, err
-	}
-	if ticket.Assignee == sessionID || ticketEventNeedsImmediateAttention(event) {
-		return now.Add(d.nudgeWindow()), true, nil
-	}
+func (d *Daemon) ticketDeadline(sessionID string, newestPendingSeq int64, now time.Time) (time.Time, bool, error) {
 	attention, found, err := d.store.TicketDeliveryAttention(d.ticketAttentionKey(sessionID))
 	if err != nil {
 		return time.Time{}, false, err
 	}
+	if found && newestPendingSeq <= attention.DeliveredThroughSeq {
+		return time.Time{}, false, nil
+	}
 	deadline := now.Add(d.nudgeWindow())
-	if found {
-		if buffered := attention.LastAttentionAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
-			deadline = buffered
-		}
-	} else if !event.CreatedAt.IsZero() {
-		if buffered := event.CreatedAt.Add(d.ticketBufferWindow()); buffered.After(deadline) {
-			deadline = buffered
-		}
+	if !found || !attention.LastAttentionAt.Add(d.ticketBundleWindow()).After(now) {
+		return deadline, true, nil
+	}
+	if bundled := attention.LastAttentionAt.Add(d.ticketBundleWindow()); bundled.After(deadline) {
+		deadline = bundled
 	}
 	return deadline, false, nil
-}
-
-// ticketEventNeedsImmediateAttention identifies handoff boundaries that must not
-// wait behind an observer's ordinary interruption budget. Completion is the one
-// canonical successful terminal report; other statuses and activity retain PR
-// 594's buffering policy.
-func ticketEventNeedsImmediateAttention(event store.TicketEvent) bool {
-	return event.Kind == store.TicketEventStatusChanged && event.ToStatus == store.TicketStatusDone
 }
 
 // ticketNudger adapts the daemon's doorbell primitive to ticketnotify.Nudger.
@@ -287,8 +273,6 @@ func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time
 	if session == nil || d.initialPromptPending(sessionID) || !isNudgeDeliveryAllowed(string(session.State)) {
 		return
 	}
-	var deadline time.Time
-	immediate := false
 	pending := make(map[int64]struct{})
 	for _, observer := range d.ticketObserversForSession(sessionID) {
 		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
@@ -298,21 +282,28 @@ func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time
 		}
 		for _, event := range events {
 			pending[event.Seq] = struct{}{}
-			candidate, eventImmediate, err := d.ticketDeadline(sessionID, event, now)
-			if err != nil {
-				continue
-			}
-			if deadline.IsZero() || candidate.Before(deadline) {
-				deadline, immediate = candidate, eventImmediate
-			}
 		}
 	}
-	if !deadline.IsZero() {
+	if len(pending) > 0 {
+		var newestPendingSeq int64
+		for seq := range pending {
+			if seq > newestPendingSeq {
+				newestPendingSeq = seq
+			}
+		}
+		deadline, immediate, err := d.ticketDeadline(sessionID, newestPendingSeq, now)
+		if err != nil {
+			d.logf("ticket notify deadline: %s: %v", sessionID, err)
+			return
+		}
+		if deadline.IsZero() {
+			return
+		}
 		if d.ticketRebuildBeforeArmHook != nil {
 			d.ticketRebuildBeforeArmHook(sessionID, deadline)
 		}
 		if d.debugLogging {
-			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "immediate", false: "buffered"}[immediate], len(pending), deadline.Format(time.RFC3339))
+			d.logf("ticket delivery: observer=%s session=%s class=%s pending=%d deadline=%s channel=countdown outcome=armed", d.ticketAttentionKey(sessionID), sessionID, map[bool]string{true: "immediate", false: "bundled"}[immediate], len(pending), deadline.Format(time.RFC3339))
 		}
 		d.armNudgeCountdownAt(sessionID, deadline)
 	}

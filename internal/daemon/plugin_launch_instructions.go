@@ -39,10 +39,9 @@ func (d *Daemon) preparePluginLaunchInstructions(sessionID, workspaceID string, 
 		return &pluginLaunchInstructions{
 			Kind: pluginInstructionKindChief,
 			Content: hooks.Launch{
-				NotebookRoot:   root,
-				HasSelfMonitor: d.sessionHasSelfMonitor(sessionID),
-				Garden:         d.gardenPrimeForLaunch(sessionID),
-				Crew:           d.crewPrimeForLaunch(sessionID),
+				NotebookRoot: root,
+				Garden:       d.gardenPrimeForLaunch(sessionID),
+				Crew:         d.crewPrimeForLaunch(sessionID),
 			}.Instructions(),
 			WorkspaceID:  workspaceID,
 			NotebookRoot: root,
