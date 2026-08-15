@@ -34,10 +34,11 @@ interface WakeConfirm {
 /**
  * The two-step over one member's wake.
  *
- * An armed wake disarms itself three ways — a click outside the row, Escape,
- * and the timeout above — so an arm nobody confirms never wakes anyone. The
- * outside-click rule also gives the roster single-arm for free: arming a second
- * member is a click outside the first one's row.
+ * An armed wake disarms itself four ways — a click outside the row, focus
+ * leaving the row, Escape, and the timeout above — so an arm nobody confirms
+ * never wakes anyone. Leaving the row is also what gives the roster single-arm
+ * for free: reaching a second member means leaving the first one's row, by
+ * pointer or by keyboard.
  */
 export function useWakeConfirm(onWake: (() => void) | undefined): WakeConfirm {
   const [phase, setPhase] = useState<WakePhase>('rest');
@@ -50,15 +51,24 @@ export function useWakeConfirm(onWake: (() => void) | undefined): WakeConfirm {
       if (rowRef.current?.contains(event.target as Node)) return;
       disarm();
     };
+    // Focus is the keyboard's pointer: tabbing to another row is that user
+    // leaving this one, and without this the roster's one-arm-at-a-time rule
+    // would hold for the mouse and quietly not for the keyboard.
+    const onFocusIn = (event: FocusEvent) => {
+      if (rowRef.current?.contains(event.target as Node)) return;
+      disarm();
+    };
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') disarm();
     };
     const timer = window.setTimeout(disarm, WAKE_ARM_TIMEOUT_MS);
     document.addEventListener('pointerdown', onPointerDown, true);
+    document.addEventListener('focusin', onFocusIn, true);
     document.addEventListener('keydown', onKeyDown, true);
     return () => {
       window.clearTimeout(timer);
       document.removeEventListener('pointerdown', onPointerDown, true);
+      document.removeEventListener('focusin', onFocusIn, true);
       document.removeEventListener('keydown', onKeyDown, true);
     };
   }, [phase]);
@@ -74,6 +84,10 @@ export function useWakeConfirm(onWake: (() => void) | undefined): WakeConfirm {
   // twice from the one confirmed click this whole two-step exists to earn.
   const trigger = useCallback(() => {
     if (!onWake) return;
+    // The flare is not a target. A click landing in it would otherwise re-arm a
+    // row whose wake is already sent, and the click after that would send a
+    // second one — the double-wake this whole two-step exists to prevent.
+    if (phase === 'breaking') return;
     if (phase !== 'armed') {
       setPhase('armed');
       return;

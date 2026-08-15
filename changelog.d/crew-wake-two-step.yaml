@@ -4,6 +4,6 @@ change: >
   Waking a sleeping crew member from the sidebar now takes two clicks. The
   first arms the row — the sun on it rises off the horizon, the light fans
   out, and the row says "confirm" — and the second wakes the member. An
-  armed row stands down on its own after four seconds, on Escape, or on a
-  click anywhere else, so an arm nobody confirms wakes nobody. `attn crew
-  wake` is unchanged: typing the command is already the deliberate act.
+  armed row stands down on its own after four seconds, on Escape, and as soon
+  as you leave it, so an arm nobody confirms wakes nobody. `attn crew wake` is
+  unchanged: typing the command is already the deliberate act.

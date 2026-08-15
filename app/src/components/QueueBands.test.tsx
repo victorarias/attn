@@ -543,8 +543,21 @@ describe('the crew in the sidebar', () => {
 
       fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
       expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
-      // The confirm hands the row over to the flare; it is no longer armed, so
-      // a third click starts a fresh two-step rather than waking twice.
+      expect(armed('trellis')).toBe('breaking');
+    });
+
+    it('is not a target while it is flaring', () => {
+      // The flare lasts long enough to click into. Re-arming a row whose wake
+      // is already sent would put a second wake one click away.
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
       expect(armed('trellis')).toBe('breaking');
     });
 
@@ -573,6 +586,33 @@ describe('the crew in the sidebar', () => {
       expect(armed('trellis')).toBeNull();
       expect(armed('alder')).toBe('armed');
       expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('arms one member at a time for the keyboard too', () => {
+      // A keyboard user reaches the next row by focusing it, never by clicking
+      // outside this one, so focus leaving the row has to disarm it as well.
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.focusIn(screen.getByTestId('queue-crew-wake-alder'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-alder'));
+
+      expect(armed('trellis')).toBeNull();
+      expect(armed('alder')).toBe('armed');
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('keeps the arm while focus moves inside its own row', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-select-trellis'));
+      fireEvent.focusIn(screen.getByTestId('queue-crew-wake-trellis'));
+
+      expect(armed('trellis')).toBe('armed');
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
     });
 
     it('stands down on Escape', () => {
