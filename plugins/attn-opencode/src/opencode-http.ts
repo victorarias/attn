@@ -105,15 +105,19 @@ export class OpenCodeHTTP {
     return body.map((entry) => asString(asObject(entry)?.id)).filter((id): id is string => id !== undefined);
   }
 
+  // OpenCode's message order is not contractually chronological, so the user
+  // message is the first one with that role, not the first one in the list.
   async userPromptText(sessionID: string, signal?: AbortSignal): Promise<string | undefined> {
-    const messages = await this.listMessages(sessionID, 1, signal);
-    const first = asObject(messages[0]);
-    const info = asObject(first?.info) ?? first;
-    if (asString(info?.role) !== "user") return undefined;
-    const parts = Array.isArray(first?.parts) ? first.parts : [];
-    const text = parts.map((part) => asObject(part)).filter((part) => asString(part?.type) === "text")
-      .map((part) => asString(part?.text) ?? "").join("");
-    return text === "" ? undefined : text;
+    const messages = await this.listMessages(sessionID, 5, signal);
+    for (const message of messages) {
+      const entry = asObject(message);
+      if (asString((asObject(entry?.info) ?? entry)?.role) !== "user") continue;
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      const text = parts.map((part) => asObject(part)).filter((part) => asString(part?.type) === "text")
+        .map((part) => asString(part?.text) ?? "").join("");
+      if (text !== "") return text;
+    }
+    return undefined;
   }
 
   async listToolIDs(signal?: AbortSignal): Promise<string[]> {

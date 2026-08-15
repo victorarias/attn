@@ -232,7 +232,12 @@ export class FakeOpenCode {
       if (this.tuiAttached && this.composer !== "") {
         const id = `native-${this.nextSession++}`;
         this.sessions.set(id, { id, model: this.tuiModel });
-        this.messages.set(id, [{ info: { id: `user-${id}`, role: "user" }, parts: [{ type: "text", text: this.composer }] }]);
+        // Newest first, like OpenCode can answer: the reply the TUI produces is
+        // ahead of the prompt in the list.
+        this.messages.set(id, [
+          { info: { id: `assistant-${id}`, role: "assistant" }, parts: [{ type: "text", text: "working" }] },
+          { info: { id: `user-${id}`, role: "user" }, parts: [{ type: "text", text: this.composer }] },
+        ]);
         this.tuiSubmissions.push({ sessionID: id, text: this.composer });
         this.composer = "";
         if (!this.dropSessionCreatedEvent) this.emit("session.created", { sessionID: id });
