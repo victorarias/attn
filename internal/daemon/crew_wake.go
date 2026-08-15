@@ -287,7 +287,12 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 	}
 
 	initialPrompt := crewWakePrompt
-	if delivery != nil {
+	if delivery == nil {
+		// A crew binding becomes visible before the launching agent has crossed
+		// priming and its trust dialog. Gate messages addressed in that window;
+		// the first hook on the far side of the greeting opens and drains it.
+		d.notePostInitialPrompt(sessionID, nil)
+	} else {
 		if delivery.Record != nil {
 			delivery.Record.TargetSessionID = sessionID
 			if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
@@ -318,12 +323,10 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
-		if delivery != nil {
-			if delivery.Record != nil {
-				d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
-			}
-			d.forgetPostInitialPrompt(sessionID)
+		if delivery != nil && delivery.Record != nil {
+			d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
 		}
+		d.forgetPostInitialPrompt(sessionID)
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)
 		return nil, fmt.Errorf("wake %s: %w", crew.DisplayName(member.ID), err)

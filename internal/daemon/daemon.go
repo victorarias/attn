@@ -255,9 +255,8 @@ type Daemon struct {
 	drainingAgentMessages       map[string]bool
 	agentMessageTaken           map[string][]chan struct{}
 	agentMessagesAwaitingSubmit map[string]bool
-	// A crew wake may owe work only after the new day has submitted its ordinary
-	// first prompt. Ticket delivery uses this to keep the doorbell behind charter
-	// and handoff priming instead of pasting into the launching session.
+	// Every crew wake gates doorbells until the new day has submitted its first
+	// prompt. The optional callback carries ticket work that starts at that seam.
 	postInitialPrompt map[string]func()
 	// A message-triggered crew wake carries the attributed message as the new
 	// day's initial prompt. The row stays queued until a prompt-submit hook
