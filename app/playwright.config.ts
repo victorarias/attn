@@ -17,7 +17,9 @@ export default defineConfig({
     trace: 'on-first-retry',
   },
   webServer: {
-    command: `npx vite --port ${TEST_VITE_PORT}`,
+    // The wasm module is downloaded, not committed, so a fresh checkout — CI
+    // included — has to fetch it before vite can resolve the import.
+    command: `pnpm run verify:ghostty-vt && npx vite --port ${TEST_VITE_PORT}`,
     url: `http://localhost:${TEST_VITE_PORT}`,
     reuseExistingServer: false, // Always start fresh to ensure correct env vars
     timeout: 30000,
