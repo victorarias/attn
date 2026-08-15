@@ -527,16 +527,19 @@ Parallelism means another member, never a second copy. A binding naming a
 session the daemon no longer knows has let go on its own, the same liveness
 rule a seed's tender follows.
 
-To **wake** a member is to start its day: `attn crew wake <name>`, or one click
-on its row in the sidebar, where every member is drawn awake or asleep. The
-daemon binds the member, then launches a session in its recorded cwd — its own
-home when none is recorded — reaching its **awareness dirs**, the directories
-its charter is about. Every wake runs on the same pinned model, hardcoded
-rather than configurable: a member subtly wrong takes a read of its prose to
-notice. The launch carries **priming**: what a member is, where its charter is
-to be read, the freshest letter left for it inline, and how a day is closed.
-Skills retire into verbs and the verbs are taught, because an agent never told
-how to handoff cannot file one.
+To **wake** a member is to start its day: `attn crew wake <name>`, or two
+clicks on its row in the sidebar, where every member is drawn awake or asleep.
+The sidebar asks twice because a day cannot be un-rung — the first click arms
+the row and the second wakes, and an armed row that is not confirmed stands
+down. The command does not ask twice: typing it is already the deliberate act
+the clicks reconstruct. Either way the daemon binds the member, then launches
+a session in its recorded cwd — its own home when none is recorded — reaching
+its **awareness dirs**, the directories its charter is about. Every wake runs
+on the same pinned model, hardcoded rather than configurable: a member subtly
+wrong takes a read of its prose to notice. The launch carries **priming**:
+what a member is, where its charter is to be read, the freshest letter left
+for it inline, and how a day is closed. Skills retire into verbs and the verbs
+are taught, because an agent never told how to handoff cannot file one.
 
 A member is also an address: `attn agent msg <member> "…"` reaches its live
 day when it is awake. When it is asleep, the message wakes it within the same

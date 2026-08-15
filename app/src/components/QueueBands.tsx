@@ -3,6 +3,7 @@ import { StateIndicator } from './StateIndicator';
 import { SessionLabel } from './SessionLabel';
 import { ChiefOfStaffBadge } from './ChiefOfStaffBadge';
 import { SidebarSettlingBar } from './SettlingIndicator';
+import { CrewWakeSun, useWakeConfirm } from './CrewWake';
 import { formatShortcut } from '../shortcuts/formatShortcut';
 import type { UISessionState } from '../types/sessionState';
 import { formatTurnAge, type QueueBands as QueueBandsModel, type QueueRow } from '../utils/queueBands';
@@ -411,6 +412,11 @@ function buildCrewRows(
  * One crew member's row. Awake, it is the session's row with the crew rail;
  * asleep, it is the member itself with one act on it — wake — and no state to
  * report, because there is nothing running to have a state.
+ *
+ * Waking takes two clicks. Both of the row's asleep targets — the fill button
+ * and the sun — arm on the first and wake on the second, and they share one
+ * armed state, so arming from the row and confirming on the sun is the same
+ * gesture. The daemon still hears one `crew_wake`, on the confirm.
  */
 function CrewRowView({
   member,
@@ -428,16 +434,21 @@ function CrewRowView({
   onOpenActions?: (event: ReactMouseEvent) => void;
 }) {
   const awake = Boolean(row);
+  const { phase, trigger, rowRef } = useWakeConfirm(onWake);
+  const armed = phase === 'armed';
   // An awake member arrives with the daemon's label; a sleeping one has no
   // session to carry one, so the display rule names it here.
   const name = crewDisplayName(member);
   const label = row?.session.label || name;
+  const wakeLabel = armed ? `Wake ${name} — click again to confirm` : `Wake ${name}`;
   return (
     <div
+      ref={rowRef}
       className={`session-item queue-row queue-row--crew ${selected ? 'selected' : ''}`.trim()}
       data-testid={`queue-crew-${member}`}
       data-crew-member={member}
       data-crew-state={awake ? 'awake' : 'asleep'}
+      data-crew-wake={awake || phase === 'rest' ? undefined : phase}
       data-state={row?.session.state}
       data-workspace-id={row?.workspaceId}
     >
@@ -445,8 +456,8 @@ function CrewRowView({
         type="button"
         className="queue-row-select"
         data-testid={`queue-crew-select-${member}`}
-        aria-label={awake ? `Open ${label}` : `Wake ${name}`}
-        onClick={awake ? onSelect : onWake}
+        aria-label={awake ? `Open ${label}` : wakeLabel}
+        onClick={awake ? onSelect : trigger}
       />
       {awake ? (
         <StateIndicator state={row!.session.state} size="md" seed={row!.session.id} reason={row!.session.state_reason} />
@@ -461,18 +472,19 @@ function CrewRowView({
       </span>
       {!awake && onWake && (
         <div className="queue-row-controls">
+          {armed && <span className="crew-wake-confirm">confirm</span>}
           <button
             type="button"
             className="queue-row-wake"
             data-testid={`queue-crew-wake-${member}`}
-            title={`Wake ${name} — start its day`}
-            aria-label={`Wake ${name}`}
+            title={armed ? `Click again to wake ${name}` : `Wake ${name} — start its day`}
+            aria-label={wakeLabel}
             onClick={(event) => {
               event.stopPropagation();
-              onWake();
+              trigger();
             }}
           >
-            ☀
+            <CrewWakeSun phase={phase} />
           </button>
         </div>
       )}
