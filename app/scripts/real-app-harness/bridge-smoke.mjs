@@ -52,19 +52,17 @@ async function main() {
     if (!targetPaneId) {
       throw new Error(`No pane available to split in workspace ${sessionId}`);
     }
+    const existingPaneIds = new Set((initialState.panes || []).map((pane) => pane.paneId));
     await client.request('split_pane', {
       sessionId,
       targetPaneId,
       direction: 'vertical',
     });
 
-    const workspace = await observer.waitForWorkspace(
-      sessionId,
-      (entry) => (entry.panes || []).filter((pane) => pane.kind === 'shell').length >= 1,
-      `utility workspace for session ${sessionId}`,
-      20_000
-    );
-    const utilityPane = (workspace.panes || []).find((pane) => pane.kind === 'shell' && pane.runtime_id);
+    // The split's pane is the one the workspace did not have before it. Every
+    // pane in a workspace is kind `agent` — a shell pane is an agent pane whose
+    // agent is the shell — so there is nothing on the record to filter by.
+    const utilityPane = await observer.waitForUtilityPane(sessionId, 20_000, existingPaneIds);
     if (!utilityPane?.runtime_id) {
       throw new Error('Utility pane runtime not found');
     }
@@ -84,7 +82,10 @@ async function main() {
       client,
       sessionId,
       utilityPane.pane_id,
-      (text) => text.includes(utilityToken),
+      // The pane is 80-ish columns and the token is longer than what is left of
+      // the line after the prompt, so the terminal wraps it. Rendered text keeps
+      // that wrap as a newline; the token itself has no whitespace.
+      (text) => text.replace(/\s+/g, '').includes(utilityToken),
       `utility pane text to contain ${utilityToken}`,
       15_000
     );
