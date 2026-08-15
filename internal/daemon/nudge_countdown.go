@@ -314,6 +314,9 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 	if d.ptyBackend == nil || d.store == nil {
 		return "noop"
 	}
+	if d.initialPromptPending(sessionID) {
+		return "priming"
+	}
 	session := d.store.Get(sessionID)
 	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
 		return "blocked"
@@ -408,6 +411,9 @@ func isNudgeDeliveryAllowed(state string) bool {
 func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	sessionID := strings.TrimSpace(msg.SessionID)
 	if sessionID == "" {
+		return
+	}
+	if d.initialPromptPending(sessionID) {
 		return
 	}
 	d.cancelNudgeCountdown(sessionID, "user triggered")

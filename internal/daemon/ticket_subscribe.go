@@ -31,7 +31,8 @@ func (d *Daemon) handleTicketSubscribe(conn net.Conn, msg *protocol.TicketSubscr
 	// AddTicketSubscription fails with ErrTicketNotFound for an unknown id, so an
 	// agent subscribing to a phantom ticket gets a clear error rather than a silent
 	// no-op. Re-subscribing is idempotent.
-	if err := d.store.AddTicketSubscription(sourceSessionID, ticketID, time.Now()); err != nil {
+	identity := d.ticketActorIdentity(sourceSessionID)
+	if err := d.store.AddTicketSubscription(identity, ticketID, time.Now()); err != nil {
 		d.sendError(conn, "ticket subscribe: "+err.Error())
 		return
 	}
@@ -59,7 +60,7 @@ func (d *Daemon) handleTicketUnsubscribe(conn net.Conn, msg *protocol.TicketUnsu
 		d.sendError(conn, "ticket unsubscribe: ticket_id is required")
 		return
 	}
-	if err := d.store.RemoveTicketSubscription(sourceSessionID, ticketID); err != nil {
+	if err := d.store.RemoveTicketSubscription(d.ticketActorIdentity(sourceSessionID), ticketID); err != nil {
 		d.sendError(conn, "ticket unsubscribe: "+err.Error())
 		return
 	}

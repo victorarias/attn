@@ -70,6 +70,38 @@ func TestHandleTicketCommentValidatesTicket(t *testing.T) {
 	}
 }
 
+func TestCrewMemberCommentIsAttributedToTheMemberWithoutSubscribingIt(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "trellis-today")
+	if _, err := d.claimCrewBinding("trellis", "trellis-today"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "peer-ticket", Title: "Peer"}, "you", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if resp := callTicketComment(t, d, "trellis-today", "peer-ticket", "one useful note"); !resp.Ok {
+		t.Fatalf("comment response = %+v", resp)
+	}
+	ticket, err := d.store.GetTicket("peer-ticket")
+	if err != nil || ticket == nil {
+		t.Fatalf("GetTicket = %+v, %v", ticket, err)
+	}
+	last := ticket.Activity[len(ticket.Activity)-1]
+	identity := store.TicketMemberIdentity("trellis")
+	if last.Author != identity {
+		t.Fatalf("comment author = %q, want %q", last.Author, identity)
+	}
+	participants, err := d.store.TicketParticipants("peer-ticket")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, participant := range participants {
+		if participant == identity {
+			t.Fatalf("comment-only member became a participant: %v", participants)
+		}
+	}
+}
+
 // The core of the feature: commenting informs a ticket's participants WITHOUT
 // enrolling the commenter. X comments on Z's ticket; Z (the assignee) is nudged,
 // X is not nudged about its own note — and crucially, a LATER event on that ticket

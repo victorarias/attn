@@ -1,9 +1,12 @@
 package daemon
 
 import (
+	"fmt"
 	"strconv"
 	"time"
 
+	"github.com/victorarias/attn/internal/crew"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -110,7 +113,16 @@ func (d *Daemon) notifyTicketObservers(ticketID string) {
 	}
 	now := time.Now()
 	targets := make(map[string]bool, len(participants))
+	var sleepingMembers []string
 	for _, identity := range participants {
+		if _, member := store.ParseTicketMemberIdentity(identity); member {
+			if id := d.ticketSessionForIdentity(identity); id != "" {
+				targets[id] = true
+			} else {
+				sleepingMembers = append(sleepingMembers, identity)
+			}
+			continue
+		}
 		if id := d.ticketSessionForIdentity(identity); id != "" {
 			targets[id] = true
 		}
@@ -118,6 +130,113 @@ func (d *Daemon) notifyTicketObservers(ticketID string) {
 	for id := range targets {
 		d.notifyTicketSession(id, now)
 	}
+	for _, identity := range sleepingMembers {
+		d.notifySleepingTicketMember(identity, ticketID)
+	}
+}
+
+// notifySleepingTicketMember wakes a member only when this ticket still has
+// unread activity for the durable member identity. The unread event is the
+// durable delivery: neither a failed wake nor its warning advances the cursor.
+func (d *Daemon) notifySleepingTicketMember(identity, ticketID string) {
+	memberID, ok := store.ParseTicketMemberIdentity(identity)
+	if !ok {
+		return
+	}
+	events, err := d.store.UnreadTicketEventsFor(identity, identity)
+	if err != nil {
+		d.logf("ticket notify: unread for %s: %v", identity, err)
+		return
+	}
+	unread := false
+	for _, event := range events {
+		if event.TicketID == ticketID {
+			unread = true
+			break
+		}
+	}
+	if !unread {
+		return
+	}
+
+	result, err := d.crewWakeWithDelivery(memberID, "", true, &crewWakeDelivery{
+		AfterInitialPrompt: func(sessionID string) {
+			d.notifyTicketSession(sessionID, time.Now())
+		},
+	})
+	if err != nil {
+		d.notifyTicketMemberWakeRefused(memberID, ticketID, err)
+		return
+	}
+	if result.AlreadyAwake {
+		d.notifyTicketSession(result.SessionID, time.Now())
+		return
+	}
+	// The indicator can show immediately, but the actual nudge waits on the
+	// prompt-submit receipt registered above, behind charter and handoff priming.
+	d.refreshTicketUnread(result.SessionID)
+}
+
+// seedCrewTicketWakeDeliveries reconstructs the priming gate after a daemon
+// restart. Its premise is durable: a live member binding plus unread member
+// activity. Rebuilding from those facts prevents a restart between spawn and
+// prompt submission from either splicing the nudge ahead of priming or losing
+// it altogether.
+func (d *Daemon) seedCrewTicketWakeDeliveries() error {
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if !d.crewBindingLive(member) {
+			continue
+		}
+		identity := store.TicketMemberIdentity(member.ID)
+		events, err := d.store.UnreadTicketEventsFor(identity, identity)
+		if err != nil {
+			return err
+		}
+		if len(events) == 0 {
+			continue
+		}
+		sessionID := member.BindingSession
+		session := d.store.Get(sessionID)
+		if session == nil {
+			continue
+		}
+		state := string(session.State)
+		if state == protocol.StateLaunching || state == protocol.StateWorking {
+			d.notePostInitialPrompt(sessionID, func() { d.notifyTicketSession(sessionID, time.Now()) })
+			d.refreshTicketUnread(sessionID)
+			continue
+		}
+		// A settled session has already crossed its first prompt. Restore its
+		// ordinary unread delivery immediately instead of waiting for a hook it
+		// may never emit while idle.
+		d.notifyTicketSession(sessionID, time.Now())
+	}
+	return nil
+}
+
+const notificationKindCrewTicketWakeRefused = "crew_ticket_wake_refused"
+
+func (d *Daemon) notifyTicketMemberWakeRefused(memberID, ticketID string, wakeErr error) {
+	name := crew.DisplayName(memberID)
+	d.logf("ticket notify: could not wake %s for %s: %v; activity remains unread", name, ticketID, wakeErr)
+	record, err := d.store.AddNotification(store.NotificationRecord{
+		Kind:       notificationKindCrewTicketWakeRefused,
+		Severity:   store.NotificationWarning,
+		Title:      fmt.Sprintf("Could not wake %s for ticket activity", name),
+		Body:       fmt.Sprintf("Ticket %s is still unread. Wake %s from the sidebar or run `attn crew wake %s`.", ticketID, name, memberID),
+		Detail:     wakeErr.Error(),
+		SourceKind: "ticket",
+		SourceID:   ticketID,
+	}, time.Now())
+	if err != nil {
+		d.logf("notifications: add crew ticket wake refusal for %s: %v", memberID, err)
+		return
+	}
+	d.publishFact(FactNotificationCreated, record.ID, nil)
 }
 
 // notifyTicketSession runs Notify for one session's observer when it is a live
@@ -165,7 +284,7 @@ func (d *Daemon) notifyUnreadTicketSessionLocked(sessionID string, now time.Time
 		return
 	}
 	session := d.store.Get(sessionID)
-	if session == nil || !isNudgeDeliveryAllowed(string(session.State)) {
+	if session == nil || d.initialPromptPending(sessionID) || !isNudgeDeliveryAllowed(string(session.State)) {
 		return
 	}
 	var deadline time.Time

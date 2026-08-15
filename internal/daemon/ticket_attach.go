@@ -77,9 +77,10 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	if strings.TrimSpace(author) == "" {
 		return nil, errors.New("source_session_id is required")
 	}
+	sourceSessionID := author
 	ticketID := strings.TrimSpace(protocol.Deref(msg.TicketID))
 	if ticketID == "" && resolveBound {
-		ticket, err := d.store.ActiveTicketForSession(author)
+		ticket, err := d.store.ActiveTicketForSession(sourceSessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +148,8 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 	}
 	options := expectedTicketMutationOptions(msg.ExpectedEventSeq)
 	if resolveBound {
-		options = d.ticketMutationOptions(author)
+		options = d.ticketMutationOptions(sourceSessionID)
+		author = d.ticketActorIdentity(sourceSessionID)
 	}
 	d.deliveryMu.Lock()
 	record, outcome, err := d.store.SubmitTicketAttachWithOptions(
@@ -160,7 +162,7 @@ func (d *Daemon) submitTicketAttach(msg *protocol.TicketAttachMessage, author st
 		return nil, err
 	}
 	catchUp := ticketMutationCatchUp(ticketID, outcome.CatchUp)
-	d.afterTicketMutationCatchUpLocked(author, outcome.CatchUp)
+	d.afterTicketMutationCatchUpLocked(sourceSessionID, outcome.CatchUp)
 	if outcome.Blocked {
 		rollbackInstalledAttachFiles(staged)
 		d.deliveryMu.Unlock()

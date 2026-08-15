@@ -37,8 +37,9 @@ func (d *Daemon) handleTicketComment(conn net.Conn, msg *protocol.TicketCommentM
 	// (touchTicketTx affects no rows), so an agent naming a bad ticket gets a clear
 	// error rather than a silently dropped comment.
 	d.deliveryMu.Lock()
+	author := d.ticketActorIdentity(sourceSessionID)
 	_, outcome, err := d.store.AddTicketCommentWithOptions(
-		ticketID, sourceSessionID, comment,
+		ticketID, author, comment,
 		d.ticketMutationOptions(sourceSessionID), time.Now(),
 	)
 	if err != nil {

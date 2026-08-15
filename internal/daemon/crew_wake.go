@@ -62,13 +62,14 @@ const crewWakePrompt = "You have been woken for today. Orient from your charter 
 // each morning.
 func crewWorkspaceID(memberID string) string { return "workspace-crew-" + memberID }
 
-// crewWakeDelivery is the message that caused an autonomous wake. Its
-// attributed prompt replaces the ordinary greeting as the first ask of the new
-// day, and its row is persisted before the process starts so the gap between
-// wake and delivery cannot lose it.
+// crewWakeDelivery is work carried by the one serialized wake path. An agent
+// message replaces the ordinary greeting and persists its row before spawn. A
+// ticket nudge keeps the greeting and runs AfterInitialPrompt only after a hook
+// proves the new day got through priming and submitted that greeting.
 type crewWakeDelivery struct {
-	Record *store.AgentMessage
-	Prompt string
+	Record             *store.AgentMessage
+	Prompt             string
+	AfterInitialPrompt func(sessionID string)
 }
 
 // crewMember reads one member by id, behind the fence.
@@ -270,15 +271,20 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 
 	initialPrompt := crewWakePrompt
 	if delivery != nil {
-		delivery.Record.TargetSessionID = sessionID
-		if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
-			d.removeWorkspaceLayoutPaneForSession(sessionID)
-			d.releaseCrewBindingIfSession(sessionID)
-			return nil, err
+		if delivery.Record != nil {
+			delivery.Record.TargetSessionID = sessionID
+			if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
+				d.removeWorkspaceLayoutPaneForSession(sessionID)
+				d.releaseCrewBindingIfSession(sessionID)
+				return nil, err
+			}
+			d.noteQueuedAgentMessage(sessionID)
+			d.noteInitialAgentMessage(sessionID, delivery.Record.ID)
+			initialPrompt = delivery.Prompt
 		}
-		d.noteQueuedAgentMessage(sessionID)
-		d.noteInitialAgentMessage(sessionID, delivery.Record.ID)
-		initialPrompt = delivery.Prompt
+		if delivery.AfterInitialPrompt != nil {
+			d.notePostInitialPrompt(sessionID, func() { delivery.AfterInitialPrompt(sessionID) })
+		}
 	}
 
 	spawnClient := newInternalWSClient()
@@ -296,7 +302,10 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
 		if delivery != nil {
-			d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
+			if delivery.Record != nil {
+				d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
+			}
+			d.forgetPostInitialPrompt(sessionID)
 		}
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)

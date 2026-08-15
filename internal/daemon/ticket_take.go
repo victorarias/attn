@@ -66,7 +66,7 @@ func (d *Daemon) handleTicketTake(conn net.Conn, msg *protocol.TicketTakeMessage
 		d.sendError(conn, "ticket take: ticket "+ticketID+" is already assigned to "+previous+"; pass --confirm to take it over")
 		return
 	}
-	if err := d.store.AssignTicket(ticketID, sourceSessionID, sourceSessionID, time.Now()); err != nil {
+	if err := d.store.AssignTicket(ticketID, sourceSessionID, d.ticketActorIdentity(sourceSessionID), time.Now()); err != nil {
 		d.sendError(conn, "ticket take: "+err.Error())
 		return
 	}

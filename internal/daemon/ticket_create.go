@@ -19,11 +19,12 @@ import (
 // title and auto-suffixed on collision, exactly like delegation. There are no
 // participants to notify, so the only side effect is the board re-broadcast.
 func (d *Daemon) handleTicketCreate(conn net.Conn, msg *protocol.TicketCreateMessage) {
-	author := strings.TrimSpace(msg.SourceSessionID)
-	if author == "" {
+	sourceSessionID := strings.TrimSpace(msg.SourceSessionID)
+	if sourceSessionID == "" {
 		d.sendError(conn, "ticket new: source_session_id is required")
 		return
 	}
+	author := d.ticketActorIdentity(sourceSessionID)
 	title := strings.TrimSpace(msg.Title)
 	if title == "" {
 		d.sendError(conn, "ticket new: title is required")

@@ -2,6 +2,8 @@ package daemon
 
 import (
 	"fmt"
+	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -10,6 +12,8 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // delegateForNotify runs a real delegation with the given agent and returns the
@@ -431,6 +435,171 @@ func TestTicketWatchDrainClearsSharedCountdown(t *testing.T) {
 	}
 	if wasNudged(inputs(agentID)) {
 		t.Fatal("watch-drained queue was still doorbelled")
+	}
+}
+
+func TestTicketActivityWakesSleepingMemberAndNudgesAfterPriming(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	d.nudgeWindowOverride = time.Hour
+	t.Cleanup(d.stopNudgeCountdowns)
+	doorbell := &recordingDoorbell{}
+	backend.onInput = doorbell.backend().onInput
+	var initialPrompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		body, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		initialPrompt = string(body)
+	}
+
+	identity := store.TicketMemberIdentity("trellis")
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "sleeping-thread", Title: "Sleeping thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription(identity, "sleeping-thread", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.AddTicketComment("sleeping-thread", "you", "new activity", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	d.notifyTicketObservers("sleeping-thread")
+
+	member := memberByID(t, crewList(t, d), "trellis")
+	sessionID := protocol.Deref(member.BindingSession)
+	if sessionID == "" {
+		t.Fatal("ticket activity did not wake Trellis")
+	}
+	if initialPrompt != crewWakePrompt {
+		t.Fatalf("wake initial prompt = %q, want the ordinary post-priming greeting", initialPrompt)
+	}
+	if prompts := doorbell.pasted(); len(prompts) != 0 {
+		t.Fatalf("ticket nudge landed before priming completed: %q", prompts)
+	}
+	d.handleTriggerNudge(&protocol.TriggerNudgeMessage{SessionID: sessionID})
+	if prompts := doorbell.pasted(); len(prompts) != 0 {
+		t.Fatalf("manual nudge spliced into priming: %q", prompts)
+	}
+	decorated := d.sessionForBroadcast(d.store.Get(sessionID))
+	if decorated == nil || !protocol.Deref(decorated.TicketUnread) {
+		t.Fatalf("woken member session = %+v, want unread indicator", decorated)
+	}
+
+	hook := callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{ID: sessionID, State: protocol.StateWorking})
+	})
+	if !hook.Ok {
+		t.Fatalf("prompt-submit hook = %+v", hook)
+	}
+	if currentNudgeTimer(d, sessionID) == nil {
+		t.Fatal("prompt-submit receipt did not arm the ticket nudge")
+	}
+	fireNudgeNow(t, d, sessionID)
+	if !wasNudged(doorbell.pasted()) {
+		t.Fatalf("woken member was not nudged after priming: %q", doorbell.pasted())
+	}
+}
+
+func TestTicketWakeLimitRefusalIsVisibleAndLeavesMemberUnread(t *testing.T) {
+	d, backend, logs := newWakeableDaemon(t)
+	d.store.SetSetting(SettingCrewWakeLimit, "0")
+	identity := store.TicketMemberIdentity("alder")
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "refused-thread", Title: "Refused thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription(identity, "refused-thread", now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.AddTicketComment("refused-thread", "you", "wake up", now.Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	d.notifyTicketObservers("refused-thread")
+
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 0 {
+		t.Fatalf("wake-limit refusal spawned %d sessions", spawned)
+	}
+	events, err := d.store.UnreadTicketEventsFor(identity, identity)
+	if err != nil || len(events) == 0 {
+		t.Fatalf("member unread after refusal = %+v, %v", events, err)
+	}
+	notifications, err := d.store.ListNotifications()
+	if err != nil || len(notifications) != 1 {
+		t.Fatalf("refusal notifications = %+v, %v", notifications, err)
+	}
+	note := notifications[0]
+	if note.Kind != notificationKindCrewTicketWakeRefused || note.SourceID != "refused-thread" ||
+		!strings.Contains(note.Detail, "crew.wake_limit=0") || !strings.Contains(note.Body, "still unread") {
+		t.Fatalf("refusal notification = %+v", note)
+	}
+	if log := logs(); !strings.Contains(log, "activity remains unread") {
+		t.Fatalf("refusal was not logged loudly:\n%s", log)
+	}
+}
+
+func TestCrewTicketWakeGateRebuildsFromDurableUnreadState(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "woken-day")
+	d.store.UpdateState("woken-day", protocol.StateWorking)
+	if _, err := d.claimCrewBinding("trellis", "woken-day"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	identity := store.TicketMemberIdentity("trellis")
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "restart-thread", Title: "Restart thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription(identity, "restart-thread", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.seedCrewTicketWakeDeliveries(); err != nil {
+		t.Fatal(err)
+	}
+	if !d.initialPromptPending("woken-day") {
+		t.Fatal("restart did not restore the initial-prompt gate")
+	}
+	if timer := currentNudgeTimer(d, "woken-day"); timer != nil {
+		t.Fatal("restart armed a nudge before the prompt receipt")
+	}
+	d.runPostInitialPrompt("woken-day", protocol.StateWorking)
+	if d.initialPromptPending("woken-day") {
+		t.Fatal("prompt receipt did not clear the restored gate")
+	}
+	if timer := currentNudgeTimer(d, "woken-day"); timer == nil {
+		t.Fatal("prompt receipt did not arm the waiting ticket nudge")
+	}
+}
+
+func TestCrewTicketRestartNudgesAnAlreadySettledDay(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "settled-day")
+	d.store.UpdateState("settled-day", protocol.StateIdle)
+	if _, err := d.claimCrewBinding("trellis", "settled-day"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(d.stopNudgeCountdowns)
+	now := time.Now()
+	identity := store.TicketMemberIdentity("trellis")
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "settled-thread", Title: "Settled thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription(identity, "settled-thread", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.seedCrewTicketWakeDeliveries(); err != nil {
+		t.Fatal(err)
+	}
+	if d.initialPromptPending("settled-day") {
+		t.Fatal("settled day was incorrectly put back behind its first-prompt gate")
+	}
+	if timer := currentNudgeTimer(d, "settled-day"); timer == nil {
+		t.Fatal("restart did not restore ordinary unread delivery for a settled day")
 	}
 }
 

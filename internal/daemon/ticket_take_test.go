@@ -119,3 +119,33 @@ func TestTicketTakeUnassignedSelfAndUnknown(t *testing.T) {
 		t.Fatalf("take of unknown ticket returned ok: %+v", resp)
 	}
 }
+
+func TestCrewMemberTakeKeepsConcreteAssigneeAndDurableParticipant(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "trellis-today")
+	if _, err := d.claimCrewBinding("trellis", "trellis-today"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "backlog-member", Title: "Member work"}, "you", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if resp := callTicketTake(t, d, "trellis-today", "backlog-member", false); !resp.Ok {
+		t.Fatalf("take response = %+v", resp)
+	}
+	ticket, err := d.store.GetTicket("backlog-member")
+	if err != nil || ticket == nil || ticket.Assignee != "trellis-today" {
+		t.Fatalf("ticket after take = %+v, %v", ticket, err)
+	}
+	participants, err := d.store.TicketParticipants("backlog-member")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := store.TicketMemberIdentity("trellis")
+	found := false
+	for _, identity := range participants {
+		found = found || identity == want
+	}
+	if !found {
+		t.Fatalf("participants = %v, want durable %q beside the concrete assignee", participants, want)
+	}
+}

@@ -41,7 +41,7 @@ func (d *Daemon) createDelegatedTicket(creatorSessionID string, ownedByChiefRole
 			return "", err
 		}
 	}
-	ownerRole, subscribers := delegationTicketAttachment(creatorSessionID, ownedByChiefRole)
+	author, ownerRole, subscribers := d.delegationTicketAttachment(creatorSessionID, ownedByChiefRole)
 	created, err := d.createTicketWithUniqueSlug(store.Ticket{
 		Title:       label,
 		Description: brief,
@@ -49,7 +49,7 @@ func (d *Daemon) createDelegatedTicket(creatorSessionID string, ownedByChiefRole
 		Assignee:    session.ID,
 		Cwd:         session.Directory,
 		LastAgentID: agent,
-	}, ticketSlug(label), creatorSessionID, ownerRole, subscribers, time.Now())
+	}, ticketSlug(label), author, ownerRole, subscribers, time.Now())
 	if err != nil {
 		return "", err
 	}
@@ -61,9 +61,9 @@ func (d *Daemon) createDelegatedTicket(creatorSessionID string, ownedByChiefRole
 // description already went out in the spawn prompt); the previous assignee stays
 // subscribed.
 func (d *Daemon) adoptDelegatedTicket(creatorSessionID string, ownedByChiefRole bool, session *protocol.Session, ticketID, agent string, confirm bool) (string, error) {
-	ownerRole, subscribers := delegationTicketAttachment(creatorSessionID, ownedByChiefRole)
+	author, ownerRole, subscribers := d.delegationTicketAttachment(creatorSessionID, ownedByChiefRole)
 	adopted, err := d.store.AdoptTicketForDelegation(
-		ticketID, session.ID, session.Directory, agent, creatorSessionID,
+		ticketID, session.ID, session.Directory, agent, author,
 		ownerRole, subscribers, confirm, time.Now(),
 	)
 	if err != nil {
@@ -72,18 +72,20 @@ func (d *Daemon) adoptDelegatedTicket(creatorSessionID string, ownedByChiefRole 
 	return adopted.ID, nil
 }
 
-// delegationTicketAttachment decides who the delegating side attaches as. A chief
-// delegation attaches the ROLE and nothing else: the role owner row is the
-// attachment, and the events the acting session writes carry that role, so the
+// delegationTicketAttachment decides who the delegating side acts and attaches
+// as. A chief delegation attaches the ROLE and nothing else: the role owner row
+// is the attachment, and the events the acting session writes carry that role, so the
 // attachment moves with the role instead of stranding a personal subscription on
 // the session that happened to hold it. Any other delegator attaches personally
 // and pulls the chief role in as a subscriber, because the chief follows every
-// delegation whether or not it started it.
-func delegationTicketAttachment(creatorSessionID string, ownedByChiefRole bool) (ownerRole string, subscribers []string) {
+// delegation whether or not it started it. For a crew member, personally means
+// the durable member identity rather than today's disposable session.
+func (d *Daemon) delegationTicketAttachment(creatorSessionID string, ownedByChiefRole bool) (author, ownerRole string, subscribers []string) {
 	if ownedByChiefRole {
-		return store.TicketRoleChiefOfStaff, nil
+		return creatorSessionID, store.TicketRoleChiefOfStaff, nil
 	}
-	return "", []string{creatorSessionID, store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)}
+	author = d.ticketActorIdentity(creatorSessionID)
+	return author, "", []string{author, store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)}
 }
 
 // ticketSlugSequentialAttempts bounds the readable base-2, base-3, ... walk

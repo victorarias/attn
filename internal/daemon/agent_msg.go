@@ -249,7 +249,7 @@ func agentMessageQueuedDetail(err error) string {
 // took it, and stamps the row. Shared by the send path and the redelivery drain
 // so a queued message and a live one land identically.
 func (d *Daemon) deliverAgentMessage(record store.AgentMessage) error {
-	if d.initialAgentMessagePending(record.TargetSessionID, "") {
+	if d.initialPromptPending(record.TargetSessionID) {
 		return errAgentMessageInitialPromptPending
 	}
 	sender := d.store.Get(record.SenderSessionID)
@@ -413,6 +413,47 @@ func (d *Daemon) initialAgentMessagePending(sessionID, messageID string) bool {
 	return current != "" && (messageID == "" || current == messageID)
 }
 
+func (d *Daemon) notePostInitialPrompt(sessionID string, after func()) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	if d.postInitialPrompt == nil {
+		d.postInitialPrompt = make(map[string]func())
+	}
+	d.postInitialPrompt[sessionID] = after
+}
+
+func (d *Daemon) forgetPostInitialPrompt(sessionID string) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	delete(d.postInitialPrompt, sessionID)
+}
+
+// initialPromptPending covers both forms of wake-carried delivery. It is the
+// anti-splice gate for agent messages and ticket countdowns while a new member
+// day is still taking its first prompt.
+func (d *Daemon) initialPromptPending(sessionID string) bool {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	return d.agentMessageInitialPrompt[sessionID] != "" || d.postInitialPrompt[sessionID] != nil
+}
+
+func (d *Daemon) runPostInitialPrompt(sessionID, state string) {
+	if state != protocol.StateWorking {
+		return
+	}
+	d.agentMessageMu.Lock()
+	after := d.postInitialPrompt[sessionID]
+	delete(d.postInitialPrompt, sessionID)
+	d.agentMessageMu.Unlock()
+	if after != nil {
+		after()
+		// Messages addressed to the member while the ticket-triggered wake was
+		// priming queued behind the same gate. This hook is their first reliable
+		// drain signal too.
+		d.drainAgentMessagesAfterStateChange(sessionID, state)
+	}
+}
+
 // noteInitialAgentMessageSubmitted is the receipt for a message carried as a
 // new member day's initial prompt. Worker state is not enough: a freshly
 // spawned Claude session reports `working` while still sitting at its trust
@@ -534,7 +575,7 @@ func (d *Daemon) seedQueuedAgentMessages() {
 // sent to a session waiting on an approval would sit queued until someone sent
 // another one.
 func (d *Daemon) drainAgentMessagesAfterStateChange(sessionID, state string) {
-	if d.initialAgentMessagePending(sessionID, "") || !isNudgeDeliveryAllowed(state) || !d.hasQueuedAgentMessages(sessionID) {
+	if d.initialPromptPending(sessionID) || !isNudgeDeliveryAllowed(state) || !d.hasQueuedAgentMessages(sessionID) {
 		return
 	}
 	if d.agentMessageDrainScheduledHook != nil {
