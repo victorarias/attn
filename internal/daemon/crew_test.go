@@ -6,11 +6,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // writeCrewHomes builds a copy of the real `~/.attn/crew` shape under a
@@ -270,6 +272,56 @@ func TestCrew_ReimportingHomesLeavesLiveRecordsAlone(t *testing.T) {
 	}
 	if len(crewList(t, d)) != 3 {
 		t.Fatal("re-import duplicated the roster")
+	}
+}
+
+func TestCrew_ImportRefusesAStoredHomeFromAnotherProfile(t *testing.T) {
+	d, _, readLog := newWakeableDaemon(t)
+	members, docs, err := d.readCrewMembers()
+	if err != nil {
+		t.Fatalf("read roster: %v", err)
+	}
+	member, ok := crew.Resolve("trellis", members)
+	if !ok {
+		t.Fatal("trellis is missing from the fixture roster")
+	}
+	foreignRoot := filepath.Join(t.TempDir(), "copied-default", crew.HomesDirName)
+	member.HomeDir = filepath.Join(foreignRoot, member.ID)
+	member.CharterPath = filepath.Join(member.HomeDir, crew.CharterFileName)
+	body, err := member.Encode()
+	if err != nil {
+		t.Fatalf("encode copied record: %v", err)
+	}
+	expected := docs[member.ID].Rev
+	schema, err := d.crewCollection()
+	if err != nil {
+		t.Fatalf("crew collection: %v", err)
+	}
+	fact := documentChangedFact(crew.Namespace, crew.CollectionMembers, member.ID, false)
+	if _, err := d.store.CommitDocumentWrite(store.DocumentWrite{
+		Schema: *schema, ID: member.ID, Body: body, Expected: &expected,
+	}, fact, time.Now()); err != nil {
+		t.Fatalf("seed copied registry record: %v", err)
+	}
+
+	d.importCrewHomes()
+	log := readLog()
+	for _, want := range []string{"import refused", member.HomeDir, filepath.Join(d.dataRoot, crew.HomesDirName), "attn.db copied from another profile"} {
+		if !strings.Contains(log, want) {
+			t.Errorf("import refusal does not name %q:\n%s", want, log)
+		}
+	}
+	if _, _, err := d.readCrewMembers(); err == nil {
+		t.Fatal("an operational roster read accepted the copied member record")
+	} else if !strings.Contains(err.Error(), member.HomeDir) {
+		t.Fatalf("read refusal %q does not name the foreign home", err)
+	}
+
+	addSession(t, d, "copied-db-wake")
+	if _, err := d.claimCrewBinding(member.ID, "copied-db-wake"); err == nil {
+		t.Fatal("a copied member record was writable")
+	} else if !strings.Contains(err.Error(), member.HomeDir) {
+		t.Fatalf("write refusal %q does not name the foreign home", err)
 	}
 }
 

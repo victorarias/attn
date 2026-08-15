@@ -33,6 +33,36 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
 }
 
+.sidebar-profile-marker {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile-marker strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.sidebar-profile-marker--collapsed {
+  box-sizing: border-box;
+  width: calc(100% - 10px);
+  margin: 6px 5px 2px;
+  padding-inline: 4px;
+  text-align: center;
+}
+
 .sidebar-tool-row,
 .sidebar-header-row {
   display: flex;

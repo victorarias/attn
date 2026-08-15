@@ -92,7 +92,13 @@ func (d *Daemon) crewMember(name string) (crew.Member, docstore.Document, error)
 // own home when nobody recorded one. The home always exists — it is what made
 // the member — so a wake never fails for want of a directory, and a cwd that
 // has since moved is named rather than silently swapped.
-func crewLaunchDir(member crew.Member) (string, error) {
+func (d *Daemon) crewLaunchDir(member crew.Member) (string, error) {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return "", err
+	}
+	if err := d.validateCrewAwarenessDirs(member); err != nil {
+		return "", err
+	}
 	dir := strings.TrimSpace(member.CWD)
 	if dir == "" {
 		return member.HomeDir, nil
@@ -104,13 +110,23 @@ func crewLaunchDir(member crew.Member) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("%s launches in %s, which is not a directory; `attn crew set %s --cwd <dir>` moves it", crew.DisplayName(member.ID), dir, member.ID)
 	}
-	return dir, nil
+	resolved, err := d.resolveCrewWorkDir(dir)
+	if err != nil {
+		return "", fmt.Errorf("%s launches in %s: %w", crew.DisplayName(member.ID), dir, err)
+	}
+	return resolved, nil
 }
 
 // crewPriming composes what a member's launch injects, reading the prose off
 // the home each time: the files are canonical, so a charter edited between two
 // wakes takes effect at the next one with nothing to invalidate.
-func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
+func (d *Daemon) crewPriming(member crew.Member) (crew.Priming, error) {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return crew.Priming{}, err
+	}
+	if err := d.validateCrewWorkDirs(member); err != nil {
+		return crew.Priming{}, err
+	}
 	priming := crew.Priming{
 		Member:        member.ID,
 		HomeDir:       member.HomeDir,
@@ -124,13 +140,16 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 		d.logf("crew: reading %s's charter at %s: %v", crew.DisplayName(member.ID), member.CharterPath, err)
 	}
 
-	handoffsDir := filepath.Join(member.HomeDir, crew.HandoffsDirName)
+	handoffsDir, err := d.validateCrewHandoffsDir(member)
+	if err != nil {
+		return crew.Priming{}, err
+	}
 	entries, err := os.ReadDir(handoffsDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			d.logf("crew: reading %s's handoffs at %s: %v", crew.DisplayName(member.ID), handoffsDir, err)
 		}
-		return priming
+		return priming, nil
 	}
 	names := make([]string, 0, len(entries))
 	for _, entry := range entries {
@@ -141,16 +160,22 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 	}
 	crew.SortHandoffNames(names)
 	if len(names) == 0 {
-		return priming
+		return priming, nil
+	}
+	for _, name := range names {
+		if err := d.validateCrewLetterPath(member, filepath.Join(handoffsDir, name)); err != nil {
+			return crew.Priming{}, err
+		}
 	}
 	priming.HandoffName = names[0]
 	priming.OlderHandoffs = names[1:]
-	if letter, err := os.ReadFile(filepath.Join(handoffsDir, names[0])); err == nil {
+	letterPath := filepath.Join(handoffsDir, names[0])
+	if letter, err := os.ReadFile(letterPath); err == nil {
 		priming.Handoff = string(letter)
 	} else {
 		d.logf("crew: reading %s's freshest handoff %s: %v", crew.DisplayName(member.ID), names[0], err)
 	}
-	return priming
+	return priming, nil
 }
 
 // IPC handlers.
@@ -222,7 +247,7 @@ func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, deliv
 			return nil, fmt.Errorf("agent %q is not available", agent)
 		}
 	}
-	directory, err := crewLaunchDir(member)
+	directory, err := d.crewLaunchDir(member)
 	if err != nil {
 		return nil, err
 	}
@@ -326,7 +351,11 @@ func (d *Daemon) handleCrewPrime(conn net.Conn, msg *protocol.CrewPrimeMessage) 
 		return
 	}
 	result := &protocol.CrewPrimeResult{AwarenessDirs: []string{}}
-	member, block, bound := d.crewPrimeForSession(sessionID)
+	member, block, bound, err := d.crewPrimeForSession(sessionID)
+	if err != nil {
+		d.sendCrewError(conn, "prime", err)
+		return
+	}
 	if bound {
 		result.Member = protocol.Ptr(member.ID)
 		result.Guidance = protocol.Ptr(block)
@@ -340,25 +369,28 @@ func (d *Daemon) handleCrewPrime(conn net.Conn, msg *protocol.CrewPrimeMessage) 
 // to be its member, and logs the size — the budget receipt the wake limit and
 // the heartbeat are waiting on. One line per injection, naming what each part
 // cost: grep `crew: priming`. Reports false for a session that is nobody.
-func (d *Daemon) crewPrimeForSession(sessionID string) (crew.Member, string, bool) {
+func (d *Daemon) crewPrimeForSession(sessionID string) (crew.Member, string, bool, error) {
 	if sessionID == "" || d.store == nil {
-		return crew.Member{}, "", false
+		return crew.Member{}, "", false, nil
 	}
 	if err := d.requireHome(crew.Surface); err != nil {
-		return crew.Member{}, "", false
+		return crew.Member{}, "", false, err
 	}
 	members, _, err := d.readCrewMembers()
 	if err != nil {
 		if !docstore.IsUndeclaredCollection(err) {
 			d.logf("crew: reading roster to prime %s: %v", sessionID, err)
 		}
-		return crew.Member{}, "", false
+		return crew.Member{}, "", false, err
 	}
 	for _, member := range members {
 		if member.BindingSession != sessionID {
 			continue
 		}
-		priming := d.crewPriming(member)
+		priming, err := d.crewPriming(member)
+		if err != nil {
+			return crew.Member{}, "", false, err
+		}
 		block := priming.Block()
 		handoff := priming.HandoffName
 		if handoff == "" {
@@ -367,9 +399,9 @@ func (d *Daemon) crewPrimeForSession(sessionID string) (crew.Member, string, boo
 		d.logf("crew: priming %s for session %s: %d bytes (charter %d, handoff %s %d, older %d)",
 			crew.DisplayName(member.ID), sessionID, len(block), len(priming.Charter),
 			handoff, len(priming.Handoff), len(priming.OlderHandoffs))
-		return member, block, true
+		return member, block, true, nil
 	}
-	return crew.Member{}, "", false
+	return crew.Member{}, "", false, nil
 }
 
 func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
@@ -384,7 +416,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 		return
 	}
 	if msg.Cwd != nil {
-		cwd, err := resolveCrewDir(*msg.Cwd)
+		cwd, err := d.resolveCrewRecordedDir(*msg.Cwd)
 		if err != nil {
 			d.sendCrewError(conn, "set", err)
 			return
@@ -398,7 +430,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 	} else if msg.AwarenessDirs != nil {
 		dirs := make([]string, 0, len(msg.AwarenessDirs))
 		for _, dir := range msg.AwarenessDirs {
-			resolved, err := resolveCrewDir(dir)
+			resolved, err := d.resolveCrewRecordedDir(dir)
 			if err != nil {
 				d.sendCrewError(conn, "set", err)
 				return
@@ -420,10 +452,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 	})
 }
 
-// resolveCrewDir makes a directory absolute and insists it exists. A recorded
-// cwd that is not there only fails at the next wake, which is the wrong end of
-// the day to learn about a typo. An empty value clears the field.
-func resolveCrewDir(dir string) (string, error) {
+func absoluteCrewDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return "", nil
@@ -437,6 +466,17 @@ func resolveCrewDir(dir string) (string, error) {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("%s is not a usable path: %w", dir, err)
+	}
+	return absolute, nil
+}
+
+// resolveCrewDir makes a directory absolute and insists it exists. A recorded
+// cwd that is not there only fails at the next wake, which is the wrong end of
+// the day to learn about a typo. An empty value clears the field.
+func resolveCrewDir(dir string) (string, error) {
+	absolute, err := absoluteCrewDir(dir)
+	if err != nil || absolute == "" {
+		return absolute, err
 	}
 	info, err := os.Stat(absolute)
 	if err != nil {

@@ -105,6 +105,15 @@ const baseProps = {
 };
 
 describe('Sidebar', () => {
+  it('shows only a non-default profile marker', () => {
+    const data = buildSidebarData([]);
+    const { rerender } = render(<Sidebar {...baseProps} {...data} />);
+    expect(screen.queryByTestId('sidebar-profile-marker')).not.toBeInTheDocument();
+
+    rerender(<Sidebar {...baseProps} {...data} profile="fixture-lab" />);
+    expect(screen.getByTestId('sidebar-profile-marker')).toHaveTextContent('profile fixture-lab');
+  });
+
   it('uses regular state indicator for codex sessions', () => {
     const sessions: TestSession[] = [{
       id: 's1',

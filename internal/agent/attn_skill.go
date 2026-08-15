@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/toolhome"
 )
 
@@ -138,14 +139,34 @@ func ensureAttnCopilotSkillInstalled() error {
 	return installAttnSkill(filepath.Join(homeDir, ".copilot", "skills", "attn"))
 }
 
-func EnsureClaudeSkillInstalled() error {
-	return ensureAttnClaudeSkillInstalled()
+func userGlobalSkillSyncEnabled() bool {
+	profile := config.Profile()
+	return profile == "" || profile == "dev"
 }
 
-func EnsureAgentsSkillInstalled() error {
-	return ensureAttnAgentsSkillInstalled()
+// EnsureClaudeSkillInstalled installs the bundled skill only for the default
+// and dev profiles. The bool reports whether synchronization ran.
+func EnsureClaudeSkillInstalled() (bool, error) {
+	if !userGlobalSkillSyncEnabled() {
+		return false, nil
+	}
+	return true, ensureAttnClaudeSkillInstalled()
 }
 
-func EnsureCopilotSkillInstalled() error {
-	return ensureAttnCopilotSkillInstalled()
+// EnsureAgentsSkillInstalled installs the shared agent skill only for the
+// default and dev profiles. The bool reports whether synchronization ran.
+func EnsureAgentsSkillInstalled() (bool, error) {
+	if !userGlobalSkillSyncEnabled() {
+		return false, nil
+	}
+	return true, ensureAttnAgentsSkillInstalled()
+}
+
+// EnsureCopilotSkillInstalled installs the bundled skill only for the default
+// and dev profiles. The bool reports whether synchronization ran.
+func EnsureCopilotSkillInstalled() (bool, error) {
+	if !userGlobalSkillSyncEnabled() {
+		return false, nil
+	}
+	return true, ensureAttnCopilotSkillInstalled()
 }

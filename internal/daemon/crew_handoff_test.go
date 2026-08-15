@@ -123,6 +123,80 @@ func handoffFiles(t *testing.T, d *Daemon, member string) []string {
 	return names
 }
 
+func TestCrewHandoff_RefusesASymlinkedHandoffsDirectory(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	handoffsDir := filepath.Join(d.dataRoot, crew.HomesDirName, "keel", crew.HandoffsDirName)
+	if err := os.RemoveAll(handoffsDir); err != nil {
+		t.Fatalf("remove fixture handoffs: %v", err)
+	}
+	foreign := t.TempDir()
+	if err := os.Symlink(foreign, handoffsDir); err != nil {
+		t.Fatalf("symlink handoffs: %v", err)
+	}
+
+	resp := crewHandoffCall(t, d, woken.SessionID, "This must stay in my profile.")
+	if resp.Ok {
+		t.Fatal("a handoff was filed through a symlink leaving the member home")
+	}
+	refusal := protocol.Deref(resp.Error)
+	for _, want := range []string{handoffsDir, filepath.Join(d.dataRoot, crew.HomesDirName, "keel"), "symlink"} {
+		if !strings.Contains(refusal, want) {
+			t.Errorf("refusal %q does not name %q", refusal, want)
+		}
+	}
+	if entries, err := os.ReadDir(foreign); err != nil || len(entries) != 0 {
+		t.Fatalf("foreign handoff target was written: entries=%v err=%v", entries, err)
+	}
+	if len(spawnedSessions(t, backend)) != 1 {
+		t.Fatal("a refused filing spawned a successor")
+	}
+}
+
+func TestCrewPriming_RefusesASymlinkedLetter(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		t.Fatalf("read roster: %v", err)
+	}
+	member, ok := crew.Resolve("keel", members)
+	if !ok {
+		t.Fatal("keel is missing from the fixture roster")
+	}
+	handoffsDir := filepath.Join(member.HomeDir, crew.HandoffsDirName)
+	if err := os.RemoveAll(handoffsDir); err != nil {
+		t.Fatalf("remove fixture handoffs: %v", err)
+	}
+	if err := os.MkdirAll(handoffsDir, 0o755); err != nil {
+		t.Fatalf("recreate handoffs: %v", err)
+	}
+	foreignLetter := filepath.Join(t.TempDir(), "foreign-letter.md")
+	if err := os.WriteFile(foreignLetter, []byte("foreign words\n"), 0o644); err != nil {
+		t.Fatalf("write foreign letter: %v", err)
+	}
+	linkedLetter := filepath.Join(handoffsDir, "2099-01-01T00-00Z-keel.md")
+	if err := os.Symlink(foreignLetter, linkedLetter); err != nil {
+		t.Fatalf("symlink letter: %v", err)
+	}
+	newerLetter := filepath.Join(handoffsDir, "2100-01-01T00-00Z-keel.md")
+	if err := os.WriteFile(newerLetter, []byte("newer local words\n"), 0o644); err != nil {
+		t.Fatalf("write newer local letter: %v", err)
+	}
+
+	if _, err := d.crewPriming(member); err == nil {
+		t.Fatal("priming read a symlinked letter outside the member home")
+	} else {
+		for _, want := range []string{linkedLetter, handoffsDir, "symlink"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("refusal %q does not name %q", err, want)
+			}
+		}
+	}
+}
+
 // The slice's acceptance: a member files its letter and the day turns over in
 // one motion. The letter lands on disk as written, a fresh session takes over
 // the member's day, and the member is awake throughout.
@@ -393,7 +467,10 @@ func TestCrewHandoff_ARetryTurnsTheDayOverWithTheLetterAlreadyFiled(t *testing.T
 	}
 	// The letter the member actually wrote is what threads the new day — the
 	// retry must not have primed the successor off some other file.
-	_, block, bound := d.crewPrimeForSession(successor)
+	_, block, bound, err := d.crewPrimeForSession(successor)
+	if err != nil {
+		t.Fatalf("prime successor: %v", err)
+	}
 	if !bound || !strings.Contains(block, "The letter, written once.") {
 		t.Error("the successor was not primed by the letter that was already filed")
 	}
@@ -542,7 +619,10 @@ func TestCrewHandoff_TheSuccessorIsPrimedByTheLetterJustFiled(t *testing.T) {
 	}
 	successor := protocol.Deref(resp.CrewHandoffResult.SessionID)
 
-	member, block, bound := d.crewPrimeForSession(successor)
+	member, block, bound, err := d.crewPrimeForSession(successor)
+	if err != nil {
+		t.Fatalf("prime successor: %v", err)
+	}
 	if !bound {
 		t.Fatal("the successor is nobody")
 	}

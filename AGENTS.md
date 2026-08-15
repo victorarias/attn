@@ -167,6 +167,10 @@ output as product evidence.
 ### Packaged-app harness
 
 - Single-tenant: never run packaged-app scenarios in parallel.
+- Crew fixtures in harness and verification profiles use obviously synthetic
+  names, never real member names such as `keel`, `alder`, or `trellis`. Pin
+  synthetic members explicitly to `claude-haiku-4-5`; use a stronger model only
+  when the scenario is testing work that needs its intelligence.
 - Multiple scenarios: `pnpm --dir app run real-app:serial-matrix`.
 - Rebuild before evidence-sensitive runs.
 - Harness uses active `ATTN_PROFILE`, otherwise `dev`;

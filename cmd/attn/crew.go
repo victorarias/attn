@@ -15,7 +15,7 @@ import (
 
 // `attn crew` is the roster's agent surface. A crew member is a durable named
 // identity — charter, handoff line, address — whose sessions are its days; the
-// registry serves reads over the plain-markdown homes at `~/.attn/crew/`.
+// registry serves reads over the active profile's plain-markdown crew homes.
 // Launching bound is `attn <agent> --member <name>`; this command answers who
 // exists and who is awake.
 
@@ -42,8 +42,9 @@ func writeCrewHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn crew <command>
 
 The crew is the roster of durable named identities. A member's home is plain
-markdown at ~/.attn/crew/<name>/; the registry serves reads over it, and a
-session becomes a member by launching as one: attn <agent> --member <name>.
+markdown under the active profile's crew directory; the registry serves reads
+over it, and a session becomes a member by launching as one:
+attn <agent> --member <name>.
 
 The crew lives at the home daemon. On an outpost every command here refuses,
 naming the home to run it on.
@@ -239,7 +240,7 @@ func valueOrDash(value string) string {
 
 func printCrewList(w io.Writer, members []protocol.CrewMember) {
 	if len(members) == 0 {
-		fmt.Fprintln(w, "No crew members are registered. A home at ~/.attn/crew/<name>/CHARTER.md joins the roster at the daemon's next start.")
+		fmt.Fprintln(w, "No crew members are registered. A <name>/CHARTER.md home in the active profile's crew directory joins the roster at the daemon's next start.")
 		return
 	}
 	fmt.Fprintf(w, "%-12s  %-8s  %-10s  %s\n", "MEMBER", "STATE", "SESSION", "HOME")

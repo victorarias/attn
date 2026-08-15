@@ -73,7 +73,21 @@ func (d *Daemon) importCrewHomes() {
 		d.logf("crew: importing homes: %v", err)
 		return
 	}
+	registered, _, err := d.readCrewMembersRaw()
+	if err != nil && !docstore.IsUndeclaredCollection(err) {
+		d.logf("crew: checking registered homes before import: %v", err)
+		return
+	}
+	for _, member := range registered {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			d.logf("crew: import refused stored member %s: %v", crew.DisplayName(member.ID), err)
+		}
+	}
 	for _, member := range members {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			d.logf("crew: import refused member %s: %v", crew.DisplayName(member.ID), err)
+			continue
+		}
 		if err := d.writeCrewMember(*schema, member, docstore.ExpectAbsent); err != nil {
 			if docstore.IsConflict(err) {
 				continue // already registered; the record is authoritative
@@ -100,6 +114,9 @@ func (d *Daemon) crewCollection() (*docstore.CollectionSchema, error) {
 // docstore's own change fact so live queries on the roster wake like any other
 // write.
 func (d *Daemon) writeCrewMember(schema docstore.CollectionSchema, member crew.Member, expected int64) error {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return err
+	}
 	body, err := member.Encode()
 	if err != nil {
 		return err
@@ -123,6 +140,22 @@ func (d *Daemon) writeCrewMember(schema docstore.CollectionSchema, member crew.M
 // 2026-08-14 at a three-member roster, 25µs on an M5. That is what a session
 // broadcast pays, and what a garden action pays to resolve its tender.
 func (d *Daemon) readCrewMembers() ([]crew.Member, map[string]docstore.Document, error) {
+	members, docs, err := d.readCrewMembersRaw()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, member := range members {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			return nil, nil, err
+		}
+	}
+	return members, docs, nil
+}
+
+// readCrewMembersRaw is reserved for startup import, where invalid copied rows
+// must be enumerated so each refusal can be logged. Every operational read goes
+// through readCrewMembers and therefore through the path fence.
+func (d *Daemon) readCrewMembersRaw() ([]crew.Member, map[string]docstore.Document, error) {
 	read, _, err := d.runDocQuery(docstore.Query{
 		Namespace:  crew.Namespace,
 		Collection: crew.CollectionMembers,

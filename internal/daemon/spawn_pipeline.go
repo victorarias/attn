@@ -362,6 +362,15 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		plan.spawnOpts.ExternalCommand = append([]string(nil), result.Argv...)
 		plan.spawnOpts.ExternalEnv = commandEnv
 		plan.spawnOpts.ExternalCWD = strings.TrimSpace(result.CWD)
+		if plan.spawnOpts.ExternalCWD != "" {
+			resolved, err := d.validateCrewBoundLaunchDir(msg.ID, plan.spawnOpts.ExternalCWD)
+			if err != nil {
+				d.abortPluginSessionLaunch(msg.ID, "launch_failed")
+				plan.rollback(d, msg.ID)
+				return &spawnOutcome{err: err}
+			}
+			plan.spawnOpts.ExternalCWD = resolved
+		}
 	}
 
 	// Persist the complete launch intent before creating the worker. If the daemon

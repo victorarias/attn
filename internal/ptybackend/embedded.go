@@ -60,6 +60,7 @@ func embeddedSpawnOptions(opts SpawnOptions) pty.SpawnOptions {
 		ExternalCommand:   opts.ExternalCommand,
 		ExternalEnv:       opts.ExternalEnv,
 		ExternalCWD:       opts.ExternalCWD,
+		DaemonEnv:         opts.DaemonEnv,
 		LifecycleID:       opts.LifecycleID,
 		LoginShellEnv:     opts.LoginShellEnv,
 

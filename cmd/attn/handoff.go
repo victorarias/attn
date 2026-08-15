@@ -26,9 +26,9 @@ func writeHandoffHelp(w io.Writer) {
 	fmt.Fprint(w, `usage: attn handoff -m "<your letter>"
 
 File the letter closing this crew member's day. You write it; attn files it into
-~/.attn/crew/<member>/handoffs/ under a UTC-stamped name and never edits the
-prose. The line is append-only: a filed letter is never overwritten, so a
-correction is a new letter.
+the active profile's crew directory under <member>/handoffs/, with a UTC-stamped
+name, and never edits the prose. The line is append-only: a filed letter is never
+overwritten, so a correction is a new letter.
 
 Filing ends the day. The moment the letter lands, attn closes this session and
 wakes the member's successor, primed by what you just wrote — one motion.

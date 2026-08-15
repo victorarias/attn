@@ -174,3 +174,57 @@ func TestEnsureAttnCopilotSkillInstalledPrunesOrphanedFiles(t *testing.T) {
 	}
 	assertAttnSkillTree(t, skillDir)
 }
+
+func TestUserGlobalSkillSyncIsSkippedOutsideDefaultAndDevProfiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(toolhome.EnvVar, home)
+	t.Setenv("ATTN_PROFILE", "fixture-lab")
+
+	for name, ensure := range map[string]func() (bool, error){
+		"claude":  EnsureClaudeSkillInstalled,
+		"agents":  EnsureAgentsSkillInstalled,
+		"copilot": EnsureCopilotSkillInstalled,
+	} {
+		t.Run(name, func(t *testing.T) {
+			synced, err := ensure()
+			if err != nil {
+				t.Fatalf("ensure skill: %v", err)
+			}
+			if synced {
+				t.Fatal("a verification profile synchronized a user-global skill")
+			}
+		})
+	}
+
+	for _, root := range []string{".claude", ".agents", ".copilot"} {
+		if _, err := os.Stat(filepath.Join(home, root)); !os.IsNotExist(err) {
+			t.Fatalf("verification profile wrote %s: stat err = %v", root, err)
+		}
+	}
+}
+
+func TestUserGlobalSkillSyncRunsForDevProfile(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv(toolhome.EnvVar, home)
+	t.Setenv("ATTN_PROFILE", "dev")
+
+	for name, test := range map[string]struct {
+		ensure   func() (bool, error)
+		skillDir string
+	}{
+		"claude":  {EnsureClaudeSkillInstalled, filepath.Join(home, ".claude", "skills", "attn")},
+		"agents":  {EnsureAgentsSkillInstalled, filepath.Join(home, ".agents", "skills", "attn")},
+		"copilot": {EnsureCopilotSkillInstalled, filepath.Join(home, ".copilot", "skills", "attn")},
+	} {
+		t.Run(name, func(t *testing.T) {
+			synced, err := test.ensure()
+			if err != nil {
+				t.Fatalf("ensure skill: %v", err)
+			}
+			if !synced {
+				t.Fatal("dev profile skipped user-global skill synchronization")
+			}
+			assertAttnSkillTree(t, test.skillDir)
+		})
+	}
+}
