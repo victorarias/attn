@@ -492,10 +492,13 @@ func (d *Daemon) rollbackInitialAgentMessage(sessionID, messageID string) {
 	d.forgetQueuedAgentMessages(sessionID)
 }
 
-// composeAgentMessage builds what the target actually reads. The format is the
-// daemon's, never the sender's: the attribution line, the consent boundary
-// repeated on every delivery, and the exact command to answer with.
+// composeAgentMessage builds what the target actually reads. Agent-originated
+// deliveries get the daemon's attribution and consent boundary. A senderless
+// record is an internal user-origin request whose content is already complete.
 func (d *Daemon) composeAgentMessage(sender *protocol.Session, record store.AgentMessage) string {
+	if strings.TrimSpace(record.SenderSessionID) == "" {
+		return record.Content
+	}
 	shortID := shortSessionID(record.SenderSessionID)
 	origin := shortID
 	if sender != nil {

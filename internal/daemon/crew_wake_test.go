@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,10 +10,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -181,6 +184,126 @@ func TestCrewWake_AnAwakeMemberIsNotWokenTwice(t *testing.T) {
 	backend.mu.Unlock()
 	if spawned != 1 {
 		t.Fatalf("%d sessions were spawned for one member, want 1", spawned)
+	}
+}
+
+type crewRuntimeBackend struct {
+	*fakeSpawnBackend
+	running map[string]bool
+}
+
+func (b *crewRuntimeBackend) Spawn(ctx context.Context, opts ptybackend.SpawnOptions) error {
+	if err := b.fakeSpawnBackend.Spawn(ctx, opts); err != nil {
+		return err
+	}
+	b.running[opts.ID] = true
+	return nil
+}
+
+func (b *crewRuntimeBackend) SessionInfo(_ context.Context, sessionID string) (ptybackend.SessionInfo, error) {
+	running, ok := b.running[sessionID]
+	if !ok {
+		return ptybackend.SessionInfo{}, pty.ErrSessionNotFound
+	}
+	return ptybackend.SessionInfo{SessionID: sessionID, Running: running}, nil
+}
+
+// A session row is history, not liveness. Wake probes the bound runtime; when
+// the process exited it releases that exact binding, starts a fresh day, and
+// names the repair in the result.
+func TestCrewWake_ReleasesAnExitedBindingAndStartsAFreshDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	runtime := &crewRuntimeBackend{fakeSpawnBackend: backend, running: make(map[string]bool)}
+	d.ptyBackend = runtime
+
+	first, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("first wake: %v", err)
+	}
+	runtime.running[first.SessionID] = false
+
+	second, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake after exit: %v", err)
+	}
+	if second.AlreadyAwake || second.SessionID == first.SessionID {
+		t.Fatalf("wake result = %+v, want a fresh day", second)
+	}
+	if got := protocol.Deref(second.ReleasedSessionID); got != first.SessionID {
+		t.Fatalf("released_session_id = %q, want exited day %q", got, first.SessionID)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").BindingSession); got != second.SessionID {
+		t.Fatalf("roster binding = %q, want fresh day %q", got, second.SessionID)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 2 {
+		t.Fatalf("wake spawned %d sessions, want the original and replacement", spawned)
+	}
+}
+
+// PTY exit is the runtime seam: the generic session row may remain for history
+// or recovery, but the member is asleep as soon as its process is gone.
+func TestCrewBinding_ProcessExitReleasesTheDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	if !d.handlePTYExit(ptybackend.ExitInfo{ID: woken.SessionID, ExitCode: 1}) {
+		t.Fatal("process exit was suppressed")
+	}
+	if binding := memberByID(t, crewList(t, d), "alder").BindingSession; binding != nil {
+		t.Fatalf("exited day still holds binding %q", *binding)
+	}
+	if d.store.Get(woken.SessionID) == nil {
+		t.Fatal("the generic session row was removed; crew release should not erase history")
+	}
+
+	replacement, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake after process exit: %v", err)
+	}
+	if got := protocol.Deref(replacement.ReleasedSessionID); got != woken.SessionID {
+		t.Fatalf("wake named released session %q, want %q", got, woken.SessionID)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 2 {
+		t.Fatalf("process-exit wake spawned %d days, want original and replacement", spawned)
+	}
+}
+
+// Startup may keep a dead generic session as recoverable, but it never keeps
+// the member's seat: the letter and home, not the process row, carry the crew.
+func TestCrewBinding_StartupRecoveryReleasesADeadDay(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	home := newRecoveryHome(t)
+	home.resumableClaude(t, "native-keel")
+	giveRestorationEvidence(t, d, woken.SessionID, "native-keel")
+
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
+		t.Fatalf("startup removed %d sessions, want the resumable row kept", removed)
+	}
+	if session := d.store.Get(woken.SessionID); session == nil || session.State != protocol.SessionStateRecoverable {
+		t.Fatalf("session = %+v, want generic row recoverable", session)
+	}
+	if binding := memberByID(t, crewList(t, d), "keel").BindingSession; binding != nil {
+		t.Fatalf("recoverable corpse still holds binding %q", *binding)
+	}
+	replacement, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake after startup release: %v", err)
+	}
+	if got := protocol.Deref(replacement.ReleasedSessionID); got != woken.SessionID {
+		t.Fatalf("wake named released session %q, want %q", got, woken.SessionID)
 	}
 }
 

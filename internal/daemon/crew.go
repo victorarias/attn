@@ -314,6 +314,67 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 	d.releaseCrewBindingsExcept(*schema, members, docs, "", sessionID)
 }
 
+// releaseCrewBinding clears one member's binding only when it still names the
+// session the caller observed. Unlike the broad teardown helper, this path
+// returns failures because a wake must not launch a second day until the dead
+// day's seat is known to be free.
+func (d *Daemon) releaseCrewBinding(memberID, sessionID string) (bool, error) {
+	released := false
+	_, err := d.updateCrewMember(memberID, func(member *crew.Member) (bool, error) {
+		released = false
+		if member.BindingSession != sessionID {
+			return false, nil
+		}
+		if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+			return false, err
+		}
+		member.BindingSession = ""
+		released = true
+		return true, nil
+	})
+	if err != nil || !released {
+		return released, err
+	}
+	d.publishFact(FactCrewReleased, memberID, nil)
+	d.logf("crew: session %s released %s's binding", sessionID, crew.DisplayName(memberID))
+	return true, nil
+}
+
+// releaseExitedCrewBinding releases a day whose runtime is known dead and
+// remembers that fact for the next wake receipt. The member becomes visibly
+// asleep now; naming the release later must not keep the seat occupied.
+func (d *Daemon) releaseExitedCrewBinding(sessionID string) {
+	member, bound := d.crewMemberForSession(sessionID)
+	if !bound {
+		return
+	}
+	released, err := d.releaseCrewBinding(member.ID, sessionID)
+	if err != nil {
+		d.logf("crew: releasing exited session %s from %s: %v", sessionID, crew.DisplayName(member.ID), err)
+		return
+	}
+	if released {
+		d.noteCrewExitedSession(member.ID, sessionID)
+	}
+}
+
+func (d *Daemon) noteCrewExitedSession(memberID, sessionID string) {
+	d.crewExitedMu.Lock()
+	defer d.crewExitedMu.Unlock()
+	if d.crewExitedSessions == nil {
+		d.crewExitedSessions = make(map[string]string)
+	}
+	d.crewExitedSessions[memberID] = sessionID
+}
+
+func (d *Daemon) takeCrewExitedSession(memberID string) string {
+	d.crewExitedMu.Lock()
+	defer d.crewExitedMu.Unlock()
+	sessionID := d.crewExitedSessions[memberID]
+	delete(d.crewExitedSessions, memberID)
+	return sessionID
+}
+
 // releaseCrewBindingsExcept clears every binding naming sessionID other than
 // keepID's, against a roster the caller already read. One session answers to
 // one name: a session that becomes somebody drops whoever it was first.

@@ -29,6 +29,8 @@ func runCrew() {
 		runCrewList(os.Args[3:])
 	case "wake":
 		runCrewWake(os.Args[3:])
+	case "sleep":
+		runCrewSleep(os.Args[3:])
 	case "set":
 		runCrewSet(os.Args[3:])
 	default:
@@ -59,6 +61,11 @@ commands:
         where to read its charter, the freshest letter left for it, and how its
         home works. A member that is already
         awake is not woken twice — the answer names the session it is living.
+
+  sleep <member> [--json]
+        ask an awake member to write its handoff letter and file it with
+        attn handoff --sleep. This requests consented closure; it does not
+        kill the member. An already-asleep member is a named no-op.
 
   set <member> [--cwd <dir>] [--awareness-dir <dir>]...
         record where the member's sessions launch and which directories its
@@ -165,8 +172,72 @@ func runCrewWake(args []string) {
 		fmt.Printf("%s is already awake in session %s — nothing was launched.\n", crew.DisplayName(result.Member), agentShortID(result.SessionID))
 		return
 	}
+	if repair := crewWakeRepairLine(result); repair != "" {
+		fmt.Fprintln(os.Stdout, repair)
+	}
 	fmt.Printf("%s is awake in session %s. `attn agent peek %[2]s` watches the day; the priming size is in the daemon log (grep `crew: priming`).\n",
 		crew.DisplayName(result.Member), agentShortID(result.SessionID))
+}
+
+func crewWakeRepairLine(result *protocol.CrewWakeResult) string {
+	released := strings.TrimSpace(protocol.Deref(result.ReleasedSessionID))
+	if released == "" {
+		return ""
+	}
+	return fmt.Sprintf("Previous session %s had exited; its binding was released.", agentShortID(released))
+}
+
+type crewSleepArgs struct {
+	member string
+	json   bool
+}
+
+func parseCrewSleepArgs(args []string) (crewSleepArgs, error) {
+	fs := flag.NewFlagSet("crew sleep", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	jsonOut := fs.Bool("json", false, "print the machine result as JSON")
+	member, err := parseMemberAndFlags(fs, args, "crew sleep")
+	if err != nil {
+		return crewSleepArgs{}, err
+	}
+	return crewSleepArgs{member: member, json: *jsonOut}, nil
+}
+
+func runCrewSleep(args []string) {
+	parsed, err := parseCrewSleepArgs(args)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew sleep: %v\n", err)
+		writeCrewHelp(os.Stderr)
+		os.Exit(2)
+	}
+	result, err := client.New("").CrewSleep(parsed.member)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "crew sleep: %v\n", err)
+		os.Exit(1)
+	}
+	if parsed.json {
+		printJSON(result)
+		return
+	}
+	fmt.Fprintln(os.Stdout, crewSleepOutcomeLine(result))
+}
+
+func crewSleepOutcomeLine(result *protocol.CrewSleepResult) string {
+	name := crew.DisplayName(result.Member)
+	if result.AlreadyAsleep {
+		if detail := strings.TrimSpace(result.Detail); detail != "" {
+			return detail + "."
+		}
+		return fmt.Sprintf("%s is already asleep — no sleep request was sent.", name)
+	}
+	if result.DeliveryStatus != nil && *result.DeliveryStatus == protocol.AgentMsgStatusQueued {
+		detail := strings.TrimSpace(result.Detail)
+		if detail == "" {
+			detail = "the member is not taking input right now"
+		}
+		return fmt.Sprintf("Sleep request for %s is queued in session %s — %s", name, agentShortID(protocol.Deref(result.SessionID)), detail)
+	}
+	return fmt.Sprintf("Asked %s in session %s to write its handoff and file it with `attn handoff --sleep`.", name, agentShortID(protocol.Deref(result.SessionID)))
 }
 
 // crewDirList collects a repeatable flag. An explicit empty value clears the

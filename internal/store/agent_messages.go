@@ -9,8 +9,8 @@ import (
 // before any delivery is attempted, so a message that cannot land right now is
 // queued rather than dropped, and `delivered_at` is what separates the two.
 
-// AgentMessage is one message between sessions. DeliveredAt is empty while the
-// message is still queued.
+// AgentMessage is one durable delivery to a session. SenderSessionID is empty
+// for a daemon-authored user request; DeliveredAt is empty while it is queued.
 type AgentMessage struct {
 	ID              string
 	SenderSessionID string

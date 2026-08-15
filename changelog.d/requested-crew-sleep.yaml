@@ -1,0 +1,12 @@
+kind: fixed
+area: crew
+change: >
+  Crew members can now be asked to sleep from the CLI or their awake sidebar
+  row. The request tells the member to close with `attn handoff --sleep`, so no
+  successor wakes behind a sleep the user requested. A dead member process now
+  releases its crew binding immediately, and wake repairs and names any stale
+  binding it still encounters instead of focusing a corpse.
+symptom: >
+  There was no user-side sleep action, the automatic sleep prompt could wake a
+  successor when the user returned before the letter landed, and a crew member
+  whose process died outside attn could remain permanently stuck awake.

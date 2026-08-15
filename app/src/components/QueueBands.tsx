@@ -43,6 +43,8 @@ interface QueueBandsProps {
   crew?: CrewMemberView[];
   /** Start a sleeping member's day. Resolves once its session exists. */
   onWakeCrewMember?: (member: string) => void;
+  /** Ask an awake member to close its day and sleep. */
+  onSleepCrewMember?: (member: string) => void;
   selectedId: string | null;
   onSelectSession: (id: string) => void;
   onSettleTurn: (id: string) => void;
@@ -265,6 +267,7 @@ export function QueueBands({
   bands,
   crew,
   onWakeCrewMember,
+  onSleepCrewMember,
   selectedId,
   onSelectSession,
   onSettleTurn,
@@ -359,6 +362,7 @@ export function QueueBands({
               selected={crewRow.row ? selectedId === crewRow.row.session.id : false}
               onSelect={crewRow.row ? () => onSelectSession(crewRow.row!.session.id) : undefined}
               onWake={onWakeCrewMember && (() => onWakeCrewMember(crewRow.member))}
+              onSleep={crewRow.row && onSleepCrewMember ? () => onSleepCrewMember(crewRow.member) : undefined}
               onOpenActions={
                 crewRow.row && onOpenActions
                   ? (event) => onOpenActions(crewRow.row!.session, event)
@@ -424,6 +428,7 @@ function CrewRowView({
   selected,
   onSelect,
   onWake,
+  onSleep,
   onOpenActions,
 }: {
   member: string;
@@ -431,6 +436,7 @@ function CrewRowView({
   selected: boolean;
   onSelect?: () => void;
   onWake?: () => void;
+  onSleep?: () => void;
   onOpenActions?: (event: ReactMouseEvent) => void;
 }) {
   const awake = Boolean(row);
@@ -488,21 +494,38 @@ function CrewRowView({
           </button>
         </div>
       )}
-      {awake && onOpenActions && (
+      {awake && (onSleep || onOpenActions) && (
         <div className="queue-row-controls">
-          <button
-            type="button"
-            className="session-actions session-more-btn"
-            data-testid={`session-actions-${row!.session.id}`}
-            title="Session actions"
-            aria-label={`Actions for ${label}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              onOpenActions(event);
-            }}
-          >
-            •••
-          </button>
+          {onSleep && (
+            <button
+              type="button"
+              className="queue-row-sleep"
+              data-testid={`queue-crew-sleep-${member}`}
+              title={`Ask ${name} to close its day and sleep`}
+              aria-label={`Ask ${name} to sleep`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onSleep();
+              }}
+            >
+              ☾
+            </button>
+          )}
+          {onOpenActions && (
+            <button
+              type="button"
+              className="session-actions session-more-btn"
+              data-testid={`session-actions-${row!.session.id}`}
+              title="Session actions"
+              aria-label={`Actions for ${label}`}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenActions(event);
+              }}
+            >
+              •••
+            </button>
+          )}
         </div>
       )}
     </div>

@@ -1303,6 +1303,7 @@
 .queue-row-controls .session-actions,
 .queue-row-controls .queue-row-pin,
 .queue-row-controls .queue-row-snooze,
+.queue-row-controls .queue-row-sleep,
 .queue-row-controls .queue-row-wake,
 .queue-row-controls .queue-row-settle {
   opacity: 1;
@@ -1319,6 +1320,7 @@
 
 .queue-row-settle,
 .queue-row-snooze,
+.queue-row-sleep,
 .queue-row-wake,
 .queue-row-pin {
   flex: 0 0 auto;
@@ -1333,10 +1335,12 @@
 
 .queue-row:hover .queue-row-settle,
 .queue-row:hover .queue-row-snooze,
+.queue-row:hover .queue-row-sleep,
 .queue-row:hover .queue-row-wake,
 .queue-row:hover .queue-row-pin,
 .queue-row-settle:focus-visible,
 .queue-row-snooze:focus-visible,
+.queue-row-sleep:focus-visible,
 .queue-row-wake:focus-visible,
 .queue-row-pin:focus-visible {
   opacity: 1;
@@ -1344,6 +1348,7 @@
 
 .queue-row-settle:hover,
 .queue-row-snooze:hover,
+.queue-row-sleep:hover,
 .queue-row-wake:hover,
 .queue-row-pin:hover {
   color: var(--color-text-primary);
