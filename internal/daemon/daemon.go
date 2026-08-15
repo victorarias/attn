@@ -255,6 +255,10 @@ type Daemon struct {
 	drainingAgentMessages       map[string]bool
 	agentMessageTaken           map[string][]chan struct{}
 	agentMessagesAwaitingSubmit map[string]bool
+	// A crew wake may owe work only after the new day has submitted its ordinary
+	// first prompt. Ticket delivery uses this to keep the doorbell behind charter
+	// and handoff priming instead of pasting into the launching session.
+	postInitialPrompt map[string]func()
 	// A message-triggered crew wake carries the attributed message as the new
 	// day's initial prompt. The row stays queued until a prompt-submit hook
 	// proves the agent took it; across a daemon restart the ordinary queue drain
@@ -1040,6 +1044,12 @@ func (d *Daemon) Start() error {
 	d.ensureGardenCollections()
 	d.ensureCrewCollections()
 	d.importCrewHomes()
+	if err := d.migrateCrewTicketIdentities(); err != nil {
+		return fmt.Errorf("migrate crew ticket identities: %w", err)
+	}
+	if err := d.seedCrewTicketWakeDeliveries(); err != nil {
+		return fmt.Errorf("restore crew ticket wake deliveries: %w", err)
+	}
 	if d.hubManager == nil {
 		d.hubManager = hub.NewManager(
 			d.store,
@@ -2175,6 +2185,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
+	d.forgetPostInitialPrompt(sessionID)
 	d.clearAutoSettleState(sessionID)
 	d.clearSnoozeState(sessionID)
 	d.clearPTYWriteFence(sessionID)
@@ -3058,6 +3069,7 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("hook evidence: id=%s state=%s", msg.ID, msg.State)
 	d.noteInitialAgentMessageSubmitted(msg.ID, msg.State)
+	d.runPostInitialPrompt(msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordBracketEvidence(msg.ID, msg.State)

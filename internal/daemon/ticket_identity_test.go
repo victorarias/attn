@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/store"
 )
@@ -94,5 +95,88 @@ func TestTicketIdentityUnfilledRoleHasNoSession(t *testing.T) {
 	d, _ := newChiefOfStaffTestDaemon(t)
 	if got := d.ticketSessionForIdentity(store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)); got != "" {
 		t.Fatalf("unfilled role resolved to %q, want no session", got)
+	}
+}
+
+func TestTicketIdentityFollowsCrewMemberDayTurnover(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "day-a")
+	addSession(t, d, "day-b")
+	if _, err := d.claimCrewBinding("trellis", "day-a"); err != nil {
+		t.Fatal(err)
+	}
+
+	identity := store.TicketMemberIdentity("trellis")
+	observers := d.ticketObserversForSession("day-a")
+	if len(observers) != 1 || observers[0].ID != identity || observers[0].AuthorID != identity || observers[0].DeliveryID != "day-a" {
+		t.Fatalf("day-a observers = %+v, want the durable member delivered to day-a", observers)
+	}
+	if got := d.ticketSessionForIdentity(identity); got != "day-a" {
+		t.Fatalf("member inverse = %q, want day-a", got)
+	}
+	if got := d.ticketAttentionKey("day-a"); got != identity {
+		t.Fatalf("day-a attention = %q, want %q", got, identity)
+	}
+
+	if err := d.transferCrewBinding("trellis", "day-a", "day-b"); err != nil {
+		t.Fatal(err)
+	}
+	if got := d.ticketSessionForIdentity(identity); got != "day-b" {
+		t.Fatalf("member inverse after turnover = %q, want day-b", got)
+	}
+	if got := d.ticketAttentionKey("day-b"); got != identity {
+		t.Fatalf("day-b attention = %q, want %q", got, identity)
+	}
+}
+
+func TestStaleCrewBindingTransferDoesNotMigrateTicketIdentity(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "day-a")
+	addSession(t, d, "day-b")
+	if _, err := d.claimCrewBinding("trellis", "day-b"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "stale-transfer", Title: "Stale transfer"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription("day-a", "stale-transfer", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.transferCrewBinding("trellis", "day-a", "next-day"); err == nil {
+		t.Fatal("stale transfer succeeded")
+	}
+	if subscribed, err := d.store.IsTicketSubscribed(store.TicketMemberIdentity("trellis"), "stale-transfer"); err != nil || subscribed {
+		t.Fatalf("stale transfer migrated member subscription = %v, err %v", subscribed, err)
+	}
+	if subscribed, err := d.store.IsTicketSubscribed("day-a", "stale-transfer"); err != nil || !subscribed {
+		t.Fatalf("stale transfer removed source subscription = %v, err %v", subscribed, err)
+	}
+}
+
+func TestCrewStartupSweepMigratesAnExistingLiveBinding(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "day-a")
+	if _, err := d.claimCrewBinding("trellis", "day-a"); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "upgrade-thread", Title: "Upgrade thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription("day-a", "upgrade-thread", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := d.migrateCrewTicketIdentities(); err != nil {
+		t.Fatal(err)
+	}
+	identity := store.TicketMemberIdentity("trellis")
+	if subscribed, err := d.store.IsTicketSubscribed(identity, "upgrade-thread"); err != nil || !subscribed {
+		t.Fatalf("startup member subscription = %v, err %v", subscribed, err)
+	}
+	if subscribed, err := d.store.IsTicketSubscribed("day-a", "upgrade-thread"); err != nil || subscribed {
+		t.Fatalf("startup source subscription survived = %v, err %v", subscribed, err)
 	}
 }

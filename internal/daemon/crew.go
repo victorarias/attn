@@ -193,6 +193,40 @@ func (d *Daemon) crewBindingLive(member crew.Member) bool {
 	return member.BindingSession != "" && d.sessionExists(member.BindingSession)
 }
 
+// migrateCrewTicketIdentity adopts one day's ticket participation into the
+// member before a binding moves or disappears. It is idempotent, so registration
+// retries and daemon restarts can safely run it again.
+func (d *Daemon) migrateCrewTicketIdentity(memberID string, sessionIDs ...string) error {
+	identity := store.TicketMemberIdentity(memberID)
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if err := d.store.MigrateTicketIdentity(sessionID, identity, time.Now()); err != nil {
+			return fmt.Errorf("carry session %s's ticket participation into %s: %w", shortSessionID(sessionID), identity, err)
+		}
+	}
+	return nil
+}
+
+// migrateCrewTicketIdentities upgrades session-keyed ticket state already on
+// disk. Claim/release cannot cover a daemon upgrade whose live binding survives
+// the restart, and LetterSession recovers the immediate predecessor after a
+// sleep completed before this version first ran.
+func (d *Daemon) migrateCrewTicketIdentities() error {
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if err := d.migrateCrewTicketIdentity(member.ID, member.BindingSession, member.LetterSession); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // claimCrewBinding stamps sessionID as memberName's active binding — the
 // identity mechanism: the session is the member because this claim succeeded
 // at its launch. It refuses an unregistered name, and refuses a member whose
@@ -223,6 +257,9 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 			return "", fmt.Errorf("no crew member %q is registered; `attn crew list` names the roster", memberName)
 		}
 		if member.BindingSession == sessionID {
+			if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+				return "", err
+			}
 			return member.ID, nil
 		}
 		if d.crewBindingLive(member) {
@@ -233,9 +270,16 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 		// this session already answered to. A refused claim is not reached here,
 		// and leaves the session the member it already was.
 		d.releaseCrewBindingsExcept(*schema, members, docs, member.ID, sessionID)
+		previousSessionID := member.BindingSession
+		if err := d.migrateCrewTicketIdentity(member.ID, previousSessionID); err != nil {
+			return "", err
+		}
 		member.BindingSession = sessionID
 		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
 		if err == nil {
+			if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+				return "", err
+			}
 			d.publishFact(FactCrewBound, member.ID, nil)
 			d.logf("crew: session %s bound as %s", sessionID, crew.DisplayName(member.ID))
 			return member.ID, nil
@@ -276,6 +320,10 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 func (d *Daemon) releaseCrewBindingsExcept(schema docstore.CollectionSchema, members []crew.Member, docs map[string]docstore.Document, keepID, sessionID string) {
 	for _, member := range members {
 		if member.BindingSession != sessionID || member.ID == keepID {
+			continue
+		}
+		if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+			d.logf("crew: keeping %s's stale binding for session %s because ticket participation did not move: %v", crew.DisplayName(member.ID), sessionID, err)
 			continue
 		}
 		member.BindingSession = ""

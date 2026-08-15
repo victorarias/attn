@@ -7,10 +7,11 @@ import (
 
 // Ticket notification identities, and the mapping between them and live sessions.
 //
-// A session always observes through its own session identity. The session
-// currently filling a durable product role ALSO observes through that role's
-// identity, whose per-(identity, ticket) cursors survive the role moving to a
-// different session — that is the whole point of a role identity.
+// An ordinary session observes through its own identity. A session filling a
+// durable profile role ALSO observes through that role. A crew day instead acts
+// through the member identity: its session id is disposable, while the member's
+// per-ticket cursors survive every turnover. The concrete session remains only
+// the delivery target and, where applicable, the ticket assignee.
 //
 // Three questions get asked of that mapping, in three different places, and they
 // must stay mutually consistent:
@@ -24,14 +25,18 @@ import (
 // disagreement whose symptom is an identity that is never delivered to, with no
 // error anywhere.
 
-// ticketRoleIdentitiesForSession returns the durable role identities the session
-// currently fills, in the order they take precedence. Empty for an ordinary
-// session.
-func (d *Daemon) ticketRoleIdentitiesForSession(sessionID string) []string {
-	if d.isChiefOfStaffSession(sessionID) {
-		return []string{store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)}
+// ticketDurableIdentitiesForSession returns the durable identities the session
+// currently fills, in the order they take precedence. A member comes first: its
+// subscriptions, cursor and attention clock belong to the member across days.
+func (d *Daemon) ticketDurableIdentitiesForSession(sessionID string) []string {
+	var identities []string
+	if member := d.crewMemberBoundTo(sessionID); member != "" {
+		identities = append(identities, store.TicketMemberIdentity(member))
 	}
-	return nil
+	if d.isChiefOfStaffSession(sessionID) {
+		identities = append(identities, store.TicketRoleIdentity(store.TicketRoleChiefOfStaff))
+	}
+	return identities
 }
 
 // ticketSessionForIdentity is the inverse: the live session an identity's
@@ -42,19 +47,44 @@ func (d *Daemon) ticketSessionForIdentity(identity string) string {
 	if identity == store.TicketRoleIdentity(store.TicketRoleChiefOfStaff) {
 		return d.chiefOfStaffSessionID()
 	}
+	if memberID, ok := store.ParseTicketMemberIdentity(identity); ok {
+		member, _, err := d.crewMember(memberID)
+		if err != nil || !d.crewBindingLive(member) {
+			return ""
+		}
+		return member.BindingSession
+	}
 	return identity
 }
 
+// ticketActorIdentity is how a session-bound ticket action is attributed. A
+// member acts as the member, not as today's disposable session; ordinary and
+// chief sessions keep their existing concrete-session attribution.
+func (d *Daemon) ticketActorIdentity(sessionID string) string {
+	for _, identity := range d.ticketDurableIdentitiesForSession(sessionID) {
+		if _, ok := store.ParseTicketMemberIdentity(identity); ok {
+			return identity
+		}
+	}
+	return sessionID
+}
+
 // ticketObserversForSession builds the effective notification identities for a
-// session. AuthorID stays the session on every observer, so self-authored events
-// are excluded no matter which identity's cursor is being read; DeliveryID is the
-// session, because that is what can actually be nudged.
+// session. A member reads only through durable identities; other role fillers
+// retain their concrete-session observer too. AuthorID is the acting identity so
+// a member never receives its own event through another observer. DeliveryID is
+// always the concrete session, because that is what can actually be nudged.
 func (d *Daemon) ticketObserversForSession(sessionID string) []ticketnotify.Observer {
-	observers := []ticketnotify.Observer{{ID: sessionID, AuthorID: sessionID, DeliveryID: sessionID}}
-	for _, roleIdentity := range d.ticketRoleIdentitiesForSession(sessionID) {
+	authorID := d.ticketActorIdentity(sessionID)
+	durable := d.ticketDurableIdentitiesForSession(sessionID)
+	observers := make([]ticketnotify.Observer, 0, len(durable)+1)
+	if _, member := store.ParseTicketMemberIdentity(authorID); !member {
+		observers = append(observers, ticketnotify.Observer{ID: sessionID, AuthorID: authorID, DeliveryID: sessionID})
+	}
+	for _, roleIdentity := range durable {
 		observers = append(observers, ticketnotify.Observer{
 			ID:         roleIdentity,
-			AuthorID:   sessionID,
+			AuthorID:   authorID,
 			DeliveryID: sessionID,
 		})
 	}
@@ -65,9 +95,9 @@ func (d *Daemon) ticketObserversForSession(sessionID string) []ticketnotify.Obse
 // session's buffered delivery. A role-filling session uses the role's key, so the
 // budget follows the role across a transfer rather than resetting with each new
 // session. With more than one role the highest-precedence one wins, matching the
-// order ticketRoleIdentitiesForSession returns.
+// order ticketDurableIdentitiesForSession returns.
 func (d *Daemon) ticketAttentionKey(sessionID string) string {
-	if roles := d.ticketRoleIdentitiesForSession(sessionID); len(roles) > 0 {
+	if roles := d.ticketDurableIdentitiesForSession(sessionID); len(roles) > 0 {
 		return roles[0]
 	}
 	return sessionID

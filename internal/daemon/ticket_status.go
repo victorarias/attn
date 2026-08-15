@@ -72,8 +72,9 @@ func (d *Daemon) handleSetTicketStatus(conn net.Conn, msg *protocol.SetTicketSta
 		comment = strings.TrimSpace(*msg.Comment)
 	}
 	d.deliveryMu.Lock()
+	author := d.ticketActorIdentity(sourceSessionID)
 	updated, outcome, err := d.store.SetTicketStatusWithOptions(
-		ticketID, status, sourceSessionID, comment,
+		ticketID, status, author, comment,
 		d.ticketMutationOptions(sourceSessionID), time.Now(),
 	)
 	if err != nil {
