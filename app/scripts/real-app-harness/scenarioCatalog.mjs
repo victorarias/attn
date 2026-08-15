@@ -263,6 +263,11 @@ export const scenarioCatalog = [
     timeoutMs: 360_000,
   },
   {
+    id: 'snapshot-scrollback-restore',
+    label: 'Deep scrollback survives an app relaunch restore',
+    command: ['pnpm', 'run', 'real-app:scenario-snapshot-scrollback-restore'],
+  },
+  {
     id: 'ghostty-scroll',
     label: 'Ghostty scrollback anchoring while output streams',
     command: ['pnpm', 'run', 'real-app:scenario-ghostty-scroll'],
