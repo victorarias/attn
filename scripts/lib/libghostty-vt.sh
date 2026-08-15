@@ -12,14 +12,13 @@
 # PER-PLATFORM: the library links into the daemon on darwin/arm64 AND the two
 # Linux tuples (the daemon runs headless on Linux; only the Tauri app is
 # Mac-only). Every prebuilt asset, output dir, and lock sha256 is keyed by
-# <goos>_<goarch>; the source identity `key` (sha256 of pin+patch) is shared
+# <goos>_<goarch>; the source identity `key` (sha256 of the pin) is shared
 # across platforms because the same source produces every target.
 
 # This file lives at <repo>/scripts/lib/libghostty-vt.sh; repo root is two up.
 vt_lib_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 vt_repo_dir="$(cd "$vt_lib_dir/../.." && pwd)"
 vt_pin_file="$vt_repo_dir/ghostty-vt.pin"
-vt_patch_file="$vt_repo_dir/ghostty-vt-native.patch"
 vt_lock_file="$vt_repo_dir/ghostty-vt-native.lock"
 
 # Every native target that links the real cgo library. Keep in lockstep with the
@@ -75,16 +74,15 @@ vt_commit() {
   printf '%s' "$commit"
 }
 
-# Source identity of the produced artifacts: sha256 over the pin commit AND the
-# carried patch. Both determine the bytes, so the key changes when either moves —
-# which is how a locally-edited pin/patch is detected as "no published asset yet"
-# and routed to a source build. Platform-independent: the same source builds
-# every target, so one key covers all tuples; the asset filename adds the tuple.
+# Source identity of the produced artifacts: sha256 over the pin commit, which
+# is what determines the bytes — so the key changes when the pin moves, which is
+# how a locally-edited pin is detected as "no published asset yet" and routed to
+# a source build. Platform-independent: the same source builds every target, so
+# one key covers all tuples; the asset filename adds the tuple.
 vt_key() {
   {
     vt_commit
     printf '\n'
-    [[ -f "$vt_patch_file" ]] && cat "$vt_patch_file"
   } | shasum -a 256 | cut -d' ' -f1
 }
 
@@ -122,7 +120,7 @@ vt_build_from_source() {
   if [[ -z "$zig" ]]; then
     echo "error: zig not found on PATH; need zig 0.16.x to build libghostty-vt from source" >&2
     echo "       (consumers normally download a prebuilt asset — this path only runs when" >&2
-    echo "        you have changed ghostty-vt.pin or ghostty-vt-native.patch, or forced" >&2
+    echo "        you have changed ghostty-vt.pin, or forced" >&2
     echo "        ATTN_VT_FROM_SOURCE=1)" >&2
     return 1
   fi
@@ -150,13 +148,6 @@ vt_build_from_source() {
   git -C "$workdir/ghostty" remote add origin https://github.com/ghostty-org/ghostty.git
   git -C "$workdir/ghostty" fetch -q --depth=1 origin "$commit"
   git -C "$workdir/ghostty" checkout -q --detach FETCH_HEAD
-
-  # Carried patches (e.g. exposing the primary-vs-alt ScreenFormatter through the
-  # C API). Applied only when present so the build works before the patch lands.
-  if [[ -f "$vt_patch_file" ]]; then
-    echo "==> [$platform] applying $vt_patch_file"
-    git -C "$workdir/ghostty" apply "$vt_patch_file"
-  fi
 
   echo "==> [$platform] zig build -Demit-lib-vt=true -Dtarget=$ztarget (zig $zig_version)"
   (

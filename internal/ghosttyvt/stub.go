@@ -8,12 +8,15 @@
 // A stub Terminal serializes to nothing and renders nothing.
 package ghosttyvt
 
-// DefaultMaxScrollback mirrors the real build's constant.
-const DefaultMaxScrollback = 10000
+// DefaultScrollbackBytes mirrors the real build's constant.
+const DefaultScrollbackBytes = 8 << 20
+
+// ContinuationMaxBytes mirrors the real build's constant.
+const ContinuationMaxBytes = 65 << 20
 
 // Options mirrors the real build's construction options.
 type Options struct {
-	MaxScrollback int
+	ScrollbackBytes int
 
 	// KittyImageStorageLimit is the kitty graphics image storage cap in
 	// bytes, applied at construction. The zero value disables the kitty
@@ -26,6 +29,7 @@ type Options struct {
 // Snapshot mirrors the real build's serialization result.
 type Snapshot struct {
 	Cols, Rows int
+	Payload    []byte
 	VTDump     []byte
 }
 

@@ -429,7 +429,7 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		result.Snapshot = &protocol.AttachSnapshot{
 			Cols:                int(replay.ghosttyCols),
 			Rows:                int(replay.ghosttyRows),
-			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			SnapshotB64:         base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
 			Blocks:              attachBlocksToProtocol(replay.ghosttyBlocks),
 			Placements:          placementsToProtocol(replay.ghosttyPlacements),
 			ScrollbackTruncated: replay.scrollbackTruncated,

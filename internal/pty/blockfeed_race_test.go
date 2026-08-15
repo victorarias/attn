@@ -111,12 +111,11 @@ func TestBlockSnapshotAtomicity(t *testing.T) {
 	}()
 
 	restoredLines := func(info AttachInfo) []string {
-		restored, rerr := ghosttyvt.New(int(info.Cols), int(info.Rows), ghosttyvt.Options{})
+		restored, rerr := ghosttyvt.Restore(info.GhosttySnapshot, ghosttyvt.Options{})
 		if rerr != nil {
-			t.Fatalf("ghosttyvt.New (restore): %v", rerr)
+			t.Fatalf("ghosttyvt.Restore: %v", rerr)
 		}
 		defer restored.Close()
-		restored.Write(info.GhosttySnapshot)
 		lines := strings.Split(restored.PlainText(), "\n")
 		for i, l := range lines {
 			lines[i] = strings.TrimRight(l, " ")

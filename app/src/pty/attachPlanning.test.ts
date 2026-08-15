@@ -14,7 +14,7 @@ describe('attachPlanning', () => {
       const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
-        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+        snapshot: { cols: 80, rows: 24, snapshot_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
       expect(plan.hasSnapshot).toBe(true);
@@ -28,7 +28,7 @@ describe('attachPlanning', () => {
       const plan = classifyAttachRestore({
         cols: 100,
         rows: 40,
-        snapshot: { cols: 100, rows: 40, vt_dump_b64: 'ZHVtcA==' },
+        snapshot: { cols: 100, rows: 40, snapshot_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 58, rows: 46 }, 'same_app_remount'));
 
       expect(plan.hasSnapshot).toBe(true);
@@ -42,7 +42,7 @@ describe('attachPlanning', () => {
       const plan = classifyAttachRestore({
         cols: 80,
         rows: 24,
-        snapshot: { cols: 80, rows: 24, vt_dump_b64: '' },
+        snapshot: { cols: 80, rows: 24, snapshot_b64: '' },
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
       expect(plan.hasSnapshot).toBe(false);
@@ -52,13 +52,13 @@ describe('attachPlanning', () => {
       const restorePlan = classifyAttachRestore({
         cols: 80,
         rows: 24,
-        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+        snapshot: { cols: 80, rows: 24, snapshot_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 80, rows: 24 }, 'relaunch_restore'));
 
       const effects = planAttachResultEffects({
         attachResult: {
           last_seq: 7,
-          snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+          snapshot: { cols: 80, rows: 24, snapshot_b64: 'ZHVtcA==' },
         },
         restorePlan,
         previousSeq: 6,
@@ -81,7 +81,7 @@ describe('attachPlanning', () => {
       }, {
         cols: 80,
         rows: 24,
-        snapshot: { cols: 80, rows: 24, vt_dump_b64: 'ZHVtcA==' },
+        snapshot: { cols: 80, rows: 24, snapshot_b64: 'ZHVtcA==' },
       }, {
         attachPolicy: 'same_app_remount',
         attachContext,
@@ -247,13 +247,13 @@ describe('attachPlanning', () => {
       const restorePlan = classifyAttachRestore({
         cols: 58,
         rows: 46,
-        snapshot: { cols: 58, rows: 46, vt_dump_b64: 'ZHVtcA==' },
+        snapshot: { cols: 58, rows: 46, snapshot_b64: 'ZHVtcA==' },
       }, createAttachRequestContext({ cols: 58, rows: 46 }, 'relaunch_restore'));
 
       const effects = planAttachResultEffects({
         attachResult: {
           last_seq: 10,
-          snapshot: { cols: 58, rows: 46, vt_dump_b64: 'ZHVtcA==' },
+          snapshot: { cols: 58, rows: 46, snapshot_b64: 'ZHVtcA==' },
         },
         restorePlan,
         queuedOutputs: [

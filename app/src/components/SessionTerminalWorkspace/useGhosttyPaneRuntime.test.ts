@@ -28,6 +28,7 @@ function createTerminal(): GhosttyTerminalHandle {
     getBounds: vi.fn(() => null),
     write: vi.fn(() => Promise.resolve()),
     resizeLocal: vi.fn(() => Promise.resolve()),
+    restoreSnapshot: vi.fn(() => Promise.resolve()),
     reset: vi.fn(),
     setSurfaceReleased: vi.fn(),
     scrollToTop: vi.fn(() => true),

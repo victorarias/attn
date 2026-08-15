@@ -8,6 +8,8 @@
 
 /** GhosttyResult. Negative values are errors. */
 export const GHOSTTY_SUCCESS = 0;
+/** Not an error: the asked-for value does not exist in the current state. */
+export const GHOSTTY_NO_VALUE = -4;
 
 /** ghostty_terminal_set options. */
 export const TERMINAL_OPT_WRITE_PTY = 1;
@@ -26,6 +28,11 @@ export const TERMINAL_DATA_SCROLLBACK_ROWS = 15;
 export const TERMINAL_DATA_COLOR_FOREGROUND = 18;
 export const TERMINAL_DATA_COLOR_BACKGROUND = 19;
 export const TERMINAL_DATA_MODE = 37;
+
+/** ghostty_snapshot_decoder_get data kinds. */
+export const SNAPSHOT_DATA_HISTORY_ROWS_PRIMARY = 3;
+export const SNAPSHOT_DATA_PROGRESS_ROWS = 6;
+export const SNAPSHOT_DATA_PROGRESS_REMAINING = 7;
 
 /** GhosttyScreenType for TERMINAL_DATA_ACTIVE_SCREEN. */
 export const SCREEN_TYPE_ALTERNATE = 1;
@@ -148,6 +155,12 @@ export interface GhosttyExports extends WebAssembly.Exports {
   ghostty_terminal_get(terminal: number, data: number, out: number): number;
   ghostty_terminal_vt_write(terminal: number, data: number, len: number): void;
   ghostty_terminal_grid_ref(terminal: number, point: number, outRef: number): number;
+
+  ghostty_snapshot_decoder_new_buf(allocator: number, out: number, ptr: number, len: number): number;
+  ghostty_snapshot_decoder_free(decoder: number): void;
+  ghostty_snapshot_decoder_ready(decoder: number, outTerminal: number): number;
+  ghostty_snapshot_decoder_next(decoder: number): number;
+  ghostty_snapshot_decoder_get(decoder: number, data: number, out: number): number;
 
   ghostty_grid_ref_cell(ref: number, outCell: number): number;
   ghostty_grid_ref_row(ref: number, outRow: number): number;

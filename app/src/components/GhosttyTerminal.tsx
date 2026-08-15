@@ -240,9 +240,13 @@ export interface GhosttyTerminalHandle {
     rows: number,
     options?: { historicalReplay?: boolean },
   ) => Promise<void>;
+  // Adopt a server-authoritative snapshot, replacing the model's whole state
+  // with the daemon worker's. Enqueued on the write chain, and the grid it
+  // lands on comes from the snapshot itself.
+  restoreSnapshot: (snapshot: Uint8Array) => Promise<void>;
   // Seed the command-block store from a server-authoritative restore snapshot.
-  // Enqueued on the write chain so it runs after the VT dump is applied and the
-  // restored buffer exists to compute anchor text from.
+  // Enqueued on the write chain so it runs after the snapshot is adopted and
+  // the restored buffer exists to compute anchor text from.
   seedBlocks: (blocks: SeededBlock[]) => Promise<void>;
   // Apply one described kitty placement set. Enqueued on the write chain so the
   // positions land against the grid the bytes of that seq produced.
@@ -1857,13 +1861,49 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       });
     }, [enqueueOperation, flushSynchronizedOutputRender, lineAtVisibleRow, scheduleCoalescedRefit, scheduleSynchronizedOutputRenderFallback, selectionLineAtBufferRow]);
 
+    // Adopt a server-authoritative snapshot. Nothing here is parsed — the
+    // decoder rebuilds the model's state directly — so a restore cannot answer
+    // a query, and the grid it lands on is the worker's own.
+    //
+    // Only the renderable prefix lands on this operation. Scrollback is the
+    // half that scales with the history budget, so it is decoded on a later
+    // frame and the first paint does not wait on it.
+    const restoreSnapshot = useCallback((snapshot: Uint8Array) => {
+      return enqueueOperation('restoreSnapshot', () => {
+        const terminal = terminalRef.current;
+        if (!terminal) return;
+        modelOpRingRef.current.noteRestoreChunk(snapshot, terminal.cols, terminal.rows);
+        const history = terminal.adoptSnapshot(snapshot);
+        // The decoded terminal carries the worker's modes, and the worker never
+        // asserted the app's grapheme clustering.
+        graphemeResetCarryRef.current = false;
+        ensureGraphemeClustering(terminal);
+        osc133StateRef.current = emptyOsc133State();
+        osc52StateRef.current = { pending: '' };
+        viewportOffsetRef.current = 0;
+        wheelRemainderRowsRef.current = 0;
+        hoverGenerationRef.current += 1;
+        annotationsRef.current?.noteWrite();
+        flushSynchronizedOutputRender();
+        requestAnimationFrame(() => {
+          void enqueueOperation('restoreHistory', () => {
+            if (!terminalRef.current) {
+              history.close();
+              return;
+            }
+            while (history.next() !== null) { /* prepend every page */ }
+            flushSynchronizedOutputRender();
+          });
+        });
+      });
+    }, [enqueueOperation, flushSynchronizedOutputRender]);
+
     // Seed the command-block store from a server-authoritative restore snapshot.
-    // Enqueued on the write chain so it runs after the VT dump is applied: the
-    // dump is OSC 133-stripped, so the live parser rebuilds nothing on restore
-    // and this is the only path that carries blocks across an attach. Seed rows
-    // are absolute buffer rows of the freshly-restored terminal (== the dump's
-    // SCREEN rows), the same space live applyMarker records, so anchor text read
-    // here matches what re-anchoring later expects.
+    // Enqueued on the write chain so it runs after the snapshot is adopted: a
+    // snapshot rebuilds the grid without replaying markers, so this is the only
+    // path that carries blocks across an attach. Seed rows are absolute buffer
+    // rows of the freshly-restored terminal, the same space live applyMarker
+    // records, so anchor text read here matches what re-anchoring expects.
     const seedBlocks = useCallback((blocks: SeededBlock[]) => {
       return enqueueOperation('seedBlocks', () => {
         const terminal = terminalRef.current;
@@ -2339,6 +2379,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getBounds: () => containerRef.current?.getBoundingClientRect() ?? null,
       write,
       resizeLocal,
+      restoreSnapshot,
       seedBlocks,
       applyPlacements,
       seedPlacements,
@@ -2369,7 +2410,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       getBlockState,
       getPlacementState,
       drain: () => writeChainRef.current,
-    }), [applyPlacements, fit, getBlockState, getPlacementState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, seedBlocks, seedPlacements, setSurfaceReleased, write]);
+    }), [applyPlacements, fit, getBlockState, getPlacementState, getText, getVisibleContent, getVisibleStyleSummary, openFind, renderSurface, resizeLocal, restoreSnapshot, seedBlocks, seedPlacements, setSurfaceReleased, write]);
 
     useEffect(() => {
       let active = true;
@@ -2568,6 +2609,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           getBounds: () => container.getBoundingClientRect(),
           write,
           resizeLocal,
+          restoreSnapshot,
           seedBlocks,
           applyPlacements,
           seedPlacements,

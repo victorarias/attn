@@ -83,7 +83,7 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 	t.Helper()
 	worker := newKittyTerminal(t, cols, rows, opts)
 	// The client stands in for the frontend's model: same size, no kitty.
-	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{MaxScrollback: opts.MaxScrollback})
+	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{ScrollbackBytes: opts.ScrollbackBytes})
 
 	feed := newWireFeeder(worker, 0, nil, 0)
 	if feed == nil {

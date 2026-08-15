@@ -65,12 +65,15 @@ export type PtyEventPayload =
   | { event: 'data'; id: string; data: string | Uint8Array; seq?: number; source?: PtyDataEventSource; suppressResponses?: boolean }
   | { event: 'local_resize'; id: string; cols: number; rows: number; source?: PtyDataEventSource }
   | { event: 'replay_complete'; id: string }
+  // A server-authoritative snapshot (base64), decoded into the pane's model
+  // rather than written to it. It carries its own grid and its own scrollback.
+  | { event: 'restore_snapshot'; id: string; data: string }
   | { event: 'seed_blocks'; id: string; blocks: SeededBlock[] }
   // The session's whole kitty placement set, as the worker measured it on the
   // chunk stamped `seq`. Routed through this chain rather than straight to the
   // pane so it lands behind the bytes of that same seq.
   | { event: 'placements'; id: string; seq: number; placements: PlacementElement[] }
-  // A restore's placements. The VT dump carries no images (the APC bytes were
+  // A restore's placements. A snapshot carries no images (the APC bytes were
   // stripped long before it was serialized), so this is the only path that
   // carries them across an attach — and an empty set is meaningful: it is what
   // clears an image the pane was showing before the reattach.

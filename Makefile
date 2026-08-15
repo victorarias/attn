@@ -85,16 +85,16 @@ endif
 # rebuild (the script applies it, so a stale archive would miss the change). The
 # script is download-first: it fetches a prebuilt asset keyed by pin+patch and
 # verified against ghostty-vt-native.lock, and only builds from source (zig) when
-# the pin/patch was edited locally. The lock is a prerequisite so a republished
+# the pin was edited locally. The lock is a prerequisite so a republished
 # asset (new sha) forces everyone to re-fetch. GHOSTTY_VT_GOOS/GOARCH pin the
 # script to the same target the archive path resolves, so it installs into
 # third_party/ghostty-vt/$(VT_PLATFORM)/.
-$(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
+$(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.lock)
 	GHOSTTY_VT_GOOS=$(VT_GOOS) GHOSTTY_VT_GOARCH=$(VT_GOARCH) ./scripts/build-libghostty-vt.sh
 
 # Rebuild the native archives for EVERY supported target from source and publish
-# them as prebuilt assets. Run after changing the shared ghostty-vt.pin or
-# ghostty-vt-native.patch; needs zig 0.16.x (cross-compiles all targets from one
+# them as prebuilt assets. Run after changing the shared ghostty-vt.pin; needs
+# zig 0.16.x (cross-compiles all targets from one
 # host) and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
 publish-native-vt:
 	./scripts/publish-libghostty-vt.sh

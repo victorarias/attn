@@ -2264,18 +2264,24 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	})
 }
 
+// setNoStoreHeaders keeps a daemon response out of every cache between it and
+// its client: health and favicon answer for the daemon running right now.
+func setNoStoreHeaders(header http.Header) {
+	header.Set("Cache-Control", "no-store, max-age=0")
+	header.Set("Pragma", "no-cache")
+	header.Set("Expires", "0")
+}
+
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
 // Must be called before runHTTPServer().
 func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
-	mux.HandleFunc("/web-instrumentation", d.handleWebInstrumentation)
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		setNoStoreHeaders(w.Header())
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.Handle("/", daemonWebStaticHandler())
 	d.httpHandler = mux
 
 	d.httpServer = &http.Server{

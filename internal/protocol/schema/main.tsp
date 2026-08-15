@@ -3699,10 +3699,10 @@ model ReloadSessionResultMessage {
 }
 
 // One OSC 133 shell-integration command block resolved by the worker, carried
-// beside the VT dump so restore reconstructs clickable prompt/command/output
-// regions (the dump has rendered cells, not the marks). Rows are SCREEN-space
-// rows of vt_dump_b64, which equal client buffer rows after the dump is written
-// into a fresh same-size terminal. See Phase 3a in
+// beside the snapshot so restore reconstructs clickable prompt/command/output
+// regions (the snapshot has rendered cells, not the marks). Rows are
+// SCREEN-space rows of the snapshot, which equal client buffer rows once it is
+// decoded. See Phase 3a in
 // docs/plans/2026-07-22-server-authoritative-terminal.md.
 model AttachBlock {
   id: safeint;                   // server-assigned, monotonic per session
@@ -3749,17 +3749,17 @@ model KittyPlacement {
   source_height: int32;
 }
 
-// Server-authoritative restore snapshot: a self-contained VT serialization of
-// the worker's parsed terminal (grid + scrollback + cursor + modes, both
-// primary and alternate screens) produced by libghostty-vt. Present on every
-// restore attach; the client resets its model and replays vt_dump_b64, then
-// seeds its command-block store from blocks.
+// Server-authoritative restore snapshot: libghostty-vt's binary snapshot of
+// the worker's parsed terminal (grid + scrollback + cursor + modes + any
+// unfinished parser input, both primary and alternate screens). Present on
+// every restore attach; the client decodes a terminal from snapshot_b64 rather
+// than replaying it, then seeds its command-block store from blocks.
 model AttachSnapshot {
   cols: int32;
   rows: int32;
-  vt_dump_b64: string;           // base64 self-contained VT stream
+  snapshot_b64: string;          // base64 ghostty snapshot record stream
   blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
-  // Kitty placements on the screen vt_dump_b64 serializes, captured in the same
+  // Kitty placements on the screen the snapshot carries, captured in the same
   // hold. Absent when the session holds no images. Pixels are not inlined; the
   // client pulls what its cache lacks with get_kitty_image.
   placements?: KittyPlacement[];
@@ -3771,7 +3771,7 @@ model AttachResultMessage {
   id: string;
   success: boolean;
   // The server-authoritative restore. Present whenever the attach restores prior
-  // terminal state; the client resets its model and replays snapshot.vt_dump_b64.
+  // terminal state; the client decodes a terminal from snapshot.snapshot_b64.
   // Absent on a fresh spawn or when no parsed terminal is available.
   snapshot?: AttachSnapshot;
   last_seq?: int32;

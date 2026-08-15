@@ -633,7 +633,7 @@ func (s *Session) info() AttachInfo {
 	var ghosttyTruncated bool
 	if s.ghostty != nil {
 		snapshot := s.ghostty.Serialize()
-		ghosttySnapshot = snapshot.VTDump
+		ghosttySnapshot = snapshot.Payload
 	}
 	// Blocks and placements resolve inside the SAME hold: the attach snapshot
 	// is an atomic {dump, blocks, placements, watermark} quadruple.
