@@ -204,6 +204,7 @@ func TestBuildSpawnEnv_DaemonRoutingOverridesLoginAndPluginEnvironment(t *testin
 	t.Setenv("ATTN_DATA_DIR", filepath.Join(t.TempDir(), "fixture-data"))
 	t.Setenv("ATTN_DB_PATH", filepath.Join(t.TempDir(), "fixture.db"))
 	t.Setenv("ATTN_SOCKET_PATH", socketPath)
+	t.Setenv("ATTN_WS_PORT", "25432")
 	t.Setenv("ATTN_CONFIG_PATH", filepath.Join(t.TempDir(), "fixture-config.json"))
 	t.Setenv("ATTN_PLUGIN_DIR", filepath.Join(t.TempDir(), "fixture-plugins"))
 
@@ -212,6 +213,7 @@ func TestBuildSpawnEnv_DaemonRoutingOverridesLoginAndPluginEnvironment(t *testin
 		"ATTN_DATA_DIR=" + config.DataDir(),
 		"ATTN_DB_PATH=" + config.DBPath(),
 		"ATTN_SOCKET_PATH=" + config.SocketPath(),
+		"ATTN_WS_PORT=" + config.WSPort(),
 		"ATTN_CONFIG_PATH=" + config.ConfigPath(),
 		"ATTN_PLUGIN_DIR=" + config.PluginDir(),
 	}
@@ -222,6 +224,7 @@ func TestBuildSpawnEnv_DaemonRoutingOverridesLoginAndPluginEnvironment(t *testin
 			"ATTN_DATA_DIR=/tmp/login-data",
 			"ATTN_DB_PATH=/tmp/login.db",
 			"ATTN_SOCKET_PATH=/tmp/login-shell.sock",
+			"ATTN_WS_PORT=19999",
 			"ATTN_CONFIG_PATH=/tmp/login-config.json",
 			"ATTN_PLUGIN_DIR=/tmp/login-plugins",
 		},
@@ -230,6 +233,7 @@ func TestBuildSpawnEnv_DaemonRoutingOverridesLoginAndPluginEnvironment(t *testin
 			"ATTN_DATA_DIR=/tmp/plugin-data",
 			"ATTN_DB_PATH=/tmp/plugin.db",
 			"ATTN_SOCKET_PATH=/tmp/plugin.sock",
+			"ATTN_WS_PORT=18888",
 			"ATTN_CONFIG_PATH=/tmp/plugin-config.json",
 			"ATTN_PLUGIN_DIR=/tmp/plugin-plugins",
 			"ATTN_PTY_DAEMON_ENV=internal-transport",
@@ -246,6 +250,7 @@ func TestBuildSpawnEnv_DaemonRoutingOverridesLoginAndPluginEnvironment(t *testin
 	for key, want := range map[string]string{
 		"ATTN_DATA_DIR":    config.DataDir(),
 		"ATTN_DB_PATH":     config.DBPath(),
+		"ATTN_WS_PORT":     config.WSPort(),
 		"ATTN_CONFIG_PATH": config.ConfigPath(),
 		"ATTN_PLUGIN_DIR":  config.PluginDir(),
 	} {

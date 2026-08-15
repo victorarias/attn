@@ -67,12 +67,14 @@ func TestConversationHostCarriesTheSessionIdentity(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "test.sock")
 	t.Setenv("ATTN_PROFILE", "fixture-lab")
 	t.Setenv("ATTN_SOCKET_PATH", socketPath)
+	t.Setenv("ATTN_WS_PORT", "25432")
 	d := NewForTesting(socketPath)
 	d.loginShellEnv = []string{
 		"ATTN_PROFILE=default",
 		"ATTN_DATA_DIR=/tmp/login-data",
 		"ATTN_DB_PATH=/tmp/login.db",
 		"ATTN_SOCKET_PATH=/tmp/login-shell.sock",
+		"ATTN_WS_PORT=19999",
 		"ATTN_CONFIG_PATH=/tmp/login-config.json",
 		"ATTN_PLUGIN_DIR=/tmp/login-plugins",
 		"PATH=" + os.Getenv("PATH"),
@@ -115,6 +117,7 @@ func TestConversationHostCarriesTheSessionIdentity(t *testing.T) {
 		"ATTN_DATA_DIR":       d.dataRoot,
 		"ATTN_DB_PATH":        config.DBPath(),
 		"ATTN_SOCKET_PATH":    socketPath,
+		"ATTN_WS_PORT":        config.WSPort(),
 		"ATTN_CONFIG_PATH":    config.ConfigPath(),
 		"ATTN_PLUGIN_DIR":     d.pluginDir,
 	} {

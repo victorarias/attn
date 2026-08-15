@@ -416,7 +416,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 		return
 	}
 	if msg.Cwd != nil {
-		cwd, err := d.resolveCrewWorkDir(*msg.Cwd)
+		cwd, err := d.resolveCrewRecordedDir(*msg.Cwd)
 		if err != nil {
 			d.sendCrewError(conn, "set", err)
 			return
@@ -430,7 +430,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 	} else if msg.AwarenessDirs != nil {
 		dirs := make([]string, 0, len(msg.AwarenessDirs))
 		for _, dir := range msg.AwarenessDirs {
-			resolved, err := d.resolveCrewWorkDir(dir)
+			resolved, err := d.resolveCrewRecordedDir(dir)
 			if err != nil {
 				d.sendCrewError(conn, "set", err)
 				return
@@ -452,10 +452,7 @@ func (d *Daemon) handleCrewSet(conn net.Conn, msg *protocol.CrewSetMessage) {
 	})
 }
 
-// resolveCrewDir makes a directory absolute and insists it exists. A recorded
-// cwd that is not there only fails at the next wake, which is the wrong end of
-// the day to learn about a typo. An empty value clears the field.
-func resolveCrewDir(dir string) (string, error) {
+func absoluteCrewDir(dir string) (string, error) {
 	dir = strings.TrimSpace(dir)
 	if dir == "" {
 		return "", nil
@@ -469,6 +466,17 @@ func resolveCrewDir(dir string) (string, error) {
 	absolute, err := filepath.Abs(dir)
 	if err != nil {
 		return "", fmt.Errorf("%s is not a usable path: %w", dir, err)
+	}
+	return absolute, nil
+}
+
+// resolveCrewDir makes a directory absolute and insists it exists. A recorded
+// cwd that is not there only fails at the next wake, which is the wrong end of
+// the day to learn about a typo. An empty value clears the field.
+func resolveCrewDir(dir string) (string, error) {
+	absolute, err := absoluteCrewDir(dir)
+	if err != nil || absolute == "" {
+		return absolute, err
 	}
 	info, err := os.Stat(absolute)
 	if err != nil {

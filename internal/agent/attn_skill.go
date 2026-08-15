@@ -140,11 +140,12 @@ func ensureAttnCopilotSkillInstalled() error {
 }
 
 func userGlobalSkillSyncEnabled() bool {
-	return config.Profile() == ""
+	profile := config.Profile()
+	return profile == "" || profile == "dev"
 }
 
 // EnsureClaudeSkillInstalled installs the bundled skill only for the default
-// profile. The bool reports whether synchronization ran.
+// and dev profiles. The bool reports whether synchronization ran.
 func EnsureClaudeSkillInstalled() (bool, error) {
 	if !userGlobalSkillSyncEnabled() {
 		return false, nil
@@ -153,7 +154,7 @@ func EnsureClaudeSkillInstalled() (bool, error) {
 }
 
 // EnsureAgentsSkillInstalled installs the shared agent skill only for the
-// default profile. The bool reports whether synchronization ran.
+// default and dev profiles. The bool reports whether synchronization ran.
 func EnsureAgentsSkillInstalled() (bool, error) {
 	if !userGlobalSkillSyncEnabled() {
 		return false, nil
@@ -162,7 +163,7 @@ func EnsureAgentsSkillInstalled() (bool, error) {
 }
 
 // EnsureCopilotSkillInstalled installs the bundled skill only for the default
-// profile. The bool reports whether synchronization ran.
+// and dev profiles. The bool reports whether synchronization ran.
 func EnsureCopilotSkillInstalled() (bool, error) {
 	if !userGlobalSkillSyncEnabled() {
 		return false, nil

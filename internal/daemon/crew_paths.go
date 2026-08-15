@@ -166,12 +166,11 @@ func (d *Daemon) resolveCrewWorkDir(dir string) (string, error) {
 }
 
 func (d *Daemon) resolveCrewWorkDirForHome(dir, userHome string) (string, error) {
-	resolved, err := resolveCrewDir(dir)
-	if err != nil || resolved == "" {
-		return resolved, err
+	original, err := absoluteCrewDir(dir)
+	if err != nil || original == "" {
+		return original, err
 	}
-	original := resolved
-	resolved, err = config.CanonicalRuntimePath(original)
+	resolved, err := config.CanonicalRuntimePath(original)
 	if err != nil {
 		return "", fmt.Errorf("resolve crew directory %q: %w", dir, err)
 	}
@@ -198,6 +197,16 @@ func (d *Daemon) resolveCrewWorkDirForHome(dir, userHome string) (string, error)
 		return "", fmt.Errorf("refusing crew directory %q: it resolves inside another profile's crew root %q; this daemon's crew root is %q", dir, foreignRoot, ownRoot)
 	}
 	return original, nil
+}
+
+// resolveCrewRecordedDir keeps the existing crew-set contract: new cwd and
+// awareness values must name directories that exist when they are recorded.
+func (d *Daemon) resolveCrewRecordedDir(dir string) (string, error) {
+	resolved, err := resolveCrewDir(dir)
+	if err != nil || resolved == "" {
+		return resolved, err
+	}
+	return d.resolveCrewWorkDir(resolved)
 }
 
 func (d *Daemon) validateCrewWorkDirs(member crew.Member) error {

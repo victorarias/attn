@@ -454,6 +454,34 @@ func TestCrewSet_ADirectoryThatIsNotThereIsRefused(t *testing.T) {
 	}
 }
 
+func TestCrewPriming_StaleProjectPathsDoNotBlockPriming(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	member, _, err := d.crewMember("keel")
+	if err != nil {
+		t.Fatalf("read member: %v", err)
+	}
+	missingRoot := t.TempDir()
+	member.CWD = filepath.Join(missingRoot, "moved-cwd")
+	member.AwarenessDirs = []string{filepath.Join(missingRoot, "moved-awareness")}
+
+	priming, err := d.crewPriming(member)
+	if err != nil {
+		t.Fatalf("stale project paths blocked priming: %v", err)
+	}
+	if priming.CWD != member.CWD {
+		t.Errorf("priming cwd = %q, want stale recorded path %q", priming.CWD, member.CWD)
+	}
+	if len(priming.AwarenessDirs) != 1 || priming.AwarenessDirs[0] != member.AwarenessDirs[0] {
+		t.Errorf("priming awareness = %v, want %v", priming.AwarenessDirs, member.AwarenessDirs)
+	}
+
+	if _, err := d.crewLaunchDir(member); err == nil {
+		t.Fatal("wake accepted a missing cwd")
+	} else if !strings.Contains(err.Error(), "not there") {
+		t.Fatalf("wake refusal = %q, want the existing missing-cwd explanation", err)
+	}
+}
+
 func TestCrewSet_ACwdInsideAnotherProfilesCrewIsRefused(t *testing.T) {
 	d, _, _ := newWakeableDaemon(t)
 	userHome := t.TempDir()
@@ -467,6 +495,26 @@ func TestCrewSet_ACwdInsideAnotherProfilesCrewIsRefused(t *testing.T) {
 		t.Fatal("a cwd inside another profile's crew homes was accepted")
 	}
 	for _, want := range []string{foreign, filepath.Join(userHome, ".attn-fixture", crew.HomesDirName), filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+}
+
+func TestCrewSet_AMissingPathInsideAnotherProfilesCrewIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreignRoot := filepath.Join(userHome, ".attn-fixture", crew.HomesDirName)
+	if err := os.MkdirAll(foreignRoot, 0o755); err != nil {
+		t.Fatalf("create foreign crew root: %v", err)
+	}
+	missing := filepath.Join(foreignRoot, "quartz", "moved-project")
+
+	_, err := d.resolveCrewWorkDirForHome(missing, userHome)
+	if err == nil {
+		t.Fatal("a missing path inside another profile's crew homes was accepted")
+	}
+	for _, want := range []string{missing, foreignRoot, filepath.Join(d.dataRoot, crew.HomesDirName)} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}

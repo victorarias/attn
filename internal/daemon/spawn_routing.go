@@ -11,6 +11,7 @@ func (d *Daemon) spawnRoutingEnv() []string {
 		"ATTN_DATA_DIR=" + d.dataRoot,
 		"ATTN_DB_PATH=" + config.DBPath(),
 		"ATTN_SOCKET_PATH=" + d.socketPath,
+		"ATTN_WS_PORT=" + config.WSPort(),
 		"ATTN_CONFIG_PATH=" + config.ConfigPath(),
 		"ATTN_PLUGIN_DIR=" + d.pluginDir,
 	}

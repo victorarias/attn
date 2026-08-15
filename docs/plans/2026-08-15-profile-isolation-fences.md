@@ -2,7 +2,7 @@
 
 ## Goal
 
-Make a non-default profile unmistakable in the app and incapable of reaching the default profile through inherited routing, copied crew records, global skill synchronization, or shared remote caches.
+Make a non-default profile unmistakable in the app and incapable of reaching the default profile through inherited routing, copied crew records, or shared remote caches. Fence user-global skill synchronization to the default and dev profiles.
 
 ## Architecture Map
 
@@ -17,7 +17,7 @@ Session spawn
   daemon spawn plan
     PTY manager / conversation host
       merge daemon env <- login shell <- plugin env
-      re-apply daemon profile + exact data/db/socket/config/plugin paths last
+      re-apply daemon profile + exact data/db/socket/ws/config/plugin paths last
 
 Crew path use
   imported/stored Member
@@ -27,8 +27,8 @@ Crew path use
 
 User-global side effects
   skill synchronization
-    default profile -> install/prune
-    named profile -> skip and log
+    default or dev profile -> install/prune
+    other named profile -> skip and log
   remote artifact cache
     <active dataRoot>/remotes
 ```
@@ -38,7 +38,7 @@ User-global side effects
 - The Tauri build profile owns app routing. Runtime parent environment cannot redirect a bundle.
 - The daemon profile and exact socket own every child session's routing. Login-shell and plugin environment remain inputs, never authorities for these keys.
 - The daemon validates stored crew paths immediately before filesystem or launch use. Project cwd and awareness directories remain unrestricted except for another profile's crew homes.
-- User-global skill directories belong to the default profile. Remote artifacts are ordinary profile data.
+- User-global skill directories are shared by the default and dev profiles so the attn-on-attn development loop sees the freshly bundled skill. Every other named profile skips them. Remote artifacts are ordinary profile data.
 - Harness crew identities are visibly synthetic and explicitly pinned to `claude-haiku-4-5` unless a scenario documents why it needs a stronger model.
 
 ## Implementation Steps
@@ -48,7 +48,7 @@ User-global side effects
 - [x] Scrub all app-shell routing overrides in every bundle.
 - [x] Pin profile and socket after every PTY/host environment merge, with conflicting-login-shell tests.
 - [x] Fence member filesystem paths and foreign-profile crew work directories at import and each use.
-- [x] Skip global skill synchronization outside the default profile and move remote caches under `config.DataDir()`.
+- [x] Skip global skill synchronization outside the default and dev profiles, and move remote caches under `config.DataDir()`.
 - [x] Add focused Go, Rust, and frontend tests; run `make test-quick` and the frontend suite.
 - [x] Install an isolated profile, run preflight, prove the marker/profile env/synthetic crew behavior live, and record visible evidence.
 - [x] Confirm the branch is based on current main before live verification.
@@ -60,3 +60,4 @@ User-global side effects
 - Resolve paths through existing ancestors before containment checks so symlinked roots work and symlink escapes do not.
 - Keep project directories open. Only another `~/.attn*/crew` tree is forbidden for cwd and awareness.
 - Treat an invalid stored member path as a named operation refusal, not a silently omitted member or an automatic rewrite of copied state.
+- Keep `dev` as the sole named-profile exception for user-global skill synchronization because it is the attn-on-attn development loop; verification profiles remain fenced.
