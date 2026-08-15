@@ -242,7 +242,7 @@ each is a meaningful, verifiable chunk.
 | 3 | Delegation ⇄ tickets (live wiring) | ✅ (shipped as a sub-split) |
 | 4 | Ticket view + resume + attachments | ✅ (shipped as a sub-split) |
 | 5 | Board view | ✅ (status columns + Todo backlog + filters; read-only awareness surface, opened from ⌘K) |
-| 6 | Codex nudge path | ✅ (self-monitor formalized as an `agent.Capabilities` flag; daemon resolves it from the driver registry; pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
+| 6 | Codex nudge path | ✅ (pure `ticketnotify` + end-to-end codex-nudge roundtrip test) |
 | 7 | Retire the `dispatch` namespace | ✅ (atomic: CLI/handlers/store/protocol removed, delegation rewired to tickets-only via `delegatedTicketPrompt`, ProtocolVersion 129→130; dispatch tables orphaned not dropped — append-only migration history; notebook delivery-ledger removed, shared raw-tier kept) |
 | 8 | Export ticket state (CLI) — *post-merge, lands on `main`* | ⬜ |
 | 9 | Standalone ticket create (`ticket new`, no delegation) + agent awareness | ✅ (`attn ticket new --title [--description] [--id]` mints an unbound `todo`; two-tier awareness — a thin propose-not-act pointer in both chief + agent system prompts, depth in the attn skill's tickets reference; ProtocolVersion 130→131; user-triggered only — an agent may surface a worth-filing ticket, never files unprompted) |
@@ -276,8 +276,8 @@ each is a meaningful, verifiable chunk.
 5. **Board view.** The session list as status columns with the Todo backlog and
    filters. *Test:* tickets appear in the right columns; backlog persists; filters work.
 6. **Shared nudge path.** A non-approval session gets the same ticket nudge whether
-   it is Codex or Claude, chief or delegated agent; `HasSelfMonitor` only controls
-   optional runtime guidance. *Test:* both runtimes receive a nudge and consume it.
+   it is Codex or Claude, chief or delegated agent. *Test:* both runtimes receive a
+   nudge and consume it.
 7. **Retire the `dispatch` namespace (completion bar).** Remove every old verb
    (`watch / report / message / inbox / messages / resolve / status / handoff / list`)
    and the mailbox / journal / `Classify` / #397 remnants — once the `ticket` surface

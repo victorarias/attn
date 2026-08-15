@@ -338,10 +338,10 @@ func TestWorkspaceContextSessionStartOutputWrapsGuidance(t *testing.T) {
 }
 
 func TestChiefGuidanceEmptyWithoutRoot(t *testing.T) {
-	if got := ChiefGuidance("", true); got != "" {
+	if got := ChiefGuidance(""); got != "" {
 		t.Fatalf("ChiefGuidance(\"\") = %q, want empty", got)
 	}
-	if got := ChiefGuidance("   ", false); got != "" {
+	if got := ChiefGuidance("   "); got != "" {
 		t.Fatalf("ChiefGuidance(whitespace) = %q, want empty", got)
 	}
 }
@@ -458,7 +458,7 @@ func TestLaunchInstructionsCarryTheGardenPrimer(t *testing.T) {
 	}
 
 	chief := Launch{NotebookRoot: "/tmp/notebook", Garden: prime}.Instructions()
-	if want := ChiefGuidance("/tmp/notebook", false); !strings.HasPrefix(chief, want) {
+	if want := ChiefGuidance("/tmp/notebook"); !strings.HasPrefix(chief, want) {
 		t.Fatalf("chief launch dropped the chief guidance:\n%s", chief)
 	}
 	if !strings.Contains(chief, "2 seeds were ready") {

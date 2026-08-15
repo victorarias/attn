@@ -3,9 +3,9 @@
 /**
  * Real-agent benchmark: does a chief of staff, given the always-on ChiefGuidance
  * system prompt, ACTUALLY delegate and react proactively when a delegated ticket
- * changes — with no further human prompting? A runtime may optionally arm
- * `attn ticket inbox --watch`, but every non-approval chief shares the same ticket
- * nudge path when unread activity remains.
+ * changes — with no further human prompting? Every runtime relies on attn's
+ * ticket nudge path when unread activity remains; the benchmark also records an
+ * accidentally armed `attn ticket inbox --watch` process as evidence.
  *
  * This is an instruction-following benchmark, not a unit test: it stands up a REAL
  * Claude (or Codex) chief in an isolated packaged app, types a human-sounding
@@ -198,9 +198,7 @@ function freshWatchProcesses(baselinePids) {
 // Did the chief's agent get launched WITH its runtime-specific ChiefGuidance? Each
 // marker appears only in the guidance text, not in a live watch command.
 function chiefGuidanceProcesses(agent) {
-  const marker = agent === 'claude'
-    ? 'arm a harness Monitor running'
-    : 'ticket nudges are the supported wake-up mechanism';
+  const marker = "Rely on attn's ticket nudges";
   return shell(`ps -Awwo pid=,command= | grep -- '${marker}' | grep -v grep`).trim();
 }
 

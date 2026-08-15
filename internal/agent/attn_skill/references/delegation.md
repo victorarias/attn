@@ -29,9 +29,10 @@ participant on every delegation ticket, whoever started it — and when the chie
 the one delegating, that participation belongs to the ROLE. It moves to whoever
 holds the role next, instead of following the session that delegated.
 
-Follow-up: all runtimes receive the same ticket nudge when activity remains unread;
-Claude may also arm a Monitor on `attn ticket inbox --watch` to consume updates
-sooner.
+Follow-up: rely on attn's ticket nudges. Never park a blocking Monitor on attn
+activity: a Monitor-blocked session reads as busy, which suppresses crew heartbeats
+and auto-sleep. Monitors remain useful for external waits such as CI; they are a
+helper, not an attn integration mechanism.
 
 For a delegation that returns a durable plan, read the ticket before
 continuing. `attn ticket show <ticket-id>` lists its Notebook artifacts. If one is a

@@ -504,8 +504,8 @@ func TestNotebookGuideChiefVsNonChief(t *testing.T) {
 	if chief.NotebookGuide.Root != wantRoot || chief.NotebookGuide.Guidance == "" {
 		t.Fatalf("chief guide = %+v, want root=%q and non-empty guidance", chief.NotebookGuide, wantRoot)
 	}
-	if !strings.Contains(chief.NotebookGuide.Guidance, "arm a harness Monitor") {
-		t.Fatalf("Claude chief guide should carry the self-monitor watch path: %q", chief.NotebookGuide.Guidance)
+	if !strings.Contains(chief.NotebookGuide.Guidance, "Never park a blocking Monitor on attn activity") {
+		t.Fatalf("Claude chief guide should carry nudge-only attn guidance: %q", chief.NotebookGuide.Guidance)
 	}
 
 	// The chief request ensured the scaffold exists, including the reserved files.
@@ -544,11 +544,11 @@ func TestNotebookGuideUsesCodexTicketNudgeGuidance(t *testing.T) {
 		t.Fatal("missing notebook guide")
 	}
 	guidance := response.NotebookGuide.Guidance
-	if !strings.Contains(guidance, "ticket nudges are the supported wake-up mechanism") {
+	if !strings.Contains(guidance, "Rely on attn's ticket nudges") {
 		t.Fatalf("Codex chief guide should carry nudge guidance: %q", guidance)
 	}
-	if strings.Contains(guidance, "arm a harness Monitor") {
-		t.Fatalf("Codex chief guide should not carry self-monitor guidance: %q", guidance)
+	if strings.Contains(guidance, "ticket inbox --watch") {
+		t.Fatalf("Codex chief guide should not carry watch guidance: %q", guidance)
 	}
 }
 

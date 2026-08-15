@@ -759,9 +759,9 @@ func (c *Client) TicketInbox(sourceSessionID string) (*protocol.TicketInboxResul
 	return c.ticketInbox(sourceSessionID, protocol.TicketInboxModeExplicit, 0)
 }
 
-// TicketInboxWatch is the polling form used by `ticket inbox --watch`. Unlike a
-// deliberate one-shot read, it only drains activity once the daemon says the
-// observer's immediate or buffered delivery deadline is eligible.
+// TicketInboxWatch is the polling form used by `ticket inbox --watch`. Every poll
+// immediately drains unread activity; the watch lease prevents a simultaneous
+// countdown from doorbelling the same activity.
 func (c *Client) TicketInboxWatch(sourceSessionID string, interval time.Duration) (*protocol.TicketInboxResult, error) {
 	return c.ticketInbox(sourceSessionID, protocol.TicketInboxModeWatch, interval)
 }

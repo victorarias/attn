@@ -223,7 +223,6 @@ The loop is ready → tend → harvest. ` + "`attn seed ready`" + ` says what yo
 // every attn-launched agent lives in the same garden.
 type Launch struct {
 	NotebookRoot         string
-	HasSelfMonitor       bool
 	WorkspaceContextPath string
 	InjectWorkflow       bool
 	Garden               *GardenPrime
@@ -236,7 +235,7 @@ type Launch struct {
 // Instructions composes the blocks, joined by a blank line.
 func (l Launch) Instructions() string {
 	blocks := make([]string, 0, 3)
-	if chief := ChiefGuidance(l.NotebookRoot, l.HasSelfMonitor); chief != "" {
+	if chief := ChiefGuidance(l.NotebookRoot); chief != "" {
 		blocks = append(blocks, chief)
 	} else {
 		blocks = append(blocks, AgentInstructions(l.WorkspaceContextPath, l.InjectWorkflow))
@@ -275,19 +274,14 @@ func WorkspaceContextSessionStartOutput(path string) string {
 // ChiefGuidance is the system prompt block injected into a chief-of-staff agent.
 // It covers the chief's role (coordinator, not doer), the Notebook as its durable
 // home, delegation rules, and ticket awareness. root is the resolved notebook root
-// (empty disables). hasSelfMonitor selects whether the runtime may additionally
-// watch its inbox; every runtime remains eligible for the same daemon nudge.
-func ChiefGuidance(root string, hasSelfMonitor bool) string {
+// (empty disables). Ticket waiting uses the same nudge guidance for every runtime.
+func ChiefGuidance(root string) string {
 	root = strings.TrimSpace(root)
 	if root == "" {
 		return ""
 	}
-	ticketWaitingGuidance := "For this runtime, attn's ticket nudges are the supported wake-up mechanism. Do not start `attn ticket inbox --watch`: end your turn after delegating, and when attn nudges you, run `attn ticket inbox` to consume and surface the update."
+	ticketWaitingGuidance := "Rely on attn's ticket nudges. Never park a blocking Monitor on attn activity: a Monitor-blocked session reads as busy, which suppresses crew heartbeats and auto-sleep. Monitors remain useful for external waits such as CI; they are a helper, not an attn integration mechanism. End your turn after delegating, and when attn nudges you, run `attn ticket inbox` to consume and surface the update."
 	wakeBoundary := "attn nudges you"
-	if hasSelfMonitor {
-		ticketWaitingGuidance = "You may arm a harness Monitor running `attn ticket inbox --watch` so ticket state changes push to you instead of polling the board. That monitor complements attn's shared ticket nudge: if activity remains unread, attn still wakes you with the same doorbell as every other runtime."
-		wakeBoundary = "a watched ticket pushes or attn nudges you"
-	}
 	return fmt.Sprintf(`You are the chief of staff. The attn Notebook at %[1]s is your durable, profile-wide home — plain markdown on disk that outlives any single workspace, used in place of a per-workspace shared context. Read it to orient, and maintain it as you work. It is yours to read and edit directly with native file tools (Read/Write/Edit); there is no notebook CLI.
 
 - Orient first: read %[1]s/index.md and %[1]s/knowledge/index.md to load what is already known.

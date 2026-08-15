@@ -1566,7 +1566,7 @@ func runTicketInbox(args []string) {
 	fs.SetOutput(io.Discard)
 	sessionID := fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)")
 	jsonOutput := fs.Bool("json", false, "print the unread bundles as JSON")
-	watch := fs.Bool("watch", false, "block and print new ticket activity as it lands (for a harness Monitor); silent until something changes")
+	watch := fs.Bool("watch", false, "block and print new ticket activity as it lands; silent until something changes")
 	interval := fs.Duration("interval", ticketWatchInterval, "poll interval in --watch mode")
 	if err := fs.Parse(args); err != nil {
 		fmt.Fprintf(os.Stderr, "ticket inbox: %v\n", err)
@@ -1602,15 +1602,12 @@ func runTicketInbox(args []string) {
 // countdown fires, but it is not required for delivery.
 const ticketWatchInterval = 3 * time.Second
 
-// runTicketInboxWatch blocks and prints new ticket activity as it lands, so a
-// harness Monitor can wrap it as a true push for a chief. Whether a runtime is
-// guided to use it is separate from daemon nudge eligibility. It polls the
-// consuming ticket-inbox: the daemon advances the session's per-ticket cursor on
-// each read, so each event prints exactly once and the client tracks no state.
-// Silent when nothing is new; exits cleanly on SIGINT/SIGTERM (the harness stops
-// the Monitor on session end). A transient daemon error is reported once per outage
-// but does not end the watch. The poll loop lives in watchTicketInbox so it can be
-// tested without a daemon, signals, or a real ticker.
+// runTicketInboxWatch blocks and prints new ticket activity as it lands. It polls
+// the consuming ticket-inbox: the daemon advances the session's per-ticket cursor
+// on each read, so each event prints exactly once and the client tracks no state.
+// Silent when nothing is new; exits cleanly on SIGINT/SIGTERM. A transient daemon
+// error is reported once per outage but does not end the watch. The poll loop lives
+// in watchTicketInbox so it can be tested without a daemon, signals, or a real ticker.
 func runTicketInboxWatch(source string, interval time.Duration, jsonOutput bool) {
 	if interval <= 0 {
 		interval = ticketWatchInterval

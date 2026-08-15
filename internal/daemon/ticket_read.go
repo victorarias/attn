@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/ticketnotify"
@@ -16,14 +15,6 @@ import (
 // beside the inverse mapping they must agree with. The delivery path is shared by
 // all runtimes; an optional runtime `ticket inbox --watch` consumes the same unread
 // queue before a countdown has to ring.
-
-func (d *Daemon) sessionHasSelfMonitor(sessionID string) bool {
-	agentName := ""
-	if s := d.store.Get(sessionID); s != nil {
-		agentName = s.Agent
-	}
-	return agentdriver.EffectiveCapabilities(agentdriver.Get(agentName)).HasSelfMonitor
-}
 
 func (d *Daemon) ticketUnreadForSession(sessionID string) (int, error) {
 	return ticketnotify.UnreadAny(d.store, d.ticketObserversForSession(sessionID))
@@ -48,24 +39,18 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 			d.watchLeaseUntil = make(map[string]time.Time)
 		}
 		d.watchLeaseUntil[sourceSessionID] = now.Add(ticketWatchLeaseWindowFor(msg.WatchIntervalMs))
-		eligible, err := d.ticketWatchEligible(sourceSessionID, now)
-		if err != nil {
-			d.deliveryMu.Unlock()
-			d.sendError(conn, "ticket inbox: "+err.Error())
-			return
-		}
-		if !eligible {
-			if d.debugLogging {
-				d.logf("ticket delivery: observer=%s session=%s channel=watch outcome=buffered", d.ticketAttentionKey(sourceSessionID), sourceSessionID)
-			}
-			d.deliveryMu.Unlock()
-			_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, TicketInboxResult: &protocol.TicketInboxResult{Bundles: []protocol.TicketEventBundle{}}})
-			return
-		}
 	}
 	bundles, err := ticketnotify.ConsumeAll(d.store, d.ticketObserversForSession(sourceSessionID), now)
 	if err == nil && len(bundles) > 0 {
-		if attentionErr := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(sourceSessionID), now); attentionErr != nil {
+		var deliveredThroughSeq int64
+		for _, bundle := range bundles {
+			for _, event := range bundle.Events {
+				if event.Seq > deliveredThroughSeq {
+					deliveredThroughSeq = event.Seq
+				}
+			}
+		}
+		if attentionErr := d.store.SetTicketDeliveryAttentionThrough(d.ticketAttentionKey(sourceSessionID), now, deliveredThroughSeq); attentionErr != nil {
 			// Cursors have already advanced, so returning only an error here would
 			// hide the consumed bundles. Preserve delivery and let the next
 			// successful attention write repair the interruption clock.
@@ -100,28 +85,6 @@ func (d *Daemon) handleTicketInbox(conn net.Conn, msg *protocol.TicketInboxMessa
 		Ok:                true,
 		TicketInboxResult: result,
 	})
-}
-
-// ticketWatchEligible keeps automated polling behind the same assignee/immediate
-// and observer/buffered boundary as a nudge. It peeks durable unread events only;
-// the eventual ConsumeAll remains the acknowledgement.
-func (d *Daemon) ticketWatchEligible(sessionID string, now time.Time) (bool, error) {
-	for _, observer := range d.ticketObserversForSession(sessionID) {
-		events, err := d.store.UnreadTicketEventsFor(observer.ID, observer.AuthorID)
-		if err != nil {
-			return false, err
-		}
-		for _, event := range events {
-			deadline, immediate, err := d.ticketDeadline(sessionID, event, now)
-			if err != nil {
-				return false, err
-			}
-			if immediate || !deadline.After(now) {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
 }
 
 func ticketEventBundlesToProtocol(bundles []ticketnotify.Bundle) []protocol.TicketEventBundle {

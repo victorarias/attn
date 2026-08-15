@@ -80,10 +80,11 @@ func (s *Store) MigrateTicketIdentity(from, to string, now time.Time) error {
 		return fmt.Errorf("carry ticket cursors: %w", err)
 	}
 	if _, err := tx.Exec(`
-		INSERT INTO ticket_delivery_attention (observer_key, last_attention_at)
-		SELECT ?, last_attention_at FROM ticket_delivery_attention WHERE observer_key = ?
+		INSERT INTO ticket_delivery_attention (observer_key, last_attention_at, delivered_through_seq)
+		SELECT ?, last_attention_at, delivered_through_seq FROM ticket_delivery_attention WHERE observer_key = ?
 		ON CONFLICT(observer_key) DO UPDATE SET
-			last_attention_at = MAX(ticket_delivery_attention.last_attention_at, excluded.last_attention_at)
+			last_attention_at = MAX(ticket_delivery_attention.last_attention_at, excluded.last_attention_at),
+			delivered_through_seq = MAX(ticket_delivery_attention.delivered_through_seq, excluded.delivered_through_seq)
 	`, to, from); err != nil {
 		return fmt.Errorf("carry ticket delivery attention: %w", err)
 	}

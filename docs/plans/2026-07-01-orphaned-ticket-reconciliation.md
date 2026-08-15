@@ -102,9 +102,8 @@ happens, the board lies forever. Mid-flight deaths are already surfaced
   (`TicketParticipants`, `internal/store/ticket_events.go:236`). The chief is a
   participant of every delegated ticket because it authored the `created` event.
   `notifyTicketObservers` (`internal/daemon/ticket_notify.go:34`) fans out to
-  live participants; self-monitors drain via `attn ticket inbox --watch`, others
-  get the fixed doorbell (`ticketNudgePrompt`, ticket_notify.go:14) through the
-  pausable countdown (`nudge_countdown.go`).
+  live participants; every runtime gets the fixed doorbell (`ticketNudgePrompt`,
+  ticket_notify.go:14) through the pausable countdown (`nudge_countdown.go`).
 
 ### Where the ratified framing meets codebase reality
 
