@@ -25,6 +25,7 @@ import (
 	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/diag"
 	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/fsdoc"
@@ -254,7 +255,25 @@ type Daemon struct {
 	drainingAgentMessages       map[string]bool
 	agentMessageTaken           map[string][]chan struct{}
 	agentMessagesAwaitingSubmit map[string]bool
-	agentMessageDrainHook       func(sessionID string, delivered int) // tests only; nil in production
+	// A crew wake may owe work only after the new day has submitted its ordinary
+	// first prompt. Ticket delivery uses this to keep the doorbell behind charter
+	// and handoff priming instead of pasting into the launching session.
+	postInitialPrompt map[string]func()
+	// A message-triggered crew wake carries the attributed message as the new
+	// day's initial prompt. The row stays queued until a prompt-submit hook
+	// proves the agent took it; across a daemon restart the ordinary queue drain
+	// is the conservative fallback, so the message can duplicate but not vanish.
+	agentMessageInitialPrompt map[string]string // session id -> message id
+	// Deterministic drain seams; nil outside tests.
+	agentMessageDrainScheduledHook func(sessionID string)
+	agentMessageDrainHook          func(sessionID string, delivered int)
+	// A wake owns the member from its liveness read through durable session
+	// creation. Without this fence, a second wake can steal the binding while
+	// the first claimed session is not yet visible to crewBindingLive.
+	crewWakeMu sync.Mutex
+	// Deterministic concurrency seams; nil outside tests.
+	crewWakeStartHook      func(memberID string)
+	crewWakeAfterClaimHook func(memberID, sessionID string)
 	// stateTrace is the diagnostic ring of state observations behind
 	// `attn state explain`. Lazily built so a directly-constructed test daemon
 	// traces without an init site.
@@ -1026,6 +1045,12 @@ func (d *Daemon) Start() error {
 	d.ensureGardenCollections()
 	d.ensureCrewCollections()
 	d.importCrewHomes()
+	if err := d.migrateCrewTicketIdentities(); err != nil {
+		return fmt.Errorf("migrate crew ticket identities: %w", err)
+	}
+	if err := d.seedCrewTicketWakeDeliveries(); err != nil {
+		return fmt.Errorf("restore crew ticket wake deliveries: %w", err)
+	}
 	if d.hubManager == nil {
 		d.hubManager = hub.NewManager(
 			d.store,
@@ -2161,6 +2186,7 @@ func (d *Daemon) dropSessionRecord(sessionID string) {
 		d.reconcileTicketsOnSessionEnd(sessionID, string(session.State))
 	}
 	d.clearNudgeState(sessionID)
+	d.forgetPostInitialPrompt(sessionID)
 	d.clearAutoSettleState(sessionID)
 	d.clearSnoozeState(sessionID)
 	d.clearPTYWriteFence(sessionID)
@@ -2931,7 +2957,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 			d.sendError(conn, fmt.Sprintf("crew bind %q: %v", member, err))
 			return
 		}
-		d.logf("session %s registering as crew member %s", msg.ID, memberID)
+		d.logf("session %s registering as crew member %s", msg.ID, crew.DisplayName(memberID))
 	} else {
 		d.releaseCrewBindingIfSession(msg.ID)
 	}
@@ -3044,6 +3070,8 @@ func (d *Daemon) handleUnregister(conn net.Conn, msg *protocol.UnregisterMessage
 // refreshing — was reachable only by a source that did not write state itself.
 func (d *Daemon) handleState(conn net.Conn, msg *protocol.StateMessage) {
 	d.logf("hook evidence: id=%s state=%s", msg.ID, msg.State)
+	d.noteInitialAgentMessageSubmitted(msg.ID, msg.State)
+	d.runPostInitialPrompt(msg.ID, msg.State)
 	d.tracePermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordReviewerEvidenceFromPermissionMode(msg.ID, protocol.Deref(msg.PermissionMode))
 	d.recordBracketEvidence(msg.ID, msg.State)
@@ -3366,6 +3394,7 @@ func (d *Daemon) sessionForBroadcastWithChiefOfStaff(
 	d.decorateCrewMember(clone, crewBySession)
 	d.decorateSessionWithWorkspace(clone)
 	d.decorateSessionWithWorkspaceMute(clone)
+	d.decorateSessionWithCost(clone)
 	// Last: turn ownership reads the chief flag and the workspace the earlier
 	// decorations resolved.
 	d.decorateSessionWithTurn(clone)

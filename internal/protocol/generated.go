@@ -6173,6 +6173,12 @@ type Session struct {
 	// ContextWindowCap corresponds to the JSON schema field "context_window_cap".
 	ContextWindowCap *int `json:"context_window_cap,omitempty,omitzero"`
 
+	// CostUnknown corresponds to the JSON schema field "cost_unknown".
+	CostUnknown *bool `json:"cost_unknown,omitempty,omitzero"`
+
+	// CostUsd corresponds to the JSON schema field "cost_usd".
+	CostUsd *float64 `json:"cost_usd,omitempty,omitzero"`
+
 	// CrewMember corresponds to the JSON schema field "crew_member".
 	CrewMember *string `json:"crew_member,omitempty,omitzero"`
 

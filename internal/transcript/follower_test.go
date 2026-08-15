@@ -96,6 +96,116 @@ func TestFollowerRejectsTranscriptReplacement(t *testing.T) {
 	}
 }
 
+func TestFollowerCursorResumesUsageAfterRestart(t *testing.T) {
+	path := writeFollowerTranscript(t,
+		`{"type":"session_meta","payload":{"id":"native-id"}}`,
+		`{"type":"turn_context","payload":{"model":"gpt-test"}}`,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":4,"output_tokens":2}}}}`,
+	)
+	follower, err := NewFollower(path, "codex", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := follower.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(first.Usage) != 1 || first.Usage[0].Model != "gpt-test" {
+		t.Fatalf("first usage = %+v", first.Usage)
+	}
+	cursor := follower.Cursor()
+	if cursor == "" {
+		t.Fatal("follower returned an empty durable cursor")
+	}
+
+	appendEventTranscript(t, path,
+		`{"type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":12,"cached_input_tokens":5,"output_tokens":3}}}}`,
+	)
+	resumed, err := NewFollowerAfterCursor(path, "codex", cursor)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := resumed.Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(second.Usage) != 1 || second.Usage[0].Model != "gpt-test" || second.Usage[0].InputTokens != 7 {
+		t.Fatalf("resumed usage = %+v", second.Usage)
+	}
+}
+
+func TestFollowerCursorStopsBeforePartialRecord(t *testing.T) {
+	path := writeFollowerTranscript(t, `{"type":"session_meta","payload":{"id":"native-id"}}`)
+	follower, err := NewFollower(path, "codex", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := follower.Read(); err != nil {
+		t.Fatal(err)
+	}
+	before := follower.Cursor()
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.WriteString(`{"type":"turn_context","payload":{"model":"partial"}}`); err != nil {
+		_ = f.Close()
+		t.Fatal(err)
+	}
+	if err := f.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if batch, err := follower.Read(); err != nil || len(batch.Records) != 0 {
+		t.Fatalf("partial read = %+v, %v", batch, err)
+	}
+	if after := follower.Cursor(); after != before {
+		t.Fatalf("cursor advanced across a partial record: before=%q after=%q", before, after)
+	}
+}
+
+func TestNewFollowerAfterCursorRejectsTranscriptRotation(t *testing.T) {
+	path := writeFollowerTranscript(t,
+		`{"type":"session_meta","payload":{"id":"original"}}`,
+		codexFollowerEventMessage("first"),
+	)
+	follower, err := NewFollower(path, "codex", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := follower.Read(); err != nil {
+		t.Fatal(err)
+	}
+	cursor := follower.Cursor()
+	if err := os.WriteFile(path, []byte(strings.Join([]string{
+		`{"type":"session_meta","payload":{"id":"replacement-with-a-longer-identity"}}`,
+		codexFollowerEventMessage("replacement"),
+	}, "\n")+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFollowerAfterCursor(path, "codex", cursor); !errors.Is(err, ErrCursorMismatch) {
+		t.Fatalf("rotation error = %v, want ErrCursorMismatch", err)
+	}
+}
+
+func TestNewFollowerAfterCursorRejectsTruncation(t *testing.T) {
+	firstRecord := `{"type":"session_meta","payload":{"id":"native-id"}}`
+	path := writeFollowerTranscript(t, firstRecord, codexFollowerEventMessage("second"))
+	follower, err := NewFollower(path, "codex", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := follower.Read(); err != nil {
+		t.Fatal(err)
+	}
+	cursor := follower.Cursor()
+	if err := os.WriteFile(path, []byte(firstRecord+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewFollowerAfterCursor(path, "codex", cursor); !errors.Is(err, ErrCursorPastEnd) {
+		t.Fatalf("truncation error = %v, want ErrCursorPastEnd", err)
+	}
+}
+
 func TestAssistantWindowKeepsDistinctIdenticalMessagesByCursor(t *testing.T) {
 	window := NewAssistantWindow(AssistantWindowLimits{MaxMessages: 32, MaxMessageChars: 1024, MaxTotalChars: 4096})
 	if !window.Apply([]Event{

@@ -63,6 +63,7 @@ import { createPtyTransportState } from '../pty/transportState';
 import { enqueuePerKey } from '../pty/attachQueue';
 import { parseLayoutJSON, tileContentKey, tileIdsFromLayoutJSON, type TerminalDockEdge, type TileContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
+import { crewDisplayName } from '../utils/crewName';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
 import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
@@ -262,7 +263,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '250';
+export const PROTOCOL_VERSION = '251';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -4890,7 +4891,7 @@ export function useDaemonSocket({
         setTimeout(() => {
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
-            reject(new Error(`Waking ${member} timed out`));
+            reject(new Error(`Waking ${crewDisplayName(member)} timed out`));
           }
         }, 10000);
       });

@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/victorarias/attn/internal/crew"
@@ -91,6 +92,70 @@ func TestCrewWake_StartsADayBoundInTheMembersOwnDirectory(t *testing.T) {
 	}
 }
 
+// A member runs on the pinned model, and nothing in the registry can change
+// that: a member on another model is wrong in a way only reading its prose
+// catches, so the wake decides it rather than a per-member setting.
+func TestCrewWake_AMemberWakesOnThePinnedModel(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	if _, err := d.crewWake("trellis", ""); err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	backend.mu.Lock()
+	model := backend.spawnOpts[0].Model
+	backend.mu.Unlock()
+	if model != crewWakeModel {
+		t.Fatalf("member woke on model %q, want %q", model, crewWakeModel)
+	}
+}
+
+// The pin names a Claude model, so a wake onto another harness takes that
+// harness's own default rather than a model it cannot run.
+func TestCrewWake_AnotherHarnessIsNotGivenTheClaudeModel(t *testing.T) {
+	if pin := crewWakeModelPin("codex"); pin != nil {
+		t.Fatalf("a codex wake was pinned to %q", *pin)
+	}
+	if pin := crewWakeModelPin("CLAUDE"); pin == nil || *pin != crewWakeModel {
+		t.Fatalf("the default harness was not pinned: %v", pin)
+	}
+}
+
+// Display capitalizes, identity does not. Everything a person reads off a woken
+// member — its session label, its pane, its workspace — is written as a name,
+// while the workspace id, the binding and the wire's member field stay the
+// lowercase id.
+func TestCrewWake_NamesTheDayAndKeepsTheIDLowercase(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+
+	result, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	session := d.store.Get(result.SessionID)
+	if session == nil {
+		t.Fatalf("no session %q was stored", result.SessionID)
+	}
+	if session.Label != "Trellis" {
+		t.Errorf("session label = %q, want Trellis", session.Label)
+	}
+	workspace := d.store.GetWorkspace(result.WorkspaceID)
+	if workspace == nil {
+		t.Fatalf("no workspace %q was created", result.WorkspaceID)
+	}
+	if workspace.Title != "Trellis" {
+		t.Errorf("workspace title = %q, want Trellis", workspace.Title)
+	}
+	if result.WorkspaceID != "workspace-crew-trellis" {
+		t.Errorf("workspace id = %q, want workspace-crew-trellis", result.WorkspaceID)
+	}
+	if result.Member != "trellis" {
+		t.Errorf("wire member = %q, want the lowercase id", result.Member)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").BindingSession); got != result.SessionID {
+		t.Errorf("roster binding = %q, want %q", got, result.SessionID)
+	}
+}
+
 // Two agents with the same identity never run at once. The sidebar's one action
 // must not fail exactly when the member is present, so a second wake names the
 // live day instead of refusing — and launches nothing.
@@ -116,6 +181,65 @@ func TestCrewWake_AnAwakeMemberIsNotWokenTwice(t *testing.T) {
 	backend.mu.Unlock()
 	if spawned != 1 {
 		t.Fatalf("%d sessions were spawned for one member, want 1", spawned)
+	}
+}
+
+// The binding alone is not a liveness fence: the claimed session becomes
+// visible only later in the spawn pipeline. A second wake that enters during
+// that gap must wait, then resolve to the first day instead of stealing the
+// member and launching a second identity.
+func TestCrewWake_ConcurrentWakesShareTheFirstDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	started := make(chan string, 2)
+	firstClaimed := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var claims atomic.Int32
+	d.crewWakeStartHook = func(memberID string) { started <- memberID }
+	d.crewWakeAfterClaimHook = func(_, _ string) {
+		if claims.Add(1) == 1 {
+			close(firstClaimed)
+			<-releaseFirst
+		}
+	}
+
+	type outcome struct {
+		result *protocol.CrewWakeResult
+		err    error
+	}
+	results := make(chan outcome, 2)
+	wake := func() {
+		result, err := d.crewWake("keel", "")
+		results <- outcome{result: result, err: err}
+	}
+	go wake()
+	if member := <-started; member != "keel" {
+		t.Fatalf("first wake started for %q", member)
+	}
+	<-firstClaimed
+	go wake()
+	if member := <-started; member != "keel" {
+		t.Fatalf("second wake started for %q", member)
+	}
+	close(releaseFirst)
+
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("wake errors = %v, %v", first.err, second.err)
+	}
+	if first.result.SessionID != second.result.SessionID {
+		t.Fatalf("concurrent wakes launched sessions %q and %q", first.result.SessionID, second.result.SessionID)
+	}
+	if first.result.AlreadyAwake == second.result.AlreadyAwake {
+		t.Fatalf("results = %+v and %+v, want one launch and one live-day resolution", first.result, second.result)
+	}
+	if got := claims.Load(); got != 1 {
+		t.Fatalf("the member was claimed %d times, want one", got)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 1 {
+		t.Fatalf("concurrent wakes spawned %d sessions, want one", spawned)
 	}
 }
 
@@ -149,7 +273,8 @@ func TestCrewWake_ADirectoryThatMovedIsNamedAndNothingIsClaimed(t *testing.T) {
 	if err == nil {
 		t.Fatal("a member launched into a directory that is not there")
 	}
-	for _, want := range []string{"alder", launchDir, "attn crew set"} {
+	// The prose names Alder; the command it hands back takes the id.
+	for _, want := range []string{"Alder launches in", launchDir, "attn crew set alder --cwd"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}
@@ -199,9 +324,8 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 		t.Fatalf("primed as %q, want trellis", member.ID)
 	}
 	for _, want := range []string{
-		"You are **trellis**",
-		"What I care about.", // the charter on disk
-		"Where I left off.",  // the freshest letter
+		"You are **Trellis**",
+		"Where I left off.", // the freshest letter
 		"2026-08-13T22-20Z-trellis.md",
 	} {
 		if !strings.Contains(block, want) {
@@ -210,7 +334,7 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 	}
 
 	log := readLog()
-	if !strings.Contains(log, "crew: priming trellis") {
+	if !strings.Contains(log, "crew: priming Trellis") {
 		t.Fatalf("no greppable priming receipt in the daemon log:\n%s", log)
 	}
 	// The logged size is the size of what was injected, not an estimate of it.

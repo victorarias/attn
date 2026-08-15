@@ -42,6 +42,7 @@ type Store struct {
 	// the session (the wire carries both); the transcript cursor is daemon-only
 	// and lives here.
 	activityCursors map[string]string
+	sessionCosts    map[string]SessionCostState
 	agentDriverRuns map[string]AgentDriverReportCursor
 	agentMetadata   map[string]string
 	profileRoles    map[string]string
@@ -99,6 +100,7 @@ func New() *Store {
 		return &Store{
 			sessions:        make(map[string]*protocol.Session),
 			agentDriverRuns: make(map[string]AgentDriverReportCursor),
+			sessionCosts:    make(map[string]SessionCostState),
 			agentMetadata:   make(map[string]string),
 			profileRoles:    make(map[string]string),
 			workspaces:      make(map[string]workspacelayout.WorkspaceLayout),
@@ -371,6 +373,7 @@ func (s *Store) Remove(id string) {
 		delete(s.turnStamps, id)
 		delete(s.agentDriverRuns, id)
 		delete(s.agentMetadata, id)
+		delete(s.sessionCosts, id)
 		return
 	}
 
@@ -394,6 +397,7 @@ func (s *Store) ClearSessions() {
 		s.sessions = make(map[string]*protocol.Session)
 		s.agentDriverRuns = make(map[string]AgentDriverReportCursor)
 		s.agentMetadata = make(map[string]string)
+		s.sessionCosts = make(map[string]SessionCostState)
 		s.workspaces = make(map[string]workspacelayout.WorkspaceLayout)
 		return
 	}

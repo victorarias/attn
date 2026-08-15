@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/victorarias/attn/internal/client"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -54,8 +55,9 @@ commands:
 
   wake <member> [--agent <name>] [--json]
         start a member's day: a session bound to it, launched in the member's
-        own cwd with its awareness dirs, primed with its charter, the freshest
-        letter left for it, and how its home works. A member that is already
+        own cwd with its awareness dirs, on the pinned crew model, primed with
+        where to read its charter, the freshest letter left for it, and how its
+        home works. A member that is already
         awake is not woken twice — the answer names the session it is living.
 
   set <member> [--cwd <dir>] [--awareness-dir <dir>]...
@@ -160,11 +162,11 @@ func runCrewWake(args []string) {
 		return
 	}
 	if result.AlreadyAwake {
-		fmt.Printf("%s is already awake in session %s — nothing was launched.\n", result.Member, agentShortID(result.SessionID))
+		fmt.Printf("%s is already awake in session %s — nothing was launched.\n", crew.DisplayName(result.Member), agentShortID(result.SessionID))
 		return
 	}
 	fmt.Printf("%s is awake in session %s. `attn agent peek %[2]s` watches the day; the priming size is in the daemon log (grep `crew: priming`).\n",
-		result.Member, agentShortID(result.SessionID))
+		crew.DisplayName(result.Member), agentShortID(result.SessionID))
 }
 
 // crewDirList collects a repeatable flag. An explicit empty value clears the
@@ -224,7 +226,7 @@ func runCrewSet(args []string) {
 		return
 	}
 	record := result.Member
-	fmt.Printf("%s launches in %s\n", record.ID, valueOrDash(protocol.Deref(record.Cwd)))
+	fmt.Printf("%s launches in %s\n", crew.DisplayName(record.ID), valueOrDash(protocol.Deref(record.Cwd)))
 	fmt.Printf("awareness dirs: %s\n", valueOrDash(strings.Join(record.AwarenessDirs, ", ")))
 }
 
@@ -246,7 +248,7 @@ func printCrewList(w io.Writer, members []protocol.CrewMember) {
 		if id := strings.TrimSpace(protocol.Deref(member.BindingSession)); id != "" {
 			state, session = "awake", agentShortID(id)
 		}
-		fmt.Fprintf(w, "%-12s  %-8s  %-10s  %s\n", member.ID, state, session, member.HomeDir)
+		fmt.Fprintf(w, "%-12s  %-8s  %-10s  %s\n", crew.DisplayName(member.ID), state, session, member.HomeDir)
 	}
 	fmt.Fprintf(w, "\nAn awake member's SESSION is what `attn agent peek <id>` takes.\n")
 }

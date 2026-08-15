@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 )
@@ -49,6 +50,10 @@ var agentMessageTakenWindow = 3 * time.Second
 // errDoorbellNotTaken is a delivery whose target never picked it up.
 var errDoorbellNotTaken = errors.New("doorbell typed but the target did not take it")
 
+// An initial-prompt delivery owns the prompt until its submit hook. Anything
+// behind it must queue rather than paste into priming or a trust dialog.
+var errAgentMessageInitialPromptPending = errors.New("target is still taking its initial prompt")
+
 // agentMessageGuardVerdict is empty when a message is accepted. Otherwise it is
 // the sentence the sender is told: which limit it hit, that limit's value, and
 // what it asked for. An agent can act on that; "refused" alone it cannot.
@@ -71,11 +76,6 @@ func agentMessageGuardVerdict(counts store.AgentMessageGuardCounts) string {
 }
 
 func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
-	target, errCode := d.resolveSessionByIDOrPrefix(msg.TargetSessionID)
-	if target == nil {
-		d.sendError(conn, errCode)
-		return
-	}
 	sender, errCode := d.resolveSessionByIDOrPrefix(msg.SourceSessionID)
 	if sender == nil {
 		d.sendError(conn, "sender_"+errCode)
@@ -84,8 +84,7 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 
 	content := strings.TrimSpace(msg.Content)
 	result := &protocol.AgentMsgResult{
-		TargetSessionID: target.ID,
-		Status:          protocol.AgentMsgStatusRefused,
+		Status: protocol.AgentMsgStatusRefused,
 	}
 	switch {
 	case content == "":
@@ -94,8 +93,6 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 		result.Detail = fmt.Sprintf(
 			"message is %d bytes and the limit is %d; send the gist and point at the rest",
 			len(content), protocol.AgentMessageMaxChars)
-	case sender.ID == target.ID:
-		result.Detail = "that is this session; a message to yourself is not a conversation"
 	}
 	if result.Detail != "" {
 		d.replyAgentMsg(conn, result)
@@ -103,6 +100,64 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 	}
 
 	now := time.Now()
+	member, memberFound, memberErr := d.agentMessageMember(msg.TargetSessionID)
+	target, targetErrCode := d.resolveSessionByIDOrPrefix(msg.TargetSessionID)
+	if memberFound {
+		if d.crewBindingLive(member) {
+			target = d.store.Get(member.BindingSession)
+		} else {
+			record := store.AgentMessage{
+				ID:              uuid.NewString(),
+				SenderSessionID: sender.ID,
+				Content:         content,
+				CreatedAt:       now.UTC().Format(time.RFC3339),
+			}
+			woken, err := d.crewWakeWithDelivery(member.ID, "", true, &crewWakeDelivery{
+				Record: &record,
+				Prompt: d.composeAgentMessage(sender, record),
+			})
+			if err != nil {
+				d.sendError(conn, err.Error())
+				return
+			}
+			target = d.store.Get(woken.SessionID)
+			if !woken.AlreadyAwake {
+				memberName := crew.DisplayName(member.ID)
+				result.MessageID = record.ID
+				result.TargetSessionID = woken.SessionID
+				if d.initialAgentMessagePending(woken.SessionID, record.ID) {
+					result.Status = protocol.AgentMsgStatusQueued
+					result.Detail = fmt.Sprintf("woke %s in session %s; queued as its first prompt after priming", memberName, shortSessionID(woken.SessionID))
+				} else {
+					result.Status = protocol.AgentMsgStatusDelivered
+					result.Detail = fmt.Sprintf("woke %s and delivered as its first prompt after priming", memberName)
+				}
+				d.replyAgentMsg(conn, result)
+				return
+			}
+		}
+	}
+	if target == nil {
+		if memberErr != nil {
+			d.sendError(conn, memberErr.Error())
+			return
+		}
+		if targetErrCode == "session_not_found" {
+			d.replyAgentMsgError(conn, "session_or_crew_member_not_found", fmt.Sprintf(
+				"no session or crew member matches %q; `attn agent list` names sessions and `attn crew list` names members",
+				strings.TrimSpace(msg.TargetSessionID)))
+			return
+		}
+		d.sendError(conn, targetErrCode)
+		return
+	}
+	result.TargetSessionID = target.ID
+	if sender.ID == target.ID {
+		result.Detail = "that is this session; a message to yourself is not a conversation"
+		d.replyAgentMsg(conn, result)
+		return
+	}
+
 	counts, err := d.store.AgentMessageGuardCounts(
 		sender.ID, target.ID, content,
 		now.Add(-agentMessageDedupeWindow), now.Add(-agentMessageRateWindow),
@@ -138,19 +193,47 @@ func (d *Daemon) handleAgentMsg(conn net.Conn, msg *protocol.AgentMsgMessage) {
 		result.Detail = agentMessageQueuedDetail(err)
 	} else {
 		result.Status = protocol.AgentMsgStatusDelivered
-		result.Detail = fmt.Sprintf("delivered to %s", sessionDisplayName(target))
+		targetName := sessionDisplayName(target)
+		if memberFound {
+			targetName = crew.DisplayName(member.ID)
+		}
+		result.Detail = fmt.Sprintf("delivered to %s", targetName)
 	}
 	d.replyAgentMsg(conn, result)
+}
+
+// agentMessageMember resolves only the durable-name half of an address. A
+// registered member wins over a coincidental session-id prefix; a direct
+// session address still works on an outpost, where the crew lookup is fenced.
+func (d *Daemon) agentMessageMember(address string) (crew.Member, bool, error) {
+	if err := d.requireHome(crew.Surface); err != nil {
+		return crew.Member{}, false, err
+	}
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		return crew.Member{}, false, err
+	}
+	member, ok := crew.Resolve(address, members)
+	return member, ok, nil
 }
 
 func (d *Daemon) replyAgentMsg(conn net.Conn, result *protocol.AgentMsgResult) {
 	_ = json.NewEncoder(conn).Encode(protocol.Response{Ok: true, AgentMsgResult: result})
 }
 
+func (d *Daemon) replyAgentMsgError(conn net.Conn, code, message string) {
+	_ = json.NewEncoder(conn).Encode(protocol.Response{
+		Ok: false, Error: protocol.Ptr(message), ErrorCode: protocol.Ptr(code),
+	})
+}
+
 // agentMessageQueuedDetail says what the sender should expect next, which is
 // not the same sentence in both cases: an approval clears on its own, a dead
 // session does not, and a sender that waits for a reply from one is stuck.
 func agentMessageQueuedDetail(err error) string {
+	if errors.Is(err, errAgentMessageInitialPromptPending) {
+		return "queued (target is waking and still reading its priming — lands immediately after its first prompt starts)"
+	}
 	if errors.Is(err, errDoorbellBlockedByApproval) {
 		return "queued (target is waiting on an approval — lands when the approval clears)"
 	}
@@ -166,6 +249,9 @@ func agentMessageQueuedDetail(err error) string {
 // took it, and stamps the row. Shared by the send path and the redelivery drain
 // so a queued message and a live one land identically.
 func (d *Daemon) deliverAgentMessage(record store.AgentMessage) error {
+	if d.initialPromptPending(record.TargetSessionID) {
+		return errAgentMessageInitialPromptPending
+	}
 	sender := d.store.Get(record.SenderSessionID)
 	target := d.store.Get(record.TargetSessionID)
 	confirmable := target != nil && string(target.State) != protocol.StateWorking
@@ -311,6 +397,101 @@ func (d *Daemon) noteAgentMessageTaken(sessionID, state string) {
 	}
 }
 
+func (d *Daemon) noteInitialAgentMessage(sessionID, messageID string) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	if d.agentMessageInitialPrompt == nil {
+		d.agentMessageInitialPrompt = make(map[string]string)
+	}
+	d.agentMessageInitialPrompt[sessionID] = messageID
+}
+
+func (d *Daemon) initialAgentMessagePending(sessionID, messageID string) bool {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	current := d.agentMessageInitialPrompt[sessionID]
+	return current != "" && (messageID == "" || current == messageID)
+}
+
+func (d *Daemon) notePostInitialPrompt(sessionID string, after func()) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	if d.postInitialPrompt == nil {
+		d.postInitialPrompt = make(map[string]func())
+	}
+	d.postInitialPrompt[sessionID] = after
+}
+
+func (d *Daemon) forgetPostInitialPrompt(sessionID string) {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	delete(d.postInitialPrompt, sessionID)
+}
+
+// initialPromptPending covers both forms of wake-carried delivery. It is the
+// anti-splice gate for agent messages and ticket countdowns while a new member
+// day is still taking its first prompt.
+func (d *Daemon) initialPromptPending(sessionID string) bool {
+	d.agentMessageMu.Lock()
+	defer d.agentMessageMu.Unlock()
+	return d.agentMessageInitialPrompt[sessionID] != "" || d.postInitialPrompt[sessionID] != nil
+}
+
+func (d *Daemon) runPostInitialPrompt(sessionID, state string) {
+	if state != protocol.StateWorking {
+		return
+	}
+	d.agentMessageMu.Lock()
+	after := d.postInitialPrompt[sessionID]
+	delete(d.postInitialPrompt, sessionID)
+	d.agentMessageMu.Unlock()
+	if after != nil {
+		after()
+		// Messages addressed to the member while the ticket-triggered wake was
+		// priming queued behind the same gate. This hook is their first reliable
+		// drain signal too.
+		d.drainAgentMessagesAfterStateChange(sessionID, state)
+	}
+}
+
+// noteInitialAgentMessageSubmitted is the receipt for a message carried as a
+// new member day's initial prompt. Worker state is not enough: a freshly
+// spawned Claude session reports `working` while still sitting at its trust
+// dialog. A hook's working evidence comes from UserPromptSubmit or a tool event,
+// both on the far side of that dialog and therefore prove the prompt was read.
+func (d *Daemon) noteInitialAgentMessageSubmitted(sessionID, state string) {
+	if state != protocol.StateWorking {
+		return
+	}
+	d.agentMessageMu.Lock()
+	messageID := d.agentMessageInitialPrompt[sessionID]
+	delete(d.agentMessageInitialPrompt, sessionID)
+	d.agentMessageMu.Unlock()
+	if messageID == "" {
+		return
+	}
+	_ = d.stampAgentMessageDelivered(messageID)
+	// Another sender can address this now-live member while its initial prompt
+	// is still blocked on priming. Keep the queue armed and drain anything behind
+	// the initial message now that the prompt-submit receipt opened the gate.
+	d.drainAgentMessagesAfterStateChange(sessionID, state)
+}
+
+// rollbackInitialAgentMessage is reached only when the wake itself failed. No
+// process owns the planned session, so its queued row cannot ever deliver and
+// is removed rather than becoming an orphan that claims otherwise forever.
+func (d *Daemon) rollbackInitialAgentMessage(sessionID, messageID string) {
+	d.agentMessageMu.Lock()
+	if d.agentMessageInitialPrompt[sessionID] == messageID {
+		delete(d.agentMessageInitialPrompt, sessionID)
+	}
+	d.agentMessageMu.Unlock()
+	if err := d.store.DeleteQueuedAgentMessage(messageID); err != nil {
+		d.logf("agent msg rollback: session=%s id=%s err=%v", sessionID, messageID, err)
+	}
+	d.forgetQueuedAgentMessages(sessionID)
+}
+
 // composeAgentMessage builds what the target actually reads. The format is the
 // daemon's, never the sender's: the attribution line, the consent boundary
 // repeated on every delivery, and the exact command to answer with.
@@ -394,8 +575,11 @@ func (d *Daemon) seedQueuedAgentMessages() {
 // sent to a session waiting on an approval would sit queued until someone sent
 // another one.
 func (d *Daemon) drainAgentMessagesAfterStateChange(sessionID, state string) {
-	if !isNudgeDeliveryAllowed(state) || !d.hasQueuedAgentMessages(sessionID) {
+	if d.initialPromptPending(sessionID) || !isNudgeDeliveryAllowed(state) || !d.hasQueuedAgentMessages(sessionID) {
 		return
+	}
+	if d.agentMessageDrainScheduledHook != nil {
+		d.agentMessageDrainScheduledHook(sessionID)
 	}
 	// Never inline: typeDoorbell takes doorbellMu and sleeps between the paste
 	// and its Enter, and applyState is on the state-report path.

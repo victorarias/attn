@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/transcript"
 )
@@ -327,5 +328,58 @@ func TestMaybeGenerateSessionTitle_ConcurrentAttemptRunsExecOnce(t *testing.T) {
 	got := d.store.Get("sess-1")
 	if got == nil || got.Label != "Fix login flow" {
 		t.Fatalf("session label = %+v, want %q", got, "Fix login flow")
+	}
+}
+
+// A member's name is its identity, not a placeholder. A member launches in its
+// own home, so its label and its cwd basename are the same string and the
+// default-label check alone cannot tell "nobody named this" from "this is
+// trellis" — the auto-titler used to overwrite a live member's name at its
+// first Stop.
+func TestMaybeGenerateSessionTitle_CrewMemberNeverTitled(t *testing.T) {
+	d := newCrewDaemon(t)
+	home := filepath.Join(d.dataRoot, crew.HomesDirName, "trellis")
+	seedSessionTitleSession(t, d, "sess-trellis", home, "")
+	if _, err := d.claimCrewBinding("trellis", "sess-trellis"); err != nil {
+		t.Fatalf("claim: %v", err)
+	}
+	transcriptPath := writeSessionTitleTranscript(t)
+
+	calls := 0
+	d.sessionTitleExec = func(ctx context.Context, session *protocol.Session, slice transcript.ConversationSlice) (string, error) {
+		calls++
+		return "Fix login flow", nil
+	}
+
+	d.maybeGenerateSessionTitle("sess-trellis", transcriptPath)
+
+	if calls != 0 {
+		t.Fatalf("exec calls = %d, want 0 (a bound member is named by definition)", calls)
+	}
+	if got := d.store.Get("sess-trellis"); got == nil || got.Label != "trellis" {
+		t.Fatalf("session label = %+v, want %q", got, "trellis")
+	}
+}
+
+// The binding can be claimed while the LLM run is in flight — a member woken
+// into a session that was already talking. The post-run re-check must see it.
+func TestMaybeGenerateSessionTitle_CrewBindingRace(t *testing.T) {
+	d := newCrewDaemon(t)
+	directory := t.TempDir()
+	seedSessionTitleSession(t, d, "sess-1", directory, "")
+	transcriptPath := writeSessionTitleTranscript(t)
+
+	d.sessionTitleExec = func(ctx context.Context, session *protocol.Session, slice transcript.ConversationSlice) (string, error) {
+		if _, err := d.claimCrewBinding("trellis", "sess-1"); err != nil {
+			t.Errorf("claim: %v", err)
+		}
+		return "llm title", nil
+	}
+
+	d.maybeGenerateSessionTitle("sess-1", transcriptPath)
+
+	wantLabel := defaultSessionLabel(directory, "sess-1")
+	if got := d.store.Get("sess-1"); got == nil || got.Label != wantLabel {
+		t.Fatalf("session label = %+v, want unchanged %q (a session that became a member must not be titled)", got, wantLabel)
 	}
 }

@@ -78,11 +78,11 @@ func (d *Daemon) importCrewHomes() {
 			if docstore.IsConflict(err) {
 				continue // already registered; the record is authoritative
 			}
-			d.logf("crew: importing %s: %v", member.ID, err)
+			d.logf("crew: importing %s: %v", crew.DisplayName(member.ID), err)
 			continue
 		}
 		d.publishFact(FactCrewRegistered, member.ID, nil)
-		d.logf("crew: imported member %s from %s", member.ID, member.HomeDir)
+		d.logf("crew: imported member %s from %s", crew.DisplayName(member.ID), member.HomeDir)
 	}
 }
 
@@ -193,6 +193,40 @@ func (d *Daemon) crewBindingLive(member crew.Member) bool {
 	return member.BindingSession != "" && d.sessionExists(member.BindingSession)
 }
 
+// migrateCrewTicketIdentity adopts one day's ticket participation into the
+// member before a binding moves or disappears. It is idempotent, so registration
+// retries and daemon restarts can safely run it again.
+func (d *Daemon) migrateCrewTicketIdentity(memberID string, sessionIDs ...string) error {
+	identity := store.TicketMemberIdentity(memberID)
+	for _, sessionID := range sessionIDs {
+		sessionID = strings.TrimSpace(sessionID)
+		if sessionID == "" {
+			continue
+		}
+		if err := d.store.MigrateTicketIdentity(sessionID, identity, time.Now()); err != nil {
+			return fmt.Errorf("carry session %s's ticket participation into %s: %w", shortSessionID(sessionID), identity, err)
+		}
+	}
+	return nil
+}
+
+// migrateCrewTicketIdentities upgrades session-keyed ticket state already on
+// disk. Claim/release cannot cover a daemon upgrade whose live binding survives
+// the restart, and LetterSession recovers the immediate predecessor after a
+// sleep completed before this version first ran.
+func (d *Daemon) migrateCrewTicketIdentities() error {
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		return err
+	}
+	for _, member := range members {
+		if err := d.migrateCrewTicketIdentity(member.ID, member.BindingSession, member.LetterSession); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // claimCrewBinding stamps sessionID as memberName's active binding — the
 // identity mechanism: the session is the member because this claim succeeded
 // at its launch. It refuses an unregistered name, and refuses a member whose
@@ -223,21 +257,31 @@ func (d *Daemon) claimCrewBinding(memberName, sessionID string) (string, error) 
 			return "", fmt.Errorf("no crew member %q is registered; `attn crew list` names the roster", memberName)
 		}
 		if member.BindingSession == sessionID {
+			if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+				return "", err
+			}
 			return member.ID, nil
 		}
 		if d.crewBindingLive(member) {
 			return "", fmt.Errorf("%s is already awake in session %s; two agents with the same identity never run at once — wait for that day to end, or wake another member",
-				member.ID, shortSessionID(member.BindingSession))
+				crew.DisplayName(member.ID), shortSessionID(member.BindingSession))
 		}
 		// Past every refusal, so the claim is going to land: drop any other name
 		// this session already answered to. A refused claim is not reached here,
 		// and leaves the session the member it already was.
 		d.releaseCrewBindingsExcept(*schema, members, docs, member.ID, sessionID)
+		previousSessionID := member.BindingSession
+		if err := d.migrateCrewTicketIdentity(member.ID, previousSessionID); err != nil {
+			return "", err
+		}
 		member.BindingSession = sessionID
 		err = d.writeCrewMember(*schema, member, docs[member.ID].Rev)
 		if err == nil {
+			if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+				return "", err
+			}
 			d.publishFact(FactCrewBound, member.ID, nil)
-			d.logf("crew: session %s bound as %s", sessionID, member.ID)
+			d.logf("crew: session %s bound as %s", sessionID, crew.DisplayName(member.ID))
 			return member.ID, nil
 		}
 		if !docstore.IsConflict(err) {
@@ -278,13 +322,17 @@ func (d *Daemon) releaseCrewBindingsExcept(schema docstore.CollectionSchema, mem
 		if member.BindingSession != sessionID || member.ID == keepID {
 			continue
 		}
+		if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+			d.logf("crew: keeping %s's stale binding for session %s because ticket participation did not move: %v", crew.DisplayName(member.ID), sessionID, err)
+			continue
+		}
 		member.BindingSession = ""
 		if err := d.writeCrewMember(schema, member, docs[member.ID].Rev); err != nil {
-			d.logf("crew: releasing %s's binding for session %s: %v", member.ID, sessionID, err)
+			d.logf("crew: releasing %s's binding for session %s: %v", crew.DisplayName(member.ID), sessionID, err)
 			continue
 		}
 		d.publishFact(FactCrewReleased, member.ID, nil)
-		d.logf("crew: session %s released %s's binding", sessionID, member.ID)
+		d.logf("crew: session %s released %s's binding", sessionID, crew.DisplayName(member.ID))
 	}
 }
 
@@ -316,6 +364,28 @@ func (d *Daemon) crewMembersBySession() map[string]string {
 	return out
 }
 
+// crewMemberBoundTo names the member a session is living as, or "" when it is
+// nobody. Read the roster rather than the session record: CrewMember is a
+// broadcast decoration, so it is nil on everything d.store.Get returns.
+func (d *Daemon) crewMemberBoundTo(sessionID string) string {
+	if d.store == nil || strings.TrimSpace(sessionID) == "" {
+		return ""
+	}
+	members, _, err := d.readCrewMembers()
+	if err != nil {
+		if !docstore.IsUndeclaredCollection(err) {
+			d.logf("crew: reading roster for session %s: %v", sessionID, err)
+		}
+		return ""
+	}
+	for _, member := range members {
+		if member.BindingSession == sessionID && d.crewBindingLive(member) {
+			return member.ID
+		}
+	}
+	return ""
+}
+
 // decorateCrewMember marks the session living a member's current day. Mirrors
 // decorateChiefOfStaffWithSessionID: set only when bound, cleared otherwise so
 // it round-trips as an omitted field.
@@ -337,8 +407,8 @@ func (d *Daemon) decorateCrewMember(session *protocol.Session, membersBySession 
 // through untouched: the registry never becomes a requirement to tend.
 func (d *Daemon) resolveTenderMember(memberName, sessionID string) string {
 	memberName = strings.TrimSpace(memberName)
-	if memberName == "" && sessionID == "" {
-		return ""
+	if memberName == "" {
+		return d.crewMemberBoundTo(sessionID)
 	}
 	members, _, err := d.readCrewMembers()
 	if err != nil {
@@ -347,18 +417,10 @@ func (d *Daemon) resolveTenderMember(memberName, sessionID string) string {
 		}
 		return memberName
 	}
-	if memberName != "" {
-		if member, ok := crew.Resolve(memberName, members); ok {
-			return member.ID
-		}
-		return memberName
+	if member, ok := crew.Resolve(memberName, members); ok {
+		return member.ID
 	}
-	for _, member := range members {
-		if member.BindingSession == sessionID && sessionID != "" && d.crewBindingLive(member) {
-			return member.ID
-		}
-	}
-	return ""
+	return memberName
 }
 
 // IPC handlers.

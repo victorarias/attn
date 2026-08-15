@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/hooks"
@@ -1014,22 +1015,13 @@ func (d *Daemon) gardenPrime(sessionID string) (*hooks.GardenPrime, error) {
 		line := hooks.SeedPrime{ID: seed.ID, Title: seed.Title}
 		if handoff := d.gardenHandoff(seed.ID); handoff != nil {
 			line.Handoff = handoff.Body
-			line.HandoffAuthor = firstNonEmptyString(handoff.AuthorMember, handoff.AuthorSession)
+			line.HandoffAuthor = crew.HolderName(handoff.AuthorMember, handoff.AuthorSession)
 		}
 		plot.ReadySeeds = append(plot.ReadySeeds, line)
 	}
 	prime.Ready = len(plot.ReadySeeds)
 	prime.Crown = plot
 	return prime, nil
-}
-
-func firstNonEmptyString(values ...string) string {
-	for _, v := range values {
-		if strings.TrimSpace(v) != "" {
-			return v
-		}
-	}
-	return ""
 }
 
 // gardenFacts is the verb-to-fact table. One fact per transition, each naming

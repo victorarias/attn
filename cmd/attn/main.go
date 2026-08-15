@@ -24,6 +24,7 @@ import (
 	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/daemon"
 	"github.com/victorarias/attn/internal/daemonctl"
 	"github.com/victorarias/attn/internal/hooks"
@@ -646,7 +647,7 @@ commands:
   presence                          check whether the current shell runs inside attn
   agent list                        name every session running here
   agent peek <id>                   read a session without interrupting it
-  agent msg <id> "text"             send a session a message, attributed to you
+  agent msg <session-or-member> "text"  message a live session or durable crew member
 	  session <command>                 inspect a session's conversation
   state explain <id>                replay why a session's state is what it is
   delegate --brief-file <path>      start another agent with a delegated brief
@@ -2974,9 +2975,10 @@ func parseDirectLaunchArgs(args []string) (directLaunchArgs, error) {
 		}
 	}
 	if label == "" {
-		// A member's day is named after the member; -s still overrides.
+		// A member's day is named after the member, written as a name; -s still
+		// overrides.
 		if parsed.member != "" {
-			label = parsed.member
+			label = crew.DisplayName(parsed.member)
 		} else {
 			label = wrapper.DefaultLabel()
 		}

@@ -132,3 +132,123 @@ func TestCreateDelegatedTicketParticipants(t *testing.T) {
 		})
 	}
 }
+
+func TestCrewMemberDelegationUsesDurableMemberIdentity(t *testing.T) {
+	memberIdentity := store.TicketMemberIdentity("trellis")
+	chiefRole := store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
+	for _, tc := range []struct {
+		name string
+		bind func(t *testing.T, d *Daemon, delegated *protocol.Session) string
+	}{
+		{
+			name: "create",
+			bind: func(t *testing.T, d *Daemon, delegated *protocol.Session) string {
+				t.Helper()
+				id, err := d.createDelegatedTicket("trellis-today", false, delegated, "the brief", "Member work", "codex")
+				if err != nil {
+					t.Fatalf("createDelegatedTicket: %v", err)
+				}
+				return id
+			},
+		},
+		{
+			name: "adopt",
+			bind: func(t *testing.T, d *Daemon, delegated *protocol.Session) string {
+				t.Helper()
+				if _, err := d.store.CreateTicket(store.Ticket{ID: "member-work", Title: "Member work", Description: "the brief"}, "filer", time.Now()); err != nil {
+					t.Fatalf("seed ticket: %v", err)
+				}
+				id, err := d.adoptDelegatedTicket("trellis-today", false, delegated, "member-work", "codex", false)
+				if err != nil {
+					t.Fatalf("adoptDelegatedTicket: %v", err)
+				}
+				return id
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			d := newCrewDaemon(t)
+			addSession(t, d, "trellis-today")
+			if _, err := d.claimCrewBinding("trellis", "trellis-today"); err != nil {
+				t.Fatalf("claim crew binding: %v", err)
+			}
+			delegated := &protocol.Session{ID: "sess-delegated", Directory: "/tmp/x"}
+			ticketID := tc.bind(t, d, delegated)
+
+			participants, err := d.store.TicketParticipants(ticketID)
+			if err != nil {
+				t.Fatalf("TicketParticipants: %v", err)
+			}
+			got := map[string]bool{}
+			for _, participant := range participants {
+				got[participant] = true
+			}
+			for _, want := range []string{delegated.ID, memberIdentity, chiefRole} {
+				if !got[want] {
+					t.Errorf("participants = %v, missing %q", participants, want)
+				}
+			}
+			if got["trellis-today"] {
+				t.Errorf("participants = %v, disposable member session is attached", participants)
+			}
+
+			events, err := d.store.TicketEventsSince(0)
+			if err != nil {
+				t.Fatalf("TicketEventsSince: %v", err)
+			}
+			delegationEvents := 0
+			for _, event := range events {
+				if event.TicketID != ticketID || (event.Kind == store.TicketEventCreated && tc.name == "adopt") {
+					continue
+				}
+				delegationEvents++
+				if event.Author != memberIdentity || event.AuthorRole != "" {
+					t.Errorf("delegation event = %+v, want author %q without a role", event, memberIdentity)
+				}
+			}
+			wantEvents := 1
+			if tc.name == "adopt" {
+				wantEvents = 2
+			}
+			if delegationEvents != wantEvents {
+				t.Errorf("delegation events = %d, want %d", delegationEvents, wantEvents)
+			}
+		})
+	}
+}
+
+func TestChiefMemberDelegationKeepsChiefRoleAttachment(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "trellis-today")
+	if _, err := d.claimCrewBinding("trellis", "trellis-today"); err != nil {
+		t.Fatalf("claim crew binding: %v", err)
+	}
+	delegated := &protocol.Session{ID: "sess-delegated", Directory: "/tmp/x"}
+	ticketID, err := d.createDelegatedTicket("trellis-today", true, delegated, "the brief", "Chief work", "codex")
+	if err != nil {
+		t.Fatalf("createDelegatedTicket: %v", err)
+	}
+	participants, err := d.store.TicketParticipants(ticketID)
+	if err != nil {
+		t.Fatalf("TicketParticipants: %v", err)
+	}
+	got := map[string]bool{}
+	for _, participant := range participants {
+		got[participant] = true
+	}
+	chiefRole := store.TicketRoleIdentity(store.TicketRoleChiefOfStaff)
+	if !got[delegated.ID] || !got[chiefRole] {
+		t.Errorf("participants = %v, want delegated session and %q", participants, chiefRole)
+	}
+	if got["trellis-today"] || got[store.TicketMemberIdentity("trellis")] {
+		t.Errorf("participants = %v, chief delegation also attached its acting member", participants)
+	}
+	events, err := d.store.TicketEventsSince(0)
+	if err != nil {
+		t.Fatalf("TicketEventsSince: %v", err)
+	}
+	created := events[0]
+	if created.Author != "trellis-today" || created.AuthorRole != store.TicketRoleChiefOfStaff {
+		t.Fatalf("created event = %+v, want concrete audit author carrying the chief role", created)
+	}
+}

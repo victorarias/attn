@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 func callTicketSubscribe(t *testing.T, d *Daemon, sessionID, ticketID string) protocol.Response {
@@ -22,6 +23,33 @@ func callTicketSubscribe(t *testing.T, d *Daemon, sessionID, ticketID string) pr
 		t.Fatalf("decode ticket-subscribe response: %v", err)
 	}
 	return resp
+}
+
+func TestCrewMemberSubscribesAndUnsubscribesAsTheMember(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "trellis-today")
+	if _, err := d.claimCrewBinding("trellis", "trellis-today"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "watched", Title: "Watched"}, "you", time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if resp := callTicketSubscribe(t, d, "trellis-today", "watched"); !resp.Ok {
+		t.Fatalf("subscribe response = %+v", resp)
+	}
+	identity := store.TicketMemberIdentity("trellis")
+	if subscribed, err := d.store.IsTicketSubscribed(identity, "watched"); err != nil || !subscribed {
+		t.Fatalf("member subscription = %v, %v", subscribed, err)
+	}
+	if subscribed, err := d.store.IsTicketSubscribed("trellis-today", "watched"); err != nil || subscribed {
+		t.Fatalf("day subscription = %v, %v; want none", subscribed, err)
+	}
+	if resp := callTicketUnsubscribe(t, d, "trellis-today", "watched"); !resp.Ok {
+		t.Fatalf("unsubscribe response = %+v", resp)
+	}
+	if subscribed, err := d.store.IsTicketSubscribed(identity, "watched"); err != nil || subscribed {
+		t.Fatalf("member subscription after unsubscribe = %v, %v", subscribed, err)
+	}
 }
 
 func callTicketUnsubscribe(t *testing.T, d *Daemon, sessionID, ticketID string) protocol.Response {

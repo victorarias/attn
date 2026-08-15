@@ -79,6 +79,34 @@ export const QUICK_LABEL_GROUPS: QuickLabel[][] = [
 // Every label, in row order.
 export const QUICK_LABELS: QuickLabel[] = QUICK_LABEL_GROUPS.flat();
 
+const PROMOTED_LABEL_IDS = ['i-agree', 'this-is-wrong', 'clarify-this'] as const;
+
+function requireQuickLabel(id: string): QuickLabel {
+  const label = labelById(id);
+  if (!label) {
+    throw new Error(
+      `A promoted toolbar button points at quick label "${id}", which the shared set no longer offers. `
+      + `Point it at one of: ${QUICK_LABELS.map((candidate) => candidate.id).join(', ')}.`,
+    );
+  }
+  return label;
+}
+
+export const PROMOTED_LABELS: readonly QuickLabel[] = PROMOTED_LABEL_IDS.map(requireQuickLabel);
+
+const promotedLabelIds = new Set<string>(PROMOTED_LABEL_IDS);
+
+const pickerGroups: QuickLabel[][] = [];
+for (const group of QUICK_LABEL_GROUPS) {
+  const pickerGroup = group.filter((label) => !promotedLabelIds.has(label.id));
+  if (pickerGroup.length > 0) {
+    pickerGroups.push(pickerGroup);
+  }
+}
+export const QUICK_LABEL_PICKER_GROUPS: readonly (readonly QuickLabel[])[] = pickerGroups;
+
+export const QUICK_LABEL_PICKER_LABELS: readonly QuickLabel[] = QUICK_LABEL_PICKER_GROUPS.flat();
+
 export function labelByEmoji(emoji: string): QuickLabel | undefined {
   return QUICK_LABELS.find((label) => label.emoji === emoji);
 }

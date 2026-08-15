@@ -89,6 +89,30 @@ func TestMarkAgentMessageDeliveredIsWriteOnce(t *testing.T) {
 	}
 }
 
+func TestDeleteQueuedAgentMessageRollsBackOnlyAnUndeliveredRow(t *testing.T) {
+	s := newAgentMessageStore(t)
+	now := time.Now()
+	enqueue(t, s, "queued", "sender", "target", "not launched", now)
+	enqueue(t, s, "delivered", "sender", "target", "already read", now)
+	if err := s.MarkAgentMessageDelivered("delivered", now); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := s.DeleteQueuedAgentMessage("queued"); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.DeleteQueuedAgentMessage("delivered"); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM agent_messages`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 1 {
+		t.Fatalf("rows = %d, want only the delivered receipt", count)
+	}
+}
+
 // The guard's three counts, each scoped to exactly what its limit is about:
 // dedupe to one sender's identical text, the rate to one sender's traffic, and
 // the queue cap to the target's whole backlog from everyone.

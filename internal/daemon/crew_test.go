@@ -146,7 +146,7 @@ func TestCrew_SecondClaimOnALiveMemberIsRefusedByName(t *testing.T) {
 	if err == nil {
 		t.Fatal("a second keel was allowed to wake")
 	}
-	for _, want := range []string{"keel", "sess-fir"} {
+	for _, want := range []string{"Keel", "sess-fir"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("refusal %q does not name %q", err, want)
 		}

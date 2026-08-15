@@ -16,6 +16,7 @@ import (
 	"github.com/victorarias/attn/internal/modelcapture"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
+	"github.com/victorarias/attn/internal/sessioncost"
 )
 
 const (
@@ -193,6 +194,9 @@ func (d *Daemon) handleSetSettingWS(client *wsClient, msg *protocol.SetSettingMe
 	}
 
 	d.store.SetSetting(msg.Key, msg.Value)
+	if isSessionCostPriceSetting(msg.Key) {
+		d.publishSessionCostReprices()
+	}
 	if msg.Key == SettingTailscaleEnabled {
 		d.ensureTailscaleServeFromSettings()
 	}
@@ -593,6 +597,10 @@ func (d *Daemon) validateSetting(key, value string) error {
 	case SettingReviewerModel:
 		return nil
 	default:
+		if isSessionCostPriceSetting(key) {
+			_, err := sessioncost.ParseOverrides(map[string]string{key: value})
+			return err
+		}
 		if strings.HasPrefix(strings.TrimSpace(strings.ToLower(key)), SettingCrewCacheTTLPrefix) {
 			return validateBoundedIntSetting("crew cache TTL", value, crewCacheTTLMinSeconds, crewCacheTTLMaxSeconds)
 		}

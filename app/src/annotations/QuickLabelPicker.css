@@ -1,0 +1,86 @@
+.md-ql-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 999px;
+  /* Per-chip colors arrive as inline custom props from LABEL_COLOR_MAP. */
+  color: var(--md-ql-text-dark, var(--color-text-primary, #e8e8e8));
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) .md-ql-chip {
+    color: var(--md-ql-text, var(--color-text-primary, #18181b));
+  }
+}
+
+:root[data-theme='light'] .md-ql-chip {
+  color: var(--md-ql-text, var(--color-text-primary, #18181b));
+}
+
+.md-quick-label-picker {
+  position: fixed;
+  z-index: 10021;
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  border-radius: 8px;
+  background: var(--color-bg-elevated, #1a1a1d);
+  border: 1px solid var(--color-border, #2a2a2d);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.45);
+  animation: md-qlp-in 0.12s ease-out;
+}
+
+@keyframes md-qlp-in {
+  from {
+    opacity: 0;
+    margin-top: -4px;
+  }
+  to {
+    opacity: 1;
+    margin-top: 0;
+  }
+}
+
+.md-quick-label-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-text-primary, #e8e8e8);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.md-quick-label-row:hover {
+  background: var(--color-bg-button, #252528);
+}
+
+.md-quick-label-divider {
+  border: 0;
+  height: 1px;
+  margin: 3px 6px;
+  background: var(--color-border, #2a2a2d);
+}
+
+.md-quick-label-text {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.md-quick-label-num {
+  font-size: 10px;
+  color: var(--color-text-muted, #888);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}

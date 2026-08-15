@@ -87,6 +87,37 @@ func TestSpawnCommitPreservesExistingEndpointID(t *testing.T) {
 	}
 }
 
+func TestSpawnCostTrackingStartsFreshButNotFromResumedHistory(t *testing.T) {
+	d, _, cwd := newSpawnCommitTestDaemon(t)
+
+	fresh := spawnCommitMessage("fresh-cost", cwd)
+	fresh.Agent = string(protocol.SessionAgentClaude)
+	if rejection := d.runSpawnPipeline(fresh, internalSpawnPolicy{}); rejection != nil {
+		t.Fatalf("fresh runSpawnPipeline() rejection = %+v", rejection)
+	}
+	freshCost, err := d.store.SessionCost(fresh.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !freshCost.Initialized || freshCost.Cursor != "" {
+		t.Fatalf("fresh session cost state = %+v, want initialized at byte zero", freshCost)
+	}
+
+	resumed := spawnCommitMessage("resumed-cost", cwd)
+	resumed.Agent = string(protocol.SessionAgentClaude)
+	resumed.ResumeSessionID = protocol.Ptr("provider-conversation-with-history")
+	if rejection := d.runSpawnPipeline(resumed, internalSpawnPolicy{}); rejection != nil {
+		t.Fatalf("resumed runSpawnPipeline() rejection = %+v", rejection)
+	}
+	resumedCost, err := d.store.SessionCost(resumed.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumedCost.Initialized {
+		t.Fatalf("resumed session cost state = %+v, want uninitialized so discovery seeds at head", resumedCost)
+	}
+}
+
 func TestSpawnPersistsLaunchIntentBeforeWorkerStart(t *testing.T) {
 	d, backend, cwd := newSpawnCommitTestDaemon(t)
 	msg := spawnCommitMessage("intent-before-worker", cwd)

@@ -221,3 +221,50 @@ func TestMembersSchema_IsAValidDeclaration(t *testing.T) {
 		t.Fatalf("MembersSchema is not declarable: %v", err)
 	}
 }
+
+// Display capitalizes, identity does not: the same string reads as a name to a
+// person and stays the lowercase id everywhere it addresses something.
+func TestDisplayName_WritesTheIDAsAName(t *testing.T) {
+	for id, want := range map[string]string{
+		"trellis":   "Trellis",
+		"keel":      "Keel",
+		"alder":     "Alder",
+		"a":         "A",
+		"mary-jane": "Mary-jane",
+		"Trellis":   "Trellis",
+		"":          "",
+		"  keel  ":  "Keel",
+		"ólafur":    "Ólafur",
+	} {
+		if got := DisplayName(id); got != want {
+			t.Errorf("DisplayName(%q) = %q, want %q", id, got, want)
+		}
+	}
+}
+
+// The rule is one-way: a display name still resolves to the member it names, so
+// nothing that looks up an id has to know about the capitalization.
+func TestDisplayName_StillResolvesToItsMember(t *testing.T) {
+	members := []Member{{ID: "trellis"}, {ID: "keel"}}
+	member, ok := Resolve(DisplayName("keel"), members)
+	if !ok || member.ID != "keel" {
+		t.Fatalf("Resolve(%q) = %q, %t; want keel", DisplayName("keel"), member.ID, ok)
+	}
+	if err := ValidateID(member.ID); err != nil {
+		t.Fatalf("the resolved id is not a member id: %v", err)
+	}
+}
+
+// Where a holder can be either a member or a bare session, only the member
+// branch is a name: a session id is never dressed up as one.
+func TestHolderName_NamesTheMemberAndLeavesASessionAlone(t *testing.T) {
+	if got := HolderName("trellis", "sess-a"); got != "Trellis" {
+		t.Errorf("HolderName(trellis, sess-a) = %q, want Trellis", got)
+	}
+	if got := HolderName("", "sess-a"); got != "sess-a" {
+		t.Errorf("HolderName(\"\", sess-a) = %q, want the session id untouched", got)
+	}
+	if got := HolderName("  ", "  "); got != "" {
+		t.Errorf("an unheld thing displays as %q, want empty", got)
+	}
+}

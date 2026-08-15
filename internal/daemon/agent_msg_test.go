@@ -2,8 +2,10 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/victorarias/attn/internal/client"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/ptybackend"
 	"github.com/victorarias/attn/internal/store"
 )
 
@@ -111,6 +114,246 @@ func TestHandleAgentMsgDeliversAnAttributedPromptWithTheBoundary(t *testing.T) {
 	}
 	if len(queued) != 0 {
 		t.Fatalf("a delivered message is still queued: %+v", queued)
+	}
+}
+
+// A member name is its durable address. When its day is live, resolution lands
+// on that binding and uses the ordinary attributed delivery path; no second day
+// is started.
+func TestHandleAgentMsgResolvesAnAwakeCrewMemberToItsLiveSession(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	addCharacterizationSession(t, d, "keels-live-session", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	if _, err := d.claimCrewBinding("keel", "keels-live-session"); err != nil {
+		t.Fatalf("bind keel: %v", err)
+	}
+	doorbell := &recordingDoorbell{}
+	backend.onInput = doorbell.backend().onInput
+
+	resp := callAgentMsg(t, d, "Keel", "sender-session-id", "the garden is ready")
+	if !resp.Ok || resp.AgentMsgResult == nil || resp.AgentMsgResult.Status != protocol.AgentMsgStatusDelivered {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.AgentMsgResult.TargetSessionID != "keels-live-session" {
+		t.Fatalf("target = %q, want keel's live day", resp.AgentMsgResult.TargetSessionID)
+	}
+	if resp.AgentMsgResult.Detail != "delivered to Keel" {
+		t.Fatalf("detail = %q, want the member's display name", resp.AgentMsgResult.Detail)
+	}
+	if prompts := doorbell.pasted(); len(prompts) != 1 || !strings.Contains(prompts[0], "the garden is ready") {
+		t.Fatalf("delivered prompts = %q", prompts)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 0 {
+		t.Fatalf("messaging an awake member spawned %d sessions", spawned)
+	}
+}
+
+// Wake-and-deliver is one operation, not a wake followed by a best-effort
+// paste. The attributed message is persisted before spawn and replaces the
+// ordinary greeting as the day's initial prompt; the prompt-submit hook is the
+// receipt that clears the durable row.
+func TestHandleAgentMsgWakesASleepingMemberWithTheMessageAsItsFirstPrompt(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	var initialPrompt string
+	backend.onSpawn = func(opts ptybackend.SpawnOptions) {
+		body, err := os.ReadFile(opts.InitialPromptFile)
+		if err != nil {
+			t.Fatalf("read initial prompt: %v", err)
+		}
+		initialPrompt = string(body)
+	}
+	writes := 0
+	backend.onInput = func(_ string, _ []byte) { writes++ }
+
+	resp := callAgentMsg(t, d, "trellis", "sender-session-id", "please inspect the broken build")
+	if !resp.Ok || resp.AgentMsgResult == nil {
+		t.Fatalf("response = %+v", resp)
+	}
+	result := resp.AgentMsgResult
+	if result.Status != protocol.AgentMsgStatusQueued || result.MessageID == "" || result.TargetSessionID == "" {
+		t.Fatalf("result = %+v, want a durable queued delivery to the new day", result)
+	}
+	if !strings.Contains(result.Detail, "woke Trellis") {
+		t.Fatalf("detail = %q, want the member's display name", result.Detail)
+	}
+	for _, want := range []string{"📨 from session sender-s", "please inspect the broken build", "reply: attn agent msg sender-s"} {
+		if !strings.Contains(initialPrompt, want) {
+			t.Errorf("initial prompt missing %q:\n%s", want, initialPrompt)
+		}
+	}
+	if strings.Contains(initialPrompt, crewWakePrompt) {
+		t.Fatalf("the generic greeting ran before the message:\n%s", initialPrompt)
+	}
+	if writes != 0 {
+		t.Fatalf("the message was pasted %d times in addition to the initial prompt", writes)
+	}
+	queued, err := d.store.UndeliveredAgentMessages(result.TargetSessionID)
+	if err != nil || len(queued) != 1 || queued[0].ID != result.MessageID {
+		t.Fatalf("message was not durable before the wake completed: queued=%+v err=%v", queued, err)
+	}
+
+	// Worker state alone is not the receipt: a live Claude wake reports working
+	// while its trust dialog is still in front of the initial prompt. It must
+	// neither stamp nor drain the queued row there.
+	if !d.applyState(sessionStateChange{
+		sessionID: result.TargetSessionID,
+		state:     protocol.StateWorking,
+		cause:     liveSignal{},
+	}) {
+		t.Fatal("the woken member did not enter working")
+	}
+	queued, err = d.store.UndeliveredAgentMessages(result.TargetSessionID)
+	if err != nil || len(queued) != 1 {
+		t.Fatalf("worker state claimed the initial prompt before the hook: %+v, %v", queued, err)
+	}
+	if writes != 0 {
+		t.Fatalf("worker state redelivered the initial prompt through the PTY %d times", writes)
+	}
+
+	hook := callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{ID: result.TargetSessionID, State: protocol.StateWorking})
+	})
+	if !hook.Ok {
+		t.Fatalf("prompt-submit hook: %+v", hook)
+	}
+	queued, err = d.store.UndeliveredAgentMessages(result.TargetSessionID)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("the prompt-submit receipt left the message queued: %+v, %v", queued, err)
+	}
+	if writes != 0 {
+		t.Fatalf("the prompt-submit receipt redelivered the initial prompt through the PTY %d times", writes)
+	}
+}
+
+// A member is live as soon as its day is durably created, before the initial
+// prompt clears priming. Messages arriving in that interval queue behind the
+// first ask; the prompt-submit receipt must open their drain rather than clear
+// the only bit that remembers they exist.
+func TestHandleAgentMsgDuringWakePrimingDrainsAfterTheInitialPrompt(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+	doorbell := &recordingDoorbell{}
+	backend.onInput = doorbell.backend().onInput
+
+	first := callAgentMsg(t, d, "keel", "sender-session-id", "first ask")
+	if !first.Ok || first.AgentMsgResult == nil {
+		t.Fatalf("first response = %+v", first)
+	}
+	sessionID := first.AgentMsgResult.TargetSessionID
+	second := callAgentMsg(t, d, "keel", "sender-session-id", "second ask")
+	if !second.Ok || second.AgentMsgResult == nil || second.AgentMsgResult.TargetSessionID != sessionID || second.AgentMsgResult.Status != protocol.AgentMsgStatusQueued {
+		t.Fatalf("second response = %+v, want a queue behind the same waking day", second)
+	}
+	queued, err := d.store.UndeliveredAgentMessages(sessionID)
+	if err != nil || len(queued) != 2 {
+		t.Fatalf("messages queued during priming = %+v, %v", queued, err)
+	}
+	if prompts := doorbell.pasted(); len(prompts) != 0 {
+		t.Fatalf("a message jumped ahead of priming: %q", prompts)
+	}
+
+	scheduled := make(chan string, 1)
+	drained := make(chan int, 1)
+	d.agentMessageDrainScheduledHook = func(sessionID string) { scheduled <- sessionID }
+	d.agentMessageDrainHook = func(_ string, delivered int) { drained <- delivered }
+	hook := callHandler(t, func(conn net.Conn) {
+		d.handleState(conn, &protocol.StateMessage{ID: sessionID, State: protocol.StateWorking})
+	})
+	if !hook.Ok {
+		t.Fatalf("prompt-submit hook: %+v", hook)
+	}
+	select {
+	case got := <-scheduled:
+		if got != sessionID {
+			t.Fatalf("drain scheduled for %q, want %q", got, sessionID)
+		}
+	default:
+		t.Fatal("prompt-submit receipt did not open the queued-message drain")
+	}
+	if delivered := <-drained; delivered != 1 {
+		t.Fatalf("drained %d messages behind the initial prompt, want 1", delivered)
+	}
+	queued, err = d.store.UndeliveredAgentMessages(sessionID)
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("queue after prompt submit = %+v, %v", queued, err)
+	}
+	prompts := doorbell.pasted()
+	if len(prompts) != 1 || !strings.Contains(prompts[0], "second ask") || strings.Contains(prompts[0], "first ask") {
+		t.Fatalf("doorbell prompts after priming = %q", prompts)
+	}
+}
+
+// A message-triggered wake is autonomous. The lifecycle's own limit decides,
+// and its loud refusal reaches the caller with the additional fact that no
+// message landed.
+func TestHandleAgentMsgWakeLimitRefusalDeliversNothing(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	d.store.SetSetting(SettingCrewWakeLimit, "0")
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	resp := callAgentMsg(t, d, "alder", "sender-session-id", "wake up")
+	if resp.Ok {
+		t.Fatalf("wake past the limit succeeded: %+v", resp)
+	}
+	detail := protocol.Deref(resp.Error)
+	for _, want := range []string{"crew.wake_limit=0", "Alder", "sidebar", "nothing was delivered"} {
+		if !strings.Contains(detail, want) {
+			t.Errorf("refusal %q does not name %q", detail, want)
+		}
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 0 {
+		t.Fatalf("the refused wake spawned %d sessions", spawned)
+	}
+	queued, err := d.store.TargetsWithQueuedAgentMessages()
+	if err != nil || len(queued) != 0 {
+		t.Fatalf("the refused wake queued a message anyway: %v, %v", queued, err)
+	}
+}
+
+func TestHandleAgentMsgFailedWakeLeavesNoUndeliverableMessage(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	backend.spawnErr = errors.New("the harness would not start")
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	resp := callAgentMsg(t, d, "keel", "sender-session-id", "please wake")
+	if resp.Ok || !strings.Contains(protocol.Deref(resp.Error), "would not start") {
+		t.Fatalf("response = %+v", resp)
+	}
+	targets, err := d.store.TargetsWithQueuedAgentMessages()
+	if err != nil || len(targets) != 0 {
+		t.Fatalf("failed wake left an undeliverable row: %v, %v", targets, err)
+	}
+	if binding := memberByID(t, crewList(t, d), "keel").BindingSession; binding != nil {
+		t.Fatalf("failed wake left keel bound to %q", *binding)
+	}
+}
+
+func TestHandleAgentMsgUnknownAddressNamesBothPlacesToLook(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	addCharacterizationSession(t, d, "sender-session-id", protocol.SessionAgentClaude, protocol.SessionStateIdle)
+
+	resp := callAgentMsg(t, d, "nobody", "sender-session-id", "hello")
+	if resp.Ok || protocol.Deref(resp.ErrorCode) != "session_or_crew_member_not_found" {
+		t.Fatalf("response = %+v", resp)
+	}
+	for _, want := range []string{`"nobody"`, "attn agent list", "attn crew list"} {
+		if !strings.Contains(protocol.Deref(resp.Error), want) {
+			t.Errorf("error %q does not name %q", protocol.Deref(resp.Error), want)
+		}
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 0 {
+		t.Fatalf("an unknown address spawned %d sessions", spawned)
 	}
 }
 

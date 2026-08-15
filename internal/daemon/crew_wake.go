@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Wake: a member's day starts at launch. The daemon claims the binding, then
@@ -32,6 +34,24 @@ import (
 // another, and a member is plain markdown so any harness can live in one.
 const crewWakeAgent = "claude"
 
+// crewWakeModel is what a member wakes on, hardcoded on purpose. A member's
+// session is one Victor drives himself and those run Fable; a per-member model
+// knob is a quiet way to end up with a member subtly wrong in a way only a
+// spirit-read of its prose catches. It names a Claude model, so it is pinned
+// only for the default harness — `--agent codex` still picks that harness's own
+// default.
+const crewWakeModel = "claude-fable-5"
+
+// crewWakeModelPin is the pin as a spawn field: set for the default harness,
+// nil for any other, so it can be applied by every path that starts a member's
+// day without each one restating the rule.
+func crewWakeModelPin(agent string) *string {
+	if strings.TrimSpace(strings.ToLower(agent)) != crewWakeAgent {
+		return nil
+	}
+	return protocol.Ptr(crewWakeModel)
+}
+
 // crewWakePrompt is the first thing a woken member is asked to do. Without it a
 // member launches primed and silent, and the user has to open the session to
 // find out anybody is there.
@@ -41,6 +61,16 @@ const crewWakePrompt = "You have been woken for today. Orient from your charter 
 // every day. A workspace per wake would litter the sidebar with a new group
 // each morning.
 func crewWorkspaceID(memberID string) string { return "workspace-crew-" + memberID }
+
+// crewWakeDelivery is work carried by the one serialized wake path. An agent
+// message replaces the ordinary greeting and persists its row before spawn. A
+// ticket nudge keeps the greeting and runs AfterInitialPrompt only after a hook
+// proves the new day got through priming and submitted that greeting.
+type crewWakeDelivery struct {
+	Record             *store.AgentMessage
+	Prompt             string
+	AfterInitialPrompt func(sessionID string)
+}
 
 // crewMember reads one member by id, behind the fence.
 func (d *Daemon) crewMember(name string) (crew.Member, docstore.Document, error) {
@@ -69,10 +99,10 @@ func crewLaunchDir(member crew.Member) (string, error) {
 	}
 	info, err := os.Stat(dir)
 	if err != nil {
-		return "", fmt.Errorf("%s launches in %s, which is not there (%v); `attn crew set %[1]s --cwd <dir>` moves it", member.ID, dir, err)
+		return "", fmt.Errorf("%s launches in %s, which is not there (%v); `attn crew set %s --cwd <dir>` moves it", crew.DisplayName(member.ID), dir, err, member.ID)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%s launches in %s, which is not a directory; `attn crew set %[1]s --cwd <dir>` moves it", member.ID, dir)
+		return "", fmt.Errorf("%s launches in %s, which is not a directory; `attn crew set %s --cwd <dir>` moves it", crew.DisplayName(member.ID), dir, member.ID)
 	}
 	return dir, nil
 }
@@ -91,14 +121,14 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 	if charter, err := os.ReadFile(member.CharterPath); err == nil {
 		priming.Charter = string(charter)
 	} else if !os.IsNotExist(err) {
-		d.logf("crew: reading %s's charter at %s: %v", member.ID, member.CharterPath, err)
+		d.logf("crew: reading %s's charter at %s: %v", crew.DisplayName(member.ID), member.CharterPath, err)
 	}
 
 	handoffsDir := filepath.Join(member.HomeDir, crew.HandoffsDirName)
 	entries, err := os.ReadDir(handoffsDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			d.logf("crew: reading %s's handoffs at %s: %v", member.ID, handoffsDir, err)
+			d.logf("crew: reading %s's handoffs at %s: %v", crew.DisplayName(member.ID), handoffsDir, err)
 		}
 		return priming
 	}
@@ -118,7 +148,7 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 	if letter, err := os.ReadFile(filepath.Join(handoffsDir, names[0])); err == nil {
 		priming.Handoff = string(letter)
 	} else {
-		d.logf("crew: reading %s's freshest handoff %s: %v", member.ID, names[0], err)
+		d.logf("crew: reading %s's freshest handoff %s: %v", crew.DisplayName(member.ID), names[0], err)
 	}
 	return priming
 }
@@ -159,6 +189,16 @@ func (d *Daemon) handleCrewWakeWS(client *wsClient, msg *protocol.CrewWakeMessag
 }
 
 func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) {
+	return d.crewWakeWithDelivery(name, agent, false, nil)
+}
+
+func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, delivery *crewWakeDelivery) (*protocol.CrewWakeResult, error) {
+	if d.crewWakeStartHook != nil {
+		d.crewWakeStartHook(strings.TrimSpace(strings.ToLower(name)))
+	}
+	d.crewWakeMu.Lock()
+	defer d.crewWakeMu.Unlock()
+
 	member, _, err := d.crewMember(name)
 	if err != nil {
 		return nil, err
@@ -186,6 +226,11 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	if autonomous {
+		if err := d.chargeAutonomousWake(member.ID, time.Now()); err != nil {
+			return nil, fmt.Errorf("%w; nothing was delivered", err)
+		}
+	}
 
 	sessionID := uuid.NewString()
 	// Claimed before the spawn, because the launch reads it: the wrapper asks
@@ -194,18 +239,21 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 	if _, err := d.claimCrewBinding(member.ID, sessionID); err != nil {
 		return nil, err
 	}
+	if d.crewWakeAfterClaimHook != nil {
+		d.crewWakeAfterClaimHook(member.ID, sessionID)
+	}
 
 	workspaceID := crewWorkspaceID(member.ID)
 	if d.store.GetWorkspace(workspaceID) == nil {
 		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 			Cmd:       protocol.CmdRegisterWorkspace,
 			ID:        workspaceID,
-			Title:     member.ID,
+			Title:     crew.DisplayName(member.ID),
 			Directory: directory,
 		})
 		if d.store.GetWorkspace(workspaceID) == nil {
 			d.releaseCrewBindingIfSession(sessionID)
-			return nil, fmt.Errorf("create %s's workspace", member.ID)
+			return nil, fmt.Errorf("create %s's workspace", crew.DisplayName(member.ID))
 		}
 	}
 	paneClient := newInternalWSClient()
@@ -214,11 +262,29 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		WorkspaceID: workspaceID,
 		PaneID:      protocol.Ptr("pane-" + sessionID),
 		SessionID:   sessionID,
-		Title:       protocol.Ptr(member.ID),
+		Title:       protocol.Ptr(crew.DisplayName(member.ID)),
 	})
 	if _, err := readInternalActionResult(paneClient); err != nil {
 		d.releaseCrewBindingIfSession(sessionID)
-		return nil, fmt.Errorf("create %s's pane: %w", member.ID, err)
+		return nil, fmt.Errorf("create %s's pane: %w", crew.DisplayName(member.ID), err)
+	}
+
+	initialPrompt := crewWakePrompt
+	if delivery != nil {
+		if delivery.Record != nil {
+			delivery.Record.TargetSessionID = sessionID
+			if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
+				d.removeWorkspaceLayoutPaneForSession(sessionID)
+				d.releaseCrewBindingIfSession(sessionID)
+				return nil, err
+			}
+			d.noteQueuedAgentMessage(sessionID)
+			d.noteInitialAgentMessage(sessionID, delivery.Record.ID)
+			initialPrompt = delivery.Prompt
+		}
+		if delivery.AfterInitialPrompt != nil {
+			d.notePostInitialPrompt(sessionID, func() { delivery.AfterInitialPrompt(sessionID) })
+		}
 	}
 
 	spawnClient := newInternalWSClient()
@@ -228,17 +294,24 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		Cwd:           directory,
 		WorkspaceID:   workspaceID,
 		Agent:         agent,
+		Model:         crewWakeModelPin(agent),
 		Cols:          80,
 		Rows:          24,
-		Label:         protocol.Ptr(member.ID),
-		InitialPrompt: protocol.Ptr(crewWakePrompt),
+		Label:         protocol.Ptr(crew.DisplayName(member.ID)),
+		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
+		if delivery != nil {
+			if delivery.Record != nil {
+				d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
+			}
+			d.forgetPostInitialPrompt(sessionID)
+		}
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)
-		return nil, fmt.Errorf("wake %s: %w", member.ID, err)
+		return nil, fmt.Errorf("wake %s: %w", crew.DisplayName(member.ID), err)
 	}
-	d.logf("crew: woke %s in session %s at %s", member.ID, sessionID, directory)
+	d.logf("crew: woke %s in session %s at %s", crew.DisplayName(member.ID), sessionID, directory)
 	return &protocol.CrewWakeResult{
 		Member:      member.ID,
 		SessionID:   sessionID,
@@ -292,7 +365,7 @@ func (d *Daemon) crewPrimeForSession(sessionID string) (crew.Member, string, boo
 			handoff = "(none)"
 		}
 		d.logf("crew: priming %s for session %s: %d bytes (charter %d, handoff %s %d, older %d)",
-			member.ID, sessionID, len(block), len(priming.Charter),
+			crew.DisplayName(member.ID), sessionID, len(block), len(priming.Charter),
 			handoff, len(priming.Handoff), len(priming.OlderHandoffs))
 		return member, block, true
 	}

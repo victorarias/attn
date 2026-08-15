@@ -1,0 +1,10 @@
+kind: fixed
+area: crew
+change: >
+  Ticket participation now belongs to a crew member instead of one day's
+  session. A member keeps its subscriptions, unread cursor, and interruption
+  clock across day turnover; ticket commands attribute the member by its
+  `member:<id>` identity while the concrete session remains the assignee. Any
+  unread ticket activity wakes a sleeping member through the existing
+  autonomous wake limit, after charter and handoff priming. A refused wake is
+  surfaced as a warning and leaves the activity unread for the next manual wake.

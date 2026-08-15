@@ -11,6 +11,7 @@ import {
 import { createPortal } from 'react-dom';
 import { useEscapeStack } from '../hooks/useEscapeStack';
 import { LABEL_COLOR_MAP, type QuickLabel } from './quickLabels';
+import './QuickLabelPicker.css';
 
 export interface FloatingQuickLabelPickerProps {
   mode?: 'floating';
@@ -20,6 +21,7 @@ export interface FloatingQuickLabelPickerProps {
   cursorHint?: { x: number; y: number } | null;
   onSelect: (label: QuickLabel) => void;
   onDismiss: () => void;
+  onHint?: (hint: string | null) => void;
 }
 
 interface ChipQuickLabelPickerProps {
@@ -77,6 +79,7 @@ function FloatingQuickLabelPicker({
   cursorHint,
   onSelect,
   onDismiss,
+  onHint,
 }: FloatingQuickLabelPickerProps) {
   const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
   const [height, setHeight] = useState(0);
@@ -160,8 +163,13 @@ function FloatingQuickLabelPicker({
                 key={label.id}
                 type="button"
                 className="md-quick-label-row"
+                data-quick-label-id={label.id}
                 onClick={() => onSelect(label)}
                 title={label.tip}
+                onMouseEnter={() => onHint?.(label.text)}
+                onMouseLeave={() => onHint?.(null)}
+                onFocus={() => onHint?.(label.text)}
+                onBlur={() => onHint?.(null)}
               >
                 <span
                   className="md-ql-chip"

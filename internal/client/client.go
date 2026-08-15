@@ -407,13 +407,13 @@ func (c *Client) AgentPeek(targetSessionID string) (*protocol.AgentPeekResult, e
 	return resp.AgentPeekResult, nil
 }
 
-// AgentMsg sends another session a message. The daemon persists it, composes
-// the attribution, and delivers it — so the result says what became of it
-// (delivered, queued for later, or refused with the reason), never nothing.
-func (c *Client) AgentMsg(targetSessionID, sourceSessionID, content string) (*protocol.AgentMsgResult, error) {
+// AgentMsg sends a session or durable crew member a message. The daemon
+// resolves the address, persists the words, and delivers them — waking an
+// asleep member first — so the result always says what became of them.
+func (c *Client) AgentMsg(target, sourceSessionID, content string) (*protocol.AgentMsgResult, error) {
 	resp, err := c.send(protocol.AgentMsgMessage{
 		Cmd:             protocol.CmdAgentMsg,
-		TargetSessionID: targetSessionID,
+		TargetSessionID: target,
 		SourceSessionID: sourceSessionID,
 		Content:         content,
 	})

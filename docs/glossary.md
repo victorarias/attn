@@ -535,9 +535,15 @@ Plan:
 ## The crew
 
 The **crew** is the roster of durable named identities. A **crew member** —
-keel, alder, trellis — is a charter, a handoff line, and an address; its
+Keel, Alder, Trellis — is a charter, a handoff line, and an address; its
 sessions are its **days**. A member belongs to a home daemon, for the same
 reason the garden does: one roster across a fleet is its whole point.
+
+**Display capitalizes, identity does not.** The id is lowercase and stays that
+way wherever it addresses something — the home directory, `--member`, the
+fields on the wire, the store. Wherever a person reads the member, it is
+written as the name it is: you type `attn crew wake trellis` and Trellis is
+who answers.
 
 A member's **home** is plain markdown on disk at `~/.attn/crew/<name>/`: a
 `CHARTER.md` saying what it cares about, and dated **handoffs** it writes to
@@ -562,11 +568,19 @@ To **wake** a member is to start its day: `attn crew wake <name>`, or one click
 on its row in the sidebar, where every member is drawn awake or asleep. The
 daemon binds the member, then launches a session in its recorded cwd — its own
 home when none is recorded — reaching its **awareness dirs**, the directories
-its charter is about. The launch carries **priming**: the charter, the freshest
-letter left for it, and the crew guidance — how a handoff is filed, how the two
-handoff axes differ, that only one session is this member at a time. Skills
-retire into verbs and the verbs are taught, because an agent never told how to
-handoff cannot file one.
+its charter is about. Every wake runs on the same pinned model, hardcoded
+rather than configurable: a member subtly wrong takes a read of its prose to
+notice. The launch carries **priming**: what a member is, where its charter is
+to be read, the freshest letter left for it inline, and how a day is closed.
+Skills retire into verbs and the verbs are taught, because an agent never told
+how to handoff cannot file one.
+
+A member is also an address: `attn agent msg <member> "…"` reaches its live
+day when it is awake. When it is asleep, the message wakes it within the same
+wake limit as every autonomous wake and becomes the new day's first attributed
+prompt after priming. The message is persisted before the day starts, so the
+wake-to-delivery gap cannot silently lose it; a refused wake delivers nothing
+and names the limit and its way out.
 
 A member's day ends with a **handoff**: `attn handoff -m "<letter>"`, the
 member's own letter to its successor. attn names the file and files it into the

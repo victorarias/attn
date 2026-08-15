@@ -5,6 +5,7 @@ import (
 	"net"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
@@ -110,6 +111,49 @@ func TestTicketInboxConsumesByIdentity(t *testing.T) {
 	}
 	if ev.Comment == nil || *ev.Comment != "take a look" {
 		t.Fatalf("chief inbox status event comment = %v, want the supplied note", ev.Comment)
+	}
+}
+
+func TestCrewMemberCursorSurvivesDayTurnoverAndWatchUsesIt(t *testing.T) {
+	d := newCrewDaemon(t)
+	addSession(t, d, "day-a")
+	addSession(t, d, "day-b")
+	if _, err := d.claimCrewBinding("trellis", "day-a"); err != nil {
+		t.Fatal(err)
+	}
+	identity := store.TicketMemberIdentity("trellis")
+	now := time.Now()
+	if _, err := d.store.CreateTicket(store.Ticket{ID: "member-thread", Title: "Member thread"}, "you", now); err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.AddTicketSubscription(identity, "member-thread", now); err != nil {
+		t.Fatal(err)
+	}
+	if bundles := callTicketInbox(t, d, "day-a"); len(bundles) != 1 {
+		t.Fatalf("day-a first inbox = %+v, want the subscribed history", bundles)
+	}
+	before, err := d.store.GetTicketCursor(identity, "member-thread")
+	if err != nil || before == 0 {
+		t.Fatalf("member cursor before turnover = %d, %v", before, err)
+	}
+
+	if err := d.transferCrewBinding("trellis", "day-a", "day-b"); err != nil {
+		t.Fatal(err)
+	}
+	if replay := callTicketInbox(t, d, "day-b"); len(replay) != 0 {
+		t.Fatalf("successor replayed predecessor history: %+v", replay)
+	}
+	if _, err := d.store.SetTicketStatus("member-thread", store.TicketStatusDone, "you", "finished", now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	watch := protocol.TicketInboxModeWatch
+	bundles := callTicketInboxMode(t, d, "day-b", &watch)
+	if len(bundles) != 1 || bundles[0].TicketID != "member-thread" || len(bundles[0].Events) != 1 {
+		t.Fatalf("successor watch = %+v, want exactly the post-turnover event", bundles)
+	}
+	after, err := d.store.GetTicketCursor(identity, "member-thread")
+	if err != nil || after <= before {
+		t.Fatalf("member cursor after successor watch = %d, before %d, err %v", after, before, err)
 	}
 }
 

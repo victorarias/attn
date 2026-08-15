@@ -7,6 +7,7 @@ import { openPath, openUrl } from '@tauri-apps/plugin-opener';
 import { Sidebar, type SidebarHeaderAction, type DockItem, WorkflowIcon, EditorIcon, PRsIcon, NotebookIcon } from './components/Sidebar';
 import { Dashboard } from './components/Dashboard';
 import { activityStaleMs } from './utils/activitySettings';
+import { crewDisplayName } from './utils/crewName';
 import { AttentionDrawer } from './components/AttentionDrawer';
 import { LocationPicker } from './components/LocationPicker';
 
@@ -1275,6 +1276,8 @@ function AppContent({
       autoSettleFiresAt: daemonSession?.auto_settle_fires_at,
       autoSettleHeld: daemonSession?.auto_settle_held ?? false,
       autoSettleDismissArmed: daemonSession?.auto_settle_dismiss_armed ?? false,
+      costUsd: daemonSession?.cost_usd,
+      costUnknown: daemonSession?.cost_unknown ?? false,
       // Dropped when a pane status overrides the state: the reason describes the
       // resolver's answer, and a pane-derived state was not the resolver's.
       state_reason: paneState ? undefined : daemonSession?.state_reason,
@@ -3535,7 +3538,7 @@ function AppContent({
   const handleWakeCrewMember = useCallback((member: string) => {
     sendCrewWake(member)
       .then((result) => handleSelectSession(result.sessionId))
-      .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${member}`));
+      .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${crewDisplayName(member)}`));
   }, [sendCrewWake, handleSelectSession, showError]);
 
   // The daemon-facing ticket actions the pane-header ticket overlay wires into
@@ -4052,6 +4055,8 @@ function AppContent({
                       autoSettleFiresAt: entry.autoSettleFiresAt,
                       autoSettleHeld: entry.autoSettleHeld,
                       autoSettleDismissArmed: entry.autoSettleDismissArmed,
+                      costUsd: entry.costUsd,
+                      costUnknown: entry.costUnknown,
                       isActive: entry.id === activeSessionId,
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
