@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "249"
+const ProtocolVersion = "250"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -189,6 +189,7 @@ const (
 	CmdSeedPlot                              = "seed_plot"
 	CmdSeedList                              = "seed_list"
 	CmdSeedShow                              = "seed_show"
+	CmdSeedDocumentGet                       = "seed_document_get"
 	CmdSeedTransition                        = "seed_transition"
 	CmdSeedNote                              = "seed_note"
 	CmdSeedNotes                             = "seed_notes"
@@ -312,6 +313,7 @@ const (
 	CmdWorkspaceLayoutMoveLeafToNewWorkspace = "workspace_layout_move_leaf_to_new_workspace"
 	CmdWorkspaceTileContentGet               = "workspace_tile_content_get"
 	CmdOpenMarkdown                          = "open_markdown"
+	CmdOpenSeed                              = "open_seed"
 	CmdOpenSentFiles                         = "open_sent_files"
 	CmdSessionMessagesGet                    = "session_messages_get"
 	CmdSessionAnnotationsGet                 = "session_annotations_get"
@@ -463,6 +465,8 @@ const (
 	EventWorkspaceLayoutActionResult     = "workspace_layout_action_result"
 	EventWorkspaceTileContent            = "workspace_tile_content"
 	EventOpenMarkdownResult              = "open_markdown_result"
+	EventOpenSeedResult                  = "open_seed_result"
+	EventSeedDocumentGetResult           = "seed_document_get_result"
 	EventSessionMessagesGetResult        = "session_messages_get_result"
 	EventSessionMessagesChanged          = "session_messages_changed"
 	EventPastConversationsResult         = "past_conversations_result"
@@ -1254,6 +1258,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		}
 		return peek.Cmd, &msg, nil
 
+	case CmdSeedDocumentGet:
+		var msg SeedDocumentGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
 	case CmdSeedTransition:
 		var msg SeedTransitionMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
@@ -2014,6 +2025,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg OpenMarkdownMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal open_markdown: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdOpenSeed:
+		var msg OpenSeedMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal open_seed: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 

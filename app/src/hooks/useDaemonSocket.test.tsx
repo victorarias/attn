@@ -6,6 +6,7 @@ import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachReq
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
 import { TicketStatus } from '../types/generated';
+import { fileMarkdownSource, seedMarkdownSource } from '../components/MarkdownReader/documentSource';
 
 class FakeWebSocket {
   static readonly CONNECTING = 0;
@@ -3579,16 +3580,22 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('resolves markdown annotation get with annotations and generation', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const promise = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     const sent = lastSent(ws);
-    expect(sent).toMatchObject({ cmd: 'markdown_annotations_get', path: 'doc.md', workspace_id: 'ws-1' });
+    expect(sent).toMatchObject({
+      cmd: 'markdown_annotations_get',
+      document_uri: source.uri,
+      source_kind: 'file',
+      path: '/tmp/doc.md',
+      workspace_id: 'ws-1',
+    });
 
     ws.emit({
       event: 'markdown_annotations_get_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
       annotations: [{ id: 'a1' }],
       generation: 7,
@@ -3600,15 +3607,20 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('treats a stale save as a resolved outcome, not an error', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const promise = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 3);
+    const source = seedMarkdownSource('s-7k3f9m');
+    const promise = result.current.saveMarkdownAnnotations(source, [], 3);
     await Promise.resolve();
     const sent = lastSent(ws);
+    expect(sent).toMatchObject({
+      document_uri: 'attn://seed/s-7k3f9m',
+      source_kind: 'seed',
+      seed_id: 's-7k3f9m',
+    });
 
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: false,
       stale: true,
     });
@@ -3621,10 +3633,11 @@ describe('useDaemonSocket notebook and annotation events', () => {
 
     // `get` deliberately shares one in-flight round-trip per document, so
     // supersede is exercised through `save`, which does replace its waiter.
-    const first = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 1);
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const first = result.current.saveMarkdownAnnotations(source, [], 1);
     await Promise.resolve();
     const firstSent = lastSent(ws);
-    const second = result.current.saveMarkdownAnnotations('doc.md', 'ws-1', [], 2);
+    const second = result.current.saveMarkdownAnnotations(source, [], 2);
     await Promise.resolve();
     const secondSent = lastSent(ws);
     expect(firstSent.request_id).not.toBe(secondSent.request_id);
@@ -3634,16 +3647,14 @@ describe('useDaemonSocket notebook and annotation events', () => {
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: firstSent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: false,
       stale: true,
     });
     ws.emit({
       event: 'markdown_annotations_save_result',
       request_id: secondSent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
     });
     await expect(second).resolves.toEqual({ stale: false });
@@ -3653,10 +3664,11 @@ describe('useDaemonSocket notebook and annotation events', () => {
   it('shares one in-flight round-trip when the same document is hydrated twice', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
-    const first = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const source = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const first = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     const sent = lastSent(ws);
-    const second = result.current.getMarkdownAnnotations('doc.md', 'ws-1');
+    const second = result.current.getMarkdownAnnotations(source);
     await Promise.resolve();
     // No second command: a rejected hydrate would lock that tile's saves.
     expect(lastSent(ws).request_id).toBe(sent.request_id);
@@ -3664,14 +3676,56 @@ describe('useDaemonSocket notebook and annotation events', () => {
     ws.emit({
       event: 'markdown_annotations_get_result',
       request_id: sent.request_id,
-      workspace_id: 'ws-1',
-      path: 'doc.md',
+      document_uri: source.uri,
       success: true,
       annotations: [{ id: 'a1' }],
       generation: 4,
     });
     await expect(first).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
     await expect(second).resolves.toEqual({ annotations: [{ id: 'a1' }], generation: 4 });
+    unmount();
+  });
+
+  it('opens a seed tile with typed identity', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendOpenSeed('s-7k3f9m', 'session-1');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'open_seed', seed_id: 's-7k3f9m', session_id: 'session-1' });
+
+    ws.emit({
+      event: 'open_seed_result',
+      request_id: sent.request_id,
+      seed_id: 's-7k3f9m',
+      success: true,
+      workspace_id: 'workspace-1',
+      tile_id: 'tile-seed-s-7k3f9m',
+    });
+    await expect(promise).resolves.toEqual({ workspaceId: 'workspace-1', tileId: 'tile-seed-s-7k3f9m' });
+    unmount();
+  });
+
+  it('reads the seed document used by the tile and panel', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const promise = result.current.sendSeedDocumentGet('s-7k3f9m');
+    await Promise.resolve();
+    const sent = lastSent(ws);
+    expect(sent).toMatchObject({ cmd: 'seed_document_get', seed_id: 's-7k3f9m' });
+    const document = {
+      seed: { id: 's-7k3f9m', title: 'Garden era', body: '# Plan' },
+      children: [],
+      notes: [],
+      notes_total: 0,
+    };
+    ws.emit({
+      event: 'seed_document_get_result',
+      request_id: sent.request_id,
+      success: true,
+      document,
+    });
+    await expect(promise).resolves.toEqual(document);
     unmount();
   });
 });

@@ -654,7 +654,7 @@ commands:
   delegate --ticket <id>            start another agent on an existing ticket
   journal append --entry <text>     serialized append to the daily notebook journal
   workspace context <command>       edit shared workspace context
-  open <file.md> [--session <id>]   show a markdown file in attn
+  open <file.md|seed-id> [--session <id>]   show a document in attn
   browser <command>                 open and control the in-app browser
   workflow <command>                run, inspect, and resume durable workflows
   automation <command>              manage and run durable automations
@@ -2496,7 +2496,7 @@ func parseDelegateArgs(args []string) (delegateCLIArgs, error) {
 	}, nil
 }
 
-// parseOpenArgs parses the args for `attn open <file.md> [--session <id>]`.
+// parseOpenArgs parses the args for `attn open <file.md|seed-id> [--session <id>]`.
 // Go's flag parser stops at the first non-flag argument, so a naive Parse would
 // silently ignore `--session` when it trails the path. We parse interspersed
 // flags and positionals so the documented trailing form works exactly like the
@@ -2522,7 +2522,7 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 	}
 
 	if len(positionals) == 0 {
-		return "", "", fmt.Errorf("missing <file.md> argument")
+		return "", "", fmt.Errorf("missing <file.md|seed-id> argument")
 	}
 	if len(positionals) > 1 {
 		return "", "", fmt.Errorf("unexpected extra arguments: %v", positionals[1:])
@@ -2530,20 +2530,19 @@ func parseOpenArgs(args []string) (rawPath string, sessionFlag string, err error
 	return strings.TrimSpace(positionals[0]), strings.TrimSpace(*sessionID), nil
 }
 
-// runOpen handles `attn open <file.md> [--session <id>]`, docking a
-// live-reloading markdown tile into a workspace. The session defaults to
+func isSeedOpenTarget(target string) bool {
+	return strings.HasPrefix(strings.TrimSpace(target), "s-")
+}
+
+// runOpen handles `attn open <file.md|seed-id> [--session <id>]`, docking a
+// document tile into a workspace. The session defaults to
 // ATTN_SESSION_ID (set inside attn-managed agents), then the daemon's currently
 // selected session.
 func runOpen() {
 	warnIfDaemonVersionMismatch()
 	rawPath, sessionFlag, err := parseOpenArgs(os.Args[2:])
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md> [--session <id>]\n", err)
-		os.Exit(1)
-	}
-	absPath, err := filepath.Abs(rawPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "open: resolve path: %v\n", err)
+		fmt.Fprintf(os.Stderr, "attn open: %v\nusage: attn open <file.md|seed-id> [--session <id>]\n", err)
 		os.Exit(1)
 	}
 
@@ -2553,6 +2552,19 @@ func runOpen() {
 	}
 
 	c := client.New(strings.TrimSpace(os.Getenv("ATTN_SOCKET_PATH")))
+	if isSeedOpenTarget(rawPath) {
+		if err := c.OpenSeed(rawPath, resolvedSession); err != nil {
+			fmt.Fprintf(os.Stderr, "open: %v\n", err)
+			os.Exit(1)
+		}
+		fmt.Printf("opened %s\n", rawPath)
+		return
+	}
+	absPath, err := filepath.Abs(rawPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "open: resolve path: %v\n", err)
+		os.Exit(1)
+	}
 	if err := c.OpenMarkdown(absPath, resolvedSession); err != nil {
 		fmt.Fprintf(os.Stderr, "open: %v\n", err)
 		os.Exit(1)

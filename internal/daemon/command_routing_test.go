@@ -170,7 +170,7 @@ var sessionCommandsAnsweredWhereTheyLand = map[string]string{
 // message says to check here first.
 func routingProbe(wire string) []byte {
 	return []byte(`{"cmd":"` + wire + `","id":"probe","session_id":"probe","target_session_id":"probe",` +
-		`"workspace_id":"probe","source_workspace_id":"probe","endpoint_id":"probe","directory":"/probe"}`)
+		`"workspace_id":"probe","source_workspace_id":"probe","source_kind":"file","endpoint_id":"probe","directory":"/probe"}`)
 }
 
 func routedByAnyRouter(wire string, msg interface{}) bool {

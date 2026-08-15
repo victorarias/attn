@@ -1,0 +1,7 @@
+kind: added
+area: garden
+change: >
+  `attn open <seed-id>` now docks a seed as a rendered, annotatable workspace
+  document with its live child and note ledger beneath it. The Garden panel
+  offers the same document as a read-only drill with an Open as tile handoff,
+  while Markdown file tiles keep their existing annotation flow.

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MarkdownReader } from './index';
 import { sanitizeLinkUrl } from './markdownLinks';
+import { fileMarkdownSource, seedMarkdownSource } from './documentSource';
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
@@ -28,9 +29,11 @@ const shikiMock = vi.hoisted(() => ({
 }));
 vi.mock('shiki', () => shikiMock);
 
+const FILE_SOURCE = fileMarkdownSource('workspace-1', '/tmp/project/README.md');
+
 function renderReader(content: string, allowLocalTargets = true) {
   return render(
-    <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={allowLocalTargets} />,
+    <MarkdownReader content={content} source={FILE_SOURCE} allowLocalTargets={allowLocalTargets} />,
   );
 }
 
@@ -110,6 +113,18 @@ describe('MarkdownReader link sanitization', () => {
     expect(screen.getByText('leak')).toBeInTheDocument();
   });
 
+  it('does not treat a seed body as if it had a local filesystem directory', () => {
+    render(
+      <MarkdownReader
+        content="[local](docs/setup.md) [site](https://example.test/docs)"
+        source={seedMarkdownSource('s-7k3f9m')}
+      />,
+    );
+
+    expect(screen.queryByRole('link', { name: 'local' })).toBeNull();
+    expect(screen.getByRole('link', { name: 'site' })).toBeInTheDocument();
+  });
+
   it('keeps heading ids GitHub-sluggy with dedup', () => {
     renderReader('## Configuração!\n\n## Configuração?\n');
 
@@ -131,7 +146,7 @@ describe('MarkdownReader link sanitization', () => {
   it('scrolls the tile body to a fragment target instead of navigating', () => {
     const { container } = render(
       <div className="workspace-dock-tile-body">
-        <MarkdownReader content={'[Jump](#setup)\n\n## Setup\n'} path="/tmp/project/README.md" />
+        <MarkdownReader content={'[Jump](#setup)\n\n## Setup\n'} source={FILE_SOURCE} />
       </div>,
     );
     const body = container.querySelector<HTMLElement>('.workspace-dock-tile-body')!;
@@ -152,10 +167,10 @@ describe('MarkdownReader link sanitization', () => {
     const { container } = render(
       <>
         <div className="workspace-dock-tile-body" data-testid="tile-1">
-          <MarkdownReader content={content} path="/tmp/project/README.md" />
+          <MarkdownReader content={content} source={FILE_SOURCE} />
         </div>
         <div className="workspace-dock-tile-body" data-testid="tile-2">
-          <MarkdownReader content={content} path="/tmp/project/README.md" />
+          <MarkdownReader content={content} source={FILE_SOURCE} />
         </div>
       </>,
     );
@@ -238,7 +253,7 @@ describe('MarkdownReader code blocks', () => {
     expect(shikiMock.codeToHtml).toHaveBeenCalledTimes(1);
 
     rerender(
-      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+      <MarkdownReader content={content} source={FILE_SOURCE} allowLocalTargets={true} />,
     );
     await act(async () => {});
 
@@ -589,7 +604,7 @@ describe('MarkdownReader content re-render gate', () => {
   it('same content: no remount — user-toggled <details> stays open on identical re-render', () => {
     const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
     const { container, rerender } = render(
-      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+      <MarkdownReader content={content} source={FILE_SOURCE} allowLocalTargets={true} />,
     );
 
     const details = container.querySelector('details')!;
@@ -598,7 +613,7 @@ describe('MarkdownReader content re-render gate', () => {
     details.open = true;
 
     rerender(
-      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+      <MarkdownReader content={content} source={FILE_SOURCE} allowLocalTargets={true} />,
     );
 
     const after = container.querySelector('details')!;
@@ -624,7 +639,7 @@ describe('MarkdownReader content re-render gate', () => {
   it('changed content: the subtree re-renders (and resets DOM state)', () => {
     const content = '<details>\n<summary>More</summary>\n\nBody.\n\n</details>\n';
     const { container, rerender } = render(
-      <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+      <MarkdownReader content={content} source={FILE_SOURCE} allowLocalTargets={true} />,
     );
     const details = container.querySelector('details')!;
     details.open = true;
@@ -632,7 +647,7 @@ describe('MarkdownReader content re-render gate', () => {
     rerender(
       <MarkdownReader
         content={`${content}\nNew paragraph.\n`}
-        path="/tmp/project/README.md"
+        source={FILE_SOURCE}
         allowLocalTargets={true}
       />,
     );

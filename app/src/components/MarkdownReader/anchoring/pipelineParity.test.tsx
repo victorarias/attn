@@ -9,6 +9,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MarkdownReader } from '../index';
+import { fileMarkdownSource } from '../documentSource';
 import { blockDomText, resolveDomRange } from './domRange';
 import { extractBlockTexts } from './extractBlocks';
 
@@ -37,7 +38,11 @@ vi.mock('shiki', () => shikiMock);
 
 function renderReader(content: string) {
   return render(
-    <MarkdownReader content={content} path="/tmp/project/README.md" allowLocalTargets={true} />,
+    <MarkdownReader
+      content={content}
+      source={fileMarkdownSource('workspace-1', '/tmp/project/README.md')}
+      allowLocalTargets={true}
+    />,
   );
 }
 

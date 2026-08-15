@@ -1096,6 +1096,17 @@ func (c *Client) OpenMarkdown(path, sessionID string) error {
 	return err
 }
 
+// OpenSeed docks a seed reader tile beside the requested session. An empty
+// sessionID lets the daemon use the currently selected session.
+func (c *Client) OpenSeed(seedID, sessionID string) error {
+	msg := protocol.OpenSeedMessage{Cmd: protocol.CmdOpenSeed, SeedID: seedID}
+	if sessionID != "" {
+		msg.SessionID = protocol.Ptr(sessionID)
+	}
+	_, err := c.send(msg)
+	return err
+}
+
 // OpenSentFiles forwards the files an agent handed the user (SendUserFile)
 // so the daemon can open the ones attn can show. The daemon owns the gate
 // and the type routing; unroutable paths are dropped silently.

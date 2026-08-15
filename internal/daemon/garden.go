@@ -705,6 +705,60 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 	})
 }
 
+// handleSeedDocumentGet returns the complete reading surface for one seed.
+// Garden mutation snapshots are the invalidation signal; clients refetch this
+// one-shot document after each snapshot instead of holding a second watcher.
+func (d *Daemon) handleSeedDocumentGet(client *wsClient, msg *protocol.SeedDocumentGetMessage) {
+	result := protocol.SeedDocumentGetResultMessage{
+		Event:     protocol.EventSeedDocumentGetResult,
+		RequestID: msg.RequestID,
+	}
+	fail := func(err error) {
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+	}
+	if err := d.requireHome(garden.Surface); err != nil {
+		fail(err)
+		return
+	}
+	seed, doc, err := d.readSeed(msg.SeedID)
+	if err != nil {
+		fail(err)
+		return
+	}
+	read, err := d.readGarden()
+	if err != nil {
+		fail(err)
+		return
+	}
+	children := make([]garden.Seed, 0)
+	for _, candidate := range read.seeds {
+		for _, edge := range candidate.Edges {
+			if edge.Kind == garden.EdgePartOf && edge.To == seed.ID {
+				children = append(children, candidate)
+				break
+			}
+		}
+	}
+	notes, notesTotal, err := d.readNotes(seed.ID, docstore.MaxLimit)
+	if err != nil {
+		fail(err)
+		return
+	}
+	wireSeed := seedToProtocol(seed, doc, read.ready[seed.ID])
+	if progress, ok := read.progress(seed.ID); ok {
+		wireSeed.PlotProgress = progress
+	}
+	result.Document = &protocol.SeedDocument{
+		Seed:       wireSeed,
+		Children:   read.wire(children),
+		Notes:      notes,
+		NotesTotal: notesTotal,
+	}
+	result.Success = true
+	d.sendToClient(client, result)
+}
+
 // gardenRelations renders both directions of a seed's edges, each with the other
 // seed's title and state: "blocked-by s-7k3f9m" is only actionable when the
 // reader can see whether that blocker is still open.

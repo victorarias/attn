@@ -2530,6 +2530,25 @@ model OpenMarkdownResultMessage {
   tile_id?: string;
 }
 
+// Open a seed into a docked reader tile. The seed lives in the hub's garden;
+// session_id identifies the local workspace/pane beside which the tile docks.
+model OpenSeedMessage {
+  cmd: "open_seed";
+  seed_id: string;
+  session_id?: string;
+  request_id?: string;
+}
+
+model OpenSeedResultMessage {
+  event: "open_seed_result";
+  request_id?: string;
+  success: boolean;
+  error?: string;
+  seed_id: string;
+  workspace_id?: string;
+  tile_id?: string;
+}
+
 // A resilient anchor into a markdown document: block-scoped offsets plus
 // enough context (exact/prefix/suffix, content hash) to re-locate the text
 // after the file changes. Mirrors the frontend anchoring core's AnchorRecord.
@@ -2750,12 +2769,17 @@ model SessionAnnotationsSubmitResultMessage {
 // counter past any tombstone even when the draft is empty.
 model MarkdownAnnotationsGetMessage {
   cmd: "markdown_annotations_get";
-  path: string;
+  // Identity/correlation only. The daemon never parses authority from this.
+  document_uri: string;
+  // file | seed. Typed fields below are the authority the daemon acts on.
+  source_kind: string;
+  path?: string;
+  seed_id?: string;
   // Owning workspace of the requesting markdown tile. On a hub this routes
   // the command to the endpoint that owns the workspace, so drafts live on
   // (and are keyed by) the daemon that owns the document — identical paths
   // on different endpoints never share a draft/generation/tombstone row.
-  workspace_id: string;
+  workspace_id?: string;
   request_id: string;
 }
 
@@ -2765,10 +2789,13 @@ model MarkdownAnnotationsGetResultMessage {
   event: "markdown_annotations_get_result";
   request_id: string;
   // Echo of the request's workspace_id (client correlation key).
-  workspace_id: string;
+  document_uri: string;
+  source_kind: string;
+  workspace_id?: string;
+  seed_id?: string;
   success: boolean;
   error?: string;
-  path: string;
+  path?: string;
   annotations: MarkdownAnnotation[];
   generation: int32;
 }
@@ -2778,9 +2805,12 @@ model MarkdownAnnotationsGetResultMessage {
 // generation and the tombstone generation or the save is rejected as stale.
 model MarkdownAnnotationsSaveMessage {
   cmd: "markdown_annotations_save";
-  path: string;
+  document_uri: string;
+  source_kind: string;
+  path?: string;
+  seed_id?: string;
   // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
-  workspace_id: string;
+  workspace_id?: string;
   annotations: MarkdownAnnotation[];
   generation: int32;
   request_id: string;
@@ -2793,11 +2823,14 @@ model MarkdownAnnotationsSaveResultMessage {
   event: "markdown_annotations_save_result";
   request_id: string;
   // Echo of the request's workspace_id (client correlation key).
-  workspace_id: string;
+  document_uri: string;
+  source_kind: string;
+  workspace_id?: string;
+  seed_id?: string;
   success: boolean;
   stale?: boolean;
   error?: string;
-  path: string;
+  path?: string;
   generation: int32;
 }
 
@@ -2806,9 +2839,12 @@ model MarkdownAnnotationsSaveResultMessage {
 // save that fires after clear from resurrecting ghost drafts). Idempotent.
 model MarkdownAnnotationsClearMessage {
   cmd: "markdown_annotations_clear";
-  path: string;
+  document_uri: string;
+  source_kind: string;
+  path?: string;
+  seed_id?: string;
   // See MarkdownAnnotationsGetMessage.workspace_id (hub endpoint routing).
-  workspace_id: string;
+  workspace_id?: string;
   generation: int32;
   request_id: string;
 }
@@ -2818,10 +2854,13 @@ model MarkdownAnnotationsClearResultMessage {
   event: "markdown_annotations_clear_result";
   request_id: string;
   // Echo of the request's workspace_id (client correlation key).
-  workspace_id: string;
+  document_uri: string;
+  source_kind: string;
+  workspace_id?: string;
+  seed_id?: string;
   success: boolean;
   error?: string;
-  path: string;
+  path?: string;
   generation: int32;
 }
 
@@ -2830,7 +2869,11 @@ model MarkdownAnnotationsClearResultMessage {
 // Drafts are tombstone-cleared ONLY on successful delivery.
 model MarkdownAnnotationsSubmitMessage {
   cmd: "markdown_annotations_submit";
-  path: string;
+  document_uri: string;
+  source_kind: string;
+  workspace_id?: string;
+  path?: string;
+  seed_id?: string;
   target_session_id: string;
   // Annotation ids the client currently shows as orphaned (anchor no longer
   // resolves). Orphanhood is a client-derived, non-persisted property; the
@@ -2849,7 +2892,11 @@ model MarkdownAnnotationsSubmitMessage {
 model MarkdownAnnotationsSubmitResultMessage {
   event: "markdown_annotations_submit_result";
   request_id: string;
-  path: string;
+  document_uri: string;
+  source_kind: string;
+  workspace_id?: string;
+  path?: string;
+  seed_id?: string;
   target_session_id: string;
   success: boolean;
   status: string;
@@ -4430,6 +4477,30 @@ model SeedShowResult {
   "handoff"?: SeedNote;
 }
 
+// One-shot reader payload shared by the seed tile and GardenPanel drill. The
+// existing garden_seeds_updated event is its invalidation: clients re-read an
+// open document when any garden fact moves rather than holding another watcher.
+model SeedDocumentGetMessage {
+  "cmd": "seed_document_get";
+  "seed_id": string;
+  "request_id": string;
+}
+
+model SeedDocument {
+  "seed": Seed;
+  "children": Seed[];
+  "notes": SeedNote[];
+  "notes_total": int32;
+}
+
+model SeedDocumentGetResultMessage {
+  "event": "seed_document_get_result";
+  "request_id": string;
+  "success": boolean;
+  "error"?: string;
+  "document"?: SeedDocument;
+}
+
 // One edge as it reads from one seed's point of view: `blocks` and `part-of`
 // outbound, `blocked-by` and `has-part` for the same edges seen from the other
 // end.
@@ -4513,6 +4584,17 @@ model SeedTransitionResult {
 // One entry on a seed's log: what happened and what was learned, written for
 // whoever tends the seed next. A note is anchored to the work and routed to
 // nobody — directed messages are their own surface.
+// Typed artifact association carried by future attach/detach log entries.
+// This reading-surface slice adds the readable shape only; no writer exists yet.
+model SeedArtifactReference {
+  // markdown_file | notebook | repository | url.
+  "kind": string;
+  "notebook_document_id"?: string;
+  "repository"?: string;
+  "path"?: string;
+  "url"?: string;
+}
+
 model SeedNote {
   "id": string;
   "seed_id": string;
@@ -4523,6 +4605,7 @@ model SeedNote {
   "author_session": string;
   "author_member": string;
   "created_at": string;
+  "artifact"?: SeedArtifactReference;
 }
 
 model SeedNoteMessage {
@@ -5811,6 +5894,7 @@ alias DaemonEvent =
   | SessionContextWindowCapResultMessage
   | TicketsUpdatedMessage
   | GardenSeedsUpdatedMessage
+  | SeedDocumentGetResultMessage
   | CrewUpdatedMessage
   | CrewWakeResultMessage
   | TicketResultMessage
@@ -5818,6 +5902,7 @@ alias DaemonEvent =
   | TicketAttachResultMessage
   | TicketResumeResultMessage
   | WorkspaceTileContentMessage
+  | OpenSeedResultMessage
   | BrowserControlResponseMessage
   | PRsUpdatedMessage
   | ReposUpdatedMessage

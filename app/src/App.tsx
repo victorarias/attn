@@ -873,6 +873,8 @@ function AppContent({
     sendWorkspaceUndockTile,
     sendWorkspaceUpdateTile,
     sendOpenMarkdown,
+    sendOpenSeed,
+    sendSeedDocumentGet,
     sendSessionMessagesGet,
     subscribeSessionMessagesChanged,
     sendSessionAnnotationsGet,
@@ -3990,6 +3992,12 @@ function AppContent({
                       presentation: presentationBySessionId.get(entry.id),
                       ticket: boundTicketForSession(tickets ?? [], entry.id),
                     }))}
+                    seedTargetSessions={daemonSessions.map((session) => ({
+                      sessionId: session.id,
+                      label: session.label || session.id,
+                      state: session.state,
+                    }))}
+                    gardenSeeds={seeds}
                     ticketActions={ticketActions}
                     conversationAgents={conversationPaneAgents}
                     annotationApi={annotationApi}
@@ -4177,6 +4185,22 @@ function AppContent({
                   onClose={() => closeDockPanel('garden')}
                   seeds={seeds}
                   seedsTotal={seedsTotal}
+                  fetchSeedDocument={sendSeedDocumentGet}
+                  onOpenAsTile={(seedId) => {
+                    // The daemon uses this session to place the tile, then
+                    // binds its annotation target to the seed's tender.
+                    // Without the placement session, a garden-only open has
+                    // no workspace and annotations can never reach the
+                    // driving session.
+                    void sendOpenSeed(seedId, activeSessionId || '').catch((error) => {
+                      console.error('[Garden] Could not open seed tile:', error);
+                    });
+                  }}
+                  onOpenMarkdownArtifact={(path) => {
+                    void sendOpenMarkdown(path, '').catch((error) => {
+                      console.error('[Garden] Could not open markdown artifact:', error);
+                    });
+                  }}
                 />
               ),
             },

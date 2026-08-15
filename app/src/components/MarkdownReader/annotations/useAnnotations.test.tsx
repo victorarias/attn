@@ -29,6 +29,7 @@ import {
   registerMarkdownAnnotationsAutomationHandle,
   type MarkdownAnnotationsAutomationHandle,
 } from './annotationsAutomation';
+import { fileMarkdownSource, seedMarkdownSource, type MarkdownDocumentSource } from '../documentSource';
 
 vi.mock('@tauri-apps/plugin-opener', () => ({
   openUrl: vi.fn(async () => {}),
@@ -74,16 +75,16 @@ function makeTransport(seed: { annotations: WireAnnotation[]; generation: number
   };
   const state = { seed, saveResult: { stale: false } };
   const transport: MarkdownAnnotationsTransport = {
-    getMarkdownAnnotations: async (path, _workspaceId) => {
-      calls.get.push(path);
+    getMarkdownAnnotations: async (source) => {
+      calls.get.push(source.kind === 'file' ? source.path : source.uri);
       return { annotations: state.seed.annotations, generation: state.seed.generation };
     },
-    saveMarkdownAnnotations: async (path, _workspaceId, annotations, generation) => {
-      calls.save.push({ path, annotations, generation });
+    saveMarkdownAnnotations: async (source, annotations, generation) => {
+      calls.save.push({ path: source.kind === 'file' ? source.path : source.uri, annotations, generation });
       return state.saveResult;
     },
-    clearMarkdownAnnotations: async (path, _workspaceId, generation) => {
-      calls.clear.push({ path, generation });
+    clearMarkdownAnnotations: async (source, generation) => {
+      calls.clear.push({ path: source.kind === 'file' ? source.path : source.uri, generation });
       return { generation };
     },
     submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
@@ -96,19 +97,22 @@ function makeTransport(seed: { annotations: WireAnnotation[]; generation: number
 function Harness({
   content,
   path,
+  source,
   transport,
   apiRef,
 }: {
   content: string;
   path: string;
+  source?: MarkdownDocumentSource;
   transport: MarkdownAnnotationsTransport | null;
   apiRef: { current: UseAnnotationsApi | null };
 }) {
   const rootRef = useRef<HTMLDivElement>(null);
-  apiRef.current = useAnnotations({ rootRef, content, path, workspaceId: 'ws-test', enabled: true, transport });
+  const documentSource = source ?? fileMarkdownSource('ws-test', path);
+  apiRef.current = useAnnotations({ rootRef, content, source: documentSource, enabled: true, transport });
   return (
     <div ref={rootRef}>
-      <MarkdownReader content={content} path={path} allowLocalTargets />
+      <MarkdownReader content={content} source={documentSource} allowLocalTargets />
     </div>
   );
 }
@@ -192,6 +196,23 @@ afterEach(() => {
 // ---- tests -------------------------------------------------------------------
 
 describe('useAnnotations', () => {
+  it('passes a seed source through as the draft identity and typed authority', async () => {
+    const { transport, calls } = makeTransport();
+    const apiRef: { current: UseAnnotationsApi | null } = { current: null };
+    render(
+      <Harness
+        content={DOC}
+        path=""
+        source={seedMarkdownSource('s-7k3f9m')}
+        transport={transport}
+        apiRef={apiRef}
+      />,
+    );
+    await flush();
+
+    expect(calls.get).toEqual(['attn://seed/s-7k3f9m']);
+  });
+
   it('hydrates the stored draft on mount and paints it', async () => {
     const { transport, calls } = makeTransport({
       annotations: [storedAnnotation('target words')],
@@ -398,7 +419,7 @@ describe('useAnnotations', () => {
         calls.save += 1;
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const { container, apiRef } = await mount(transport);
@@ -576,11 +597,11 @@ describe('useAnnotations', () => {
         }
         return { annotations: [], generation: 9 };
       },
-      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
-        saves.push({ path, annotations, generation });
+      saveMarkdownAnnotations: async (source, annotations, generation) => {
+        saves.push({ path: source.kind === 'file' ? source.path : source.uri, annotations, generation });
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -630,11 +651,11 @@ describe('useAnnotations', () => {
         }
         return { annotations: [storedAnnotation('target words')], generation: 4 };
       },
-      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
-        saves.push({ path, annotations, generation });
+      saveMarkdownAnnotations: async (source, annotations, generation) => {
+        saves.push({ path: source.kind === 'file' ? source.path : source.uri, annotations, generation });
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -670,14 +691,14 @@ describe('useAnnotations', () => {
     const saves: SaveCall[] = [];
     const transport: MarkdownAnnotationsTransport = {
       getMarkdownAnnotations: async () => ({ annotations: [], generation: 0 }),
-      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
-        saves.push({ path, annotations, generation });
+      saveMarkdownAnnotations: async (source, annotations, generation) => {
+        saves.push({ path: source.kind === 'file' ? source.path : source.uri, annotations, generation });
         if (fail) {
           throw new Error('WebSocket not connected');
         }
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_p, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -796,7 +817,7 @@ describe('useAnnotations', () => {
         new Promise((resolve) => {
           resolveSave = resolve;
         }),
-      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const { container, apiRef } = await mount(transport);
@@ -836,7 +857,7 @@ describe('useAnnotations', () => {
         new Promise((resolve) => {
           resolveSave = resolve;
         }),
-      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const { container, apiRef } = await mount(transport);
@@ -877,11 +898,11 @@ describe('useAnnotations', () => {
         calls.get += 1;
         throw new Error('daemon down');
       },
-      saveMarkdownAnnotations: async (path, _w, annotations, generation) => {
-        calls.save.push({ path, annotations, generation });
+      saveMarkdownAnnotations: async (source, annotations, generation) => {
+        calls.save.push({ path: source.kind === 'file' ? source.path : source.uri, annotations, generation });
         return { stale: false };
       },
-      clearMarkdownAnnotations: async (_path, _w, generation) => ({ generation }),
+      clearMarkdownAnnotations: async (_source, generation) => ({ generation }),
       submitMarkdownAnnotations: async () => ({ status: 'delivered' }),
     };
     const { container, apiRef } = await mount(transport);

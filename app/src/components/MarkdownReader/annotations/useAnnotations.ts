@@ -44,6 +44,7 @@ import { evaluateSelection, type PendingSelection, type SelectionLike } from './
 import { getMarkdownAnnotationsTransport, type MarkdownAnnotationsTransport } from './transport';
 import { annotationFromWire, annotationToWire, type Annotation } from './types';
 import type { QuickLabel } from './quickLabels';
+import type { MarkdownDocumentSource } from '../documentSource';
 
 export const ANNOTATION_SAVE_DEBOUNCE_MS = 500;
 /** Re-try cadence after a failed hydrate — saves stay locked until one succeeds. */
@@ -63,11 +64,8 @@ export interface UseAnnotationsOptions {
   rootRef: RefObject<HTMLElement | null>;
   /** Raw markdown content — MUST be the same string the reader body renders. */
   content: string;
-  /** Absolute document path — the daemon draft key. */
-  path: string;
-  /** Owning workspace of the tile. Routes draft persistence to the endpoint
-      daemon that owns the workspace on hub setups (see transport.ts). */
-  workspaceId: string;
+  /** Opaque identity plus the typed fields the daemon acts on. */
+  source: MarkdownDocumentSource;
   /** False disables everything (chat-surface readers never annotate). */
   enabled: boolean;
   /** Test seam. Defaults to the module-registered app transport. */
@@ -129,8 +127,7 @@ function paintKindFor(annotation: Annotation): HighlightKind {
 export function useAnnotations({
   rootRef,
   content,
-  path,
-  workspaceId,
+  source,
   enabled,
   transport,
 }: UseAnnotationsOptions): UseAnnotationsApi {
@@ -148,10 +145,8 @@ export function useAnnotations({
   const contentRef = useRef(content);
   contentRef.current = content;
   // Written by the hydrate effect (not render) so its CLEANUP still sees the
-  // previous path and can flush the old document's pending save.
-  const pathRef = useRef(path);
-  const workspaceIdRef = useRef(workspaceId);
-  workspaceIdRef.current = workspaceId;
+  // previous document and can flush that document's pending save.
+  const sourceRef = useRef(source);
   const generationRef = useRef(0);
   const hasHydratedRef = useRef(false);
   const hydrateTokenRef = useRef(0);
@@ -194,9 +189,9 @@ export function useAnnotations({
       timer so the draft re-persists once the socket is back, instead of
       silently dropping the last debounced edit. Retry stops on unmount and
       on path change (the guard below). */
-  const schedulePersistRetry = useCallback((savePath: string, op: string, err: unknown) => {
-    console.warn(`[md-annotations] ${op} failed for ${savePath}; retrying`, err);
-    if (!mountedRef.current || pathRef.current !== savePath || saveTimerRef.current !== null) {
+  const schedulePersistRetry = useCallback((saveUri: string, op: string, err: unknown) => {
+    console.warn(`[md-annotations] ${op} failed for ${saveUri}; retrying`, err);
+    if (!mountedRef.current || sourceRef.current.uri !== saveUri || saveTimerRef.current !== null) {
       return;
     }
     saveTimerRef.current = setTimeout(() => {
@@ -219,8 +214,8 @@ export function useAnnotations({
     if (!t) {
       return Promise.resolve(); // local-only mode
     }
-    const savePath = pathRef.current;
-    const saveWorkspaceId = workspaceIdRef.current;
+    const saveSource = sourceRef.current;
+    const saveUri = saveSource.uri;
     generationRef.current += 1;
     const generation = generationRef.current;
     const list = annotationsRef.current;
@@ -228,20 +223,20 @@ export function useAnnotations({
       ? // Last annotation removed: tombstone instead of saving [] so a stale
         // stored draft can never offer back deleted content (plannotator
         // remove-on-empty semantics; also the primitive PR6's clear-on-send uses).
-        t.clearMarkdownAnnotations(savePath, saveWorkspaceId, generation)
+        t.clearMarkdownAnnotations(saveSource, generation)
           .then(({ generation: floor }) => {
             generationRef.current = Math.max(generationRef.current, floor);
           })
-          .catch((err: unknown) => schedulePersistRetry(savePath, 'clear', err))
-      : t.saveMarkdownAnnotations(savePath, saveWorkspaceId, list.map(annotationToWire), generation)
+          .catch((err: unknown) => schedulePersistRetry(saveUri, 'clear', err))
+      : t.saveMarkdownAnnotations(saveSource, list.map(annotationToWire), generation)
           .then(({ stale }) => {
-            if (stale && pathRef.current === savePath) {
+            if (stale && sourceRef.current.uri === saveUri) {
               // A tombstone (or newer writer) raced us: drop local pending state
               // and re-hydrate the authoritative draft.
               void hydrateRef.current?.();
             }
           })
-          .catch((err: unknown) => schedulePersistRetry(savePath, 'save', err));
+          .catch((err: unknown) => schedulePersistRetry(saveUri, 'save', err));
     inFlightPersistRef.current = request;
     const settle = () => {
       if (inFlightPersistRef.current === request) {
@@ -436,7 +431,7 @@ export function useAnnotations({
       return;
     }
     try {
-      const result = await t.getMarkdownAnnotations(pathRef.current, workspaceIdRef.current);
+      const result = await t.getMarkdownAnnotations(sourceRef.current);
       if (hydrateTokenRef.current !== token) {
         return; // superseded by a newer hydrate (path change / stale re-sync)
       }
@@ -478,7 +473,7 @@ export function useAnnotations({
       // this "hydrated" would let a generation-0 save go out, come back stale
       // against any prior draft/tombstone floor, and the stale re-hydrate
       // would then wipe every annotation the user just created.
-      console.warn(`[md-annotations] hydrate failed for ${pathRef.current}; retrying`, err);
+      console.warn(`[md-annotations] hydrate failed for ${sourceRef.current.uri}; retrying`, err);
       hydrateRetryTimerRef.current = setTimeout(() => {
         hydrateRetryTimerRef.current = null;
         if (hydrateTokenRef.current === token && mountedRef.current) {
@@ -494,7 +489,7 @@ export function useAnnotations({
     if (!enabled) {
       return;
     }
-    pathRef.current = path;
+    sourceRef.current = source;
     generationRef.current = 0;
     annotationsRef.current = [];
     orphansRef.current = new Map();
@@ -506,7 +501,7 @@ export function useAnnotations({
     setPending(null);
     void hydrate();
     return () => {
-      // Leaving this document (path change or unmount): flush any pending
+      // Leaving this document (URI change or unmount): flush any pending
       // save for it before the refs are reset for the next one.
       flushPendingSave();
       hydrateTokenRef.current += 1; // invalidate in-flight hydration
@@ -516,7 +511,7 @@ export function useAnnotations({
       }
       hasHydratedRef.current = false;
     };
-  }, [path, enabled, hydrate, flushPendingSave]);
+  }, [source.uri, enabled, hydrate, flushPendingSave]);
 
   // Flush the debounce window when the app is backgrounded or the window
   // closes — best-effort fire-through-socket, no keepalive equivalent needed.
@@ -852,13 +847,14 @@ export function useAnnotations({
       // pre-clear list locally. (Only when hydrated — a first hydrate still
       // in flight must survive, or saves would stay locked forever.)
       hydrateTokenRef.current += 1;
-      const clearPath = pathRef.current;
+      const clearSource = sourceRef.current;
+      const clearUri = clearSource.uri;
       generationRef.current += 1;
-      t.clearMarkdownAnnotations(clearPath, workspaceIdRef.current, generationRef.current)
+      t.clearMarkdownAnnotations(clearSource, generationRef.current)
         .then(({ generation: floor }) => {
           generationRef.current = Math.max(generationRef.current, floor);
         })
-        .catch((err: unknown) => schedulePersistRetry(clearPath, 'clear', err));
+        .catch((err: unknown) => schedulePersistRetry(clearUri, 'clear', err));
     }
   }, [getTransport, schedulePersistRetry]);
 
@@ -965,7 +961,8 @@ export function useAnnotations({
         return {
           available: true,
           mode: painterRef.current?.mode ?? 'none',
-          path: pathRef.current,
+          uri: sourceRef.current.uri,
+          path: sourceRef.current.kind === 'file' ? sourceRef.current.path : '',
           generation: generationRef.current,
           hydrated: hasHydratedRef.current,
           pendingSelection: pendingRef.current !== null,

@@ -2,17 +2,16 @@
 
 import { takeKeyedRequest, type PendingKeyedRequests } from './daemonPendingRequests';
 
-/** `<op>:<workspaceId>:<path>` — one in-flight request per document per op. */
-export function markdownAnnotationKey(op: string, workspaceId: string, path: string): string {
-  return `${op}:${workspaceId}:${path}`;
+/** `<op>:<uri>` — one in-flight request per document per operation. */
+export function markdownAnnotationKey(op: string, documentUri: string): string {
+  return `${op}:${documentUri}`;
 }
 
 /** The event shapes this module reads, loosely typed off the wire union. */
 type MarkdownAnnotationEvent = {
   event: string;
   request_id?: unknown;
-  workspace_id?: unknown;
-  path?: unknown;
+  document_uri?: unknown;
   success?: boolean;
   error?: string;
   stale?: unknown;
@@ -39,7 +38,7 @@ export function handleMarkdownAnnotationDaemonEvent(
           : event.event === 'markdown_annotations_save_result'
             ? 'save'
             : 'clear';
-      const key = markdownAnnotationKey(op, String(event.workspace_id ?? ''), String(event.path));
+      const key = markdownAnnotationKey(op, String(event.document_uri ?? ''));
       const waiter = takeKeyedRequest(pending, key, event.request_id);
       if (!waiter) {
         return true; // superseded or timed out — drop the late result
@@ -66,10 +65,7 @@ export function handleMarkdownAnnotationDaemonEvent(
     }
 
     case 'markdown_annotations_submit_result': {
-      // Submit routes by target session, not workspace; the send side keys its
-      // pending entry with workspaceId '' so mirror that here (the daemon echoes
-      // workspace_id '' or omits it).
-      const key = markdownAnnotationKey('submit', String(event.workspace_id ?? ''), String(event.path));
+      const key = markdownAnnotationKey('submit', String(event.document_uri ?? ''));
       const waiter = takeKeyedRequest(pending, key, event.request_id);
       if (!waiter) {
         return true; // superseded or timed out — drop the late result

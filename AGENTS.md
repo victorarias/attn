@@ -456,8 +456,10 @@ this is where daemon traffic lands:
   Grep a wire name (`fs_write_result`) to find the module that owns it. Adding a
   domain means a new module plus one line in that `default` chain.
 - Markdown annotations use `daemonPendingRequests.ts`'s keyed correlation with
-  `<op>:<workspaceId>:<path>` keys, last-writer-wins superseding, and
-  `request_id` checks. `daemonMarkdownAnnotationEvents.ts` only decodes results.
+  `<op>:<documentUri>` keys, last-writer-wins superseding, and `request_id`
+  checks. File and seed messages also carry typed source fields; the daemon
+  validates those fields and never parses authority from the URI.
+  `daemonMarkdownAnnotationEvents.ts` only decodes results.
 - `store/daemonSessions.ts`: Zustand store for session/PR state.
 - `pty/`: transport, attach planning, binary frame decode, runtime lifecycle.
 - Tests are topic-suffixed: `Source.concern.test.tsx`. Keep that — the suffix
