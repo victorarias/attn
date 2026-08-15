@@ -651,8 +651,13 @@ export class GhosttyTerminal {
     return line;
   }
 
-  /** Whether an active-area row soft-wraps into the next one. */
-  isRowWrapped(row: number): boolean {
+  /**
+   * Whether an active-area row soft-wraps into the row below it.
+   *
+   * This is ghostty's own direction, and the opposite of the question callers
+   * usually ask ("does this row continue the one above?") — hence the name.
+   */
+  rowWrapsIntoNext(row: number): boolean {
     if (!this.ref(POINT_TAG_ACTIVE, 0, row)) return false;
     if (this.e.ghostty_grid_ref_row(this.pRef, this.pScratch) !== GHOSTTY_SUCCESS) return false;
     return this.rowFlag(this.dv().getBigUint64(this.pScratch, true), ROW_RAW_DATA_WRAP);

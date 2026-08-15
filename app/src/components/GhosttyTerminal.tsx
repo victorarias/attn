@@ -1309,7 +1309,9 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             runs.push(run);
           }
         }
-        lines.push({ runs, wrapped: !scrollback && terminal.isRowWrapped(activeRow) });
+        // `wrapped` joins this line onto the previous one, so the flag that
+        // answers it belongs to the row above.
+        lines.push({ runs, wrapped: activeRow > 0 && terminal.rowWrapsIntoNext(activeRow - 1) });
       }
       return terminalStyledSelectionToMarkdown(lines);
     }, [resolvedTheme]);
@@ -2950,9 +2952,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, []);
 
     // Does this viewport row continue the line started on the row above it?
-    // Active-screen rows have an authoritative wrap flag; ghostty-web exposes
-    // no flag for scrollback rows, so a completely full previous row is
-    // treated as wrapping. False joins are filtered downstream: path
+    // The row above it carries an authoritative wrap flag while it is on the
+    // active screen; scrollback rows expose none, so a completely full
+    // previous row is treated as wrapping. False joins are filtered
+    // downstream: path
     // candidates must pass the existence check before anything links.
     const isContinuationRow = useCallback((viewportRow: number): boolean => {
       const terminal = terminalRef.current;
@@ -2960,7 +2963,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const history = terminal.getScrollbackLength();
       const bufferRow = bufferRowFromViewportRow(viewportRow, history, viewportOffsetRef.current);
       if (bufferRow <= 0) return false;
-      if (bufferRow >= history) return terminal.isRowWrapped(bufferRow - history);
+      if (bufferRow > history) return terminal.rowWrapsIntoNext(bufferRow - history - 1);
       return selectionLineAtBufferRow(bufferRow - 1, 0, terminal.cols).length === terminal.cols;
     }, [selectionLineAtBufferRow]);
 

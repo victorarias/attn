@@ -212,12 +212,15 @@ describe('GhosttyTerminal', () => {
     t.free();
   });
 
-  it('marks a soft-wrapped active row', () => {
+  // The flag marks the row the text wraps OUT of, not the one it continues
+  // into. Callers ask the opposite question, and reading it in the wrong
+  // direction silently drops a link that soft-wraps across rows.
+  it('marks the row a soft wrap starts on, not the one it continues onto', () => {
     const t = terminal(10, 5);
     t.write('0123456789abc');
     t.update();
-    expect(t.isRowWrapped(0)).toBe(true);
-    expect(t.isRowWrapped(1)).toBe(false);
+    expect(t.rowWrapsIntoNext(0)).toBe(true);
+    expect(t.rowWrapsIntoNext(1)).toBe(false);
     t.free();
   });
 
