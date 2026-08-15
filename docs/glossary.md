@@ -538,6 +538,13 @@ to be read, the freshest letter left for it inline, and how a day is closed.
 Skills retire into verbs and the verbs are taught, because an agent never told
 how to handoff cannot file one.
 
+A member is also an address: `attn agent msg <member> "…"` reaches its live
+day when it is awake. When it is asleep, the message wakes it within the same
+wake limit as every autonomous wake and becomes the new day's first attributed
+prompt after priming. The message is persisted before the day starts, so the
+wake-to-delivery gap cannot silently lose it; a refused wake delivers nothing
+and names the limit and its way out.
+
 A member's day ends with a **handoff**: `attn handoff -m "<letter>"`, the
 member's own letter to its successor. attn names the file and files it into the
 member's `handoffs/`; the line is **append-only**, so a name already taken is

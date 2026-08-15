@@ -265,6 +265,12 @@ func TestAgentMsgErrorMessageSeparatesTargetFromSender(t *testing.T) {
 	if !strings.Contains(sender, `"yyyy"`) || !strings.Contains(sender, "sender") {
 		t.Fatalf("sender error = %q", sender)
 	}
+	unknown := agentMsgErrorMessage(parsed, errors.New("daemon error: session_or_crew_member_not_found"))
+	for _, want := range []string{`"zzzz"`, "attn agent list", "attn crew list"} {
+		if !strings.Contains(unknown, want) {
+			t.Fatalf("unknown-address error %q does not name %q", unknown, want)
+		}
+	}
 }
 
 // A message far past the limit never reaches the daemon's refusal: the socket

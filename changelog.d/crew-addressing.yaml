@@ -1,0 +1,10 @@
+kind: added
+area: crew
+change: >
+  `attn agent msg <member> "text"` now addresses a crew member whether it is
+  awake or asleep. An awake member receives the same attributed message as a
+  session target; a sleeping member wakes on its pinned model and receives the
+  message as the new day's first prompt after its charter and predecessor's
+  letter. Message-triggered wakes use the autonomous wake limit, whose refusal
+  names the configured limit, the attempted member, that nothing was delivered,
+  and how to proceed.

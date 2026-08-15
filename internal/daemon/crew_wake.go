@@ -6,12 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	agentdriver "github.com/victorarias/attn/internal/agent"
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Wake: a member's day starts at launch. The daemon claims the binding, then
@@ -59,6 +61,15 @@ const crewWakePrompt = "You have been woken for today. Orient from your charter 
 // every day. A workspace per wake would litter the sidebar with a new group
 // each morning.
 func crewWorkspaceID(memberID string) string { return "workspace-crew-" + memberID }
+
+// crewWakeDelivery is the message that caused an autonomous wake. Its
+// attributed prompt replaces the ordinary greeting as the first ask of the new
+// day, and its row is persisted before the process starts so the gap between
+// wake and delivery cannot lose it.
+type crewWakeDelivery struct {
+	Record *store.AgentMessage
+	Prompt string
+}
 
 // crewMember reads one member by id, behind the fence.
 func (d *Daemon) crewMember(name string) (crew.Member, docstore.Document, error) {
@@ -177,6 +188,16 @@ func (d *Daemon) handleCrewWakeWS(client *wsClient, msg *protocol.CrewWakeMessag
 }
 
 func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) {
+	return d.crewWakeWithDelivery(name, agent, false, nil)
+}
+
+func (d *Daemon) crewWakeWithDelivery(name, agent string, autonomous bool, delivery *crewWakeDelivery) (*protocol.CrewWakeResult, error) {
+	if d.crewWakeStartHook != nil {
+		d.crewWakeStartHook(strings.TrimSpace(strings.ToLower(name)))
+	}
+	d.crewWakeMu.Lock()
+	defer d.crewWakeMu.Unlock()
+
 	member, _, err := d.crewMember(name)
 	if err != nil {
 		return nil, err
@@ -204,6 +225,11 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 	if err != nil {
 		return nil, err
 	}
+	if autonomous {
+		if err := d.chargeAutonomousWake(member.ID, time.Now()); err != nil {
+			return nil, fmt.Errorf("%w; nothing was delivered", err)
+		}
+	}
 
 	sessionID := uuid.NewString()
 	// Claimed before the spawn, because the launch reads it: the wrapper asks
@@ -211,6 +237,9 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 	// whose day is claimed by a launch that then fails is released below.
 	if _, err := d.claimCrewBinding(member.ID, sessionID); err != nil {
 		return nil, err
+	}
+	if d.crewWakeAfterClaimHook != nil {
+		d.crewWakeAfterClaimHook(member.ID, sessionID)
 	}
 
 	workspaceID := crewWorkspaceID(member.ID)
@@ -239,6 +268,19 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		return nil, fmt.Errorf("create %s's pane: %w", crew.DisplayName(member.ID), err)
 	}
 
+	initialPrompt := crewWakePrompt
+	if delivery != nil {
+		delivery.Record.TargetSessionID = sessionID
+		if err := d.store.EnqueueAgentMessage(*delivery.Record); err != nil {
+			d.removeWorkspaceLayoutPaneForSession(sessionID)
+			d.releaseCrewBindingIfSession(sessionID)
+			return nil, err
+		}
+		d.noteQueuedAgentMessage(sessionID)
+		d.noteInitialAgentMessage(sessionID, delivery.Record.ID)
+		initialPrompt = delivery.Prompt
+	}
+
 	spawnClient := newInternalWSClient()
 	d.handleSpawnSession(spawnClient, &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
@@ -250,9 +292,12 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		Cols:          80,
 		Rows:          24,
 		Label:         protocol.Ptr(crew.DisplayName(member.ID)),
-		InitialPrompt: protocol.Ptr(crewWakePrompt),
+		InitialPrompt: protocol.Ptr(initialPrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
+		if delivery != nil {
+			d.rollbackInitialAgentMessage(sessionID, delivery.Record.ID)
+		}
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)
 		return nil, fmt.Errorf("wake %s: %w", crew.DisplayName(member.ID), err)

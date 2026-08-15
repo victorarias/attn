@@ -298,7 +298,7 @@ type agentMsgArgs struct {
 }
 
 func parseAgentMsgArgs(args []string, envSessionID string) (agentMsgArgs, error) {
-	const usage = "usage: attn agent msg <id> \"text\" [--source-session <id>]"
+	const usage = "usage: attn agent msg <session-or-member> \"text\" [--source-session <id>]"
 	literal := len(args) > 0 && args[0] == "--"
 	if literal {
 		args = args[1:]
@@ -382,7 +382,13 @@ func agentMsgOutcomeLine(result *protocol.AgentMsgResult) string {
 // mistyped one knows which.
 func agentMsgErrorMessage(parsed agentMsgArgs, err error) string {
 	message := strings.TrimSpace(err.Error())
-	switch strings.TrimSpace(strings.TrimPrefix(message, "daemon error: ")) {
+	code := client.ErrorCode(err)
+	if code == "" {
+		code = strings.TrimSpace(strings.TrimPrefix(message, "daemon error: "))
+	}
+	switch code {
+	case "session_or_crew_member_not_found":
+		return fmt.Sprintf("no session or crew member matches %q; `attn agent list` names sessions and `attn crew list` names members", parsed.target)
 	case "session_not_found":
 		return fmt.Sprintf("no session matches %q; `attn agent list` names the sessions on this daemon", parsed.target)
 	case "ambiguous_session":
@@ -406,12 +412,13 @@ commands:
         observe a session without interrupting it: state, todos, last
         assistant message, and the rendered screen. Passive — the observed
         agent never notices. <id> is a full session id or a unique prefix.
-  msg <id> "text" [--source-session <id>] [--json]
-        send a session a message. It lands in that session's conversation,
-        attributed to you, carrying the command to reply with. A target that
+  msg <session-or-member> "text" [--source-session <id>] [--json]
+        send a session or crew member a message. It lands in the live session,
+        or wakes a sleeping member and becomes its first prompt after priming.
+        It is attributed to you and carries the command to reply with. A target that
         cannot take input right now has it queued and delivered when it can;
         the result always says which. The sender defaults to this session
         (ATTN_SESSION_ID); pass --source-session when running outside one.
-        A message that starts with - goes after --, as: agent msg -- <id> "-text"
+        A message that starts with - goes after --, as: agent msg -- <session-or-member> "-text"
 `)
 }

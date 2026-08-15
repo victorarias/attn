@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/victorarias/attn/internal/crew"
@@ -180,6 +181,65 @@ func TestCrewWake_AnAwakeMemberIsNotWokenTwice(t *testing.T) {
 	backend.mu.Unlock()
 	if spawned != 1 {
 		t.Fatalf("%d sessions were spawned for one member, want 1", spawned)
+	}
+}
+
+// The binding alone is not a liveness fence: the claimed session becomes
+// visible only later in the spawn pipeline. A second wake that enters during
+// that gap must wait, then resolve to the first day instead of stealing the
+// member and launching a second identity.
+func TestCrewWake_ConcurrentWakesShareTheFirstDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	started := make(chan string, 2)
+	firstClaimed := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var claims atomic.Int32
+	d.crewWakeStartHook = func(memberID string) { started <- memberID }
+	d.crewWakeAfterClaimHook = func(_, _ string) {
+		if claims.Add(1) == 1 {
+			close(firstClaimed)
+			<-releaseFirst
+		}
+	}
+
+	type outcome struct {
+		result *protocol.CrewWakeResult
+		err    error
+	}
+	results := make(chan outcome, 2)
+	wake := func() {
+		result, err := d.crewWake("keel", "")
+		results <- outcome{result: result, err: err}
+	}
+	go wake()
+	if member := <-started; member != "keel" {
+		t.Fatalf("first wake started for %q", member)
+	}
+	<-firstClaimed
+	go wake()
+	if member := <-started; member != "keel" {
+		t.Fatalf("second wake started for %q", member)
+	}
+	close(releaseFirst)
+
+	first, second := <-results, <-results
+	if first.err != nil || second.err != nil {
+		t.Fatalf("wake errors = %v, %v", first.err, second.err)
+	}
+	if first.result.SessionID != second.result.SessionID {
+		t.Fatalf("concurrent wakes launched sessions %q and %q", first.result.SessionID, second.result.SessionID)
+	}
+	if first.result.AlreadyAwake == second.result.AlreadyAwake {
+		t.Fatalf("results = %+v and %+v, want one launch and one live-day resolution", first.result, second.result)
+	}
+	if got := claims.Load(); got != 1 {
+		t.Fatalf("the member was claimed %d times, want one", got)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 1 {
+		t.Fatalf("concurrent wakes spawned %d sessions, want one", spawned)
 	}
 }
 
