@@ -61,6 +61,7 @@ import { createPtyTransportState } from '../pty/transportState';
 import { enqueuePerKey } from '../pty/attachQueue';
 import { parseLayoutJSON, tileContentKey, tileIdsFromLayoutJSON, type TerminalDockEdge, type TileContentState } from '../types/workspace';
 import { isSuspiciousTerminalSize } from '../utils/terminalDebug';
+import { crewDisplayName } from '../utils/crewName';
 import { collectWorkspaceLayoutDiagnostics } from '../utils/workspaceDiagnostics';
 import { recordDiag, recordLayout } from '../utils/terminalDiagnosticsLog';
 import { recordPtyCommand, recordWsBinaryPtyOutput, recordWsJsonParse } from '../utils/ptyPerf';
@@ -4774,7 +4775,7 @@ export function useDaemonSocket({
         setTimeout(() => {
           if (pendingActionsRef.current.has(key)) {
             pendingActionsRef.current.delete(key);
-            reject(new Error(`Waking ${member} timed out`));
+            reject(new Error(`Waking ${crewDisplayName(member)} timed out`));
           }
         }, 10000);
       });

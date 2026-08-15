@@ -87,10 +87,10 @@ func crewLaunchDir(member crew.Member) (string, error) {
 	}
 	info, err := os.Stat(dir)
 	if err != nil {
-		return "", fmt.Errorf("%s launches in %s, which is not there (%v); `attn crew set %[1]s --cwd <dir>` moves it", member.ID, dir, err)
+		return "", fmt.Errorf("%s launches in %s, which is not there (%v); `attn crew set %s --cwd <dir>` moves it", crew.DisplayName(member.ID), dir, err, member.ID)
 	}
 	if !info.IsDir() {
-		return "", fmt.Errorf("%s launches in %s, which is not a directory; `attn crew set %[1]s --cwd <dir>` moves it", member.ID, dir)
+		return "", fmt.Errorf("%s launches in %s, which is not a directory; `attn crew set %s --cwd <dir>` moves it", crew.DisplayName(member.ID), dir, member.ID)
 	}
 	return dir, nil
 }
@@ -109,14 +109,14 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 	if charter, err := os.ReadFile(member.CharterPath); err == nil {
 		priming.Charter = string(charter)
 	} else if !os.IsNotExist(err) {
-		d.logf("crew: reading %s's charter at %s: %v", member.ID, member.CharterPath, err)
+		d.logf("crew: reading %s's charter at %s: %v", crew.DisplayName(member.ID), member.CharterPath, err)
 	}
 
 	handoffsDir := filepath.Join(member.HomeDir, crew.HandoffsDirName)
 	entries, err := os.ReadDir(handoffsDir)
 	if err != nil {
 		if !os.IsNotExist(err) {
-			d.logf("crew: reading %s's handoffs at %s: %v", member.ID, handoffsDir, err)
+			d.logf("crew: reading %s's handoffs at %s: %v", crew.DisplayName(member.ID), handoffsDir, err)
 		}
 		return priming
 	}
@@ -136,7 +136,7 @@ func (d *Daemon) crewPriming(member crew.Member) crew.Priming {
 	if letter, err := os.ReadFile(filepath.Join(handoffsDir, names[0])); err == nil {
 		priming.Handoff = string(letter)
 	} else {
-		d.logf("crew: reading %s's freshest handoff %s: %v", member.ID, names[0], err)
+		d.logf("crew: reading %s's freshest handoff %s: %v", crew.DisplayName(member.ID), names[0], err)
 	}
 	return priming
 }
@@ -218,12 +218,12 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		d.handleRegisterWorkspace(nil, &protocol.RegisterWorkspaceMessage{
 			Cmd:       protocol.CmdRegisterWorkspace,
 			ID:        workspaceID,
-			Title:     member.ID,
+			Title:     crew.DisplayName(member.ID),
 			Directory: directory,
 		})
 		if d.store.GetWorkspace(workspaceID) == nil {
 			d.releaseCrewBindingIfSession(sessionID)
-			return nil, fmt.Errorf("create %s's workspace", member.ID)
+			return nil, fmt.Errorf("create %s's workspace", crew.DisplayName(member.ID))
 		}
 	}
 	paneClient := newInternalWSClient()
@@ -232,11 +232,11 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		WorkspaceID: workspaceID,
 		PaneID:      protocol.Ptr("pane-" + sessionID),
 		SessionID:   sessionID,
-		Title:       protocol.Ptr(member.ID),
+		Title:       protocol.Ptr(crew.DisplayName(member.ID)),
 	})
 	if _, err := readInternalActionResult(paneClient); err != nil {
 		d.releaseCrewBindingIfSession(sessionID)
-		return nil, fmt.Errorf("create %s's pane: %w", member.ID, err)
+		return nil, fmt.Errorf("create %s's pane: %w", crew.DisplayName(member.ID), err)
 	}
 
 	spawnClient := newInternalWSClient()
@@ -249,15 +249,15 @@ func (d *Daemon) crewWake(name, agent string) (*protocol.CrewWakeResult, error) 
 		Model:         crewWakeModelPin(agent),
 		Cols:          80,
 		Rows:          24,
-		Label:         protocol.Ptr(member.ID),
+		Label:         protocol.Ptr(crew.DisplayName(member.ID)),
 		InitialPrompt: protocol.Ptr(crewWakePrompt),
 	})
 	if _, err := readInternalActionResult(spawnClient); err != nil {
 		d.removeWorkspaceLayoutPaneForSession(sessionID)
 		d.releaseCrewBindingIfSession(sessionID)
-		return nil, fmt.Errorf("wake %s: %w", member.ID, err)
+		return nil, fmt.Errorf("wake %s: %w", crew.DisplayName(member.ID), err)
 	}
-	d.logf("crew: woke %s in session %s at %s", member.ID, sessionID, directory)
+	d.logf("crew: woke %s in session %s at %s", crew.DisplayName(member.ID), sessionID, directory)
 	return &protocol.CrewWakeResult{
 		Member:      member.ID,
 		SessionID:   sessionID,
@@ -311,7 +311,7 @@ func (d *Daemon) crewPrimeForSession(sessionID string) (crew.Member, string, boo
 			handoff = "(none)"
 		}
 		d.logf("crew: priming %s for session %s: %d bytes (charter %d, handoff %s %d, older %d)",
-			member.ID, sessionID, len(block), len(priming.Charter),
+			crew.DisplayName(member.ID), sessionID, len(block), len(priming.Charter),
 			handoff, len(priming.Handoff), len(priming.OlderHandoffs))
 		return member, block, true
 	}

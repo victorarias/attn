@@ -120,9 +120,10 @@ func (d *Daemon) maybeGenerateSessionTitle(sessionID, transcriptPath string) {
 // sessionMayBeAutoTitled reports whether nobody has named this session yet.
 // Two ways a session is already named: a crew member is bound to it — the
 // member's name IS its identity — or its label was moved off the cwd basename
-// the launch gave it. The member check cannot be folded into the label one: a
-// member launches in its own home, so its name and its default label are the
-// same string.
+// the launch gave it. A woken member is caught by the label check on its own
+// (its label is the name, `Trellis`, and its home's basename is the id,
+// `trellis`); the member check stays as the backstop for a member session whose
+// label was renamed back to that basename.
 func (d *Daemon) sessionMayBeAutoTitled(session *protocol.Session) bool {
 	if session.Label != defaultSessionLabel(session.Directory, session.ID) {
 		return false

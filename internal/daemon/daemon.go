@@ -25,6 +25,7 @@ import (
 	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/classifier"
 	"github.com/victorarias/attn/internal/config"
+	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/diag"
 	"github.com/victorarias/attn/internal/enrollment"
 	"github.com/victorarias/attn/internal/fsdoc"
@@ -2929,7 +2930,7 @@ func (d *Daemon) handleRegister(conn net.Conn, msg *protocol.RegisterMessage) {
 			d.sendError(conn, fmt.Sprintf("crew bind %q: %v", member, err))
 			return
 		}
-		d.logf("session %s registering as crew member %s", msg.ID, memberID)
+		d.logf("session %s registering as crew member %s", msg.ID, crew.DisplayName(memberID))
 	} else {
 		d.releaseCrewBindingIfSession(msg.ID)
 	}

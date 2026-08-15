@@ -39,7 +39,7 @@ describe('GardenPanel lifecycle', () => {
     render(<GardenPanel isOpen onClose={vi.fn()} seedsTotal={1} seeds={[growing]} />);
 
     expect(screen.getByText('growing')).toBeInTheDocument();
-    expect(screen.getByText('tended by trellis')).toBeInTheDocument();
+    expect(screen.getByText('tended by Trellis')).toBeInTheDocument();
   });
 
   // A session id is not a pretty name, but "somebody holds this" is the fact the
@@ -87,7 +87,7 @@ describe('GardenPanel lifecycle', () => {
       />,
     );
     expect(screen.getByText('growing')).toBeInTheDocument();
-    expect(screen.getByText('tended by trellis')).toBeInTheDocument();
+    expect(screen.getByText('tended by Trellis')).toBeInTheDocument();
 
     rerender(
       <GardenPanel

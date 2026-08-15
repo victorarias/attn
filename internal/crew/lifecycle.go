@@ -158,12 +158,13 @@ func (l WakeLedger) Within(now time.Time) []time.Time {
 // they must see: the caller prints this, it is never a silent no-op.
 func (l WakeLedger) Allows(memberID string, now time.Time) ([]time.Time, error) {
 	kept := l.Within(now)
+	name := DisplayName(memberID)
 	if l.Limit <= 0 {
-		return kept, fmt.Errorf("autonomous wakes are turned off (crew.wake_limit=%d), so %s was not woken; wake it yourself from the sidebar, or raise the limit", l.Limit, memberID)
+		return kept, fmt.Errorf("autonomous wakes are turned off (crew.wake_limit=%d), so %s was not woken; wake it yourself from the sidebar, or raise the limit", l.Limit, name)
 	}
 	if len(kept) >= l.Limit {
 		return kept, fmt.Errorf("%s has been woken %d times without the user in the last %s, and the limit is %d (crew.wake_limit=%d, crew.wake_limit_window_seconds=%d); nothing was woken. Wake it yourself from the sidebar, or raise the limit",
-			memberID, len(kept), l.Window, l.Limit, l.Limit, int(l.Window/time.Second))
+			name, len(kept), l.Window, l.Limit, l.Limit, int(l.Window/time.Second))
 	}
 	return append(kept, now), nil
 }

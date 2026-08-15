@@ -1,0 +1,9 @@
+kind: changed
+area: crew
+change: >
+  A crew member is written as a name wherever you read one — Trellis in the
+  sidebar, in `attn crew list`, on the session it wakes into, in the daemon
+  log, and in the sentences that refuse or report a wake. The id itself is
+  untouched: `attn crew wake trellis` is still what you type, and the home
+  path, the workspace it belongs to, and every field on the wire stay
+  lowercase.

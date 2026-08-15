@@ -200,7 +200,7 @@ func TestGarden_ASecondSessionCannotTakeALiveClaim(t *testing.T) {
 		t.Fatal("a second session took a claim that was already held")
 	}
 	message := protocol.Deref(refused.Error)
-	for _, want := range []string{seed.ID, "trellis", "attn seed note"} {
+	for _, want := range []string{seed.ID, "Trellis", "attn seed note"} {
 		if !strings.Contains(message, want) {
 			t.Fatalf("the refusal does not name %q:\n%s", want, message)
 		}
@@ -239,7 +239,7 @@ func TestGarden_ConcurrentClaimsProduceOneTender(t *testing.T) {
 	for _, session := range []string{"sess-a", "sess-b"} {
 		go func() {
 			start.Wait()
-			results <- outcome{transition(t, d, session, seed.ID, garden.VerbTend, "", session), session}
+			results <- outcome{transition(t, d, session, seed.ID, garden.VerbTend, "", ""), session}
 		}()
 	}
 	start.Done()

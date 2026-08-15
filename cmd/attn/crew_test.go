@@ -31,7 +31,7 @@ func TestPrintCrewList_ShowsSleepingAndAwakeMembers(t *testing.T) {
 		{ID: "trellis", HomeDir: "/home/.attn/crew/trellis", BindingSession: protocol.Ptr("sess-abcdef123456")},
 	})
 	text := out.String()
-	for _, want := range []string{"keel", "asleep", "trellis", "awake", "sess-abc", "/home/.attn/crew/keel"} {
+	for _, want := range []string{"Keel", "asleep", "Trellis", "awake", "sess-abc", "/home/.attn/crew/keel"} {
 		if !strings.Contains(text, want) {
 			t.Errorf("crew list output is missing %q:\n%s", want, text)
 		}
@@ -39,6 +39,20 @@ func TestPrintCrewList_ShowsSleepingAndAwakeMembers(t *testing.T) {
 	// The session column is the short id `attn agent peek` takes, not the full one.
 	if strings.Contains(text, "sess-abcdef123456") {
 		t.Errorf("crew list printed a full session id:\n%s", text)
+	}
+}
+
+// The MEMBER column is a name, and the home beside it is the lowercase path the
+// id owns — the two never drift into one another.
+func TestPrintCrewList_WritesTheMemberAsAName(t *testing.T) {
+	var out bytes.Buffer
+	printCrewList(&out, []protocol.CrewMember{{ID: "trellis", HomeDir: "/home/.attn/crew/trellis"}})
+	text := out.String()
+	if !strings.Contains(text, "Trellis") {
+		t.Errorf("the MEMBER column is not written as a name:\n%s", text)
+	}
+	if !strings.Contains(text, "/home/.attn/crew/trellis") {
+		t.Errorf("the home path was rewritten:\n%s", text)
 	}
 }
 
@@ -81,7 +95,7 @@ func TestAgentListRows_CarryTheCrewMember(t *testing.T) {
 	var out bytes.Buffer
 	printAgentList(&out, rows)
 	text := out.String()
-	if !strings.Contains(text, "MEMBER") || !strings.Contains(text, "trellis") {
+	if !strings.Contains(text, "MEMBER") || !strings.Contains(text, "Trellis") {
 		t.Errorf("agent list does not show the member column:\n%s", text)
 	}
 	// An unbound session's cell is the same placeholder every empty cell uses,

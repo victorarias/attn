@@ -354,21 +354,21 @@ func (d *Daemon) actOnCrewMember(member crew.Member, sessionID string, action cr
 			return
 		}
 		if err := d.typeDoorbell(sessionID, crewHeartbeatPrompt); err != nil {
-			d.logf("crew: %s's heartbeat did not reach session %s: %v", member.ID, sessionID, err)
+			d.logf("crew: %s's heartbeat did not reach session %s: %v", crew.DisplayName(member.ID), sessionID, err)
 			return
 		}
 		d.logf("crew: warmed %s's context in session %s (cache estimated %s old against a %s assumption)",
-			member.ID, sessionID, cache.Age.Round(time.Second), cache.TTL)
+			crew.DisplayName(member.ID), sessionID, cache.Age.Round(time.Second), cache.TTL)
 	case crew.ActionSleep:
 		if !d.crewMemo().mayAsk(sessionID, now, crewSleepPromptGrace) {
 			return
 		}
 		if err := d.typeDoorbell(sessionID, crewSleepPrompt); err != nil {
-			d.logf("crew: %s was not asked to close its day: %v", member.ID, err)
+			d.logf("crew: %s was not asked to close its day: %v", crew.DisplayName(member.ID), err)
 			return
 		}
 		d.logf("crew: asked %s to close its day — the user has been away and the cache is %s from lapsing",
-			member.ID, cache.Remaining().Round(time.Second))
+			crew.DisplayName(member.ID), cache.Remaining().Round(time.Second))
 	}
 }
 

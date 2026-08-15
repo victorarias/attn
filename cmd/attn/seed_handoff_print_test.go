@@ -29,7 +29,7 @@ func TestFprintSeedShowPutsTheHandoffFirst(t *testing.T) {
 	})
 	out := buf.String()
 
-	if !strings.HasPrefix(out, "handoff — keel,") {
+	if !strings.HasPrefix(out, "handoff — Keel,") {
 		t.Fatalf("the handoff is not the first thing on the screen:\n%s", out)
 	}
 	if strings.Index(out, "the join test is the gate") > strings.Index(out, "s-7k3f9m") {
@@ -124,7 +124,7 @@ func TestFprintTransitionPrimesOnTend(t *testing.T) {
 	})
 	out := buf.String()
 
-	if !strings.HasPrefix(out, "s-7k3f9m is growing, tended by alder\n") {
+	if !strings.HasPrefix(out, "s-7k3f9m is growing, tended by Alder\n") {
 		t.Fatalf("the claim is not confirmed first:\n%s", out)
 	}
 	if !strings.Contains(out, "start at the docstore compiler") {

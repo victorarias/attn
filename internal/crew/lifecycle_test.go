@@ -179,7 +179,7 @@ func TestWakeLedger_RefusalNamesTheLimitAndTheAsk(t *testing.T) {
 	if err == nil {
 		t.Fatal("Allows() let a third wake through a limit of 2")
 	}
-	for _, want := range []string{"trellis", "crew.wake_limit=2", "crew.wake_limit_window_seconds=43200", "nothing was woken"} {
+	for _, want := range []string{"Trellis", "crew.wake_limit=2", "crew.wake_limit_window_seconds=43200", "nothing was woken"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("the refusal %q does not name %q", err, want)
 		}

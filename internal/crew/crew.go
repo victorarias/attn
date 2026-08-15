@@ -21,6 +21,8 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"github.com/victorarias/attn/internal/docstore"
 )
@@ -148,6 +150,34 @@ func ValidateID(id string) error {
 		return fmt.Errorf("%q is not a member id: lowercase letters, digits and - only, starting with a letter, like `trellis`", id)
 	}
 	return docstore.ValidateDocumentID(id)
+}
+
+// DisplayName is how a member's id is written wherever a person reads it:
+// Trellis, Keel, Alder. Display capitalizes, identity does not — the id stays
+// lowercase in paths, CLI arguments, JSON fields and the store, and this is the
+// one place the two part ways. The frontend keeps its own copy of the same rule
+// in `app/src/utils/crewName.ts`.
+//
+// The first rune only. Ids may carry `-`, but no real member is two words, and
+// title-casing one would invent a name nobody chose.
+func DisplayName(id string) string {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return ""
+	}
+	first, size := utf8.DecodeRuneInString(id)
+	return string(unicode.ToUpper(first)) + id[size:]
+}
+
+// HolderName is how something's holder is written for a reader when it can be
+// either a member or a bare session: the member reads as the name it is, and a
+// session id is left exactly as it is rather than dressed up as one. The
+// garden's tenders, planters and note authors are all this shape.
+func HolderName(member, session string) string {
+	if strings.TrimSpace(member) != "" {
+		return DisplayName(member)
+	}
+	return strings.TrimSpace(session)
 }
 
 // Resolve finds the registered member a free-string name addresses, folding

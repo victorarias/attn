@@ -50,7 +50,7 @@ func FileHandoff(homeDir, member, note string, at time.Time) (string, error) {
 	}
 	dir := filepath.Join(homeDir, HandoffsDirName)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", fmt.Errorf("making %s's handoffs directory at %s: %w", member, dir, err)
+		return "", fmt.Errorf("making %s's handoffs directory at %s: %w", DisplayName(member), dir, err)
 	}
 	path := filepath.Join(dir, HandoffFileName(member, at))
 	// O_EXCL is the enforcement, not a check before one: two letters racing for
@@ -61,11 +61,11 @@ func FileHandoff(homeDir, member, note string, at time.Time) (string, error) {
 		if os.IsExist(err) {
 			return "", fmt.Errorf("%w: %s — a filed letter is never overwritten, so file the correction as its own letter a minute from now", ErrHandoffExists, path)
 		}
-		return "", fmt.Errorf("filing %s's letter at %s: %w", member, path, err)
+		return "", fmt.Errorf("filing %s's letter at %s: %w", DisplayName(member), path, err)
 	}
 	defer file.Close()
 	if _, err := file.WriteString(ensureTrailingNewline(note)); err != nil {
-		return "", fmt.Errorf("writing %s's letter at %s: %w", member, path, err)
+		return "", fmt.Errorf("writing %s's letter at %s: %w", DisplayName(member), path, err)
 	}
 	return path, nil
 }
