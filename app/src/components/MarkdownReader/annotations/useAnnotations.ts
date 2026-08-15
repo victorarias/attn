@@ -147,6 +147,8 @@ export function useAnnotations({
   // Written by the hydrate effect (not render) so its CLEANUP still sees the
   // previous document and can flush that document's pending save.
   const sourceRef = useRef(source);
+  const incomingSourceRef = useRef(source);
+  incomingSourceRef.current = source;
   const generationRef = useRef(0);
   const hasHydratedRef = useRef(false);
   const hydrateTokenRef = useRef(0);
@@ -489,7 +491,9 @@ export function useAnnotations({
     if (!enabled) {
       return;
     }
-    sourceRef.current = source;
+    // Cleanup for the previous URI runs before this callback, so keep its
+    // typed source intact until the pending save has flushed.
+    sourceRef.current = incomingSourceRef.current;
     generationRef.current = 0;
     annotationsRef.current = [];
     orphansRef.current = new Map();

@@ -3,10 +3,9 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Seed } from '../types/generated';
 import {
   SeedDocumentView,
-  currentSeedArtifacts,
   type SeedDocument,
-  type SeedDocumentNote,
 } from './SeedDocumentView';
+import { currentSeedArtifacts, type SeedDocumentNote } from './seedArtifacts';
 
 function seed(overrides: Partial<Seed> = {}): Seed {
   return {

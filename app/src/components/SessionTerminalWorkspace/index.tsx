@@ -226,13 +226,16 @@ interface SessionTerminalWorkspaceProps {
   onRequestTileContent?: (workspaceId: string, tileId: string) => void;
 }
 
+const EMPTY_SEED_TARGET_SESSIONS: WorkspaceTileSessionOption[] = [];
+const EMPTY_GARDEN_SEEDS: Seed[] = [];
+
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
   function SessionTerminalWorkspace({
     workspaceId,
     workspaceDirectory,
     workspaceSessions = [],
-    seedTargetSessions = [],
-    gardenSeeds = [],
+    seedTargetSessions = EMPTY_SEED_TARGET_SESSIONS,
+    gardenSeeds = EMPTY_GARDEN_SEEDS,
     ticketActions,
     conversationAgents,
     annotationApi,
@@ -1185,11 +1188,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onUpdateTile,
       tileLeafById,
       tileSessionOptions,
+      seedTargetSessions,
+      gardenSeeds,
       tileBodyRefFor,
       tileContents,
       allowLocalTileTargets,
       onRequestTileContent,
       workspaceId,
+      workspaceDirectory,
       renamePane,
       fontSize,
       isActiveSession,
