@@ -46,6 +46,12 @@ static GhosttyResult ghosttyvt_set_kitty_limit(GhosttyTerminal t, uint64_t v) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &v);
 }
 
+// Scrollback is a construction-time concern for us but a post-construction
+// option upstream, so it is set immediately after ghostty_terminal_new.
+static GhosttyResult ghosttyvt_set_max_scrollback(GhosttyTerminal t, uint64_t v) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &v);
+}
+
 static GhosttyColorRgb ghosttyvt_rgb(uint32_t value) {
 	GhosttyColorRgb color = {
 		.r = (uint8_t)(value >> 16),
@@ -132,28 +138,33 @@ static int ghosttyvt_active_screen(GhosttyTerminal t) {
 	return (int)s;
 }
 
+// Modes are read through the terminal's data query: `mode` goes in, `value`
+// comes back. False on a failed read is the safe answer everywhere it is used
+// below, so the failure is folded into the helper.
+static bool ghosttyvt_mode(GhosttyTerminal t, GhosttyMode mode) {
+	GhosttyTerminalModeConfig cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.mode = mode;
+	if (ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_MODE, &cfg) != GHOSTTY_SUCCESS) return false;
+	return cfg.value;
+}
+
 static bool ghosttyvt_cursor_visible(GhosttyTerminal t) {
-	bool visible = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_CURSOR_VISIBLE, &visible) != GHOSTTY_SUCCESS) return false;
-	return visible;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_CURSOR_VISIBLE);
 }
 
 // DEC wraparound (mode 7, DECAWM). False on a failed read is the safe answer:
 // the caller then resizes plainly instead of toggling a mode it could not read,
 // so a failure can never leave wraparound enabled behind the program's back.
 static bool ghosttyvt_wraparound(GhosttyTerminal t) {
-	bool enabled = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_WRAPAROUND, &enabled) != GHOSTTY_SUCCESS) return false;
-	return enabled;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_WRAPAROUND);
 }
 
 // Left/right margin mode (DECLRMM, DEC private mode 69). False on a failed read
 // leaves the caller trusting its own scroll measurement, which is what a
 // terminal without margins earns anyway.
 static bool ghosttyvt_left_right_margin_mode(GhosttyTerminal t) {
-	bool enabled = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN, &enabled) != GHOSTTY_SUCCESS) return false;
-	return enabled;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN);
 }
 
 static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
@@ -283,13 +294,12 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 		cellH: defaultCellHeightPx,
 		sink:  &respSink{},
 	}
-	copts := C.GhosttyTerminalOptions{
-		cols:           C.uint16_t(cols),
-		rows:           C.uint16_t(rows),
-		max_scrollback: C.size_t(maxSB),
-	}
-	if rc := C.ghostty_terminal_new(nil, &t.term, copts); rc != C.GHOSTTY_SUCCESS {
+	if rc := C.ghostty_terminal_new(nil, &t.term, C.uint16_t(cols), C.uint16_t(rows)); rc != C.GHOSTTY_SUCCESS {
 		return nil, fmt.Errorf("ghosttyvt: terminal_new failed: rc=%d", int(rc))
+	}
+	if rc := C.ghosttyvt_set_max_scrollback(t.term, C.uint64_t(maxSB)); rc != C.GHOSTTY_SUCCESS {
+		C.ghostty_terminal_free(t.term)
+		return nil, fmt.Errorf("ghosttyvt: set max scrollback failed: rc=%d", int(rc))
 	}
 	// Written even when zero: zero overrides the library's 10MB default.
 	if rc := C.ghosttyvt_set_kitty_limit(t.term, C.uint64_t(opts.KittyImageStorageLimit)); rc != C.GHOSTTY_SUCCESS {

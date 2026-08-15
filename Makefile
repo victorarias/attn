@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt publish-ghostty-vt-wasm install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -99,6 +99,13 @@ $(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libg
 publish-native-vt:
 	./scripts/publish-libghostty-vt.sh
 
+# Mirror ghostty-org's prebuilt browser ghostty-vt.wasm for the pinned commit
+# onto our own keyed release. Upstream's rolling "tip" is rebuilt on every
+# commit, so the pin must BE that tip when this runs. Commit the regenerated
+# ghostty-vt-wasm.lock.
+publish-ghostty-vt-wasm:
+	./scripts/publish-ghostty-vt-wasm.sh
+
 build: $(NATIVE_VT_DEP)
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
 
@@ -139,7 +146,7 @@ $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
 verify-ghostty-vt-wasm:
-	bash ./app/scripts/ghostty-vt-wasm-lock.sh verify
+	bash ./app/scripts/ensure-ghostty-vt-wasm.sh
 
 test: $(NATIVE_VT_DEP) test-hooks test-scripts verify-ghostty-vt-wasm
 	./scripts/test-go.sh

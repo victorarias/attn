@@ -30,7 +30,9 @@
 // (resizeGhosttyWithoutReflow vs. plain resizeLocal); both reach the same
 // wasm-level infinite loop.
 //
-// Loads the wasm exactly like app/src/utils/ghosttyHyperlinks.test.ts. Since
+// Drives the wasm exports directly rather than through the app's binding: the
+// worker loads plain .mjs with no TypeScript transform, and the three calls the
+// repro needs (new/write/resize) are the raw C API anyway. Since
 // the hang is a synchronous, wasm-level infinite loop, it cannot be detected
 // from the same thread it runs on (the event loop never gets control back).
 // This script runs the repro in a worker_thread so the parent can apply a
@@ -46,7 +48,6 @@ import { fileURLToPath } from 'node:url';
 
 const APP_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WASM_PATH = `${APP_ROOT}/vendor/ghostty-vt/ghostty-vt.wasm`;
-const GHOSTTY_WEB_ENTRY = `file://${APP_ROOT}/node_modules/ghostty-web/dist/ghostty-web.js`;
 
 // The exact minimized payload (truncated OSC 8, box drawing, overflowing
 // 'w' run). Do not "clean up" the malformed-looking OSC 8 fragments -- they
@@ -63,18 +64,29 @@ if (isMainThread) {
 }
 
 async function runInWorker() {
-  const { Ghostty } = await import(GHOSTTY_WEB_ENTRY);
   const bytes = readFileSync(WASM_PATH);
   const mod = await WebAssembly.compile(bytes);
   const instance = await WebAssembly.instantiate(mod, { env: { log: () => {} } });
-  const ghostty = new Ghostty(instance);
-  const term = ghostty.createTerminal(59, 58);
+  const e = instance.exports;
+  const dv = () => new DataView(e.memory.buffer);
+
+  const out = e.ghostty_wasm_alloc_opaque();
+  e.ghostty_terminal_new(0, out, 59, 58);
+  const term = dv().getUint32(out, true);
+
+  const write = (text) => {
+    const payload = new TextEncoder().encode(text);
+    const ptr = e.ghostty_wasm_alloc_u8_array(payload.length);
+    new Uint8Array(e.memory.buffer).set(payload, ptr);
+    e.ghostty_terminal_vt_write(term, ptr, payload.length);
+    e.ghostty_wasm_free_u8_array(ptr, payload.length);
+  };
 
   const steps = [
-    ['write payload', () => term.write(PAYLOAD)],
-    ['resize(69, 58) [widen]', () => term.resize(69, 58)],
-    ['resize(68, 58) [narrow #1]', () => term.resize(68, 58)],
-    ['resize(67, 58) [narrow #2 -- expected to hang]', () => term.resize(67, 58)],
+    ['write payload', () => write(PAYLOAD)],
+    ['resize(69, 58) [widen]', () => e.ghostty_terminal_resize(term, 69, 58)],
+    ['resize(68, 58) [narrow #1]', () => e.ghostty_terminal_resize(term, 68, 58)],
+    ['resize(67, 58) [narrow #2 -- expected to hang]', () => e.ghostty_terminal_resize(term, 67, 58)],
   ];
 
   for (const [label, fn] of steps) {

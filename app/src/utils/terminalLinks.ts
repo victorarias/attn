@@ -221,7 +221,8 @@ export const MAX_WRAP_JOIN_ROWS = 6;
 
 // Join the soft-wrapped row group containing `row` into a logical line.
 // isContinuationRow(r) answers "does row r continue the line started on row
-// r-1" (ghostty's isRowWrapped semantics). Rows outside [0, rowCount) are
+// r-1", which is the opposite direction from ghostty's own wrap flag. Rows
+// outside [0, rowCount) are
 // never touched; groups larger than the cap keep the rows nearest the start
 // of the budget (paths begin above the hovered row more often than below).
 export function logicalLineAt(

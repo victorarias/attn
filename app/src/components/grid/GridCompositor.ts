@@ -7,7 +7,7 @@
 // arrive via writeBytes(); the compositor is a pure sink and OBSERVER — it
 // processes terminal responses but never echoes them back to the PTY (that would
 // inject phantom input into the user's session).
-import type { Ghostty, GhosttyTerminal } from 'ghostty-web';
+import type { Ghostty, GhosttyTerminal } from '../../ghostty';
 import type { UISessionState } from '../../types/sessionState';
 import type { GridRenderer, GridRenderStats, Rect, TileFrame } from './GridRenderer';
 import { TILE_COLS, TILE_ROWS, type CellMetrics } from './gridConfig';

@@ -7,7 +7,8 @@ import {
   useRef,
   useState,
 } from 'react';
-import { InputHandler, CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from 'ghostty-web';
+import { InputHandler } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal as GhosttyModel } from '../ghostty';
 import { loadGhostty } from '../ghostty/wasm';
 import { CooperativeReplayBudget } from '../utils/cooperativeReplay';
 import { openPath, openUrl } from '@tauri-apps/plugin-opener';
@@ -27,7 +28,6 @@ import {
   type LogicalLine,
   type LogicalSpan,
 } from '../utils/terminalLinks';
-import { hyperlinkUriAt, scrollbackHyperlinkUri } from '../utils/ghosttyHyperlinks';
 import {
   initialFocusedMatch,
   startFindScan,
@@ -365,8 +365,6 @@ interface SelectionRange {
   endCol: number;
 }
 
-// OSC 8 hyperlink URIs are read via ghosttyHyperlinks.ts, which reaches into
-// the vendored wasm's render-state/scrollback exports directly.
 // Ghostty's native renderer resets synchronized-output mode after 1000ms so
 // one bad producer cannot freeze rendering indefinitely.
 const SYNCHRONIZED_OUTPUT_RENDER_TIMEOUT_MS = 1000;
@@ -1235,8 +1233,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
         hyperlinkUri: (row, col) => {
           const history = terminal.getScrollbackLength();
           return row < history
-            ? scrollbackHyperlinkUri(terminal, row, col)
-            : hyperlinkUriAt(terminal, row - history, col);
+            ? terminal.getScrollbackHyperlinkUri(row, col)
+            : terminal.getHyperlinkUri(row - history, col);
         },
       };
     }, [selectionLineAtBufferRow]);
@@ -1311,10 +1309,17 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
             runs.push(run);
           }
         }
-        lines.push({ runs, wrapped: !scrollback && terminal.isRowWrapped(activeRow) });
+        // `wrapped` joins this line onto the previous one, so the flag that
+        // answers it belongs to the row above — and once that row has fallen
+        // into scrollback it carries no flag, which is the same fold
+        // isContinuationRow covers with a full-row heuristic.
+        const wrapped = row > 0 && (activeRow > 0
+          ? terminal.rowWrapsIntoNext(activeRow - 1)
+          : selectionLineAtBufferRow(row - 1, 0, terminal.cols).length === terminal.cols);
+        lines.push({ runs, wrapped });
       }
       return terminalStyledSelectionToMarkdown(lines);
-    }, [resolvedTheme]);
+    }, [resolvedTheme, selectionLineAtBufferRow]);
 
     const getText = useCallback(() => {
       const terminal = terminalRef.current;
@@ -2506,7 +2511,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
           fitRef.current();
         });
         inputRef.current = new InputHandler(
-          ghostty,
+          ghostty.keyInput,
           container,
           (data) => onInputRef.current(data, 'user'),
           () => undefined,
@@ -2887,8 +2892,8 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const history = terminal.getScrollbackLength();
       const bufferRow = bufferRowFromViewportRow(row, history, viewportOffsetRef.current);
       return bufferRow >= history
-        ? hyperlinkUriAt(terminal, bufferRow - history, col)
-        : scrollbackHyperlinkUri(terminal, bufferRow, col);
+        ? terminal.getHyperlinkUri(bufferRow - history, col)
+        : terminal.getScrollbackHyperlinkUri(bufferRow, col);
     }, []);
 
     const hoverLinkAtCell = useCallback((cell: { row: number; col: number } | null): DetectedTerminalLink | null => {
@@ -2952,9 +2957,10 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
     }, []);
 
     // Does this viewport row continue the line started on the row above it?
-    // Active-screen rows have an authoritative wrap flag; ghostty-web exposes
-    // no flag for scrollback rows, so a completely full previous row is
-    // treated as wrapping. False joins are filtered downstream: path
+    // The row above it carries an authoritative wrap flag while it is on the
+    // active screen; scrollback rows expose none, so a completely full
+    // previous row is treated as wrapping. False joins are filtered
+    // downstream: path
     // candidates must pass the existence check before anything links.
     const isContinuationRow = useCallback((viewportRow: number): boolean => {
       const terminal = terminalRef.current;
@@ -2962,7 +2968,7 @@ export const GhosttyTerminal = forwardRef<GhosttyTerminalHandle, GhosttyTerminal
       const history = terminal.getScrollbackLength();
       const bufferRow = bufferRowFromViewportRow(viewportRow, history, viewportOffsetRef.current);
       if (bufferRow <= 0) return false;
-      if (bufferRow >= history) return terminal.isRowWrapped(bufferRow - history);
+      if (bufferRow > history) return terminal.rowWrapsIntoNext(bufferRow - history - 1);
       return selectionLineAtBufferRow(bufferRow - 1, 0, terminal.cols).length === terminal.cols;
     }, [selectionLineAtBufferRow]);
 

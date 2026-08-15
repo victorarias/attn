@@ -1,0 +1,12 @@
+kind: internal
+area: terminal
+change: >
+  The browser terminal now runs on ghostty-org's own prebuilt
+  libghostty-vt module, read through a first-party binding over its
+  current C API. attn no longer builds that module or carries a
+  compatibility adapter for a dormant third-party wrapper, and the shared
+  source pin moves to a build measured at 4.2x the IO throughput and 4.8x
+  the reflow throughput of the one it replaces. The new pin also scrolls a
+  kitty image that claims more rows than the screen holds by what fits
+  rather than by what it claimed, which the wire now carries in full
+  instead of falling back to a snapshot re-push.

@@ -8,7 +8,7 @@
 // simultaneously-live WebGL contexts; the production pane renderer
 // (GhosttyTerminal) spends one context per pane, so a global "see every session"
 // surface has to composite into a single context to scale.
-import type { GhosttyTerminal } from 'ghostty-web';
+import type { GhosttyTerminal } from '../../ghostty';
 import type { UISessionState } from '../../types/sessionState';
 
 export interface TileModel {

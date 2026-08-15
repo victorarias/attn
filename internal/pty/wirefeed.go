@@ -49,8 +49,14 @@ const (
 	kittyResyncMarginMode = "kitty_layout_margin_mode"
 	// kittyResyncScrollClamped: the placement scrolled further than one SU can
 	// express (ghostty clamps SU to the scroll region height), so the client's
-	// history would come out short. Reachable because kitty's `r=` lets a 2x2
-	// image claim any number of rows.
+	// history would come out short. A tripwire on this ghostty pin: a placement's
+	// scroll no longer tracks the row count `r=` claims and stays inside the
+	// screen, so `r=` — the only knob that dials it — no longer reaches. Probed
+	// at 164 shapes (heights 1..40 and 2^n up to 129, cursor at the top, second
+	// row, and last row, on 2-, 3-, 4-, 8- and 12-row screens): none reached
+	// this, and worker and wire agreed on every one. It stays because the
+	// divergence it names is silent and a pin bump restoring proportional
+	// scrolling would ship it.
 	kittyResyncScrollClamped = "kitty_layout_scroll_clamped"
 	// kittyResyncPendingWrap: the cursor sat in the LAST COLUMN, where a
 	// dispatch may consume a pending-wrap bit CursorPos cannot see. Measured:
@@ -290,8 +296,7 @@ func (f *wireFeeder) writeAPC(apc []byte) {
 	}
 
 	// One SU carries at most a screen's worth of rows (ghostty clamps to the
-	// scroll region). Receipt: TestWireFeedSynthesizesTheLargestScrollOneSUCarries
-	// pins both sides of the boundary on 8- and 12-row screens.
+	// scroll region), so a taller scroll would leave the client's history short.
 	if _, screenRows := f.term.Size(); scrolled > screenRows {
 		f.failResync(kittyResyncScrollClamped)
 		return

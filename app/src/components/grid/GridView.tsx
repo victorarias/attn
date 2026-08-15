@@ -184,7 +184,7 @@ export function GridView({
         if (id) void ptyWrite({ id, data });
       };
       inputHandler = new InputHandler(
-        ghostty,
+        ghostty.keyInput,
         stage,
         forward,
         () => {},

@@ -21,7 +21,7 @@
 import { readFileSync } from 'node:fs';
 // @ts-expect-error -- see above
 import { fileURLToPath } from 'node:url';
-import { Ghostty, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { Ghostty, type GhosttyCell, type GhosttyTerminal } from '../ghostty';
 import { describe, expect, it } from 'vitest';
 
 interface CorpusEntry {

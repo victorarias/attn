@@ -44,7 +44,6 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const APP_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const WASM_PATH = `${APP_ROOT}/vendor/ghostty-vt/ghostty-vt.wasm`;
-const GHOSTTY_WEB_ENTRY = `file://${APP_ROOT}/node_modules/ghostty-web/dist/ghostty-web.js`;
 
 const DEFAULT_WATCHDOG_MS = 5000;
 // Mirrors HISTORICAL_REPLAY_CHUNK_BYTES in
@@ -209,8 +208,11 @@ export function readCapturingFaults(path) {
   return records;
 }
 
+// The four calls replayCapture makes, over the raw wasm exports. The app's own
+// binding (app/src/ghostty) is TypeScript and this worker loads plain .mjs with
+// no transform, so the CLI path carries its own minimal model; the vitest side
+// hands replayCapture the real binding instead.
 async function createTerminal(cols, rows) {
-  const { Ghostty } = await import(GHOSTTY_WEB_ENTRY);
   const bytes = readFileSync(WASM_PATH);
   const mod = await WebAssembly.compile(bytes);
   let instance;
@@ -222,8 +224,40 @@ async function createTerminal(cols, rows) {
       },
     },
   });
-  const ghostty = new Ghostty(instance);
-  return ghostty.createTerminal(cols, rows);
+  const e = instance.exports;
+  const dv = () => new DataView(e.memory.buffer);
+  const scratch = e.ghostty_wasm_alloc_u8_array(16);
+
+  const out = e.ghostty_wasm_alloc_opaque();
+  e.ghostty_terminal_new(0, out, cols, rows);
+  const handle = dv().getUint32(out, true);
+  e.ghostty_render_state_new(0, out);
+  const state = dv().getUint32(out, true);
+
+  return {
+    write(data) {
+      const payload = typeof data === 'string' ? new TextEncoder().encode(data) : data;
+      if (payload.length === 0) return;
+      const ptr = e.ghostty_wasm_alloc_u8_array(payload.length);
+      new Uint8Array(e.memory.buffer).set(payload, ptr);
+      e.ghostty_terminal_vt_write(handle, ptr, payload.length);
+      e.ghostty_wasm_free_u8_array(ptr, payload.length);
+    },
+    resize(nextCols, nextRows) {
+      e.ghostty_terminal_resize(handle, nextCols, nextRows);
+    },
+    update() {
+      e.ghostty_render_state_update(state, handle);
+    },
+    getMode(mode) {
+      // GhosttyTerminalModeConfig: u16 mode in, bool value out. The high bit
+      // marks an ANSI mode; every mode the replay asks about is DEC private.
+      dv().setUint16(scratch, mode & 0x7fff, true);
+      dv().setUint8(scratch + 2, 0);
+      if (e.ghostty_terminal_get(handle, 37 /* DATA_MODE */, scratch) !== 0) return false;
+      return dv().getUint8(scratch + 2) !== 0;
+    },
+  };
 }
 
 async function runInWorker() {

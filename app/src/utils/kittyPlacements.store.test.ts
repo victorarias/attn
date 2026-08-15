@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 // @ts-expect-error -- see above
 import { fileURLToPath } from 'node:url';
-import { Ghostty, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { Ghostty, type GhosttyCell, type GhosttyTerminal } from '../ghostty';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { KittyPlacementStore } from './kittyPlacements';
 import type { PlacementElement } from '../types/generated';
