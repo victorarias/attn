@@ -177,8 +177,10 @@ describe("OpenCode server-backed driver", () => {
 
     const launch = await driver.spawn(params());
     expect(launch.argv.slice(0, 3)).toEqual([process.execPath, "run", expect.stringContaining("launcher.ts")]);
+    // The submission is recorded before the bind it triggers runs, so wait on
+    // the bind's own report rather than on the submission.
     await eventually(
-      () => target.tuiSubmissions.length === 1,
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
       () => `staged prompt submission; health=${JSON.stringify(driver.health())}; requests=${JSON.stringify(target.requests)}; calls=${JSON.stringify(rpc.calls)}`,
     );
     expect(target.requests.some((request) => request.path === "/event")).toBe(true);
@@ -329,7 +331,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-attention-events"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     const reportsBeforeOtherSession = rpc.calls.length;
     target.askQuestion("native-other", "question-other");
@@ -374,7 +379,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-overlapping-attention"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.askPermission("native-1", "permission-overlap");
     await eventually(
@@ -418,7 +426,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-idle-attention"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.pendingQuestions.set("question-idle", "native-1");
     target.emit("session.idle", { sessionID: "native-1" });
@@ -453,7 +464,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-verdicts"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.messages.set("native-1", [assistantMessage("message-question", "Should I continue?")]);
     target.classifierReplies.push('{"verdict":"WAITING"}');
@@ -485,7 +499,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-cache"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("same-message", "Which option should I use?")]);
     target.classifierReplies.push('{"verdict":"WAITING"}');
 
@@ -512,7 +529,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-malformed"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-malformed", "Can you choose?")]);
     target.classifierReplies.push("WAITING");
     target.emit("session.idle", { sessionID: "native-1" });
@@ -527,7 +547,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-idle-reconcile-failure"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.failPendingLists = true;
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "unknown reconciliation verdict");
@@ -554,7 +577,10 @@ describe("OpenCode server-backed driver", () => {
       });
       await driver.initialize();
       await driver.spawn(params(`run-cancel-${newerEvent}`));
-      await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+      await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
       target.messages.set("native-1", [assistantMessage("message-blocked", "What next?")]);
       target.emit("session.idle", { sessionID: "native-1" });
       await eventually(() => classifier.inputs.length === 1, "classifier started");
@@ -592,7 +618,10 @@ describe("OpenCode server-backed driver", () => {
     });
     await driver.initialize();
     await driver.spawn(params("run-benign-session-update"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-benign", "Should I continue?")]);
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => classifier.inputs.length === 1, "classifier started");
@@ -610,7 +639,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-question-reconnect"));
-    await eventually(() => target.tuiSubmissions.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata") && target.eventSubscriberCount === 1,
+      "initial native run",
+    );
 
     target.pendingQuestions.set("question-missed", "native-1");
     target.closeEvents();
@@ -629,7 +661,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-question-reconnect-order"));
-    await eventually(() => target.tuiSubmissions.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata") && target.eventSubscriberCount === 1,
+      "initial native run",
+    );
 
     target.pendingQuestions.set("question-race", "native-1");
     let releaseSnapshot!: () => void;
@@ -1064,7 +1099,10 @@ describe("OpenCode server-backed driver", () => {
     });
     await driver.initialize();
     await driver.spawn(params("run-classifier-timeout"));
-    await eventually(() => target.tuiSubmissions.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-timeout", "Are you there?")]);
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => (rpc.calls.at(-1)?.params as { verdict?: string }).verdict === "unknown", "timed-out unknown verdict");
