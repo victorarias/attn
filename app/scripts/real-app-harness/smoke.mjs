@@ -19,6 +19,7 @@ import {
   waitForNewShellPane,
   waitForPaneInputFocus,
   waitForPaneState,
+  waitForPaneText,
   waitForPaneVisible,
 } from './scenarioAssertions.mjs';
 
@@ -106,40 +107,18 @@ async function main() {
       submit: false,
     });
 
-    // Prefer bridge-side read_pane_text for verification — it walks the same
-    // terminal buffer the user sees, without requiring a daemon attach.
-    let utilityScrollback = '';
-    try {
-      const textResult = await (async () => {
-        const deadline = Date.now() + 15_000;
-        let lastText = '';
-        while (Date.now() < deadline) {
-          const payload = await client.request('read_pane_text', {
-            sessionId,
-            paneId: utilityPane.paneId,
-          });
-          lastText = payload?.text || '';
-          if (compactTerminalText(lastText).includes(compactTerminalText(utilityToken))) {
-            return lastText;
-          }
-          await new Promise((resolve) => setTimeout(resolve, 300));
-        }
-        throw new Error(
-          `utility pane text never contained ${utilityToken}; last tail:\n${lastText.slice(-400)}`,
-        );
-      })();
-      utilityScrollback = textResult;
-    } catch (error) {
-      console.warn(
-        `[RealAppHarness] read_pane_text path failed; falling back to daemon scrollback: ${error.message}`,
-      );
-      utilityScrollback = await observer.waitForScrollbackContains(
-        utilityPane.runtimeId,
-        utilityToken,
-        15_000,
-      );
-    }
-    fs.writeFileSync(path.join(runDir, 'utility-scrollback.txt'), utilityScrollback, 'utf8');
+    // read_pane_text is the only way to verify rendered output: it walks the
+    // same terminal buffer the user sees, and the daemon's attach payload is
+    // binary snapshot data no observer can read.
+    const utilityPaneText = await waitForPaneText(
+      client,
+      sessionId,
+      utilityPane.paneId,
+      (text) => compactTerminalText(text).includes(compactTerminalText(utilityToken)),
+      `utility pane text to contain ${utilityToken}`,
+      15_000,
+    );
+    fs.writeFileSync(path.join(runDir, 'utility-scrollback.txt'), utilityPaneText?.text || '', 'utf8');
     await captureScreenshot(driver, path.join(runDir, '04-utility-output.png'));
 
     const workspace = observer.getWorkspace(sessionId);

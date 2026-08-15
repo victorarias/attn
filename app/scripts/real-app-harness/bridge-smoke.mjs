@@ -5,6 +5,7 @@ import path from 'node:path';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { waitForPaneText } from './scenarioAssertions.mjs';
 
 async function main() {
   const options = parseCommonArgs(process.argv.slice(2));
@@ -79,12 +80,15 @@ async function main() {
       submit: true,
     });
 
-    const utilityScrollback = await observer.waitForScrollbackContains(
-      utilityPane.runtime_id,
-      utilityToken,
+    const utilityPaneText = await waitForPaneText(
+      client,
+      sessionId,
+      utilityPane.pane_id,
+      (text) => text.includes(utilityToken),
+      `utility pane text to contain ${utilityToken}`,
       15_000
     );
-    fs.writeFileSync(path.join(runDir, 'utility-scrollback.txt'), utilityScrollback, 'utf8');
+    fs.writeFileSync(path.join(runDir, 'utility-scrollback.txt'), utilityPaneText?.text || '', 'utf8');
 
     const summary = {
       ok: true,

@@ -706,22 +706,6 @@ async function waitForPaneState(client, sessionId, paneId, predicate, descriptio
   );
 }
 
-async function waitForScrollbackChange(observer, runtimeId, previous, timeoutMs = 20_000) {
-  const startedAt = Date.now();
-  let lastScrollback = '';
-  while (Date.now() - startedAt < timeoutMs) {
-    lastScrollback = await observer.waitForScrollbackReady(runtimeId, Math.min(5_000, timeoutMs));
-    if (lastScrollback.length > 0 && lastScrollback !== previous) {
-      return lastScrollback;
-    }
-    await sleep(250);
-  }
-
-  throw new Error(
-    `Timed out waiting for scrollback ${runtimeId} to change after reload. Last scrollback tail:\n${lastScrollback.slice(-400)}`
-  );
-}
-
 async function captureArtifacts(client, runDir, suffix) {
   try {
     const snapshot = await client.request('capture_structured_snapshot', {
@@ -1215,7 +1199,7 @@ Remote hub options:
       sessionId: remoteSessionId,
       paneId: remoteInitialPaneId,
     });
-    await observer.waitForScrollbackReady(remoteSessionId, 20_000);
+    await observer.waitForAttachable(remoteSessionId, 20_000);
     const reloadedSessionUi = await waitForSessionUiState(
       client,
       remoteSessionId,

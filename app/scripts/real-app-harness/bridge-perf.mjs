@@ -9,6 +9,7 @@ import { execFile } from 'node:child_process';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createRunContext, parseCommonArgs, printCommonHelp } from './common.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
+import { readPaneText } from './scenarioAssertions.mjs';
 
 const execFileAsync = promisify(execFile);
 
@@ -316,17 +317,6 @@ async function waitForCondition(fn, description, timeoutMs = 20_000, intervalMs 
   throw new Error(`Timed out waiting for ${description}. Last value: ${JSON.stringify(lastValue, null, 2)}`);
 }
 
-async function waitForScrollbackBytes(observer, runtimeId, minBytes, timeoutMs = 30_000) {
-  return waitForCondition(async () => {
-    try {
-      const scrollback = await observer.readScrollback(runtimeId, 8_000);
-      return scrollback.length >= minBytes ? scrollback.length : null;
-    } catch {
-      return null;
-    }
-  }, `scrollback for ${runtimeId} to reach ${minBytes} bytes`, timeoutMs, 400);
-}
-
 function formatCheckpointSummary(checkpoint) {
   const rssMb = (checkpoint.processTree.summary.totalRssKbMax / 1024).toFixed(1);
   const cpuPct = checkpoint.processTree.summary.totalCpuPctMax.toFixed(1);
@@ -401,35 +391,37 @@ function countOccurrences(haystack, needle) {
   return count;
 }
 
-async function waitForTerminalCompletion(observer, runtimeId, token, doneToken, expectedLineCount, timeoutMs = 45_000) {
+// Completion is read through the app: the daemon's attach payload is binary
+// snapshot data, so rendered text only exists on the client side.
+async function waitForTerminalCompletion(client, sessionId, paneId, token, doneToken, expectedLineCount, timeoutMs = 45_000) {
   const startedAt = Date.now();
   return waitForCondition(async () => {
     try {
-      const scrollback = await observer.readScrollback(runtimeId, 8_000);
-      if (!scrollback.includes(doneToken)) {
+      const paneText = await readPaneText(client, sessionId, paneId, 8_000);
+      if (!paneText.includes(doneToken)) {
         return null;
       }
-      const observedLineCount = countOccurrences(scrollback, `${token} line `);
+      const observedLineCount = countOccurrences(paneText, `${token} line `);
       return {
         completionMs: Date.now() - startedAt,
         expectedLineCount,
         observedLineCount,
-        scrollbackBytes: scrollback.length,
-        doneTokenCount: countOccurrences(scrollback, doneToken),
+        scrollbackBytes: paneText.length,
+        doneTokenCount: countOccurrences(paneText, doneToken),
       };
     } catch {
       return null;
     }
-  }, `terminal completion for ${runtimeId}`, timeoutMs, 300);
+  }, `terminal completion for ${paneId}`, timeoutMs, 300);
 }
 
-async function runTerminalLoad(client, observer, sessionId, shellPanes, lineCount = 2500) {
+async function runTerminalLoad(client, sessionId, shellPanes, lineCount = 2500) {
   const paneRuns = [];
   for (let index = 0; index < shellPanes.length; index += 1) {
     const pane = shellPanes[index];
-    // Keep markers shorter than a deeply split pane. The VT dump preserves
-    // rendered wrapping, so a long logical token can contain a newline in the
-    // snapshot and never match even though the command completed.
+    // Keep markers shorter than a deeply split pane. Pane text is rendered
+    // text, so a long logical token can contain a newline in it and never match
+    // even though the command completed.
     const token = `P${index}${Date.now().toString(36).slice(-6)}`;
     const doneToken = `${token}D`;
     const python = [
@@ -457,8 +449,9 @@ async function runTerminalLoad(client, observer, sessionId, shellPanes, lineCoun
 
   const panes = await Promise.all(paneRuns.map(async (paneRun) => {
     const completion = await waitForTerminalCompletion(
-      observer,
-      paneRun.runtimeId,
+      client,
+      sessionId,
+      paneRun.paneId,
       paneRun.token,
       paneRun.doneToken,
       paneRun.expectedLineCount,
@@ -551,7 +544,7 @@ async function main() {
     }));
 
     await client.request('clear_perf_counters');
-    const terminalLoad = await runTerminalLoad(client, observer, sessionId, shellPanes, options.terminalLineCount);
+    const terminalLoad = await runTerminalLoad(client, sessionId, shellPanes, options.terminalLineCount);
     await delay(options.terminalSteadyMs);
     const terminalOutputCheckpoint = await captureCheckpoint(client, manifest.pid, 'terminal_output', {
       extraPids: sampledExtraPids,

@@ -80,6 +80,14 @@ export async function waitForPaneVisible(client, sessionId, paneId, timeoutMs = 
   );
 }
 
+// Read a pane's whole terminal text through the app. This is the only way the
+// harness can see rendered text: attach carries the worker's terminal as binary
+// snapshot data, so the daemon observer cannot read it.
+export async function readPaneText(client, sessionId, paneId, timeoutMs = 20_000) {
+  const payload = await client.request('read_pane_text', { sessionId, paneId }, { timeoutMs });
+  return payload?.text || '';
+}
+
 export async function scrollPaneToTop(client, sessionId, paneId, timeoutMs = 12_000) {
   await client.request('scroll_pane_to_top', { sessionId, paneId }, { timeoutMs: 20_000 });
   return waitForPaneState(
