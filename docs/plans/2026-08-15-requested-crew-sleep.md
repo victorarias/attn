@@ -63,7 +63,7 @@ another agent.
 - [x] Update glossary/changelog and regenerate protocol types.
 - [x] Run focused tests, `make test-quick`, and the frontend suite.
 - [x] Verify both scenarios in an isolated installed profile and record evidence.
-- [ ] Rebase on main, commit, push, and open a ready-for-review PR.
+- [x] Rebase on main, commit, push, and open a ready-for-review PR.
 
 ## Decisions
 
