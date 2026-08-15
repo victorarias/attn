@@ -107,7 +107,7 @@ describe('useGhosttyPaneRuntime', () => {
     ]);
   });
 
-  it('allows explicit bootstrap replay to return terminal responses to the live PTY', async () => {
+  it('returns terminal responses to the live PTY when the daemon does not suppress them', async () => {
     const terminal = createTerminal();
     vi.mocked(terminal.write).mockImplementation(async () => {
       result.current.handleTerminalInput('pane-session')('\u001b[1;1R');
@@ -121,7 +121,6 @@ describe('useGhosttyPaneRuntime', () => {
       binding?.onEvent({
         event: 'data',
         id: 'runtime-1',
-        source: 'attach_replay',
         suppressResponses: false,
         data: btoa('\u001b[6n'),
       });
@@ -131,77 +130,7 @@ describe('useGhosttyPaneRuntime', () => {
     expect(mockPtyWrite).toHaveBeenCalledWith({ id: 'runtime-1', data: '\u001b[1;1R' });
   });
 
-  it('parses restore replay without returning historical terminal responses to the live PTY', async () => {
-    const terminal = createTerminal();
-    vi.mocked(terminal.write).mockImplementation(async (_data, options) => {
-      if (!options?.suppressResponses) {
-        result.current.handleTerminalInput('pane-session')('\u001b[1;1R');
-      }
-    });
-    const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
-    ], 'pane-session', router, { current: true }));
-
-    act(() => result.current.setTerminalHandle('pane-session', terminal));
-    await act(async () => {
-      binding?.onEvent({
-        event: 'data',
-        id: 'runtime-1',
-        source: 'attach_replay',
-        data: btoa('\u001b[6n'),
-      });
-    });
-
-    expect(terminal.write).toHaveBeenCalledWith(
-      expect.any(Uint8Array),
-      {
-        suppressResponses: true,
-        deferRender: true,
-        historicalReplay: true,
-      },
-    );
-    expect(mockPtyWrite).not.toHaveBeenCalled();
-  });
-
-  it('splits large historical replay into cooperative writes without losing bytes', async () => {
-    const terminal = createTerminal();
-    const bytes = new Uint8Array((16 * 1024) + 1);
-    bytes.fill(65);
-    bytes[bytes.length - 1] = 66;
-    const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
-    ], 'pane-session', router, { current: true }));
-
-    act(() => result.current.setTerminalHandle('pane-session', terminal));
-    await act(async () => {
-      binding?.onEvent({
-        event: 'data',
-        id: 'runtime-1',
-        source: 'attach_replay',
-        data: btoa(String.fromCharCode(...bytes)),
-      });
-    });
-
-    expect(terminal.write).toHaveBeenCalledTimes(2);
-    const firstWrite = vi.mocked(terminal.write).mock.calls[0];
-    const secondWrite = vi.mocked(terminal.write).mock.calls[1];
-    expect(firstWrite[0]).toBeInstanceOf(Uint8Array);
-    expect(secondWrite[0]).toBeInstanceOf(Uint8Array);
-    expect((firstWrite[0] as Uint8Array).byteLength).toBe(16 * 1024);
-    expect((secondWrite[0] as Uint8Array)).toEqual(Uint8Array.of(66));
-    expect(firstWrite[1]).toEqual({
-      suppressResponses: true,
-      deferRender: true,
-      historicalReplay: true,
-    });
-    expect(secondWrite[1]).toEqual({
-      suppressResponses: true,
-      deferRender: true,
-      historicalReplay: true,
-    });
-  });
-
-  it('marks historical geometry changes as replay-only resizes', async () => {
+  it('marks an attach geometry change as a restore resize', async () => {
     const terminal = createTerminal();
     const { result } = renderHook(() => useGhosttyPaneRuntime([
       { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent' },
@@ -212,7 +141,7 @@ describe('useGhosttyPaneRuntime', () => {
       binding?.onEvent({
         event: 'local_resize',
         id: 'runtime-1',
-        source: 'attach_replay',
+        source: 'attach_restore',
         cols: 118,
         rows: 48,
       });
@@ -221,11 +150,11 @@ describe('useGhosttyPaneRuntime', () => {
     expect(terminal.resizeLocal).toHaveBeenCalledWith(
       118,
       48,
-      { historicalReplay: true },
+      { restore: true },
     );
   });
 
-  it('fits an active pane after queued historical replay completes', async () => {
+  it('fits an active pane once the restore completes', async () => {
     const terminal = createTerminal();
     const isActiveSessionRef = { current: true };
     const { result } = renderHook(() => useGhosttyPaneRuntime([
@@ -234,7 +163,7 @@ describe('useGhosttyPaneRuntime', () => {
 
     act(() => result.current.setTerminalHandle('pane-session', terminal));
     await act(async () => {
-      binding?.onEvent({ event: 'replay_complete', id: 'runtime-1' });
+      binding?.onEvent({ event: 'restore_complete', id: 'runtime-1' });
       await Promise.resolve();
     });
 
@@ -242,7 +171,7 @@ describe('useGhosttyPaneRuntime', () => {
     expect(terminal.fit).toHaveBeenCalled();
   });
 
-  it('does not fit replay completion after the workspace becomes inactive', async () => {
+  it('does not fit restore completion after the workspace becomes inactive', async () => {
     let resolveDrain: (() => void) | undefined;
     const terminal = createTerminal();
     vi.mocked(terminal.drain).mockReturnValue(new Promise<void>((resolve) => {
@@ -255,7 +184,7 @@ describe('useGhosttyPaneRuntime', () => {
 
     act(() => {
       result.current.setTerminalHandle('pane-session', terminal);
-      binding?.onEvent({ event: 'replay_complete', id: 'runtime-1' });
+      binding?.onEvent({ event: 'restore_complete', id: 'runtime-1' });
       isActiveSessionRef.current = false;
       resolveDrain?.();
     });
@@ -376,46 +305,6 @@ describe('useGhosttyPaneRuntime', () => {
       forceResizeBeforeAttach: true,
     });
     expect(mockPtyDetach).not.toHaveBeenCalled();
-  });
-
-  it('re-attaches after queued replay is interrupted by a geometry change', async () => {
-    vi.useFakeTimers();
-    const { result } = renderHook(() => useGhosttyPaneRuntime([
-      { paneId: 'pane-session', runtimeId: 'runtime-1', paneKind: 'agent', agent: 'claude' },
-    ], 'pane-session', router, { current: true }));
-    const terminal = createTerminal();
-
-    act(() => result.current.setTerminalHandle('pane-session', terminal));
-    await act(async () => {
-      binding?.onEvent({ event: 'data', id: 'runtime-1', data: btoa('ready') });
-      await result.current.handleTerminalReady('pane-session')(terminal);
-    });
-    mockPtyAttach.mockClear();
-
-    // A split lands mid-replay: the terminal reports the interruption twice
-    // in quick succession (burst of fits) — one debounced re-attach follows.
-    act(() => {
-      result.current.handleReplayInterrupted('pane-session')();
-      result.current.handleReplayInterrupted('pane-session')();
-    });
-    expect(mockPtyAttach).not.toHaveBeenCalled();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(300);
-    });
-
-    expect(mockPtyAttach).toHaveBeenCalledTimes(1);
-    expect(mockPtyAttach).toHaveBeenCalledWith({
-      args: {
-        id: 'runtime-1',
-        cols: 120,
-        rows: 40,
-        shell: false,
-        agent: 'claude',
-        policy: 'same_app_remount',
-      },
-      forceResizeBeforeAttach: true,
-    });
   });
 
   it('detaches an attached runtime when its terminal is virtualized', async () => {

@@ -2252,7 +2252,7 @@ export function useDaemonSocket({
                     id: data.id,
                     cols: restoreGeometry.cols,
                     rows: restoreGeometry.rows,
-                    source: 'attach_replay',
+                    source: 'attach_restore',
                   });
                 }
                 if (attachEffects.shouldReset && attachEffects.resetReason) {
@@ -2313,7 +2313,7 @@ export function useDaemonSocket({
                 }
                 if (restoreWasEmitted) {
                   emitPtyEvent({
-                    event: 'replay_complete',
+                    event: 'restore_complete',
                     id: data.id,
                   });
                 }

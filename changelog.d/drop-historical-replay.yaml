@@ -1,0 +1,13 @@
+kind: internal
+area: terminal
+change: >
+  The terminal's historical-replay machinery is gone. It existed because a
+  restore used to be megabytes of VT written into a blank model in slices:
+  a cooperative byte budget that yielded between chunks, a generation fence
+  that dropped queued history when a live resize cancelled it, a re-attach
+  the pane requested after such a cancellation, and the geometry promise a
+  fit consulted before deciding whether it conflicted with the queued
+  history. A snapshot decode is one operation, so none of it had a caller
+  left. What remains of the option is the one thing it still means: an
+  attach's geometry sizes the model without painting it, because the
+  snapshot adoption queued behind it is what the pane should show.

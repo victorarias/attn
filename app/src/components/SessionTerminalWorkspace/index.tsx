@@ -1092,7 +1092,6 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                   onOpenMarkdown={onOpenMarkdown}
                   onReady={handleGhosttyTerminalReady(agentPane.id)}
                   onResize={runtime.handleTerminalResize(agentPane.id)}
-                  onReplayInterrupted={runtime.handleReplayInterrupted(agentPane.id)}
                   onTerminalModelRecovered={onTerminalModelRecovered}
                 />
               )}

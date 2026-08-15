@@ -7,12 +7,6 @@ import type { BlockStateSnapshot, GhosttyTerminalHandle, PlacementStateSnapshot 
 import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisibleContent';
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 
-const HISTORICAL_REPLAY_CHUNK_BYTES = 16 * 1024;
-// Delay before re-attaching after a geometry change cancelled queued replay:
-// long enough for a split/drag burst of fits to settle, short enough that the
-// restored history feels immediate.
-const REPLAY_INTERRUPTED_RETRY_MS = 250;
-
 interface TerminalResizeOptions {
   reason?: string;
   // Pane total in device pixels, carried through to the PTY's winsize. Absent
@@ -45,7 +39,6 @@ export interface GhosttyPaneRuntime {
   handleTerminalReady: (paneId: string) => (terminal: GhosttyTerminalHandle) => Promise<void>;
   handleTerminalInput: (paneId: string) => (data: string, source?: string) => void;
   handleTerminalResize: (paneId: string) => (cols: number, rows: number, options?: TerminalResizeOptions) => void;
-  handleReplayInterrupted: (paneId: string) => () => void;
   focusPane: (paneId: string, retries?: number) => void;
   fitPane: (paneId: string) => void;
   fitActivePane: () => void;
@@ -91,7 +84,6 @@ export function useGhosttyPaneRuntime(
     ypixel?: number;
   }>());
   const terminalsLiveRef = useRef(terminalsLive);
-  const replayRetryTimersRef = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   panesRef.current = panes;
   terminalsLiveRef.current = terminalsLive;
 
@@ -114,25 +106,11 @@ export function useGhosttyPaneRuntime(
       readyRuntimesRef.current.add(pane.runtimeId);
     }
     switch (event.event) {
-      case 'data': {
-        const bytes = decodePtyBytes(event.data);
-        const suppressResponses = event.suppressResponses ?? event.source === 'attach_replay';
-        if (event.source === 'attach_replay') {
-          for (let offset = 0; offset < bytes.length; offset += HISTORICAL_REPLAY_CHUNK_BYTES) {
-            void terminal.write(
-              bytes.subarray(offset, offset + HISTORICAL_REPLAY_CHUNK_BYTES),
-              {
-                suppressResponses,
-                deferRender: true,
-                historicalReplay: true,
-              },
-            );
-          }
-          break;
-        }
-        void terminal.write(bytes, { suppressResponses });
+      case 'data':
+        void terminal.write(decodePtyBytes(event.data), {
+          suppressResponses: event.suppressResponses,
+        });
         break;
-      }
       case 'restore_snapshot':
         void terminal.restoreSnapshot(decodePtyBytes(event.data));
         break;
@@ -140,7 +118,7 @@ export function useGhosttyPaneRuntime(
         void terminal.resizeLocal(
           event.cols,
           event.rows,
-          { historicalReplay: event.source === 'attach_replay' },
+          { restore: event.source === 'attach_restore' },
         );
         break;
       case 'seed_blocks':
@@ -152,7 +130,7 @@ export function useGhosttyPaneRuntime(
       case 'seed_placements':
         void terminal.seedPlacements(event.id, event.placements);
         break;
-      case 'replay_complete':
+      case 'restore_complete':
         void terminal.drain().then(() => {
           if (isActiveSessionRef.current) {
             terminal.fit();
@@ -217,10 +195,6 @@ export function useGhosttyPaneRuntime(
     for (const pane of panesRef.current) {
       cancelRuntimeConnection(pane.runtimeId);
     }
-    for (const timer of replayRetryTimersRef.current.values()) {
-      clearTimeout(timer);
-    }
-    replayRetryTimersRef.current.clear();
   }, [cancelRuntimeConnection]);
 
   const setTerminalHandle = useCallback((paneId: string, handle: GhosttyTerminalHandle | null) => {
@@ -321,24 +295,6 @@ export function useGhosttyPaneRuntime(
     }
   }, [paneFor]);
 
-  // A live geometry change (split, drag, window resize) landed while attach
-  // replay was still applying: the queued history was cancelled and the model
-  // is missing it. Re-request the attach once the geometry settles — the
-  // daemon re-serves replay consistent with the new size. Debounced so a
-  // resize burst yields one re-attach.
-  const handleReplayInterrupted = useCallback((paneId: string) => () => {
-    const timers = replayRetryTimersRef.current;
-    const existing = timers.get(paneId);
-    if (existing !== undefined) clearTimeout(existing);
-    timers.set(paneId, setTimeout(() => {
-      timers.delete(paneId);
-      const pane = paneFor(paneId);
-      const terminal = handlesRef.current.get(paneId);
-      if (!pane || !terminal || !terminalsLiveRef.current) return;
-      void handleTerminalReady(paneId)(terminal);
-    }, REPLAY_INTERRUPTED_RETRY_MS));
-  }, [handleTerminalReady, paneFor]);
-
   const handleTerminalInput = useCallback((paneId: string) => (data: string, source?: string) => {
     const pane = paneFor(paneId);
     if (!pane) return;
@@ -396,7 +352,6 @@ export function useGhosttyPaneRuntime(
     handleTerminalReady,
     handleTerminalInput,
     handleTerminalResize,
-    handleReplayInterrupted,
     focusPane: (paneId: string, retries = 20) => {
       recordFocus(paneId, retries);
       const focus = (remaining: number) => {
@@ -423,5 +378,5 @@ export function useGhosttyPaneRuntime(
     injectPaneBytes: async (paneId: string, bytes: Uint8Array) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(bytes); return true; },
     injectPaneBase64: async (paneId: string, data: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.write(decodePtyBytes(data)); return true; },
     drainPaneTerminal: async (paneId: string) => { const terminal = get(paneId); if (!terminal) return false; await terminal.drain(); return true; },
-  }), [activePaneId, emptyContent, emptyStyle, get, handleReplayInterrupted, handleTerminalInput, handleTerminalReady, handleTerminalResize, setTerminalHandle]);
+  }), [activePaneId, emptyContent, emptyStyle, get, handleTerminalInput, handleTerminalReady, handleTerminalResize, setTerminalHandle]);
 }
