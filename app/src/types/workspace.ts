@@ -7,7 +7,7 @@ export type TerminalDockEdge = 'left' | 'right' | 'top' | 'bottom';
 // TileKind is the surface a docked tile renders. The layout layer persists it
 // as an opaque token; individual kinds can still have daemon and native-host
 // behavior. Kept open-ended for forward compatibility with newer tile hosts.
-export type TileKind = 'markdown' | 'browser' | (string & {});
+export type TileKind = 'markdown' | 'seed' | 'browser' | (string & {});
 
 export interface TerminalPaneLeaf {
   type: 'pane';
@@ -23,8 +23,8 @@ export interface TileLeaf {
   tileId: string;
   tileKind: TileKind;
   // Opaque per-tile data persisted with the layout by the daemon. For markdown
-  // tiles this is the absolute path of the file the tile renders. Empty when
-  // the daemon persisted no params.
+  // tiles this is the absolute path of the file the tile renders; for seed
+  // tiles it is the typed seed id. Empty when the daemon persisted no params.
   tileParams?: string;
   // Session the tile was opened from (markdown tiles bind to the session whose
   // terminal the file was cmd+clicked in). Absent when the tile has no binding.

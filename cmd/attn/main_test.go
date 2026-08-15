@@ -894,6 +894,18 @@ func TestParseOpenArgs(t *testing.T) {
 	}
 }
 
+func TestSeedOpenTargetClassification(t *testing.T) {
+	if !isSeedOpenTarget("s-7k3f9m") {
+		t.Fatal("seed id should route to open_seed")
+	}
+	if !isSeedOpenTarget("s-not-valid") {
+		t.Fatal("seed-looking input should route to open_seed so validation fails loudly")
+	}
+	if isSeedOpenTarget("./s-7k3f9m") {
+		t.Fatal("explicit relative path should remain a file target")
+	}
+}
+
 // TestStopFacts locks what the Stop hook reports to the daemon. The payloads are
 // real Claude Code Stop-hook stdin bodies (trimmed to the fields attn parses),
 // captured from live background Workflow runs and CronCreate/CronDelete probes.

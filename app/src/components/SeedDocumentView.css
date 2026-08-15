@@ -1,0 +1,169 @@
+.seed-document {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+/* The panel already supplies its own frame. Keep the shared reader card, but
+   use its compact padding instead of letting container queries expand it. */
+.seed-document--compact .md-reader-card {
+  padding: 14px;
+}
+
+.seed-document__empty-body,
+.seed-document__empty-ledger,
+.seed-document__withheld {
+  color: var(--color-text-muted);
+  font-size: var(--font-size-xs);
+  margin: 0;
+}
+
+.seed-document__artifacts,
+.seed-document__ledger {
+  border-top: 1px solid var(--color-border-subtle);
+  padding-top: 10px;
+}
+
+.seed-document__artifacts h3,
+.seed-document__ledger h3 {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  margin: 0 0 8px;
+  text-transform: uppercase;
+}
+
+.seed-document__artifacts ul,
+.seed-document__children,
+.seed-document__notes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.seed-document__artifacts ul {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.seed-document__artifacts button,
+.seed-document__artifacts a {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 5px;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  display: inline-block;
+  font-size: var(--font-size-xs);
+  padding: 4px 7px;
+  text-decoration: none;
+}
+
+.seed-document__artifacts button:hover,
+.seed-document__artifacts a:hover {
+  border-color: var(--color-border);
+  color: var(--color-text-primary);
+}
+
+.seed-document__children {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  margin-bottom: 10px;
+}
+
+.seed-document__children li {
+  align-items: baseline;
+  display: flex;
+  gap: 7px;
+  min-width: 0;
+}
+
+.seed-document__child-state {
+  align-self: center;
+  background: var(--color-text-muted);
+  border-radius: 50%;
+  flex: none;
+  height: 6px;
+  width: 6px;
+}
+
+.seed-document__children .is-growing .seed-document__child-state {
+  background: var(--accent);
+}
+
+.seed-document__children .is-harvested .seed-document__child-state {
+  background: var(--color-text-tertiary);
+}
+
+.seed-document__children .is-withered .seed-document__child-state {
+  background: var(--color-error);
+}
+
+.seed-document__children .is-dormant .seed-document__child-state {
+  background: var(--color-warning);
+}
+
+.seed-document__child-title {
+  color: var(--color-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.seed-document__child-id,
+.seed-document__child-status {
+  color: var(--color-text-muted);
+  flex: none;
+  font-size: var(--font-size-xs);
+}
+
+.seed-document__child-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  margin-left: auto;
+}
+
+.seed-document__notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.seed-document__notes > li {
+  border-left: 2px solid var(--color-border);
+  padding-left: 9px;
+}
+
+.seed-document__note-head {
+  color: var(--color-text-muted);
+  display: flex;
+  flex-wrap: wrap;
+  font-size: var(--font-size-xs);
+  gap: 7px;
+}
+
+.seed-document__note-head time {
+  margin-left: auto;
+}
+
+.seed-document__note-body {
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-xs);
+  margin-top: 3px;
+}
+
+.seed-document__note-body > :first-child {
+  margin-top: 0;
+}
+
+.seed-document__note-body > :last-child {
+  margin-bottom: 0;
+}
+
+.seed-document__withheld {
+  margin-top: 8px;
+}

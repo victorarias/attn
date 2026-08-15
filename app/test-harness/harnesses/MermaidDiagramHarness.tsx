@@ -1,6 +1,9 @@
 import { useEffect } from 'react';
 import { MarkdownReader } from '../../src/components/MarkdownReader';
+import { fileMarkdownSource } from '../../src/components/MarkdownReader/documentSource';
 import type { HarnessProps } from '../types';
+
+const DOCUMENT_SOURCE = fileMarkdownSource('test-harness', '/tmp/mermaid-diagram-harness.md');
 
 const DOCUMENT = `# Large Mermaid diagrams
 
@@ -115,7 +118,7 @@ export function MermaidDiagramHarness({ onReady }: HarnessProps) {
 
   return (
     <div style={{ width: 760, maxWidth: '100%', margin: '0 auto', padding: 12 }}>
-      <MarkdownReader content={DOCUMENT} path="/tmp/mermaid-diagram-harness.md" />
+      <MarkdownReader content={DOCUMENT} source={DOCUMENT_SOURCE} />
     </div>
   );
 }

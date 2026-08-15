@@ -1366,6 +1366,10 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleWorkspaceTileContentGet(client, msg.(*protocol.WorkspaceTileContentGetMessage))
 	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdownWS(client, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdOpenSeed: // wire: open_seed
+		d.handleOpenSeedWS(client, msg.(*protocol.OpenSeedMessage))
+	case protocol.CmdSeedDocumentGet: // wire: seed_document_get
+		d.handleSeedDocumentGet(client, msg.(*protocol.SeedDocumentGetMessage))
 	case protocol.CmdSessionMessagesGet: // wire: session_messages_get
 		d.handleSessionMessagesGet(client, msg.(*protocol.SessionMessagesGetMessage))
 	case protocol.CmdSessionAnnotationsGet: // wire: session_annotations_get
@@ -1665,15 +1669,24 @@ func remoteCommandWorkspaceID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdMarkdownAnnotationsGet: // wire: markdown_annotations_get
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsGetMessage); ok {
-			return typed.WorkspaceID
+			if typed.SourceKind != annotationSourceFile {
+				return ""
+			}
+			return protocol.Deref(typed.WorkspaceID)
 		}
 	case protocol.CmdMarkdownAnnotationsSave: // wire: markdown_annotations_save
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsSaveMessage); ok {
-			return typed.WorkspaceID
+			if typed.SourceKind != annotationSourceFile {
+				return ""
+			}
+			return protocol.Deref(typed.WorkspaceID)
 		}
 	case protocol.CmdMarkdownAnnotationsClear: // wire: markdown_annotations_clear
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsClearMessage); ok {
-			return typed.WorkspaceID
+			if typed.SourceKind != annotationSourceFile {
+				return ""
+			}
+			return protocol.Deref(typed.WorkspaceID)
 		}
 	case protocol.CmdRenameWorkspace: // wire: rename_workspace
 		if typed, ok := msg.(*protocol.RenameWorkspaceMessage); ok {

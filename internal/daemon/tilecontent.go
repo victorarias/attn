@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/victorarias/attn/internal/garden"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/workspacelayout"
@@ -22,6 +23,8 @@ import (
 // own tile and multiple markdown tiles can coexist in one workspace.
 const markdownTileIDPrefix = "tile-markdown-"
 
+const seedTileIDPrefix = "tile-seed-"
+
 // markdownTileIDForPath derives the stable tile id for a markdown file:
 // the prefix plus the first 16 hex chars of sha256 over the absolute path.
 // Reopening the same path lands on the same id, which is what makes
@@ -29,6 +32,10 @@ const markdownTileIDPrefix = "tile-markdown-"
 func markdownTileIDForPath(path string) string {
 	sum := sha256.Sum256([]byte(path))
 	return markdownTileIDPrefix + hex.EncodeToString(sum[:8])
+}
+
+func seedTileIDForID(seedID string) string {
+	return seedTileIDPrefix + seedID
 }
 
 // markdownPollInterval is how often the content watcher restats open markdown
@@ -466,8 +473,8 @@ func (d *Daemon) openMarkdownTile(path, sessionID string) (workspaceID, tileID s
 	// Serialize check-then-dock: concurrent opens of different files share
 	// last-write-wins layout snapshots, so an unserialized second dock would
 	// silently drop the first tile.
-	d.openMarkdownMu.Lock()
-	defer d.openMarkdownMu.Unlock()
+	d.openTileMu.Lock()
+	defer d.openTileMu.Unlock()
 
 	tileID = markdownTileIDForPath(path)
 	alreadyOpen := false
@@ -498,6 +505,43 @@ func (d *Daemon) openMarkdownTile(path, sessionID string) (workspaceID, tileID s
 	// itself — passes through here, so recents need no client bookkeeping and
 	// no origin flag.
 	d.store.RecordFileActivity(path, store.FileActivitySourceOpened, sessionID)
+	return workspaceID, tileID, nil
+}
+
+// openSeedTile docks the seed beside the placement session. Its session
+// binding follows the seed's current tender so annotation submit reaches the
+// person doing the work; an untended seed falls back to the placement session.
+func (d *Daemon) openSeedTile(seedID, placementSessionID string) (workspaceID, tileID string, err error) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		return "", "", err
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return "", "", err
+	}
+	if placementSessionID == "" {
+		return "", "", fmt.Errorf("no session selected; open a session in attn or pass --session")
+	}
+	workspaceID, paneID, ok := d.store.FindWorkspaceLayoutPaneBySessionID(placementSessionID)
+	if !ok {
+		return "", "", fmt.Errorf("no workspace found for session %s", placementSessionID)
+	}
+	bindingSessionID := strings.TrimSpace(seed.TenderSession)
+	if bindingSessionID == "" {
+		bindingSessionID = placementSessionID
+	}
+
+	d.openTileMu.Lock()
+	defer d.openTileMu.Unlock()
+
+	tileID = seedTileIDForID(seed.ID)
+	if snapshot := d.store.GetWorkspaceLayout(workspaceID); snapshot != nil && workspacelayout.HasTile(snapshot.Layout, tileID) {
+		if err := d.rebindTileSession(workspaceID, tileID, bindingSessionID); err != nil {
+			return "", "", err
+		}
+	} else if err := d.dockTile(workspaceID, paneID, tileID, string(workspacelayout.TileKindSeed), seed.ID, bindingSessionID, protocol.WorkspaceLayoutDockEdgeRight, nil); err != nil {
+		return "", "", err
+	}
 	return workspaceID, tileID, nil
 }
 
@@ -537,6 +581,20 @@ func (d *Daemon) handleOpenMarkdown(conn net.Conn, msg *protocol.OpenMarkdownMes
 		return
 	}
 	d.logf("open_markdown: docked %s as %s into workspace %s (session %s)", strings.TrimSpace(msg.Path), tileID, workspaceID, sessionID)
+	d.sendOK(conn)
+}
+
+func (d *Daemon) handleOpenSeed(conn net.Conn, msg *protocol.OpenSeedMessage) {
+	placementSessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
+	if placementSessionID == "" {
+		placementSessionID = d.currentlySelectedSession()
+	}
+	workspaceID, tileID, err := d.openSeedTile(msg.SeedID, placementSessionID)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("open_seed: %v", err))
+		return
+	}
+	d.logf("open_seed: docked %s as %s into workspace %s", strings.TrimSpace(msg.SeedID), tileID, workspaceID)
 	d.sendOK(conn)
 }
 
@@ -613,6 +671,30 @@ func (d *Daemon) handleOpenMarkdownWS(client *wsClient, msg *protocol.OpenMarkdo
 	result.WorkspaceID = protocol.Ptr(workspaceID)
 	result.TileID = protocol.Ptr(tileID)
 	d.logf("open_markdown(ws): docked %s as %s into workspace %s (session %s)", result.Path, tileID, workspaceID, sessionID)
+	d.sendToClient(client, result)
+}
+
+func (d *Daemon) handleOpenSeedWS(client *wsClient, msg *protocol.OpenSeedMessage) {
+	result := protocol.OpenSeedResultMessage{
+		Event:     protocol.EventOpenSeedResult,
+		RequestID: msg.RequestID,
+		SeedID:    strings.TrimSpace(msg.SeedID),
+		Success:   true,
+	}
+	placementSessionID := strings.TrimSpace(protocol.Deref(msg.SessionID))
+	if placementSessionID == "" {
+		placementSessionID = d.currentlySelectedSession()
+	}
+	workspaceID, tileID, err := d.openSeedTile(msg.SeedID, placementSessionID)
+	if err != nil {
+		result.Success = false
+		result.Error = protocol.Ptr(err.Error())
+		d.sendToClient(client, result)
+		return
+	}
+	result.WorkspaceID = protocol.Ptr(workspaceID)
+	result.TileID = protocol.Ptr(tileID)
+	d.logf("open_seed(ws): docked %s as %s into workspace %s", result.SeedID, tileID, workspaceID)
 	d.sendToClient(client, result)
 }
 

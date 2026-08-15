@@ -9,7 +9,8 @@
  * - Capture-phase outside pointerdown closes ONLY while the textarea is
  *   clean; typed text blocks it (hasUnsavedContentRef).
  * - Draft text survives unmount via a module-level Map keyed by `draftKey`
- *   (`${path}#<anchorKey>` / `${path}#global`); cleared on submit, deleted
+ *   (`${documentUri}#<anchorKey>` / `${documentUri}#global`); cleared on
+ *   submit, deleted
  *   when emptied.
  * - Anchored below the selection (rect.bottom + 8), flipped above when
  *   spaceBelow < 280; width min(384, vw−32); horizontally clamped.

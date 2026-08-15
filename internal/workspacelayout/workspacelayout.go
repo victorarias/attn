@@ -36,6 +36,7 @@ const (
 	// without touching this package.
 	TileKindMarkdown TileKind = "markdown"
 	TileKindBrowser  TileKind = "browser"
+	TileKindSeed     TileKind = "seed"
 	// TileKindNotebook renders the full editable Notebook surface inside a tile.
 	// Its TileParams hold the open file's path; an empty value is valid and
 	// renders the tile's no-selection picker.

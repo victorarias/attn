@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -20,9 +21,9 @@ func mdAnnotationsGet(t *testing.T, d *Daemon, requestID, path string) protocol.
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleMarkdownAnnotationsGet(client, &protocol.MarkdownAnnotationsGetMessage{
-		Cmd:       protocol.CmdMarkdownAnnotationsGet,
-		Path:      path,
-		RequestID: requestID,
+		Cmd: protocol.CmdMarkdownAnnotationsGet, DocumentUri: fileDocumentURI("workspace-test", strings.TrimSpace(path)),
+		SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-test"),
+		Path: protocol.Ptr(path), RequestID: requestID,
 	})
 	var msg protocol.MarkdownAnnotationsGetResultMessage
 	readNotebookWSEvent(t, client.send, &msg)
@@ -33,8 +34,9 @@ func mdAnnotationsSave(t *testing.T, d *Daemon, requestID, path string, annotati
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleMarkdownAnnotationsSave(client, &protocol.MarkdownAnnotationsSaveMessage{
-		Cmd:         protocol.CmdMarkdownAnnotationsSave,
-		Path:        path,
+		Cmd: protocol.CmdMarkdownAnnotationsSave, DocumentUri: fileDocumentURI("workspace-test", strings.TrimSpace(path)),
+		SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-test"),
+		Path:        protocol.Ptr(path),
 		Annotations: annotations,
 		Generation:  generation,
 		RequestID:   requestID,
@@ -48,8 +50,9 @@ func mdAnnotationsClear(t *testing.T, d *Daemon, requestID, path string, generat
 	t.Helper()
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleMarkdownAnnotationsClear(client, &protocol.MarkdownAnnotationsClearMessage{
-		Cmd:        protocol.CmdMarkdownAnnotationsClear,
-		Path:       path,
+		Cmd: protocol.CmdMarkdownAnnotationsClear, DocumentUri: fileDocumentURI("workspace-test", strings.TrimSpace(path)),
+		SourceKind: annotationSourceFile, WorkspaceID: protocol.Ptr("workspace-test"),
+		Path:       protocol.Ptr(path),
 		Generation: generation,
 		RequestID:  requestID,
 	})
@@ -103,7 +106,7 @@ func TestMarkdownAnnotationsSaveThenGetRoundtripsStructuredFields(t *testing.T) 
 	}
 
 	save := mdAnnotationsSave(t, d, "req-s", "  "+path+"  ", annotations, 1)
-	if !save.Success || save.Stale != nil || save.Path != path || save.Generation != 1 {
+	if !save.Success || save.Stale != nil || protocol.Deref(save.Path) != path || save.Generation != 1 {
 		t.Fatalf("save = %+v, want success on trimmed path at gen 1", save)
 	}
 

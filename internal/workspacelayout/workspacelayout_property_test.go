@@ -166,7 +166,7 @@ func findSplit(node Node, splitID string) (Node, bool) {
 
 var (
 	directions   = []Direction{DirectionVertical, DirectionHorizontal, "", "diagonal"}
-	tileKinds    = []string{string(TileKindMarkdown), string(TileKindBrowser), string(TileKindNotebook), "  markdown  "}
+	tileKinds    = []string{string(TileKindMarkdown), string(TileKindBrowser), string(TileKindSeed), string(TileKindNotebook), "  markdown  "}
 	tileParams   = []string{"", "/tmp/notes.md", "  /tmp/spaced.md  ", "https://example.test"}
 	tileSessions = []string{"", "sess-a", "  sess-b  "}
 )

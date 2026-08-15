@@ -22,12 +22,17 @@ import (
 // single-writer, and the client flushes its debounced save before submitting
 // — accepted.
 func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol.MarkdownAnnotationsSubmitMessage) {
-	path := strings.TrimSpace(msg.Path)
 	target := strings.TrimSpace(msg.TargetSessionID)
+	source, sourceErr := d.resolveAnnotationDocumentSource(msg.DocumentUri, msg.SourceKind, msg.WorkspaceID, msg.Path, msg.SeedID)
+	workspaceID, path, seedID := annotationSourcePointers(source)
 	result := protocol.MarkdownAnnotationsSubmitResultMessage{
 		Event:           protocol.EventMarkdownAnnotationsSubmitResult,
 		RequestID:       msg.RequestID,
+		DocumentUri:     source.documentURI,
+		SourceKind:      source.kind,
+		WorkspaceID:     workspaceID,
 		Path:            path,
+		SeedID:          seedID,
 		TargetSessionID: target,
 		Status:          annotationSubmitStatusError,
 	}
@@ -35,23 +40,23 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 		result.Error = protocol.Ptr(errText)
 		d.sendToClient(client, result)
 	}
-	if path == "" {
-		fail("markdown_annotations_submit: path is required")
+	if sourceErr != nil {
+		fail("markdown_annotations_submit: " + sourceErr.Error())
 		return
 	}
 	if target == "" {
 		fail("markdown_annotations_submit: target_session_id is required")
 		return
 	}
-	draft, err := d.store.GetMarkdownAnnotationDraft(path)
+	draft, err := d.store.GetMarkdownAnnotationDraft(source.draftKey)
 	if err != nil {
-		d.logf("markdown_annotations_submit: %s: %v", path, err)
+		d.logf("markdown_annotations_submit: %s: %v", source.draftKey, err)
 		fail(err.Error())
 		return
 	}
 	annotations, err := decodeMarkdownAnnotations(draft.Annotations)
 	if err != nil {
-		d.logf("markdown_annotations_submit: %s: corrupt stored draft: %v", path, err)
+		d.logf("markdown_annotations_submit: %s: corrupt stored draft: %v", source.draftKey, err)
 		fail("stored annotation draft is corrupt: " + err.Error())
 		return
 	}
@@ -75,14 +80,14 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 	for _, id := range msg.OrphanedIds {
 		orphaned[id] = true
 	}
-	payload := formatMarkdownAnnotationPayload(path, annotations, orphaned)
+	payload := formatMarkdownAnnotationPayload(source, annotations, orphaned)
 	if err := d.typeDoorbell(target, payload); err != nil {
 		if errors.Is(err, errDoorbellBlockedByApproval) {
 			result.Status = annotationSubmitStatusSkipped
 			d.sendToClient(client, result)
 			return
 		}
-		d.logf("markdown_annotations_submit: %s -> %s: delivery failed: %v", path, target, err)
+		d.logf("markdown_annotations_submit: %s -> %s: delivery failed: %v", source.draftKey, target, err)
 		fail(err.Error())
 		return
 	}
@@ -93,16 +98,16 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 	// error so the UI can re-hydrate instead of assuming an empty draft.
 	result.Success = true
 	result.Status = annotationSubmitStatusDelivered
-	if err := d.store.ClearMarkdownAnnotationDraft(path, draft.Generation, time.Now()); err != nil {
-		d.logf("markdown_annotations_submit: %s: delivered but clearing drafts failed: %v", path, err)
+	if err := d.store.ClearMarkdownAnnotationDraft(source.draftKey, draft.Generation, time.Now()); err != nil {
+		d.logf("markdown_annotations_submit: %s: delivered but clearing drafts failed: %v", source.draftKey, err)
 		result.Error = protocol.Ptr("delivered; failed to clear drafts: " + err.Error())
 		d.sendToClient(client, result)
 		return
 	}
-	if fresh, err := d.store.GetMarkdownAnnotationDraft(path); err == nil {
+	if fresh, err := d.store.GetMarkdownAnnotationDraft(source.draftKey); err == nil {
 		result.Generation = protocol.Ptr(fresh.Generation)
 	} else {
-		d.logf("markdown_annotations_submit: %s: reading post-clear floor: %v", path, err)
+		d.logf("markdown_annotations_submit: %s: reading post-clear floor: %v", source.draftKey, err)
 	}
 	d.sendToClient(client, result)
 }

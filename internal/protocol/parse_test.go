@@ -408,6 +408,29 @@ func TestParseOpenMarkdown(t *testing.T) {
 	}
 }
 
+func TestParseSeedReaderMessages(t *testing.T) {
+	t.Run("open seed", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"open_seed","seed_id":"s-abc123","session_id":"sess-1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, ok := data.(*OpenSeedMessage)
+		if cmd != CmdOpenSeed || !ok || msg.SeedID != "s-abc123" || Deref(msg.SessionID) != "sess-1" {
+			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
+		}
+	})
+	t.Run("get seed document", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"seed_document_get","seed_id":"s-abc123","request_id":"req-1"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, ok := data.(*SeedDocumentGetMessage)
+		if cmd != CmdSeedDocumentGet || !ok || msg.SeedID != "s-abc123" || msg.RequestID != "req-1" {
+			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
+		}
+	})
+}
+
 func TestParseBrowserMessages(t *testing.T) {
 	t.Run("open browser", func(t *testing.T) {
 		cmd, data, err := ParseMessage([]byte(`{"cmd":"open_browser","url":"http://localhost:3000","session_id":"sess-1"}`))

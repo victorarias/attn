@@ -29,7 +29,7 @@ import { HeaderSettleKeptChip, HeaderSettlingIndicator } from '../SettlingIndica
 import { HeaderPresentationChip } from '../PresentationChip';
 import { PaneTicketChip } from '../PaneTicketChip';
 import { TicketDetailPanel } from '../TicketDetailPanel';
-import type { Ticket, TicketRow } from '../../hooks/useDaemonSocket';
+import type { Seed, Ticket, TicketRow } from '../../hooks/useDaemonSocket';
 import { useEscapeStack } from '../../hooks/useEscapeStack';
 import type { Presentation } from '../../types/generated';
 import { useGhosttyPaneRuntime } from './useGhosttyPaneRuntime';
@@ -42,7 +42,7 @@ import type { TerminalVisibleContentSnapshot } from '../../utils/terminalVisible
 import type { TerminalVisibleStyleSnapshot } from '../../utils/terminalStyleSummary';
 import type { ResolvedTheme } from '../../utils/terminalSizing';
 import { WorkspaceLayoutRenderer } from './WorkspaceLayoutRenderer';
-import { WorkspaceDockTile } from './WorkspaceDockTile';
+import { WorkspaceDockTile, type WorkspaceTileSessionOption } from './WorkspaceDockTile';
 import { startLeafDrag, type LeafDropSnapshot } from './leafDrag';
 import type { DockTarget } from './dockTarget';
 import type { WorkspaceSelectionStyle } from '../../utils/workspaceSelectionStyle';
@@ -144,6 +144,9 @@ interface SessionTerminalWorkspaceProps {
     // one exists. Drives the pane-header ticket chip + in-pane overlay.
     ticket?: TicketRow;
   }>;
+  // A seed may be tended outside the workspace where its reading tile sits.
+  seedTargetSessions?: WorkspaceTileSessionOption[];
+  gardenSeeds?: Seed[];
   // Daemon-facing ticket actions, threaded straight into the overlay's
   // TicketDetailPanel. Optional so a workspace without ticket wiring still
   // renders; the chip's overlay only opens when these are present.
@@ -226,11 +229,16 @@ interface SessionTerminalWorkspaceProps {
   onRequestTileContent?: (workspaceId: string, tileId: string) => void;
 }
 
+const EMPTY_SEED_TARGET_SESSIONS: WorkspaceTileSessionOption[] = [];
+const EMPTY_GARDEN_SEEDS: Seed[] = [];
+
 export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandle, SessionTerminalWorkspaceProps>(
   function SessionTerminalWorkspace({
     workspaceId,
     workspaceDirectory,
     workspaceSessions = [],
+    seedTargetSessions = EMPTY_SEED_TARGET_SESSIONS,
+    gardenSeeds = EMPTY_GARDEN_SEEDS,
     ticketActions,
     conversationAgents,
     annotationApi,
@@ -1161,7 +1169,8 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
                 && renamePane === null
                 && effectiveDraggingLeafId === null
               }
-              workspaceSessions={tileSessionOptions}
+              workspaceSessions={tileLeaf.tileKind === 'seed' ? seedTargetSessions : tileSessionOptions}
+              gardenSeeds={gardenSeeds}
               workspaceDirectory={workspaceDirectory}
               onClose={() => onUndockTile?.(tileLeaf.tileId)}
               onUpdateParams={(tileParams) => onUpdateTile?.(tileLeaf.tileId, tileParams)}
@@ -1187,11 +1196,14 @@ export const SessionTerminalWorkspace = forwardRef<SessionTerminalWorkspaceHandl
       onUpdateTile,
       tileLeafById,
       tileSessionOptions,
+      seedTargetSessions,
+      gardenSeeds,
       tileBodyRefFor,
       tileContents,
       allowLocalTileTargets,
       onRequestTileContent,
       workspaceId,
+      workspaceDirectory,
       renamePane,
       fontSize,
       isActiveSession,

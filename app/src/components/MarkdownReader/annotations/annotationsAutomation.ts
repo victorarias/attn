@@ -17,6 +17,8 @@ export interface MarkdownAnnotationsAutomationState {
   available: boolean;
   /** Painter strategy: 'custom-highlight' (real WKWebView) or 'mark' (test DOMs). */
   mode: 'custom-highlight' | 'mark' | 'none';
+  uri: string;
+  /** Absolute file path for file documents; empty for non-file sources. */
   path: string;
   generation: number;
   hydrated: boolean;
@@ -66,6 +68,7 @@ export function getMarkdownAnnotationsAutomationHandle(): MarkdownAnnotationsAut
 export const INACTIVE_MARKDOWN_ANNOTATIONS_STATE: MarkdownAnnotationsAutomationState = {
   available: false,
   mode: 'none',
+  uri: '',
   path: '',
   generation: 0,
   hydrated: false,

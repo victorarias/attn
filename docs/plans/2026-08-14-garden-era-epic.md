@@ -164,9 +164,9 @@ events.
 ## Implementation steps
 
 - [x] Open `epic/garden-era` from main once #900 (annot-seams) merges.
-- [ ] Seed document source in the reader + `attn open <seed-id>` +
+- [x] Seed document source in the reader + `attn open <seed-id>` +
       panel read-only drill (ruling A).
-- [ ] `attn://seed/<id>` URI, draft-key generalization, typed
+- [x] `attn://seed/<id>` URI, draft-key generalization, typed
       daemon fields (ruling B).
 - [ ] Live re-anchor on body edits (ruling C).
 - [ ] Split-button submit with the untended flip (ruling D).

@@ -464,11 +464,9 @@ type Daemon struct {
 	selectedSessionID   string
 	selectedWorkspaceID string
 
-	// openMarkdownMu serializes openMarkdownTile's check-then-dock against
-	// itself. Layout saves are last-write-wins snapshots, so two concurrent
-	// opens of different files in one workspace would otherwise both read the
-	// same layout and the second save would silently drop the first tile.
-	openMarkdownMu sync.Mutex
+	// openTileMu serializes tile openers' check-then-dock. Layout saves are
+	// last-write-wins snapshots, so concurrent opens would otherwise drop one.
+	openTileMu sync.Mutex
 
 	// lastUserActivityAtNano is the UnixNano timestamp of the most recent
 	// UI-origin websocket command the daemon observed (see
@@ -2904,6 +2902,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleInjectTestSession(conn, msg.(*protocol.InjectTestSessionMessage))
 	case protocol.CmdOpenMarkdown: // wire: open_markdown
 		d.handleOpenMarkdown(conn, msg.(*protocol.OpenMarkdownMessage))
+	case protocol.CmdOpenSeed: // wire: open_seed
+		d.handleOpenSeed(conn, msg.(*protocol.OpenSeedMessage))
 	case protocol.CmdOpenSentFiles: // wire: open_sent_files
 		d.handleOpenSentFiles(conn, msg.(*protocol.OpenSentFilesMessage))
 	case protocol.CmdOpenBrowser: // wire: open_browser

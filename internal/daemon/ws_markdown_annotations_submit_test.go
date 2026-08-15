@@ -42,7 +42,10 @@ func sendSubmit(t *testing.T, d *Daemon, target string, orphaned []string) proto
 	client := &wsClient{send: make(chan outboundMessage, 4)}
 	d.handleMarkdownAnnotationsSubmit(client, &protocol.MarkdownAnnotationsSubmitMessage{
 		Cmd:             protocol.CmdMarkdownAnnotationsSubmit,
-		Path:            submitTestPath,
+		DocumentUri:     fileDocumentURI("workspace-test", submitTestPath),
+		SourceKind:      annotationSourceFile,
+		WorkspaceID:     protocol.Ptr("workspace-test"),
+		Path:            protocol.Ptr(submitTestPath),
 		TargetSessionID: target,
 		OrphanedIds:     orphaned,
 		RequestID:       "req-1",
@@ -88,7 +91,7 @@ func TestMarkdownAnnotationsSubmitDelivered(t *testing.T) {
 	if res.Generation == nil || *res.Generation != 5 {
 		t.Fatalf("generation = %v, want floor 5", res.Generation)
 	}
-	wantPayload := formatMarkdownAnnotationPayload(submitTestPath, anns, map[string]bool{})
+	wantPayload := formatMarkdownAnnotationPayload(fileAnnotationSource(submitTestPath), anns, map[string]bool{})
 	wantPaste := bracketedPasteStart + wantPayload + bracketedPasteEnd
 	mu.Lock()
 	got := append([]string(nil), inputs...)

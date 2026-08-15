@@ -27,6 +27,7 @@ import { readerSanitizeSchema } from './sanitizeSchema';
 import { scrollToAnchor } from './scrollToAnchor';
 import { AnnotationLayer } from './annotations/AnnotationLayer';
 import { useAnnotations } from './annotations/useAnnotations';
+import { markdownDocumentPath, type MarkdownDocumentSource } from './documentSource';
 import { tilePathBasename } from '../../utils/tilePresentation';
 import './MarkdownReader.css';
 
@@ -283,14 +284,12 @@ export interface MarkdownAnnotationsSendHandle {
 export interface MarkdownReaderProps {
   /** Raw markdown file content (frontmatter included). */
   content: string;
-  /** Absolute path; relative link/image targets resolve against it. */
-  path: string;
+  /** Opaque document identity plus typed file/seed authority. */
+  source: MarkdownDocumentSource;
   /** False for remote workspaces: local file links/images render blocked. */
   allowLocalTargets?: boolean;
   /** Markdown TILES pass true; chat-surface readers never see the layer. */
   annotationsEnabled?: boolean;
-  /** Routes draft persistence to the owning daemon; required when annotating. */
-  workspaceId?: string;
   /** Reports the current annotation count (drives the tile header's Send N). */
   onAnnotationsCountChange?: (count: number) => void;
   annotationsSendRef?: Ref<MarkdownAnnotationsSendHandle | null>;
@@ -347,13 +346,14 @@ const MarkdownReaderBody = memo(function MarkdownReaderBody({
  */
 export const MarkdownReader = memo(function MarkdownReader({
   content,
-  path,
+  source,
   allowLocalTargets = true,
   annotationsEnabled = false,
-  workspaceId = '',
   onAnnotationsCountChange,
   annotationsSendRef,
 }: MarkdownReaderProps) {
+  const path = markdownDocumentPath(source);
+  const localTargetsEnabled = allowLocalTargets && source.kind === 'file';
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [lightbox, setLightbox] = useState<{ src: string; alt: string } | null>(null);
   // Props of the memoized body: identities must never change (gate contract).
@@ -368,8 +368,7 @@ export const MarkdownReader = memo(function MarkdownReader({
   const annotationsApi = useAnnotations({
     rootRef,
     content,
-    path,
-    workspaceId,
+    source,
     enabled: annotationsEnabled,
   });
 
@@ -408,13 +407,13 @@ export const MarkdownReader = memo(function MarkdownReader({
           <MarkdownReaderBody
             content={content}
             path={path}
-            allowLocalTargets={allowLocalTargets}
+            allowLocalTargets={localTargetsEnabled}
             rootRef={rootRef}
             onImageClick={handleImageClick}
           />
         </div>
       </div>
-      {annotationsEnabled && <AnnotationLayer api={annotationsApi} rootRef={rootRef} path={path} />}
+      {annotationsEnabled && <AnnotationLayer api={annotationsApi} rootRef={rootRef} source={source} />}
       {lightbox && (
         <ImageLightbox src={lightbox.src} alt={lightbox.alt} onClose={handleLightboxClose} />
       )}

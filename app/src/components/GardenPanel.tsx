@@ -1,18 +1,18 @@
 // app/src/components/GardenPanel.tsx
 //
 // The garden, seen. Slice 1's whole contract is that a seed planted from a
-// terminal appears here without the user touching anything, so this panel holds
-// no fetch and no refresh: it renders the seeds the daemon pushed
-// (garden_seeds_updated, and initial_state on connect) and re-renders when they
-// change.
+// terminal appears here without the user touching anything. The rows render the
+// pushed garden snapshot; an open row reads its document detail again whenever
+// that snapshot changes so its ledger stays live without polling.
 //
 // The garden is one space (ruled 2026-08-13): the panel opens on all of it and
 // scopes by plot, not by workspace. Drilling into a crown, climbing back, and
 // crossing into another plot are all local — the push already carries the whole
 // garden, so navigation costs no round trip.
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { Seed } from '../hooks/useDaemonSocket';
 import { crewDisplayName, crewHolderName } from '../utils/crewName';
+import { SeedDocumentView, type SeedDocument } from './SeedDocumentView';
 import './GardenPanel.css';
 
 interface GardenPanelProps {
@@ -23,6 +23,12 @@ interface GardenPanelProps {
   // garden outgrew one push, and then the panel says so: a list that ends at a
   // cap without saying it reads as the whole garden.
   seedsTotal: number;
+  /** Read the seed body and its whole ledger for the expanded drill. */
+  fetchSeedDocument?: (seedId: string) => Promise<SeedDocument>;
+  /** Dock the seed's annotated reading surface. */
+  onOpenAsTile?: (seedId: string) => void;
+  /** Open an attached markdown document as its own file tile. */
+  onOpenMarkdownArtifact?: (path: string) => void;
 }
 
 // formatPlantedAt renders an RFC3339 created_at as a short relative phrase.
@@ -134,11 +140,22 @@ function progressOf(seed: Seed): string {
   return parts.join(' · ');
 }
 
-export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelProps) {
+export function GardenPanel({
+  isOpen,
+  onClose,
+  seeds,
+  seedsTotal,
+  fetchSeedDocument,
+  onOpenAsTile,
+  onOpenMarkdownArtifact,
+}: GardenPanelProps) {
   // The trail of crowns walked into, root last. Empty is the whole garden, which
   // is where the panel opens.
   const [trail, setTrail] = useState<string[]>([]);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [seedDocument, setSeedDocument] = useState<SeedDocument | null>(null);
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [documentError, setDocumentError] = useState<string | null>(null);
 
   const index = useMemo(() => indexEdges(seeds), [seeds]);
 
@@ -160,6 +177,36 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelP
     if (!plotId) return seeds;
     return seeds.filter((seed) => crownOf(seed) === plotId);
   }, [seeds, plotId]);
+
+  // Every garden push is relevant while a drill is open: notes and edge
+  // changes re-push the snapshot without necessarily changing the seed's own
+  // revision. Re-read the detail on each new seeds array so the ledger stays
+  // live without polling.
+  useEffect(() => {
+    if (!isOpen || !expandedId || !fetchSeedDocument) {
+      setSeedDocument(null);
+      setDocumentLoading(false);
+      setDocumentError(null);
+      return;
+    }
+    let ignore = false;
+    setDocumentLoading(true);
+    setDocumentError(null);
+    fetchSeedDocument(expandedId)
+      .then((document) => {
+        if (ignore) return;
+        setSeedDocument(document);
+        setDocumentLoading(false);
+      })
+      .catch((error) => {
+        if (ignore) return;
+        setDocumentError(error instanceof Error ? error.message : `Could not read ${expandedId}`);
+        setDocumentLoading(false);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [expandedId, fetchSeedDocument, isOpen, seeds]);
 
   const drillInto = (id: string) => {
     setExpandedId(null);
@@ -239,6 +286,13 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelP
             const expanded = expandedId === seed.id;
             const blockers = index.blockers.get(seed.id) ?? 0;
             const relations = expanded ? relationsOf(index, seed.id) : [];
+            const localDocument: SeedDocument = {
+              seed,
+              children: seeds.filter((candidate) => crownOf(candidate) === seed.id),
+              notes: [],
+              notes_total: 0,
+            };
+            const displayedDocument = seedDocument?.seed.id === seed.id ? seedDocument : localDocument;
             return (
               <li
                 key={seed.id}
@@ -281,6 +335,15 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelP
                 )}
                 {expanded && (
                   <div className="garden-seed__detail">
+                    {onOpenAsTile && (
+                      <button
+                        type="button"
+                        className="garden-seed__open-tile"
+                        onClick={() => onOpenAsTile(seed.id)}
+                      >
+                        Open as tile
+                      </button>
+                    )}
                     <div className="garden-seed__meta">
                       <span>{seed.status}</span>
                       {seed.planter_member && <span>planted by {crewDisplayName(seed.planter_member)}</span>}
@@ -314,10 +377,16 @@ export function GardenPanel({ isOpen, onClose, seeds, seedsTotal }: GardenPanelP
                         ))}
                       </ul>
                     )}
-                    {seed.body ? (
-                      <pre className="garden-seed__body">{seed.body}</pre>
+                    {documentLoading && seedDocument?.seed.id !== seed.id ? (
+                      <p className="garden-seed__document-state">Loading seed…</p>
+                    ) : documentError ? (
+                      <p className="garden-seed__document-state garden-seed__document-state--error">{documentError}</p>
                     ) : (
-                      <p className="garden-seed__nobody">No body — the title is the whole seed.</p>
+                      <SeedDocumentView
+                        document={displayedDocument}
+                        compact
+                        onOpenMarkdownArtifact={onOpenMarkdownArtifact}
+                      />
                     )}
                   </div>
                 )}

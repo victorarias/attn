@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   ChangeEvent,
   FocusEvent as ReactFocusEvent,
@@ -14,11 +14,19 @@ import { deriveTileTitle, tilePathBasename } from '../../utils/tilePresentation'
 import { BrowserTileBody } from './BrowserTileBody';
 import { MarkdownReader } from '../MarkdownReader';
 import type { MarkdownAnnotationsSendHandle } from '../MarkdownReader';
+import {
+  fileMarkdownSource,
+  seedMarkdownSource,
+  type MarkdownDocumentSource,
+} from '../MarkdownReader/documentSource';
 import { getMarkdownAnnotationsTransport } from '../MarkdownReader/annotations/transport';
 import { useAnnotationSend } from '../../annotations/useAnnotationSend';
 import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext';
 import { NotebookTile } from '../notebook/NotebookTile';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
+import { SeedDocumentView, type SeedDocument } from '../SeedDocumentView';
+import { useDaemonApi } from '../../contexts/DaemonApiContext';
+import type { Seed } from '../../hooks/useDaemonSocket';
 import './WorkspaceDockTile.css';
 
 // Link/image target resolution moved to the reader; re-exported here for
@@ -32,6 +40,7 @@ function bodyKindModifier(tileKind: string): string {
   if (tileKind === 'browser') return 'workspace-dock-tile-body--browser';
   if (tileKind === 'notebook') return 'workspace-dock-tile-body--notebook';
   if (tileKind === 'markdown') return 'workspace-dock-tile-body--markdown';
+  if (tileKind === 'seed') return 'workspace-dock-tile-body--markdown';
   return '';
 }
 
@@ -58,6 +67,7 @@ interface WorkspaceDockTileProps {
   visible?: boolean;
   // The workspace's agent sessions — the markdown tile's retarget options.
   workspaceSessions?: WorkspaceTileSessionOption[];
+  gardenSeeds?: Seed[];
   // The owning workspace's directory (Workspace.directory), for the notebook
   // tile's root switcher's "Workspace — <dir>" option. Absent for tile-only
   // workspaces with no directory.
@@ -89,6 +99,7 @@ type MarkdownSendResult =
 const SEND_SENT_CLEAR_MS = 4000;
 const SKIPPED_APPROVAL_MESSAGE = 'Target is waiting for approval — not sent';
 const NOT_HYDRATED_MESSAGE = 'Annotations are still syncing — try again in a moment';
+const NO_GARDEN_SEEDS: Seed[] = [];
 
 export function WorkspaceDockTile({
   tile,
@@ -98,6 +109,7 @@ export function WorkspaceDockTile({
   dragging,
   visible = true,
   workspaceSessions = [],
+  gardenSeeds = NO_GARDEN_SEEDS,
   workspaceDirectory,
   onClose,
   onUpdateParams,
@@ -120,7 +132,7 @@ export function WorkspaceDockTile({
   const path = content?.path
     || (tile.tileKind === 'notebook' ? parseNotebookTileParams(tile.tileParams).path : tile.tileParams)
     || '';
-  const title = deriveTileTitle(tile, content);
+  const baseTitle = deriveTileTitle(tile, content);
   const browserLabel = browserHostLabel(workspaceId, tile.tileId);
   const [browserAddress, setBrowserAddress] = useState(tile.tileParams || '');
   const pendingBrowserParamsRef = useRef<string | null>(null);
@@ -130,8 +142,16 @@ export function WorkspaceDockTile({
   // a root switch, or worse, persist it to the wrong root after remount.
   const notebookSurfaceRef = useRef<NotebookSurfaceHandle | null>(null);
 
-  // ---- markdown annotation send flow (PR6) ---------------------------------
+  // ---- rendered-document annotation send flow ------------------------------
   const isMarkdown = tile.tileKind === 'markdown';
+  const isSeed = tile.tileKind === 'seed';
+  const isAnnotatedDocument = isMarkdown || isSeed;
+  const [seedDocument, setSeedDocument] = useState<SeedDocument | null>(null);
+  const title = isSeed ? (seedDocument?.seed.title || path || baseTitle) : baseTitle;
+  const documentSource = useMemo(
+    () => (isSeed ? seedMarkdownSource(path) : fileMarkdownSource(workspaceId, path)),
+    [isSeed, path, workspaceId],
+  );
   const annotationsSendRef = useRef<MarkdownAnnotationsSendHandle | null>(null);
   const [annotationCount, setAnnotationCount] = useState(0);
   // Focus-within on the tile root gates the ⌘Enter shortcut's registration:
@@ -183,7 +203,7 @@ export function WorkspaceDockTile({
       // that includes the last keystroke's edit.
       await handle.flushPendingSave();
       const result = await transport.submitMarkdownAnnotations(
-        path,
+        documentSource,
         targetSessionId,
         handle.getOrphanedIds(),
       );
@@ -201,9 +221,9 @@ export function WorkspaceDockTile({
       }
       return { kind: 'error', message: result.error || 'Send failed' };
     })();
-  }, [annotationCount, path, targetSessionId]);
+  }, [annotationCount, documentSource, path, targetSessionId]);
 
-  const sendEnabled = isMarkdown
+  const sendEnabled = isAnnotatedDocument
       && visible
       && hasFocusWithin
       && annotationCount > 0
@@ -362,8 +382,8 @@ export function WorkspaceDockTile({
       className={`workspace-dock-tile ${dragging ? 'workspace-dock-tile--dragging' : ''}`.trim()}
       data-browser-host-owner={tile.tileKind === 'browser' ? true : undefined}
       onPointerDownCapture={tile.tileKind === 'browser' ? () => claimBrowserHostFocus(browserLabel) : undefined}
-      onFocus={isMarkdown ? handleTileFocus : undefined}
-      onBlur={isMarkdown ? handleTileBlur : undefined}
+      onFocus={isAnnotatedDocument ? handleTileFocus : undefined}
+      onBlur={isAnnotatedDocument ? handleTileBlur : undefined}
     >
       <div
         className="workspace-dock-tile-header"
@@ -409,7 +429,7 @@ export function WorkspaceDockTile({
             <option value={ROOT_BROWSE_VALUE}>Browse…</option>
           </select>
         ) : null}
-        {isMarkdown ? (
+        {isAnnotatedDocument ? (
           <div
             className="workspace-dock-tile-send"
             // The header is the drag handle; interacting with the send
@@ -519,8 +539,16 @@ export function WorkspaceDockTile({
         {tile.tileKind === 'markdown' ? (
           <MarkdownBody
             content={content}
-            workspaceId={workspaceId}
+            source={documentSource}
             allowLocalTargets={allowLocalTargets}
+            onAnnotationsCountChange={setAnnotationCount}
+            annotationsSendRef={annotationsSendRef}
+          />
+        ) : tile.tileKind === 'seed' ? (
+          <SeedTileBody
+            seedId={path}
+            gardenSeeds={gardenSeeds}
+            onDocument={setSeedDocument}
             onAnnotationsCountChange={setAnnotationCount}
             annotationsSendRef={annotationsSendRef}
           />
@@ -564,13 +592,13 @@ export function WorkspaceDockTile({
 
 function MarkdownBody({
   content,
-  workspaceId,
+  source,
   allowLocalTargets,
   onAnnotationsCountChange,
   annotationsSendRef,
 }: {
   content?: TileContentState;
-  workspaceId: string;
+  source: MarkdownDocumentSource;
   allowLocalTargets: boolean;
   onAnnotationsCountChange: (count: number) => void;
   annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
@@ -587,12 +615,80 @@ function MarkdownBody({
   return (
     <MarkdownReader
       content={content.content}
-      path={content.path}
+      source={source}
       allowLocalTargets={allowLocalTargets}
       annotationsEnabled
-      workspaceId={workspaceId}
       onAnnotationsCountChange={onAnnotationsCountChange}
       annotationsSendRef={annotationsSendRef}
+    />
+  );
+}
+
+function SeedTileBody({
+  seedId,
+  gardenSeeds,
+  onDocument,
+  onAnnotationsCountChange,
+  annotationsSendRef,
+}: {
+  seedId: string;
+  gardenSeeds: Seed[];
+  onDocument: (document: SeedDocument | null) => void;
+  onAnnotationsCountChange: (count: number) => void;
+  annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
+}) {
+  const { sendSeedDocumentGet, sendOpenMarkdown } = useDaemonApi();
+  const [document, setDocument] = useState<SeedDocument | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  // Every garden fact re-pushes the seeds snapshot. Notes and child changes do
+  // not necessarily touch this seed's own revision, so the array identity is
+  // the live invalidation signal for the complete reader document.
+  useEffect(() => {
+    if (!seedId) {
+      setDocument(null);
+      onDocument(null);
+      setError('No seed is associated with this tile.');
+      return;
+    }
+    let ignore = false;
+    setError(null);
+    void sendSeedDocumentGet(seedId)
+      .then((next) => {
+        if (ignore) return;
+        setDocument(next);
+        onDocument(next);
+      })
+      .catch((readError) => {
+        if (ignore) return;
+        setError(readError instanceof Error ? readError.message : `Could not read ${seedId}`);
+      });
+    return () => {
+      ignore = true;
+    };
+  }, [gardenSeeds, onDocument, seedId, sendSeedDocumentGet]);
+
+  useEffect(() => () => onDocument(null), [onDocument]);
+
+  if (!document) {
+    return (
+      <div className={`workspace-dock-tile-message${error ? ' workspace-dock-tile-error' : ''}`}>
+        {error || 'Loading seed…'}
+      </div>
+    );
+  }
+
+  return (
+    <SeedDocumentView
+      document={document}
+      annotationsEnabled
+      onAnnotationsCountChange={onAnnotationsCountChange}
+      annotationsSendRef={annotationsSendRef}
+      onOpenMarkdownArtifact={(path) => {
+        void sendOpenMarkdown(path, '').catch((openError) => {
+          console.error('[SeedDocument] Could not open markdown artifact:', openError);
+        });
+      }}
     />
   );
 }
