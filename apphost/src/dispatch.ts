@@ -65,6 +65,28 @@ export interface CommandResult {
   payload?: unknown
 }
 
+export interface ReconcileReason {
+  causes: ("gap" | "re_enabled" | "version_changed")[]
+  version: number
+  throughSeq: number
+  gap?: {
+    cursor: number
+    earliest: number
+    missed: number
+  }
+  previousVersions: number[]
+}
+
+/** What the daemon sends to rebuild one app through a durable fence. */
+export interface ReconcileParams {
+  dispatch: string
+  app: string
+  version_id: number
+  artifact: string
+  collections: string[]
+  reason: ReconcileReason
+}
+
 /** A handler of either kind: the first argument is the fact or the payload. */
 type Handler = (arg: unknown, ctx: unknown) => unknown
 
@@ -76,7 +98,11 @@ type Handler = (arg: unknown, ctx: unknown) => unknown
  * a command and a subscription of the same name are two different handlers and
  * no key can be ambiguous.
  */
-type Bundle = Partial<Record<HandlerKind, Record<string, Handler>>>
+type Bundle = {
+  subscriptions?: Record<string, Handler>
+  commands?: Record<string, Handler>
+  reconcile?: Handler
+}
 
 type HandlerKind = "subscriptions" | "commands"
 
@@ -167,6 +193,21 @@ function collectionsFor(
   return out
 }
 
+/** Builds the context shared by subscriptions, commands, and reconciliation. */
+function contextFor(
+  conn: RpcConnection,
+  params: { dispatch: string; app: string; version_id: number; collections: string[] },
+): Record<string, unknown> {
+  return {
+    app: params.app,
+    version: params.version_id,
+    collections: collectionsFor(conn, params.dispatch, params.collections),
+    current: {
+      snapshot: () => conn.call("app.current.snapshot", { dispatch: params.dispatch }),
+    },
+  }
+}
+
 /**
  * Runs one dispatch and describes what happened.
  *
@@ -196,11 +237,7 @@ export async function runDispatch(
     }
   }
 
-  const ctx = {
-    app: params.app,
-    version: params.version_id,
-    collections: collectionsFor(conn, params.dispatch, params.collections),
-  }
+  const ctx = contextFor(conn, params)
   // Announced before the call, because a handler that never yields would keep any
   // later announcement from ever being written. This is the daemon's only witness
   // of which handler is on the event loop, and it needs it exactly when this
@@ -252,11 +289,7 @@ export async function runCommand(
     }
   }
 
-  const ctx = {
-    app: params.app,
-    version: params.version_id,
-    collections: collectionsFor(conn, params.dispatch, params.collections),
-  }
+  const ctx = contextFor(conn, params)
   const scope = { dispatch: params.dispatch, app: params.app }
   conn.notify("app_runtime.entered", scope)
   try {
@@ -265,6 +298,42 @@ export async function runCommand(
     // field off is what tells the caller that apart from a handler that
     // deliberately returned null.
     return payload === undefined ? { ok: true } : { ok: true, payload }
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  } finally {
+    conn.notify("app_runtime.left", scope)
+  }
+}
+
+/** Runs the serving version's reconcile sibling export. */
+export async function runReconcile(
+  conn: RpcConnection,
+  params: ReconcileParams,
+): Promise<DispatchResult> {
+  appByArtifact.set(params.artifact, params.app)
+
+  let bundle: Bundle
+  try {
+    bundle = await loadBundle(params.artifact)
+  } catch (err) {
+    return { ok: false, error: describeFailure(err) }
+  }
+
+  const handler = typeof bundle.reconcile === "function" ? bundle.reconcile : undefined
+  if (!handler) {
+    return {
+      ok: false,
+      error:
+        `app ${params.app} version ${params.version_id} declares reconcile but its default export has no reconcile handler. ` +
+        "The generated Handlers type makes this a compile error — the bundle is out of step with its manifest.",
+    }
+  }
+
+  const scope = { dispatch: params.dispatch, app: params.app }
+  conn.notify("app_runtime.entered", scope)
+  try {
+    await handler(params.reason, contextFor(conn, params))
+    return { ok: true }
   } catch (err) {
     return { ok: false, error: describeFailure(err) }
   } finally {

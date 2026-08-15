@@ -34,7 +34,7 @@ func TestParseManifest_Valid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
-	if m.Name != "approval-gate" || m.Entrypoint != "src/index.ts" || m.AttnAppAPI != APIVersion {
+	if m.Name != "approval-gate" || m.Entrypoint != "src/index.ts" || m.AttnAppAPI != APIVersion || m.Reconcile {
 		t.Fatalf("manifest = %+v", m)
 	}
 	if got := m.EventPatterns(); len(got) != 2 || got[0] != "delegation.*" || got[1] != "session.state.changed" {
@@ -109,6 +109,29 @@ func TestParseManifest_UnknownTopLevelKeyIsRefused(t *testing.T) {
 	_, err := ParseManifest(text)
 	if err == nil || !strings.Contains(err.Error(), `"author"`) {
 		t.Fatalf("err = %v, want a refusal naming author", err)
+	}
+}
+
+func TestParseManifest_ReconcileDefaultsFalseAndFreezesTrue(t *testing.T) {
+	m, err := ParseManifest(validManifest(t, ""))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Reconcile {
+		t.Fatal("reconcile defaults true")
+	}
+
+	with := strings.Replace(validManifest(t, ""), `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true", 1)
+	m, err = ParseManifest(with)
+	if err != nil {
+		t.Fatal(err)
+	}
+	declaration, err := m.Declaration()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(declaration, `"reconcile":true`) {
+		t.Fatalf("declaration does not freeze reconcile support: %s", declaration)
 	}
 }
 
@@ -513,7 +536,8 @@ func TestLoadManifest_NoManifestSaysWhatToDo(t *testing.T) {
 // The frozen snapshot is what a version row carries, so it has to survive the
 // round trip with the fields the runtime will read back.
 func TestManifest_DeclarationRoundTrips(t *testing.T) {
-	m, err := ParseManifest(validManifest(t, ""))
+	text := strings.Replace(validManifest(t, ""), `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true", 1)
+	m, err := ParseManifest(text)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +549,7 @@ func TestManifest_DeclarationRoundTrips(t *testing.T) {
 	if err := json.Unmarshal([]byte(snapshot), &back); err != nil {
 		t.Fatalf("declaration is not JSON: %v", err)
 	}
-	if back.Name != m.Name || back.Entrypoint != m.Entrypoint || len(back.Subscribe) != len(m.Subscribe) {
+	if back.Name != m.Name || back.Entrypoint != m.Entrypoint || !back.Reconcile || len(back.Subscribe) != len(m.Subscribe) {
 		t.Fatalf("declaration lost fields: %+v", back)
 	}
 	if len(back.Collections) != 1 || back.Collections[0].Name != "decisions" {

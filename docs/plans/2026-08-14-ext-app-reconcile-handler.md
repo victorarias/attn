@@ -184,12 +184,13 @@ type CurrentStateSnapshot = {
   tickets: TicketRow[]
   seeds: Seed[]
   crew: CrewMember[]
-  apps: AppSummary[]
+  apps: AppRegistryEntry[]
 }
 ```
 
 These are the state-bearing domain fields assembled for `InitialStateMessage`
-in `internal/daemon/websocket.go`; A5 adds `apps` to that projection. Protocol
+in `internal/daemon/websocket.go`; A5 adds `apps` as its registry projection,
+not the operator-oriented `AppSummary`. Protocol
 identity, warnings, client-only metadata, and the untyped `settings` map are
 not app state and are not included. In particular, `settings` is the daemon's
 entire settings table plus derived client capability flags, not a bounded app

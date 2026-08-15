@@ -52,12 +52,15 @@ type fakeAppRuntime struct {
 	// no payload, which is what a handler returning nothing looks like on the
 	// wire. Returning an error is a handler that threw.
 	command func(*fakeAppRuntime, appCommandRequest) (json.RawMessage, error)
+	// reconcile runs in place of the bundle's reconcile sibling export.
+	reconcile func(*fakeAppRuntime, appReconcileRequest) error
 
 	writeMu sync.Mutex
 
 	mu         sync.Mutex
 	dispatches []appDispatchRequest
 	commands   []appCommandRequest
+	reconciles []appReconcileRequest
 	pending    map[string]chan jsonRPCMessage
 	nextID     int
 	// loopFrozen models a blocked event loop. A real host does everything off one
@@ -178,8 +181,12 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			f.serveCommand(msg)
 			continue
 		}
+		if msg.Method == "app.reconcile" {
+			f.serveReconcile(msg)
+			continue
+		}
 		if msg.Method != "app.dispatch" {
-			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch, app.command and app.runtime.ping"))
+			f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, "the fake sidecar only serves app.dispatch, app.command, app.reconcile and app.runtime.ping"))
 			continue
 		}
 		var req appDispatchRequest
@@ -217,6 +224,34 @@ func (f *fakeAppRuntime) serve(reader *bufio.Reader) {
 			f.sendRaw(jsonRPCResult(id, result))
 		}(msg.ID, req)
 	}
+}
+
+func (f *fakeAppRuntime) serveReconcile(msg jsonRPCMessage) {
+	var req appReconcileRequest
+	if err := json.Unmarshal(msg.Params, &req); err != nil {
+		f.sendRaw(jsonRPCFailure(msg.ID, jsonRPCInvalidRequest, err.Error()))
+		return
+	}
+	f.mu.Lock()
+	f.reconciles = append(f.reconciles, req)
+	f.mu.Unlock()
+	f.sendRaw(jsonRPCMessage{
+		JSONRPC: "2.0", Method: appRuntimeEnteredMethod,
+		Params: mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+	})
+	go func(id json.RawMessage, req appReconcileRequest) {
+		result := appDispatchResult{OK: true}
+		if f.reconcile != nil {
+			if err := f.reconcile(f, req); err != nil {
+				result = appDispatchResult{OK: false, Error: err.Error()}
+			}
+		}
+		f.sendRaw(jsonRPCMessage{
+			JSONRPC: "2.0", Method: appRuntimeLeftMethod,
+			Params: mustMarshalHandlerParams(f.t, appRuntimeHandlerParams{Dispatch: req.Dispatch, App: req.App}),
+		})
+		f.sendRaw(jsonRPCResult(id, result))
+	}(msg.ID, req)
 }
 
 // serveCommand is the command half of the loop above, with the same
@@ -265,6 +300,14 @@ func (f *fakeAppRuntime) commandLog() []appCommandRequest {
 	return out
 }
 
+func (f *fakeAppRuntime) reconcileLog() []appReconcileRequest {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]appReconcileRequest, len(f.reconciles))
+	copy(out, f.reconciles)
+	return out
+}
+
 func mustMarshalHandlerParams(t *testing.T, params appRuntimeHandlerParams) json.RawMessage {
 	t.Helper()
 	data, err := json.Marshal(params)
@@ -284,8 +327,8 @@ func (f *fakeAppRuntime) sendRaw(msg jsonRPCMessage) {
 	_, _ = f.conn.Write(append(data, '\n'))
 }
 
-// call makes a collection callback, the way a handler's ctx.collections does.
-func (f *fakeAppRuntime) call(method string, params appCollectionParams) (json.RawMessage, error) {
+// call makes a context callback, the way a handler's ctx does.
+func (f *fakeAppRuntime) call(method string, params any) (json.RawMessage, error) {
 	f.mu.Lock()
 	f.nextID++
 	id := json.RawMessage(fmt.Sprintf(`"cb-%d"`, f.nextID))

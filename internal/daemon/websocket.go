@@ -781,26 +781,27 @@ func (d *Daemon) sendInitialState(client *wsClient) {
 	if status, err := d.enrollmentStatus(); err == nil {
 		homeDaemonID = status.HomeDaemonID
 	}
+	state := d.currentStateProjection()
 	event := &protocol.InitialStateMessage{
 		Event:             protocol.EventInitialState,
 		ProtocolVersion:   protocol.Ptr(protocol.ProtocolVersion),
 		SourceFingerprint: protocol.Ptr(buildinfo.SourceFingerprint),
 		DaemonInstanceID:  protocol.Ptr(d.daemonInstanceID),
 		HomeDaemonID:      protocol.Ptr(homeDaemonID),
-		Sessions:          d.mergedSessionsForBroadcast(),
-		Endpoints:         d.listEndpointInfos(),
-		Workspaces:        d.listWorkspaces(),
-		Prs:               protocol.PRsToValues(d.store.ListPRs("")),
-		Repos:             protocol.RepoStatesToValues(d.store.ListRepoStates()),
-		Authors:           protocol.AuthorStatesToValues(d.store.ListAuthorStates()),
-		GithubHosts:       d.gitHubHosts(),
+		Sessions:          state.Sessions,
+		Endpoints:         state.Endpoints,
+		Workspaces:        state.Workspaces,
+		Prs:               state.Prs,
+		Repos:             state.Repos,
+		Authors:           state.Authors,
+		GithubHosts:       state.GithubHosts,
 		Settings:          d.settingsWithAgentAvailability(),
 		Warnings:          d.getWarnings(),
-		Tickets:           d.ticketsForBroadcast(),
-		Seeds:             d.seedsForBroadcast(),
+		Tickets:           state.Tickets,
+		Seeds:             state.Seeds,
 		SeedsTotal:        protocol.Ptr(d.countSeedsForBroadcast()),
-		Apps:              d.appRegistryForWire(),
-		Crew:              d.crewForBroadcast(),
+		Apps:              state.Apps,
+		Crew:              state.Crew,
 	}
 	data, err := json.Marshal(event)
 	if err != nil {

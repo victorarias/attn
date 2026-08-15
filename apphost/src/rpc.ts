@@ -148,8 +148,8 @@ export class RpcConnection {
     this.socket.write(`${JSON.stringify(frame)}\n`)
   }
 
-  private consume(chunk: Buffer): void {
-    this.buffer += chunk.toString("utf8")
+  private consume(chunk: Buffer | string): void {
+    this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8")
     for (;;) {
       const newline = this.buffer.indexOf("\n")
       if (newline < 0) break
