@@ -136,6 +136,9 @@ type AttachInfo struct {
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal (geometry Cols/Rows); nil when absent.
 	GhosttySnapshot []byte
+	// GhosttySnapshotFormat names the wire format GhosttySnapshot is written
+	// in; empty when absent, and from an old worker that does not send it.
+	GhosttySnapshotFormat string
 	// GhosttyBlocks are OSC 133 command blocks resolved to SCREEN-space rows of
 	// GhosttySnapshot, captured atomically with it and LastSeq; nil when absent.
 	GhosttyBlocks []pty.AttachBlockData

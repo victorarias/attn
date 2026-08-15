@@ -15,6 +15,7 @@ import (
 
 	creackpty "github.com/creack/pty"
 
+	"github.com/victorarias/attn/internal/buildinfo"
 	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
@@ -663,10 +664,20 @@ func (s *Session) info() AttachInfo {
 		ExitCode:                   exitCode,
 		ExitSignal:                 exitSignal,
 		GhosttySnapshot:            ghosttySnapshot,
+		GhosttySnapshotFormat:      snapshotFormat(ghosttySnapshot),
 		GhosttyBlocks:              ghosttyBlocks,
 		GhosttyPlacements:          ghosttyPlacements,
 		GhosttyScrollbackTruncated: ghosttyTruncated,
 	}
+}
+
+// snapshotFormat names the format of bytes this build just encoded. Nothing to
+// name when there are no bytes.
+func snapshotFormat(snapshot []byte) string {
+	if len(snapshot) == 0 {
+		return ""
+	}
+	return buildinfo.SnapshotFormat
 }
 
 // kittyImage copies one stored image out of the session's terminal. Under

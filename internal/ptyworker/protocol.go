@@ -268,6 +268,13 @@ type AttachResult struct {
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal from libghostty-vt (geometry is Cols/Rows). Omitted when absent.
 	GhosttySnapshot []byte `json:"ghostty_snapshot,omitempty"`
+	// GhosttySnapshotFormat identifies the wire format GhosttySnapshot is
+	// written in (buildinfo.SnapshotFormat). A worker outlives an install, so
+	// these bytes can reach a client built against a different libghostty-vt;
+	// the client compares this against its own decoder and skips a restore it
+	// cannot read. Additive: an old worker omits it, and an unnamed format is
+	// one nobody speaks.
+	GhosttySnapshotFormat string `json:"ghostty_snapshot_format,omitempty"`
 	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
 	// SCREEN-space rows of GhosttySnapshot, captured atomically with it and
 	// LastSeq (Phase 3a). Mirrors pty.AttachBlockData. Omitted when absent;

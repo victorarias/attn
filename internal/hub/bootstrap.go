@@ -716,6 +716,12 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	if gc := buildinfo.GitCommit; gc != "" && gc != "unknown" {
 		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.GitCommit=" + gc
 	}
+	// The remote daemon's workers encode snapshots this app decodes, so the
+	// build it gets must carry the same format tag; without it every remote
+	// session attaches without its scrollback.
+	if sf := buildinfo.SnapshotFormat; sf != "" && sf != "unknown" {
+		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.SnapshotFormat=" + sf
+	}
 	// The worker's server-authoritative terminal links libghostty-vt via cgo on
 	// Linux too (internal/ghosttyvt), so the cross-compile needs that target's
 	// native archive present. It is download-first (no zig for the archive

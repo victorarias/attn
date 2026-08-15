@@ -106,6 +106,22 @@ describe('adoptSnapshot', () => {
     terminal.free();
   });
 
+  it('rejects bytes it cannot decode without touching the terminal', () => {
+    // The containment in GhosttyTerminal.restoreSnapshot rests on this: a
+    // refused decode must leave the model it declined to replace intact, so a
+    // snapshot written by another build costs the restore and nothing else.
+    const terminal = ghostty.createTerminal(80, 24, {});
+    terminal.write('content that survives a refused restore\r\n');
+
+    expect(() => terminal.adoptSnapshot(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]))).toThrow();
+
+    expect([terminal.cols, terminal.rows]).toEqual([80, 24]);
+    expect(viewportRows(terminal)[0]).toBe('content that survives a refused restore');
+    terminal.write('and still takes input');
+    expect(viewportRows(terminal)[1]).toBe('and still takes input');
+    terminal.free();
+  });
+
   it('keeps the terminal usable for live input', () => {
     const { terminal, history } = adopted();
     while (history.next() !== null) { /* drain */ }

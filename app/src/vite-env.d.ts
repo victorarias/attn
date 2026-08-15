@@ -16,3 +16,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// The snapshot wire format this bundle decodes, defined by vite.config.ts.
+declare const __ATTN_SNAPSHOT_FORMAT__: string;

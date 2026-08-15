@@ -114,6 +114,12 @@ type AttachInfo struct {
 	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
 	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
 	GhosttySnapshot []byte
+	// GhosttySnapshotFormat names the wire format GhosttySnapshot is written in
+	// (buildinfo.SnapshotFormat), stamped where the bytes are produced. A
+	// pty-worker outlives an install, so a snapshot can reach a client built
+	// against a different libghostty-vt; carrying the format is what lets that
+	// client decline it. Empty when there is no snapshot.
+	GhosttySnapshotFormat string
 	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
 	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
 	// (atomic with the dump and LastSeq). nil when ghostty is absent.

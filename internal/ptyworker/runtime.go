@@ -947,6 +947,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ExitCode:                   info.ExitCode,
 			ExitSignal:                 info.ExitSignal,
 			GhosttySnapshot:            info.GhosttySnapshot,
+			GhosttySnapshotFormat:      info.GhosttySnapshotFormat,
 			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
 			GhosttyPlacements:          placementsToWire(info.GhosttyPlacements),
 			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,

@@ -3758,6 +3758,13 @@ model AttachSnapshot {
   cols: int32;
   rows: int32;
   snapshot_b64: string;          // base64 ghostty snapshot record stream
+  // The wire format snapshot_b64 is written in. A pty-worker outlives an
+  // install, so these bytes can be encoded by a build the client's decoder does
+  // not match; the client compares this against its own and falls back to a
+  // snapshot-less attach rather than decoding a format it cannot read. Absent
+  // from a worker that predates the field, which is also a format nobody
+  // speaks. See docs/plans/2026-08-16-snapshot-format-skew.md.
+  format?: string;
   blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
   // Kitty placements on the screen the snapshot carries, captured in the same
   // hold. Absent when the session holds no images. Pixels are not inlined; the

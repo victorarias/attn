@@ -579,6 +579,17 @@ Design and gate decisions:
   fallback — a snapshot-less attach keeps whatever the client has and dedups the
   live stream against `last_seq`. See
   [docs/plans/2026-08-16-snapshot-restore.md](docs/plans/2026-08-16-snapshot-restore.md).
+- A snapshot names the format it was written in
+  (`attach_result.snapshot.format`, derived at build time by
+  `scripts/snapshot-format.sh` from the two ghostty locks). A pty-worker
+  outlives an install, so an upgraded app is routinely offered bytes an older
+  encoder wrote; the client compares that tag against its own decoder and
+  treats anything else — a foreign tag or no tag — as no snapshot, which is
+  already a supported attach. Never decode a snapshot on the strength of the
+  field being present, and never route a decode failure to model-fault
+  recovery: the model is fine, the payload is not, and a new epoch reattaches
+  straight back into the same bytes. See
+  [docs/plans/2026-08-16-snapshot-format-skew.md](docs/plans/2026-08-16-snapshot-format-skew.md).
 - Encoding fails outright when the worker's parser sits mid-sequence and
   continuation tracking was off, so the worker enables it at construction, not at
   snapshot time.
