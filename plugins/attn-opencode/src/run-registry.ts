@@ -115,6 +115,12 @@ export class RunRegistry {
     });
   }
 
+  // A pinned run gets its own OpenCode TUI state, so it opens on the delegated
+  // model and cannot rewrite the user's own selection. See `seedTUIState`.
+  stateDir(runID: string): string {
+    return join(this.root, "state", safeRunID(runID));
+  }
+
   async password(record: RunRecord): Promise<string> {
     return readPrivate(record.password_ref);
   }
@@ -151,6 +157,7 @@ export class RunRegistry {
         record.prompt_ref ? rm(record.prompt_ref, { force: true }) : Promise.resolve(),
         record.instruction_ref ? rm(record.instruction_ref, { force: true }) : Promise.resolve(),
         rm(record.launch_config_ref, { force: true }),
+        rm(this.stateDir(record.run_id), { force: true, recursive: true }),
       ]);
     });
   }

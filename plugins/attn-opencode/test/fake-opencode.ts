@@ -23,6 +23,16 @@ export class FakeOpenCode {
   pendingListBarrier?: Promise<void>;
   readonly hangingSessionReads = new Set<string>();
   readonly prompts: Array<{ sessionID: string; body: unknown }> = [];
+  readonly tuiSubmissions: Array<{ sessionID: string; text: string }> = [];
+  tuiAttached = true;
+  tuiModel: unknown = { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "max" };
+  // Every model the tests pin, with the variants OpenCode's catalog declares for
+  // it. A model missing here is a model OpenCode does not have.
+  variants = new Map<string, string[]>([
+    ["spotify-glm/zai-org/GLM-5.2-FP8", ["low", "max"]],
+    ["opencode-go/mimo-v2.5", []],
+  ]);
+  private composer = "";
   private controllers = new Set<ReadableStreamDefaultController<Uint8Array>>();
   private nextSession = 1;
   readonly server: ReturnType<typeof Bun.serve>;
@@ -112,6 +122,19 @@ export class FakeOpenCode {
       this.sessions.set(id, { id, model: (body as { model: unknown }).model });
       return Response.json({ id });
     }
+    if (url.pathname === "/config/providers") {
+      const providers = new Map<string, Record<string, unknown>>();
+      for (const [pin, variants] of this.variants) {
+        const slash = pin.indexOf("/");
+        const providerID = pin.slice(0, slash);
+        const models = providers.get(providerID) ?? {};
+        models[pin.slice(slash + 1)] = { id: pin.slice(slash + 1), variants: Object.fromEntries(variants.map((name) => [name, {}])) };
+        providers.set(providerID, models);
+      }
+      return Response.json({
+        providers: [...providers].map(([id, models]) => ({ id, models })),
+      });
+    }
     if (url.pathname === "/session/status") return Response.json(Object.fromEntries(this.statuses));
     if (url.pathname === "/question") {
       if (this.failPendingLists) return Response.json({ error: "question list failed" }, { status: 500 });
@@ -188,7 +211,27 @@ export class FakeOpenCode {
       const session = this.sessions.get(sessionID);
       return session ? Response.json(session) : new Response("missing", { status: 404 });
     }
-    if (url.pathname === "/tui/select-session") return Response.json(true);
+    // Every `/tui/*` route answers `true` whether or not a TUI is attached to
+    // the event bus, exactly like OpenCode: a control request published before
+    // the TUI attaches is simply dropped.
+    if (url.pathname === "/tui/clear-prompt") {
+      if (this.tuiAttached) this.composer = "";
+      return Response.json(true);
+    }
+    if (url.pathname === "/tui/append-prompt") {
+      if (this.tuiAttached) this.composer += (body as { text?: string }).text ?? "";
+      return Response.json(true);
+    }
+    if (url.pathname === "/tui/submit-prompt") {
+      if (this.tuiAttached && this.composer !== "") {
+        const id = `native-${this.nextSession++}`;
+        this.sessions.set(id, { id, model: this.tuiModel });
+        this.tuiSubmissions.push({ sessionID: id, text: this.composer });
+        this.composer = "";
+        this.emit("session.created", { sessionID: id });
+      }
+      return Response.json(true);
+    }
     return new Response("not found", { status: 404 });
   }
 }

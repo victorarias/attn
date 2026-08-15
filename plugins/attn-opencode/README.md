@@ -39,10 +39,21 @@ An ordinary promptless OpenCode session launches the TUI with OpenCode's own
 model and variant defaults. The plugin observes the native session OpenCode
 creates and persists its identity for resume. Delegated OpenCode sessions
 require an explicit `--model provider/model` and one of the contract-tested
-effort pins: `--effort low` or `--effort max`. The plugin sends those pins to
-OpenCode's server as `{ providerID, id, variant }`, so its staged prompt is
-bound to the selected native session. Other effort labels remain intentionally
-unsupported until they have the same adapter and live-app evidence.
+effort pins: `--effort low` or `--effort max`. Other effort labels remain
+intentionally unsupported until they have the same adapter and live-app
+evidence.
+
+A delegated launch runs the pinned model on OpenCode's `build` agent
+(`--agent build` plus the model in the injected config), and seeds its own
+`XDG_STATE_HOME` with the pinned variant, because the TUI takes the variant
+from its state rather than from the agent config — which also keeps a run from
+rewriting the user's own model selection. The delegated turn is then submitted
+through the TUI, so the pane shows the session OpenCode itself opened; the
+`session.created` event that submission produces is the receipt that stops the
+staging retry. Before staging, the plugin checks the pinned model's variants in
+OpenCode's provider catalog and fails the run when the model cannot honor the
+requested effort, and after the session opens it reads the model back and
+degrades loudly when provider, model, or variant differ from the pin.
 
 Each run gets a separate loopback port and random Basic-auth password. The
 password, staged prompt, and attn-composed launch instructions live in private
@@ -75,5 +86,5 @@ attention request, the plugin classifies the newest completed assistant prose
 using the same OpenCode model in a temporary, tool-disabled session. Ordinary
 prose questions then become `waiting_input`, completed answers become `idle`,
 and uncertain extraction or classification becomes `unknown`. The temporary
-session is deleted without selecting it in the TUI, and duplicate idle events
+session is deleted without ever reaching the TUI, and duplicate idle events
 reuse a verdict cached against the exact native message text.
