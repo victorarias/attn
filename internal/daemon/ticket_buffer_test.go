@@ -64,6 +64,34 @@ func TestTicketBurstBundlesIntoOneFollowupNudge(t *testing.T) {
 	})
 }
 
+func TestCompletedTicketInsideBurstStaysBundled(t *testing.T) {
+	d := newBubbleDaemon(t)
+	synctest.Test(t, func(t *testing.T) {
+		d.nudgeWindowOverride = time.Second
+		d.ticketBundleWindowOverride = 10 * time.Minute
+		stopDaemonBackground(t, d)
+		chiefID, agentID, inputs := delegateForNotify(t, d, "codex")
+		d.setSelectedSession(agentID)
+		if bundles := callTicketInbox(t, d, chiefID); len(bundles) != 0 {
+			t.Fatalf("initial chief inbox = %+v", bundles)
+		}
+		if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(chiefID), time.Now()); err != nil {
+			t.Fatal(err)
+		}
+
+		callSetTicketStatus(t, d, agentID, string(protocol.DispatchWorkStateCompleted), "done")
+		deadline := settledNudgeDeadline(t, d, chiefID)
+		if want := time.Now().Add(10 * time.Minute); !deadline.Equal(want) {
+			t.Fatalf("completed-ticket deadline = %s, want bundled %s", deadline, want)
+		}
+		time.Sleep(time.Second)
+		synctest.Wait()
+		if got := nudgeCount(inputs(chiefID)); got != 0 {
+			t.Fatalf("completed-ticket nudges before bundle deadline = %d, want 0", got)
+		}
+	})
+}
+
 func TestTicketNudgeReturnsToImmediateAfterQuiet(t *testing.T) {
 	d := newBubbleDaemon(t)
 	synctest.Test(t, func(t *testing.T) {

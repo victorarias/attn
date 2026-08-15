@@ -1535,8 +1535,10 @@ func migrateDB(db *sql.DB, dbPath string) error {
 	return nil
 }
 
-// applyMigration107 records the newest ticket event covered by a delivery. The
-// guard keeps migration-rewind tests and branch databases with the column safe.
+// applyMigration107 records the newest ticket event covered by a delivery. Old
+// rows stay at zero because the prior schema cannot prove which event was covered;
+// guessing could suppress unread activity, while the next delivery self-heals.
+// The guard keeps migration-rewind tests and branch databases with the column safe.
 func applyMigration107(tx *sql.Tx) error {
 	has, err := columnExists(tx, "ticket_delivery_attention", "delivered_through_seq")
 	if err != nil {
