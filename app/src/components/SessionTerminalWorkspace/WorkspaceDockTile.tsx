@@ -148,7 +148,10 @@ export function WorkspaceDockTile({
   const isMarkdown = tile.tileKind === 'markdown';
   const isSeed = tile.tileKind === 'seed';
   const isAnnotatedDocument = isMarkdown || isSeed;
-  const [seedDocument, setSeedDocument] = useState<SeedDocument | null>(null);
+  const {
+    document: seedDocument,
+    error: seedDocumentError,
+  } = useLiveSeedDocument(path, gardenSeeds, isSeed);
   const title = isSeed ? (seedDocument?.seed.title || path || baseTitle) : baseTitle;
   const documentSource = useMemo(
     () => (isSeed ? seedMarkdownSource(path) : fileMarkdownSource(workspaceId, path)),
@@ -646,9 +649,8 @@ export function WorkspaceDockTile({
           />
         ) : tile.tileKind === 'seed' ? (
           <SeedTileBody
-            seedId={path}
-            gardenSeeds={gardenSeeds}
-            onDocument={setSeedDocument}
+            document={seedDocument}
+            error={seedDocumentError}
             onAnnotationsCountChange={setAnnotationCount}
             annotationsSendRef={annotationsSendRef}
           />
@@ -724,20 +726,8 @@ function MarkdownBody({
   );
 }
 
-function SeedTileBody({
-  seedId,
-  gardenSeeds,
-  onDocument,
-  onAnnotationsCountChange,
-  annotationsSendRef,
-}: {
-  seedId: string;
-  gardenSeeds: Seed[];
-  onDocument: (document: SeedDocument | null) => void;
-  onAnnotationsCountChange: (count: number) => void;
-  annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
-}) {
-  const { sendSeedDocumentGet, sendOpenMarkdown } = useDaemonApi();
+function useLiveSeedDocument(seedId: string, gardenSeeds: Seed[], enabled: boolean) {
+  const { sendSeedDocumentGet } = useDaemonApi();
   const [document, setDocument] = useState<SeedDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const liveSeed = useMemo(
@@ -761,9 +751,9 @@ function SeedTileBody({
   // not necessarily touch this seed's own revision, so the array identity is
   // the live invalidation signal for the complete reader document.
   useEffect(() => {
+    if (!enabled) return;
     if (!seedId) {
       setDocument(null);
-      onDocument(null);
       setError('No seed is associated with this tile.');
       return;
     }
@@ -793,15 +783,25 @@ function SeedTileBody({
     return () => {
       ignore = true;
     };
-  }, [gardenSeeds, liveSeed, onDocument, seedId, sendSeedDocumentGet]);
+  }, [enabled, gardenSeeds, liveSeed, seedId, sendSeedDocumentGet]);
 
-  useEffect(() => {
-    onDocument(displayedDocument);
-  }, [displayedDocument, onDocument]);
+  return { document: displayedDocument, error };
+}
 
-  useEffect(() => () => onDocument(null), [onDocument]);
+function SeedTileBody({
+  document,
+  error,
+  onAnnotationsCountChange,
+  annotationsSendRef,
+}: {
+  document: SeedDocument | null;
+  error: string | null;
+  onAnnotationsCountChange: (count: number) => void;
+  annotationsSendRef: RefObject<MarkdownAnnotationsSendHandle | null>;
+}) {
+  const { sendOpenMarkdown } = useDaemonApi();
 
-  if (!displayedDocument) {
+  if (!document) {
     return (
       <div className={`workspace-dock-tile-message${error ? ' workspace-dock-tile-error' : ''}`}>
         {error || 'Loading seed…'}
@@ -811,7 +811,7 @@ function SeedTileBody({
 
   return (
     <SeedDocumentView
-      document={displayedDocument}
+      document={document}
       annotationsEnabled
       onAnnotationsCountChange={onAnnotationsCountChange}
       annotationsSendRef={annotationsSendRef}

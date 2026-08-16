@@ -66,16 +66,24 @@ const testSurfaceValue: NotebookSurfaceContextValue = {
   connectionGeneration: 0,
 };
 
-function NotebookSurfaceTestWrapper({ children }: { children: ReactNode }) {
-  return <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>;
+const defaultDaemonApi = {} as DaemonApi;
+
+function NotebookSurfaceTestWrapper({
+  api = defaultDaemonApi,
+  children,
+}: {
+  api?: DaemonApi;
+  children: ReactNode;
+}) {
+  return (
+    <DaemonApiProvider api={api}>
+      <NotebookSurfaceProvider value={testSurfaceValue}>{children}</NotebookSurfaceProvider>
+    </DaemonApiProvider>
+  );
 }
 
 function SeedTileTestWrapper({ api, children }: { api: DaemonApi; children: ReactNode }) {
-  return (
-    <DaemonApiProvider api={api}>
-      <NotebookSurfaceTestWrapper>{children}</NotebookSurfaceTestWrapper>
-    </DaemonApiProvider>
-  );
+  return <NotebookSurfaceTestWrapper api={api}>{children}</NotebookSurfaceTestWrapper>;
 }
 
 const opener = vi.hoisted(() => ({
