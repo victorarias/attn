@@ -793,7 +793,7 @@ function SeedTileBody({
     return () => {
       ignore = true;
     };
-  }, [gardenSeeds, liveSeed, seedId, sendSeedDocumentGet]);
+  }, [gardenSeeds, liveSeed, onDocument, seedId, sendSeedDocumentGet]);
 
   useEffect(() => {
     onDocument(displayedDocument);
