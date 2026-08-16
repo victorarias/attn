@@ -98,11 +98,11 @@ export interface AppContext<Collections> {
  */
 export type Handler<Collections> = (event: AppEvent, ctx: AppContext<Collections>) => void | Promise<void>;
 /** Why attn requires the app to rebuild its derived collections. */
-export type ReconcileCause = "gap" | "re_enabled" | "version_changed";
+export type ReconcileCause = "gap" | "version_changed";
 export type { AppRegistryEntry, AppViewInfo, AuthorState, CrewMember, CurrentStateSnapshot, EndpointCapabilities, EndpointInfo, PR, RepoState, Seed, SeedEdge, SeedPlotProgress, SeedVar, Session, TicketRow, Workspace, WorkspaceLayout, WorkspacePane, } from "./currentState";
 /** The durable requests coalesced into one reconcile invocation. */
 export interface ReconcileReason {
-    /** Sorted as gap, re_enabled, version_changed, independent of arrival order. */
+    /** Sorted as gap, version_changed, independent of arrival order. */
     readonly causes: readonly ReconcileCause[];
     /** The version whose reconcile handler is running. */
     readonly version: number;

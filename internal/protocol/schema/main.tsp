@@ -2234,7 +2234,8 @@ model BusStatusResultMessage {
   baseline_window_seconds: float64;
   surge_rate_per_hour: float64;
   // How long an enabled consumer may pin the retention floor before the pin is
-  // reported. Carried so a client shows the limit beside the observed value.
+  // reported. Disabled installed-app lanes are retained but do not use this
+  // alarm; their future size tripwire needs a measured receipt first.
   pin_alarm_seconds: float64;
   producers: BusProducerStatus[];
   consumers: BusConsumerStatus[];
@@ -2242,8 +2243,9 @@ model BusStatusResultMessage {
 }
 
 // Flips a durable consumer's kill switch, the same bit `attn bus enable|disable`
-// writes. Disabling stops delivery and stops the consumer pinning retention; its
-// cursor is preserved, and re-enabling resumes from wherever trimming left it.
+// writes. Disabling stops delivery. An ordinary consumer stops pinning
+// retention; an installed app keeps its cursor and unread backlog until it is
+// enabled or uninstalled.
 model BusSetConsumerEnabledMessage {
   cmd: "bus_set_consumer_enabled";
   consumer: string;

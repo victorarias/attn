@@ -1,13 +1,13 @@
 kind: fixed
 area: apps
 change: >
-  App reconciliation is now durable at the event-bus boundary: a version move,
-  re-enable, or retained-history gap records the current bus-head fence, and an
-  app receives no later fact until that owed rebuild completes. Requests that
-  arrive during a rebuild remain owed for the next run, and a daemon restart
-  loses neither the request nor its cursor boundary.
+  App reconciliation is now durable at the event-bus boundary: a version move
+  records the app consumer's cursor and a retained-history gap records one
+  before the earliest surviving fact. An app receives no later fact until that
+  owed rebuild completes. Requests that arrive during a rebuild remain owed
+  for the next run, and a daemon restart loses neither the request nor its
+  cursor boundary.
 symptom: >
   An app that rebuilt a document collection from events could silently keep
-  stale rows after being re-enabled, falling behind retention, or changing
-  versions, because the bus resumed delivery without first rebuilding from
-  current state.
+  stale rows after falling behind retention or changing versions, because the
+  bus resumed delivery without first rebuilding from current state.

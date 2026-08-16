@@ -143,8 +143,8 @@ func TestPinAlarmsMatchesTheSnapshot(t *testing.T) {
 	}
 }
 
-// A disabled consumer does not hold retention open — the kill switch is the way
-// out of exactly this condition, so it must not keep reporting it.
+// A disabled ordinary consumer does not hold retention open — the kill switch
+// is the way out of exactly this condition, so it must not keep reporting it.
 func TestDisabledConsumerNeverAlarms(t *testing.T) {
 	s := pinStore(t, "notifier", false, 30*24*time.Hour)
 	b := pinBus(t, s, time.Hour)

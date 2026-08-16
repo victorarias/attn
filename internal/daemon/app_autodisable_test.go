@@ -274,17 +274,16 @@ func TestEnablingClearsTheStreakAndResumesDelivery(t *testing.T) {
 	}
 }
 
-// Disabling releases the retention floor. This is the whole reason auto-disable
-// exists: a stalled consumer holds the durable log open for everybody, and the
-// observable consequence is that nothing can be compacted past it.
-func TestADisabledAppNoLongerHoldsTheRetentionFloor(t *testing.T) {
+// Auto-disable stops broken code, but an installed app's lane remains durable.
+// Its compactable facts wait at the same frozen cursor as ordinary history.
+func TestADisabledInstalledAppStillHoldsTheRetentionFloor(t *testing.T) {
 	d := newAppDaemon(t)
 	clock := newAppTestClock(d)
 	installApp(t, d, "greeter", subscribing(FactDocumentChanged))
 	startFakeAppRuntime(t, d, failEvery("boom"))
 
 	// Several invalidations about one subject. Compaction reduces those to the
-	// newest — but only at or below the floor every enabled consumer has passed.
+	// newest — but only at or below the floor every participating consumer has passed.
 	for i := 0; i < 4; i++ {
 		d.publishFact(FactDocumentChanged, "app/greeter/seen/tk-1", nil)
 	}
@@ -304,13 +303,13 @@ func TestADisabledAppNoLongerHoldsTheRetentionFloor(t *testing.T) {
 	clock.advance(appAutoDisableStall + time.Minute)
 	waitFor(t, "the stalled app to be disabled", func() bool { return !appEnabled(t, d, "greeter") })
 
-	// Nothing else moved. The only difference is that a disabled consumer does
-	// not pin the log.
+	// Nothing else moved. Disabling stops delivery, but the installed app still
+	// owns this lane and its facts remain retained.
 	removed, err = d.eventBus.Trim()
 	if err != nil {
 		t.Fatalf("trim after the auto-disable: %v", err)
 	}
-	if removed == 0 {
-		t.Fatal("the disabled app is still holding the retention floor down")
+	if removed != 0 {
+		t.Fatalf("compaction removed %d retained event(s) after auto-disable", removed)
 	}
 }

@@ -353,11 +353,37 @@ func TestStatusWarnsAboutADisabledConsumer(t *testing.T) {
 	if !strings.Contains(h.Message, "killed") || !strings.Contains(h.Message, "disabled") {
 		t.Errorf("message %q must name the consumer and its state", h.Message)
 	}
-	// A disabled consumer does not pin the log, exactly as trimming treats it.
+	// A disabled ordinary consumer does not pin the log, exactly as trimming treats it.
 	for _, c := range status.Consumers {
 		if c.Name == "killed" && c.HoldsRetentionFloor {
 			t.Error("a disabled consumer must not be shown holding the retention floor")
 		}
+	}
+}
+
+func TestStatusShowsADisabledInstalledAppHoldingTheRetentionFloor(t *testing.T) {
+	b, s := statusBus(t)
+	publishAt(t, s, "ticket.updated", 4, 10, time.Hour)
+	if err := s.SaveConsumer(Consumer{
+		Name: "app:history", Cursor: 2, Enabled: false, PinsRetention: true,
+	}, statusNow); err != nil {
+		t.Fatalf("SaveConsumer: %v", err)
+	}
+
+	status, err := b.Status()
+	if err != nil {
+		t.Fatalf("Status: %v", err)
+	}
+	c := consumerStatus(t, status, "app:history")
+	if !c.HoldsRetentionFloor {
+		t.Fatal("disabled installed app was not shown holding the retention floor")
+	}
+	if c.PinAlarm {
+		t.Fatal("disabled installed app used the enabled-consumer alarm before the lane cap has a receipt")
+	}
+	h, ok := findHealth(status, HealthConsumerDisabled, "app:history")
+	if !ok || !strings.Contains(h.Message, "keeps the unread backlog") || !strings.Contains(h.Message, "uninstall") {
+		t.Fatalf("disabled installed-app health = %+v", h)
 	}
 }
 

@@ -300,11 +300,11 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 		return AppVersion{}, false, err
 	}
 	if moved && previous != 0 {
-		head, err := busHeadWith(tx)
+		cursor, err := appConsumerCursorWith(tx, v.AppName)
 		if err != nil {
 			return AppVersion{}, false, err
 		}
-		if err := appendAppReconcileRequest(tx, v.AppName, AppReconcileVersionChange, v.ID, head, previous, now); err != nil {
+		if err := appendAppReconcileRequest(tx, v.AppName, AppReconcileVersionChange, v.ID, cursor, previous, now); err != nil {
 			return AppVersion{}, false, err
 		}
 	}
@@ -346,11 +346,11 @@ func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time
 		return err
 	}
 	if moved && previous != 0 {
-		head, err := busHeadWith(tx)
+		cursor, err := appConsumerCursorWith(tx, name)
 		if err != nil {
 			return err
 		}
-		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, head, previous, now); err != nil {
+		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
 			return err
 		}
 	}
@@ -400,11 +400,11 @@ func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) err
 		return err
 	}
 	if previous != 0 {
-		head, err := busHeadWith(tx)
+		cursor, err := appConsumerCursorWith(tx, name)
 		if err != nil {
 			return err
 		}
-		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, head, previous, now); err != nil {
+		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
 			return err
 		}
 	}

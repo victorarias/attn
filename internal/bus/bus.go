@@ -58,11 +58,12 @@ func (e Event) Decode(v any) error {
 
 // Consumer is a durable consumer's persisted registration and position.
 type Consumer struct {
-	Name      string
-	Cursor    int64
-	Filter    string
-	Enabled   bool
-	UpdatedAt time.Time
+	Name          string
+	Cursor        int64
+	Filter        string
+	Enabled       bool
+	PinsRetention bool
+	UpdatedAt     time.Time
 }
 
 // Store is the persistence seam; the daemon adapts internal/store to it so
@@ -917,8 +918,8 @@ func (b *Bus) drain(d *durable) error {
 	}
 }
 
-// reconcileGap handles a cursor below the oldest surviving event (retention
-// trimmed past it while disabled or dead): resume at head, with a logged gap.
+// reconcileGap handles a cursor below the oldest surviving event: resume at
+// head, with a logged gap.
 func (b *Bus) reconcileGap(d *durable, gap Gap) error {
 	b.log("bus: consumer %s resumed at head %d; %d event(s) were trimmed before its cursor %d",
 		d.name, gap.Head, gap.Missed, gap.Cursor)
@@ -1016,9 +1017,9 @@ func (b *Bus) Trim() (int, error) {
 // bounding the log by the data it describes rather than by write frequency.
 // For these names durable delivery is at-least-once PER CHANGED SUBJECT, not
 // per write. Compaction honors the same cursor floor as trimming: an enabled
-// consumer must never lose an unread fact, and compacting above the floor would
-// punch holes that reconcileGap misreads as trimmed history. A stalled enabled
-// consumer pins compaction exactly as it pins trimming.
+// consumer and a disabled installed app must never lose an unread fact, and
+// compacting above the floor would punch holes that reconcileGap misreads as
+// trimmed history.
 func (b *Bus) compact() (int, error) {
 	if len(b.compactable) == 0 {
 		return 0, nil
@@ -1039,8 +1040,8 @@ func (b *Bus) compact() (int, error) {
 	return n, nil
 }
 
-// consumerFloor is the lowest position every enabled consumer has passed; with
-// none enabled it is the log head. A killed consumer must not pin the log.
+// consumerFloor is the lowest position every enabled consumer and every
+// installed app consumer has passed; with none it is the log head.
 func (b *Bus) consumerFloor() (int64, error) {
 	rows, err := b.store.ListConsumers()
 	if err != nil {
@@ -1048,7 +1049,7 @@ func (b *Bus) consumerFloor() (int64, error) {
 	}
 	floor := int64(-1)
 	for _, c := range rows {
-		if !c.Enabled {
+		if !c.Enabled && !c.PinsRetention {
 			continue
 		}
 		if floor < 0 || c.Cursor < floor {

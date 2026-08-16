@@ -557,8 +557,9 @@ reaching no projection has to name the consumer that does read it.
   so handlers must tolerate redelivery. A failing handler stalls its own
   consumer rather than skipping the event.
 - Retention trims past the age window but never past an **enabled** consumer's
-  cursor. Disabled consumers do not pin the log; they resume at head with a
-  logged gap.
+  cursor or an **installed app** consumer's cursor. A disabled ordinary consumer
+  does not pin; a disabled installed app keeps its unread backlog until enable
+  or uninstall.
 - An enabled consumer that stops consuming therefore grows the log until someone
   intervenes, so past `bus.DefaultPinAlarmAge` the pin is reported: a warning
   notification, a `(PINNING …)` tag in `attn bus status`, and a badge on the

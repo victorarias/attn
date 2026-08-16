@@ -131,10 +131,11 @@ func (a *sqlBusStore) PendingBytes(above int64) (int64, error) {
 
 func busConsumerFromRow(r store.BusConsumer) bus.Consumer {
 	return bus.Consumer{
-		Name:      r.Name,
-		Cursor:    r.Cursor,
-		Filter:    r.Filter,
-		Enabled:   r.Enabled,
-		UpdatedAt: r.UpdatedAt,
+		Name:          r.Name,
+		Cursor:        r.Cursor,
+		Filter:        r.Filter,
+		Enabled:       r.Enabled,
+		PinsRetention: r.PinsRetention,
+		UpdatedAt:     r.UpdatedAt,
 	}
 }

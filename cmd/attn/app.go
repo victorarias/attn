@@ -125,9 +125,9 @@ commands:
         resume delivery to the app, from wherever its consumer's cursor stands.
 
   disable <name>
-        stop delivering facts to the app. Its cursor is preserved, but a
-        disabled consumer no longer holds the event log's retention window open:
-        once trimming passes its cursor, enabling resumes it at head.
+        stop delivering facts to the app. Its cursor and unread backlog are
+        preserved for as long as the app remains installed; enabling resumes
+        delivery from that frozen cursor.
 
         This flips the app's bus consumer bit, which IS its enabled state. When
         the daemon is not running, attn bus disable app:<name> does the same
@@ -460,7 +460,7 @@ func runAppSetEnabled(args []string, enabled bool) {
 		fmt.Printf("app %s enabled: %s resumes from its cursor\n", result.Name, result.Consumer)
 		return
 	}
-	fmt.Printf("app %s disabled: %s stops receiving facts and no longer holds the event log open\n",
+	fmt.Printf("app %s disabled: %s stops receiving facts; its unread backlog stays retained until enable or uninstall\n",
 		result.Name, result.Consumer)
 }
 

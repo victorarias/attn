@@ -11,9 +11,9 @@ import (
 )
 
 // memStore is an in-memory Store for the delivery tests. Its trim semantics
-// deliberately mirror the SQLite implementation (age window AND the enabled-only
-// cursor floor) so a test that passes here is not passing because the fake is
-// more permissive than the real thing.
+// deliberately mirror the SQLite implementation (age window AND the cursor
+// floor held by enabled consumers and installed apps) so a test that passes
+// here is not passing because the fake is more permissive than the real thing.
 type memStore struct {
 	mu        sync.Mutex
 	events    []Event
@@ -173,7 +173,7 @@ func (m *memStore) Trim(cutoff time.Time) (int, error) {
 	defer m.mu.Unlock()
 	floor := int64(-1)
 	for _, c := range m.consumers {
-		if !c.Enabled {
+		if !c.Enabled && !c.PinsRetention {
 			continue
 		}
 		if floor < 0 || c.Cursor < floor {
