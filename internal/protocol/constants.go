@@ -136,14 +136,6 @@ const (
 	CmdAppRuntimeStatus                      = "app_runtime_status"
 	CmdAppRuntimeRestart                     = "app_runtime_restart"
 	CmdAppWatch                              = "app_watch"
-	// Auto mode's agent-reachable half. Every one of these records or reads;
-	// none of them changes what a session launches with. Promotion is on the
-	// WebSocket surface alone — see CmdAutoModePromote.
-	CmdAutoModeShow                          = "automode_show"
-	CmdAutoModeEnvAdd                        = "automode_env_add"
-	CmdAutoModeEnvRemove                     = "automode_env_remove"
-	CmdAutoModePropose                       = "automode_propose"
-	CmdAutoModeDenials                       = "automode_denials"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -300,11 +292,6 @@ const (
 	CmdListPastConversations                 = "list_past_conversations"
 	CmdBusStatusGet                          = "bus_status_get"
 	CmdBusSetConsumerEnabled                 = "bus_set_consumer_enabled"
-	// Auto mode's app-only half. Promotion and discard exist here and nowhere
-	// else: a human in the app is the trust boundary a CLI caller cannot fake.
-	CmdAutoModeGet                           = "automode_get"
-	CmdAutoModePromote                       = "automode_promote"
-	CmdAutoModeDiscard                       = "automode_discard"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -346,6 +333,23 @@ const (
 	CmdSetWorkspaceRank                      = "set_workspace_rank"
 	CmdSetChiefOfStaff                       = "set_chief_of_staff"
 	CmdSetSessionContextWindowCap            = "set_session_context_window_cap"
+)
+
+// Auto mode's commands, split by which surface may reach them. The first group
+// is agent-reachable over the unix socket and every one of its members reads or
+// records a proposal — none changes what a session launches with. The second
+// group is the app's alone: a human in the app is the trust boundary a CLI
+// caller cannot fake, so promotion lives here and nowhere else.
+const (
+	CmdAutoModeShow      = "automode_show"
+	CmdAutoModeEnvAdd    = "automode_env_add"
+	CmdAutoModeEnvRemove = "automode_env_remove"
+	CmdAutoModePropose   = "automode_propose"
+	CmdAutoModeDenials   = "automode_denials"
+
+	CmdAutoModeGet     = "automode_get"
+	CmdAutoModePromote = "automode_promote"
+	CmdAutoModeDiscard = "automode_discard"
 )
 
 // Per-action automations result events (socket + WS share one command set;
