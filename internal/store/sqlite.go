@@ -1114,7 +1114,10 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	{107, "record which ticket event a delivery covered", ``},
 	// Auto mode's home, at 109 because 108 is burned: a branch still in flight
 	// applied it to a production database before merging, and migrateDB skips
-	// anything at or below the highest version already applied.
+	// anything at or below the highest version already applied. That cuts both
+	// ways — a database created after this lands sits at 109, so a later 108
+	// would be skipped there too. Whatever that branch ships must renumber
+	// above this one.
 	//
 	// One promoted config row, the proposals waiting on a human, and the denials
 	// slice 5 reports. The split is the security design: the CLI writes
