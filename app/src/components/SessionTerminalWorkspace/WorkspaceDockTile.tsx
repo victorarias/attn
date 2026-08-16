@@ -273,12 +273,17 @@ export function WorkspaceDockTile({
 
   const sending = sendStatus.kind === 'sending';
   const sendDisabled = sending || annotationCount === 0 || !primaryDestination || !transportAvailable;
-  const [seedDestinationMenuOpen, setSeedDestinationMenuOpen] = useState(false);
+  const seedDestinationMenuKey = seedTenderSessionId && seedDocument
+    ? `${seedTenderSessionId}:${seedDocument.seed.rev}`
+    : null;
+  const [openSeedDestinationMenuKey, setOpenSeedDestinationMenuKey] = useState<string | null>(null);
+  const seedDestinationMenuOpen = seedDestinationMenuKey !== null
+    && openSeedDestinationMenuKey === seedDestinationMenuKey;
   const seedDestinationGroupRef = useRef<HTMLDivElement>(null);
   const seedDestinationCaretRef = useRef<HTMLButtonElement>(null);
   const seedDestinationItemRef = useRef<HTMLButtonElement>(null);
   const closeSeedDestinationMenu = useCallback((restoreFocus = false) => {
-    setSeedDestinationMenuOpen(false);
+    setOpenSeedDestinationMenuKey(null);
     if (restoreFocus) {
       window.requestAnimationFrame(() => seedDestinationCaretRef.current?.focus());
     }
@@ -295,9 +300,6 @@ export function WorkspaceDockTile({
     document.addEventListener('mousedown', handleMouseDown);
     return () => document.removeEventListener('mousedown', handleMouseDown);
   }, [closeSeedDestinationMenu, seedDestinationMenuOpen]);
-  useEffect(() => {
-    if (!seedTenderSessionId) setSeedDestinationMenuOpen(false);
-  }, [seedTenderSessionId]);
 
   useEffect(() => {
     setBrowserAddress(tile.tileParams || '');
@@ -540,7 +542,9 @@ export function WorkspaceDockTile({
                       aria-haspopup="menu"
                       aria-expanded={seedDestinationMenuOpen}
                       disabled={sendDisabled}
-                      onClick={() => setSeedDestinationMenuOpen((open) => !open)}
+                      onClick={() => setOpenSeedDestinationMenuKey((openKey) => (
+                        openKey === seedDestinationMenuKey ? null : seedDestinationMenuKey
+                      ))}
                     >
                       ▾
                     </button>
