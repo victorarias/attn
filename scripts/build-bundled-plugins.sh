@@ -73,8 +73,11 @@ remove_bun_linker_signature() {
 
 }
 
+staged_names=()
+
 stage_plugin() {
   local name="$1" description="$2"
+  staged_names+=("${name}")
   local source_dir="${repo_root}/plugins/${name}"
   local stage_dir="${stage_root}/${name}"
 
@@ -109,9 +112,6 @@ stage_plugin() {
   remove_bun_linker_signature "${stage_dir}/bin/${name}"
   chmod 0755 "${stage_dir}/bin/${name}"
   fix_bun_compile_codesign "${stage_dir}/bin/${name}"
-  if [[ "${name}" == "attn-opencode" ]]; then
-    bun build "${source_dir}/src/guidance-plugin.ts" --target=bun --format=esm --minify --outfile "${stage_dir}/guidance-plugin.js"
-  fi
   if [[ "${name}" == "attn-pi" ]]; then
     # The suite runs inside pi's node runtime; pi resolves
     # @earendil-works/pi-coding-agent as a virtual module at load time, so it
@@ -143,5 +143,17 @@ EOF
   echo "Staged bundled ${name} ${package_version} at ${stage_dir}"
 }
 
-stage_plugin attn-opencode "Server-backed OpenCode driver for attn"
 stage_plugin attn-pi "pi driver for attn"
+
+# The stage root outlives a build, so a plugin that stopped being bundled keeps
+# shipping from every checkout that once built it. Only what this run staged
+# belongs here.
+for existing in "${stage_root}"/*/; do
+  [[ -d "${existing}" ]] || continue
+  name="$(basename "${existing}")"
+  for staged in "${staged_names[@]}"; do
+    [[ "${name}" == "${staged}" ]] && continue 2
+  done
+  echo "Removing unbundled plugin ${name} from ${stage_root}"
+  rm -rf "${existing}"
+done

@@ -162,7 +162,7 @@ describe('SettingsModal', () => {
   it('installs an available bundled plugin', async () => {
     const onInstallBundledPlugin = vi.fn().mockResolvedValue({ success: true });
     const bundled = {
-      name: 'attn-opencode', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-opencode',
+      name: 'attn-example', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-example',
       priority: 0, connected: false, running: false, availability: 'bundled', installation_state: 'available',
       runtime_state: 'stopped', can_install: true, can_uninstall: false,
     };
@@ -180,13 +180,13 @@ describe('SettingsModal', () => {
     fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     expect(await screen.findByText('Bundled')).toBeInTheDocument();
     fireEvent.click(screen.getByText('Install', { selector: 'button' }));
-    await waitFor(() => expect(onInstallBundledPlugin).toHaveBeenCalledWith('attn-opencode'));
+    await waitFor(() => expect(onInstallBundledPlugin).toHaveBeenCalledWith('attn-example'));
   });
 
   it('uninstalls an installed bundled plugin', async () => {
     const onUninstallPlugin = vi.fn().mockResolvedValue({ success: true });
     const bundled = {
-      name: 'attn-opencode', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-opencode',
+      name: 'attn-example', version: '0.1.0', dir: '/Applications/attn.app/Contents/Resources/plugins/attn-example',
       priority: 0, connected: true, running: true, availability: 'bundled', installation_state: 'installed',
       runtime_state: 'connected', can_install: false, can_uninstall: true,
     };
@@ -203,7 +203,7 @@ describe('SettingsModal', () => {
     );
     fireEvent.click(screen.getByTestId('settings-nav-plugins'));
     fireEvent.click(await screen.findByText('Uninstall', { selector: 'button' }));
-    await waitFor(() => expect(onUninstallPlugin).toHaveBeenCalledWith('attn-opencode'));
+    await waitFor(() => expect(onUninstallPlugin).toHaveBeenCalledWith('attn-example'));
   });
 
   it('updates provider priority for an installed plugin', async () => {

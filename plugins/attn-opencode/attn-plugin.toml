@@ -1,7 +1,0 @@
-name = "attn-opencode"
-version = "0.1.0"
-attn_api_version = 5
-description = "Server-backed OpenCode driver for attn"
-
-[plugin]
-entrypoint = "src/index.ts"

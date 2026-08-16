@@ -180,8 +180,8 @@ func TestStore_ListAgentDriverRunsFiltersByOwnerAndIncludesMetadata(t *testing.T
 	for _, sessionID := range []string{"session-b", "session-a", "other"} {
 		s.Add(&protocol.Session{ID: sessionID, Agent: "external"})
 	}
-	if !s.BeginAgentDriverRun("session-b", "attn-opencode", "run-b") ||
-		!s.BeginAgentDriverRun("session-a", "attn-opencode", "run-a") ||
+	if !s.BeginAgentDriverRun("session-b", "attn-example", "run-b") ||
+		!s.BeginAgentDriverRun("session-a", "attn-example", "run-a") ||
 		!s.BeginAgentDriverRun("other", "other-plugin", "run-other") {
 		t.Fatal("BeginAgentDriverRun failed")
 	}
@@ -189,7 +189,7 @@ func TestStore_ListAgentDriverRunsFiltersByOwnerAndIncludesMetadata(t *testing.T
 		t.Fatal("ApplyAgentDriverMetadata failed")
 	}
 
-	if got := s.ListAgentDriverRuns("attn-opencode"); !reflect.DeepEqual(got, []ActiveAgentDriverRun{
+	if got := s.ListAgentDriverRuns("attn-example"); !reflect.DeepEqual(got, []ActiveAgentDriverRun{
 		{SessionID: "session-a", RunID: "run-a", Metadata: `{"native":"one"}`},
 		{SessionID: "session-b", RunID: "run-b"},
 	}) {

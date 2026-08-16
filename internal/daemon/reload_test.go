@@ -537,23 +537,23 @@ func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testin
 	}
 	d := newReloadTestDaemon(t, backend)
 	addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
-	addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+	addReloadSession(d, "plugin-chief", protocol.SessionAgent("example"), protocol.SessionStateIdle)
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "plugin-chief"); err != nil {
 		t.Fatalf("assign chief role: %v", err)
 	}
-	if !d.store.BeginAgentDriverRun("plugin-chief", "opencode-plugin", "run-old") {
+	if !d.store.BeginAgentDriverRun("plugin-chief", "example-plugin", "run-old") {
 		t.Fatal("begin old plugin run")
 	}
 	if !d.store.ApplyAgentDriverMetadata("plugin-chief", "run-old", 1, `{"native_id":"same-session"}`) {
 		t.Fatal("seed plugin metadata")
 	}
-	plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+	plugin, done := startPluginPipe(t, d, "example-plugin", nil)
 	defer func() {
 		_ = plugin.Close()
 		<-done
 	}()
-	registerTestPluginDriver(t, plugin, "opencode", map[string]bool{
+	registerTestPluginDriver(t, plugin, "example", map[string]bool{
 		"resume": true, "yolo": true, "model_pin": true, "effort_pin": true, "launch_instructions": true,
 	})
 	closed := make(chan pluginDriverSessionClosedParams, 1)
@@ -576,7 +576,7 @@ func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testin
 			t.Errorf("resume params=%+v, want preserved flags and metadata", params)
 			return
 		}
-		respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"opencode-launcher"}})
+		respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"example-launcher"}})
 		request = decodeJSONRPCMessage(t, plugin)
 		var closeParams pluginDriverSessionClosedParams
 		if err := json.Unmarshal(request.Params, &closeParams); err != nil {
@@ -593,10 +593,10 @@ func TestReloadSessionAgentRecomposesPluginChiefInstructionsBeforeKill(t *testin
 		t.Fatalf("orchestration order=%v", order)
 	}
 	spawn, ok := backend.lastSpawn()
-	if !ok || !reflect.DeepEqual(spawn.ExternalCommand, []string{"opencode-launcher"}) || spawn.LifecycleID == "" {
+	if !ok || !reflect.DeepEqual(spawn.ExternalCommand, []string{"example-launcher"}) || spawn.LifecycleID == "" {
 		t.Fatalf("plugin respawn=%+v", spawn)
 	}
-	if active := d.store.GetAgentDriverRun("plugin-chief"); active.RunID != spawn.LifecycleID || active.PluginName != "opencode-plugin" {
+	if active := d.store.GetAgentDriverRun("plugin-chief"); active.RunID != spawn.LifecycleID || active.PluginName != "example-plugin" {
 		t.Fatalf("active plugin run=%+v, want replacement", active)
 	}
 	select {
@@ -617,17 +617,17 @@ func TestReloadSessionAgentLeavesPluginWorkerAliveWhenResumeCannotBePrepared(t *
 	}
 	d := newReloadTestDaemon(t, backend)
 	addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
-	addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+	addReloadSession(d, "plugin-chief", protocol.SessionAgent("example"), protocol.SessionStateIdle)
 	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 	if err := d.store.SetProfileRole(profileRoleChiefOfStaff, "plugin-chief"); err != nil {
 		t.Fatalf("assign chief role: %v", err)
 	}
-	plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+	plugin, done := startPluginPipe(t, d, "example-plugin", nil)
 	defer func() {
 		_ = plugin.Close()
 		<-done
 	}()
-	registerTestPluginDriver(t, plugin, "opencode", map[string]bool{"resume": true, "launch_instructions": true})
+	registerTestPluginDriver(t, plugin, "example", map[string]bool{"resume": true, "launch_instructions": true})
 	closed := make(chan struct{})
 	go func() {
 		request := decodeJSONRPCMessage(t, plugin)
@@ -674,23 +674,23 @@ func TestSetChiefOfStaffRejectsPluginRoleChangeWhenResumePreflightFails(t *testi
 			}
 			d := newReloadTestDaemon(t, backend)
 			addTestWorkspace(d, "ws-plugin-chief", t.TempDir())
-			addReloadSession(d, "plugin-chief", protocol.SessionAgent("opencode"), protocol.SessionStateIdle)
+			addReloadSession(d, "plugin-chief", protocol.SessionAgent("example"), protocol.SessionStateIdle)
 			d.store.SetSetting(SettingNotebookRoot, t.TempDir())
 			if test.initialChief != "" {
 				if err := d.store.SetProfileRole(profileRoleChiefOfStaff, test.initialChief); err != nil {
 					t.Fatalf("seed chief role: %v", err)
 				}
 			}
-			if !d.store.BeginAgentDriverRun("plugin-chief", "opencode-plugin", "run-live") {
+			if !d.store.BeginAgentDriverRun("plugin-chief", "example-plugin", "run-live") {
 				t.Fatal("begin live plugin run")
 			}
 
-			plugin, done := startPluginPipe(t, d, "opencode-plugin", nil)
+			plugin, done := startPluginPipe(t, d, "example-plugin", nil)
 			defer func() {
 				_ = plugin.Close()
 				<-done
 			}()
-			registerTestPluginDriver(t, plugin, "opencode", map[string]bool{"resume": true, "launch_instructions": true})
+			registerTestPluginDriver(t, plugin, "example", map[string]bool{"resume": true, "launch_instructions": true})
 			closed := make(chan struct{})
 			go func() {
 				request := decodeJSONRPCMessage(t, plugin)

@@ -35,12 +35,12 @@ func TestBundledPluginDirForExecutableUsesExplicitOverride(t *testing.T) {
 
 func TestPluginDataDirForSocketIsSeparateFromUserPluginInstallRoot(t *testing.T) {
 	socketPath := filepath.Join(t.TempDir(), "profile", "attn.sock")
-	got := pluginDataDirForSocket(socketPath, "attn-opencode")
-	want := filepath.Join(filepath.Dir(socketPath), "plugin-data", "attn-opencode")
+	got := pluginDataDirForSocket(socketPath, "attn-example")
+	want := filepath.Join(filepath.Dir(socketPath), "plugin-data", "attn-example")
 	if got != want {
 		t.Fatalf("pluginDataDirForSocket()=%q, want %q", got, want)
 	}
-	if got == filepath.Join(pluginDirForSocket(socketPath), "attn-opencode") {
+	if got == filepath.Join(pluginDirForSocket(socketPath), "attn-example") {
 		t.Fatal("bundled plugin data must not occupy the user-plugin install path")
 	}
 }
