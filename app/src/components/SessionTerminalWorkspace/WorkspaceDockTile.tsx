@@ -27,7 +27,7 @@ import { useNotebookSurfaceContext } from '../../contexts/NotebookSurfaceContext
 import { NotebookTile } from '../notebook/NotebookTile';
 import type { NotebookSurfaceHandle } from '../NotebookSurface';
 import { SeedDocumentView, type SeedDocument } from '../SeedDocumentView';
-import { useDaemonApi } from '../../contexts/DaemonApiContext';
+import { useDaemonApi, useOptionalDaemonApi } from '../../contexts/DaemonApiContext';
 import type { Seed } from '../../hooks/useDaemonSocket';
 import './WorkspaceDockTile.css';
 
@@ -731,7 +731,9 @@ function MarkdownBody({
 }
 
 function useLiveSeedDocument(seedId: string, gardenSeeds: Seed[], enabled: boolean) {
-  const { sendSeedDocumentGet } = useDaemonApi();
+  // Ordinary tiles are also rendered in lightweight workspace surfaces that
+  // do not need daemon commands. Only require the API when this is a seed.
+  const sendSeedDocumentGet = useOptionalDaemonApi()?.sendSeedDocumentGet;
   const [document, setDocument] = useState<SeedDocument | null>(null);
   const [error, setError] = useState<string | null>(null);
   const liveSeed = useMemo(
@@ -759,6 +761,11 @@ function useLiveSeedDocument(seedId: string, gardenSeeds: Seed[], enabled: boole
     if (!seedId) {
       setDocument(null);
       setError('No seed is associated with this tile.');
+      return;
+    }
+    if (!sendSeedDocumentGet) {
+      setDocument(null);
+      setError('The daemon API is unavailable.');
       return;
     }
     let ignore = false;
