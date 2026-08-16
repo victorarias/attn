@@ -1,14 +1,17 @@
-// Auto mode's per-session state: the verdict cache that keeps the hot path
-// free of classifier calls, and the circuit breaker that stops an agent from
-// grinding against the same refusal while nobody is watching.
+// Auto mode's per-session state: the conversation window the classifier
+// judges against, the verdict cache that keeps the hot path free of classifier
+// calls, and the circuit breaker that stops an agent from grinding against the
+// same refusal while nobody is watching.
 //
-// Both are reset by the user speaking, because that is auto mode's approval
-// channel: the next message may be the grant, so a cached deny must not eat
-// it, and a breaker must not outlive the answer that resolves it.
+// The cache and the breaker are reset by the user speaking, because that is
+// auto mode's approval channel: the next message may be the grant, so a cached
+// deny must not eat it, and a breaker must not outlive the answer that
+// resolves it. The window is not reset — what was said is still what was said.
 import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
+import { TranscriptWindow } from "./transcript";
 
 /** Denials in a row, without an allowed call between them. */
 export const consecutiveDenialLimit = 3;
@@ -37,6 +40,7 @@ export class AutoModeSession {
   // Allow verdicts live for the session; deny verdicts are dropped the
   // moment the user speaks.
   private readonly cache = new Map<string, { verdict: "allow" | "deny"; reason: string }>();
+  private readonly transcript = new TranscriptWindow();
   private consecutiveDenials = 0;
   private totalDenials = 0;
 
@@ -54,10 +58,18 @@ export class AutoModeSession {
   }
 
   /** The user said something: their message may be the approval. */
-  noteUserInput(): void {
+  noteUserInput(text = ""): void {
+    // pi announces one message on two seams (the input event and the prompt
+    // the turn starts with), and the same sentence twice reads as insistence.
+    if (this.transcript.latest("user") !== text.trim()) this.transcript.record("user", text);
     for (const [key, entry] of this.cache) if (entry.verdict === "deny") this.cache.delete(key);
     this.consecutiveDenials = 0;
     this.totalDenials = 0;
+  }
+
+  /** The agent said something. Only what it SAID: never a tool result. */
+  noteAssistantText(text: string): void {
+    this.transcript.record("assistant", text);
   }
 
   async decide(call: ToolCall, options: DecideOptions): Promise<SessionDecision> {
@@ -88,6 +100,7 @@ export class AutoModeSession {
       cwd: options.cwd,
       reason: staticDecision.reason,
       environment: this.config.environment,
+      transcript: this.transcript.snapshot(),
       signal: options.signal,
     });
     if (judged.verdict === "allow") {
