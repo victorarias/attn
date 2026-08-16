@@ -1,16 +1,18 @@
 // pi wiring for auto mode. Like suite/core.ts this file is duck-typed
 // against pi's ExtensionAPI/ExtensionContext shapes (verified against pi
-// 0.83.0, packages/coding-agent/src/core/extensions/types.ts) rather than
+// 0.84.2, packages/coding-agent/src/core/extensions/types.ts) rather than
 // importing pi, so the whole extension runs under `bun test`.
 //
 // Everything decided lives in ./policy and ./session; this file only turns
 // their answer into pi's `{ block, reason }` and keeps the fail-safe
 // posture: whatever goes wrong here, the tool does not run.
+import { autoModeSystemPromptAddendum } from "./addendum";
 import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { describeCall, type ToolCall } from "./policy";
 import { AutoModeSession, type SessionDecision } from "./session";
+import { mergeUsage, UsageLedger, type UsageLike } from "./usage";
 
 export type ToolCallEventLike = {
   type: "tool_call";
@@ -27,6 +29,26 @@ export type InputEventLike = {
   source: "interactive" | "rpc" | "extension";
 };
 
+export type BeforeAgentStartEventLike = {
+  type: "before_agent_start";
+  prompt: string;
+  systemPrompt: string;
+};
+
+export type BeforeAgentStartResultLike = { systemPrompt?: string };
+
+export type MessageLike = { role: string; content: { type: string; text?: string }[] };
+
+export type MessageEndEventLike = { type: "message_end"; message: MessageLike };
+
+export type ToolResultEventLike = {
+  type: "tool_result";
+  toolCallId: string;
+  usage?: UsageLike;
+};
+
+export type ToolResultEventResultLike = { usage?: UsageLike };
+
 export type AutoModeContextLike = {
   cwd: string;
   signal?: AbortSignal;
@@ -41,6 +63,15 @@ export type AutoModeExtensionAPILike = {
     ) => ToolCallEventResultLike | undefined | Promise<ToolCallEventResultLike | undefined>,
   ): void;
   on(event: "input", handler: (event: InputEventLike, ctx: AutoModeContextLike) => void): void;
+  on(
+    event: "before_agent_start",
+    handler: (event: BeforeAgentStartEventLike, ctx: AutoModeContextLike) => BeforeAgentStartResultLike,
+  ): void;
+  on(event: "message_end", handler: (event: MessageEndEventLike, ctx: AutoModeContextLike) => void): void;
+  on(
+    event: "tool_result",
+    handler: (event: ToolResultEventLike, ctx: AutoModeContextLike) => ToolResultEventResultLike | undefined,
+  ): void;
 };
 
 export type AutoModeDenial = {
@@ -57,6 +88,11 @@ export type AutoModeOptions = {
   enabled?: boolean;
   /** Called for every blocked call, for the surfaces that report denials. */
   onDenial?: (denial: AutoModeDenial) => void;
+  /**
+   * Where the classifier's usage waits for a tool result to ride into the
+   * session's totals. The same ledger the classifier reports into.
+   */
+  usageLedger?: UsageLedger;
 };
 
 /**
@@ -89,10 +125,47 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       return { block: true, reason: decision.toolResult };
     });
 
+    // An extension's own prompt is not the user speaking, so it grants nothing:
+    // it must not clear a deny or reset the breaker. before_agent_start carries
+    // no source of its own, and pi emits it from the same prompt() call that
+    // emitted this event, so the source is remembered here for the seam that
+    // cannot see it.
+    let promptIsUsers = true;
     pi.on("input", (event) => {
-      if (event.source !== "extension") session.noteUserInput();
+      promptIsUsers = event.source !== "extension";
+      if (promptIsUsers) session.noteUserInput(event.text);
+    });
+
+    // The turn's prompt, for the deliveries that never surface as an input
+    // event (an SDK `session.prompt`, a launch brief). noteUserInput drops the
+    // repeat when a message arrives on both seams. The addendum is appended
+    // whoever prompted — the agent is under auto mode either way.
+    pi.on("before_agent_start", (event) => {
+      if (promptIsUsers) session.noteUserInput(event.prompt);
+      return { systemPrompt: `${event.systemPrompt}\n\n${autoModeSystemPromptAddendum()}` };
+    });
+
+    // Only assistant TEXT. A toolResult message is the injection surface the
+    // classifier's prompt exists to stay out of.
+    pi.on("message_end", (event) => {
+      if (event.message.role !== "assistant") return;
+      session.noteAssistantText(messageText(event.message));
+    });
+
+    // pi takes the returned usage INSTEAD of the tool's own, so what the tool
+    // reported has to come back with it.
+    pi.on("tool_result", (event) => {
+      const held = options.usageLedger?.drain();
+      return held ? { usage: mergeUsage(event.usage, held) } : undefined;
     });
   };
+}
+
+function messageText(message: MessageLike): string {
+  return message.content
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text)
+    .join("\n");
 }
 
 function failureReason(error: unknown): string {

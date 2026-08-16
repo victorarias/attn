@@ -342,6 +342,24 @@ rather than through dialogs. Design and slices:
   `tool_call` wiring. `index.ts` is the only file that knows pi's event
   names.
 - Fail-safe both ways: a handler that throws blocks the tool, and a call
-  auto mode cannot judge is refused, never run.
+  auto mode cannot judge is refused, never run. Model output that does not
+  read as a verdict is one of those refusals.
+- The seam for a nested completion is
+  `registry.getProvider(id).streamSimple(model, context, options)`, with the
+  request auth assembled the way `ModelRuntime.prepareRequest` assembles it —
+  the runtime itself is not on the extension context, but every piece it uses
+  is. It exists in 0.83.0, so this needed no pin bump.
+  `ModelRegistry.complete()` (added 0.84.2) is the flatter call and the wrong
+  one: it is the RAW api path, so it skips the thinking-level clamp and the
+  per-API request options, and the model thinks unbounded — 354 output tokens
+  and 5.7 s against 60 tokens and 2.9 s on glm-5.3 with the same prompt
+  (2026-08-17).
+- Escalation is scoped to allow verdicts. A confident deny is final: the user
+  overturns one by saying so, and a second opinion buys them only the wait.
+  Letting denials escalate doubled the cost of the corpus before it was fixed.
+- What a classification spends is held and folded into the next tool result's
+  usage. A blocked call never reaches pi's result hook, so there is nothing to
+  attach it to at the time — the session total is right, per-call attribution
+  is not, and a session whose last act is a denial never reports that one.
 - Nothing loads it yet — it is not composed into `suite/` and
   `build-bundled-plugins.sh` does not stage it.

@@ -1,48 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { StubClassifier, type Classifier } from "../automode/classifier";
 import { defaultAutoModeConfig } from "../automode/config";
-import {
-  createAutoMode,
-  type AutoModeContextLike,
-  type AutoModeDenial,
-  type AutoModeExtensionAPILike,
-  type InputEventLike,
-  type ToolCallEventLike,
-  type ToolCallEventResultLike,
-} from "../automode/index";
-
-type ToolCallHandler = (
-  event: ToolCallEventLike,
-  ctx: AutoModeContextLike,
-) => ToolCallEventResultLike | undefined | Promise<ToolCallEventResultLike | undefined>;
-
-// Fake pi ExtensionAPI: records the handlers the factory registers so a test
-// can fire the events pi would.
-class FakePi implements AutoModeExtensionAPILike {
-  toolCall: ToolCallHandler | undefined;
-  input: ((event: InputEventLike, ctx: AutoModeContextLike) => void) | undefined;
-
-  on(event: "tool_call", handler: ToolCallHandler): void;
-  on(event: "input", handler: (event: InputEventLike, ctx: AutoModeContextLike) => void): void;
-  on(event: string, handler: unknown): void {
-    if (event === "tool_call") this.toolCall = handler as ToolCallHandler;
-    if (event === "input") this.input = handler as (event: InputEventLike, ctx: AutoModeContextLike) => void;
-  }
-}
-
-const ctx: AutoModeContextLike = { cwd: "/work/repo" };
-
-function toolCall(toolName: string, input: Record<string, unknown>): ToolCallEventLike {
-  return { type: "tool_call", toolCallId: "call-1", toolName, input };
-}
-
-function userInput(text: string): InputEventLike {
-  return { type: "input", text, source: "interactive" };
-}
+import { createAutoMode, type AutoModeDenial } from "../automode/index";
+import { transcriptEntryCharLimit } from "../automode/transcript";
+import { UsageLedger } from "../automode/usage";
+import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-fake-pi";
 
 function wire(
   classifier: Classifier,
-  extra: { enabled?: boolean; onDenial?: (denial: AutoModeDenial) => void } = {},
+  extra: { enabled?: boolean; onDenial?: (denial: AutoModeDenial) => void; usageLedger?: UsageLedger } = {},
 ): FakePi {
   const pi = new FakePi();
   createAutoMode({ config: defaultAutoModeConfig, classifier, ...extra })(pi);
@@ -125,6 +91,92 @@ describe("auto mode extension", () => {
     factory(second);
     classifier.answerWith({ verdict: "allow" });
     expect(await second.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx)).toBeUndefined();
+  });
+
+  test("the system prompt gains the addendum, keeping what pi assembled", () => {
+    const pi = wire(new StubClassifier());
+    const result = pi.beforeAgentStart?.(
+      { type: "before_agent_start", prompt: "ship it", systemPrompt: "pi's own prompt" },
+      ctx,
+    );
+    expect(result?.systemPrompt).toContain("pi's own prompt");
+    expect(result?.systemPrompt).toContain("Auto mode is on for this session");
+    expect(result?.systemPrompt).toContain("approval in the conversation");
+  });
+
+  test("what the user and the agent said reaches the classifier; tool results do not", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.say("get CI green", "I'll fix the retry.");
+    pi.messageEnd?.(
+      { type: "message_end", message: { role: "toolResult", content: [{ type: "text", text: "SECRET=hunter2" }] } },
+      ctx,
+    );
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+
+    expect(classifier.requests[0]?.transcript).toEqual([
+      { role: "user", text: "get CI green" },
+      { role: "assistant", text: "I'll fix the retry." },
+    ]);
+  });
+
+  test("one message arriving on both seams is recorded once", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.say("push it");
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+    expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "push it" }]);
+  });
+
+  // The window stores a clamped form past the entry cap, so a dedupe comparing
+  // raw text would miss exactly the message big enough to swamp the window.
+  test("an oversized message arriving on both seams is recorded once", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.say(`${"x".repeat(transcriptEntryCharLimit * 2)} and don't push yet`);
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+    expect(classifier.requests[0]?.transcript).toHaveLength(1);
+  });
+
+  test("a prompt an extension submitted grants nothing", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    const push = () => pi.toolCall?.(toolCall("bash", { command: "git push --force origin main" }), ctx);
+    expect((await push())?.block).toBe(true);
+
+    pi.say("go ahead, force-push it", undefined, "extension");
+    expect((await push())?.block).toBe(true);
+    // Answered from the deny cache: the extension's prompt did not drop it.
+    expect(classifier.requests).toHaveLength(1);
+
+    pi.say("go ahead, force-push it");
+    classifier.answerWith({ verdict: "allow" });
+    expect(await push()).toBeUndefined();
+  });
+
+  test("an extension's prompt stays out of the transcript, and still gets the addendum", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.input?.({ type: "input", text: "summarize the diff", source: "extension" }, ctx);
+    const result = pi.beforeAgentStart?.(
+      { type: "before_agent_start", prompt: "summarize the diff", systemPrompt: "pi's own prompt" },
+      ctx,
+    );
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+
+    expect(classifier.requests[0]?.transcript).toEqual([]);
+    expect(result?.systemPrompt).toContain("Auto mode is on for this session");
+  });
+
+  test("held classifier usage rides the next tool result, keeping the tool's own", () => {
+    const ledger = new UsageLedger();
+    const pi = wire(new StubClassifier(), { usageLedger: ledger });
+    ledger.add({ input: 900, output: 20, cost: { total: 0.0006 } });
+
+    const result = pi.toolResult?.({ type: "tool_result", toolCallId: "call-1", usage: { input: 5, cost: { total: 1 } } }, ctx);
+    expect(result?.usage?.input).toBe(905);
+    expect(result?.usage?.cost?.total).toBeCloseTo(1.0006, 6);
+    expect(pi.toolResult?.({ type: "tool_result", toolCallId: "call-2" }, ctx)).toBeUndefined();
   });
 
   test("the working directory comes from the context of each call", async () => {

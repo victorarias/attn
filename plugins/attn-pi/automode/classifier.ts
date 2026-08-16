@@ -1,8 +1,8 @@
 // The seam between the static tree and the model that judges what the tree
-// routes on. The implementation (prompt, model calls, escalation) is its own
-// slice; this file is the interface both sides agree on, plus the stub the
-// tests decide with.
+// routes on. This file is the interface both sides agree on, plus the stub the
+// tests decide with; model-classifier.ts is the implementation.
 import type { ToolCall } from "./policy";
+import type { TranscriptEntry } from "./transcript";
 
 export type ClassifierRequest = {
   call: ToolCall;
@@ -12,6 +12,8 @@ export type ClassifierRequest = {
   reason: string;
   /** Config prose describing what this machine may do. */
   environment: readonly string[];
+  /** What the user and the agent said, oldest first. Never tool results. */
+  transcript?: readonly TranscriptEntry[];
   /** pi's turn signal, so Esc aborts a classification in flight. */
   signal?: AbortSignal;
 };
