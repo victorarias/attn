@@ -60,6 +60,7 @@ func embeddedSpawnOptions(opts SpawnOptions) pty.SpawnOptions {
 		ExternalCommand:   opts.ExternalCommand,
 		ExternalEnv:       opts.ExternalEnv,
 		ExternalCWD:       opts.ExternalCWD,
+		DaemonEnv:         opts.DaemonEnv,
 		LifecycleID:       opts.LifecycleID,
 		LoginShellEnv:     opts.LoginShellEnv,
 
@@ -118,6 +119,7 @@ func (b *EmbeddedBackend) Attach(_ context.Context, sessionID, subscriberID stri
 		ExitCode:                   info.ExitCode,
 		ExitSignal:                 info.ExitSignal,
 		GhosttySnapshot:            info.GhosttySnapshot,
+		GhosttySnapshotFormat:      info.GhosttySnapshotFormat,
 		GhosttyBlocks:              info.GhosttyBlocks,
 		GhosttyPlacements:          info.GhosttyPlacements,
 		GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,

@@ -83,7 +83,7 @@ func (s *Store) withTicketMutation(
 		}
 		if len(consumed) > 0 {
 			if key := strings.TrimSpace(options.AttentionKey); key != "" {
-				if err := setTicketDeliveryAttentionTx(tx, key, now); err != nil {
+				if err := setTicketDeliveryAttentionTx(tx, key, now, consumed[len(consumed)-1].Seq); err != nil {
 					return TicketMutationOutcome{}, err
 				}
 			}

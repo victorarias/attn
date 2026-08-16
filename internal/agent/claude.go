@@ -71,7 +71,6 @@ func (c *Claude) Capabilities() Capabilities {
 		HasYolo:              true,
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
-		HasSelfMonitor:       true,
 		HasModelPin:          true,
 		HasEffortPin:         true,
 	}
@@ -97,7 +96,7 @@ func (c *Claude) BuildCommand(opts SpawnOpts) *exec.Cmd {
 	// folded in by hooks.Launch). Non-chief agents are NOT nudged to
 	// journal: the keeper narrates each workspace's own work into the journal, and
 	// the chief journals the cross-workspace layer.
-	if instructions := opts.launchGuidance(c.Capabilities().HasSelfMonitor); instructions != "" {
+	if instructions := opts.launchGuidance(); instructions != "" {
 		args = append(args, "--append-system-prompt", instructions)
 	}
 
@@ -552,7 +551,7 @@ func claudeHasBareModeAuthentication() bool {
 // PrepareLaunch copies resume transcripts into the target project folder so
 // Claude can resolve --resume when the resumed transcript belongs to another project folder.
 func (c *Claude) PrepareLaunch(opts SpawnOpts) error {
-	if err := ensureAttnClaudeSkillInstalled(); err != nil {
+	if _, err := EnsureClaudeSkillInstalled(); err != nil {
 		return err
 	}
 	if strings.TrimSpace(opts.ResumeSessionID) == "" {

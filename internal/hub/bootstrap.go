@@ -404,15 +404,11 @@ func (b *Bootstrapper) localVersion(ctx context.Context) (string, error) {
 }
 
 func (b *Bootstrapper) ensureLocalBinary(ctx context.Context, platform RemotePlatform, version string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
 	cacheKey, preferSourceBuild, err := b.localBinaryCacheKey(version)
 	if err != nil {
 		return "", err
 	}
-	cachePath := filepath.Join(home, ".attn", "remotes", "binaries", cacheKey, platform.ArtifactName)
+	cachePath := remoteBinaryCachePath(cacheKey, platform)
 	if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
 		return cachePath, nil
 	}
@@ -440,6 +436,10 @@ func (b *Bootstrapper) ensureLocalBinary(ctx context.Context, platform RemotePla
 		return "", err
 	}
 	return cachePath, nil
+}
+
+func remoteBinaryCachePath(key string, platform RemotePlatform) string {
+	return filepath.Join(config.DataDir(), "remotes", "binaries", key, platform.ArtifactName)
 }
 
 func (b *Bootstrapper) downloadReleaseArtifact(ctx context.Context, version, artifact, destDir string) error {
@@ -471,22 +471,17 @@ func (b *Bootstrapper) downloadReleaseArtifact(ctx context.Context, version, art
 // over this artifact is under a second: 0.13s to compile (bun embeds its
 // runtime rather than compiling it), 0.17s to hash locally, 0.38s to hash on the
 // far end. Measured on a 93,694,096-byte linux_arm64 host.
-func appRuntimeCacheDir(home, key string) string {
-	return filepath.Join(home, ".attn", "remotes", "app-runtime", key)
+func appRuntimeCacheDir(key string) string {
+	return filepath.Join(config.DataDir(), "remotes", "app-runtime", key)
 }
 
 // ensureLocalAppRuntime produces the app runtime host for the remote's platform
 // and returns its local path. Source build first, published artifact second —
 // the same order, and for the same reason, as the attn binary beside it.
 func (b *Bootstrapper) ensureLocalAppRuntime(ctx context.Context, platform RemotePlatform, version string) (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-
 	var reasons []string
 	if sourceCheckoutAvailable() {
-		stageDir := appRuntimeCacheDir(home, platform.GOOS+"_"+platform.GOARCH)
+		stageDir := appRuntimeCacheDir(platform.GOOS + "_" + platform.GOARCH)
 		if err := b.buildAppRuntimeFromSource(ctx, platform, stageDir); err == nil {
 			return filepath.Join(stageDir, apps.RuntimeHostBinaryName), nil
 		} else {
@@ -495,7 +490,7 @@ func (b *Bootstrapper) ensureLocalAppRuntime(ctx context.Context, platform Remot
 	}
 
 	if version != "" && version != "dev" {
-		cachePath := filepath.Join(appRuntimeCacheDir(home, version), platform.RuntimeArtifactName)
+		cachePath := filepath.Join(appRuntimeCacheDir(version), platform.RuntimeArtifactName)
 		if info, err := os.Stat(cachePath); err == nil && info.Mode().IsRegular() {
 			return cachePath, nil
 		}
@@ -720,6 +715,12 @@ func (b *Bootstrapper) buildBinaryFromSource(ctx context.Context, platform Remot
 	}
 	if gc := buildinfo.GitCommit; gc != "" && gc != "unknown" {
 		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.GitCommit=" + gc
+	}
+	// The remote daemon's workers encode snapshots this app decodes, so the
+	// build it gets must carry the same format tag; without it every remote
+	// session attaches without its scrollback.
+	if sf := buildinfo.SnapshotFormat; sf != "" && sf != "unknown" {
+		ldflags += " -X github.com/victorarias/attn/internal/buildinfo.SnapshotFormat=" + sf
 	}
 	// The worker's server-authoritative terminal links libghostty-vt via cgo on
 	// Linux too (internal/ghosttyvt), so the cross-compile needs that target's

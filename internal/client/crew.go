@@ -35,6 +35,20 @@ func (c *Client) CrewWake(member, agent string) (*protocol.CrewWakeResult, error
 	return resp.CrewWakeResult, nil
 }
 
+// CrewSleep asks an awake member to write its handoff and close its day with
+// `attn handoff --sleep`. The member chooses when to comply; this command does
+// not kill its session.
+func (c *Client) CrewSleep(member string) (*protocol.CrewSleepResult, error) {
+	resp, err := c.send(protocol.CrewSleepMessage{Cmd: protocol.CmdCrewSleep, Member: member})
+	if err != nil {
+		return nil, err
+	}
+	if resp.CrewSleepResult == nil {
+		return nil, fmt.Errorf("the daemon answered without a sleep result")
+	}
+	return resp.CrewSleepResult, nil
+}
+
 // CrewSet records where a member's sessions launch and what its charter is
 // about. A nil field is left as it was; awarenessDirs non-nil and empty clears
 // the list, which travels as its own flag because an empty list marshals away.

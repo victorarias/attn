@@ -526,6 +526,7 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 		"ATTN_AUTO_COMPACT_WINDOW",
 		"ATTN_CACHED_SHELL_ENV",
 		"ATTN_PTY_EXTERNAL_ENV",
+		"ATTN_PTY_DAEMON_ENV",
 	)
 	workerEnv = append(workerEnv, "ATTN_PTY_WORKER=1")
 	if opts.WorkflowGuidanceEnabled {
@@ -557,6 +558,13 @@ func (b *WorkerBackend) Spawn(ctx context.Context, opts SpawnOptions) error {
 			return fmt.Errorf("encode external environment: %w", err)
 		}
 		workerEnv = append(workerEnv, "ATTN_PTY_EXTERNAL_ENV="+string(envJSON))
+	}
+	if len(opts.DaemonEnv) > 0 {
+		envJSON, err := json.Marshal(opts.DaemonEnv)
+		if err != nil {
+			return fmt.Errorf("encode daemon routing environment: %w", err)
+		}
+		workerEnv = append(workerEnv, "ATTN_PTY_DAEMON_ENV="+string(envJSON))
 	}
 	cmd.Env = workerEnv
 
@@ -695,6 +703,7 @@ func (b *WorkerBackend) Attach(ctx context.Context, sessionID, subscriberID stri
 				ExitCode:                   attachResult.ExitCode,
 				ExitSignal:                 attachResult.ExitSignal,
 				GhosttySnapshot:            attachResult.GhosttySnapshot,
+				GhosttySnapshotFormat:      attachResult.GhosttySnapshotFormat,
 				GhosttyBlocks:              attachBlocksFromWire(attachResult.GhosttyBlocks),
 				GhosttyPlacements:          ptyworker.PlacementsFromWire(attachResult.GhosttyPlacements),
 				GhosttyScrollbackTruncated: attachResult.GhosttyScrollbackTruncated,

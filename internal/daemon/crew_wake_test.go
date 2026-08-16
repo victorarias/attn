@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -9,10 +10,12 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/crew"
 	"github.com/victorarias/attn/internal/logging"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/pty"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
 
@@ -184,6 +187,126 @@ func TestCrewWake_AnAwakeMemberIsNotWokenTwice(t *testing.T) {
 	}
 }
 
+type crewRuntimeBackend struct {
+	*fakeSpawnBackend
+	running map[string]bool
+}
+
+func (b *crewRuntimeBackend) Spawn(ctx context.Context, opts ptybackend.SpawnOptions) error {
+	if err := b.fakeSpawnBackend.Spawn(ctx, opts); err != nil {
+		return err
+	}
+	b.running[opts.ID] = true
+	return nil
+}
+
+func (b *crewRuntimeBackend) SessionInfo(_ context.Context, sessionID string) (ptybackend.SessionInfo, error) {
+	running, ok := b.running[sessionID]
+	if !ok {
+		return ptybackend.SessionInfo{}, pty.ErrSessionNotFound
+	}
+	return ptybackend.SessionInfo{SessionID: sessionID, Running: running}, nil
+}
+
+// A session row is history, not liveness. Wake probes the bound runtime; when
+// the process exited it releases that exact binding, starts a fresh day, and
+// names the repair in the result.
+func TestCrewWake_ReleasesAnExitedBindingAndStartsAFreshDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	runtime := &crewRuntimeBackend{fakeSpawnBackend: backend, running: make(map[string]bool)}
+	d.ptyBackend = runtime
+
+	first, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("first wake: %v", err)
+	}
+	runtime.running[first.SessionID] = false
+
+	second, err := d.crewWake("trellis", "")
+	if err != nil {
+		t.Fatalf("wake after exit: %v", err)
+	}
+	if second.AlreadyAwake || second.SessionID == first.SessionID {
+		t.Fatalf("wake result = %+v, want a fresh day", second)
+	}
+	if got := protocol.Deref(second.ReleasedSessionID); got != first.SessionID {
+		t.Fatalf("released_session_id = %q, want exited day %q", got, first.SessionID)
+	}
+	if got := protocol.Deref(memberByID(t, crewList(t, d), "trellis").BindingSession); got != second.SessionID {
+		t.Fatalf("roster binding = %q, want fresh day %q", got, second.SessionID)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 2 {
+		t.Fatalf("wake spawned %d sessions, want the original and replacement", spawned)
+	}
+}
+
+// PTY exit is the runtime seam: the generic session row may remain for history
+// or recovery, but the member is asleep as soon as its process is gone.
+func TestCrewBinding_ProcessExitReleasesTheDay(t *testing.T) {
+	d, backend, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+
+	if !d.handlePTYExit(ptybackend.ExitInfo{ID: woken.SessionID, ExitCode: 1}) {
+		t.Fatal("process exit was suppressed")
+	}
+	if binding := memberByID(t, crewList(t, d), "alder").BindingSession; binding != nil {
+		t.Fatalf("exited day still holds binding %q", *binding)
+	}
+	if d.store.Get(woken.SessionID) == nil {
+		t.Fatal("the generic session row was removed; crew release should not erase history")
+	}
+
+	replacement, err := d.crewWake("alder", "")
+	if err != nil {
+		t.Fatalf("wake after process exit: %v", err)
+	}
+	if got := protocol.Deref(replacement.ReleasedSessionID); got != woken.SessionID {
+		t.Fatalf("wake named released session %q, want %q", got, woken.SessionID)
+	}
+	backend.mu.Lock()
+	spawned := len(backend.spawnOpts)
+	backend.mu.Unlock()
+	if spawned != 2 {
+		t.Fatalf("process-exit wake spawned %d days, want original and replacement", spawned)
+	}
+}
+
+// Startup may keep a dead generic session as recoverable, but it never keeps
+// the member's seat: the letter and home, not the process row, carry the crew.
+func TestCrewBinding_StartupRecoveryReleasesADeadDay(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	woken, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake: %v", err)
+	}
+	home := newRecoveryHome(t)
+	home.resumableClaude(t, "native-keel")
+	giveRestorationEvidence(t, d, woken.SessionID, "native-keel")
+
+	if removed := d.pruneSessionsWithoutPTY(time.Time{}); removed != 0 {
+		t.Fatalf("startup removed %d sessions, want the resumable row kept", removed)
+	}
+	if session := d.store.Get(woken.SessionID); session == nil || session.State != protocol.SessionStateRecoverable {
+		t.Fatalf("session = %+v, want generic row recoverable", session)
+	}
+	if binding := memberByID(t, crewList(t, d), "keel").BindingSession; binding != nil {
+		t.Fatalf("recoverable corpse still holds binding %q", *binding)
+	}
+	replacement, err := d.crewWake("keel", "")
+	if err != nil {
+		t.Fatalf("wake after startup release: %v", err)
+	}
+	if got := protocol.Deref(replacement.ReleasedSessionID); got != woken.SessionID {
+		t.Fatalf("wake named released session %q, want %q", got, woken.SessionID)
+	}
+}
+
 // The binding alone is not a liveness fence: the claimed session becomes
 // visible only later in the spawn pipeline. A second wake that enters during
 // that gap must wait, then resolve to the first day instead of stealing the
@@ -316,7 +439,10 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 		t.Fatalf("wake: %v", err)
 	}
 
-	member, block, bound := d.crewPrimeForSession(result.SessionID)
+	member, block, bound, err := d.crewPrimeForSession(result.SessionID)
+	if err != nil {
+		t.Fatalf("prime: %v", err)
+	}
 	if !bound {
 		t.Fatal("the session a wake just bound was primed as nobody")
 	}
@@ -348,10 +474,10 @@ func TestCrewPrime_ABoundSessionIsPrimedWithItsHomeAndTheSizeIsLogged(t *testing
 func TestCrewPrime_AnUnboundSessionIsNobody(t *testing.T) {
 	d, _, _ := newWakeableDaemon(t)
 	addSession(t, d, "sess-worker")
-	if _, block, bound := d.crewPrimeForSession("sess-worker"); bound || block != "" {
+	if _, block, bound, err := d.crewPrimeForSession("sess-worker"); err != nil || bound || block != "" {
 		t.Fatalf("an unbound session was primed as somebody: %q", block)
 	}
-	if _, _, bound := d.crewPrimeForSession(""); bound {
+	if _, _, bound, err := d.crewPrimeForSession(""); err != nil || bound {
 		t.Fatal("a session with no id was primed")
 	}
 }
@@ -451,6 +577,105 @@ func TestCrewSet_ADirectoryThatIsNotThereIsRefused(t *testing.T) {
 	}
 }
 
+func TestCrewPriming_StaleProjectPathsDoNotBlockPriming(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	member, _, err := d.crewMember("keel")
+	if err != nil {
+		t.Fatalf("read member: %v", err)
+	}
+	missingRoot := t.TempDir()
+	member.CWD = filepath.Join(missingRoot, "moved-cwd")
+	member.AwarenessDirs = []string{filepath.Join(missingRoot, "moved-awareness")}
+
+	priming, err := d.crewPriming(member)
+	if err != nil {
+		t.Fatalf("stale project paths blocked priming: %v", err)
+	}
+	if priming.CWD != member.CWD {
+		t.Errorf("priming cwd = %q, want stale recorded path %q", priming.CWD, member.CWD)
+	}
+	if len(priming.AwarenessDirs) != 1 || priming.AwarenessDirs[0] != member.AwarenessDirs[0] {
+		t.Errorf("priming awareness = %v, want %v", priming.AwarenessDirs, member.AwarenessDirs)
+	}
+
+	if _, err := d.crewLaunchDir(member); err == nil {
+		t.Fatal("wake accepted a missing cwd")
+	} else if !strings.Contains(err.Error(), "not there") {
+		t.Fatalf("wake refusal = %q, want the existing missing-cwd explanation", err)
+	}
+}
+
+func TestCrewSet_ACwdInsideAnotherProfilesCrewIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreign := filepath.Join(userHome, ".attn-fixture", crew.HomesDirName, "ember", "project")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatalf("create foreign crew cwd: %v", err)
+	}
+
+	_, err := d.resolveCrewWorkDirForHome(foreign, userHome)
+	if err == nil {
+		t.Fatal("a cwd inside another profile's crew homes was accepted")
+	}
+	for _, want := range []string{foreign, filepath.Join(userHome, ".attn-fixture", crew.HomesDirName), filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+}
+
+func TestCrewSet_AMissingPathInsideAnotherProfilesCrewIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreignRoot := filepath.Join(userHome, ".attn-fixture", crew.HomesDirName)
+	if err := os.MkdirAll(foreignRoot, 0o755); err != nil {
+		t.Fatalf("create foreign crew root: %v", err)
+	}
+	missing := filepath.Join(foreignRoot, "quartz", "moved-project")
+
+	_, err := d.resolveCrewWorkDirForHome(missing, userHome)
+	if err == nil {
+		t.Fatal("a missing path inside another profile's crew homes was accepted")
+	}
+	for _, want := range []string{missing, foreignRoot, filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+}
+
+func TestCrewSet_ASymlinkedForeignProfileRootIsRefused(t *testing.T) {
+	d, _, _ := newWakeableDaemon(t)
+	userHome := t.TempDir()
+	foreignTarget := filepath.Join(t.TempDir(), "foreign-profile")
+	foreign := filepath.Join(foreignTarget, crew.HomesDirName, "quartz", "project")
+	if err := os.MkdirAll(foreign, 0o755); err != nil {
+		t.Fatalf("create symlinked foreign crew cwd: %v", err)
+	}
+	profileLink := filepath.Join(userHome, ".attn-fixture")
+	if err := os.Symlink(foreignTarget, profileLink); err != nil {
+		t.Fatalf("symlink foreign profile: %v", err)
+	}
+	linkedCWD := filepath.Join(profileLink, crew.HomesDirName, "quartz", "project")
+
+	_, err := d.resolveCrewWorkDirForHome(linkedCWD, userHome)
+	if err == nil {
+		t.Fatal("a cwd under a symlinked foreign profile root was accepted")
+	}
+	for _, want := range []string{linkedCWD, filepath.Join(userHome, ".attn-fixture", crew.HomesDirName), filepath.Join(d.dataRoot, crew.HomesDirName)} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("refusal %q does not name %q", err, want)
+		}
+	}
+	canonicalCWD, err := filepath.EvalSymlinks(linkedCWD)
+	if err != nil {
+		t.Fatalf("canonicalize linked cwd: %v", err)
+	}
+	if _, err := d.resolveCrewWorkDirForHome(canonicalCWD, userHome); err == nil {
+		t.Fatal("the canonical target of a symlinked foreign profile root was accepted")
+	}
+}
+
 // Every crew verb passes the fence. An outpost holds no part of the crew, so a
 // wake, a set and a prime all refuse there by name.
 func TestCrewWake_AnOutpostHoldsNoneOfIt(t *testing.T) {
@@ -477,7 +702,7 @@ func TestCrewWake_AnOutpostHoldsNoneOfIt(t *testing.T) {
 		t.Errorf("set refusal %q does not name the home", protocol.Deref(resp.Error))
 	}
 
-	if _, _, bound := d.crewPrimeForSession("sess-anything"); bound {
+	if _, _, bound, _ := d.crewPrimeForSession("sess-anything"); bound {
 		t.Fatal("an outpost primed a session as a crew member")
 	}
 }

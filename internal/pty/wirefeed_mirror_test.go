@@ -83,7 +83,7 @@ func newMirror(t *testing.T, cols, rows int, opts ghosttyvt.Options) *mirror {
 	t.Helper()
 	worker := newKittyTerminal(t, cols, rows, opts)
 	// The client stands in for the frontend's model: same size, no kitty.
-	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{MaxScrollback: opts.MaxScrollback})
+	client := newKittyTerminal(t, cols, rows, ghosttyvt.Options{ScrollbackBytes: opts.ScrollbackBytes})
 
 	feed := newWireFeeder(worker, 0, nil, 0)
 	if feed == nil {
@@ -522,16 +522,22 @@ func TestWireFeedResyncsOnEveryUnaccountedMutationButAPureRemoval(t *testing.T) 
 			shape: onlyUpdates,
 		},
 		{
-			// New pixels under a live key: ImageGeneration moves and the key
-			// does not, which is Updated again.
+			// New pixels under a live key RETIRE the placement rather than
+			// re-point it, so this reads as a pure removal and the rule
+			// deliberately stays quiet: the wire carried the transmission
+			// verbatim, so the client retires the same placement on the same
+			// bytes. agree() below is what keeps that claim honest.
+			//
+			// It used to be an Update — ImageGeneration moving under a key that
+			// did not — and moved to a removal when the ghostty pin did.
 			name: "an image retransmitted under a live placement id",
 			chunks: []string{
 				"\x1b[2;2Hkeep",
 				kittyPlaceRGB(53, 16, 32, ""),
 				undescribed(kittyTransmitRGB(53, 8, 16)),
 			},
-			want:  kittyResyncUndescribedImage,
-			shape: onlyUpdates,
+			want:  "",
+			shape: onlyRemovals,
 		},
 		{
 			// The original shape, kept in the table so widening the rule cannot
@@ -649,52 +655,37 @@ func TestWireFeedStillDescribesTheAPCThatSettlesAnUndescribedOne(t *testing.T) {
 	}
 }
 
-// The receipt behind the kittyResyncScrollClamped threshold, and the reason it
-// is the screen height rather than a guess. `r=N` makes a 2x2 image claim N
-// rows, so the scroll a placement causes is dialable one row at a time; the
-// tallest scroll a single SU still reproduces is the number the tripwire is set
-// at.
+// `r=N` makes a 2x2 image claim N rows, which is the one knob that dials the
+// scroll a single placement causes. It is how a placement used to outrun what
+// one SU can express and trip kittyResyncScrollClamped, and it is the shape
+// most likely to do so again — so this sweeps it past every plausible height
+// and holds the wire to the strong claim at each one: no resync, and the two
+// grids agree.
 //
-// Measured on this ghostty pin, cursor on row 1, image placed there:
-//
-//	8-row screen:  r=14 -> SU 8 agrees,  r=15 -> SU 9 lost a row of history
-//	12-row screen: r=22 -> SU 12 agrees, r=23 -> SU 13 lost a row of history
-//
-// Both sides are pinned because both are wrong to move. One row tighter and the
-// wire would resync over a scroll it could have carried; one row looser and it
-// would emit a clamped SU and diverge in silence, which is what this used to do.
-func TestWireFeedSynthesizesTheLargestScrollOneSUCarries(t *testing.T) {
-	for _, tc := range []struct {
-		rows int
-		// carried is the tallest image whose scroll one SU reproduces; overflow
-		// is the next row up, where SU would be clamped.
-		carried, overflow int
-	}{
-		{rows: 8, carried: 14, overflow: 15},
-		{rows: 12, carried: 22, overflow: 23},
-	} {
-		t.Run(fmt.Sprintf("%d rows", tc.rows), func(t *testing.T) {
-			// The resync is the placement chunk's; the trailing text after it is
-			// only what makes the scroll reach history where it can be compared.
-			place := func(rowCount int) (*mirror, string) {
-				m := newMirror(t, 20, tc.rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
+// On this ghostty pin nothing in the sweep resyncs. A placement's scroll no
+// longer tracks the row count `r=` claims and stays inside the screen, so it
+// never exceeds one SU and the tripwire has no case here — see the receipt on
+// kittyResyncScrollClamped for the shapes probed against it.
+func TestWireFeedCarriesTheScrollOfAnOverTallPlacement(t *testing.T) {
+	for _, rows := range []int{8, 12} {
+		t.Run(fmt.Sprintf("%d rows", rows), func(t *testing.T) {
+			// Heights around and far past the screen, including the ones that
+			// used to sit on either side of the old boundary.
+			for _, r := range []int{1, 2, 7, 8, 12, 13, 14, 15, 22, 23, 40} {
+				m := newMirror(t, 20, rows, ghosttyvt.Options{KittyImageStorageLimit: mirrorStorageLimit})
 				m.write("\x1b[2;2Hkeep")
-				m.write(kittyPlaceRGB(uint32(80+rowCount), 16, 32, fmt.Sprintf(",r=%d", rowCount)))
+				m.write(kittyPlaceRGB(uint32(80+r), 16, 32, fmt.Sprintf(",r=%d", r)))
 				resync := m.lastResync
+				// The trailing text is what pushes the scroll into history,
+				// where agree() can compare it.
 				m.write("\r\ntail")
-				return m, resync
-			}
 
-			at, resync := place(tc.carried)
-			if resync != "" {
-				t.Fatalf("r=%d resynced (%s) on a %d-row screen: one SU still carries that scroll",
-					tc.carried, resync, tc.rows)
-			}
-			at.agree(t, fmt.Sprintf("after an r=%d placement", tc.carried))
-
-			if _, resync := place(tc.overflow); resync != kittyResyncScrollClamped {
-				t.Errorf("r=%d resync = %q, want %q: SU cannot carry a scroll taller than the %d-row screen",
-					tc.overflow, resync, kittyResyncScrollClamped, tc.rows)
+				if resync != "" {
+					t.Errorf("r=%d resynced (%s) on a %d-row screen: one SU carries that scroll",
+						r, resync, rows)
+					continue
+				}
+				m.agree(t, fmt.Sprintf("after an r=%d placement on a %d-row screen", r, rows))
 			}
 		})
 	}

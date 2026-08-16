@@ -46,6 +46,35 @@ static GhosttyResult ghosttyvt_set_kitty_limit(GhosttyTerminal t, uint64_t v) {
 	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_KITTY_IMAGE_STORAGE_LIMIT, &v);
 }
 
+// Scrollback is a construction-time concern for us but a post-construction
+// option upstream, so it is set immediately after ghostty_terminal_new.
+static GhosttyResult ghosttyvt_set_max_scrollback(GhosttyTerminal t, uint64_t v) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_SCROLLBACK_MAX_BYTES, &v);
+}
+
+// Retain the bytes of an unfinished sequence so a snapshot taken mid-sequence
+// can restore the parser. Tracking is off by default, and encoding a terminal
+// whose parser is not at ground fails without it.
+static GhosttyResult ghosttyvt_set_continuation(GhosttyTerminal t, size_t v) {
+	return ghostty_terminal_set(t, GHOSTTY_TERMINAL_OPT_CONTINUATION_MAX_BYTES, &v);
+}
+
+static GhosttyResult ghosttyvt_snapshot_encode(GhosttyTerminal t, uint8_t **ptr, size_t *n) {
+	return ghostty_snapshot_encode_alloc(t, NULL, ptr, n);
+}
+
+// Decode a whole snapshot — READY prefix and every history page — into a fresh
+// terminal. The decoder borrows the source bytes, so it is freed before this
+// returns and the caller's buffer need not outlive the call.
+static GhosttyResult ghosttyvt_snapshot_decode(const uint8_t *ptr, size_t n, GhosttyTerminal *out) {
+	GhosttySnapshotDecoder d;
+	GhosttyResult rc = ghostty_snapshot_decoder_new_buf(NULL, &d, ptr, n);
+	if (rc != GHOSTTY_SUCCESS) return rc;
+	rc = ghostty_snapshot_decoder_decode(d, out);
+	ghostty_snapshot_decoder_free(d);
+	return rc;
+}
+
 static GhosttyColorRgb ghosttyvt_rgb(uint32_t value) {
 	GhosttyColorRgb color = {
 		.r = (uint8_t)(value >> 16),
@@ -132,28 +161,33 @@ static int ghosttyvt_active_screen(GhosttyTerminal t) {
 	return (int)s;
 }
 
+// Modes are read through the terminal's data query: `mode` goes in, `value`
+// comes back. False on a failed read is the safe answer everywhere it is used
+// below, so the failure is folded into the helper.
+static bool ghosttyvt_mode(GhosttyTerminal t, GhosttyMode mode) {
+	GhosttyTerminalModeConfig cfg;
+	memset(&cfg, 0, sizeof(cfg));
+	cfg.mode = mode;
+	if (ghostty_terminal_get(t, GHOSTTY_TERMINAL_DATA_MODE, &cfg) != GHOSTTY_SUCCESS) return false;
+	return cfg.value;
+}
+
 static bool ghosttyvt_cursor_visible(GhosttyTerminal t) {
-	bool visible = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_CURSOR_VISIBLE, &visible) != GHOSTTY_SUCCESS) return false;
-	return visible;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_CURSOR_VISIBLE);
 }
 
 // DEC wraparound (mode 7, DECAWM). False on a failed read is the safe answer:
 // the caller then resizes plainly instead of toggling a mode it could not read,
 // so a failure can never leave wraparound enabled behind the program's back.
 static bool ghosttyvt_wraparound(GhosttyTerminal t) {
-	bool enabled = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_WRAPAROUND, &enabled) != GHOSTTY_SUCCESS) return false;
-	return enabled;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_WRAPAROUND);
 }
 
 // Left/right margin mode (DECLRMM, DEC private mode 69). False on a failed read
 // leaves the caller trusting its own scroll measurement, which is what a
 // terminal without margins earns anyway.
 static bool ghosttyvt_left_right_margin_mode(GhosttyTerminal t) {
-	bool enabled = false;
-	if (ghostty_terminal_mode_get(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN, &enabled) != GHOSTTY_SUCCESS) return false;
-	return enabled;
+	return ghosttyvt_mode(t, GHOSTTY_MODE_LEFT_RIGHT_MARGIN);
 }
 
 static GhosttyPoint ghosttyvt_viewport_point(uint16_t x, uint32_t y) {
@@ -201,6 +235,7 @@ static GhosttyResult ghosttyvt_format_viewport(
 import "C"
 
 import (
+	"errors"
 	"fmt"
 	"runtime"
 	"runtime/cgo"
@@ -216,14 +251,30 @@ const (
 	defaultCellHeightPx = 16
 )
 
-// DefaultMaxScrollback is the scrollback cap (lines). Measured: ~0.8MB RSS for
-// a 10k-line 200x50 scrollback.
-const DefaultMaxScrollback = 10000
+// DefaultScrollbackBytes is the scrollback cap. Ghostty budgets scrollback in
+// bytes, not rows, and stores it in pages: measured at 200 columns, 4MB holds
+// 1,955 rows and 16MB holds 9,095, so a row costs roughly 1.8KB and this
+// budget is about 4,400 rows of agent output. Resident only once a session has
+// actually produced that much; a quiet session holds one page.
+//
+// It replaced a 10,000 that was written for a rows option and passed to a
+// bytes one — ten kilobytes, measured at 289 rows.
+const DefaultScrollbackBytes = 8 << 20
+
+// ContinuationMaxBytes bounds the unfinished sequence a snapshot may carry.
+// It is ghostty's own kitty APC buffer limit: a longer sequence never reaches
+// the parser intact in the first place, so nothing legitimate can sit above
+// it, and the snapshot decoder defaults to the same number — a snapshot we
+// encode is one an unconfigured decoder accepts. It costs no steady-state
+// memory: only the bytes of a sequence currently in flight are retained, and
+// the APC handler is holding those same bytes already.
+const ContinuationMaxBytes = 65 << 20
 
 // Options configures a new Terminal.
 type Options struct {
-	// MaxScrollback caps retained scrollback lines. Zero uses DefaultMaxScrollback.
-	MaxScrollback int
+	// ScrollbackBytes caps retained scrollback in bytes. Zero uses
+	// DefaultScrollbackBytes.
+	ScrollbackBytes int
 
 	// KittyImageStorageLimit caps kitty image storage in bytes. Zero disables
 	// the protocol entirely — deliberate: the library default is 10MB, and a
@@ -232,9 +283,12 @@ type Options struct {
 }
 
 // Snapshot is a self-contained serialization for reconstructing a terminal on
-// a client.
+// a client. Whole-terminal serialization fills Payload; the viewport-only form
+// fills VTDump.
 type Snapshot struct {
 	Cols, Rows int
+	// Payload is ghostty's binary snapshot format, decoded into a terminal.
+	Payload []byte
 	// VTDump replays into a fresh same-size terminal; no interrogative sequences.
 	VTDump []byte
 }
@@ -270,9 +324,9 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 	if cols <= 0 || rows <= 0 {
 		return nil, fmt.Errorf("ghosttyvt: invalid size %dx%d", cols, rows)
 	}
-	maxSB := opts.MaxScrollback
+	maxSB := opts.ScrollbackBytes
 	if maxSB <= 0 {
-		maxSB = DefaultMaxScrollback
+		maxSB = DefaultScrollbackBytes
 	}
 	// Process-global, idempotent; without it ghostty rejects every PNG (f=100).
 	installPNGDecoder()
@@ -283,18 +337,61 @@ func New(cols, rows int, opts Options) (*Terminal, error) {
 		cellH: defaultCellHeightPx,
 		sink:  &respSink{},
 	}
-	copts := C.GhosttyTerminalOptions{
-		cols:           C.uint16_t(cols),
-		rows:           C.uint16_t(rows),
-		max_scrollback: C.size_t(maxSB),
-	}
-	if rc := C.ghostty_terminal_new(nil, &t.term, copts); rc != C.GHOSTTY_SUCCESS {
+	if rc := C.ghostty_terminal_new(nil, &t.term, C.uint16_t(cols), C.uint16_t(rows)); rc != C.GHOSTTY_SUCCESS {
 		return nil, fmt.Errorf("ghosttyvt: terminal_new failed: rc=%d", int(rc))
+	}
+	return t.configure(maxSB, opts)
+}
+
+// Restore decodes a snapshot produced by Serialize into a live Terminal.
+//
+// The decoder owns the whole record stream in one call: history is small
+// enough on this side that staging it costs more than it saves — the browser,
+// where the first frame is on the line, decodes READY and prepends history
+// after painting.
+func Restore(payload []byte, opts Options) (*Terminal, error) {
+	if len(payload) == 0 {
+		return nil, errors.New("ghosttyvt: empty snapshot")
+	}
+	maxSB := opts.ScrollbackBytes
+	if maxSB <= 0 {
+		maxSB = DefaultScrollbackBytes
+	}
+	installPNGDecoder()
+	t := &Terminal{
+		cellW: defaultCellWidthPx,
+		cellH: defaultCellHeightPx,
+		sink:  &respSink{},
+	}
+	if rc := C.ghosttyvt_snapshot_decode(
+		(*C.uint8_t)(unsafe.Pointer(&payload[0])), C.size_t(len(payload)), &t.term,
+	); rc != C.GHOSTTY_SUCCESS {
+		return nil, fmt.Errorf("ghosttyvt: snapshot decode failed: rc=%d", int(rc))
+	}
+	t.cols = int(C.ghosttyvt_get_u16(t.term, C.GHOSTTY_TERMINAL_DATA_COLS))
+	t.rows = int(C.ghosttyvt_get_u16(t.term, C.GHOSTTY_TERMINAL_DATA_ROWS))
+	return t.configure(maxSB, opts)
+}
+
+// configure applies our options to a freshly created or decoded terminal and
+// installs the response callback. It owns t.term on failure.
+func (t *Terminal) configure(maxSB int, opts Options) (*Terminal, error) {
+	if rc := C.ghosttyvt_set_max_scrollback(t.term, C.uint64_t(maxSB)); rc != C.GHOSTTY_SUCCESS {
+		C.ghostty_terminal_free(t.term)
+		return nil, fmt.Errorf("ghosttyvt: set max scrollback failed: rc=%d", int(rc))
 	}
 	// Written even when zero: zero overrides the library's 10MB default.
 	if rc := C.ghosttyvt_set_kitty_limit(t.term, C.uint64_t(opts.KittyImageStorageLimit)); rc != C.GHOSTTY_SUCCESS {
 		C.ghostty_terminal_free(t.term)
 		return nil, fmt.Errorf("ghosttyvt: set kitty image storage limit failed: rc=%d", int(rc))
+	}
+	// Enabled from the first byte: tracking cannot reconstruct a sequence that
+	// was already in flight when it was switched on, and a pty chunk boundary
+	// lands mid-sequence often enough that an attach would otherwise fail to
+	// serialize whenever it did.
+	if rc := C.ghosttyvt_set_continuation(t.term, C.size_t(ContinuationMaxBytes)); rc != C.GHOSTTY_SUCCESS {
+		C.ghostty_terminal_free(t.term)
+		return nil, fmt.Errorf("ghosttyvt: set continuation tracking failed: rc=%d", int(rc))
 	}
 	// C retains the userdata: pin &sink.handle (the supported way for C to hold
 	// a Go pointer); unpinned in Close, after ghostty_terminal_free.
@@ -520,28 +617,20 @@ func (t *Terminal) serializeLocked() Snapshot {
 	if t.closed {
 		return Snapshot{Cols: t.cols, Rows: t.rows}
 	}
-	dump := t.serializeVTLocked()
-
-	// Upstream ordering bug: the dump emits the cursor CUP before tabstop
-	// resets, which move the cursor — append the true position last
-	// (0-indexed native coords → 1-based CUP).
-	cx, cy := t.cursorXYLocked()
-	dump = fmt.Appendf(dump, "\x1b[%d;%dH", cy+1, cx+1)
-
 	return Snapshot{
-		Cols:   t.cols,
-		Rows:   t.rows,
-		VTDump: dump,
+		Cols:    t.cols,
+		Rows:    t.rows,
+		Payload: t.encodeSnapshotLocked(),
 	}
 }
 
-// serializeVTLocked serializes the whole terminal via the carried
-// ghostty_terminal_serialize_vt patch; with the alt screen active it emits
-// primary, ?1049h, then the alt frame. Caller holds t.mu, not after Close.
-func (t *Terminal) serializeVTLocked() []byte {
+// encodeSnapshotLocked serializes the whole terminal — both screens, their
+// scrollback, and any unfinished parser input — into ghostty's binary snapshot
+// format. Caller holds t.mu, not after Close.
+func (t *Terminal) encodeSnapshotLocked() []byte {
 	var ptr *C.uint8_t
 	var n C.size_t
-	if rc := C.ghostty_terminal_serialize_vt(nil, t.term, &ptr, &n); rc != C.GHOSTTY_SUCCESS {
+	if rc := C.ghosttyvt_snapshot_encode(t.term, &ptr, &n); rc != C.GHOSTTY_SUCCESS {
 		return nil
 	}
 	defer C.ghostty_free(nil, ptr, n)

@@ -1066,20 +1066,23 @@ func TestParkedRuntimeIsVisibleOnEveryAppAndRevivable(t *testing.T) {
 		}
 	}
 
-	// The only one of these three a person ever sees.
-	notifications, err := d.store.ListNotifications()
-	if err != nil {
-		t.Fatalf("list notifications: %v", err)
-	}
+	// The only one of these three a person ever sees. The supervisor sets the
+	// parked phase and releases its lock before calling OnGiveUp, so the phase
+	// this test waited on is visible a moment before the notification exists.
 	var parked *store.NotificationRecord
-	for i := range notifications {
-		if notifications[i].Kind == notificationKindAppRuntimeParked {
-			parked = &notifications[i]
+	waitFor(t, "the app-runtime-parked notification to be written", func() bool {
+		notifications, err := d.store.ListNotifications()
+		if err != nil {
+			t.Fatalf("list notifications: %v", err)
 		}
-	}
-	if parked == nil {
-		t.Fatalf("no app-runtime-parked notification among %d", len(notifications))
-	}
+		parked = nil
+		for i := range notifications {
+			if notifications[i].Kind == notificationKindAppRuntimeParked {
+				parked = &notifications[i]
+			}
+		}
+		return parked != nil
+	})
 	if !strings.Contains(parked.Body, "attn app runtime restart") {
 		t.Fatalf("the notification does not name the way back: %q", parked.Body)
 	}
@@ -1089,9 +1092,10 @@ func TestParkedRuntimeIsVisibleOnEveryAppAndRevivable(t *testing.T) {
 	if parked.Severity != store.NotificationCritical {
 		t.Fatalf("severity = %q, want critical", parked.Severity)
 	}
-	if created := appFacts(t, d, FactNotificationCreated); len(created) != 1 || created[0].Subject != parked.ID {
-		t.Fatalf("notification.created facts = %+v, want one for %s", created, parked.ID)
-	}
+	waitFor(t, "the notification.created fact", func() bool {
+		created := appFacts(t, d, FactNotificationCreated)
+		return len(created) == 1 && created[0].Subject == parked.ID
+	})
 
 	revived := appRuntimeRestart(t, d)
 	if revived.Was != string(supervise.PhaseParked) {

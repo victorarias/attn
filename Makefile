@@ -1,4 +1,4 @@
-.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types generate-sdk check-sdk build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
+.PHONY: run build build-linux-amd64 build-linux-arm64 build-app-runtime-host build-app-runtime-host-linux-amd64 build-app-runtime-host-linux-arm64 publish-native-vt publish-ghostty-vt-wasm install install-daemon install-dev install-daemon-dev dev verify-ghostty-vt-wasm test test-hooks test-v test-quick test-watch test-all test-frontend test-e2e test-harness clean generate-types ensure-go-jsonschema check-types generate-sdk check-sdk build-app ensure-codesign-identity sign-app app-screenshot dist release release-skip-tests
 
 # Bare `make` does the full prod inner loop: install + open the app.
 # `make install` is install-only (for scripts/CI that drive the launch
@@ -33,6 +33,9 @@ VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 SOURCE_FINGERPRINT ?= $(shell bash ./scripts/source-fingerprint.sh --field fingerprint)
 GIT_COMMIT ?= $(shell bash ./scripts/source-fingerprint.sh --field commit)
+# Identity of the terminal-snapshot wire format. The frontend computes it from
+# the same script, so a bundle's worker and app agree by construction.
+SNAPSHOT_FORMAT ?= $(shell bash ./scripts/snapshot-format.sh)
 OUTPUT ?= $(BINARY_NAME)
 # Guards the macOS-only branches below (code signing, the lsof port check). It
 # was used by three recipes and defined by none, so `$(UNAME_S)` expanded to
@@ -40,7 +43,7 @@ OUTPUT ?= $(BINARY_NAME)
 # ad-hoc linker signature inside a properly signed bundle, and macOS answered
 # `daemon ensure` with Killed: 9.
 UNAME_S := $(shell uname -s)
-GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT)
+GO_LDFLAGS = -X github.com/victorarias/attn/internal/buildinfo.Version=$(VERSION) -X github.com/victorarias/attn/internal/buildinfo.BuildTime=$(BUILD_TIME) -X github.com/victorarias/attn/internal/buildinfo.SourceFingerprint=$(SOURCE_FINGERPRINT) -X github.com/victorarias/attn/internal/buildinfo.GitCommit=$(GIT_COMMIT) -X github.com/victorarias/attn/internal/buildinfo.SnapshotFormat=$(SNAPSHOT_FORMAT)
 # Honor the repository's .tool-versions even when an older standalone Zig is
 # earlier on PATH (the app's WASM builder follows the same order).
 ZIG ?= $(shell if command -v asdf >/dev/null 2>&1; then asdf which zig 2>/dev/null || command -v zig; else command -v zig; fi)
@@ -85,19 +88,26 @@ endif
 # rebuild (the script applies it, so a stale archive would miss the change). The
 # script is download-first: it fetches a prebuilt asset keyed by pin+patch and
 # verified against ghostty-vt-native.lock, and only builds from source (zig) when
-# the pin/patch was edited locally. The lock is a prerequisite so a republished
+# the pin was edited locally. The lock is a prerequisite so a republished
 # asset (new sha) forces everyone to re-fetch. GHOSTTY_VT_GOOS/GOARCH pin the
 # script to the same target the archive path resolves, so it installs into
 # third_party/ghostty-vt/$(VT_PLATFORM)/.
-$(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.patch) $(wildcard ghostty-vt-native.lock)
+$(NATIVE_VT_LIB): ghostty-vt.pin scripts/build-libghostty-vt.sh scripts/lib/libghostty-vt.sh $(wildcard ghostty-vt-native.lock)
 	GHOSTTY_VT_GOOS=$(VT_GOOS) GHOSTTY_VT_GOARCH=$(VT_GOARCH) ./scripts/build-libghostty-vt.sh
 
 # Rebuild the native archives for EVERY supported target from source and publish
-# them as prebuilt assets. Run after changing the shared ghostty-vt.pin or
-# ghostty-vt-native.patch; needs zig 0.16.x (cross-compiles all targets from one
+# them as prebuilt assets. Run after changing the shared ghostty-vt.pin; needs
+# zig 0.16.x (cross-compiles all targets from one
 # host) and an authenticated gh. Commit the regenerated ghostty-vt-native.lock.
 publish-native-vt:
 	./scripts/publish-libghostty-vt.sh
+
+# Mirror ghostty-org's prebuilt browser ghostty-vt.wasm for the pinned commit
+# onto our own keyed release. Upstream's rolling "tip" is rebuilt on every
+# commit, so the pin must BE that tip when this runs. Commit the regenerated
+# ghostty-vt-wasm.lock.
+publish-ghostty-vt-wasm:
+	./scripts/publish-ghostty-vt-wasm.sh
 
 build: $(NATIVE_VT_DEP)
 	go build -ldflags "$(GO_LDFLAGS)" -o $(OUTPUT) $(BUILD_DIR)
@@ -139,7 +149,7 @@ $(GOTESTSUM):
 	go install gotest.tools/gotestsum@latest
 
 verify-ghostty-vt-wasm:
-	bash ./app/scripts/ghostty-vt-wasm-lock.sh verify
+	bash ./app/scripts/ensure-ghostty-vt-wasm.sh
 
 test: $(NATIVE_VT_DEP) test-hooks test-scripts verify-ghostty-vt-wasm
 	./scripts/test-go.sh

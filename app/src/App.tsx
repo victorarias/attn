@@ -117,6 +117,7 @@ import {
 } from './utils/agentAvailability';
 import { normalizeInstallChannel, shouldCheckForReleaseUpdates } from './utils/installChannel';
 import { boundTicketForSession } from './utils/tickets';
+import { BUILD_PROFILE } from './utils/buildProfile';
 import { buildWorkspaceViewModels, filterSessionsRepresentedInWorkspaceLayouts } from './utils/workspaceViewModels';
 import {
   advanceAfterTurnClosed,
@@ -911,6 +912,7 @@ function AppContent({
     sendTicketAttach,
     sendTicketResume,
     sendCrewWake,
+    sendCrewSleep,
   } = useDaemonApi();
 
   // The presentation notice lives in the triggering session's pane header
@@ -3541,6 +3543,14 @@ function AppContent({
       .catch((error) => showError(error instanceof Error ? error.message : `Failed to wake ${crewDisplayName(member)}`));
   }, [sendCrewWake, handleSelectSession, showError]);
 
+  // Asking for sleep delivers closure work to the member; it does not close the
+  // session itself. The roster changes only after the member consents by filing
+  // its letter with `attn handoff --sleep`.
+  const handleSleepCrewMember = useCallback((member: string) => {
+    sendCrewSleep(member)
+      .catch((error) => showError(error instanceof Error ? error.message : `Failed to ask ${crewDisplayName(member)} to sleep`));
+  }, [sendCrewSleep, showError]);
+
   // The daemon-facing ticket actions the pane-header ticket overlay wires into
   // its TicketDetailPanel. Memoized so the workspace's renderPaneSurface memo
   // does not rebuild every render. Same senders the dock panel uses; resume is
@@ -3921,6 +3931,7 @@ function AppContent({
           selectedTile={selectedTile}
           tileContents={tileContents}
           collapsed={sidebarCollapsed}
+          profile={BUILD_PROFILE}
           headerActions={sidebarHeaderActions}
           criticalNotifications={criticalNotifications}
           onOpenNotifications={openNotificationsPanel}
@@ -3942,6 +3953,7 @@ function AppContent({
           onToggleShowSessionless={handleToggleShowSessionlessWorkspaces}
           crew={crew}
           onWakeCrewMember={handleWakeCrewMember}
+          onSleepCrewMember={handleSleepCrewMember}
           queueModeEnabled={queueModeEnabled}
           onToggleQueueMode={handleToggleQueueMode}
           workspaceSelectionStyle={workspaceSelectionStyle}

@@ -79,7 +79,7 @@ func inboxHasTicket(bundles []protocol.TicketEventBundle, ticketID string) bool 
 // The full subscribe lifecycle over the daemon: an agent subscribes to a ticket it
 // does not own, is then nudged by — and its inbox delivers — a later event on that
 // ticket, and after unsubscribing it is neither nudged by nor served further events.
-// codex (no self-monitor) is used so the doorbell is observable; the trigger is a
+// Codex is used so the doorbell is observable; the trigger is a
 // chief comment on the ticket, an event the subscriber did not author. The trigger
 // goes through commentOnTicket (synchronous handleTicketAddComment), so the nudge
 // countdown is armed before the assertion, unlike the net.Pipe-based

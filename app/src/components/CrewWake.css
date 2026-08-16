@@ -1,0 +1,305 @@
+/* The two-step wake on a sleeping crew row: a sunrise you arm, then let break.
+   Every motion here is one-shot — a transition into the armed state, an
+   animation out of it. Nothing loops: attn draws GPU terminals all day, and a
+   permanent repaint is a battery bug no test catches. */
+
+.crew-sun {
+  --sun-ink: currentColor;
+  --sun-core: currentColor;
+  display: block;
+  width: calc(16px * var(--ui-scale));
+  height: calc(16px * var(--ui-scale));
+  /* The armed sun and its flare reach past the box; the button reserves the
+     resting footprint and the light spills. */
+  overflow: visible;
+  fill: none;
+  stroke: var(--sun-ink);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  transition: stroke 300ms ease;
+}
+
+/* Armed and breaking both burn in the brand's own sunrise orange, which is
+   theme-invariant, so the armed state reads the same in light and dark. */
+.crew-sun--armed,
+.crew-sun--breaking {
+  --sun-ink: var(--accent);
+  --sun-core: var(--accent);
+}
+
+.crew-sun-disc {
+  fill: var(--sun-core);
+  stroke: none;
+  transition: fill 300ms ease;
+}
+
+/* The rise, with a little overshoot at the top — the sun arrives and settles
+   rather than sliding into place. It also grows, because sixteen pixels is not
+   much room to say "this is a different state" with position alone.
+   fill-box rather than the viewBox, so the growth is about the sun's own centre
+   on every engine instead of the drawing's. */
+.crew-sun-body {
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: translateY(0) scale(1);
+  transition: transform 420ms cubic-bezier(0.34, 1.42, 0.64, 1);
+}
+
+.crew-sun--armed .crew-sun-body,
+.crew-sun--breaking .crew-sun-body {
+  transform: translateY(-4px) scale(1.08);
+}
+
+/* Rays and ground both draw from the middle outward, so arming reads as light
+   spreading rather than parts appearing. `--ray` is the distance from the top
+   ray, so the fan opens from noon outward on both sides at once. */
+.crew-sun-ray,
+.crew-sun-horizon {
+  stroke-dasharray: 1;
+  transition: stroke-dashoffset 300ms ease-out, opacity 300ms ease-out;
+}
+
+.crew-sun-ray {
+  stroke-dashoffset: 0.55;
+  transition-delay: calc(var(--ray, 0) * 55ms);
+}
+
+.crew-sun-horizon {
+  /* Shorter than the disc is wide: at rest there is no ground to see, because
+     the sun has not risen off it yet. */
+  stroke-dashoffset: 0.72;
+  opacity: 0.45;
+}
+
+.crew-sun--armed .crew-sun-ray,
+.crew-sun--breaking .crew-sun-ray {
+  stroke-dashoffset: 0;
+}
+
+.crew-sun--armed .crew-sun-horizon,
+.crew-sun--breaking .crew-sun-horizon {
+  stroke-dashoffset: 0;
+  opacity: 0.9;
+}
+
+/* First light: blooms once, past where it lands, then holds. The hold is the
+   held breath — a still frame, not a pulse. */
+.crew-sun-glow {
+  fill: var(--accent);
+  stroke: none;
+  filter: blur(2.6px);
+  opacity: 0.22;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: crew-sun-firstlight 620ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes crew-sun-firstlight {
+  0% {
+    opacity: 0;
+    transform: scale(0.35);
+  }
+  55% {
+    opacity: 0.42;
+    transform: scale(1.14);
+  }
+  100% {
+    opacity: 0.22;
+    transform: scale(1);
+  }
+}
+
+/* Confirm. The sun crouches, then clears the sky entirely; the ground it left
+   dissolves in the light and a ring of first light rings out past the row. */
+.crew-sun--breaking .crew-sun-body {
+  animation: crew-sun-leap 520ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes crew-sun-leap {
+  0% {
+    transform: translateY(-4px) scale(1.08);
+    opacity: 1;
+  }
+  18% {
+    transform: translateY(-2.8px) scale(0.92);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-10px) scale(1.8);
+    opacity: 0;
+  }
+}
+
+.crew-sun--breaking .crew-sun-horizon {
+  animation: crew-sun-horizon-out 440ms ease-in both;
+}
+
+@keyframes crew-sun-horizon-out {
+  0% {
+    stroke-dashoffset: 0;
+    opacity: 0.9;
+  }
+  100% {
+    stroke-dashoffset: 0.9;
+    opacity: 0;
+  }
+}
+
+.crew-sun--breaking .crew-sun-glow {
+  animation: crew-sun-flood 520ms ease-out both;
+}
+
+@keyframes crew-sun-flood {
+  0% {
+    opacity: 0.22;
+    transform: scale(1);
+  }
+  30% {
+    opacity: 0.6;
+    transform: scale(1.5);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(2.4);
+  }
+}
+
+.crew-sun-shock {
+  fill: none;
+  stroke: var(--accent);
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: crew-sun-shock 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes crew-sun-shock {
+  0% {
+    transform: scale(0.5);
+    opacity: 0.95;
+    stroke-width: 2;
+  }
+  100% {
+    transform: scale(3);
+    opacity: 0;
+    stroke-width: 0.4;
+  }
+}
+
+/* What the next click does, in the row's own voice — the marks beside a label
+   are all small caps. It sits to the LEFT of the sun and the controls strip is
+   anchored to the row's right edge, so arming grows the strip leftward and the
+   confirm target does not move a pixel. */
+.crew-wake-confirm {
+  flex: 0 0 auto;
+  padding-right: 5px;
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  color: var(--accent);
+  animation: crew-wake-confirm-in 240ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes crew-wake-confirm-in {
+  from {
+    opacity: 0;
+    transform: translateX(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The row is the other arm-and-confirm target, so it says so: armed, it holds a
+   trace of the light building on it. The hover background under the glow is
+   spelled out rather than inherited so a keyboard-armed row looks the same as a
+   pointer-armed one, and the controls strip takes the identical pair — it is
+   opaque over the row and would otherwise sit on the warmth as a grey patch. */
+.queue-row.queue-row--crew[data-crew-wake='armed'],
+.queue-row.queue-row--crew[data-crew-wake='armed'] .queue-row-controls {
+  background-color: var(--color-bg-elevated);
+  background-image: linear-gradient(var(--accent-glow), var(--accent-glow));
+}
+
+/* Confirmed: the strip gets out of the light's way, and the word that says the
+   member is asleep goes with it — it stops being true here. */
+.queue-row.queue-row--crew[data-crew-wake='breaking'] .queue-row-controls {
+  background: none;
+}
+
+.queue-row.queue-row--crew[data-crew-wake='breaking'] .crew-row-mark {
+  opacity: 0;
+  transition: opacity 200ms ease;
+}
+
+/* Daybreak across the row. One pass, left to right, then gone — the wake is
+   the member's, not the button's.
+   The band travels by background-position rather than a transform, so nothing
+   leaves the row and the row needs no clip; a clip here would cut the sun's
+   own flare off at the row's edge. */
+.queue-row--crew[data-crew-wake='breaking']::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    transparent 30%,
+    var(--accent-glow) 42%,
+    rgba(255, 168, 92, 0.32) 50%,
+    var(--accent-glow) 58%,
+    transparent 70%
+  );
+  background-size: 300% 100%;
+  animation: crew-wake-daybreak 620ms ease-out both;
+}
+
+@keyframes crew-wake-daybreak {
+  0% {
+    background-position: 100% 0;
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  100% {
+    background-position: 0 0;
+    opacity: 0;
+  }
+}
+
+/* The two steps stay; the theater stops. Every armed value above is a
+   transition endpoint or an animation's resting frame, so removing the motion
+   leaves an armed sun that still reads as armed. */
+@media (prefers-reduced-motion: reduce) {
+  .crew-sun,
+  .crew-sun-disc,
+  .crew-sun-body,
+  .crew-sun-ray,
+  .crew-sun-horizon {
+    transition: none;
+  }
+
+  .crew-sun-glow,
+  .crew-sun-shock,
+  .crew-sun--breaking .crew-sun-body,
+  .crew-sun--breaking .crew-sun-glow,
+  .crew-sun--breaking .crew-sun-horizon,
+  .crew-wake-confirm,
+  .queue-row--crew[data-crew-wake='breaking']::after {
+    animation: none;
+  }
+
+  /* Without its animation the shockwave would sit on the sun as a static ring;
+     it exists only as motion. */
+  .crew-sun-shock,
+  .queue-row--crew[data-crew-wake='breaking']::after {
+    display: none;
+  }
+
+  .queue-row.queue-row--crew[data-crew-wake='breaking'] .crew-row-mark {
+    transition: none;
+  }
+}

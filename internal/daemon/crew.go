@@ -73,7 +73,21 @@ func (d *Daemon) importCrewHomes() {
 		d.logf("crew: importing homes: %v", err)
 		return
 	}
+	registered, _, err := d.readCrewMembersRaw()
+	if err != nil && !docstore.IsUndeclaredCollection(err) {
+		d.logf("crew: checking registered homes before import: %v", err)
+		return
+	}
+	for _, member := range registered {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			d.logf("crew: import refused stored member %s: %v", crew.DisplayName(member.ID), err)
+		}
+	}
 	for _, member := range members {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			d.logf("crew: import refused member %s: %v", crew.DisplayName(member.ID), err)
+			continue
+		}
 		if err := d.writeCrewMember(*schema, member, docstore.ExpectAbsent); err != nil {
 			if docstore.IsConflict(err) {
 				continue // already registered; the record is authoritative
@@ -100,6 +114,9 @@ func (d *Daemon) crewCollection() (*docstore.CollectionSchema, error) {
 // docstore's own change fact so live queries on the roster wake like any other
 // write.
 func (d *Daemon) writeCrewMember(schema docstore.CollectionSchema, member crew.Member, expected int64) error {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return err
+	}
 	body, err := member.Encode()
 	if err != nil {
 		return err
@@ -123,6 +140,22 @@ func (d *Daemon) writeCrewMember(schema docstore.CollectionSchema, member crew.M
 // 2026-08-14 at a three-member roster, 25µs on an M5. That is what a session
 // broadcast pays, and what a garden action pays to resolve its tender.
 func (d *Daemon) readCrewMembers() ([]crew.Member, map[string]docstore.Document, error) {
+	members, docs, err := d.readCrewMembersRaw()
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, member := range members {
+		if err := d.validateCrewMemberPaths(member); err != nil {
+			return nil, nil, err
+		}
+	}
+	return members, docs, nil
+}
+
+// readCrewMembersRaw is reserved for startup import, where invalid copied rows
+// must be enumerated so each refusal can be logged. Every operational read goes
+// through readCrewMembers and therefore through the path fence.
+func (d *Daemon) readCrewMembersRaw() ([]crew.Member, map[string]docstore.Document, error) {
 	read, _, err := d.runDocQuery(docstore.Query{
 		Namespace:  crew.Namespace,
 		Collection: crew.CollectionMembers,
@@ -312,6 +345,67 @@ func (d *Daemon) releaseCrewBindingIfSession(sessionID string) {
 		return
 	}
 	d.releaseCrewBindingsExcept(*schema, members, docs, "", sessionID)
+}
+
+// releaseCrewBinding clears one member's binding only when it still names the
+// session the caller observed. Unlike the broad teardown helper, this path
+// returns failures because a wake must not launch a second day until the dead
+// day's seat is known to be free.
+func (d *Daemon) releaseCrewBinding(memberID, sessionID string) (bool, error) {
+	released := false
+	_, err := d.updateCrewMember(memberID, func(member *crew.Member) (bool, error) {
+		released = false
+		if member.BindingSession != sessionID {
+			return false, nil
+		}
+		if err := d.migrateCrewTicketIdentity(member.ID, sessionID); err != nil {
+			return false, err
+		}
+		member.BindingSession = ""
+		released = true
+		return true, nil
+	})
+	if err != nil || !released {
+		return released, err
+	}
+	d.publishFact(FactCrewReleased, memberID, nil)
+	d.logf("crew: session %s released %s's binding", sessionID, crew.DisplayName(memberID))
+	return true, nil
+}
+
+// releaseExitedCrewBinding releases a day whose runtime is known dead and
+// remembers that fact for the next wake receipt. The member becomes visibly
+// asleep now; naming the release later must not keep the seat occupied.
+func (d *Daemon) releaseExitedCrewBinding(sessionID string) {
+	member, bound := d.crewMemberForSession(sessionID)
+	if !bound {
+		return
+	}
+	released, err := d.releaseCrewBinding(member.ID, sessionID)
+	if err != nil {
+		d.logf("crew: releasing exited session %s from %s: %v", sessionID, crew.DisplayName(member.ID), err)
+		return
+	}
+	if released {
+		d.noteCrewExitedSession(member.ID, sessionID)
+	}
+}
+
+func (d *Daemon) noteCrewExitedSession(memberID, sessionID string) {
+	d.crewExitedMu.Lock()
+	defer d.crewExitedMu.Unlock()
+	if d.crewExitedSessions == nil {
+		d.crewExitedSessions = make(map[string]string)
+	}
+	d.crewExitedSessions[memberID] = sessionID
+}
+
+func (d *Daemon) takeCrewExitedSession(memberID string) string {
+	d.crewExitedMu.Lock()
+	defer d.crewExitedMu.Unlock()
+	sessionID := d.crewExitedSessions[memberID]
+	delete(d.crewExitedSessions, memberID)
+	return sessionID
 }
 
 // releaseCrewBindingsExcept clears every binding naming sessionID other than

@@ -55,6 +55,7 @@ type SpawnOptions struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
+	DaemonEnv         []string
 	LifecycleID       string
 
 	// LoginShellEnv, when non-nil, is a pre-computed login shell environment
@@ -113,6 +114,12 @@ type AttachInfo struct {
 	// terminal (primary + alt screens, scrollback, cursor) from libghostty-vt.
 	// Snapshot geometry is Cols/Rows. nil when the ghostty terminal is absent.
 	GhosttySnapshot []byte
+	// GhosttySnapshotFormat names the wire format GhosttySnapshot is written in
+	// (buildinfo.SnapshotFormat), stamped where the bytes are produced. A
+	// pty-worker outlives an install, so a snapshot can reach a client built
+	// against a different libghostty-vt; carrying the format is what lets that
+	// client decline it. Empty when there is no snapshot.
+	GhosttySnapshotFormat string
 	// GhosttyBlocks are the worker's OSC 133 command blocks resolved to
 	// SCREEN-space rows of GhosttySnapshot, captured under the same lock hold
 	// (atomic with the dump and LastSeq). nil when ghostty is absent.
@@ -738,7 +745,7 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	env = filterEnvKeys(env, launchKeys...)
 	env = MergeEnvironment(env, launchEnv)
 	// Don't leak worker-only configuration transport vars into spawned shells.
-	env = filterEnvKeys(env, "ATTN_PTY_WORKER", "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV")
+	env = filterEnvKeys(env, "ATTN_PTY_WORKER", "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV", "ATTN_PTY_DAEMON_ENV")
 
 	// Strip CLAUDECODE after all merges so spawned sessions don't think
 	// they're nested.  This var leaks into the daemon env when started
@@ -795,6 +802,13 @@ func buildSpawnEnv(loginShell string, opts SpawnOptions, agent, wrapperPath stri
 	if len(opts.ExternalEnv) > 0 {
 		env = MergeEnvironment(env, opts.ExternalEnv)
 	}
+	// External environments cross the worker boundary too, so scrub the
+	// transport envelope again after applying them.
+	env = filterEnvKeys(env, "ATTN_PTY_WORKER", "ATTN_CACHED_SHELL_ENV", "ATTN_PTY_EXTERNAL_ENV", "ATTN_PTY_DAEMON_ENV")
+	// Routing is the final overlay. Login-shell and plugin environments may add
+	// credentials and driver state; neither may redirect the session to another
+	// attn daemon.
+	env = MergeEnvironment(env, opts.DaemonEnv)
 	return env
 }
 

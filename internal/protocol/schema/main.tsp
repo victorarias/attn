@@ -3705,10 +3705,10 @@ model ReloadSessionResultMessage {
 }
 
 // One OSC 133 shell-integration command block resolved by the worker, carried
-// beside the VT dump so restore reconstructs clickable prompt/command/output
-// regions (the dump has rendered cells, not the marks). Rows are SCREEN-space
-// rows of vt_dump_b64, which equal client buffer rows after the dump is written
-// into a fresh same-size terminal. See Phase 3a in
+// beside the snapshot so restore reconstructs clickable prompt/command/output
+// regions (the snapshot has rendered cells, not the marks). Rows are
+// SCREEN-space rows of the snapshot, which equal client buffer rows once it is
+// decoded. See Phase 3a in
 // docs/plans/2026-07-22-server-authoritative-terminal.md.
 model AttachBlock {
   id: safeint;                   // server-assigned, monotonic per session
@@ -3755,17 +3755,24 @@ model KittyPlacement {
   source_height: int32;
 }
 
-// Server-authoritative restore snapshot: a self-contained VT serialization of
-// the worker's parsed terminal (grid + scrollback + cursor + modes, both
-// primary and alternate screens) produced by libghostty-vt. Present on every
-// restore attach; the client resets its model and replays vt_dump_b64, then
-// seeds its command-block store from blocks.
+// Server-authoritative restore snapshot: libghostty-vt's binary snapshot of
+// the worker's parsed terminal (grid + scrollback + cursor + modes + any
+// unfinished parser input, both primary and alternate screens). Present on
+// every restore attach; the client decodes a terminal from snapshot_b64 rather
+// than replaying it, then seeds its command-block store from blocks.
 model AttachSnapshot {
   cols: int32;
   rows: int32;
-  vt_dump_b64: string;           // base64 self-contained VT stream
+  snapshot_b64: string;          // base64 ghostty snapshot record stream
+  // The wire format snapshot_b64 is written in. A pty-worker outlives an
+  // install, so these bytes can be encoded by a build the client's decoder does
+  // not match; the client compares this against its own and falls back to a
+  // snapshot-less attach rather than decoding a format it cannot read. Absent
+  // from a worker that predates the field, which is also a format nobody
+  // speaks. See docs/plans/2026-08-16-snapshot-format-skew.md.
+  format?: string;
   blocks?: AttachBlock[];        // OSC 133 command blocks, empty/absent if none
-  // Kitty placements on the screen vt_dump_b64 serializes, captured in the same
+  // Kitty placements on the screen the snapshot carries, captured in the same
   // hold. Absent when the session holds no images. Pixels are not inlined; the
   // client pulls what its cache lacks with get_kitty_image.
   placements?: KittyPlacement[];
@@ -3777,7 +3784,7 @@ model AttachResultMessage {
   id: string;
   success: boolean;
   // The server-authoritative restore. Present whenever the attach restores prior
-  // terminal state; the client resets its model and replays snapshot.vt_dump_b64.
+  // terminal state; the client decodes a terminal from snapshot.snapshot_b64.
   // Absent on a fresh spawn or when no parsed terminal is available.
   snapshot?: AttachSnapshot;
   last_seq?: int32;
@@ -5134,6 +5141,7 @@ model Response {
   agent_msg_result?: AgentMsgResult;
   crew_list_result?: CrewListResult;
   crew_wake_result?: CrewWakeResult;
+  crew_sleep_result?: CrewSleepResult;
   crew_set_result?: CrewSetResult;
   crew_prime_result?: CrewPrimeResult;
   crew_handoff_result?: CrewHandoffResult;
@@ -5286,6 +5294,10 @@ model CrewWakeResultMessage {
   session_id?: string;
   workspace_id?: string;
   already_awake?: boolean;
+  // Present when wake found a stale binding, released it, and started this
+  // fresh day. The caller names the repair instead of silently focusing a
+  // replacement for a process that had already exited.
+  released_session_id?: string;
 }
 
 model CrewWakeResult {
@@ -5295,6 +5307,44 @@ model CrewWakeResult {
   // True when the member was already awake and session_id is the day that was
   // already running — nothing was launched.
   already_awake: boolean;
+  // The dead day whose stale binding this wake released before launching the
+  // returned session. Absent when there was no stale binding.
+  released_session_id?: string;
+}
+
+// Ask an awake member to close its day and sleep. This is consented closure:
+// the daemon delivers a user-originated request telling the member to write its
+// handoff and file it with `attn handoff --sleep`; it does not kill the member.
+// Home-only. An asleep member is a named no-op rather than a silent success.
+model CrewSleepMessage {
+  cmd: "crew_sleep";
+  member: string;
+  request_id?: string; // set by the WS frontend to correlate the result event
+}
+
+// CrewSleepResultMessage replies to a websocket crew_sleep. The request may be
+// queued when the member cannot take input immediately; the durable message
+// rail retries it on the target's next state change.
+model CrewSleepResultMessage {
+  event: "crew_sleep_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  member?: string;
+  session_id?: string;
+  already_asleep?: boolean;
+  delivery_status?: AgentMsgStatus;
+  detail?: string;
+}
+
+model CrewSleepResult {
+  member: string;
+  // Absent when the member was already asleep and no request was sent.
+  session_id?: string;
+  already_asleep: boolean;
+  // Absent on the already-asleep no-op.
+  delivery_status?: AgentMsgStatus;
+  detail: string;
 }
 
 // Record where a member's sessions launch and which directories its charter is
@@ -6005,6 +6055,7 @@ alias DaemonEvent =
   | GardenSeedsUpdatedMessage
   | CrewUpdatedMessage
   | CrewWakeResultMessage
+  | CrewSleepResultMessage
   | TicketResultMessage
   | TicketActionResultMessage
   | TicketAttachResultMessage

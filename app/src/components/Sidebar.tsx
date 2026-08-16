@@ -132,6 +132,8 @@ interface SidebarProps {
   selectedTile?: SelectedTile | null;
   tileContents?: Record<string, TileContentState>;
   collapsed: boolean;
+  /** The non-default build profile. Empty keeps the production sidebar exact. */
+  profile?: string;
   headerActions: SidebarHeaderAction[];
   // The ambient critical-notification surface. Optional so existing Sidebar
   // tests render without wiring it; absent or zero-count renders nothing.
@@ -153,6 +155,8 @@ interface SidebarProps {
   crew?: CrewMemberView[];
   /** Start a sleeping member's day. */
   onWakeCrewMember?: (member: string) => void;
+  /** Ask an awake member to close its day and sleep. */
+  onSleepCrewMember?: (member: string) => void;
   onSettleTurn?: (id: string) => void;
   /** Open the snooze duration menu for a row, anchored at the click. */
   onOpenSnooze?: (session: { id: string; label: string }, event: ReactMouseEvent) => void;
@@ -358,6 +362,7 @@ export function Sidebar({
   selectedTile = null,
   tileContents = {},
   collapsed,
+  profile = '',
   headerActions,
   criticalNotifications,
   onOpenNotifications,
@@ -369,6 +374,7 @@ export function Sidebar({
   queue = null,
   crew,
   onWakeCrewMember,
+  onSleepCrewMember,
   onSettleTurn,
   onOpenSnooze,
   onWakeTurn,
@@ -852,6 +858,11 @@ export function Sidebar({
   if (collapsed) {
     return (
       <div className="sidebar collapsed">
+        {profile && (
+          <div className="sidebar-profile-marker sidebar-profile-marker--collapsed" title={`Profile: ${profile}`}>
+            {profile}
+          </div>
+        )}
         <div className="icon-rail">
           <button
             className={`icon-btn ${homeActive ? 'active' : ''}`}
@@ -910,6 +921,11 @@ export function Sidebar({
   return (
     <div className={`sidebar sidebar--display-${displayMode}`}>
       <div className="sidebar-header">
+        {profile && (
+          <div className="sidebar-profile-marker" data-testid="sidebar-profile-marker">
+            profile <strong>{profile}</strong>
+          </div>
+        )}
         <div className="sidebar-tool-row">
           {gridLayout && onSelectGridLayout && (
             <GridLayoutControl layout={gridLayout} onSelect={onSelectGridLayout} />
@@ -1037,6 +1053,7 @@ export function Sidebar({
           bands={queue}
           crew={crew}
           onWakeCrewMember={onWakeCrewMember}
+          onSleepCrewMember={onSleepCrewMember}
           selectedId={selectedId}
           onSelectSession={onSelectSession}
           onSettleTurn={(id) => onSettleTurn?.(id)}

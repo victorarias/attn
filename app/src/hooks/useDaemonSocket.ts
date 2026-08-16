@@ -141,6 +141,13 @@ export type Seed = GeneratedSeed;
 // an awake one names the session living its day (binding_session), and that
 // presence IS "awake" — the daemon judged the binding live before sending it.
 export type CrewMember = GeneratedCrewMember;
+export interface CrewSleepResult {
+  member: string;
+  sessionId?: string;
+  alreadyAsleep: boolean;
+  deliveryStatus?: string;
+  detail?: string;
+}
 export type DaemonWorkspace = GeneratedWorkspaceSnapshot;
 export type DaemonPR = GeneratedPR;
 export type DaemonWorktree = GeneratedWorktree;
@@ -263,7 +270,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '251';
+export const PROTOCOL_VERSION = '254';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -2013,6 +2020,25 @@ export function useDaemonSocket({
             break;
           }
 
+          case 'crew_sleep_result':
+            settlePendingRequest(
+              pendingActionsRef.current,
+              'crew_sleep',
+              data,
+              (event): CrewSleepResult | undefined => {
+                if (typeof event.member !== 'string') return undefined;
+                return {
+                  member: event.member,
+                  ...(typeof event.session_id === 'string' ? { sessionId: event.session_id } : {}),
+                  alreadyAsleep: event.already_asleep === true,
+                  ...(typeof event.delivery_status === 'string' ? { deliveryStatus: event.delivery_status } : {}),
+                  ...(typeof event.detail === 'string' ? { detail: event.detail } : {}),
+                };
+              },
+              'Asking the member to sleep failed',
+            );
+            break;
+
           case 'ticket_resume_result': {
             const requestId = data.request_id;
             if (typeof requestId !== 'string') {
@@ -2242,9 +2268,9 @@ export function useDaemonSocket({
                   previousSeq: ptyTransportRef.current.getLastSeq(data.id),
                   queuedOutputs: ptyTransportRef.current.getQueuedAttachOutputs(data.id),
                 });
-                // A Ghostty snapshot is a raw VT dump authored at the daemon
-                // worker's exact grid; the fresh model must be resized to that
-                // grid before the dump is written or its line-wrapping desyncs.
+                // A Ghostty snapshot carries the daemon worker's exact grid.
+                // The decoded model comes up at it; the pane's surface is sized
+                // to match here so the two agree before the first paint.
                 const snapshotGeometry = restorePlan.hasSnapshot
                   && typeof restorePlan.restoreCols === 'number'
                   && typeof restorePlan.restoreRows === 'number'
@@ -2264,7 +2290,7 @@ export function useDaemonSocket({
                     id: data.id,
                     cols: restoreGeometry.cols,
                     rows: restoreGeometry.rows,
-                    source: 'attach_replay',
+                    source: 'attach_restore',
                   });
                 }
                 if (attachEffects.shouldReset && attachEffects.resetReason) {
@@ -2275,21 +2301,16 @@ export function useDaemonSocket({
                   });
                 }
                 ptyTransportRef.current.setLastSeq(data.id, attachEffects.nextSeq);
-                // The daemon worker already answered CPR/DA1/OSC during live
-                // parsing and forwarded the query gap over the wire, so the
-                // frontend must never re-answer queries embedded in the dump.
                 const restoreWasEmitted = attachEffects.restoreAction.kind === 'ghostty_snapshot';
                 if (attachEffects.restoreAction.kind === 'ghostty_snapshot') {
                   emitPtyEvent({
-                    event: 'data',
+                    event: 'restore_snapshot',
                     id: data.id,
                     data: attachEffects.restoreAction.data,
-                    source: 'attach_replay',
-                    suppressResponses: true,
                   });
-                  // Seed OSC 133 command blocks from the snapshot: the VT dump is
-                  // marker-stripped, so the live parser rebuilds none on restore.
-                  // Enqueued after the dump write (seedBlocks runs on the write
+                  // Seed OSC 133 command blocks from the snapshot: a decode
+                  // replays no markers, so the client rebuilds none on restore.
+                  // Enqueued after the adoption (seedBlocks runs on the same
                   // chain) so anchor text reads the restored buffer. Wire shape
                   // (snake_case) → client-domain SeededBlock.
                   const snapshotBlocks = data.snapshot?.blocks;
@@ -2330,7 +2351,7 @@ export function useDaemonSocket({
                 }
                 if (restoreWasEmitted) {
                   emitPtyEvent({
-                    event: 'replay_complete',
+                    event: 'restore_complete',
                     id: data.id,
                   });
                 }
@@ -4899,6 +4920,17 @@ export function useDaemonSocket({
     [nextRequestID],
   );
 
+  // Ask an awake member to close its day. The daemon delivers the request over
+  // the agent-message rail; the member remains awake until it files its letter.
+  const sendCrewSleep = useCallback(
+    (member: string): Promise<CrewSleepResult> => sendRequest(
+      'crew_sleep',
+      { member },
+      `Asking ${crewDisplayName(member)} to sleep timed out`,
+    ),
+    [sendRequest],
+  );
+
   // List the durable runner's tasks (newest-updated first). Resolves with an empty
   // array when the runner is disabled or has no tasks.
   const sendTaskList = useCallback((): Promise<Task[]> => {
@@ -5662,6 +5694,7 @@ export function useDaemonSocket({
     sendTicketAttach,
     sendTicketResume,
     sendCrewWake,
+    sendCrewSleep,
     sendTaskList,
     sendTaskRetry,
     sendNotificationList,

@@ -1,0 +1,21 @@
+kind: fixed
+area: terminal
+change: >
+  Sessions that were already running when you update attn now reopen
+  normally. A session's terminal process keeps running across an update, so
+  it can hand the new app a terminal snapshot the new app cannot read — and
+  the app treated that as a broken terminal, rebuilt it, was handed the same
+  snapshot again, and looped there behind an error banner. A snapshot now
+  says which build wrote it, and one the app cannot read is skipped: the
+  session comes back without its earlier scrollback and keeps running,
+  filling in as the agent prints. Restart the session to get full history
+  back.
+notes: >
+  docs/plans/2026-08-16-snapshot-format-skew.md. The tag is derived at build
+  time from the native and wasm ghostty locks, so republishing either moves
+  it without anyone remembering to; a snapshot that names no format at all —
+  every worker running today — reads as unreadable, which is what makes this
+  reach the sessions the incident left behind. Beside it, a decode failure
+  is no longer routed to model-fault recovery: the model it declined to
+  replace is intact, so an unforeseen skew costs one restore instead of a
+  hot loop.

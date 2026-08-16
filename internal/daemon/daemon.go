@@ -255,9 +255,8 @@ type Daemon struct {
 	drainingAgentMessages       map[string]bool
 	agentMessageTaken           map[string][]chan struct{}
 	agentMessagesAwaitingSubmit map[string]bool
-	// A crew wake may owe work only after the new day has submitted its ordinary
-	// first prompt. Ticket delivery uses this to keep the doorbell behind charter
-	// and handoff priming instead of pasting into the launching session.
+	// Every crew wake gates doorbells until the new day has submitted its first
+	// prompt. The optional callback carries ticket work that starts at that seam.
 	postInitialPrompt map[string]func()
 	// A message-triggered crew wake carries the attributed message as the new
 	// day's initial prompt. The row stays queued until a prompt-submit hook
@@ -271,6 +270,10 @@ type Daemon struct {
 	// creation. Without this fence, a second wake can steal the binding while
 	// the first claimed session is not yet visible to crewBindingLive.
 	crewWakeMu sync.Mutex
+	// A process-exit release is consumed by the next wake result, so the repair
+	// stays named even though the roster correctly became asleep immediately.
+	crewExitedMu       sync.Mutex
+	crewExitedSessions map[string]string // member id -> exited session id
 	// Deterministic concurrency seams; nil outside tests.
 	crewWakeStartHook      func(memberID string)
 	crewWakeAfterClaimHook func(memberID, sessionID string)
@@ -297,7 +300,7 @@ type Daemon struct {
 	deliveryMu                 sync.Mutex                                 // serializes consumes, catch-up, deadline rebuilds, and nudge fire-time checks
 	watchLeaseUntil            map[string]time.Time                       // ephemeral live-watch lease per session
 	nudgeWindowOverride        time.Duration                              // 0 => defaultNudgeCountdownWindow; a short test override otherwise
-	ticketBufferWindowOverride time.Duration                              // 0 => defaultTicketBufferWindow; test-only override
+	ticketBundleWindowOverride time.Duration                              // 0 => defaultTicketBundleWindow; test-only override
 	nudgeFireHook              func(sessionID, action string)             // tests only: invoked at the end of a countdown fire
 	ticketRebuildBeforeArmHook func(sessionID string, deadline time.Time) // tests only: invoked while deliveryMu is held
 	lastInputMu                sync.Mutex
@@ -1330,6 +1333,9 @@ func (d *Daemon) pruneSessionsWithoutPTY(cutoff time.Time) int {
 		if sessionUpdatedAfter(session, cutoff) {
 			continue
 		}
+		// A recoverable session may keep its conversation row, but a dead crew
+		// day never keeps the member's seat. The letter and home are continuity.
+		d.releaseExitedCrewBinding(session.ID)
 		if d.canReviveSession(session) {
 			if session.State == protocol.SessionStateRecoverable {
 				continue
@@ -1740,6 +1746,9 @@ func (d *Daemon) reconcileSessionsWithWorkerBackend(ctx context.Context, allowId
 			report.SkippedIdle++
 			continue
 		}
+		// Missing runtime is now established. Release crew identity before the
+		// generic session is kept as recoverable or reaped.
+		d.releaseExitedCrewBinding(session.ID)
 		if d.canReviveSession(session) {
 			// Already parked there by an earlier pass; the verdict has not changed.
 			if session.State == protocol.SessionStateRecoverable {
@@ -2001,6 +2010,7 @@ func (d *Daemon) handlePTYExit(info ptybackend.ExitInfo) bool {
 		// (ticket_reconcile.go). The settle erases it.
 		d.reconcileTicketsOnSessionEnd(info.ID, string(session.State))
 	}
+	d.releaseExitedCrewBinding(info.ID)
 
 	d.publishFact(FactSessionPTYExited, info.ID, ptyExit{
 		ExitCode: info.ExitCode,
@@ -2255,19 +2265,25 @@ func (d *Daemon) handlePTYState(sessionID string, obs pty.Observation) {
 	})
 }
 
+// setNoStoreHeaders keeps a daemon response out of every cache between it and
+// its client: health and favicon answer for the daemon running right now.
+func setNoStoreHeaders(header http.Header) {
+	header.Set("Cache-Control", "no-store, max-age=0")
+	header.Set("Pragma", "no-cache")
+	header.Set("Expires", "0")
+}
+
 // initHTTPServer creates the HTTP server synchronously to avoid race with Stop().
 // Must be called before runHTTPServer().
 func (d *Daemon) initHTTPServer() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/ws", d.handleWS)
 	mux.HandleFunc("/health", d.handleHealth)
-	mux.HandleFunc("/web-instrumentation", d.handleWebInstrumentation)
 	mux.HandleFunc(appBundleRoutePrefix, d.handleAppBundle)
 	mux.HandleFunc("/favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		setNoStoreHeaders(w.Header())
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.Handle("/", daemonWebStaticHandler())
 	d.httpHandler = mux
 
 	d.httpServer = &http.Server{
@@ -2815,6 +2831,8 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleCrewList(conn, msg.(*protocol.CrewListMessage))
 	case protocol.CmdCrewWake: // wire: crew_wake
 		d.handleCrewWake(conn, msg.(*protocol.CrewWakeMessage))
+	case protocol.CmdCrewSleep: // wire: crew_sleep
+		d.handleCrewSleep(conn, msg.(*protocol.CrewSleepMessage))
 	case protocol.CmdCrewSet: // wire: crew_set
 		d.handleCrewSet(conn, msg.(*protocol.CrewSetMessage))
 	case protocol.CmdCrewPrime: // wire: crew_prime

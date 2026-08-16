@@ -11,7 +11,7 @@
 //   2. The HOT PATH writes floats directly into a preallocated Float32Array via
 //      an index cursor — NOT `number[].push(...)` + `new Float32Array(...)`,
 //      which benchmarked at ~57ms/frame for 25 tiles (hard jank).
-import { CellFlags, type GhosttyCell, type GhosttyTerminal } from 'ghostty-web';
+import { CellFlags, type GhosttyCell, type GhosttyTerminal } from '../../ghostty';
 import {
   GLYPH_MODE_COLOR,
   GLYPH_MODE_TINT,

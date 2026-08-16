@@ -1,5 +1,13 @@
 # Plan: Ticket notification buffering and read-before-write
 
+> Superseded on 2026-08-15: ticket delivery no longer distinguishes assignees
+> from other participants or holds a first event for 30 minutes. The first event
+> after quiet gets the short safety countdown; activity following a delivered
+> nudge bundles behind one ten-minute deadline; `ticket inbox --watch` consumes
+> unread activity immediately. The ten-minute receipt is a 9m49s median across
+> 440 inter-event gaps from 67 production tickets with at least five events.
+> The read-before-write behavior below remains current.
+
 ## Goal
 
 Reduce ticket-notification interruptions while keeping updates immediate for the agent

@@ -9,17 +9,16 @@ import (
 	"github.com/victorarias/attn/internal/ghosttyvt"
 )
 
-// restoredScreenLines rebuilds the terminal a client would see from a VT dump
+// restoredScreenLines rebuilds the terminal a client would see from a snapshot
 // and returns one trimmed line per SCREEN-space row, so the slice index IS the
 // row a resolved block points at.
 func restoredScreenLines(t *testing.T, snap ghosttyvt.Snapshot) []string {
 	t.Helper()
-	restored, err := ghosttyvt.New(snap.Cols, snap.Rows, ghosttyvt.Options{})
+	restored, err := ghosttyvt.Restore(snap.Payload, ghosttyvt.Options{})
 	if err != nil {
-		t.Fatalf("ghosttyvt.New (restore): %v", err)
+		t.Fatalf("ghosttyvt.Restore: %v", err)
 	}
 	defer restored.Close()
-	restored.Write(snap.VTDump)
 	lines := strings.Split(restored.PlainText(), "\n")
 	for i, l := range lines {
 		lines[i] = strings.TrimRight(l, " ")

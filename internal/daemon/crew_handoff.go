@@ -180,10 +180,16 @@ func (d *Daemon) crewDayEndsHere(close protocol.CrewDayClose, now time.Time) boo
 // "a letter is already filed under that name" is the same sentence for a retry
 // and for a correction and the caller cannot tell which it is in.
 func (d *Daemon) crewLetterForHandoff(member crew.Member, sessionID, note string, retry bool) (string, error) {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return "", err
+	}
 	filed, hasFiled := member.FiledLetterFor(sessionID)
 	if retry {
 		if !hasFiled {
 			return "", fmt.Errorf("%s's day has filed no letter yet, so there is no turnover to retry — write one with `attn handoff -m \"<your letter>\"`", crew.DisplayName(member.ID))
+		}
+		if err := d.validateCrewLetterPath(member, filed); err != nil {
+			return "", err
 		}
 		if _, err := os.Stat(filed); err != nil {
 			return "", fmt.Errorf("%s's filed letter is recorded at %s but is not readable there (%v); file this day's letter again with `attn handoff -m \"<your letter>\"`", crew.DisplayName(member.ID), filed, err)
@@ -192,6 +198,9 @@ func (d *Daemon) crewLetterForHandoff(member crew.Member, sessionID, note string
 		return filed, nil
 	}
 	if err := crew.ValidateHandoffNote(note); err != nil {
+		return "", err
+	}
+	if _, err := d.validateCrewHandoffsDir(member); err != nil {
 		return "", err
 	}
 	path, err := crew.FileHandoff(member.HomeDir, member.ID, note, time.Now())
@@ -230,6 +239,12 @@ func (d *Daemon) recordCrewLetter(memberID, sessionID, path string) {
 // primed by the letter that was just filed. The old session is closed only once
 // the new one is running.
 func (d *Daemon) crewNap(member crew.Member, oldSessionID string) (string, error) {
+	if err := d.validateCrewMemberPaths(member); err != nil {
+		return "", err
+	}
+	if err := d.validateCrewWorkDirs(member); err != nil {
+		return "", err
+	}
 	session := d.store.Get(oldSessionID)
 	if session == nil {
 		return "", fmt.Errorf("session %s is no longer here", shortSessionID(oldSessionID))
@@ -245,6 +260,11 @@ func (d *Daemon) crewNap(member crew.Member, oldSessionID string) (string, error
 		}
 	}
 	spawnMsg, policy := d.crewNapSpawn(member, session)
+	launchDir, err := d.resolveCrewWorkDir(spawnMsg.Cwd)
+	if err != nil {
+		return "", fmt.Errorf("wake %s's successor in %s: %w", crew.DisplayName(member.ID), spawnMsg.Cwd, err)
+	}
+	spawnMsg.Cwd = launchDir
 	newSessionID := spawnMsg.ID
 
 	// Moved before the spawn for the same reason the wake claims before it

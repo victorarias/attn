@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { ptyAttach, ptyDetach, ptyKill, ptyReload, ptySpawn } from '../pty/bridge';
+import { LOCAL_SNAPSHOT_FORMAT } from '../pty/attachPlanning';
 import { AutomationActionTimeoutError, PROTOCOL_VERSION, retryTransientAttachRequest, useDaemonSocket } from './useDaemonSocket';
 import { useWorkflowRunsStore } from '../store/workflowRuns';
 import { useAutomationsStore } from '../store/automations';
@@ -589,25 +590,25 @@ describe('useDaemonSocket PTY kill sequencing', () => {
     });
     await expect(install).resolves.toMatchObject({ success: true, name: 'attn-snipe' });
 
-    const installBundled = result.current.sendInstallBundledPlugin('attn-opencode');
+    const installBundled = result.current.sendInstallBundledPlugin('attn-example');
     expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
       cmd: 'install_bundled_plugin',
-      name: 'attn-opencode',
+      name: 'attn-example',
     });
     act(() => {
-      ws.emit({ event: 'plugin_action_result', action: 'install_bundled', name: 'attn-opencode', success: true });
+      ws.emit({ event: 'plugin_action_result', action: 'install_bundled', name: 'attn-example', success: true });
     });
-    await expect(installBundled).resolves.toMatchObject({ success: true, name: 'attn-opencode' });
+    await expect(installBundled).resolves.toMatchObject({ success: true, name: 'attn-example' });
 
-    const uninstall = result.current.sendUninstallPlugin('attn-opencode');
+    const uninstall = result.current.sendUninstallPlugin('attn-example');
     expect(ws.sent.map((entry) => JSON.parse(entry))).toContainEqual({
       cmd: 'uninstall_plugin',
-      name: 'attn-opencode',
+      name: 'attn-example',
     });
     act(() => {
-      ws.emit({ event: 'plugin_action_result', action: 'uninstall', name: 'attn-opencode', success: true });
+      ws.emit({ event: 'plugin_action_result', action: 'uninstall', name: 'attn-example', success: true });
     });
-    await expect(uninstall).resolves.toMatchObject({ success: true, name: 'attn-opencode' });
+    await expect(uninstall).resolves.toMatchObject({ success: true, name: 'attn-example' });
 
     const setPriority = result.current.sendSetPluginPriority('services-pilot-worktrees', 50);
     act(() => {
@@ -2137,7 +2138,8 @@ describe('useDaemonSocket PTY kill sequencing', () => {
         snapshot: {
           cols: 56,
           rows: 35,
-          vt_dump_b64: btoa('fresh-daemon-frame'),
+          snapshot_b64: btoa('fresh-daemon-frame'),
+          format: LOCAL_SNAPSHOT_FORMAT,
         },
         last_seq: 29376,
         running: true,
@@ -2161,7 +2163,7 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       id: 'sess-existing',
       cols: 56,
       rows: 35,
-      source: 'attach_replay',
+      source: 'attach_restore',
     });
     expect(ptyEvents).toContainEqual({
       event: 'reset',
@@ -2169,23 +2171,19 @@ describe('useDaemonSocket PTY kill sequencing', () => {
       reason: 'snapshot_restore',
     });
     expect(ptyEvents).toContainEqual({
-      event: 'data',
+      event: 'restore_snapshot',
       id: 'sess-existing',
       data: btoa('fresh-daemon-frame'),
-      source: 'attach_replay',
-      suppressResponses: true,
     });
-    expect(ptyEvents).toContainEqual({ event: 'replay_complete', id: 'sess-existing' });
-    const snapshotIndex = ptyEvents.findIndex((event) => (
-      event.event === 'data' && event.source === 'attach_replay'
-    ));
+    expect(ptyEvents).toContainEqual({ event: 'restore_complete', id: 'sess-existing' });
+    const snapshotIndex = ptyEvents.findIndex((event) => event.event === 'restore_snapshot');
     const queuedLiveIndex = ptyEvents.findIndex((event) => (
       event.event === 'data' && event.data === btoa('live-after-snapshot')
     ));
-    const replayCompleteIndex = ptyEvents.findIndex((event) => event.event === 'replay_complete');
+    const restoreCompleteIndex = ptyEvents.findIndex((event) => event.event === 'restore_complete');
     expect(snapshotIndex).toBeGreaterThanOrEqual(0);
     expect(queuedLiveIndex).toBeGreaterThan(snapshotIndex);
-    expect(replayCompleteIndex).toBeGreaterThan(queuedLiveIndex);
+    expect(restoreCompleteIndex).toBeGreaterThan(queuedLiveIndex);
     unmount();
   });
 

@@ -3,7 +3,7 @@ area: plugins
 change: >
   Released builds now carry the bundled plugins. The release workflow compiled
   the app without ever staging them, so the shipped bundle's plugin directory
-  held nothing and a release install offered no OpenCode or pi agents — while a
+  held nothing and a release install offered no plugin agents — while a
   source install, which stages them, looked fine. The release now stages the
   plugins the same way and refuses to publish an app that is missing any of
   them.

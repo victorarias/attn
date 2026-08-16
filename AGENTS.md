@@ -167,6 +167,10 @@ output as product evidence.
 ### Packaged-app harness
 
 - Single-tenant: never run packaged-app scenarios in parallel.
+- Crew fixtures in harness and verification profiles use obviously synthetic
+  names, never real member names such as `keel`, `alder`, or `trellis`. Pin
+  synthetic members explicitly to `claude-haiku-4-5`; use a stronger model only
+  when the scenario is testing work that needs its intelligence.
 - Multiple scenarios: `pnpm --dir app run real-app:serial-matrix`.
 - Rebuild before evidence-sensitive runs.
 - Harness uses active `ATTN_PROFILE`, otherwise `dev`;
@@ -582,22 +586,33 @@ Design and gate decisions:
 - The daemon worker's single parsed terminal (libghostty-vt) backs approval
   classification, CPR replies, grid/automation snapshots, and attach restore.
   Ghostty construction failure is spawn-fatal on supported platforms.
-- Restore is server-authoritative: the daemon worker serializes that terminal
-  and the attach serves its VT dump as the sole restore payload
-  (`attach_result.snapshot`). The frontend resets a fresh Ghostty model, resizes
-  to the snapshot grid, and writes the dump with responses suppressed. There is
-  no raw-scrollback/screen-snapshot/segment fallback — a snapshot-less attach
-  keeps whatever the client has and dedups the live stream against `last_seq`.
-  See
-  [docs/plans/2026-07-22-server-authoritative-terminal.md](docs/plans/2026-07-22-server-authoritative-terminal.md).
-- OSC 133 command blocks are worker-owned state carried beside the dump as
-  structured `attach_result.snapshot.blocks` (the VT dump rebuilds none); the
-  frontend seeds `TerminalBlockStore` from them after the dump write
-  (Phase 3a).
+- Restore is server-authoritative: the daemon worker encodes that terminal with
+  ghostty's snapshot API and the attach serves those bytes as the sole restore
+  payload (`attach_result.snapshot`). The client *decodes* them — nothing is
+  replayed, so no query can be answered and the grid comes from the snapshot
+  itself. The renderable prefix lands first and scrollback is prepended page by
+  page after the first paint. There is no raw-scrollback/screen-snapshot/segment
+  fallback — a snapshot-less attach keeps whatever the client has and dedups the
+  live stream against `last_seq`. See
+  [docs/plans/2026-08-16-snapshot-restore.md](docs/plans/2026-08-16-snapshot-restore.md).
+- A snapshot names the format it was written in
+  (`attach_result.snapshot.format`, derived at build time by
+  `scripts/snapshot-format.sh` from the two ghostty locks). A pty-worker
+  outlives an install, so an upgraded app is routinely offered bytes an older
+  encoder wrote; the client compares that tag against its own decoder and
+  treats anything else — a foreign tag or no tag — as no snapshot, which is
+  already a supported attach. Never decode a snapshot on the strength of the
+  field being present, and never route a decode failure to model-fault
+  recovery: the model is fine, the payload is not, and a new epoch reattaches
+  straight back into the same bytes. See
+  [docs/plans/2026-08-16-snapshot-format-skew.md](docs/plans/2026-08-16-snapshot-format-skew.md).
+- Encoding fails outright when the worker's parser sits mid-sequence and
+  continuation tracking was off, so the worker enables it at construction, not at
+  snapshot time.
+- OSC 133 command blocks are worker-owned state carried beside the payload as
+  structured `attach_result.snapshot.blocks` (a decode rebuilds none); the
+  frontend seeds `TerminalBlockStore` from them after the snapshot is adopted.
 - Do not use restore as redraw repair or infer PTY correctness from local `fit()`.
-- Restored terminal queries must not generate fresh PTY input; the worker
-  already answered CPR/DA1/OSC and forwarded the query gap over the wire, so the
-  client always writes the dump suppressed.
 - The daemon/worker alone answers CPR, DA1, and OSC 10/11/12; frontend strips
   model replies and sends theme changes via `set_terminal_theme`.
 - Kitty images are worker-authoritative and **on by default**. The worker is the
@@ -605,8 +620,8 @@ Design and gate decisions:
   client model never sees an APC and the worker's grid stays authoritative. The
   worker describes what it stored: `kitty_placements` carries the active screen's
   whole placement set, the app pulls pixels it lacks with `get_kitty_image`, and
-  the attach snapshot carries placements beside the VT dump and the OSC 133
-  blocks. `KittyImageStorageLimit` is 320MB at construction (ghostty's own app
+  the attach snapshot carries placements beside the snapshot bytes and the
+  OSC 133 blocks. `KittyImageStorageLimit` is 320MB at construction (ghostty's own app
   default; receipt in the plan); `ATTN_KITTY_STORAGE_LIMIT` (bytes, read from the
   daemon's environment at session spawn, inherited by the worker, forwarded to
   remote daemons) tunes it, and **0 disables the protocol** — the escape hatch,
@@ -668,12 +683,11 @@ or `GOOS=… GOARCH=… make build`).
 **Download-first (no zig for most contributors, and none in CI/release).** The
 script fetches the prebuilt archive **for the target platform** — assets are
 named `libghostty-vt-<key>-<goos>_<goarch>.tar.gz`, keyed by the ghostty pin
-(`ghostty-vt.pin`) plus the carried `ghostty-vt-native.patch` — from the
-rolling `native-vt-prebuilts` GitHub release and verifies it against the
+(`ghostty-vt.pin`) — from the rolling `native-vt-prebuilts` GitHub release and verifies it against the
 matching `sha256_<goos>_<goarch>` in `ghostty-vt-native.lock` (fail-closed). The
 key is shared across platforms (same source); the lock carries one sha per
 platform. The repo is public, so this needs only network access. A **source
-build (zig 0.16.x)** happens only when you have edited the pin/patch (no
+build (zig 0.16.x)** happens only when you have edited the pin (no
 published asset for the new key yet), when the download/verify fails, or when
 `ATTN_VT_FROM_SOURCE=1` forces it. `GHOSTTY_VT_GOOS`/`GHOSTTY_VT_GOARCH` scope the
 script to a target when cross-building (the Makefile sets them).
@@ -681,9 +695,8 @@ script to a target when cross-building (the Makefile sets them).
 **Changing the VT source.** After editing the shared `ghostty-vt.pin`, rebuild
 the vendored browser core with `app/scripts/build-ghostty-vt-wasm.sh`; it also
 rewrites `app/vendor/ghostty-vt/ghostty-vt.lock`, which normal builds and tests
-verify against the pin, adapter, patch, recipe, and binary. Then run
-`make publish-native-vt` (`scripts/publish-libghostty-vt.sh`) after editing the
-shared pin or `ghostty-vt-native.patch`: it cross-builds **every** supported
+verify against the pin, adapter, recipe, and binary. Then run
+`make publish-native-vt` (`scripts/publish-libghostty-vt.sh`): it cross-builds **every** supported
 native target from one host (needs zig 0.16.x and an authenticated `gh`), uploads
 all the keyed assets, and rewrites `ghostty-vt-native.lock` with the shared key +
 per-platform shas. **Commit both regenerated locks when the shared pin changes**

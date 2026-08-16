@@ -114,8 +114,10 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 	// PrepareLaunch wrote — so a machine without codex gave a delegated
 	// conversation agent repo guidance and no attn skill. Best-effort: a missing
 	// skill is a poorer agent, not a session that must refuse to start.
-	if err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
+	if synced, err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
 		d.logf("host spawn: failed to ensure the attn skill under ~/.agents: %v", err)
+	} else if !synced {
+		d.logf("host spawn: skipping user-global attn skill sync for profile %q", config.ProfileLabel())
 	}
 	// Daemon env, then login shell on top: credentials live in shell profiles and
 	// an app-launched host would otherwise fail its first prompt with "no API key".
@@ -149,6 +151,11 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 		hostEnv = append(hostEnv, "ATTN_NISSE_RESUME_FILE="+resume)
 	}
 	env = pty.MergeEnvironment(env, hostEnv)
+	routingEnv := opts.DaemonEnv
+	if len(routingEnv) == 0 {
+		routingEnv = d.spawnRoutingEnv()
+	}
+	env = pty.MergeEnvironment(env, routingEnv)
 	cwd := strings.TrimSpace(opts.ExternalCWD)
 	if cwd == "" {
 		cwd = opts.CWD
@@ -166,6 +173,7 @@ func (d *Daemon) spawnHostSession(opts ptybackend.SpawnOptions) error {
 
 // spawnSessionRuntime starts whichever runtime this session's agent asked for.
 func (d *Daemon) spawnSessionRuntime(req *spawnRequest, opts ptybackend.SpawnOptions) error {
+	opts.DaemonEnv = d.spawnRoutingEnv()
 	if req.hasPluginDriver && req.pluginDriver.Capabilities[pluginDriverConversationCapability] {
 		return d.spawnHostSession(opts)
 	}

@@ -109,6 +109,7 @@ type Config struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
+	DaemonEnv         []string
 	UnattendedLaunch  launchcontract.UnattendedLaunchSpec
 
 	RegistryPath   string
@@ -308,6 +309,7 @@ func (r *Runtime) run(ctx context.Context) error {
 		ExternalCommand:   r.cfg.ExternalCommand,
 		ExternalEnv:       r.cfg.ExternalEnv,
 		ExternalCWD:       r.cfg.ExternalCWD,
+		DaemonEnv:         r.cfg.DaemonEnv,
 		UnattendedLaunch:  r.cfg.UnattendedLaunch,
 	}); err != nil {
 		return fmt.Errorf("spawn PTY session: %w", err)
@@ -945,6 +947,7 @@ func (c *connCtx) handleRequest(req RequestEnvelope) {
 			ExitCode:                   info.ExitCode,
 			ExitSignal:                 info.ExitSignal,
 			GhosttySnapshot:            info.GhosttySnapshot,
+			GhosttySnapshotFormat:      info.GhosttySnapshotFormat,
 			GhosttyBlocks:              attachBlocksToWire(info.GhosttyBlocks),
 			GhosttyPlacements:          placementsToWire(info.GhosttyPlacements),
 			GhosttyScrollbackTruncated: info.GhosttyScrollbackTruncated,

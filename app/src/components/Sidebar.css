@@ -33,6 +33,36 @@
     linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent);
 }
 
+.sidebar-profile-marker {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.035);
+  color: var(--color-text-secondary);
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.02em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-profile-marker strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+}
+
+.sidebar-profile-marker--collapsed {
+  box-sizing: border-box;
+  width: calc(100% - 10px);
+  margin: 6px 5px 2px;
+  padding-inline: 4px;
+  text-align: center;
+}
+
 .sidebar-tool-row,
 .sidebar-header-row {
   display: flex;
@@ -1303,6 +1333,7 @@
 .queue-row-controls .session-actions,
 .queue-row-controls .queue-row-pin,
 .queue-row-controls .queue-row-snooze,
+.queue-row-controls .queue-row-sleep,
 .queue-row-controls .queue-row-wake,
 .queue-row-controls .queue-row-settle {
   opacity: 1;
@@ -1319,6 +1350,7 @@
 
 .queue-row-settle,
 .queue-row-snooze,
+.queue-row-sleep,
 .queue-row-wake,
 .queue-row-pin {
   flex: 0 0 auto;
@@ -1333,10 +1365,12 @@
 
 .queue-row:hover .queue-row-settle,
 .queue-row:hover .queue-row-snooze,
+.queue-row:hover .queue-row-sleep,
 .queue-row:hover .queue-row-wake,
 .queue-row:hover .queue-row-pin,
 .queue-row-settle:focus-visible,
 .queue-row-snooze:focus-visible,
+.queue-row-sleep:focus-visible,
 .queue-row-wake:focus-visible,
 .queue-row-pin:focus-visible {
   opacity: 1;
@@ -1344,9 +1378,26 @@
 
 .queue-row-settle:hover,
 .queue-row-snooze:hover,
+.queue-row-sleep:hover,
 .queue-row-wake:hover,
 .queue-row-pin:hover {
   color: var(--color-text-primary);
+}
+
+/* The wake button holds a drawn sun rather than a glyph, so it centers its art
+   instead of a line of text. Armed, it stays lit whether or not the row is
+   hovered: the reveal rules above must not hide the thing waiting for its
+   second click. See CrewWake.css for the sun itself. */
+.queue-row-wake {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.queue-row--crew[data-crew-wake] .queue-row-controls,
+.queue-row--crew[data-crew-wake] .queue-row-wake {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 /* When a deferred agent comes back. It sits where the turn age sits on a queued

@@ -564,16 +564,25 @@ Parallelism means another member, never a second copy. A binding naming a
 session the daemon no longer knows has let go on its own, the same liveness
 rule a seed's tender follows.
 
-To **wake** a member is to start its day: `attn crew wake <name>`, or one click
-on its row in the sidebar, where every member is drawn awake or asleep. The
-daemon binds the member, then launches a session in its recorded cwd — its own
-home when none is recorded — reaching its **awareness dirs**, the directories
-its charter is about. Every wake runs on the same pinned model, hardcoded
-rather than configurable: a member subtly wrong takes a read of its prose to
-notice. The launch carries **priming**: what a member is, where its charter is
-to be read, the freshest letter left for it inline, and how a day is closed.
-Skills retire into verbs and the verbs are taught, because an agent never told
-how to handoff cannot file one.
+To **wake** a member is to start its day: `attn crew wake <name>`, or two
+clicks on its row in the sidebar, where every member is drawn awake or asleep.
+The sidebar asks twice because a day cannot be un-rung — the first click arms
+the row and the second wakes, and an armed row that is not confirmed stands
+down. The command does not ask twice: typing it is already the deliberate act
+the clicks reconstruct. Either way the daemon binds the member, then launches
+a session in its recorded cwd — its own home when none is recorded — reaching
+its **awareness dirs**, the directories its charter is about. Every wake runs
+on the same pinned model, hardcoded rather than configurable: a member subtly
+wrong takes a read of its prose to notice. The launch carries **priming**:
+what a member is, where its charter is to be read, the freshest letter left
+for it inline, and how a day is closed. Skills retire into verbs and the verbs
+are taught, because an agent never told how to handoff cannot file one.
+
+To **ask a member to sleep** is `attn crew sleep <name>`, or the moon on its
+awake row. The request is delivered into the member's day; it never kills the
+session. The member finishes its letter and files it with `attn handoff
+--sleep`, which is the user's explicit sleep request carried through to the
+closure: nobody wakes behind it.
 
 A member is also an address: `attn agent msg <member> "…"` reaches its live
 day when it is awake. When it is asleep, the message wakes it within the same
@@ -610,7 +619,14 @@ attn's call, made from whether the user is around: a day that closes while
 nobody is there does not start another one, because the point of a fresh day is
 somebody to spend it with. A sleeping member is bound to nothing and shows in
 the sidebar one click from a new day. `attn handoff --sleep` and `--nap` decide
-it for one handoff rather than letting attn read presence.
+it for one handoff rather than letting attn read presence. Plain `attn handoff`
+is presence-decided day turnover; `--nap` explicitly requests a successor, and
+a user-requested sleep is always filed with `--sleep`.
+
+A binding owns a seat only while its process is live. Process exit releases the
+member immediately even when the generic session row remains recoverable; a
+wake that finds stale state releases it, names the exited session, and starts a
+fresh day.
 
 Between those two, the **crew lifecycle** is what watches an awake member and
 decides when either should happen. It reads two things: how long the user has

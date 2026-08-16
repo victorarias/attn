@@ -51,6 +51,25 @@ func TestPriming_BlockCarriesEverythingAWokenMemberNeeds(t *testing.T) {
 	}
 }
 
+// Closure names every way a day can turn over. The plain verb stays
+// presence-decided; Victor's explicit sleep request and a requested successor
+// each have their own flag, so a member never has to infer intent at filing.
+func TestPriming_ClosureCarriesHandoffFlagSemantics(t *testing.T) {
+	block := fullPriming().Block()
+
+	for _, want := range []string{
+		"Plain `attn handoff` is presence-decided day turnover",
+		"While Victor is at the machine, a successor wakes immediately",
+		"When Victor asks you to sleep, file with `attn handoff --sleep`",
+		"nobody wakes behind it",
+		"Use `attn handoff --nap` when you explicitly want a successor",
+	} {
+		if !strings.Contains(block, want) {
+			t.Errorf("the closure does not carry %q", want)
+		}
+	}
+}
+
 // The charter is read, never inlined: a member opens its own file, so the wake
 // never carries a stale copy of the self it is about to read.
 func TestPriming_TheCharterIsReadRatherThanInlined(t *testing.T) {

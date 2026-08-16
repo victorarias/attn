@@ -24,6 +24,21 @@ type doorbellRecorder struct {
 	writes []string
 }
 
+// The prompt promises that an unattended day ends without buying a successor.
+// The explicit flag makes that promise independent of presence when the letter
+// finally lands.
+func TestCrewSleepPrompt_ForcesThePromisedSleep(t *testing.T) {
+	for _, want := range []string{
+		"`attn handoff --sleep",
+		"nobody wakes behind it",
+		"not be woken again until the user asks",
+	} {
+		if !strings.Contains(crewSleepPrompt, want) {
+			t.Errorf("sleep prompt does not carry %q", want)
+		}
+	}
+}
+
 func (r *doorbellRecorder) prompts() []string {
 	r.mu.Lock()
 	defer r.mu.Unlock()

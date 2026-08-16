@@ -1,6 +1,8 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { StrictMode } from 'react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { describe, it, expect, vi } from 'vitest';
 import { Sidebar } from './Sidebar';
+import { WAKE_ARM_TIMEOUT_MS } from './CrewWake';
 import { buildQueueBands, formatTurnAge } from '../utils/queueBands';
 import { buildWorkspaceViewModels } from '../utils/workspaceViewModels';
 
@@ -449,23 +451,32 @@ describe('the crew in the sidebar', () => {
     expect(rows.filter((id) => id?.includes('keel'))).toEqual(['queue-crew-keel']);
   });
 
-  it('wakes a sleeping member with one click and focuses an awake one', () => {
+  it('wakes a sleeping member on the second click, asks an awake one to sleep, and focuses its day', () => {
     const onWakeCrewMember = vi.fn();
+    const onSleepCrewMember = vi.fn();
     const onSelectSession = vi.fn();
     renderCrew(
       [{ id: 'sess-keel', label: 'keel of the day', state: 'working', workspaceId: 'ws-a', crewMember: 'keel' }] as TestSession[],
-      { onWakeCrewMember, onSelectSession },
+      { onWakeCrewMember, onSleepCrewMember, onSelectSession },
     );
 
     fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+    expect(onWakeCrewMember).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
     expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
 
+    fireEvent.click(screen.getByTestId('queue-crew-sleep-keel'));
+    expect(onSleepCrewMember.mock.calls).toEqual([['keel']]);
+    expect(onSelectSession).not.toHaveBeenCalled();
+
+    // Focusing an awake member is not consequential and stays one click.
     fireEvent.click(screen.getByTestId('queue-crew-select-keel'));
     expect(onSelectSession.mock.calls).toEqual([['sess-keel']]);
 
-    // An awake member has no wake button: the way in is the way in only while
-    // there is nothing to focus.
+    // Each act exists only on the side of the day where it makes sense.
     expect(screen.queryByTestId('queue-crew-wake-keel')).toBeNull();
+    expect(screen.queryByTestId('queue-crew-sleep-trellis')).toBeNull();
+    expect(screen.getByTestId('queue-crew-sleep-keel').getAttribute('aria-label')).toBe('Ask Keel to sleep');
   });
 
   it('writes a sleeping member as a name while the id stays the address', () => {
@@ -499,5 +510,174 @@ describe('the crew in the sidebar', () => {
   it('renders no crew rows while the queue arrangement is off', () => {
     renderSidebar(sessions, false, { crew: roster });
     expect(screen.queryByTestId('queue-crew-alder')).toBeNull();
+  });
+
+  describe('arming a wake', () => {
+    // Waking starts a day of a durable identity and cannot be un-rung, so it
+    // takes two deliberate clicks and an unconfirmed arm must never wake
+    // anyone. Every disarm route is a separate test below.
+
+    function armed(member: string) {
+      return screen.getByTestId(`queue-crew-${member}`).getAttribute('data-crew-wake');
+    }
+
+    it('says what the second click does, and says it without the animation', () => {
+      renderCrew([], { onWakeCrewMember: vi.fn() });
+      const button = screen.getByTestId('queue-crew-wake-trellis');
+      expect(armed('trellis')).toBeNull();
+
+      fireEvent.click(button);
+
+      expect(armed('trellis')).toBe('armed');
+      expect(button.getAttribute('aria-label')).toBe('Wake Trellis — click again to confirm');
+      // A word, not only a drawing: the motion is the delight, the text is the
+      // contract, and one of them survives prefers-reduced-motion untouched.
+      expect(screen.getByTestId('queue-crew-trellis').textContent).toContain('confirm');
+      // The fill button covers the whole row and is the other confirm target,
+      // so it has to make the same promise.
+      expect(screen.getByTestId('queue-crew-select-trellis').getAttribute('aria-label'))
+        .toBe('Wake Trellis — click again to confirm');
+    });
+
+    it('arms on the row and confirms on the sun, because they are one gesture', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-select-trellis'));
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+      expect(armed('trellis')).toBe('armed');
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
+      expect(armed('trellis')).toBe('breaking');
+    });
+
+    it('is not a target while it is flaring', () => {
+      // The flare lasts long enough to click into. Re-arming a row whose wake
+      // is already sent would put a second wake one click away.
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
+      expect(armed('trellis')).toBe('breaking');
+    });
+
+    it('stands down when the next click lands somewhere else', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.pointerDown(document.body);
+      expect(armed('trellis')).toBeNull();
+
+      // Disarmed for real: the next click arms again rather than waking.
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('arms one member at a time', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      // Reaching for another member's row is a click outside this one.
+      fireEvent.pointerDown(screen.getByTestId('queue-crew-wake-alder'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-alder'));
+
+      expect(armed('trellis')).toBeNull();
+      expect(armed('alder')).toBe('armed');
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('arms one member at a time for the keyboard too', () => {
+      // A keyboard user reaches the next row by focusing it, never by clicking
+      // outside this one, so focus leaving the row has to disarm it as well.
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.focusIn(screen.getByTestId('queue-crew-wake-alder'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-alder'));
+
+      expect(armed('trellis')).toBeNull();
+      expect(armed('alder')).toBe('armed');
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('keeps the arm while focus moves inside its own row', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-select-trellis'));
+      fireEvent.focusIn(screen.getByTestId('queue-crew-wake-trellis'));
+
+      expect(armed('trellis')).toBe('armed');
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
+    });
+
+    it('stands down on Escape', () => {
+      const onWakeCrewMember = vi.fn();
+      renderCrew([], { onWakeCrewMember });
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.keyDown(document, { key: 'Escape' });
+
+      expect(armed('trellis')).toBeNull();
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      expect(onWakeCrewMember).not.toHaveBeenCalled();
+    });
+
+    it('wakes once even where React runs the click path twice', () => {
+      // StrictMode double-invokes state updaters, so sending the wake from
+      // inside one would spend two days on the one click this earns.
+      const onWakeCrewMember = vi.fn();
+      const data = sidebarData(sessions);
+      render(
+        <StrictMode>
+          <Sidebar
+            {...baseProps}
+            {...data}
+            crew={roster}
+            onWakeCrewMember={onWakeCrewMember}
+            queue={buildQueueBands(data.workspaces)}
+          />
+        </StrictMode>,
+      );
+
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+      fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+
+      expect(onWakeCrewMember.mock.calls).toEqual([['trellis']]);
+    });
+
+    it('stands down on its own, and wakes nobody doing it', () => {
+      vi.useFakeTimers();
+      try {
+        const onWakeCrewMember = vi.fn();
+        renderCrew([], { onWakeCrewMember });
+
+        fireEvent.click(screen.getByTestId('queue-crew-wake-trellis'));
+        expect(armed('trellis')).toBe('armed');
+
+        act(() => {
+          vi.advanceTimersByTime(WAKE_ARM_TIMEOUT_MS - 1);
+        });
+        expect(armed('trellis')).toBe('armed');
+
+        act(() => {
+          vi.advanceTimersByTime(1);
+        });
+        expect(armed('trellis')).toBeNull();
+        expect(onWakeCrewMember).not.toHaveBeenCalled();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 });

@@ -105,7 +105,7 @@ const crewHeartbeatPrompt = "[attn] Keeping your context warm — no work is bei
 
 // crewSleepPrompt ends the day. The member writes the letter, as always: attn
 // decides when to ask, never what to say.
-const crewSleepPrompt = "[attn] The user has been away long enough that your day should end rather than carry on warm. Close it now: write your letter to whoever wakes as you next — what you were doing, what is load-bearing, what you would pick up first — and file it with `attn handoff -m \"<your letter>\"`. Your session ends when it lands; you will not be woken again until the user asks."
+const crewSleepPrompt = "[attn] The user has been away long enough that your day should end rather than carry on warm. Close it now: write your letter to whoever wakes as you next — what you were doing, what is load-bearing, what you would pick up first — and file it with `attn handoff --sleep -m \"<your letter>\"`. Your session ends when it lands; nobody wakes behind it, and you will not be woken again until the user asks."
 
 // crewSleepPromptGrace is how long attn waits for a prompted handoff before
 // asking again. A member mid-thought may take minutes to close, and re-asking

@@ -12,9 +12,9 @@ import (
 // cap — never a stale coordinate. The block table depends on both: it anchors
 // blocks by ScreenPoint while live and treats a dropped ref as "content gone,
 // drop the block" rather than trusting a phantom row. Drives real prune with a
-// small MaxScrollback so the early mark is guaranteed to fall out.
+// small scrollback budget so the early mark is guaranteed to fall out.
 func TestTrackedRefDropsWhenPruned(t *testing.T) {
-	term, err := New(80, 10, Options{MaxScrollback: 50})
+	term, err := New(80, 10, Options{ScrollbackBytes: 50})
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestTrackedRefDropsWhenPruned(t *testing.T) {
 		}
 	}
 
-	// Push far past MaxScrollback; the early mark must eventually be discarded
+	// Push far past the scrollback budget; the early mark must eventually be discarded
 	// and ScreenPoint must then report ok=false.
 	for _, milestone := range []int{1000, 5000, 20000, 60000} {
 		feedLines(term, 0, milestone)

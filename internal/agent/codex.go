@@ -57,9 +57,8 @@ func (c *Codex) Capabilities() Capabilities {
 		HasYolo:              true,
 		HasInitialPrompt:     true,
 		HasWorkspaceContext:  true,
-		// HasSelfMonitor: false — the shared daemon nudge covers unread tickets.
-		HasModelPin:  true,
-		HasEffortPin: true,
+		HasModelPin:          true,
+		HasEffortPin:         true,
 	}
 }
 
@@ -129,7 +128,8 @@ func (c *Codex) BuildEnv(opts SpawnOpts) []string {
 }
 
 func (c *Codex) PrepareLaunch(opts SpawnOpts) error {
-	return ensureAttnAgentsSkillInstalled()
+	_, err := EnsureAgentsSkillInstalled()
+	return err
 }
 
 func (c *Codex) RunHeadlessTask(ctx context.Context, request HeadlessTaskRequest) (HeadlessTaskResult, error) {

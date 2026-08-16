@@ -351,7 +351,11 @@ func (d *Daemon) runNudgeDelivery(sessionID string) string {
 		d.logf("nudge countdown doorbell %s: %v", sessionID, err)
 		return "doorbell-error"
 	}
-	if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(sessionID), time.Now()); err != nil {
+	deliveredThroughSeq, err := d.newestUnreadTicketSeq(sessionID)
+	if err != nil {
+		d.logf("nudge delivered-through scan %s: %v", sessionID, err)
+	}
+	if err := d.store.SetTicketDeliveryAttentionThrough(d.ticketAttentionKey(sessionID), time.Now(), deliveredThroughSeq); err != nil {
 		d.logf("nudge attention update %s: %v", sessionID, err)
 	}
 	return "doorbell"
@@ -380,7 +384,7 @@ func (d *Daemon) updateNudgeSelection(oldID, newID string) {
 	}
 	if resumeUnread {
 		// Re-derive the deadline from durable unread events so switching away
-		// cannot collapse a long observer buffer to 30 seconds.
+		// cannot collapse an active bundle window to the short countdown.
 		go d.notifyUnreadTicketSession(oldID, time.Now())
 	}
 }
@@ -434,8 +438,14 @@ func (d *Daemon) handleTriggerNudge(msg *protocol.TriggerNudgeMessage) {
 	}
 	if err := d.typeDoorbell(sessionID, ticketNudgePrompt); err != nil {
 		d.logf("trigger_nudge doorbell %s: %v", sessionID, err)
-	} else if err := d.store.SetTicketDeliveryAttention(d.ticketAttentionKey(sessionID), time.Now()); err != nil {
-		d.logf("trigger_nudge attention update %s: %v", sessionID, err)
+	} else {
+		deliveredThroughSeq, scanErr := d.newestUnreadTicketSeq(sessionID)
+		if scanErr != nil {
+			d.logf("trigger_nudge delivered-through scan %s: %v", sessionID, scanErr)
+		}
+		if err := d.store.SetTicketDeliveryAttentionThrough(d.ticketAttentionKey(sessionID), time.Now(), deliveredThroughSeq); err != nil {
+			d.logf("trigger_nudge attention update %s: %v", sessionID, err)
+		}
 	}
 	d.broadcastSessionStateChanged(sessionID)
 }

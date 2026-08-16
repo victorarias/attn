@@ -1,7 +1,20 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "child_process";
 import { resolve } from "path";
+
+// The terminal-snapshot wire format this bundle decodes. Computed here, from
+// the same script the Makefile feeds into buildinfo.SnapshotFormat, so a
+// bundle's worker and app agree by construction rather than by a build script
+// remembering to export an env var. A failure to derive it fails the build:
+// guessing would silently cost every session its restore.
+// See docs/plans/2026-08-16-snapshot-format-skew.md.
+const snapshotFormat = execFileSync(
+  "bash",
+  [resolve(__dirname, "../scripts/snapshot-format.sh")],
+  { encoding: "utf8" },
+).trim();
 
 // @ts-expect-error process is a nodejs global
 const host = process.env.TAURI_DEV_HOST;
@@ -40,6 +53,9 @@ const appSdkDevChunks = {
 // https://vite.dev/config/
 export default defineConfig(async () => ({
   plugins: [react(), appSdkDevChunks],
+  define: {
+    __ATTN_SNAPSHOT_FORMAT__: JSON.stringify(snapshotFormat),
+  },
   // Multi-page app configuration for test harness
   build: {
     rollupOptions: {

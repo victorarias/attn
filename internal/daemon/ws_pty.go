@@ -82,8 +82,12 @@ type attachReplayPayload struct {
 	// its model and replays it. Empty when the policy omits restore or no
 	// server-authoritative terminal is available (ghostty absent).
 	ghosttySnapshot []byte
-	ghosttyCols     uint16
-	ghosttyRows     uint16
+	// ghosttySnapshotFormat travels with the bytes so the client — the only
+	// participant that owns a decoder — can decline a format it cannot read.
+	// Empty from a worker that predates the field, which reads the same way.
+	ghosttySnapshotFormat string
+	ghosttyCols           uint16
+	ghosttyRows           uint16
 	// ghosttyBlocks are the worker's OSC 133 command blocks resolved atomically
 	// with ghosttySnapshot (Phase 3a). Carried only alongside a snapshot.
 	ghosttyBlocks []pty.AttachBlockData
@@ -119,13 +123,14 @@ func buildAttachReplayPayload(info ptybackend.AttachInfo, policy protocol.Attach
 		return attachReplayPayload{decision: "no_snapshot"}
 	}
 	return attachReplayPayload{
-		ghosttySnapshot:     info.GhosttySnapshot,
-		ghosttyCols:         info.Cols,
-		ghosttyRows:         info.Rows,
-		ghosttyBlocks:       info.GhosttyBlocks,
-		ghosttyPlacements:   info.GhosttyPlacements,
-		scrollbackTruncated: info.GhosttyScrollbackTruncated,
-		decision:            "use_ghostty_snapshot",
+		ghosttySnapshot:       info.GhosttySnapshot,
+		ghosttySnapshotFormat: info.GhosttySnapshotFormat,
+		ghosttyCols:           info.Cols,
+		ghosttyRows:           info.Rows,
+		ghosttyBlocks:         info.GhosttyBlocks,
+		ghosttyPlacements:     info.GhosttyPlacements,
+		scrollbackTruncated:   info.GhosttyScrollbackTruncated,
+		decision:              "use_ghostty_snapshot",
 	}
 }
 
@@ -391,12 +396,13 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 	}
 	replay := buildAttachReplayPayload(info, protocol.Deref(msg.AttachPolicy))
 	d.logf(
-		"PTY attach result: id=%s policy=%s running=%v last_seq=%d ghostty_snapshot_bytes=%d scrollback_truncated=%v replay_decision=%s size=%dx%d",
+		"PTY attach result: id=%s policy=%s running=%v last_seq=%d ghostty_snapshot_bytes=%d snapshot_format=%s scrollback_truncated=%v replay_decision=%s size=%dx%d",
 		msg.ID,
 		protocol.Deref(msg.AttachPolicy),
 		info.Running,
 		info.LastSeq,
 		len(replay.ghosttySnapshot),
+		replay.ghosttySnapshotFormat,
 		replay.scrollbackTruncated,
 		replay.decision,
 		info.Cols,
@@ -429,7 +435,8 @@ func (d *Daemon) handleAttachSession(client *wsClient, msg *protocol.AttachSessi
 		result.Snapshot = &protocol.AttachSnapshot{
 			Cols:                int(replay.ghosttyCols),
 			Rows:                int(replay.ghosttyRows),
-			VtDumpB64:           base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			SnapshotB64:         base64.StdEncoding.EncodeToString(replay.ghosttySnapshot),
+			Format:              protocol.Ptr(replay.ghosttySnapshotFormat),
 			Blocks:              attachBlocksToProtocol(replay.ghosttyBlocks),
 			Placements:          placementsToProtocol(replay.ghosttyPlacements),
 			ScrollbackTruncated: replay.scrollbackTruncated,

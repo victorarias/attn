@@ -823,6 +823,9 @@ type AttachSnapshot struct {
 	// Cols corresponds to the JSON schema field "cols".
 	Cols int `json:"cols"`
 
+	// Format corresponds to the JSON schema field "format".
+	Format *string `json:"format,omitempty,omitzero"`
+
 	// Placements corresponds to the JSON schema field "placements".
 	Placements []KittyPlacement `json:"placements,omitempty,omitzero"`
 
@@ -833,8 +836,8 @@ type AttachSnapshot struct {
 	// "scrollback_truncated".
 	ScrollbackTruncated bool `json:"scrollback_truncated"`
 
-	// VtDumpB64 corresponds to the JSON schema field "vt_dump_b64".
-	VtDumpB64 string `json:"vt_dump_b64"`
+	// SnapshotB64 corresponds to the JSON schema field "snapshot_b64".
+	SnapshotB64 string `json:"snapshot_b64"`
 }
 
 type AuthorState struct {
@@ -1844,6 +1847,63 @@ type CrewSetResult struct {
 	Member CrewMember `json:"member"`
 }
 
+type CrewSleepMessage struct {
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member string `json:"member"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID *string `json:"request_id,omitempty,omitzero"`
+}
+
+type CrewSleepResult struct {
+	// AlreadyAsleep corresponds to the JSON schema field "already_asleep".
+	AlreadyAsleep bool `json:"already_asleep"`
+
+	// DeliveryStatus corresponds to the JSON schema field "delivery_status".
+	DeliveryStatus *AgentMsgStatus `json:"delivery_status,omitempty,omitzero"`
+
+	// Detail corresponds to the JSON schema field "detail".
+	Detail string `json:"detail"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member string `json:"member"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+}
+
+type CrewSleepResultMessage struct {
+	// AlreadyAsleep corresponds to the JSON schema field "already_asleep".
+	AlreadyAsleep *bool `json:"already_asleep,omitempty,omitzero"`
+
+	// DeliveryStatus corresponds to the JSON schema field "delivery_status".
+	DeliveryStatus *AgentMsgStatus `json:"delivery_status,omitempty,omitzero"`
+
+	// Detail corresponds to the JSON schema field "detail".
+	Detail *string `json:"detail,omitempty,omitzero"`
+
+	// Error corresponds to the JSON schema field "error".
+	Error *string `json:"error,omitempty,omitzero"`
+
+	// Event corresponds to the JSON schema field "event".
+	Event string `json:"event"`
+
+	// Member corresponds to the JSON schema field "member".
+	Member *string `json:"member,omitempty,omitzero"`
+
+	// RequestID corresponds to the JSON schema field "request_id".
+	RequestID string `json:"request_id"`
+
+	// SessionID corresponds to the JSON schema field "session_id".
+	SessionID *string `json:"session_id,omitempty,omitzero"`
+
+	// Success corresponds to the JSON schema field "success".
+	Success bool `json:"success"`
+}
+
 type CrewUpdatedMessage struct {
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`
@@ -1873,6 +1933,9 @@ type CrewWakeResult struct {
 	// Member corresponds to the JSON schema field "member".
 	Member string `json:"member"`
 
+	// ReleasedSessionID corresponds to the JSON schema field "released_session_id".
+	ReleasedSessionID *string `json:"released_session_id,omitempty,omitzero"`
+
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
 
@@ -1892,6 +1955,9 @@ type CrewWakeResultMessage struct {
 
 	// Member corresponds to the JSON schema field "member".
 	Member *string `json:"member,omitempty,omitzero"`
+
+	// ReleasedSessionID corresponds to the JSON schema field "released_session_id".
+	ReleasedSessionID *string `json:"released_session_id,omitempty,omitzero"`
 
 	// RequestID corresponds to the JSON schema field "request_id".
 	RequestID string `json:"request_id"`
@@ -5539,6 +5605,9 @@ type Response struct {
 
 	// CrewSetResult corresponds to the JSON schema field "crew_set_result".
 	CrewSetResult *CrewSetResult `json:"crew_set_result,omitempty,omitzero"`
+
+	// CrewSleepResult corresponds to the JSON schema field "crew_sleep_result".
+	CrewSleepResult *CrewSleepResult `json:"crew_sleep_result,omitempty,omitzero"`
 
 	// CrewWakeResult corresponds to the JSON schema field "crew_wake_result".
 	CrewWakeResult *CrewWakeResult `json:"crew_wake_result,omitempty,omitzero"`

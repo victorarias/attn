@@ -1,0 +1,11 @@
+kind: fixed
+area: profiles
+change: >
+  Named-profile windows now identify themselves at a glance, and every process
+  they launch carries that profile's routing even when a login shell exports a
+  conflicting value. App bundles discard inherited data and plugin directory
+  overrides; copied crew registries are refused before they can read or write
+  another profile's member homes; crew working directories cannot point into a
+  different profile's homes; and verification daemons other than dev no longer
+  rewrite global agent skills. Remote binary caches now live inside the active
+  profile too.

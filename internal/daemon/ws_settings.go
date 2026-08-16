@@ -297,16 +297,22 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		if available {
 			switch name {
 			case string(protocol.SessionAgentClaude):
-				if err := agentdriver.EnsureClaudeSkillInstalled(); err != nil {
+				if synced, err := agentdriver.EnsureClaudeSkillInstalled(); err != nil {
 					d.logf("failed to ensure Claude attn skill: %v", err)
+				} else if !synced {
+					d.logf("skipping user-global Claude attn skill sync for profile %q", config.ProfileLabel())
 				}
 			case string(protocol.SessionAgentCodex):
-				if err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
+				if synced, err := agentdriver.EnsureAgentsSkillInstalled(); err != nil {
 					d.logf("failed to ensure ~/.agents attn skill: %v", err)
+				} else if !synced {
+					d.logf("skipping user-global ~/.agents attn skill sync for profile %q", config.ProfileLabel())
 				}
 			case string(protocol.SessionAgentCopilot):
-				if err := agentdriver.EnsureCopilotSkillInstalled(); err != nil {
+				if synced, err := agentdriver.EnsureCopilotSkillInstalled(); err != nil {
 					d.logf("failed to ensure Copilot attn skill: %v", err)
+				} else if !synced {
+					d.logf("skipping user-global Copilot attn skill sync for profile %q", config.ProfileLabel())
 				}
 			}
 		}

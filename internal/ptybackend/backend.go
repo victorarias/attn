@@ -47,7 +47,10 @@ type SpawnOptions struct {
 	ExternalCommand   []string
 	ExternalEnv       []string
 	ExternalCWD       string
-	LifecycleID       string
+	// DaemonEnv is the daemon's exact routing contract. Every runtime reapplies
+	// it after login-shell and plugin environment.
+	DaemonEnv   []string
+	LifecycleID string
 
 	// ResumeConversationFile is an existing conversation file this session
 	// picks up from, chosen by the user in the new-session flow. Only a
@@ -133,6 +136,9 @@ type AttachInfo struct {
 	// GhosttySnapshot is the server-authoritative VT serialization of the whole
 	// terminal (geometry Cols/Rows); nil when absent.
 	GhosttySnapshot []byte
+	// GhosttySnapshotFormat names the wire format GhosttySnapshot is written
+	// in; empty when absent, and from an old worker that does not send it.
+	GhosttySnapshotFormat string
 	// GhosttyBlocks are OSC 133 command blocks resolved to SCREEN-space rows of
 	// GhosttySnapshot, captured atomically with it and LastSeq; nil when absent.
 	GhosttyBlocks []pty.AttachBlockData

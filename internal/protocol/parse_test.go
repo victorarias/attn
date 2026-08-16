@@ -48,6 +48,11 @@ func TestParseCommand(t *testing.T) {
 			wantCmd: CmdTicketTake,
 		},
 		{
+			name:    "crew sleep message",
+			input:   `{"cmd":"crew_sleep","member":"trellis","request_id":"req-1"}`,
+			wantCmd: CmdCrewSleep,
+		},
+		{
 			name:    "state message",
 			input:   `{"cmd":"state","id":"abc","state":"waiting"}`,
 			wantCmd: CmdState,
@@ -94,12 +99,12 @@ func TestParseCommand(t *testing.T) {
 		},
 		{
 			name:    "install bundled plugin message",
-			input:   `{"cmd":"install_bundled_plugin","name":"attn-opencode"}`,
+			input:   `{"cmd":"install_bundled_plugin","name":"attn-example"}`,
 			wantCmd: CmdInstallBundledPlugin,
 		},
 		{
 			name:    "uninstall plugin message",
-			input:   `{"cmd":"uninstall_plugin","name":"attn-opencode"}`,
+			input:   `{"cmd":"uninstall_plugin","name":"attn-example"}`,
 			wantCmd: CmdUninstallPlugin,
 		},
 		{
