@@ -42,8 +42,11 @@ Conclusions the design leans on:
   `opencode-go/glm-5.3`, layer-2b escalation `opencode-go/qwen3.8-max`.
   The seats pick the models: 2a runs on every classified call, so the
   fastest accurate model wins it (deepseek is cheapest but always burns
-  reasoning tokens — p90 14s — and the price gap is pennies/day); 2b is
-  rare, so the only perfect-verdict model wins it despite its 4s p50.
+  reasoning tokens — p90 14s — and the price gap is pennies/day). 2b must
+  be a different, stronger judge than 2a or escalation adds latency
+  without information; among the stronger candidates qwen beat kimi on
+  both latency and price. (glm, kimi, and qwen all had zero wrong
+  verdicts; the only spread was one judgment-call case.)
 
 ## Critical UX (the moments that must feel right)
 
