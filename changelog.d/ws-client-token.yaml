@@ -1,0 +1,14 @@
+kind: changed
+area: daemon
+change: >
+  The daemon's local WebSocket port now requires a credential. Until now any
+  process on the machine that knew the port could speak the whole protocol —
+  read every session, spawn agents, write files — and one profile's app could
+  drive another profile's daemon. The daemon mints a token into its profile's
+  data directory (`~/.attn[-profile]/client-token`, owner-only) on first
+  startup and reuses it afterwards, and every client presents it when it
+  connects. A connection that has not presented it is handed nothing at all —
+  no state, no updates — rather than merely being refused commands. Nothing to
+  set up: the app, the CLI and the harness all read the same file. A client
+  that presents the wrong one is told so, with the path to read, instead of
+  being hung up on.

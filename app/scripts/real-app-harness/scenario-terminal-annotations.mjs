@@ -32,6 +32,7 @@ import {
   waitForFirstWorkspacePane,
 } from './scenarioAssertions.mjs';
 import { ensureCodexPromptReadyViaPty } from './scenarioAgents.mjs';
+import { harnessClientHello } from './harnessProfile.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
 
 // Generous on purpose: how long a live agent takes to stop says nothing about
@@ -181,10 +182,7 @@ function daemonAnnotations(wsUrl, sessionId, timeoutMs = 8_000) {
     }, timeoutMs);
     ws.once('open', () => {
       ws.send(JSON.stringify({
-        cmd: 'client_hello',
-        client_kind: 'harness-observer',
-        version: 'real-app-harness',
-        capabilities: ['workspace_sessions'],
+        ...harnessClientHello('harness-observer'),
       }));
       ws.send(JSON.stringify({ cmd: 'session_annotations_get', session_id: sessionId, request_id: requestId }));
     });

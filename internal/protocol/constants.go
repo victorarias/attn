@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "256"
+const ProtocolVersion = "257"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -44,6 +44,10 @@ const (
 	// never be answered again as written, so the tile's query is what has to
 	// change; resubscribing unchanged would fail the same way.
 	ErrorCodeCollectionRedeclared = "collection_redeclared"
+	// ErrorCodeUnauthorizedClient refuses a client_hello whose client_token does
+	// not match the daemon's. Nothing to retry on the same value — read the token
+	// file the message names, or ask the daemon that owns it.
+	ErrorCodeUnauthorizedClient = "unauthorized_client"
 )
 
 // AgentMessageMaxChars bounds one agent_msg. Measured 2026-08-10 against a live

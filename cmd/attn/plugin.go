@@ -206,17 +206,20 @@ func pluginDaemonRequest(payload map[string]any, expectedEvent, expectedAction s
 	}
 	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
-	if _, _, err := conn.Read(ctx); err != nil {
-		return nil, fmt.Errorf("read daemon state: %w", err)
-	}
 	hello := map[string]any{
 		"cmd":          protocol.CmdClientHello,
 		"client_kind":  "attn-cli",
 		"version":      "protocol-" + protocol.ProtocolVersion,
 		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+		"client_token": config.ClientToken(),
 	}
+	// Hello first: the daemon sends nothing at all — initial_state included —
+	// until it passes.
 	if err := writePluginDaemonMessage(ctx, conn, hello); err != nil {
 		return nil, err
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		return nil, fmt.Errorf("read daemon state: %w", err)
 	}
 	if err := writePluginDaemonMessage(ctx, conn, payload); err != nil {
 		return nil, err

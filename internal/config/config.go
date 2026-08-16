@@ -246,6 +246,7 @@ func ScopeTestEnvironment(dataDir string) {
 	os.Unsetenv("ATTN_SOCKET_PATH")
 	os.Unsetenv("ATTN_CONFIG_PATH")
 	os.Unsetenv("ATTN_PLUGIN_DIR")
+	os.Unsetenv("ATTN_CLIENT_TOKEN")
 }
 
 // defaultAttnDir computes the profile-aware default data dir from the real

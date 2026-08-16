@@ -1766,6 +1766,9 @@ type ClientHelloMessage struct {
 	// ClientKind corresponds to the JSON schema field "client_kind".
 	ClientKind string `json:"client_kind"`
 
+	// ClientToken corresponds to the JSON schema field "client_token".
+	ClientToken *string `json:"client_token,omitempty,omitzero"`
+
 	// Cmd corresponds to the JSON schema field "cmd".
 	Cmd string `json:"cmd"`
 
@@ -7962,6 +7965,9 @@ type WebSocketEvent struct {
 
 	// Error corresponds to the JSON schema field "error".
 	Error *string `json:"error,omitempty,omitzero"`
+
+	// ErrorCode corresponds to the JSON schema field "error_code".
+	ErrorCode *string `json:"error_code,omitempty,omitzero"`
 
 	// Event corresponds to the JSON schema field "event".
 	Event string `json:"event"`

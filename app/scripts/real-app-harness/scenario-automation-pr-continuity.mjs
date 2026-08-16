@@ -15,6 +15,7 @@ import { readFrontendProtocolVersion } from './presentDaemon.mjs';
 import {
   currentHarnessProfile,
   dataDirForProfile,
+  harnessClientHello,
   resolveHarnessResources,
 } from './harnessProfile.mjs';
 
@@ -148,10 +149,9 @@ async function wsRequest(wsURL, message, event, timeoutMs = 30_000) {
     const timer = setTimeout(() => { ws.close(); reject(new Error(`timed out waiting for ${event}`)); }, timeoutMs);
     let ready = false;
     ws.once('open', () => ws.send(JSON.stringify({
-      cmd: 'client_hello',
-      client_kind: 'harness-automation-continuity',
-      version: `protocol-${readFrontendProtocolVersion()}`,
-      capabilities: ['workspace_sessions'],
+      ...harnessClientHello('harness-automation-continuity', {
+        version: `protocol-${readFrontendProtocolVersion()}`,
+      }),
     })));
     ws.on('message', (raw) => {
       const value = JSON.parse(raw.toString());

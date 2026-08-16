@@ -363,7 +363,11 @@ func list(_ []string) error {
 	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// First message after connect is initial_state.
+	// The hello unlocks the connection; initial_state is the first thing the
+	// daemon sends once it passes.
+	if err := sendClientHello(ctx, conn); err != nil {
+		return err
+	}
 	_, data, err := conn.Read(ctx)
 	if err != nil {
 		return fmt.Errorf("read initial_state: %w", err)
@@ -374,9 +378,6 @@ func list(_ []string) error {
 	}
 	if ev, _ := event["event"].(string); ev != "initial_state" {
 		return fmt.Errorf("expected initial_state, got %q", ev)
-	}
-	if err := sendClientHello(ctx, conn); err != nil {
-		return err
 	}
 	pretty, _ := json.MarshalIndent(map[string]any{
 		"workspaces": event["workspaces"],
@@ -404,8 +405,8 @@ func refreshPRs(args []string) error {
 
 // ── Wire helpers ─────────────────────────────────────────────────────────────
 
-// send opens a connection, drains the initial_state event, sends the
-// payload, and closes. No response read — fire-and-forget.
+// send opens a connection, presents the client token, drains initial_state,
+// sends the payload, and closes. No response read — fire-and-forget.
 func send(payload map[string]any) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -418,13 +419,13 @@ func send(payload map[string]any) error {
 	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// Daemon sends initial_state on connect; drain it before our write
-	// so the socket buffer doesn't backlog.
-	if _, _, err := conn.Read(ctx); err != nil {
-		return fmt.Errorf("drain initial_state: %w", err)
-	}
+	// The daemon sends initial_state once the hello passes; drain it before
+	// our write so the socket buffer doesn't backlog.
 	if err := sendClientHello(ctx, conn); err != nil {
 		return err
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		return fmt.Errorf("drain initial_state: %w", err)
 	}
 
 	body, err := json.Marshal(payload)
@@ -467,11 +468,11 @@ func sendAndWaitMatch(payload map[string]any, expectedEvent string, match func(m
 	conn.SetReadLimit(16 << 20)
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	if _, _, err := conn.Read(ctx); err != nil {
-		return nil, fmt.Errorf("drain initial_state: %w", err)
-	}
 	if err := sendClientHello(ctx, conn); err != nil {
 		return nil, err
+	}
+	if _, _, err := conn.Read(ctx); err != nil {
+		return nil, fmt.Errorf("drain initial_state: %w", err)
 	}
 
 	body, err := json.Marshal(payload)
@@ -517,6 +518,7 @@ func sendClientHello(ctx context.Context, conn *websocket.Conn) error {
 		"client_kind":  "wsctl",
 		"version":      "protocol-" + protocol.ProtocolVersion,
 		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+		"client_token": config.ClientToken(),
 	})
 	if err != nil {
 		return err
