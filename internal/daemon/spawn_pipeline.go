@@ -347,6 +347,15 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 			}
 			params.Instructions, plan.instructionsRollback = instructions, rollback
 		}
+		if req.pluginDriver.Capabilities["auto_mode"] {
+			cfg, err := d.store.GetAutoModeConfig()
+			if err != nil {
+				d.finishPluginSessionLaunch(msg.ID, false)
+				plan.rollback(d, msg.ID)
+				return &spawnOutcome{err: fmt.Errorf("read auto mode config: %w", err)}
+			}
+			params.AutoMode = &cfg
+		}
 		result, err := d.resolvePluginDriverLaunch(req.pluginDriver, params, req.existingSession != nil && req.pluginDriver.Capabilities["resume"])
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)

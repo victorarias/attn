@@ -90,6 +90,7 @@ export class PiDriver {
         effort_pin: true,
         state_reporting: true,
         message_delivery: true,
+        auto_mode: true,
       },
     });
     if (!result.ok) throw new Error("attn rejected pi driver registration");
@@ -119,7 +120,7 @@ export class PiDriver {
     return {
       argv: this.argvFor(availability.executable, metadata, params.initial_prompt, suitePath),
       cwd: params.cwd,
-      env: this.envFor(run.token),
+      env: this.envFor(run.token, params.auto_mode),
     };
   }
 
@@ -146,7 +147,7 @@ export class PiDriver {
     return {
       argv: this.argvFor(availability.executable, metadata, undefined, suitePath),
       cwd: params.cwd,
-      env: this.envFor(run.token),
+      env: this.envFor(run.token, params.auto_mode),
     };
   }
 
@@ -257,8 +258,14 @@ export class PiDriver {
     return this.suitePath;
   }
 
-  private envFor(token: string): Record<string, string> {
-    return { ATTN_PI_SUITE_SOCKET: this.relay.socketPath, ATTN_PI_TOKEN: token };
+  // The auto-mode config travels in the environment rather than argv: prose
+  // entries are multi-line text, and argv is world-readable. The JSON is exactly
+  // what automode/config.ts's loadAutoModeConfig parses, so the session side
+  // reads it without translating. Absent when attn sent none.
+  private envFor(token: string, autoMode: unknown): Record<string, string> {
+    const env: Record<string, string> = { ATTN_PI_SUITE_SOCKET: this.relay.socketPath, ATTN_PI_TOKEN: token };
+    if (autoMode !== undefined && autoMode !== null) env.ATTN_PI_AUTOMODE_CONFIG = JSON.stringify(autoMode);
+    return env;
   }
 
   private argvFor(

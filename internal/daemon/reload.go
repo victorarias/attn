@@ -486,6 +486,14 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 		Effort:       opts.Effort,
 		Instructions: instructions,
 	}
+	if reg.Capabilities["auto_mode"] {
+		cfg, err := d.store.GetAutoModeConfig()
+		if err != nil {
+			prepared.abort()
+			return nil, fmt.Errorf("read auto mode config: %w", err)
+		}
+		params.AutoMode = &cfg
+	}
 	if metadata := strings.TrimSpace(d.store.GetAgentMetadata(session.ID)); metadata != "" && json.Valid([]byte(metadata)) {
 		params.Metadata = json.RawMessage(metadata)
 	}

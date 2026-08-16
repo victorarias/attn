@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/automode"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -55,6 +56,11 @@ type pluginDriverSpawnParams struct {
 	InitialPrompt string                    `json:"initial_prompt,omitempty"`
 	Metadata      json.RawMessage           `json:"metadata,omitempty"`
 	Instructions  *pluginLaunchInstructions `json:"instructions,omitempty"`
+	// The promoted auto-mode config, for a driver that advertises `auto_mode`.
+	// It is the exact JSON shape plugins/attn-pi/automode/config.ts parses, so a
+	// driver forwards it to the session rather than translating it. Config
+	// changes reach new sessions only; a live session is not refreshed.
+	AutoMode *automode.Config `json:"auto_mode,omitempty"`
 }
 
 type pluginDriverSpawnResult struct {
@@ -201,6 +207,7 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 		"effort_pin":          {},
 		"launch_instructions": {},
 		"conversation":        {},
+		"auto_mode":           {},
 	}
 	out := make(map[string]bool, len(values))
 	for name, enabled := range values {

@@ -2749,6 +2749,18 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleAppRuntimeRestart(conn, msg.(*protocol.AppRuntimeRestartMessage))
 	case protocol.CmdAppWatch: // wire: app_watch
 		d.handleAppWatch(conn, msg.(*protocol.AppWatchMessage))
+	// Auto mode's agent-reachable verbs. automode_promote and automode_discard
+	// are deliberately absent: they exist on the WebSocket alone.
+	case protocol.CmdAutoModeShow: // wire: automode_show
+		d.handleAutoModeShow(conn, msg.(*protocol.AutoModeShowMessage))
+	case protocol.CmdAutoModeEnvAdd: // wire: automode_env_add
+		d.handleAutoModeEnvAdd(conn, msg.(*protocol.AutoModeEnvAddMessage))
+	case protocol.CmdAutoModeEnvRemove: // wire: automode_env_remove
+		d.handleAutoModeEnvRemove(conn, msg.(*protocol.AutoModeEnvRemoveMessage))
+	case protocol.CmdAutoModePropose: // wire: automode_propose
+		d.handleAutoModePropose(conn, msg.(*protocol.AutoModeProposeMessage))
+	case protocol.CmdAutoModeDenials: // wire: automode_denials
+		d.handleAutoModeDenials(conn, msg.(*protocol.AutoModeDenialsMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

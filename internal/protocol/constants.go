@@ -10,7 +10,7 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "253"
+const ProtocolVersion = "254"
 
 // Error codes. A failed response may carry one beside its message text, naming
 // what a caller can do about it rather than leaving it to match English. Only
@@ -136,6 +136,14 @@ const (
 	CmdAppRuntimeStatus                      = "app_runtime_status"
 	CmdAppRuntimeRestart                     = "app_runtime_restart"
 	CmdAppWatch                              = "app_watch"
+	// Auto mode's agent-reachable half. Every one of these records or reads;
+	// none of them changes what a session launches with. Promotion is on the
+	// WebSocket surface alone — see CmdAutoModePromote.
+	CmdAutoModeShow                          = "automode_show"
+	CmdAutoModeEnvAdd                        = "automode_env_add"
+	CmdAutoModeEnvRemove                     = "automode_env_remove"
+	CmdAutoModePropose                       = "automode_propose"
+	CmdAutoModeDenials                       = "automode_denials"
 	CmdGetTicket                             = "get_ticket"
 	CmdTicketChangeStatus                    = "ticket_change_status"
 	CmdTicketAddComment                      = "ticket_add_comment"
@@ -292,6 +300,11 @@ const (
 	CmdListPastConversations                 = "list_past_conversations"
 	CmdBusStatusGet                          = "bus_status_get"
 	CmdBusSetConsumerEnabled                 = "bus_set_consumer_enabled"
+	// Auto mode's app-only half. Promotion and discard exist here and nowhere
+	// else: a human in the app is the trust boundary a CLI caller cannot fake.
+	CmdAutoModeGet                           = "automode_get"
+	CmdAutoModePromote                       = "automode_promote"
+	CmdAutoModeDiscard                       = "automode_discard"
 	CmdPtyResize                             = "pty_resize"
 	CmdKillSession                           = "kill_session"
 	CmdReloadSession                         = "reload_session"
@@ -470,6 +483,9 @@ const (
 	EventPastConversationsResult         = "past_conversations_result"
 	EventBusStatusResult                 = "bus_status_result"
 	EventBusSetConsumerEnabledResult     = "bus_set_consumer_enabled_result"
+	EventAutoModeStateResult             = "automode_state_result"
+	EventAutoModePromoteResult           = "automode_promote_result"
+	EventAutoModeDiscardResult           = "automode_discard_result"
 	EventSessionAnnotationsGetResult     = "session_annotations_get_result"
 	EventSessionAnnotationsSaveResult    = "session_annotations_save_result"
 	EventSessionAnnotationsClearResult   = "session_annotations_clear_result"
@@ -831,6 +847,41 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdAppWatch:
 		var msg AppWatchMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeShow:
+		var msg AutoModeShowMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeEnvAdd:
+		var msg AutoModeEnvAddMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeEnvRemove:
+		var msg AutoModeEnvRemoveMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModePropose:
+		var msg AutoModeProposeMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeDenials:
+		var msg AutoModeDenialsMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}
@@ -1869,6 +1920,27 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 		var msg BusStatusGetMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, fmt.Errorf("unmarshal bus_status_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeGet:
+		var msg AutoModeGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal automode_get: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModePromote:
+		var msg AutoModePromoteMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal automode_promote: %w", err)
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdAutoModeDiscard:
+		var msg AutoModeDiscardMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, fmt.Errorf("unmarshal automode_discard: %w", err)
 		}
 		return peek.Cmd, &msg, nil
 
