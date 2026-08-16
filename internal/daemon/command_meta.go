@@ -217,6 +217,16 @@ var CommandMeta = map[string]CommandMetadata{
 	protocol.CmdAppRuntimeStatus:  commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppRuntimeRestart: commandMetadata(ScopeHubLocal, false, true),
 	protocol.CmdAppWatch:          commandMetadata(ScopeHubLocal, false, true),
+	// Auto mode's config is the hub's own database, and none of these touches a
+	// PTY, so a hub answers them itself and none blocks during recovery.
+	protocol.CmdAutoModeShow:      commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAutoModeEnvAdd:    commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAutoModeEnvRemove: commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAutoModePropose:   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAutoModeDenials:   commandMetadata(ScopeHubLocal, false, true),
+	protocol.CmdAutoModeGet:       commandMetadata(ScopeHubLocal, false, false),
+	protocol.CmdAutoModePromote:   commandMetadata(ScopeHubLocal, false, false),
+	protocol.CmdAutoModeDiscard:   commandMetadata(ScopeHubLocal, false, false),
 }
 
 func shouldLogWSCommand(cmd string) bool {

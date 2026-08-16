@@ -363,3 +363,9 @@ rather than through dialogs. Design and slices:
   is not, and a session whose last act is a denial never reports that one.
 - Nothing loads it yet — it is not composed into `suite/` and
   `build-bundled-plugins.sh` does not stage it.
+- attn's config reaches a pi session through the launch: the daemon hands the
+  promoted config to a driver that advertises the `auto_mode` capability, and
+  the driver forwards it as `ATTN_PI_AUTOMODE_CONFIG` (JSON, the exact shape
+  `automode/config.ts` parses). Environment rather than argv because prose
+  entries are multi-line and argv is world-readable. A config change reaches
+  the next session; a live one is not refreshed.

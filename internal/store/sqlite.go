@@ -1112,6 +1112,49 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// Applied by applyMigration106, whose ALTER is column-guarded.
 	{106, "add durable per-session token cost state", ``},
 	{107, "record which ticket event a delivery covered", ``},
+	// Auto mode's home, at 109 because 108 is burned: a branch still in flight
+	// applied it to a production database before merging, and migrateDB skips
+	// anything at or below the highest version already applied. That cuts both
+	// ways — a database created after this lands sits at 109, so a later 108
+	// would be skipped there too. Whatever that branch ships must renumber
+	// above this one.
+	//
+	// One promoted config row, the proposals waiting on a human, and the denials
+	// slice 5 reports. The split is the security design: the CLI writes
+	// proposals, only the app promotes one into the config row, so an agent
+	// cannot write its own leash. Empty model columns mean "whichever default
+	// ships" — automode.Defaults() resolves them at read.
+	{109, "auto mode config, proposals and denials", `CREATE TABLE IF NOT EXISTS automode_config (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled_default  INTEGER NOT NULL DEFAULT 1,
+    environment      TEXT NOT NULL DEFAULT '[]',
+    allow_patterns   TEXT NOT NULL DEFAULT '[]',
+    hard_deny        TEXT NOT NULL DEFAULT '[]',
+    classifier_model TEXT NOT NULL DEFAULT '',
+    escalation_model TEXT NOT NULL DEFAULT '',
+    updated_at       TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS automode_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    target      TEXT NOT NULL DEFAULT '',
+    value       TEXT NOT NULL,
+    proposed_by TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT ''
+);
+-- The review list: everything still pending, oldest first.
+CREATE INDEX IF NOT EXISTS idx_automode_proposals_state ON automode_proposals(state, id);
+CREATE TABLE IF NOT EXISTS automode_denials (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL DEFAULT '',
+    tool       TEXT NOT NULL DEFAULT '',
+    signature  TEXT NOT NULL DEFAULT '',
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DESC);`},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.

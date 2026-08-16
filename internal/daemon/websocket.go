@@ -1326,6 +1326,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleBusStatusGet(client, msg.(*protocol.BusStatusGetMessage))
 	case protocol.CmdBusSetConsumerEnabled: // wire: bus_set_consumer_enabled
 		d.handleBusSetConsumerEnabled(client, msg.(*protocol.BusSetConsumerEnabledMessage))
+	// Auto mode's app-only verbs. Promotion is here and nowhere else: a human in
+	// the app is the trust boundary a CLI caller cannot fake.
+	case protocol.CmdAutoModeGet: // wire: automode_get
+		d.handleAutoModeGet(client, msg.(*protocol.AutoModeGetMessage))
+	case protocol.CmdAutoModePromote: // wire: automode_promote
+		d.handleAutoModePromote(client, msg.(*protocol.AutoModePromoteMessage))
+	case protocol.CmdAutoModeDiscard: // wire: automode_discard
+		d.handleAutoModeDiscard(client, msg.(*protocol.AutoModeDiscardMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession: // wire: kill_session
