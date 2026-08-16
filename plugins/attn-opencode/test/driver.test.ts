@@ -109,6 +109,7 @@ function driverFor(rpc: RecordingRPC, registry: RunRegistry, target: FakeOpenCod
     http: (port, password) => new OpenCodeHTTP({ port, password }),
     startupDeadline: 300,
     reconnectDelay: 5,
+    stageRetryDelay: 5,
   });
 }
 
@@ -176,8 +177,10 @@ describe("OpenCode server-backed driver", () => {
 
     const launch = await driver.spawn(params());
     expect(launch.argv.slice(0, 3)).toEqual([process.execPath, "run", expect.stringContaining("launcher.ts")]);
+    // The submission is recorded before the bind it triggers runs, so wait on
+    // the bind's own report rather than on the submission.
     await eventually(
-      () => target.prompts.length === 1,
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
       () => `staged prompt submission; health=${JSON.stringify(driver.health())}; requests=${JSON.stringify(target.requests)}; calls=${JSON.stringify(rpc.calls)}`,
     );
     expect(target.requests.some((request) => request.path === "/event")).toBe(true);
@@ -186,11 +189,8 @@ describe("OpenCode server-backed driver", () => {
 
     const created = target.sessions.get("native-1") as { model: { providerID: string; id: string; variant: string } };
     expect(created.model).toEqual({ providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "max" });
-    expect(target.prompts[0]?.body).toEqual({
-      parts: [{ type: "text", text: "Say GLM_SPIKE_OK" }],
-      model: { providerID: "spotify-glm", modelID: "zai-org/GLM-5.2-FP8" },
-      variant: "max",
-    });
+    expect(target.tuiSubmissions).toEqual([{ sessionID: "native-1", text: "Say GLM_SPIKE_OK" }]);
+    expect(target.requests.some((request) => request.path === "/session" && request.method === "POST")).toBe(false);
 
     target.emit("session.status", { sessionID: "native-1", status: { type: "busy" } });
     target.emit("session.status", { sessionID: "native-1", status: { type: "retry" } });
@@ -204,6 +204,138 @@ describe("OpenCode server-backed driver", () => {
     ]);
     const sequences = rpc.calls.slice(1).map((call) => (call.params as { seq: number }).seq);
     expect(sequences).toEqual([1, 2, 3, 4]);
+  });
+
+  test("keeps staging the delegated turn until the TUI attaches, then binds the session it opened", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    target.tuiAttached = false;
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-late-tui"));
+
+    // A submission published before the TUI attaches is answered and dropped.
+    await eventually(
+      () => target.requests.filter((request) => request.path === "/tui/submit-prompt").length >= 2,
+      "repeated staging while the TUI is detached",
+    );
+    expect(target.tuiSubmissions).toHaveLength(0);
+    expect(rpc.calls.map((call) => call.method)).toEqual(["driver.register"]);
+
+    target.tuiAttached = true;
+    await eventually(() => rpc.calls.some((call) => call.method === "session.report_metadata"), "binding after the TUI attaches");
+    expect(target.tuiSubmissions).toEqual([{ sessionID: "native-1", text: "Say GLM_SPIKE_OK" }]);
+    expect(await registry.get("run-late-tui")).toEqual(expect.objectContaining({
+      opencode_session_id: "native-1",
+      pinned: true,
+      model: "spotify-glm/zai-org/GLM-5.2-FP8",
+      variant: "max",
+    }));
+
+    // The staging loop stops on the receipt: no second turn, and a hidden
+    // classifier session created later never steals the binding.
+    const submissions = target.requests.filter((request) => request.path === "/tui/submit-prompt").length;
+    target.emit("session.created", { sessionID: "native-hidden" });
+    await Bun.sleep(30);
+    expect(target.requests.filter((request) => request.path === "/tui/submit-prompt")).toHaveLength(submissions);
+    expect(target.tuiSubmissions).toHaveLength(1);
+    expect((await registry.get("run-late-tui"))?.opencode_session_id).toBe("native-1");
+  });
+
+  test("degrades loudly when OpenCode opens the delegated session on another model", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    target.tuiModel = { providerID: "opencode-go", id: "mimo-v2.5", variant: "low" };
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-wrong-model"));
+
+    await eventually(() => driver.health().ok === false, "degraded pin mismatch");
+    expect(driver.health().message).toContain(
+      "OpenCode opened its session on opencode-go/mimo-v2.5 (low) instead of the delegated pin spotify-glm/zai-org/GLM-5.2-FP8 (max)",
+    );
+    expect(rpc.calls.filter((call) => call.method === "session.report_metadata")).toHaveLength(0);
+    expect(rpc.calls.at(-1)).toEqual(expect.objectContaining({
+      method: "session.report_state",
+      params: expect.objectContaining({ state: "unknown" }),
+    }));
+    expect((await registry.get("run-wrong-model"))?.opencode_session_id).toBeUndefined();
+  });
+
+  test("stages the delegated turn once even while the bind is still in flight", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    // The session read the bind depends on never answers, so only the claim made
+    // when `session.created` arrived can stop the staging loop.
+    target.hangingSessionReads.add("native-1");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-stage-once"));
+
+    await eventually(() => target.tuiSubmissions.length === 1, "staged turn");
+    await Bun.sleep(60);
+    expect(target.tuiSubmissions).toHaveLength(1);
+  });
+
+  test("binds the session its staged prompt opened when the event announcing it is lost", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    // The TUI takes the prompt and opens a session, but its `session.created`
+    // never reaches the driver.
+    target.dropSessionCreatedEvent = true;
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn(params("run-lost-receipt"));
+
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      () => `bind from the opened session; submissions=${target.tuiSubmissions.length}; health=${JSON.stringify(driver.health())}`,
+    );
+    expect(target.tuiSubmissions).toHaveLength(1);
+    expect((await registry.get("run-lost-receipt"))?.opencode_session_id).toBe("native-1");
+    expect(driver.health().ok).toBe(true);
+  });
+
+  test("leaves a promptless pinned launch to the pane and binds what it opens", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn({ ...params("run-no-prompt"), initial_prompt: undefined });
+
+    await eventually(() => target.eventSubscriberCount === 1, "subscribed run");
+    expect(target.tuiSubmissions).toHaveLength(0);
+    // The TUI opens on the pinned model either way, so the first session the
+    // user submits there is this run's session.
+    target.sessions.set("native-1", { id: "native-1", model: target.tuiModel });
+    target.emit("session.created", { sessionID: "native-1" });
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "bind from the pane's own session",
+    );
+    expect((await registry.get("run-no-prompt"))?.opencode_session_id).toBe("native-1");
+  });
+
+  test("refuses a delegated effort the pinned model does not offer", async () => {
+    const rpc = new RecordingRPC();
+    const target = server("*");
+    const registry = new RunRegistry(join(await tempRoot(), "runtime"));
+    const driver = driverFor(rpc, registry, target);
+    await driver.initialize();
+    await driver.spawn({ ...params("run-no-variant"), model: "opencode-go/mimo-v2.5" });
+
+    await eventually(() => driver.health().ok === false, "degraded unofferable variant");
+    expect(driver.health().message).toContain(
+      "OpenCode model opencode-go/mimo-v2.5 cannot honor the delegated variant max: it offers no variants",
+    );
+    // The run fails before anything is staged, so no session runs unpinned.
+    expect(target.tuiSubmissions).toHaveLength(0);
+    expect((await registry.get("run-no-variant"))?.opencode_session_id).toBeUndefined();
   });
 
   test("uses the standalone executable as its launcher without requiring Bun", async () => {
@@ -240,7 +372,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-attention-events"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     const reportsBeforeOtherSession = rpc.calls.length;
     target.askQuestion("native-other", "question-other");
@@ -285,7 +420,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-overlapping-attention"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.askPermission("native-1", "permission-overlap");
     await eventually(
@@ -329,7 +467,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-idle-attention"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.pendingQuestions.set("question-idle", "native-1");
     target.emit("session.idle", { sessionID: "native-1" });
@@ -364,7 +505,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-verdicts"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
 
     target.messages.set("native-1", [assistantMessage("message-question", "Should I continue?")]);
     target.classifierReplies.push('{"verdict":"WAITING"}');
@@ -386,9 +530,7 @@ describe("OpenCode server-backed driver", () => {
       (call.params as { verdict: string }).verdict)).toEqual(["waiting_input", "idle"]);
     expect(target.classifierPrompts).toHaveLength(2);
     expect(target.deletedSessions).toEqual(["native-2", "native-3"]);
-    expect(target.requests.filter((request) => request.path === "/tui/select-session").map((request) => request.body)).toEqual([
-      { sessionID: "native-1" },
-    ]);
+    expect(target.tuiSubmissions).toEqual([{ sessionID: "native-1", text: "Say GLM_SPIKE_OK" }]);
   });
 
   test("reuses a cached message verdict while reserving a fresh report sequence", async () => {
@@ -398,7 +540,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-cache"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("same-message", "Which option should I use?")]);
     target.classifierReplies.push('{"verdict":"WAITING"}');
 
@@ -425,7 +570,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-prose-malformed"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-malformed", "Can you choose?")]);
     target.classifierReplies.push("WAITING");
     target.emit("session.idle", { sessionID: "native-1" });
@@ -440,7 +588,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-idle-reconcile-failure"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.failPendingLists = true;
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => rpc.calls.at(-1)?.method === "session.report_stop", "unknown reconciliation verdict");
@@ -463,10 +614,14 @@ describe("OpenCode server-backed driver", () => {
         stopClassifier: () => classifier,
         startupDeadline: 300,
         reconnectDelay: 5,
+        stageRetryDelay: 5,
       });
       await driver.initialize();
       await driver.spawn(params(`run-cancel-${newerEvent}`));
-      await eventually(() => target.prompts.length === 1, "native prompt submission");
+      await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
       target.messages.set("native-1", [assistantMessage("message-blocked", "What next?")]);
       target.emit("session.idle", { sessionID: "native-1" });
       await eventually(() => classifier.inputs.length === 1, "classifier started");
@@ -500,10 +655,14 @@ describe("OpenCode server-backed driver", () => {
       stopClassifier: () => classifier,
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await driver.spawn(params("run-benign-session-update"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-benign", "Should I continue?")]);
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => classifier.inputs.length === 1, "classifier started");
@@ -521,7 +680,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-question-reconnect"));
-    await eventually(() => target.prompts.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata") && target.eventSubscriberCount === 1,
+      "initial native run",
+    );
 
     target.pendingQuestions.set("question-missed", "native-1");
     target.closeEvents();
@@ -540,7 +702,10 @@ describe("OpenCode server-backed driver", () => {
     const driver = driverFor(rpc, registry, target);
     await driver.initialize();
     await driver.spawn(params("run-question-reconnect-order"));
-    await eventually(() => target.prompts.length === 1 && target.eventSubscriberCount === 1, "initial native run");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata") && target.eventSubscriberCount === 1,
+      "initial native run",
+    );
 
     target.pendingQuestions.set("question-race", "native-1");
     let releaseSnapshot!: () => void;
@@ -581,7 +746,7 @@ describe("OpenCode server-backed driver", () => {
     });
     await eventually(() => target.requests.some((request) => request.path === "/event"), "interactive SSE subscription");
     expect(target.requests.some((request) => request.path === "/session" && request.method === "POST")).toBe(false);
-    expect(target.prompts).toHaveLength(0);
+    expect(target.tuiSubmissions).toHaveLength(0);
 
     target.sessions.set("native-default", {
       id: "native-default",
@@ -658,8 +823,8 @@ describe("OpenCode server-backed driver", () => {
         variant: "low",
       },
     });
-    await eventually(() => target.requests.some((request) => request.path === "/tui/select-session"), "resume selection");
-    expect(target.prompts).toHaveLength(0);
+    await eventually(() => target.requests.some((request) => request.path === "/session/native-resume"), "resume identity read");
+    expect(target.tuiSubmissions).toHaveLength(0);
     expect(target.requests.some((request) => request.path === "/session/native-resume")).toBe(true);
 
     await expect(driver.resume({
@@ -691,6 +856,7 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await driver.resume({
@@ -705,7 +871,7 @@ describe("OpenCode server-backed driver", () => {
         variant: "low",
       },
     });
-    await eventually(() => target.requests.some((request) => request.path === "/tui/select-session"), "upgraded resume selection");
+    await eventually(() => target.requests.some((request) => request.path === "/session/native-upgrade"), "upgraded resume identity read");
     expect(await registry.get("run-forward-upgrade")).toEqual(expect.objectContaining({
       opencode_session_id: "native-upgrade",
       opencode_version: "1.18.0",
@@ -748,6 +914,7 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 40,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await driver.spawn({ session_id: "attn-version-mismatch", run_id: "run-version-mismatch", cwd: "/tmp" });
@@ -784,7 +951,7 @@ describe("OpenCode server-backed driver", () => {
         variant: "max",
       },
     });
-    await eventually(() => target.requests.some((request) => request.path === "/tui/select-session"), "interactive resume selection");
+    await eventually(() => target.requests.some((request) => request.path === "/session/native-default"), "interactive resume identity read");
     expect(target.requests.some((request) => request.path === "/session" && request.method === "POST")).toBe(false);
     expect(await registry.get("run-interactive-resume")).toEqual(expect.objectContaining({
       opencode_session_id: "native-default",
@@ -825,18 +992,23 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
+    // Each TUI opens the variant its own launch config pinned.
+    first.tuiModel = { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "low" };
+    second.tuiModel = { providerID: "spotify-glm", id: "zai-org/GLM-5.2-FP8", variant: "max" };
     await Promise.all([
       driver.spawn({ ...params("run-low"), effort: "low", initial_prompt: "first" }),
       driver.spawn({ ...params("run-max"), effort: "max", initial_prompt: "second" }),
     ]);
-    await eventually(() => first.prompts.length === 1 && second.prompts.length === 1, "both isolated prompt submissions");
-    const firstModel = (first.sessions.get("native-1") as { model: { variant: string } }).model;
-    const secondModel = (second.sessions.get("native-1") as { model: { variant: string } }).model;
-    expect([firstModel.variant, secondModel.variant].sort()).toEqual(["low", "max"]);
+    await eventually(() => first.tuiSubmissions.length === 1 && second.tuiSubmissions.length === 1, "both isolated prompt submissions");
     const low = await registry.get("run-low");
     const max = await registry.get("run-max");
+    expect(low?.variant).toBe("low");
+    expect(max?.variant).toBe("max");
+    expect((await registry.readLaunchConfig(low!)).pin).toEqual({ model: "spotify-glm/zai-org/GLM-5.2-FP8", variant: "low" });
+    expect((await registry.readLaunchConfig(max!)).pin).toEqual({ model: "spotify-glm/zai-org/GLM-5.2-FP8", variant: "max" });
     expect(low?.port).not.toBe(max?.port);
     expect(low?.password_ref).not.toBe(max?.password_ref);
     expect(await registry.password(low!)).not.toBe(await registry.password(max!));
@@ -893,6 +1065,7 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
 
@@ -903,9 +1076,8 @@ describe("OpenCode server-backed driver", () => {
     expect(await registry.get("run-orphan")).toBeUndefined();
     expect(await registry.get("run-recovery")).toBeDefined();
     expect([...target.sessions.keys()]).toEqual(["native-recovery"]);
-    expect(target.requests.filter((request) => request.path === "/tui/select-session").map((request) => request.body)).toEqual([
-      { sessionID: "native-recovery" },
-    ]);
+    expect(target.tuiSubmissions).toHaveLength(0);
+    expect(target.requests.some((request) => request.path.startsWith("/tui/"))).toBe(false);
     await driver.sessionClosed({ session_id: "attn-recovery", run_id: "run-recovery", reason: "test cleanup" });
   });
 
@@ -923,10 +1095,11 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await Promise.all([driver.spawn(params("run-classifier-first")), driver.spawn(params("run-classifier-second"))]);
-    await eventually(() => first.prompts.length === 1 && second.prompts.length === 1, "both native runs");
+    await eventually(() => first.tuiSubmissions.length === 1 && second.tuiSubmissions.length === 1, "both native runs");
     first.messages.set("native-1", [assistantMessage("same-id", "Same text?")]);
     second.messages.set("native-1", [assistantMessage("same-id", "Same text?")]);
     first.classifierReplies.push('{"verdict":"WAITING"}');
@@ -963,10 +1136,14 @@ describe("OpenCode server-backed driver", () => {
       classifierTimeout: 5,
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await driver.spawn(params("run-classifier-timeout"));
-    await eventually(() => target.prompts.length === 1, "native prompt submission");
+    await eventually(
+      () => rpc.calls.some((call) => call.method === "session.report_metadata"),
+      "native prompt submission and bind",
+    );
     target.messages.set("native-1", [assistantMessage("message-timeout", "Are you there?")]);
     target.emit("session.idle", { sessionID: "native-1" });
     await eventually(() => (rpc.calls.at(-1)?.params as { verdict?: string }).verdict === "unknown", "timed-out unknown verdict");
@@ -1003,6 +1180,7 @@ describe("OpenCode server-backed driver", () => {
         http: (port, password) => new OpenCodeHTTP({ port, password }),
         startupDeadline: 40,
         reconnectDelay: 5,
+        stageRetryDelay: 5,
         healthRequestTimeout: 5,
       });
       await driver.initialize();
@@ -1039,6 +1217,7 @@ describe("OpenCode server-backed driver", () => {
         http: (port, password) => new OpenCodeHTTP({ port, password }),
         startupDeadline: 100,
         reconnectDelay: 5,
+        stageRetryDelay: 5,
         healthRequestTimeout: 5,
       });
       await driver.initialize();
@@ -1090,6 +1269,7 @@ describe("OpenCode server-backed driver", () => {
       },
       startupDeadline: 300,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
     });
     await driver.initialize();
     await driver.spawn({
@@ -1128,6 +1308,7 @@ describe("OpenCode server-backed driver", () => {
       http: (port, password) => new OpenCodeHTTP({ port, password }),
       startupDeadline: 100,
       reconnectDelay: 5,
+      stageRetryDelay: 5,
       healthRequestTimeout: 5,
     });
     await driver.initialize();
@@ -1171,7 +1352,7 @@ test("registry persists atomically with private files and cleans them after sess
       context_revision: 3,
     },
   });
-  await eventually(() => target.prompts.length === 1, "run creation");
+  await eventually(() => target.tuiSubmissions.length === 1, "run creation");
   const record = await registry.get("run-cleanup");
   expect(record).toBeDefined();
   expect((await stat(record!.password_ref)).mode & 0o077).toBe(0);
@@ -1209,18 +1390,41 @@ test("OpenCode config merge preserves keys and deduplicates the guidance plugin"
     theme: "dark",
     instructions: ["repo.md"],
     plugin: ["user-plugin", pluginRef],
-  }), "/tmp/attn.md", pluginRef)).toEqual({
+  }), { instructionRef: "/tmp/attn.md", pluginRef })).toEqual({
     theme: "dark",
     instructions: ["repo.md"],
     plugin: ["user-plugin", pluginRef],
   });
-  expect(opencodeConfigForLaunch(undefined, "/tmp/attn.md", pluginRef)).toEqual({ plugin: [pluginRef] });
+  expect(opencodeConfigForLaunch(undefined, { instructionRef: "/tmp/attn.md", pluginRef })).toEqual({ plugin: [pluginRef] });
+});
+
+test("OpenCode config merge pins the delegated model on the launched agent", () => {
+  const pin = { model: "opencode/deepseek-v4-flash", variant: "max" };
+  expect(opencodeConfigForLaunch(undefined, { pin })).toEqual({
+    agent: { build: { model: "opencode/deepseek-v4-flash" } },
+  });
+  // The pin replaces only the model of the agent the launch runs.
+  expect(opencodeConfigForLaunch(JSON.stringify({
+    model: "opencode-go/mimo-v2.5",
+    agent: { plan: { model: "opencode/other" }, build: { temperature: 0.1, model: "opencode-go/mimo-v2.5" } },
+  }), { pin })).toEqual({
+    model: "opencode-go/mimo-v2.5",
+    agent: {
+      plan: { model: "opencode/other" },
+      build: { temperature: 0.1, model: "opencode/deepseek-v4-flash" },
+    },
+  });
 });
 
 test("OpenCode config merge rejects malformed inherited config", () => {
-  expect(() => opencodeConfigForLaunch("{", "/tmp/attn.md")).toThrow("invalid inherited OPENCODE_CONFIG_CONTENT");
-  expect(() => opencodeConfigForLaunch(JSON.stringify({ instructions: [1] }), "/tmp/attn.md")).toThrow("array of strings");
-  expect(() => opencodeConfigForLaunch(JSON.stringify({ plugin: "bad" }), "/tmp/attn.md")).toThrow("expected an array");
+  const instructionRef = "/tmp/attn.md";
+  expect(() => opencodeConfigForLaunch("{", { instructionRef })).toThrow("invalid inherited OPENCODE_CONFIG_CONTENT");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ instructions: [1] }), { instructionRef })).toThrow("array of strings");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ plugin: "bad" }), { instructionRef })).toThrow("expected an array");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ agent: [] }), { pin: { model: "a/b", variant: "max" } }))
+    .toThrow("OPENCODE_CONFIG_CONTENT.agent: expected an object");
+  expect(() => opencodeConfigForLaunch(JSON.stringify({ agent: { build: "bad" } }), { pin: { model: "a/b", variant: "max" } }))
+    .toThrow("OPENCODE_CONFIG_CONTENT.agent.build: expected an object");
 });
 
 test("guidance plugin reads the current private instruction file for every prompt", async () => {
@@ -1311,6 +1515,46 @@ test("launcher retries an address-in-use failure with a fresh port", async () =>
   }));
   expect(await launch(config)).toBe(0);
   expect(JSON.parse(await readFile(config, "utf8")).port).not.toBe(12345);
+});
+
+test("launcher runs a pinned delegation on the pinned agent, with the pin in its own TUI state", async () => {
+  const root = await tempRoot();
+  const argvFile = join(root, "argv");
+  const configFile = join(root, "opencode-config");
+  const stateFile = join(root, "state-home");
+  const executable = join(root, "fake-opencode");
+  await writeFile(
+    executable,
+    `#!/bin/sh\necho "$@" > ${argvFile}\nprintf '%s' "$OPENCODE_CONFIG_CONTENT" > ${configFile}\nprintf '%s' "$XDG_STATE_HOME" > ${stateFile}\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  const password = join(root, "password");
+  await writePrivate(password, "secret");
+  const config = join(root, "launch.json");
+  await writePrivate(config, JSON.stringify({
+    schema: 1,
+    run_id: "launch-pinned",
+    executable,
+    cwd: root,
+    password_ref: password,
+    port: 12345,
+    yolo: true,
+    pin: { model: "opencode/deepseek-v4-flash", variant: "max" },
+    state_dir: join(root, "state"),
+  }));
+  expect(await launch(config)).toBe(0);
+  expect((await readFile(argvFile, "utf8")).trim()).toBe("--hostname 127.0.0.1 --port 12345 --agent build --yolo");
+  expect(JSON.parse(await readFile(configFile, "utf8")).agent).toEqual({
+    build: { model: "opencode/deepseek-v4-flash" },
+  });
+  // The TUI takes the variant from its own state, and a pinned run writes that
+  // state under its own home instead of the user's.
+  expect((await readFile(stateFile, "utf8")).trim()).toBe(join(root, "state"));
+  expect(JSON.parse(await readFile(join(root, "state", "opencode", "model.json"), "utf8"))).toEqual({
+    recent: [{ providerID: "opencode", modelID: "deepseek-v4-flash" }],
+    favorite: [],
+    variant: { "opencode/deepseek-v4-flash": "max" },
+  });
 });
 
 async function tempRoot(): Promise<string> {

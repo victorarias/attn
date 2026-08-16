@@ -23,6 +23,11 @@ import {
 
 const startupDeadlineMs = 20_000;
 const reconnectDelayMs = 250;
+// A submitted prompt reaches `session.created` in about 70ms once the TUI is
+// attached, and the TUI attaches about three seconds after the server answers
+// health. Waiting a second between staging attempts leaves the receipt room to
+// arrive, so a prompt the TUI already took is never submitted twice.
+const stageRetryDelayMs = 1_000;
 const healthRequestTimeoutMs = 2_000;
 const eventReconnectAttempts = 3;
 const classifierTimeoutMs = 30_000;
@@ -42,6 +47,7 @@ export type OpenCodeDriverOptions = {
   http?: (port: number, password: string) => OpenCodeHTTP;
   startupDeadline?: number;
   reconnectDelay?: number;
+  stageRetryDelay?: number;
   healthRequestTimeout?: number;
   classifierTimeout?: number;
   stopClassifier?: (client: OpenCodeHTTP) => StopClassifier;
@@ -65,6 +71,9 @@ type NativeBinding = {
   record: RunRecord;
   nativeID?: string;
   mode: LaunchSelection["mode"];
+  claimedID?: string;
+  pin?: OpenCodeModel;
+  pinError?: string;
 };
 
 type BufferedSubscription = {
@@ -85,6 +94,7 @@ export class OpenCodeDriver {
   private readonly http: (port: number, password: string) => OpenCodeHTTP;
   private readonly startupDeadline: number;
   private readonly reconnectDelay: number;
+  private readonly stageRetryDelay: number;
   private readonly healthRequestTimeout: number;
   private readonly classifierTimeout: number;
   private readonly stopClassifier: (client: OpenCodeHTTP) => StopClassifier;
@@ -102,6 +112,7 @@ export class OpenCodeDriver {
     this.http = options.http ?? ((port, password) => new OpenCodeHTTP({ port, password }));
     this.startupDeadline = options.startupDeadline ?? startupDeadlineMs;
     this.reconnectDelay = options.reconnectDelay ?? reconnectDelayMs;
+    this.stageRetryDelay = options.stageRetryDelay ?? stageRetryDelayMs;
     this.healthRequestTimeout = options.healthRequestTimeout ?? healthRequestTimeoutMs;
     this.classifierTimeout = options.classifierTimeout ?? classifierTimeoutMs;
     this.stopClassifier = options.stopClassifier ?? ((client) => new OpenCodeStopClassifier(client));
@@ -188,6 +199,12 @@ export class OpenCodeDriver {
         yolo: params.yolo === true,
         resume_session_id: selection.nativeSessionID,
         instruction_ref: record.instruction_ref,
+        ...(selection.mode === "pinned" && selection.model
+          ? {
+            pin: { model: `${selection.model.providerID}/${selection.model.id}`, variant: selection.model.variant },
+            state_dir: this.options.registry.stateDir(record.run_id),
+          }
+          : {}),
       };
       await this.options.registry.writeLaunchConfig(record, launchConfig);
       this.startMonitor(record, selection);
@@ -286,7 +303,9 @@ export class OpenCodeDriver {
     const binding: NativeBinding = {
       record: initialRecord,
       nativeID: initialRecord.opencode_session_id,
+      claimedID: initialRecord.opencode_session_id,
       mode: selection.mode,
+      pin: selection.model,
     };
     const eventController = new AbortController();
     const abortEventsForSession = () => eventController.abort(signal.reason);
@@ -311,35 +330,20 @@ export class OpenCodeDriver {
           if (selection.model && !sessionModelMatches(nativeSession, selection.model)) {
             throw new Error("persisted OpenCode session model or variant no longer matches the delegated pins");
           }
-          await this.reconcileStatus(binding.record, client, binding.nativeID, setup.signal);
-          await client.selectSession(binding.nativeID, setup.signal);
-        } else if (selection.mode === "pinned") {
-          const model = selection.model!;
-          const nativeID = await client.createSession(model, setup.signal);
-          binding.nativeID = nativeID;
-          binding.record = await this.options.registry.update(binding.record.run_id, { opencode_session_id: nativeID });
-          await this.enqueueReport(binding.record, {
-            kind: "metadata",
-            metadata: {
-              schema: 1,
-              opencode_session_id: nativeID,
-              opencode_version: binding.record.opencode_version,
-              pinned: true,
-              model: binding.record.model,
-              variant: binding.record.variant,
-            },
-          });
           // A just-submitted prompt can be absent from /session/status until its
           // first explicit lifecycle event. Reconciliation therefore never infers
           // idle from absence.
-          await this.reconcileStatus(binding.record, client, nativeID, setup.signal);
-          await client.selectSession(nativeID, setup.signal);
-          const prompt = await this.options.registry.prompt(binding.record);
-          if (prompt !== "") await client.promptAsync(nativeID, prompt, model, setup.signal);
+          await this.reconcileStatus(binding.record, client, binding.nativeID, setup.signal);
         }
         await bufferedSubscription.release();
       } finally {
         setup.dispose();
+      }
+
+      if (!binding.nativeID && selection.mode === "pinned") {
+        if (selection.model) await this.requireOfferedVariant(client, selection.model, signal);
+        const prompt = await this.options.registry.prompt(binding.record);
+        if (prompt !== "") await this.stagePinnedTurn(client, binding, prompt, signal);
       }
 
       let establishedStreamFailures = 0;
@@ -402,6 +406,136 @@ export class OpenCodeDriver {
     }
   }
 
+  // The TUI owns the session a delegated run must display, and it opens one only
+  // when a prompt is submitted through it. Nothing in OpenCode's API says whether
+  // the TUI has attached to the event bus yet — `/tui/*` answers `true` with no
+  // TUI running at all — and a submission published before it attaches is
+  // dropped. The `session.created` event the TUI's own submission produces is the
+  // only receipt, so the staged prompt is submitted again until that event claims
+  // the run. Locally the TUI attaches in about three seconds; the deadline is the
+  // same startup budget the server itself gets.
+  private async stagePinnedTurn(client: OpenCodeHTTP, binding: NativeBinding, prompt: string, signal: AbortSignal): Promise<void> {
+    const deadline = Date.now() + this.startupDeadline;
+    const before = new Set(await this.sessionIDs(client, signal));
+    for (;;) {
+      if (signal.aborted || binding.pinError) return;
+      if (binding.claimedID) return;
+      if (Date.now() >= deadline) {
+        throw new Error(`OpenCode's TUI did not open a session for the staged prompt within ${this.startupDeadline}ms`);
+      }
+      const request = this.requestDeadline(signal);
+      try {
+        await client.submitTUIPrompt(prompt, request.signal);
+      } finally {
+        request.dispose();
+      }
+      await sleep(this.stageRetryDelay, signal);
+      if (signal.aborted || binding.claimedID || binding.pinError) return;
+      // An SSE drop can lose the receipt for a prompt the TUI did take, and a
+      // second submission into that session creates no new one to receive. The
+      // session carrying this run's prompt is the same receipt, read directly.
+      const opened = await this.sessionOpenedFor(client, prompt, before, signal);
+      if (opened) {
+        binding.claimedID = opened;
+        await this.bindNativeSession(client, binding, opened, signal);
+        return;
+      }
+    }
+  }
+
+  private async sessionIDs(client: OpenCodeHTTP, signal: AbortSignal): Promise<string[]> {
+    const request = this.requestDeadline(signal);
+    try {
+      return await client.listSessionIDs(request.signal);
+    } finally {
+      request.dispose();
+    }
+  }
+
+  // Sessions are stored per project directory, so a session this run did not
+  // open is only ruled out by the prompt it carries.
+  private async sessionOpenedFor(
+    client: OpenCodeHTTP,
+    prompt: string,
+    before: Set<string>,
+    signal: AbortSignal,
+  ): Promise<string | undefined> {
+    const candidates = (await this.sessionIDs(client, signal)).filter((id) => !before.has(id));
+    for (const id of candidates.reverse()) {
+      const request = this.requestDeadline(signal);
+      try {
+        if ((await client.userPromptText(id, request.signal))?.includes(prompt)) return id;
+      } finally {
+        request.dispose();
+      }
+    }
+    return undefined;
+  }
+
+  // OpenCode drops a variant the pinned model does not declare — MiMo declares
+  // none at all, DeepSeek Pro has no `low` — and the session then runs on
+  // whatever the model does by default. The catalog is the first place that is
+  // knowable, so an effort the model cannot honor fails the run here, naming
+  // what it does offer, instead of arriving as an unverifiable pin.
+  private async requireOfferedVariant(client: OpenCodeHTTP, model: OpenCodeModel, signal: AbortSignal): Promise<void> {
+    const request = this.requestDeadline(signal);
+    let offered: string[];
+    try {
+      offered = await client.modelVariants(model, request.signal);
+    } finally {
+      request.dispose();
+    }
+    if (offered.includes(model.variant)) return;
+    throw new Error(
+      `OpenCode model ${model.providerID}/${model.id} cannot honor the delegated variant ${model.variant}: it offers ${offered.length === 0 ? "no variants" : offered.join(", ")}`,
+    );
+  }
+
+  private async bindNativeSession(client: OpenCodeHTTP, binding: NativeBinding, nativeID: string, signal: AbortSignal): Promise<void> {
+    const request = this.requestDeadline(signal);
+    let nativeSession: unknown;
+    try {
+      nativeSession = await client.getSession(nativeID, request.signal);
+    } finally {
+      request.dispose();
+    }
+    if (signal.aborted) return;
+    const selectedModel = sessionModel(nativeSession);
+    if (binding.pin && !sessionModelMatches(nativeSession, binding.pin)) {
+      // The delegation asked for one model and OpenCode opened another, so the
+      // run is not what was delegated. Say which, and leave it unbound rather
+      // than reporting a session nobody asked for.
+      binding.pinError = `OpenCode opened its session on ${describeModel(selectedModel)} instead of the delegated pin ${describeModel(binding.pin)}`;
+      this.degraded.set(binding.record.run_id, `OpenCode run ${binding.record.attn_session_id} is degraded: ${binding.pinError}`);
+      await this.enqueueReport(binding.record, { kind: "state", state: "unknown" });
+      return;
+    }
+    const pinned = binding.mode === "pinned";
+    binding.nativeID = nativeID;
+    binding.record = await this.options.registry.update(binding.record.run_id, {
+      opencode_session_id: nativeID,
+      pinned,
+      model: selectedModel ? `${selectedModel.providerID}/${selectedModel.id}` : undefined,
+      variant: selectedModel?.variant,
+    });
+    await this.enqueueReport(binding.record, {
+      kind: "metadata",
+      metadata: {
+        schema: 1,
+        opencode_session_id: nativeID,
+        opencode_version: binding.record.opencode_version,
+        pinned,
+        ...(selectedModel ? { model: `${selectedModel.providerID}/${selectedModel.id}`, variant: selectedModel.variant } : {}),
+      },
+    });
+    const statusRequest = this.requestDeadline(signal);
+    try {
+      await this.reconcileStatus(binding.record, client, nativeID, statusRequest.signal);
+    } finally {
+      statusRequest.dispose();
+    }
+  }
+
   private async waitForHealthyServer(record: RunRecord, signal: AbortSignal): Promise<OpenCodeHTTP> {
     const deadline = Date.now() + this.startupDeadline;
     let lastError: unknown = new Error("OpenCode server did not start");
@@ -448,39 +582,11 @@ export class OpenCodeDriver {
 
   private async handleEvent(client: OpenCodeHTTP, binding: NativeBinding, event: { type: string; sessionID?: string; status?: string }, parentSignal: AbortSignal): Promise<void> {
     if (parentSignal.aborted) return;
-    if (!binding.nativeID && binding.mode === "interactive" && event.type === "session.created" && event.sessionID) {
-      const request = this.requestDeadline(parentSignal);
-      let nativeSession: unknown;
-      try {
-        nativeSession = await client.getSession(event.sessionID, request.signal);
-      } finally {
-        request.dispose();
-      }
-      if (parentSignal.aborted) return;
-      const selectedModel = sessionModel(nativeSession);
-      binding.nativeID = event.sessionID;
-      binding.record = await this.options.registry.update(binding.record.run_id, {
-        opencode_session_id: event.sessionID,
-        pinned: false,
-        model: selectedModel ? `${selectedModel.providerID}/${selectedModel.id}` : undefined,
-        variant: selectedModel?.variant,
-      });
-      await this.enqueueReport(binding.record, {
-        kind: "metadata",
-        metadata: {
-          schema: 1,
-          opencode_session_id: event.sessionID,
-          opencode_version: binding.record.opencode_version,
-          pinned: false,
-          ...(selectedModel ? { model: `${selectedModel.providerID}/${selectedModel.id}`, variant: selectedModel.variant } : {}),
-        },
-      });
-      const statusRequest = this.requestDeadline(parentSignal);
-      try {
-        await this.reconcileStatus(binding.record, client, binding.nativeID, statusRequest.signal);
-      } finally {
-        statusRequest.dispose();
-      }
+    if (!binding.claimedID && !binding.pinError && event.type === "session.created" && event.sessionID) {
+      // Claim before the bind's own round trips, so staging stops submitting the
+      // moment the TUI opened a session rather than once it is fully bound.
+      binding.claimedID = event.sessionID;
+      await this.bindNativeSession(client, binding, event.sessionID, parentSignal);
     }
     if (parentSignal.aborted || !binding.nativeID || event.sessionID !== binding.nativeID) return;
     const record = binding.record;
@@ -775,6 +881,10 @@ export class OpenCodeDriver {
     if (!this.availability.ok) throw new Error(this.availability.message);
     return this.availability;
   }
+}
+
+function describeModel(model: OpenCodeModel | undefined): string {
+  return model ? `${model.providerID}/${model.id} (${model.variant})` : "an unreadable model";
 }
 
 function cancelsClassification(event: { type: string; status?: string }): boolean {

@@ -1,0 +1,21 @@
+kind: fixed
+area: plugins
+change: >
+  A delegated OpenCode session now appears in its pane, on the model and effort
+  it was delegated with. The plugin used to create the session over OpenCode's
+  HTTP API and ask the TUI to select it, but that request is published to a bus
+  the TUI has not subscribed to yet when a session is starting, so it was
+  dropped and the pane sat on the OpenCode splash while the agent worked
+  unseen. The delegated turn is now submitted through the TUI itself, so the
+  pane shows the session OpenCode opened, within a couple of seconds. The
+  effort pin reached nothing at all: the TUI takes the model variant from its
+  own state, so a delegation asking for `max` quietly ran on whatever variant
+  was last used interactively. Each delegated run now gets its own OpenCode TUI
+  state seeded with the pin — which also stops delegations from rewriting the
+  model you picked yourself. A pinned model that cannot honor the requested
+  effort (MiMo declares no variants at all) now fails the run and names what
+  the model does offer, and a session that opens on a different provider, model
+  or variant than the pin is reported as degraded instead of running unnoticed.
+symptom: >
+  A delegated OpenCode session showed the OpenCode splash screen instead of its
+  work, and its `--effort` pin was not the effort it ran on.

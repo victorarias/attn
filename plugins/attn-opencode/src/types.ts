@@ -166,6 +166,16 @@ export type RunRecord = {
   created_at: string;
 };
 
+// OpenCode's built-in primary agent, and the one its HTTP-created sessions
+// already ran as. A delegated launch pins it so the model the delegation asked
+// for is the model the TUI opens with.
+export const pinnedAgent = "build";
+
+export type LaunchPin = {
+  model: string;
+  variant: string;
+};
+
 export type LaunchConfig = {
   schema: 1;
   run_id: string;
@@ -176,6 +186,8 @@ export type LaunchConfig = {
   yolo: boolean;
   resume_session_id?: string;
   instruction_ref?: string;
+  pin?: LaunchPin;
+  state_dir?: string;
 };
 
 export type ReportState = "working" | "waiting_input" | "pending_approval" | "idle" | "unknown";

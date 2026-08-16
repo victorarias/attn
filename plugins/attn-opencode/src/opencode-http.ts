@@ -55,6 +55,19 @@ export class OpenCodeHTTP {
     return body.id;
   }
 
+  // Variants are per model: OpenCode Zen's DeepSeek offers low/high/max, MiMo
+  // offers none at all, and a variant a model does not declare is dropped
+  // silently wherever it is asked for.
+  async modelVariants(model: Omit<OpenCodeModel, "variant">, signal?: AbortSignal): Promise<string[]> {
+    const body = await this.request<unknown>("/config/providers", { signal });
+    const providers = asObject(body)?.providers;
+    if (!Array.isArray(providers)) throw new Error("OpenCode provider catalog response was invalid");
+    const provider = providers.map(asObject).find((entry) => asString(entry?.id) === model.providerID);
+    const entry = asObject(asObject(provider?.models)?.[model.id]);
+    if (!entry) throw new Error(`OpenCode has no model ${model.providerID}/${model.id}`);
+    return Object.keys(asObject(entry.variants) ?? {});
+  }
+
   async getSession(sessionID: string, signal?: AbortSignal): Promise<unknown> {
     return this.request(`/session/${encodeURIComponent(sessionID)}`, { signal });
   }
@@ -82,6 +95,29 @@ export class OpenCodeHTTP {
     if (Array.isArray(root?.messages)) return root.messages;
     if (Array.isArray(root?.data)) return root.data;
     throw new Error("OpenCode message list response was invalid");
+  }
+
+  // Sessions are stored per project directory, so this lists every session in
+  // the run's directory, not only the ones this run opened.
+  async listSessionIDs(signal?: AbortSignal): Promise<string[]> {
+    const body = await this.request<unknown>("/session", { signal });
+    if (!Array.isArray(body)) throw new Error("OpenCode session list response was invalid");
+    return body.map((entry) => asString(asObject(entry)?.id)).filter((id): id is string => id !== undefined);
+  }
+
+  // OpenCode's message order is not contractually chronological, so the user
+  // message is the first one with that role, not the first one in the list.
+  async userPromptText(sessionID: string, signal?: AbortSignal): Promise<string | undefined> {
+    const messages = await this.listMessages(sessionID, 5, signal);
+    for (const message of messages) {
+      const entry = asObject(message);
+      if (asString((asObject(entry?.info) ?? entry)?.role) !== "user") continue;
+      const parts = Array.isArray(entry?.parts) ? entry.parts : [];
+      const text = parts.map((part) => asObject(part)).filter((part) => asString(part?.type) === "text")
+        .map((part) => asString(part?.text) ?? "").join("");
+      if (text !== "") return text;
+    }
+    return undefined;
   }
 
   async listToolIDs(signal?: AbortSignal): Promise<string[]> {
@@ -112,23 +148,13 @@ export class OpenCodeHTTP {
     await this.request(`/session/${encodeURIComponent(sessionID)}`, { method: "DELETE", signal });
   }
 
-  async selectSession(sessionID: string, signal?: AbortSignal): Promise<void> {
-    await this.request("/tui/select-session", { method: "POST", body: { sessionID }, signal });
-  }
-
-  async promptAsync(sessionID: string, prompt: string, model: OpenCodeModel, signal?: AbortSignal): Promise<void> {
-    await this.request(`/session/${encodeURIComponent(sessionID)}/prompt_async`, {
-      method: "POST",
-      // OpenCode uses different model shapes for native session creation and
-      // prompt submission. Keep the translation at this HTTP boundary so the
-      // rest of the driver continues to preserve one native-session identity.
-      body: {
-        parts: [{ type: "text", text: prompt }],
-        model: { providerID: model.providerID, modelID: model.id },
-        variant: model.variant,
-      },
-      signal,
-    });
+  // The TUI reads these as bus events and answers nothing: the response is
+  // `true` even when no TUI is attached to the event stream at all. Only the
+  // session a submission creates proves the TUI received anything.
+  async submitTUIPrompt(prompt: string, signal?: AbortSignal): Promise<void> {
+    await this.request("/tui/clear-prompt", { method: "POST", body: {}, signal });
+    await this.request("/tui/append-prompt", { method: "POST", body: { text: prompt }, signal });
+    await this.request("/tui/submit-prompt", { method: "POST", body: {}, signal });
   }
 
   async statusFor(sessionID: string, signal?: AbortSignal): Promise<string | undefined> {
