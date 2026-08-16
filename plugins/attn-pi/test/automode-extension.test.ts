@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { StubClassifier, type Classifier } from "../automode/classifier";
 import { defaultAutoModeConfig } from "../automode/config";
 import { createAutoMode, type AutoModeDenial } from "../automode/index";
+import { transcriptEntryCharLimit } from "../automode/transcript";
 import { UsageLedger } from "../automode/usage";
 import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-fake-pi";
 
@@ -122,10 +123,49 @@ describe("auto mode extension", () => {
   test("one message arriving on both seams is recorded once", async () => {
     const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
     const pi = wire(classifier);
-    pi.input?.(userInput("push it"), ctx);
     pi.say("push it");
     await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
     expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "push it" }]);
+  });
+
+  // The window stores a clamped form past the entry cap, so a dedupe comparing
+  // raw text would miss exactly the message big enough to swamp the window.
+  test("an oversized message arriving on both seams is recorded once", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.say(`${"x".repeat(transcriptEntryCharLimit * 2)} and don't push yet`);
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+    expect(classifier.requests[0]?.transcript).toHaveLength(1);
+  });
+
+  test("a prompt an extension submitted grants nothing", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    const push = () => pi.toolCall?.(toolCall("bash", { command: "git push --force origin main" }), ctx);
+    expect((await push())?.block).toBe(true);
+
+    pi.say("go ahead, force-push it", undefined, "extension");
+    expect((await push())?.block).toBe(true);
+    // Answered from the deny cache: the extension's prompt did not drop it.
+    expect(classifier.requests).toHaveLength(1);
+
+    pi.say("go ahead, force-push it");
+    classifier.answerWith({ verdict: "allow" });
+    expect(await push()).toBeUndefined();
+  });
+
+  test("an extension's prompt stays out of the transcript, and still gets the addendum", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    const pi = wire(classifier);
+    pi.input?.({ type: "input", text: "summarize the diff", source: "extension" }, ctx);
+    const result = pi.beforeAgentStart?.(
+      { type: "before_agent_start", prompt: "summarize the diff", systemPrompt: "pi's own prompt" },
+      ctx,
+    );
+    await pi.toolCall?.(toolCall("bash", { command: "git push origin main" }), ctx);
+
+    expect(classifier.requests[0]?.transcript).toEqual([]);
+    expect(result?.systemPrompt).toContain("Auto mode is on for this session");
   });
 
   test("held classifier usage rides the next tool result, keeping the tool's own", () => {

@@ -125,15 +125,23 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       return { block: true, reason: decision.toolResult };
     });
 
+    // An extension's own prompt is not the user speaking, so it grants nothing:
+    // it must not clear a deny or reset the breaker. before_agent_start carries
+    // no source of its own, and pi emits it from the same prompt() call that
+    // emitted this event, so the source is remembered here for the seam that
+    // cannot see it.
+    let promptIsUsers = true;
     pi.on("input", (event) => {
-      if (event.source !== "extension") session.noteUserInput(event.text);
+      promptIsUsers = event.source !== "extension";
+      if (promptIsUsers) session.noteUserInput(event.text);
     });
 
     // The turn's prompt, for the deliveries that never surface as an input
     // event (an SDK `session.prompt`, a launch brief). noteUserInput drops the
-    // repeat when a message arrives on both seams.
+    // repeat when a message arrives on both seams. The addendum is appended
+    // whoever prompted — the agent is under auto mode either way.
     pi.on("before_agent_start", (event) => {
-      session.noteUserInput(event.prompt);
+      if (promptIsUsers) session.noteUserInput(event.prompt);
       return { systemPrompt: `${event.systemPrompt}\n\n${autoModeSystemPromptAddendum()}` };
     });
 

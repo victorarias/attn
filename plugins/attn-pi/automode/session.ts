@@ -11,7 +11,7 @@ import type { Classifier } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import { denialToolResult } from "./denial";
 import { decideStatically, describeCall, normalizedIntent, type StaticRule, type ToolCall } from "./policy";
-import { TranscriptWindow } from "./transcript";
+import { TranscriptWindow, transcriptEntryText } from "./transcript";
 
 /** Denials in a row, without an allowed call between them. */
 export const consecutiveDenialLimit = 3;
@@ -61,7 +61,7 @@ export class AutoModeSession {
   noteUserInput(text = ""): void {
     // pi announces one message on two seams (the input event and the prompt
     // the turn starts with), and the same sentence twice reads as insistence.
-    if (this.transcript.latest("user") !== text.trim()) this.transcript.record("user", text);
+    if (this.transcript.latest("user") !== transcriptEntryText(text)) this.transcript.record("user", text);
     for (const [key, entry] of this.cache) if (entry.verdict === "deny") this.cache.delete(key);
     this.consecutiveDenials = 0;
     this.totalDenials = 0;

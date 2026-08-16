@@ -49,8 +49,13 @@ export class FakePi implements AutoModeExtensionAPILike {
     if (event === "tool_result") this.toolResult = handler as FakePi["toolResult"];
   }
 
-  /** One turn of the conversation reaching the extension the way pi delivers it. */
-  say(user: string, assistant?: string): void {
+  /**
+   * One turn of the conversation reaching the extension the way pi delivers
+   * it: a prompt rides the input seam and the before_agent_start seam, in that
+   * order, from the same prompt() call.
+   */
+  say(user: string, assistant?: string, source: InputEventLike["source"] = "interactive"): void {
+    this.input?.({ type: "input", text: user, source }, ctx);
     this.beforeAgentStart?.({ type: "before_agent_start", prompt: user, systemPrompt: "base" }, ctx);
     if (assistant !== undefined) {
       this.messageEnd?.({ type: "message_end", message: assistantMessage(assistant) }, ctx);

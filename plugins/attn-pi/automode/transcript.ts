@@ -57,6 +57,16 @@ export class TranscriptWindow {
   }
 }
 
+/**
+ * The form a message is stored in. A caller deduplicating two seams compares
+ * this against `latest()`, never the raw text: past the entry cap the stored
+ * form is clamped, so raw text would never match and the message that swamps
+ * the window is exactly the one recorded twice.
+ */
+export function transcriptEntryText(text: string): string {
+  return clampEntry(text.trim());
+}
+
 /** `[user] …` / `[assistant] …`, the shape the s7 receipt scored on. */
 export function renderTranscript(entries: readonly TranscriptEntry[]): string {
   return entries.map((entry) => `[${entry.role}] ${entry.text}`).join("\n");
