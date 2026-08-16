@@ -40,6 +40,10 @@ Conclusions the design leans on:
   verdict cache carrying the hot path are load-bearing, not optimizations.
 - Defaults (user-overridable settings, never pins): classifier
   `opencode-go/glm-5.3`, layer-2b escalation `opencode-go/qwen3.8-max`.
+  The seats pick the models: 2a runs on every classified call, so the
+  fastest accurate model wins it (deepseek is cheapest but always burns
+  reasoning tokens — p90 14s — and the price gap is pennies/day); 2b is
+  rare, so the only perfect-verdict model wins it despite its 4s p50.
 
 ## Critical UX (the moments that must feel right)
 
