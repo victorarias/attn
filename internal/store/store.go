@@ -66,7 +66,12 @@ type ActiveAgentDriverRun struct {
 // relaunch a session without a client. Geometry is deliberately absent:
 // the attaching client owns it.
 type LaunchIntent struct {
-	YoloMode      bool                         `json:"yolo_mode,omitempty"`
+	YoloMode bool `json:"yolo_mode,omitempty"`
+	// AutoMode is the launcher's per-session auto mode choice, or nil for "follow
+	// the promoted config". Persisted because a revive relaunches from this
+	// record alone: without it a session launched with auto mode deliberately off
+	// comes back on, which is the opposite of what the launcher asked for.
+	AutoMode      *bool                        `json:"auto_mode,omitempty"`
 	ApprovalRoute launchcontract.ApprovalRoute `json:"approval_route,omitempty"`
 	Executable    string                       `json:"executable,omitempty"`
 	Model         string                       `json:"model,omitempty"`

@@ -1913,6 +1913,12 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   yolo_mode?: boolean;
+  // Per-session auto mode, for an agent whose driver advertises `auto_mode`.
+  // Tri-state on purpose: absent follows the promoted config's
+  // `enabled_default`, and true/false is the launcher overriding it for this
+  // session alone. Persisted with the launch intent, so a revive or a reload
+  // relaunches on the choice that was made rather than on today's default.
+  auto_mode?: boolean;
   chief_of_staff?: boolean;    // Launch this session already holding the chief role (guidance injected at first spawn)
   spawned_from?: string;       // The session this one was split from. Consulted only for agent "shell": the daemon resolves it to the owning agent session and stores that as the satellite's parent.
   initial_prompt?: string;

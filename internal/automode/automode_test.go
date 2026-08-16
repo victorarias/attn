@@ -86,3 +86,55 @@ func TestConfigMarshalsIntoThePiSideShape(t *testing.T) {
 		}
 	}
 }
+
+func TestShippedHardDenyCoversAutoModesOwnSurfaces(t *testing.T) {
+	patterns := ShippedHardDeny("29849")
+	joined := strings.Join(patterns, "\n")
+	// The verbs that write: environment prose feeds the classifier's own prompt,
+	// and the rest file rows in the human's review list.
+	for _, verb := range []string{"env", "allow", "deny", "model"} {
+		if !strings.Contains(joined, "attn automode "+verb) {
+			t.Errorf("shipped hard deny does not cover `attn automode %s`: %v", verb, patterns)
+		}
+	}
+	// The read-only verbs stay reachable: a denied agent explaining what stopped
+	// it is behavior the plan asks for.
+	for _, verb := range []string{"show", "denials"} {
+		if strings.Contains(joined, "attn automode "+verb) {
+			t.Errorf("shipped hard deny covers the read-only verb %q: %v", verb, patterns)
+		}
+	}
+	if !strings.Contains(joined, "localhost:29849") {
+		t.Errorf("shipped hard deny does not name the daemon's own port: %v", patterns)
+	}
+	for _, pattern := range patterns {
+		if IsBroadPattern(pattern) {
+			t.Errorf("shipped hard deny %q names nothing", pattern)
+		}
+	}
+}
+
+func TestShippedHardDenyWithoutAPortNamesOnlyTheCLI(t *testing.T) {
+	for _, pattern := range ShippedHardDeny("") {
+		if strings.Contains(pattern, ":") {
+			t.Errorf("pattern %q names a port when none was given", pattern)
+		}
+	}
+}
+
+func TestResolveHardDenyPutsShippedFirstAndDropsDuplicates(t *testing.T) {
+	shipped := ShippedHardDeny("9849")
+	resolved := ResolveHardDeny("9849", []string{"ssh prod*", shipped[0], "ssh prod*"})
+	if len(resolved) != len(shipped)+1 {
+		t.Fatalf("resolved = %v, want the shipped set plus one stored pattern", resolved)
+	}
+	for i, pattern := range shipped {
+		if resolved[i] != pattern {
+			t.Fatalf("resolved[%d] = %q, want the shipped %q", i, resolved[i], pattern)
+		}
+	}
+	stored := StripShippedHardDeny("9849", resolved)
+	if len(stored) != 1 || stored[0] != "ssh prod*" {
+		t.Errorf("stripped = %v, want only the stored pattern", stored)
+	}
+}

@@ -92,6 +92,12 @@ const (
 	// SettingNotebookRootEffective is READ-ONLY and daemon-computed (never
 	// stored, never accepted by set_setting): the folder the notebook resolves to.
 	SettingNotebookRootEffective = "notebook.root.effective"
+	// SettingAutoModeEnabledDefault is READ-ONLY and daemon-computed: the
+	// promoted auto mode config's enabled_default. It rides the settings snapshot
+	// so the launch surface can show what auto mode will be without asking for
+	// the whole config, and it is never accepted by set_setting — the config is
+	// written through the automode verbs, not here.
+	SettingAutoModeEnabledDefault = "automode_enabled_default"
 	// SettingNotebookCronFrequency: cron expression for the notebook's nightly
 	// maintenance slot. Empty => "0 3 * * *".
 	SettingNotebookCronFrequency = "notebook.cron.frequency"
@@ -345,6 +351,9 @@ func (d *Daemon) settingsWithAgentAvailability() map[string]interface{} {
 		settings[SettingCopilotAvailable] = settings[availabilitySettingKey(string(protocol.SessionAgentCopilot))]
 	}
 	settings[SettingPTYBackendMode] = d.ptyBackendMode()
+	if cfg, err := d.store.GetAutoModeConfig(); err == nil {
+		settings[SettingAutoModeEnabledDefault] = strconv.FormatBool(cfg.EnabledDefault)
+	}
 	if root, err := d.notebookRoot(); err == nil {
 		settings[SettingNotebookRootEffective] = root
 	}
