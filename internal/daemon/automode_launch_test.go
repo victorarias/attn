@@ -91,6 +91,68 @@ func TestSpawnCarriesThePromotedAutoModeConfig(t *testing.T) {
 	<-requestDone
 }
 
+// A reload replaces the runtime in place, so it resolves the config the same
+// way a spawn does — and that is where a session picks up a promotion made
+// while it was running.
+func TestReloadCarriesThePromotedAutoModeConfig(t *testing.T) {
+	backend := &fakeReloadBackend{
+		liveIDs: []string{"snipe-session"},
+		info:    ptybackend.SessionInfo{Cols: 100, Rows: 32},
+		params:  ptybackend.SessionLaunchParams{Recorded: true},
+	}
+	d := newReloadTestDaemon(t, backend)
+	addTestWorkspace(d, "ws-snipe-session", t.TempDir())
+	addReloadSession(d, "snipe-session", protocol.SessionAgent("snipe"), protocol.SessionStateIdle)
+	d.store.SetSetting(SettingNotebookRoot, t.TempDir())
+
+	now := time.Now().UTC()
+	proposal, err := d.store.CreateAutoModeProposal(automode.KindDeny, "", "curl *", "", now)
+	if err != nil {
+		t.Fatalf("propose: %v", err)
+	}
+	if _, _, err := d.store.PromoteAutoModeProposal(proposal.ID, now); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+
+	plugin, done := startPluginPipe(t, d, "snipe-plugin", nil)
+	defer func() {
+		_ = plugin.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, plugin, "snipe", map[string]bool{
+		"resume": true, "launch_instructions": true, "auto_mode": true,
+	})
+
+	resumed := make(chan struct{})
+	go func() {
+		defer close(resumed)
+		request := decodeJSONRPCMessage(t, plugin)
+		if request.Method != "driver.resume" {
+			t.Errorf("method = %q, want driver.resume", request.Method)
+			return
+		}
+		var params pluginDriverSpawnParams
+		if err := json.Unmarshal(request.Params, &params); err != nil {
+			t.Errorf("decode resume params: %v", err)
+			return
+		}
+		if params.AutoMode == nil {
+			t.Error("resume params carry no auto mode config")
+		} else if len(params.AutoMode.HardDeny) != 1 || params.AutoMode.HardDeny[0] != "curl *" {
+			t.Errorf("auto mode hard deny = %v, want the promoted pattern", params.AutoMode.HardDeny)
+		}
+		respondPluginRequest(t, plugin, request, pluginDriverSpawnResult{Argv: []string{"snipe"}})
+	}()
+
+	d.reloadSessionAgent("snipe-session")
+
+	select {
+	case <-resumed:
+	case <-time.After(2 * time.Second):
+		t.Fatal("driver.resume was never requested")
+	}
+}
+
 func TestSpawnOmitsAutoModeForADriverThatDoesNotAskForIt(t *testing.T) {
 	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
 	d.ptyBackend = &fakeSpawnBackend{}
