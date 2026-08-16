@@ -60,7 +60,9 @@ func (d *Daemon) handleClientHello(client *wsClient, msg *protocol.ClientHelloMe
 // Registration happens here rather than at accept, and that is the read side of
 // the client token: the hub is the only fan-out, so a connection that has not
 // presented the token sees no broadcast and no initial_state — which is most of
-// what there is to see. A client that helloes twice is admitted once.
+// what there is to see. A client that helloes twice joins the hub once; the
+// token itself is checked on every hello, so a second one that fails still
+// closes an already-admitted connection.
 func (d *Daemon) admitClient(client *wsClient) {
 	client.admitted.Do(func() {
 		d.wsHub.add(client)

@@ -126,5 +126,5 @@ endpoint whose `SourceFingerprint` differs.
 
 ## Protocol
 
-`client_token?: string` on `ClientHelloMessage`, `ProtocolVersion` 253 → 254,
+`client_token?: string` on `ClientHelloMessage`, `ProtocolVersion` 256 → 257,
 `PROTOCOL_VERSION` in `useDaemonSocket.ts` to match.
