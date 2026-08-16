@@ -2866,9 +2866,9 @@ model MarkdownAnnotationsClearResultMessage {
   generation: int32;
 }
 
-// Format the persisted annotation draft for `path` into the feedback payload
-// and deliver it into target_session_id's PTY (bracketed paste + Enter).
-// Drafts are tombstone-cleared ONLY on successful delivery.
+// Format the persisted annotation draft into feedback for one typed
+// destination: a session PTY (bracketed paste + Enter) or the source seed's
+// log. Drafts are tombstone-cleared only after the destination accepts it.
 model MarkdownAnnotationsSubmitMessage {
   cmd: "markdown_annotations_submit";
   document_uri: string;
@@ -2876,7 +2876,10 @@ model MarkdownAnnotationsSubmitMessage {
   workspace_id?: string;
   path?: string;
   seed_id?: string;
-  target_session_id: string;
+  // Exactly one typed destination. A seed destination appends the formatted
+  // feedback to its log; a session destination delivers it to the agent.
+  target_session_id?: string;
+  target_seed_id?: string;
   // Annotation ids the client currently shows as orphaned (anchor no longer
   // resolves). Orphanhood is a client-derived, non-persisted property; the
   // formatter labels these "(~line N, moved)".
@@ -2886,11 +2889,12 @@ model MarkdownAnnotationsSubmitMessage {
 
 // Result of markdown_annotations_submit.
 // status: "delivered" — payload typed into the session; drafts cleared.
+//         "noted" — payload appended to the source seed's log; drafts cleared.
 //         "skipped_pending_approval" — target is waiting on an approval
 //           prompt; nothing was typed, drafts kept.
 //         "error" — see error; drafts kept.
-// generation: new generation floor after the clear (delivered only) so the
-// client can seed its counter without a round-trip.
+// generation: new generation floor after a delivered/noted clear so the client
+// can seed its counter without a round-trip.
 model MarkdownAnnotationsSubmitResultMessage {
   event: "markdown_annotations_submit_result";
   request_id: string;
@@ -2899,7 +2903,8 @@ model MarkdownAnnotationsSubmitResultMessage {
   workspace_id?: string;
   path?: string;
   seed_id?: string;
-  target_session_id: string;
+  target_session_id?: string;
+  target_seed_id?: string;
   success: boolean;
   status: string;
   error?: string;
@@ -4486,9 +4491,22 @@ model SeedShowResult {
   "handoff"?: SeedNote;
 }
 
+// Replace one seed's markdown body without moving its lifecycle or claim.
+// The daemon re-reads on a revision conflict so a concurrent tend/park is
+// preserved rather than overwritten by the editor's older snapshot.
+model SeedEditMessage {
+  "cmd": "seed_edit";
+  "seed_id": string;
+  "body": string;
+}
+
+model SeedEditResult {
+  "seed": Seed;
+}
+
 // One-shot reader payload shared by the seed tile and GardenPanel drill. The
-// existing garden_seeds_updated event is its invalidation: clients re-read an
-// open document when any garden fact moves rather than holding another watcher.
+// garden_seeds_updated carries the live seed for immediate body/tender updates;
+// clients also re-read this model for the ledger and bounded-snapshot fallback.
 model SeedDocumentGetMessage {
   "cmd": "seed_document_get";
   "seed_id": string;
@@ -4497,6 +4515,10 @@ model SeedDocumentGetMessage {
 
 model SeedDocument {
   "seed": Seed;
+  // Whether the stored tender currently holds this seed. A tender session may
+  // remain in the document after that session exits, so the ids alone cannot
+  // answer where feedback can be delivered.
+  "tender_holds": boolean;
   "children": Seed[];
   "notes": SeedNote[];
   "notes_total": int32;
@@ -5042,6 +5064,7 @@ model Response {
   seed_plot_result?: SeedPlotResult;
   seed_list_result?: SeedListResult;
   seed_show_result?: SeedShowResult;
+  seed_edit_result?: SeedEditResult;
   seed_transition_result?: SeedTransitionResult;
   seed_note_result?: SeedNoteResult;
   seed_notes_result?: SeedNotesResult;

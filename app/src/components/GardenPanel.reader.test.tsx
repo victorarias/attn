@@ -30,6 +30,7 @@ function seed(overrides: Partial<Seed> = {}): Seed {
 function seedDocument(root: Seed, noteBody: string): SeedDocument {
   return {
     seed: root,
+    tender_holds: Boolean(root.tender_session || root.tender_member),
     children: [],
     notes: noteBody ? [{
       id: `n-${noteBody}`,

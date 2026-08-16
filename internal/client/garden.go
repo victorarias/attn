@@ -72,6 +72,19 @@ func (c *Client) SeedShow(seedID string) (*protocol.SeedShowResult, error) {
 	return resp.SeedShowResult, nil
 }
 
+// SeedEdit replaces one seed's markdown body without moving its lifecycle or
+// claim. An empty body is deliberate and clears the document.
+func (c *Client) SeedEdit(seedID, body string) (*protocol.SeedEditResult, error) {
+	resp, err := c.send(protocol.SeedEditMessage{Cmd: protocol.CmdSeedEdit, SeedID: seedID, Body: body})
+	if err != nil {
+		return nil, err
+	}
+	if resp.SeedEditResult == nil {
+		return nil, fmt.Errorf("the daemon accepted the edit but returned no seed")
+	}
+	return resp.SeedEditResult, nil
+}
+
 // SeedTransition moves a seed through its life. The daemon decides whether the
 // move is legal from the state the seed is in and refuses by name; nothing here
 // pre-judges it, so the CLI and the app cannot disagree about the rules.

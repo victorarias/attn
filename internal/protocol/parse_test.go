@@ -429,6 +429,16 @@ func TestParseSeedReaderMessages(t *testing.T) {
 			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
 		}
 	})
+	t.Run("edit seed body", func(t *testing.T) {
+		cmd, data, err := ParseMessage([]byte(`{"cmd":"seed_edit","seed_id":"s-abc123","body":"# revised"}`))
+		if err != nil {
+			t.Fatal(err)
+		}
+		msg, ok := data.(*SeedEditMessage)
+		if cmd != CmdSeedEdit || !ok || msg.SeedID != "s-abc123" || msg.Body != "# revised" {
+			t.Fatalf("parsed (%q, %T, %+v)", cmd, data, msg)
+		}
+	})
 }
 
 func TestParseBrowserMessages(t *testing.T) {

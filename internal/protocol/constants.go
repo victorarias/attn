@@ -190,6 +190,7 @@ const (
 	CmdSeedList                              = "seed_list"
 	CmdSeedShow                              = "seed_show"
 	CmdSeedDocumentGet                       = "seed_document_get"
+	CmdSeedEdit                              = "seed_edit"
 	CmdSeedTransition                        = "seed_transition"
 	CmdSeedNote                              = "seed_note"
 	CmdSeedNotes                             = "seed_notes"
@@ -1269,6 +1270,13 @@ func ParseMessage(data []byte) (string, interface{}, error) {
 
 	case CmdSeedDocumentGet:
 		var msg SeedDocumentGetMessage
+		if err := json.Unmarshal(data, &msg); err != nil {
+			return "", nil, err
+		}
+		return peek.Cmd, &msg, nil
+
+	case CmdSeedEdit:
+		var msg SeedEditMessage
 		if err := json.Unmarshal(data, &msg); err != nil {
 			return "", nil, err
 		}

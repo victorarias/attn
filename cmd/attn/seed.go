@@ -42,6 +42,8 @@ func runSeed() {
 		runSeedList(args)
 	case "show":
 		runSeedShow(args)
+	case "edit":
+		runSeedEdit(args)
 	case "export":
 		runSeedExport(args)
 	case "tend", "park", "harvest", "wither", "replant":
@@ -109,6 +111,10 @@ commands:
         one seed: the freshest handoff left on it, its state, who tends it,
         every edge that touches it in both directions, its body, and the newest
         notes on its log.
+
+  edit <id> -m <body>
+        replace the seed's markdown body without moving its state or claim.
+        - reads stdin; an explicit empty -m clears the body.
 
   tend <id> [--member <name>]
         claim the seed and start growing it. One tender at a time: tending a
@@ -288,6 +294,16 @@ func (f *seedFlags) sessionID() string {
 		return id
 	}
 	return strings.TrimSpace(os.Getenv("ATTN_SESSION_ID"))
+}
+
+func (f *seedFlags) wasSet(name string) bool {
+	set := false
+	f.fs.Visit(func(flag *flag.Flag) {
+		if flag.Name == name {
+			set = true
+		}
+	})
+	return set
 }
 
 // staleWindowSeconds reads --window, refusing a value that is not a duration.
@@ -517,6 +533,26 @@ func runSeedShow(args []string) {
 		return
 	}
 	fprintSeedShow(os.Stdout, result)
+}
+
+func runSeedEdit(args []string) {
+	f := newSeedFlags("edit")
+	positionals := f.parse("edit", args)
+	if len(positionals) != 1 {
+		seedFail("edit", fmt.Errorf("needs exactly one seed id, got %d: attn seed edit s-7k3f9m -m -", len(positionals)))
+	}
+	if !f.wasSet("m") {
+		seedFail("edit", fmt.Errorf("needs -m <body>; use -m - to read markdown from stdin, or -m '' to clear it"))
+	}
+	result, err := seedClient().SeedEdit(positionals[0], f.text("edit"))
+	if err != nil {
+		seedFail("edit", err)
+	}
+	if *f.json {
+		writeJSON(result.Seed)
+		return
+	}
+	fmt.Printf("updated %s at revision %d\n", result.Seed.ID, result.Seed.Rev)
 }
 
 // fprintSeedShow renders one seed for a reader. The handoff comes before the

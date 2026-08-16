@@ -12,6 +12,7 @@ import './SeedDocumentView.css';
 /** The one read model shared by the panel drill and the docked seed tile. */
 export interface SeedDocument {
   seed: Seed;
+  tender_holds: boolean;
   children: Seed[];
   /** Newest first, matching the garden log's wire order. */
   notes: SeedDocumentNote[];

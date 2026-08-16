@@ -3982,8 +3982,11 @@ type MarkdownAnnotationsSubmitMessage struct {
 	// SourceKind corresponds to the JSON schema field "source_kind".
 	SourceKind string `json:"source_kind"`
 
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
-	TargetSessionID string `json:"target_session_id"`
+	TargetSessionID *string `json:"target_session_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
@@ -4020,8 +4023,11 @@ type MarkdownAnnotationsSubmitResultMessage struct {
 	// Success corresponds to the JSON schema field "success".
 	Success bool `json:"success"`
 
+	// TargetSeedID corresponds to the JSON schema field "target_seed_id".
+	TargetSeedID *string `json:"target_seed_id,omitempty,omitzero"`
+
 	// TargetSessionID corresponds to the JSON schema field "target_session_id".
-	TargetSessionID string `json:"target_session_id"`
+	TargetSessionID *string `json:"target_session_id,omitempty,omitzero"`
 
 	// WorkspaceID corresponds to the JSON schema field "workspace_id".
 	WorkspaceID *string `json:"workspace_id,omitempty,omitzero"`
@@ -5645,6 +5651,9 @@ type Response struct {
 	// Repos corresponds to the JSON schema field "repos".
 	Repos []RepoState `json:"repos,omitempty,omitzero"`
 
+	// SeedEditResult corresponds to the JSON schema field "seed_edit_result".
+	SeedEditResult *SeedEditResult `json:"seed_edit_result,omitempty,omitzero"`
+
 	// SeedLinkResult corresponds to the JSON schema field "seed_link_result".
 	SeedLinkResult *SeedLinkResult `json:"seed_link_result,omitempty,omitzero"`
 
@@ -5866,6 +5875,9 @@ type SeedDocument struct {
 
 	// Seed corresponds to the JSON schema field "seed".
 	Seed Seed `json:"seed"`
+
+	// TenderHolds corresponds to the JSON schema field "tender_holds".
+	TenderHolds bool `json:"tender_holds"`
 }
 
 type SeedDocumentGetMessage struct {
@@ -5902,6 +5914,22 @@ type SeedEdge struct {
 
 	// To corresponds to the JSON schema field "to".
 	To string `json:"to"`
+}
+
+type SeedEditMessage struct {
+	// Body corresponds to the JSON schema field "body".
+	Body string `json:"body"`
+
+	// Cmd corresponds to the JSON schema field "cmd".
+	Cmd string `json:"cmd"`
+
+	// SeedID corresponds to the JSON schema field "seed_id".
+	SeedID string `json:"seed_id"`
+}
+
+type SeedEditResult struct {
+	// Seed corresponds to the JSON schema field "seed".
+	Seed Seed `json:"seed"`
 }
 
 type SeedLinkMessage struct {

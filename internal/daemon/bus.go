@@ -203,6 +203,10 @@ const (
 	// after the write it describes has committed, so a consumer that reads it
 	// always finds the seed.
 	FactGardenPlanted = "garden.planted"
+	// FactGardenBodyEdited: a seed's living markdown document changed. The
+	// garden snapshot carries the new body and revision so open readers can
+	// re-anchor immediately without waiting on a detail refetch.
+	FactGardenBodyEdited = "garden.body_edited"
 	// One fact per lifecycle move, rather than one `garden.changed`: the subject
 	// says which seed and the name says what happened to it, which is what a
 	// change feed and a future nudge both read. All of them project the same way
@@ -354,7 +358,12 @@ func buildWireProjections() []projection {
 		},
 		{
 			filter: bus.Filter{FactSessionUnregistered},
-			apply:  func(d *Daemon, ev bus.Event) { d.projectSessionUnregistered(ev) },
+			apply: func(d *Daemon, ev bus.Event) {
+				d.projectSessionUnregistered(ev)
+				// Session liveness is part of garden truth: it decides whether a
+				// stored tender still holds and therefore where feedback routes.
+				d.projectGardenSeeds()
+			},
 		},
 		{
 			filter: bus.Filter{FactSessionRespawned},

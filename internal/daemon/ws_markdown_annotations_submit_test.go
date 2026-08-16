@@ -46,7 +46,7 @@ func sendSubmit(t *testing.T, d *Daemon, target string, orphaned []string) proto
 		SourceKind:      annotationSourceFile,
 		WorkspaceID:     protocol.Ptr("workspace-test"),
 		Path:            protocol.Ptr(submitTestPath),
-		TargetSessionID: target,
+		TargetSessionID: protocol.Ptr(target),
 		OrphanedIds:     orphaned,
 		RequestID:       "req-1",
 	})
@@ -55,6 +55,34 @@ func sendSubmit(t *testing.T, d *Daemon, target string, orphaned []string) proto
 	if res.Event != protocol.EventMarkdownAnnotationsSubmitResult || res.RequestID != "req-1" {
 		t.Fatalf("unexpected result envelope: %+v", res)
 	}
+	return res
+}
+
+func seedSeedSubmitDraft(t *testing.T, d *Daemon, seedID string, generation int) {
+	t.Helper()
+	blob, err := json.Marshal(submitTestAnnotations())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := d.store.SaveMarkdownAnnotationDraft(seedDocumentURI(seedID), string(blob), generation, time.Now()); err != nil {
+		t.Fatalf("seed seed draft: %v", err)
+	}
+}
+
+func sendSeedSubmit(t *testing.T, d *Daemon, sourceSeed string, targetSession, targetSeed *string) protocol.MarkdownAnnotationsSubmitResultMessage {
+	t.Helper()
+	client := &wsClient{send: make(chan outboundMessage, 4)}
+	d.handleMarkdownAnnotationsSubmit(client, &protocol.MarkdownAnnotationsSubmitMessage{
+		Cmd:             protocol.CmdMarkdownAnnotationsSubmit,
+		DocumentUri:     seedDocumentURI(sourceSeed),
+		SourceKind:      annotationSourceSeed,
+		SeedID:          protocol.Ptr(sourceSeed),
+		TargetSessionID: targetSession,
+		TargetSeedID:    targetSeed,
+		RequestID:       "req-seed",
+	})
+	var res protocol.MarkdownAnnotationsSubmitResultMessage
+	readNotebookWSEvent(t, client.send, &res)
 	return res
 }
 
@@ -127,6 +155,120 @@ func TestMarkdownAnnotationsSubmitCarriesOrphanedIds(t *testing.T) {
 	if len(inputs) != 2 || !strings.Contains(inputs[0], "(~line 3, moved)") {
 		t.Fatalf("payload should label orphaned c1, got %q", inputs)
 	}
+}
+
+func TestMarkdownAnnotationsSubmitNotesOnTypedSourceSeed(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Review target"})
+	seedSeedSubmitDraft(t, d, seed.ID, 4)
+
+	res := sendSeedSubmit(t, d, seed.ID, nil, protocol.Ptr(seed.ID))
+
+	if !res.Success || res.Status != annotationSubmitStatusNoted || res.Error != nil {
+		t.Fatalf("result = %+v, want noted", res)
+	}
+	if protocol.Deref(res.TargetSeedID) != seed.ID || res.TargetSessionID != nil {
+		t.Fatalf("typed destination = seed %v session %v", res.TargetSeedID, res.TargetSessionID)
+	}
+	shown := show(t, d, seed.ID)
+	if shown.NotesTotal != 1 || len(shown.Notes) != 1 {
+		t.Fatalf("seed log = %+v total=%d, want one annotation note", shown.Notes, shown.NotesTotal)
+	}
+	want := formatMarkdownAnnotationPayload(annotationDocumentSource{
+		kind: annotationSourceSeed, seedID: seed.ID, seedTitle: seed.Title,
+	}, submitTestAnnotations(), map[string]bool{})
+	if shown.Notes[0].Body != want || shown.Notes[0].Kind != "note" {
+		t.Fatalf("note = %+v, want formatted annotation payload %q", shown.Notes[0], want)
+	}
+	if n := storedSeedSubmitDraftCount(t, d, seed.ID); n != 0 {
+		t.Fatalf("draft not cleared after note: %d annotations remain", n)
+	}
+}
+
+func TestMarkdownAnnotationsSubmitRequiresExactlyOneMatchingTypedDestination(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Typed routing"})
+	seedSeedSubmitDraft(t, d, seed.ID, 2)
+
+	for _, tc := range []struct {
+		name       string
+		session    *string
+		targetSeed *string
+		wantError  string
+	}{
+		{name: "neither", wantError: "exactly one"},
+		{name: "both", session: protocol.Ptr("sess-a"), targetSeed: protocol.Ptr(seed.ID), wantError: "exactly one"},
+		{name: "different seed", targetSeed: protocol.Ptr("s-ffffff"), wantError: "must match"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			res := sendSeedSubmit(t, d, seed.ID, tc.session, tc.targetSeed)
+			if res.Success || res.Error == nil || !strings.Contains(*res.Error, tc.wantError) {
+				t.Fatalf("result = %+v, want error containing %q", res, tc.wantError)
+			}
+		})
+	}
+	if n := storedSeedSubmitDraftCount(t, d, seed.ID); n != 1 {
+		t.Fatalf("invalid routing changed draft: got %d annotations", n)
+	}
+}
+
+func TestMarkdownAnnotationsSubmitDoesNotRouteAFileDocumentToASeed(t *testing.T) {
+	d := newSubmitDaemon(t)
+	seedSubmitDraft(t, d, 2, submitTestAnnotations())
+	client := &wsClient{send: make(chan outboundMessage, 1)}
+	d.handleMarkdownAnnotationsSubmit(client, &protocol.MarkdownAnnotationsSubmitMessage{
+		Cmd:          protocol.CmdMarkdownAnnotationsSubmit,
+		DocumentUri:  fileDocumentURI("workspace-test", submitTestPath),
+		SourceKind:   annotationSourceFile,
+		WorkspaceID:  protocol.Ptr("workspace-test"),
+		Path:         protocol.Ptr(submitTestPath),
+		TargetSeedID: protocol.Ptr("s-ffffff"),
+		RequestID:    "file-to-seed",
+	})
+	var res protocol.MarkdownAnnotationsSubmitResultMessage
+	readNotebookWSEvent(t, client.send, &res)
+	if res.Success || res.Error == nil || !strings.Contains(*res.Error, "must match the seed document source") {
+		t.Fatalf("result = %+v, want file-to-seed routing refusal", res)
+	}
+	if n := storedSubmitDraftCount(t, d); n != 1 {
+		t.Fatalf("routing refusal changed file draft: got %d annotations", n)
+	}
+}
+
+func TestMarkdownAnnotationsSubmitNoteClearFailureStillReportsNoted(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Keep one note"})
+	seedSeedSubmitDraft(t, d, seed.ID, 2)
+	d.gardenBroadcastHook = func([]protocol.Seed, int) {
+		if err := d.store.Close(); err != nil {
+			t.Errorf("closing store after note: %v", err)
+		}
+	}
+
+	res := sendSeedSubmit(t, d, seed.ID, nil, protocol.Ptr(seed.ID))
+
+	if !res.Success || res.Status != annotationSubmitStatusNoted {
+		t.Fatalf("result = %+v, want noted despite clear failure", res)
+	}
+	if res.Error == nil || !strings.Contains(*res.Error, "noted; failed to clear drafts") {
+		t.Fatalf("error = %v, want noted-but-not-cleared marker", res.Error)
+	}
+	if res.Generation != nil {
+		t.Fatalf("generation should be absent when the clear failed, got %v", res.Generation)
+	}
+}
+
+func storedSeedSubmitDraftCount(t *testing.T, d *Daemon, seedID string) int {
+	t.Helper()
+	draft, err := d.store.GetMarkdownAnnotationDraft(seedDocumentURI(seedID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	anns, err := decodeMarkdownAnnotations(draft.Annotations)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return len(anns)
 }
 
 // pending_approval target: nothing is typed, drafts stay intact, and the

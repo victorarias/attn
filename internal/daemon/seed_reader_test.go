@@ -62,6 +62,32 @@ func TestSeedDocumentGetNamesUnknownID(t *testing.T) {
 	}
 }
 
+func TestSeedDocumentGetReportsWhetherTheStoredTenderStillHolds(t *testing.T) {
+	d := newGardenDaemon(t)
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Held only while live"})
+	move(t, d, "sess-a", seed.ID, garden.VerbTend, "", "trellis")
+
+	read := func(requestID string) protocol.SeedDocumentGetResultMessage {
+		client := newWorkspaceProtocolTestClient()
+		d.handleSeedDocumentGet(client, &protocol.SeedDocumentGetMessage{
+			Cmd: protocol.CmdSeedDocumentGet, SeedID: seed.ID, RequestID: requestID,
+		})
+		return readSeedDocumentResult(t, client)
+	}
+	if result := read("live"); !result.Success || result.Document == nil || !result.Document.TenderHolds {
+		t.Fatalf("live tender document = %+v, want tender_holds", result)
+	}
+
+	d.store.Remove("sess-a")
+	result := read("gone")
+	if !result.Success || result.Document == nil || result.Document.TenderHolds {
+		t.Fatalf("ended tender document = %+v, want stored identity without a live hold", result)
+	}
+	if result.Document.Seed.TenderSession != "sess-a" {
+		t.Fatalf("read model erased stored tender identity: %+v", result.Document.Seed)
+	}
+}
+
 func TestOpenSeedUsesPlacementPaneAndTenderBinding(t *testing.T) {
 	d := newGardenDaemon(t)
 	_, _, workspaceID := setupMarkdownWorkspaceOn(t, d)
