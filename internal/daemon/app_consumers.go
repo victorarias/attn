@@ -76,8 +76,8 @@ func (d *Daemon) appConnectWait() time.Duration {
 //
 // Fifteen minutes is roughly five rounds at the bus's two-minute retry cap —
 // long enough that a transient dependency (a git remote, a rebooting service)
-// recovers untouched, short enough that a genuinely broken app does not hold the
-// log for an afternoon.
+// recovers untouched, short enough to stop calling a genuinely broken app and
+// ask the user to intervene. Its installed lane remains retained while disabled.
 const appAutoDisableStall = 15 * time.Minute
 
 // appCrashStrikes is the second half of the auto-disable rule: an app the
@@ -216,7 +216,7 @@ func (d *Daemon) appPreDrain(name string) bus.PreDrain {
 			return nil
 		}
 		if gap != nil {
-			if _, err := d.store.RequestAppReconcileGap(name, gap.Cursor, gap.Earliest, gap.Head, d.appNow()); err != nil {
+			if _, err := d.store.RequestAppReconcileGap(name, gap.Cursor, gap.Earliest, d.appNow()); err != nil {
 				return fmt.Errorf("recording the gap reconciliation for app %q: %w", name, err)
 			}
 		}
@@ -276,7 +276,7 @@ func foldAppReconcileReason(versionID int64, claim store.AppReconcileClaim) appR
 			reason.PreviousVersions = append(reason.PreviousVersions, request.PreviousVersionID)
 		}
 	}
-	for _, cause := range []string{store.AppReconcileGap, store.AppReconcileReEnabled, store.AppReconcileVersionChange} {
+	for _, cause := range []string{store.AppReconcileGap, store.AppReconcileVersionChange} {
 		if seenCauses[cause] {
 			reason.Causes = append(reason.Causes, cause)
 		}

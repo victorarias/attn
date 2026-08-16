@@ -145,12 +145,15 @@ func (p *Producer) surge() {
 
 // ConsumerStatus is one durable consumer's registration, position, and lag.
 type ConsumerStatus struct {
-	Name      string
-	Cursor    int64
-	Lag       int64
-	Filter    string
-	Enabled   bool
-	UpdatedAt time.Time
+	Name    string
+	Cursor  int64
+	Lag     int64
+	Filter  string
+	Enabled bool
+	// PinsRetention is true for an installed app consumer even while disabled.
+	// It is an internal policy input; HoldsRetentionFloor is the wire surface.
+	PinsRetention bool
+	UpdatedAt     time.Time
 	// Live is true when this process has a delivery loop for the consumer, and
 	// is meaningful only when Status.Delivering is set.
 	Live bool
@@ -159,8 +162,8 @@ type ConsumerStatus struct {
 	// OldestUnreadAt stamps the oldest event this consumer has not read; zero
 	// when it is caught up. Lag counts events, this says how long they waited.
 	OldestUnreadAt time.Time
-	// HoldsRetentionFloor marks the enabled consumer whose cursor is the floor
-	// retention stops at — the one pinning the log.
+	// HoldsRetentionFloor marks the consumer whose cursor is the floor retention
+	// stops at — enabled ordinary consumers and installed apps participate.
 	HoldsRetentionFloor bool
 	// PinAlarm marks that pin as past DefaultPinAlarmAge: no longer the system
 	// working, but an outage holding the log open.
@@ -326,6 +329,7 @@ func (b *Bus) Status() (Status, error) {
 			Lag:                 max64(head-c.Cursor, 0),
 			Filter:              c.Filter,
 			Enabled:             c.Enabled,
+			PinsRetention:       c.PinsRetention,
 			UpdatedAt:           c.UpdatedAt,
 			HoldsRetentionFloor: c.Name == floor,
 		}
@@ -378,6 +382,12 @@ func health(s Status, now time.Time) []Health {
 				Level: HealthWarn, Kind: HealthConsumerNotLive, Subject: c.Name,
 				Message: fmt.Sprintf("consumer %s is registered and enabled but has no delivery loop in this daemon, so nothing is reading its %s backlog",
 					c.Name, events(c.Lag)),
+			})
+		case !c.Enabled && c.PinsRetention:
+			out = append(out, Health{
+				Level: HealthWarn, Kind: HealthConsumerDisabled, Subject: c.Name,
+				Message: fmt.Sprintf("consumer %s is disabled: delivery is paused at seq %d and its installed app keeps the unread backlog; enable it to resume from this cursor or uninstall it to release retention",
+					c.Name, c.Cursor),
 			})
 		case !c.Enabled:
 			out = append(out, Health{
@@ -465,6 +475,7 @@ func (b *Bus) PinAlarms() ([]Pin, error) {
 			Cursor:              c.Cursor,
 			Lag:                 max64(head-c.Cursor, 0),
 			Enabled:             c.Enabled,
+			PinsRetention:       c.PinsRetention,
 			HoldsRetentionFloor: c.Name == floor,
 		}
 		if entry.Lag > 0 {
@@ -496,13 +507,13 @@ func surgeMessage(p Producer) string {
 		events(p.Events), p.Share*100, p.Subjects)
 }
 
-// retentionFloorName is the enabled consumer whose cursor retention stops at.
-// Disabled consumers are excluded exactly as the trim does — they do not pin.
+// retentionFloorName is the consumer whose cursor retention stops at. Enabled
+// consumers and installed app consumers participate in the same floor.
 func retentionFloorName(consumers []Consumer) string {
 	name := ""
 	floor := int64(-1)
 	for _, c := range consumers {
-		if !c.Enabled {
+		if !c.Enabled && !c.PinsRetention {
 			continue
 		}
 		if floor < 0 || c.Cursor < floor {

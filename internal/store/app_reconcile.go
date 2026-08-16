@@ -8,7 +8,6 @@ import (
 
 const (
 	AppReconcileGap           = "gap"
-	AppReconcileReEnabled     = "re_enabled"
 	AppReconcileVersionChange = "version_changed"
 )
 
@@ -91,7 +90,7 @@ func appReconcilePending(q reconcileQueryer, name string) (AppReconcileClaim, er
 
 // RequestAppReconcileGap records a retention gap. Retrying the same pre-drain
 // hook is idempotent; a different cursor or surviving window is a new trigger.
-func (s *Store) RequestAppReconcileGap(name string, cursor, earliest, throughSeq int64, now time.Time) (bool, error) {
+func (s *Store) RequestAppReconcileGap(name string, cursor, earliest int64, now time.Time) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
@@ -106,6 +105,7 @@ func (s *Store) RequestAppReconcileGap(name string, cursor, earliest, throughSeq
 	if err := tx.QueryRow(`SELECT current_version_id FROM apps WHERE name = ?`, name).Scan(&versionID); err != nil {
 		return false, err
 	}
+	throughSeq := earliest - 1
 	res, err := tx.Exec(`
 		INSERT OR IGNORE INTO app_reconcile_requests
 			(app_name, reason, version_id, through_seq, cursor, earliest, missed, created_at)
@@ -185,8 +185,11 @@ func appendAppReconcileRequest(tx *sql.Tx, name, reason string, versionID, throu
 	return err
 }
 
-func busHeadWith(q reconcileQueryer) (int64, error) {
-	var head sql.NullInt64
-	err := q.QueryRow(`SELECT MAX(seq) FROM bus_events`).Scan(&head)
-	return head.Int64, err
+func appConsumerCursorWith(q reconcileQueryer, name string) (int64, error) {
+	var cursor int64
+	err := q.QueryRow(`SELECT cursor FROM bus_consumers WHERE name = ?`, "app:"+name).Scan(&cursor)
+	if err == sql.ErrNoRows {
+		return 0, nil
+	}
+	return cursor, err
 }

@@ -253,8 +253,8 @@ export function EventBusSettings({ getBusStatus, setConsumerEnabled }: EventBusS
         <div className="bus-section-head">
           <h4>Consumers</h4>
           <span className="settings-hint">
-            Disabling a consumer stops delivery to it and stops it holding retention open. Its
-            cursor is kept, but once trimming passes it, enabling resumes at head with a logged gap.
+            Disabling stops delivery. Ordinary consumers release retention; installed apps keep
+            their cursor and unread backlog until they are enabled or uninstalled.
           </span>
         </div>
         {status.consumers.length === 0 ? (

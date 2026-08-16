@@ -22,14 +22,16 @@ type BusEvent struct {
 	CreatedAt time.Time
 }
 
-// BusConsumer is a durable consumer's registration and position. Enabled=false
-// is the kill switch: not delivered to, and deliberately not pinning retention.
+// BusConsumer is a durable consumer's registration and position. PinsRetention
+// is derived when listing: installed app consumers retain their backlog even
+// while disabled. It is never persisted separately from the app registry.
 type BusConsumer struct {
-	Name      string
-	Cursor    int64
-	Filter    string
-	Enabled   bool
-	UpdatedAt time.Time
+	Name          string
+	Cursor        int64
+	Filter        string
+	Enabled       bool
+	PinsRetention bool
+	UpdatedAt     time.Time
 }
 
 // AppendBusEvent appends a fact and returns its seq. No dedup: two identical
@@ -216,9 +218,9 @@ func (s *Store) SetBusConsumerEnabled(name string, enabled bool, now time.Time) 
 	return n > 0, err
 }
 
-// SetAppBusConsumerEnabled flips an app consumer and records a false-to-true
-// reconciliation trigger in the same transaction. changed distinguishes a real
-// transition from an idempotent request.
+// SetAppBusConsumerEnabled flips an app consumer. changed distinguishes a real
+// transition from an idempotent request. Re-enabling resumes from the frozen
+// cursor; it does not create a reconciliation request.
 func (s *Store) SetAppBusConsumerEnabled(appName string, enabled bool, now time.Time) (exists, changed bool, err error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -248,21 +250,6 @@ func (s *Store) SetAppBusConsumerEnabled(appName string, enabled bool, now time.
 	stamp := now.UTC().Format(sortableTimeFormat)
 	if _, err := tx.Exec(`UPDATE bus_consumers SET enabled = ?, updated_at = ? WHERE name = ?`, want, stamp, consumerName); err != nil {
 		return false, false, err
-	}
-	if enabled {
-		var versionID sql.NullInt64
-		if err := tx.QueryRow(`SELECT current_version_id FROM apps WHERE name = ?`, appName).Scan(&versionID); err != nil {
-			return false, false, err
-		}
-		if versionID.Valid {
-			head, err := busHeadWith(tx)
-			if err != nil {
-				return false, false, err
-			}
-			if err := appendAppReconcileRequest(tx, appName, AppReconcileReEnabled, versionID.Int64, head, 0, now); err != nil {
-				return false, false, err
-			}
-		}
 	}
 	return true, true, tx.Commit()
 }
@@ -294,7 +281,10 @@ func (s *Store) ListBusConsumers() ([]BusConsumer, error) {
 		return nil, nil
 	}
 	rows, err := s.db.Query(`
-		SELECT name, cursor, filter, enabled, updated_at FROM bus_consumers ORDER BY name ASC
+		SELECT c.name, c.cursor, c.filter, c.enabled,
+		       EXISTS (SELECT 1 FROM apps a WHERE c.name = 'app:' || a.name),
+		       c.updated_at
+		FROM bus_consumers c ORDER BY c.name ASC
 	`)
 	if err != nil {
 		return nil, err
@@ -308,19 +298,21 @@ func (s *Store) ListBusConsumers() ([]BusConsumer, error) {
 			enabled   int
 			updatedAt string
 		)
-		if err := rows.Scan(&c.Name, &c.Cursor, &c.Filter, &enabled, &updatedAt); err != nil {
+		var pinsRetention int
+		if err := rows.Scan(&c.Name, &c.Cursor, &c.Filter, &enabled, &pinsRetention, &updatedAt); err != nil {
 			return nil, err
 		}
 		c.Enabled = enabled != 0
+		c.PinsRetention = pinsRetention != 0
 		c.UpdatedAt = parseTicketTime(updatedAt)
 		out = append(out, c)
 	}
 	return out, rows.Err()
 }
 
-// TrimBusEvents deletes events older than cutoff that every ENABLED consumer
-// has passed. Disabled consumers are excluded from the floor on purpose: a
-// killed consumer must not pin the log; internal/bus resumes it at head.
+// TrimBusEvents deletes events older than cutoff that every enabled consumer
+// and every installed app consumer has passed. A disabled installed app keeps
+// its backlog; a disabled orphan row with no app registry entry pins nothing.
 func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -332,7 +324,10 @@ func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {
 		DELETE FROM bus_events
 		WHERE created_at < ?
 		  AND seq <= COALESCE(
-		      (SELECT MIN(cursor) FROM bus_consumers WHERE enabled = 1),
+		      (SELECT MIN(c.cursor)
+		         FROM bus_consumers c
+		        WHERE c.enabled = 1
+		           OR EXISTS (SELECT 1 FROM apps a WHERE c.name = 'app:' || a.name)),
 		      (SELECT COALESCE(MAX(seq), 0) FROM bus_events)
 		  )
 	`, formatTicketTime(cutoff))
@@ -344,10 +339,10 @@ func (s *Store) TrimBusEvents(cutoff time.Time) (int, error) {
 }
 
 // CompactBusEvents keeps only the newest fact per subject among the named
-// names, at or below floor (the cursor floor: every enabled consumer has read
-// those rows, so removal costs no delivery and punches no holes above the
-// floor). Which names are compactable is internal/bus's call. An empty name
-// list compacts nothing, not everything.
+// names, at or below floor (the cursor floor: every enabled consumer and every
+// installed app consumer has read those rows, so removal costs no delivery and
+// punches no holes above the floor). Which names are compactable is
+// internal/bus's call. An empty name list compacts nothing, not everything.
 func (s *Store) CompactBusEvents(names []string, floor int64) (int, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

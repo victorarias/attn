@@ -84,7 +84,7 @@ describe("reconcile dispatch", () => {
       version_id: 9,
       artifact,
       collections: [],
-      reason: { causes: ["re_enabled"], version: 9, throughSeq: 2, previousVersions: [] },
+      reason: { causes: ["version_changed"], version: 9, throughSeq: 2, previousVersions: [] },
     })
     expect(result.ok).toBe(false)
     expect(result.error).toContain("default export has no reconcile handler")

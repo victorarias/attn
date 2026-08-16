@@ -19,7 +19,6 @@ func TestFoldAppReconcileReasonSortsCausesAndDeduplicatesPreviousVersions(t *tes
 	claim := store.AppReconcileClaim{
 		ThroughSeq: 18,
 		Requests: []store.AppReconcileRequest{
-			{Reason: store.AppReconcileReEnabled},
 			{Reason: store.AppReconcileVersionChange, PreviousVersionID: 3},
 			{Reason: store.AppReconcileGap, Cursor: 4, Earliest: 8, Missed: 3},
 			{Reason: store.AppReconcileVersionChange, PreviousVersionID: 3},
@@ -27,7 +26,7 @@ func TestFoldAppReconcileReasonSortsCausesAndDeduplicatesPreviousVersions(t *tes
 		},
 	}
 	got := foldAppReconcileReason(11, claim)
-	if !reflect.DeepEqual(got.Causes, []string{"gap", "re_enabled", "version_changed"}) {
+	if !reflect.DeepEqual(got.Causes, []string{"gap", "version_changed"}) {
 		t.Fatalf("causes = %v", got.Causes)
 	}
 	if got.Version != 11 || got.ThroughSeq != 18 {
@@ -58,7 +57,7 @@ func TestAppPreDrainDispatchesReconcileAndCompletesItsClaim(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := d.store.RequestAppReconcileGap("approval-gate", 1, 4, 6, now); err != nil {
+	if _, err := d.store.RequestAppReconcileGap("approval-gate", 1, 4, now); err != nil {
 		t.Fatal(err)
 	}
 	runtime := startFakeAppRuntime(t, d, nil)
@@ -91,7 +90,7 @@ func TestAppPreDrainDispatchesReconcileAndCompletesItsClaim(t *testing.T) {
 	if !reflect.DeepEqual(request.Collections, []string{"decisions"}) || !reflect.DeepEqual(request.Reason.Causes, []string{"gap"}) {
 		t.Fatalf("request = %+v", request)
 	}
-	if request.Reason.Gap == nil || request.Reason.ThroughSeq != 6 {
+	if request.Reason.Gap == nil || request.Reason.ThroughSeq != 3 {
 		t.Fatalf("reason = %+v", request.Reason)
 	}
 	snapshot := <-snapshots
@@ -102,7 +101,7 @@ func TestAppPreDrainDispatchesReconcileAndCompletesItsClaim(t *testing.T) {
 		t.Fatalf("pending after success = %+v, %v", claim, err)
 	}
 	consumer, _, err := d.store.GetBusConsumer(apps.ConsumerName("approval-gate"))
-	if err != nil || consumer.Cursor != 6 {
+	if err != nil || consumer.Cursor != 3 {
 		t.Fatalf("consumer = %+v, %v", consumer, err)
 	}
 }
@@ -119,7 +118,7 @@ func TestAppPreDrainRetriesTheSameClaimAfterAThrow(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedAppConsumer(t, d, "approval-gate", true, 1)
-	if _, err := d.store.RequestAppReconcileGap("approval-gate", 1, 4, 6, now); err != nil {
+	if _, err := d.store.RequestAppReconcileGap("approval-gate", 1, 4, now); err != nil {
 		t.Fatal(err)
 	}
 	runtime := startFakeAppRuntime(t, d, nil)
@@ -157,12 +156,12 @@ func TestAppPreDrainRetriesTheSameClaimAfterAThrow(t *testing.T) {
 		t.Fatalf("claim after retry = %+v, %v", claim, err)
 	}
 	stored, _, err = d.store.GetBusConsumer(consumer.Name)
-	if err != nil || stored.Cursor != 6 {
+	if err != nil || stored.Cursor != 3 {
 		t.Fatalf("cursor after retry = %d, %v", stored.Cursor, err)
 	}
 }
 
-func TestAppPreDrainRecordsOneGapAndFencesFactsUntilCompletion(t *testing.T) {
+func TestAppPreDrainFencesAGapBeforeTheEarliestRetainedFact(t *testing.T) {
 	d := newDaemonForTest(t)
 	seedApp(t, d, "approval-gate", true)
 	gap := &bus.Gap{Cursor: 1, Earliest: 4, Head: 6, Missed: 2}
@@ -178,7 +177,7 @@ func TestAppPreDrainRecordsOneGapAndFencesFactsUntilCompletion(t *testing.T) {
 		t.Fatalf("pending = %+v, %v", claim, err)
 	}
 	request := claim.Requests[0]
-	if request.Reason != store.AppReconcileGap || request.Cursor != 1 || request.Earliest != 4 || request.Missed != 2 || request.ThroughSeq != 6 {
+	if request.Reason != store.AppReconcileGap || request.Cursor != 1 || request.Earliest != 4 || request.Missed != 2 || request.ThroughSeq != 3 {
 		t.Fatalf("gap request = %+v", request)
 	}
 	if err := d.store.CompleteAppReconcile("approval-gate", claim.ThroughRequestID, claim.ThroughSeq, time.Now()); err != nil {
@@ -188,7 +187,7 @@ func TestAppPreDrainRecordsOneGapAndFencesFactsUntilCompletion(t *testing.T) {
 		t.Fatalf("pre-drain after completion: %v", err)
 	}
 	consumer, ok, err := d.store.GetBusConsumer(apps.ConsumerName("approval-gate"))
-	if err != nil || !ok || consumer.Cursor != 6 {
+	if err != nil || !ok || consumer.Cursor != 3 {
 		t.Fatalf("consumer after completion = %+v, found=%t, err=%v", consumer, ok, err)
 	}
 }

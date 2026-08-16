@@ -30,12 +30,6 @@ func TestAppReconcileTriggersCoalesceAtOneClaimBoundary(t *testing.T) {
 	if _, err := s.AppendBusEvent(BusEvent{Name: "ticket.created"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if exists, changed, err := s.SetAppBusConsumerEnabled("approval-gate", false, now); err != nil || !exists || !changed {
-		t.Fatalf("disable = exists:%t changed:%t err:%v", exists, changed, err)
-	}
-	if exists, changed, err := s.SetAppBusConsumerEnabled("approval-gate", true, now); err != nil || !exists || !changed {
-		t.Fatalf("enable = exists:%t changed:%t err:%v", exists, changed, err)
-	}
 	second, _, err := s.CommitAppVersion(AppVersion{
 		AppName: "approval-gate", ContentHash: "sha256:second",
 		Declaration: `{"name":"approval-gate"}`, ArtifactPath: "bundle-2.js",
@@ -43,11 +37,11 @@ func TestAppReconcileTriggersCoalesceAtOneClaimBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	inserted, err := s.RequestAppReconcileGap("approval-gate", 0, 3, 4, now)
+	inserted, err := s.RequestAppReconcileGap("approval-gate", 0, 3, now)
 	if err != nil || !inserted {
 		t.Fatalf("gap insert = %t, %v", inserted, err)
 	}
-	inserted, err = s.RequestAppReconcileGap("approval-gate", 0, 3, 4, now)
+	inserted, err = s.RequestAppReconcileGap("approval-gate", 0, 3, now)
 	if err != nil || inserted {
 		t.Fatalf("duplicate gap insert = %t, %v", inserted, err)
 	}
@@ -56,16 +50,16 @@ func TestAppReconcileTriggersCoalesceAtOneClaimBoundary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(claim.Requests) != 3 {
-		t.Fatalf("pending = %+v, want re-enable, version, and one gap", claim.Requests)
+	if len(claim.Requests) != 2 {
+		t.Fatalf("pending = %+v, want version and one gap", claim.Requests)
 	}
-	if claim.Requests[0].Reason != AppReconcileReEnabled || claim.Requests[1].Reason != AppReconcileVersionChange || claim.Requests[2].Reason != AppReconcileGap {
+	if claim.Requests[0].Reason != AppReconcileVersionChange || claim.Requests[1].Reason != AppReconcileGap {
 		t.Fatalf("reason order = %+v", claim.Requests)
 	}
-	if claim.Requests[1].PreviousVersionID != first.ID || claim.Requests[1].VersionID != second.ID {
-		t.Fatalf("version request = %+v", claim.Requests[1])
+	if claim.Requests[0].PreviousVersionID != first.ID || claim.Requests[0].VersionID != second.ID {
+		t.Fatalf("version request = %+v", claim.Requests[0])
 	}
-	if claim.ThroughSeq != 4 || claim.ThroughRequestID != claim.Requests[2].ID {
+	if claim.ThroughSeq != 2 || claim.ThroughRequestID != claim.Requests[1].ID {
 		t.Fatalf("claim boundary = %+v", claim)
 	}
 }
@@ -74,10 +68,10 @@ func TestAppReconcileTriggerDuringRunRemainsOwedAndCompletionFencesCursor(t *tes
 	s := New()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	seedReconcileApp(t, s, now)
-	if _, _, err := s.SetAppBusConsumerEnabled("approval-gate", false, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.SetAppBusConsumerEnabled("approval-gate", true, now); err != nil {
+	if _, _, err := s.CommitAppVersion(AppVersion{
+		AppName: "approval-gate", ContentHash: "sha256:second",
+		Declaration: `{"name":"approval-gate"}`, ArtifactPath: "bundle-2.js",
+	}, now); err != nil {
 		t.Fatal(err)
 	}
 	first, err := s.AppReconcilePending("approval-gate")
@@ -87,7 +81,7 @@ func TestAppReconcileTriggerDuringRunRemainsOwedAndCompletionFencesCursor(t *tes
 	if _, err := s.AppendBusEvent(BusEvent{Name: "ticket.updated"}, now); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.RequestAppReconcileGap("approval-gate", 0, 2, 1, now); err != nil {
+	if _, err := s.RequestAppReconcileGap("approval-gate", 0, 2, now); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.SetBusConsumerCursor("app:approval-gate", 9, now); err != nil {
@@ -114,10 +108,10 @@ func TestAppReconcileRequestSurvivesRestartUntilCompletion(t *testing.T) {
 		t.Fatal(err)
 	}
 	seedReconcileApp(t, s, now)
-	if _, _, err := s.SetAppBusConsumerEnabled("approval-gate", false, now); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := s.SetAppBusConsumerEnabled("approval-gate", true, now); err != nil {
+	if _, _, err := s.CommitAppVersion(AppVersion{
+		AppName: "approval-gate", ContentHash: "sha256:second",
+		Declaration: `{"name":"approval-gate"}`, ArtifactPath: "bundle-2.js",
+	}, now); err != nil {
 		t.Fatal(err)
 	}
 	before, err := s.AppReconcilePending("approval-gate")
@@ -144,15 +138,64 @@ func TestAppReconcileRequestSurvivesRestartUntilCompletion(t *testing.T) {
 	}
 }
 
-func TestAppReconcileNoOpEnableAndInitialInstallCreateNoRequest(t *testing.T) {
+func TestAppReEnableCreatesNoReconcileRequest(t *testing.T) {
 	s := New()
 	now := time.Now().UTC().Truncate(time.Millisecond)
 	seedReconcileApp(t, s, now)
-	if exists, changed, err := s.SetAppBusConsumerEnabled("approval-gate", true, now); err != nil || !exists || changed {
-		t.Fatalf("no-op enable = exists:%t changed:%t err:%v", exists, changed, err)
+	if exists, changed, err := s.SetAppBusConsumerEnabled("approval-gate", false, now); err != nil || !exists || !changed {
+		t.Fatalf("disable = exists:%t changed:%t err:%v", exists, changed, err)
+	}
+	if exists, changed, err := s.SetAppBusConsumerEnabled("approval-gate", true, now); err != nil || !exists || !changed {
+		t.Fatalf("re-enable = exists:%t changed:%t err:%v", exists, changed, err)
 	}
 	if pending, err := s.AppReconcilePending("approval-gate"); err != nil || len(pending.Requests) != 0 {
 		t.Fatalf("pending = %+v, %v", pending, err)
+	}
+}
+
+func TestAppVersionChangeFenceStopsAtTheConsumerCursor(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedReconcileApp(t, s, now)
+	first, err := s.AppendBusEvent(BusEvent{Name: "ticket.created"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.AppendBusEvent(BusEvent{Name: "ticket.updated"}, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetBusConsumerCursor("app:approval-gate", first, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := s.CommitAppVersion(AppVersion{
+		AppName: "approval-gate", ContentHash: "sha256:second",
+		Declaration: `{"name":"approval-gate"}`, ArtifactPath: "bundle-2.js",
+	}, now); err != nil {
+		t.Fatal(err)
+	}
+	claim, err := s.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 1 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if got := claim.Requests[0].ThroughSeq; got != first {
+		t.Fatalf("version fence = %d, want consumer cursor %d; the retained fact above it must still be delivered", got, first)
+	}
+}
+
+func TestAppGapFenceStopsBeforeTheEarliestRetainedFact(t *testing.T) {
+	s := New()
+	now := time.Now().UTC().Truncate(time.Millisecond)
+	seedReconcileApp(t, s, now)
+	inserted, err := s.RequestAppReconcileGap("approval-gate", 1, 4, now)
+	if err != nil || !inserted {
+		t.Fatalf("gap insert = %t, %v", inserted, err)
+	}
+	claim, err := s.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 1 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if got := claim.Requests[0].ThroughSeq; got != 3 {
+		t.Fatalf("gap fence = %d, want earliest-1 = 3", got)
 	}
 }
 

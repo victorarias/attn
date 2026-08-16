@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -221,34 +222,71 @@ func TestAppEnableDisableFlipsTheConsumerBitAndPublishes(t *testing.T) {
 	}
 }
 
-func TestAppReEnableRecordsOneReconcileAtTheCurrentBusHead(t *testing.T) {
-	d := newDaemonForTest(t)
-	seedApp(t, d, "approval-gate", true)
-	if _, err := d.store.AppendBusEvent(store.BusEvent{Name: "ticket.created"}, time.Now()); err != nil {
-		t.Fatal(err)
-	}
+func TestAppReEnableResumesWithoutReconcileAndDeliversTheRetainedBacklogInOrder(t *testing.T) {
+	d := newAppDaemon(t)
+	installApp(t, d, "approval-gate", subscribing("ticket.*"))
+	runtime := startFakeAppRuntime(t, d, nil)
 	if resp := appSetEnabled(t, d, "approval-gate", false); !resp.Ok {
 		t.Fatalf("disable: %v", protocol.Deref(resp.Error))
 	}
+	d.publishFact("ticket.created", "tk-1", nil)
+	d.publishFact("ticket.updated", "tk-1", nil)
 	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
 		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
+	}
+	waitFor(t, "the retained backlog to be delivered", func() bool { return len(runtime.dispatchLog()) == 2 })
+	log := runtime.dispatchLog()
+	if got := []string{log[0].Event.Name, log[1].Event.Name}; !reflect.DeepEqual(got, []string{"ticket.created", "ticket.updated"}) {
+		t.Fatalf("delivery order = %v", got)
+	}
+	claim, err := d.store.AppReconcilePending("approval-gate")
+	if err != nil || len(claim.Requests) != 0 {
+		t.Fatalf("pending = %+v, %v", claim, err)
+	}
+	if got := len(runtime.reconcileLog()); got != 0 {
+		t.Fatalf("re-enable dispatched %d reconcile(s), want none", got)
+	}
+}
+
+func TestAppVersionChangeReconcilesAtTheFrozenCursorThenDeliversTheRetainedFact(t *testing.T) {
+	d := newAppDaemon(t)
+	firstManifest := subscribing("ticket.*")
+	firstManifest.Reconcile = true
+	first := installApp(t, d, "approval-gate", firstManifest)
+	runtime := startFakeAppRuntime(t, d, nil)
+	if resp := appSetEnabled(t, d, "approval-gate", false); !resp.Ok {
+		t.Fatalf("disable: %v", protocol.Deref(resp.Error))
+	}
+	d.publishFact("ticket.created", "tk-1", nil)
+	_, retainedSeq, err := d.store.BusBounds()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondManifest := firstManifest
+	secondManifest.Description = "version two"
+	second := installApp(t, d, "approval-gate", secondManifest)
+	if second.ID == first.ID {
+		t.Fatalf("version did not move: first=%d second=%d", first.ID, second.ID)
 	}
 	claim, err := d.store.AppReconcilePending("approval-gate")
 	if err != nil || len(claim.Requests) != 1 {
 		t.Fatalf("pending = %+v, %v", claim, err)
 	}
-	if got := claim.Requests[0]; got.Reason != store.AppReconcileReEnabled || got.ThroughSeq != 2 {
-		t.Fatalf("request = %+v, want re-enabled through the pre-existing fact and disable fact", got)
+	if claim.ThroughSeq >= retainedSeq {
+		t.Fatalf("version fence %d covered retained undelivered fact %d", claim.ThroughSeq, retainedSeq)
 	}
 	if resp := appSetEnabled(t, d, "approval-gate", true); !resp.Ok {
-		t.Fatalf("no-op enable: %v", protocol.Deref(resp.Error))
+		t.Fatalf("enable: %v", protocol.Deref(resp.Error))
 	}
-	again, err := d.store.AppReconcilePending("approval-gate")
-	if err != nil || len(again.Requests) != 1 {
-		t.Fatalf("no-op enable added a request: %+v, %v", again, err)
+	waitFor(t, "reconcile followed by retained fact delivery", func() bool {
+		return len(runtime.reconcileLog()) == 1 && len(runtime.dispatchLog()) == 1
+	})
+	if got := runtime.reconcileLog()[0].Reason.ThroughSeq; got != claim.ThroughSeq {
+		t.Fatalf("dispatched reconcile fence = %d, want %d", got, claim.ThroughSeq)
 	}
-	if facts := appFacts(t, d, FactAppEnabledChanged); len(facts) != 2 {
-		t.Fatalf("enabled facts = %d, want only the disable and real re-enable", len(facts))
+	delivered := runtime.dispatchLog()[0]
+	if delivered.Event.Seq != retainedSeq || delivered.VersionID != second.ID {
+		t.Fatalf("retained delivery = seq %d version %d, want seq %d version %d", delivered.Event.Seq, delivered.VersionID, retainedSeq, second.ID)
 	}
 }
 

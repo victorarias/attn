@@ -2,6 +2,7 @@ kind: added
 area: apps
 change: >
   Subscribed apps can now declare a reconcile handler that rebuilds their
-  collections from a typed current-state snapshot after a bus gap, re-enable,
-  or version change. The handler runs in the ordinary app lane before later
-  facts, with the claimed reasons and bus fence fixed across retries.
+  collections from a typed current-state snapshot after a bus gap or version
+  change. The handler runs in the ordinary app lane before later facts, with
+  the claimed reasons and bus fence fixed across retries. Re-enable simply
+  resumes the retained lane from its frozen cursor.

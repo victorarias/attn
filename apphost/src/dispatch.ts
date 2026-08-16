@@ -66,7 +66,7 @@ export interface CommandResult {
 }
 
 export interface ReconcileReason {
-  causes: ("gap" | "re_enabled" | "version_changed")[]
+  causes: ("gap" | "version_changed")[]
   version: number
   throughSeq: number
   gap?: {
