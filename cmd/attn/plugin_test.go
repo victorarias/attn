@@ -42,12 +42,12 @@ func TestInstallPluginViaDaemonPropagatesBundledCollision(t *testing.T) {
 	requests := startPluginCLIDaemon(t, map[string]any{
 		"event":   "plugin_action_result",
 		"action":  "install",
-		"name":    "attn-opencode",
+		"name":    "attn-example",
 		"success": false,
 		"error":   "uninstall bundled plugin before installing a user override",
 	})
 
-	_, err := installPluginViaDaemon("/tmp/attn-opencode")
+	_, err := installPluginViaDaemon("/tmp/attn-example")
 	if err == nil || !strings.Contains(err.Error(), "uninstall bundled plugin") {
 		t.Fatalf("error=%v, want bundled collision", err)
 	}

@@ -1,0 +1,12 @@
+kind: removed
+area: plugins
+change: >
+  attn no longer supports OpenCode. The bundled OpenCode driver plugin is gone,
+  so it no longer appears in the plugin list and OpenCode is no longer an agent
+  you can launch or delegate to. Driving OpenCode needed a server on a loopback
+  port, a private run registry, a side-channel classifier, and a launcher that
+  reached around the TUI to pin the model a delegation asked for — a large
+  surface held together by behavior OpenCode does not document and does not
+  promise. If you had the plugin installed, nothing you need to do: the install
+  record for a plugin the app no longer carries is simply ignored. Existing
+  OpenCode conversations stay in their own tool; attn will not resume them.

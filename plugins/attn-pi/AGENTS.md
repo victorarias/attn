@@ -2,8 +2,8 @@
 
 attn-side driver plugin for [pi](https://github.com/earendil-works/pi). Canonical
 vision: `docs/vision/pi-attn-plugins.md`. Full grounding evidence with citations:
-`docs/grounding/pi-plugins.md`. Reference implementation for the driver pattern:
-`plugins/attn-opencode`.
+`docs/grounding/pi-plugins.md`. This is attn's only driver plugin, so the
+driver contract itself lives in `internal/daemon/plugin_driver.go`.
 
 ## Pinning pi
 
@@ -54,7 +54,7 @@ vision: `docs/vision/pi-attn-plugins.md`. Full grounding evidence with citations
 
 ## Driver pattern
 
-- Follow `plugins/attn-opencode`: `attn-plugin.toml` (`attn_api_version`
+- The shape the daemon expects: `attn-plugin.toml` (`attn_api_version`
   gate), `driver.register` with capability map, `driver.spawn`/`driver.resume`
   returning argv+env+cwd that the daemon runs in the attn-owned PTY,
   `session.report_metadata` as the resume token, `driver.session_closed`

@@ -37,7 +37,6 @@ attn fixes the dumbest part of multi-agent workflows: knowing what needs you rig
 | [Claude Code](https://claude.ai/code) | Hooks + classifier | Yes |
 | [Codex](https://developers.openai.com/codex) | Hooks + classifier | No |
 | [Copilot CLI](https://docs.github.com/en/copilot/using-github-copilot/using-github-copilot-in-the-command-line) | PTY heuristics + transcript classifier | No |
-| OpenCode (opt-in bundled plugin) | Native events | Yes |
 
 ## Install
 
@@ -139,7 +138,7 @@ Instead of reconciling five conversations yourself, you get one coherent picture
 
 The chief is an awareness layer you work alongside, not a gatekeeper or end-to-end autopilot. You can open any delegated session, talk to the agent, and steer the work directly. The chief keeps the shared picture intact, so you can move between the big picture and the details without becoming the human message bus.
 
-That continuity is not tied to one agent or harness. You might ask Fable in Claude Code to brainstorm and produce a plan, bring that handoff back through the chief, then have the chief prepare a follow-on delegation to GLM 5.2 in OpenCode. You choose each handoff; the chief preserves the context and artifacts between them so every stage can use the specialist that fits it best.
+That continuity is not tied to one agent or harness. You might ask Fable in Claude Code to brainstorm and produce a plan, bring that handoff back through the chief, then have the chief prepare a follow-on delegation to GPT 5.6 Sol in Codex. You choose each handoff; the chief preserves the context and artifacts between them so every stage can use the specialist that fits it best.
 
 #### Give the chief an office
 

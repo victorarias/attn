@@ -66,8 +66,6 @@ should_exclude_path() {
   # harness scripts, and CI config — can change without invalidating the
   # packaged app bundle, so skipping those paths keeps iteration fast.
   case "${relative_path}" in
-    plugins/attn-opencode/src/*) return 1 ;;
-    plugins/attn-opencode/package.json|plugins/attn-opencode/bun.lock|plugins/attn-opencode/attn-plugin.toml|plugins/attn-opencode/README.md) return 1 ;;
     plugins/attn-pi/src/*) return 1 ;;
     plugins/attn-pi/suite/*) return 1 ;;
     plugins/attn-pi/host/*) return 1 ;;
