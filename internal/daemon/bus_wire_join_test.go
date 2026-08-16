@@ -55,7 +55,7 @@ var wireFixtures = map[string]wireFixture{
 		subject: (*wireWorld).session,
 	},
 	FactSessionRegistered: {
-		events:  []string{protocol.EventSessionRegistered},
+		events:  []string{protocol.EventSessionRegistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionReregistered: {
@@ -107,7 +107,7 @@ var wireFixtures = map[string]wireFixture{
 		payload: func(w *wireWorld) any { return w.d.sessionForBroadcast(w.d.store.Get(w.sessionID)) },
 	},
 	FactSessionRespawned: {
-		events:  []string{protocol.EventRuntimeRespawned},
+		events:  []string{protocol.EventRuntimeRespawned, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionPTYResized: {

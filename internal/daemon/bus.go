@@ -314,6 +314,8 @@ func buildWireProjections() []projection {
 			filter: bus.Filter{FactSessionRegistered},
 			apply: func(d *Daemon, ev bus.Event) {
 				d.projectSessionEvent(protocol.EventSessionRegistered, ev.Subject)
+				// A new session can reactivate a stored tender with the same id.
+				d.projectGardenSeeds()
 			},
 		},
 		{
@@ -372,6 +374,8 @@ func buildWireProjections() []projection {
 					Event: protocol.EventRuntimeRespawned,
 					ID:    protocol.Ptr(ev.Subject),
 				})
+				// Keep the computed tender hold in lockstep with session rebirth.
+				d.projectGardenSeeds()
 			},
 		},
 		{
