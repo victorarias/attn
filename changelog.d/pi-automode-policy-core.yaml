@@ -1,0 +1,9 @@
+kind: internal
+area: attn-pi
+change: >
+  First slice of pi auto mode: the policy core under plugins/attn-pi/automode/.
+  It decides a pi tool call against the static safety envelope — hard denies,
+  the allow list, read-only tools, in-cwd writes outside protected paths, and
+  a read-only bash set that never covers the network — and routes everything
+  else to a classifier interface a later slice implements. Ships dark: nothing
+  imports it and the build does not stage it yet.

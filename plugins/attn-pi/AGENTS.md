@@ -325,3 +325,23 @@ has to pass; see its README.
   load time, so the bundle step must keep that import `--external`.
 - PTY child exit stays the authoritative liveness signal; suite silence is
   never meaningful.
+
+## Auto mode
+
+`automode/` is pi's permission system: a static safety envelope plus a
+classifier for everything that reaches past it, denied conversationally
+rather than through dialogs. Design and slices:
+[docs/plans/2026-08-16-pi-auto-mode.md](../../docs/plans/2026-08-16-pi-auto-mode.md).
+
+- The decision order in `policy.ts` IS the policy. Anything added to the
+  envelope runs unjudged, so the read-only sets are conservative by
+  construction: a command that can run another command, or reach the
+  network, is not in them.
+- Like `suite/`, the module is duck-typed against pi's shapes rather than
+  importing pi, so `bun test` covers the whole extension including its
+  `tool_call` wiring. `index.ts` is the only file that knows pi's event
+  names.
+- Fail-safe both ways: a handler that throws blocks the tool, and a call
+  auto mode cannot judge is refused, never run.
+- Nothing loads it yet — it is not composed into `suite/` and
+  `build-bundled-plugins.sh` does not stage it.
