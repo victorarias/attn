@@ -45,10 +45,23 @@ ssh -o BatchMode=yes "${SSH_TARGET}" 'sudo apt-get update -qq && sudo apt-get in
 echo "==> Installing codex and claude CLIs"
 ssh -o BatchMode=yes "${SSH_TARGET}" 'sudo npm install -g @openai/codex @anthropic-ai/claude-code'
 
+# `attn app apply` bundles with bun and typechecks with the TypeScript it
+# installs itself, so a remote that cannot run bun cannot install an app at all
+# — apps are a daemon surface, and the daemon is supported on Linux.
+echo "==> Installing bun (attn app apply bundles with it)"
+ssh -o BatchMode=yes "${SSH_TARGET}" '
+  command -v bun >/dev/null 2>&1 && exit 0
+  [ -x "$HOME/.bun/bin/bun" ] && exit 0
+  curl -fsSL https://bun.sh/install | bash
+'
+
 echo "==> Verifying required tools are on PATH in the VM"
 missing_tools="$(ssh -o BatchMode=yes "${SSH_TARGET}" '
   missing=""
-  for tool in git python3 ss codex claude; do
+  # bun installs into ~/.bun/bin, which a non-interactive shell does not have
+  # on PATH until .bashrc runs — check it where it lands.
+  PATH="$HOME/.bun/bin:$PATH"
+  for tool in git python3 ss codex claude bun; do
     command -v "$tool" >/dev/null 2>&1 || missing="$missing $tool"
   done
   echo "$missing"
@@ -57,7 +70,7 @@ if [[ -n "${missing_tools// /}" ]]; then
   echo "Missing required tools in VM:${missing_tools}" >&2
   exit 1
 fi
-echo "==> All required tools present: git python3 ss codex claude"
+echo "==> All required tools present: git python3 ss codex claude bun"
 
 echo "==> Checking codex auth"
 codex_auth_present=0

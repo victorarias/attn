@@ -119,8 +119,18 @@ export interface AppContext<Collections> {
   readonly version: number
   /** The collections declared in attn-app.toml, by name. */
   readonly collections: Collections
-  /** Read-only current truth, from the same domain projection as Initial State. */
+  /**
+   * Read-only current truth, from the same domain projection attn's own UI is
+   * handed when it connects. This is how a handler answers "what is true now"
+   * without replaying facts it may no longer be able to see; it is the whole
+   * read surface a reconcile has besides the app's own collections.
+   */
   readonly current: {
+    /**
+     * One consistent read of attn's state-bearing domains, stamped with the bus
+     * position it was taken at. Every mutation at or below `asOfSeq` is already
+     * in it; a later one still has a fact coming.
+     */
     snapshot(): Promise<CurrentStateSnapshot>
   }
 }
@@ -136,7 +146,19 @@ export type Handler<Collections> = (
   ctx: AppContext<Collections>,
 ) => void | Promise<void>
 
-/** Why attn requires the app to rebuild its derived collections. */
+/**
+ * Why attn requires the app to rebuild its derived collections.
+ *
+ * - `gap` — the consumer resumed below the oldest fact still in the log. Those
+ *   facts are gone; no retry brings them back.
+ * - `version_changed` — a different version is serving, so what this app
+ *   derives from the same facts has changed and its existing documents were
+ *   never recomputed. A rollback is a version change too.
+ *
+ * Re-enabling is neither: an installed app's facts wait while it is disabled,
+ * so enabling delivers that backlog in order. Nor is a first install, which has
+ * no derived state to rebuild.
+ */
 export type ReconcileCause = "gap" | "version_changed"
 
 export type {
@@ -177,7 +199,31 @@ export interface ReconcileReason {
   readonly previousVersions: readonly number[]
 }
 
-/** Rebuilds the app's collections from current truth. It must be idempotent. */
+/**
+ * Rebuilds the app's collections from current truth, read through
+ * `ctx.current.snapshot()` rather than replayed from facts.
+ *
+ * The contract the runtime relies on:
+ *
+ * - **It converges.** Running it twice, or after an attempt that died halfway,
+ *   ends with the same collection contents. attn will do both — a failed
+ *   attempt is retried, and a daemon restart leaves the rebuild still owed.
+ * - **It deletes as well as upserts.** A rebuild that only writes leaves rows
+ *   current truth no longer has, and nothing else will remove them.
+ * - **It yields.** Every app's handlers share one event loop. Awaiting attn's
+ *   APIs keeps it turning; a synchronous loop that never yields freezes every
+ *   app until attn kills the shared runtime out from under it.
+ *
+ * While a rebuild is owed or running, this app receives no fact and every
+ * command against it is refused with the code `reconcile_owed`. Views stay
+ * mounted and observe intermediate writes, so a rebuild that must swap
+ * atomically writes a generation marker in its collection and switches it last.
+ *
+ * A rebuild that keeps throwing is retried with backoff, recorded attempt by
+ * attempt, and after fifteen minutes on the same claim the app is disabled with
+ * a notification — still owing the rebuild. `attn app status <name>` shows all
+ * of it.
+ */
 export type ReconcileHandler<Collections> = (
   reason: ReconcileReason,
   ctx: AppContext<Collections>,

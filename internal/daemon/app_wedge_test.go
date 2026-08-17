@@ -262,3 +262,67 @@ func TestTheLivenessPingIsBoundedIndependently(t *testing.T) {
 		t.Fatalf("appPingBudget() = %v, want the override", got)
 	}
 }
+
+// A timeout has to interrupt the work, not merely stop waiting for it.
+//
+// Attribution says who wedged the loop; this says what happens to the process
+// the loop is in. A handler that never yields cannot be cancelled from Go, so
+// the only way back is to end the generation it is running in and let the
+// supervisor start the replacement. Everything below the daemon was already
+// pinned — TestTerminateGenerationRestartsOnlyTheExactProcess in
+// internal/supervise — and everything above it by the tests here; nothing drove
+// a wedged dispatch through the seam between them, which a live spinner walk
+// found and no test would have.
+//
+// The supervised child is a real process so the terminate has something to
+// kill and the supervisor something to replace. The sidecar the daemon talks to
+// is still the pipe: what is being pinned is which process dies, not what is
+// said over the socket.
+func TestAWedgedDispatchEndsTheRuntimeGenerationAndTheSupervisorReplacesIt(t *testing.T) {
+	d := newAppDaemon(t)
+	d.appDispatchWait = 300 * time.Millisecond
+	d.appPingWait = 50 * time.Millisecond
+	installApp(t, d, "hog", subscribing("ticket.*"))
+
+	t.Setenv(appRuntimeHostOverride, writeExecutableStub(t, "exec sleep 300"))
+	t.Cleanup(d.stopAppRuntime)
+	if err := d.ensureAppRuntime(); err != nil {
+		t.Fatalf("start the supervised runtime: %v", err)
+	}
+	wedged, ok := d.appRuntimeSnapshot()
+	if !ok || !wedged.Running {
+		t.Fatalf("supervised runtime snapshot = %+v, want a running child", wedged)
+	}
+
+	// The fake sidecar says generation 1, which is the generation the supervisor
+	// just spawned — the same agreement a real host reaches through its
+	// environment.
+	entered := make(chan string, 1)
+	release := make(chan struct{})
+	defer close(release)
+	if wedged.Generation != 1 {
+		t.Fatalf("the supervisor spawned generation %d, but the fake sidecar says 1", wedged.Generation)
+	}
+	runtime := startFakeAppRuntime(t, d, enterOnceThenBlock(entered, release))
+
+	failed := make(chan error, 1)
+	go func() {
+		failed <- d.deliverAppEvent(context.Background(), "hog", appEvent("ticket.created", "tk-1", 1))
+	}()
+	if app := <-entered; app != "hog" {
+		t.Fatalf("first handler in was %s, want hog", app)
+	}
+	runtime.freezeLoop()
+
+	if err := <-failed; err == nil {
+		t.Fatal("a dispatch into a frozen runtime reported success")
+	}
+	waitFor(t, "the supervisor to replace the generation the timeout ended", func() bool {
+		snapshot, ok := d.appRuntimeSnapshot()
+		return ok && snapshot.Generation > wedged.Generation && snapshot.Running
+	})
+	replacement, _ := d.appRuntimeSnapshot()
+	if replacement.LastExit == nil {
+		t.Fatal("the replacement carries no exit for the generation that was ended")
+	}
+}

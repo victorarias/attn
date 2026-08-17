@@ -78,6 +78,12 @@ commands:
         so nothing an enabled consumer or installed app has yet to read is
         removed — a lagging consumer pins the log, and bus status shows the lag.
 
+        ATTN_BUS_RETENTION moves the age window (a duration). It is thirty days
+        by default, so a pass over a database younger than that removes nothing
+        however far behind a consumer is; moving it is how a trim is watched
+        doing anything at all. Set it for the daemon too, or its hourly pass and
+        this one keep different windows.
+
   disable <consumer>
         stop delivering to a consumer. Its cursor is preserved, but a disabled
         ordinary consumer no longer holds the retention window open. An
@@ -246,6 +252,7 @@ func runBusStatus(args []string) {
 	b := bus.New(bus.Options{
 		Store:       daemon.NewBusStore(s),
 		Compactable: daemon.CompactableFacts,
+		Retention:   bus.RetentionFromEnv(busStderrLog),
 		PinAlarmAge: bus.PinAlarmAgeFromEnv(busStderrLog),
 	})
 	status, err := b.Status()
@@ -399,6 +406,7 @@ func runBusTrim(args []string) {
 	b := bus.New(bus.Options{
 		Store:       daemon.NewBusStore(s),
 		Compactable: daemon.CompactableFacts,
+		Retention:   bus.RetentionFromEnv(busStderrLog),
 		Log:         busStderrLog,
 	})
 	removed, passErr := b.Trim()

@@ -587,6 +587,28 @@ Gate 7's gap rules stand. Under this policy a live gap means corruption or a
 cursor from a removed install — genuinely broken states — and a broken thing
 being loud is the point.
 
+### How the exit proof reaches a gap (slice 4, ruled 2026-08-17)
+
+That policy makes a gap unreachable from product surfaces, twice over, which is
+what the exit proof ran into. The floor covers enabled **or installed**
+consumers, so no installed app is ever trimmed past; and the age window is
+thirty days, so a trim over a throwaway profile removes nothing at all whatever
+the floor says. Both were ruled on rather than worked around:
+
+- **`ATTN_BUS_RETENTION` moves the window**, following `ATTN_BUS_PIN_ALARM_AGE`'s
+  precedent — a limit no run can reach is a limit no run can demonstrate. It is
+  read by the daemon and by `attn bus trim` alike.
+- **The precondition is manufactured, and only the precondition.** The proof
+  removes the app (a product surface, which deletes its consumer rows),
+  publishes, trims for real, and then re-inserts one row: the app's consumer at
+  the cursor it actually reached — the "cursor from a removed install" this
+  section already names as a live gap cause. The trim, the deleted events, the
+  pre-drain's gap detection, the refusal, the disable, and the notification are
+  all real.
+
+This also retires the note that gate 7's handler-less disable was unit-tested
+only; `scenario-app-reconcile.mjs` drives it against a packaged app.
+
 ## Open questions
 
 None. Victor approved the two review calls on 2026-08-14:
