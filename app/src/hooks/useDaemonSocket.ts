@@ -1385,11 +1385,22 @@ export function useDaemonSocket({
     }
 
     let browserHostToken = '';
+    // The per-profile credential the daemon requires in client_hello. In the app
+    // it comes from the profile's token file through Tauri; in a plain browser
+    // (dev:vite, Playwright) Vite hands it over, because nothing there can read
+    // a file. Empty means the hello is refused, and the daemon says where to
+    // look.
+    let clientToken = import.meta.env.VITE_CLIENT_TOKEN ?? '';
     if (isTauri()) {
       try {
         browserHostToken = await invoke<string>('get_browser_host_token');
       } catch (error) {
         console.warn('[Daemon] Browser host authentication is unavailable:', error);
+      }
+      try {
+        clientToken = await invoke<string>('get_client_token');
+      } catch (error) {
+        console.warn('[Daemon] Client token is unavailable:', error);
       }
     }
 
@@ -1439,8 +1450,9 @@ export function useDaemonSocket({
         circuitResetTimeoutRef.current = null;
       }
 
-      // Identify ourselves first thing. Sending hello is useful for
-      // daemon-side diagnostics (client kind/version in logs).
+      // Identify ourselves first thing, and prove we may be here: the daemon
+      // withholds initial_state and every broadcast until this hello passes,
+      // so nothing else can be sent before it.
       ws.send(
         JSON.stringify({
           cmd: 'client_hello',
@@ -1453,6 +1465,7 @@ export function useDaemonSocket({
             KITTY_IMAGES_CAPABILITY,
             ...(browserHostToken ? [BROWSER_HOST_CAPABILITY] : []),
           ],
+          client_token: clientToken || undefined,
           browser_host_token: browserHostToken || undefined,
         }),
       );
@@ -3053,6 +3066,15 @@ export function useDaemonSocket({
           }
 
           case 'command_error':
+            if (data.error_code === 'unauthorized_client') {
+              // The daemon hangs up right after this. Reconnecting cannot help —
+              // the token is wrong until someone changes it — so open the circuit
+              // and show what the daemon said, which names the file to read.
+              console.error('[Daemon] Client token refused:', data.error);
+              setConnectionError(data.error || 'The daemon refused this client.');
+              circuitOpenRef.current = true;
+              break;
+            }
             if (data.error === 'daemon_recovering') {
               console.debug('[Daemon] Command deferred while daemon recovers:', data.cmd);
               rejectPendingForCommand(data.cmd, 'Daemon is recovering. Please retry in a moment.');

@@ -196,6 +196,8 @@ func main() {
 		runDaemonCommand()
 	case "ws-relay":
 		runWSRelay()
+	case "client-token":
+		runClientToken()
 	case "pty-worker":
 		runPTYWorker()
 	case "workflow":
@@ -588,6 +590,18 @@ func runDaemonStop() {
 		return
 	}
 	fmt.Printf("daemon %s\n", result.Note)
+}
+
+// runClientToken prints this profile's client token — what a WebSocket client
+// must present in client_hello. Silent on stdout beyond the token itself: the
+// hub reads it over SSH to authenticate against a remote daemon.
+func runClientToken() {
+	token := config.ClientToken()
+	if token == "" {
+		fmt.Fprintf(os.Stderr, "no client token at %s — the daemon mints it at startup; start it first\n", config.ClientTokenPath())
+		os.Exit(1)
+	}
+	fmt.Println(token)
 }
 
 func runWSRelay() {

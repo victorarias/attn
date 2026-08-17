@@ -653,6 +653,30 @@ written by whoever tends it; a **crew handoff** is the member's day-line.
 Plan:
 [docs/plans/2026-08-11-the-crew-primitive.md](plans/2026-08-11-the-crew-primitive.md).
 
+## Client token
+
+The credential a client presents in `client_hello` to speak the daemon's
+protocol at all. The daemon mints it at first startup into its own profile's
+data directory as `client-token`, owner-only, and reuses it forever after so a
+restart never strands a client.
+
+It exists because the daemon's two front doors are gated differently: the unix
+socket has file permissions, and the loopback WebSocket port has nothing. The
+token gives the port the same gate. Per-profile is the point — the same binary
+serves every profile, so one profile's app cannot drive another's daemon.
+
+Distinct from the two tokens that already existed. The **browser host token**
+says *which* client is the trusted Tauri main webview, once it is already
+inside; `ATTN_WS_AUTH_TOKEN` is an operator-set HTTP bearer for a WS port
+deliberately exposed beyond loopback. The client token answers the earlier
+question: may this process speak here? — and a connection that already cleared
+the bearer is exempt from it, because that is the same question answered at the
+layer that fits a browser.
+
+`attn client-token` prints it. A refused hello names the file and the profile,
+so the fix is readable off the error. Plan:
+[docs/plans/2026-08-16-local-ws-client-token.md](plans/2026-08-16-local-ws-client-token.md).
+
 ## Home daemon
 
 A daemon that is **its own home** — standalone, complete, owning its garden,

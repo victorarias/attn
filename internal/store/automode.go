@@ -140,11 +140,16 @@ func (s *Store) SetAutoModeEnabledDefault(enabled bool, now time.Time) (automode
 // proposal that could never be promoted never reaches the app's review list.
 //
 // The review list is a human's, so it is defended twice. An identical pending
-// proposal returns the one already there rather than a second row — a session
-// denied the same call twice has asked once. Past that, one proposer holds at
-// most automode.MaxPendingProposalsPerProposer unresolved proposals, and the
-// refusal names the cap and what it was asked to add: a caller that hit it can
-// say what to promote or discard, and the list stays reviewable.
+// proposal from the same proposer returns the one already there rather than a
+// second row — a session denied the same call twice has asked once. The
+// proposer is part of that key on purpose: the list says who asked, and
+// collapsing a second session's ask onto the first would credit the wrong one.
+// Two askers are two rows until a promotion satisfies both. A unique index over
+// pending rows holds the same key, so the answer does not depend on which
+// process is doing the asking. Past that, one proposer holds at most
+// automode.MaxPendingProposalsPerProposer unresolved proposals, and the refusal
+// names the cap and what it was asked to add: a caller that hit it can say what
+// to promote or discard, and the list stays reviewable.
 func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, now time.Time) (AutoModeProposal, error) {
 	if err := automode.ValidateProposal(kind, target, value); err != nil {
 		return AutoModeProposal{}, err
@@ -154,11 +159,15 @@ func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, n
 	if s.db == nil {
 		return AutoModeProposal{}, fmt.Errorf("store: no database")
 	}
-	existing, err := scanAutoModeProposal(s.db.QueryRow(`
-		SELECT id, kind, target, value, proposed_by, state, created_at, resolved_at
-		FROM automode_proposals
-		WHERE state = ? AND kind = ? AND target = ? AND value = ?
-		ORDER BY id ASC LIMIT 1`, automode.StatePending, kind, target, value))
+	findPending := func() (AutoModeProposal, error) {
+		return scanAutoModeProposal(s.db.QueryRow(`
+			SELECT id, kind, target, value, proposed_by, state, created_at, resolved_at
+			FROM automode_proposals
+			WHERE state = ? AND kind = ? AND target = ? AND value = ? AND proposed_by = ?
+			ORDER BY id ASC LIMIT 1`,
+			automode.StatePending, kind, target, value, proposedBy))
+	}
+	existing, err := findPending()
 	if err == nil {
 		return existing, nil
 	}
@@ -184,6 +193,11 @@ func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, n
 		VALUES (?, ?, ?, ?, ?, ?)
 	`, kind, target, value, proposedBy, automode.StatePending, stamp)
 	if err != nil {
+		// The index caught an asker this process did not see; that ask is the
+		// row already there, not a failure to report.
+		if existing, findErr := findPending(); findErr == nil {
+			return existing, nil
+		}
 		return AutoModeProposal{}, err
 	}
 	id, err := res.LastInsertId()
@@ -283,8 +297,13 @@ func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModePropos
 		return AutoModeProposal{}, automode.Config{}, err
 	}
 	stamp := now.UTC().Format(sortableTimeFormat)
-	if _, err := tx.Exec(`UPDATE automode_proposals SET state = ?, resolved_at = ? WHERE id = ?`,
-		automode.StatePromoted, stamp, id); err != nil {
+	// Every asker for this same change is answered by this one promotion, so
+	// none of them stays pending asking for what the config already says.
+	if _, err := tx.Exec(`
+		UPDATE automode_proposals SET state = ?, resolved_at = ?
+		WHERE state = ? AND kind = ? AND target = ? AND value = ?`,
+		automode.StatePromoted, stamp,
+		automode.StatePending, proposal.Kind, proposal.Target, proposal.Value); err != nil {
 		return AutoModeProposal{}, automode.Config{}, err
 	}
 	if err := tx.Commit(); err != nil {

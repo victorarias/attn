@@ -53,6 +53,10 @@ const (
 	// rebuild is owed or running. The result carries the current structured
 	// reconcile reason so a caller never has to recover the fence from prose.
 	ErrorCodeReconcileOwed = "reconcile_owed"
+	// ErrorCodeUnauthorizedClient refuses a client_hello whose client_token does
+	// not match the daemon's. Nothing to retry on the same value — read the token
+	// file the message names, or ask the daemon that owns it.
+	ErrorCodeUnauthorizedClient = "unauthorized_client"
 )
 
 // DocSubscriptionsPerClient bounds how many live queries one WebSocket client

@@ -482,6 +482,16 @@ settles it; `turn_owed` is derived at broadcast from the persisted
 IPC: `~/.attn/attn.sock`. WebSocket clients buffer 256 messages; sustained
 over-send may drop messages or disconnect slow clients.
 
+Every WebSocket client presents the profile's **client token** in
+`client_hello` — the socket has file permissions, the port had nothing. The
+daemon mints `<data-dir>/client-token` at startup; clients read it through one
+path per language (`config.ClientToken()`, `get_client_token`,
+`harnessClientHello()`). A new client that dials the daemon must send it, or
+the hello is refused by name. Nothing is pushed before that hello: hub
+registration and `initial_state` both happen in `admitClient`, so an
+unauthorized connection sees no broadcast at all, not merely refused commands.
+See `docs/glossary.md`.
+
 ## Cross-cutting contracts
 
 ### Protocol

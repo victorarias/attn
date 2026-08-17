@@ -31,7 +31,7 @@ const inspectsTo = (resolved: string) => vi.fn(async (inputPath: string) => ({
 function renderPicker(settings: Record<string, string>) {
   const onSelect = vi.fn();
   const onInspectPath = inspectsTo('/home/remote/projects');
-  render(
+  const { rerender } = render(
     <SettingsProvider settings={settings} setSetting={vi.fn()}>
       <LocationPicker
         isOpen
@@ -44,7 +44,20 @@ function renderPicker(settings: Record<string, string>) {
       />
     </SettingsProvider>,
   );
-  return { onSelect };
+  const withSettings = (next: Record<string, string>) => rerender(
+    <SettingsProvider settings={next} setSetting={vi.fn()}>
+      <LocationPicker
+        isOpen
+        purpose="workspace"
+        onClose={vi.fn()}
+        onSelect={onSelect}
+        onInspectPath={onInspectPath}
+        agentAvailability={{ shell: true, claude: true, codex: true, snipe: true }}
+        endpoints={[]}
+      />
+    </SettingsProvider>,
+  );
+  return { onSelect, withSettings };
 }
 
 const launch = () => {
@@ -99,6 +112,35 @@ describe('LocationPicker auto mode toggle', () => {
     fireEvent.click(screen.getByTestId('location-picker-automode-toggle'));
     launch();
 
+    await waitFor(() => {
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'snipe', undefined, false, false, undefined, false);
+    });
+  });
+
+  // The picker can open before the settings snapshot lands, so a default that
+  // arrives late still has to move a toggle nobody answered for.
+  it('follows a default that arrives after the picker opened', () => {
+    const { withSettings } = renderPicker(PI_SETTINGS);
+    pickSnipe();
+    expect(screen.getByTestId('location-picker-automode-toggle')).toHaveAttribute('aria-checked', 'true');
+
+    withSettings({ ...PI_SETTINGS, automode_enabled_default: 'false' });
+
+    expect(screen.getByTestId('location-picker-automode-toggle')).toHaveAttribute('aria-checked', 'false');
+  });
+
+  // …and once the launcher has answered, a default moving underneath must not
+  // launch the opposite of what they chose.
+  it('keeps an explicit off when the default changes underneath it', async () => {
+    const { onSelect, withSettings } = renderPicker(PI_SETTINGS);
+    pickSnipe();
+    fireEvent.click(screen.getByTestId('location-picker-automode-toggle'));
+
+    withSettings({ ...PI_SETTINGS, automode_enabled_default: 'false' });
+    withSettings({ ...PI_SETTINGS, automode_enabled_default: 'true' });
+
+    expect(screen.getByTestId('location-picker-automode-toggle')).toHaveAttribute('aria-checked', 'false');
+    launch();
     await waitFor(() => {
       expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'snipe', undefined, false, false, undefined, false);
     });

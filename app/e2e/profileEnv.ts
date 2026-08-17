@@ -25,6 +25,12 @@ export function resolveAttnBinaryPath(): string {
   );
 }
 
+// The client token the throwaway daemon and the bundle under test share. The
+// daemon takes it from ATTN_CLIENT_TOKEN instead of minting one, and Vite hands
+// the same value to the browser, which cannot read the daemon's temp data dir.
+// A fixed string is fine: this daemon lives for one run on a per-profile port.
+export const E2E_CLIENT_TOKEN = 'e2e-client-token';
+
 export interface E2EPorts {
   profile: string;
   daemonPort: string;

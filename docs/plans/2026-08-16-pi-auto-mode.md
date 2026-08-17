@@ -66,8 +66,10 @@ Conclusions the design leans on:
 
 In the session (pi side):
 
-- `/auto` toggles; `--auto` / `--no-auto` flags (registerFlag) force it at
-  launch; status indicator shows the mode. Default: on for attn sessions,
+- `/auto` toggles; `--auto` / `--no-auto` flags (registerFlag) decide where
+  the session starts; status indicator shows the mode. Precedence is
+  `/auto > flag > enabled_default`: the flag sets the starting mode and the
+  command the user typed wins after that. Default: on for attn sessions,
   off for bare pi.
 - Denial tool-result contract (the model-facing API): names auto mode, the
   blocked action, the reason, and states that the user's explicit approval
@@ -176,8 +178,10 @@ Classifier (layer 2a → 2b):
      over auto mode's own surfaces; proposal dedupe and per-proposer cap.
    - **5b — denial reporting.** Denial fact → notification + session
      activity. Needs slice 3's suite relay.
-6. **Live verification pass.** Harness scenario, daily-driver soak,
-   evidence recordings; defaults flipped on for attn sessions.
+6. **The closer.** The deterministic harness scenario, the hardening review
+   left behind, and this doc told true. The default did not need flipping:
+   `enabled_default` shipped on in slice 4 and a fresh machine already
+   launches attn pi sessions with auto mode on, bare pi off.
 
 ## How to verify
 

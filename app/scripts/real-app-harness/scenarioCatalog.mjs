@@ -341,6 +341,15 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'pi-automode',
+    label: 'pi auto mode: envelope invisibility, a denial and its surfaces, a conversational grant, a quiet session, the circuit breaker',
+    command: ['pnpm', 'run', 'real-app:scenario-pi-automode'],
+    // Needs `pi` on PATH and the attn-pi plugin installed, but no credentials
+    // and no network: the session's model and auto mode's classifier are both
+    // a loopback stub, so every verdict is the script's.
+    timeoutMs: 900_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

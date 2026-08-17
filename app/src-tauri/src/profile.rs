@@ -97,6 +97,23 @@ fn data_dir() -> Result<PathBuf, String> {
     Ok(home.join(name))
 }
 
+/// Reads the per-profile credential every WebSocket client presents in
+/// client_hello. The daemon mints it at startup — the app only reads it, so a
+/// missing file means the daemon has not started yet and the empty string lets
+/// the daemon answer with the path it expected.
+pub fn read_client_token() -> Result<String, String> {
+    if let Ok(token) = env::var("ATTN_CLIENT_TOKEN") {
+        let token = token.trim().to_string();
+        if !token.is_empty() {
+            return Ok(token);
+        }
+    }
+    let path = data_dir()?.join("client-token");
+    Ok(fs::read_to_string(&path)
+        .map(|token| token.trim().to_string())
+        .unwrap_or_default())
+}
+
 /// Returns the stable per-profile secret used to authenticate the trusted main
 /// webview as the daemon's browser host. The token is persisted with owner-only
 /// permissions so app restarts can reconnect to a daemon that stayed alive.

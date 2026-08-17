@@ -110,8 +110,12 @@ type Daemon struct {
 	pidFile          *os.File // Held open with flock for exclusive access
 	dataRoot         string
 	daemonInstanceID string
-	store            *store.Store
-	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	// clientToken gates the WebSocket port, which has no file permissions of its
+	// own. Read once at startup: every client_hello compares against it, and the
+	// file it came from is what the refusal names.
+	clientToken  string
+	store        *store.Store
+	automationMu sync.Mutex // serializes idempotent ensure/adopt delivery per profile
 	// wsAutomationMutationTimeout bounds how long a WS-originated automation
 	// mutation (set_enabled) waits to acquire automationMu before aborting
 	// without mutating. 0 resolves to defaultWSAutomationMutationTimeout via
@@ -1049,6 +1053,13 @@ func (d *Daemon) Start() error {
 			return fmt.Errorf("ensure daemon instance id: %w", err)
 		}
 		d.daemonInstanceID = instanceID
+	}
+	if d.clientToken == "" {
+		token, err := config.EnsureClientToken(d.dataRoot)
+		if err != nil {
+			return fmt.Errorf("ensure client token: %w", err)
+		}
+		d.clientToken = token
 	}
 	if err := d.ensureEnrollment(); err != nil {
 		return fmt.Errorf("ensure enrollment record: %w", err)

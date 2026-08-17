@@ -106,6 +106,30 @@ func runSSHExit(ctx context.Context, target, profile, script string) (stdout, st
 	return stdout, stderr, -1, runErr
 }
 
+// remoteClientToken reads the remote profile's client token — the credential
+// its daemon requires in client_hello. The hub cannot mint or derive it: the
+// token lives in that host's profile data, and ws-relay is a byte pipe, so the
+// hub's hello is checked on the far side like any local client's.
+//
+// SSH is the only new thing this asks for, and the hub already has it — it runs
+// the remote `attn` binary over the same channel to start the relay. Access to
+// the box was already full authority over it.
+//
+// Empty on any failure: the daemon's own refusal names the file and the
+// profile, which is a better answer than a guess made here.
+func (m *Manager) remoteClientToken(ctx context.Context, target, profile string) string {
+	stdout, stderr, code, err := runSSHExit(ctx, target, profile, remoteAttnCommand(profile, "client-token"))
+	if err != nil {
+		m.logf("hub: remote client-token on %s failed: %v", target, err)
+		return ""
+	}
+	if code != 0 {
+		m.logf("hub: remote client-token on %s exited %d: %s", target, code, stderr)
+		return ""
+	}
+	return strings.TrimSpace(stdout)
+}
+
 func runSSH(ctx context.Context, target, profile, script string) (string, error) {
 	var stderr bytes.Buffer
 	cmd := exec.CommandContext(ctx, "ssh", append(sshBaseArgs(target), remoteShellCommand(profile, script))...)

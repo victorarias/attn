@@ -99,7 +99,8 @@
     "real-app:scenario-nisse-tools": "node scripts/real-app-harness/scenario-nisse-tools.mjs",
     "real-app:scenario-nisse-revive": "node scripts/real-app-harness/scenario-nisse-revive.mjs",
     "real-app:scenario-nisse-delegate": "node scripts/real-app-harness/scenario-nisse-delegate.mjs",
-    "real-app:scenario-nisse-history": "node scripts/real-app-harness/scenario-nisse-history.mjs"
+    "real-app:scenario-nisse-history": "node scripts/real-app-harness/scenario-nisse-history.mjs",
+    "real-app:scenario-pi-automode": "node scripts/real-app-harness/scenario-pi-automode.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

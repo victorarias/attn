@@ -630,6 +630,11 @@ model ClientHelloMessage {
   client_kind: string;          // e.g. "tauri-app", "remote-web"
   version: string;              // free-form, used for diagnostics
   capabilities: string[];       // see capability docstrings above
+  // Per-profile credential from <data-dir>/client-token, minted by the daemon.
+  // The WebSocket port has no file permissions of its own, so this is what a
+  // local client proves before the daemon records its identity, registers it
+  // for broadcasts, or sends it initial_state.
+  client_token?: string;
   browser_host_token?: string;  // secret available only to the trusted Tauri main webview
   // Stable for as long as the client process lives, new on every restart. It is
   // what lets the daemon tell a reconnecting client why it was hung up on
@@ -6198,6 +6203,9 @@ model WebSocketEvent {
   // Common result fields
   success?: boolean;
   error?: string;
+  // Machine-readable failure class, so a client acts on the failure instead of
+  // matching English. See the ErrorCode constants in protocol/constants.go.
+  error_code?: string;
 
   // PR/worktree/branch operations
   action?: string;

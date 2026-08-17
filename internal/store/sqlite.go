@@ -1157,6 +1157,14 @@ CREATE TABLE IF NOT EXISTS automode_denials (
 CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DESC);`},
 	// Applied by applyMigration110, whose ALTER is column-guarded.
 	{110, "record which rule denied an auto mode call", ``},
+	// The review list says who asked, so one asker's pending row is what the
+	// dedupe collapses — a second session asking the same thing is a second ask.
+	// The index is what makes that true against the database rather than only
+	// inside the process that happens to hold the store's lock.
+	{111, "one pending auto mode proposal per asker", `CREATE UNIQUE INDEX IF NOT EXISTS
+    idx_automode_proposals_pending_ask
+    ON automode_proposals(kind, target, value, proposed_by)
+    WHERE state = 'pending';`},
 	// The reconcile tables, at 112 rather than the 108 they were written as.
 	// 108 and 111 are both burned — each was applied to a production database by
 	// a branch still in flight — and migrateDB skips anything at or below the

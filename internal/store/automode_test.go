@@ -3,6 +3,7 @@ package store
 import (
 	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -360,6 +361,89 @@ func TestAutoModeProposalDedupesAnIdenticalPendingOne(t *testing.T) {
 	}
 	if third.ID == first.ID {
 		t.Error("a discarded proposal was reused instead of a new one being recorded")
+	}
+}
+
+// The review list says who asked, so it must not tell a human that session-a
+// asked for something session-b asked for.
+func TestAutoModeProposalKeepsEachAskerSeparate(t *testing.T) {
+	s := New()
+	now := time.Now().UTC()
+	first, err := s.CreateAutoModeProposal(automode.KindAllow, "", "git push origin*", "session-a", now)
+	if err != nil {
+		t.Fatalf("first: %v", err)
+	}
+	second, err := s.CreateAutoModeProposal(automode.KindAllow, "", "git push origin*", "session-b", now)
+	if err != nil {
+		t.Fatalf("second: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Fatal("session-b's ask was collapsed onto session-a's row")
+	}
+	if second.ProposedBy != "session-b" {
+		t.Errorf("second proposal credits %q, want session-b", second.ProposedBy)
+	}
+
+	// One promotion answers every asker, so nobody is left asking for what the
+	// config already says.
+	if _, _, err := s.PromoteAutoModeProposal(first.ID, now); err != nil {
+		t.Fatalf("promote: %v", err)
+	}
+	pending, err := s.ListAutoModeProposals(automode.StatePending)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(pending) != 0 {
+		t.Errorf("pending = %v, want the sibling ask resolved by the promotion", pending)
+	}
+	promoted, err := s.ListAutoModeProposals(automode.StatePromoted)
+	if err != nil {
+		t.Fatalf("list promoted: %v", err)
+	}
+	if len(promoted) != 2 {
+		t.Errorf("promoted = %v, want both askers answered", promoted)
+	}
+}
+
+// The dedupe is a real constraint, not an agreement between callers that happen
+// to hold the same lock: two askers racing on the same change land one row.
+func TestAutoModeProposalRaceLandsOneRow(t *testing.T) {
+	s := New()
+	now := time.Now().UTC()
+	var wg sync.WaitGroup
+	ids := make([]int64, 8)
+	errs := make([]error, 8)
+	for i := range ids {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			p, err := s.CreateAutoModeProposal(automode.KindDeny, "", "ssh prod*", "session-a", now)
+			ids[i], errs[i] = p.ID, err
+		}(i)
+	}
+	wg.Wait()
+	for i, err := range errs {
+		if err != nil {
+			t.Fatalf("proposal %d: %v", i, err)
+		}
+		if ids[i] != ids[0] {
+			t.Errorf("proposal %d got id %d, want the one row %d", i, ids[i], ids[0])
+		}
+	}
+	pending, err := s.ListAutoModeProposals(automode.StatePending)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(pending) != 1 {
+		t.Errorf("pending = %v, want one row", pending)
+	}
+	// The database is what says so, whoever is asking.
+	if _, err := s.db.Exec(`
+		INSERT INTO automode_proposals (kind, target, value, proposed_by, state, created_at)
+		VALUES (?, '', ?, ?, ?, ?)`,
+		automode.KindDeny, "ssh prod*", "session-a", automode.StatePending,
+		now.UTC().Format(sortableTimeFormat)); err == nil {
+		t.Error("a duplicate pending ask was accepted straight into the table")
 	}
 }
 

@@ -83,6 +83,9 @@ func TestRealAgentHarness(t *testing.T) {
 		t.Fatalf("websocket dial: %v", err)
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
+	// The daemon sends this connection nothing, and refuses every gated command
+	// on it, until the hello presents the client token.
+	sendWorkspaceClientHello(t, conn)
 
 	c := client.New(sockPath)
 	sessionID := wrapper.GenerateSessionID()

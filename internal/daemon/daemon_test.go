@@ -150,6 +150,12 @@ func TestMain(m *testing.M) {
 	}
 	_ = os.Setenv(toolhome.EnvVar, toolHomeDir)
 
+	// Daemons here start against a per-test socket dir, not the scoped data dir,
+	// so a minted token would land somewhere config.ClientToken() never looks.
+	// One value for both ends is exactly what the override is for; tests that
+	// exercise the refusal set their own.
+	_ = os.Setenv("ATTN_CLIENT_TOKEN", "daemon-test-client-token")
+
 	code := m.Run()
 	os.RemoveAll(dataDir)
 	os.RemoveAll(toolHomeDir)
@@ -3079,13 +3085,14 @@ func TestDaemon_AttachFlowOverWebSocket(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
+	sendWorkspaceClientHello(t, conn)
 	initial := waitForDaemonWebSocketEvent(t, conn, 10*time.Second, func(evt map[string]interface{}) bool {
 		return asString(evt["event"]) == protocol.EventInitialState
 	})
 	if !initialStateIncludesSession(initial, sessionID) {
 		t.Fatalf("initial_state did not include smoke session %q", sessionID)
 	}
-	sendWorkspaceClientHello(t, conn)
 
 	if err := writeWS(conn, map[string]interface{}{
 		"cmd": protocol.CmdAttachSession,
@@ -3227,6 +3234,7 @@ func sendWorkspaceClientHello(t *testing.T, conn *websocket.Conn) {
 		"client_kind":  "daemon-test",
 		"version":      "protocol-" + protocol.ProtocolVersion,
 		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+		"client_token": config.ClientToken(),
 	}); err != nil {
 		t.Fatalf("send client hello: %v", err)
 	}
@@ -3937,13 +3945,13 @@ func TestDaemon_ApprovePR_ViaWebSocket(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
+	// The hello is what unlocks initial_state; nothing arrives before it.
+	sendWorkspaceClientHello(t, conn)
 	_, initialData, err := conn.Read(ctx)
 	if err != nil {
 		t.Fatalf("Read initial state error: %v", err)
 	}
 	t.Logf("Initial state: %s", string(initialData))
-	sendWorkspaceClientHello(t, conn)
 
 	// Send approve command
 	prID := protocol.FormatPRID(ghClient.Host(), "test/repo", 42)
@@ -4153,7 +4161,8 @@ func TestDaemon_MutePR_ViaWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state (other background broadcasts may arrive first).
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
+	sendWorkspaceClientHello(t, wsConn)
 	initialState := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 	if len(initialState.Prs) != 1 {
 		t.Fatalf("Expected 1 PR in initial state, got %d", len(initialState.Prs))
@@ -4236,9 +4245,9 @@ func TestDaemon_MuteRepo_ViaWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state (other background broadcasts may arrive first).
-	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
 	sendWorkspaceClientHello(t, wsConn)
+	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// Send mute_repo command
 	muteCmd := map[string]interface{}{
@@ -4322,7 +4331,8 @@ func TestDaemon_InitialState_IncludesRepoStates(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state (other background broadcasts may arrive first).
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
+	sendWorkspaceClientHello(t, wsConn)
 	initialState := waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// Verify initial state includes repos
@@ -4388,7 +4398,8 @@ func TestDaemon_StateChange_BroadcastsToWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state (other background broadcasts may arrive first).
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
+	sendWorkspaceClientHello(t, wsConn)
 	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// Update state to waiting_input via unix socket
@@ -4458,6 +4469,8 @@ func TestDaemon_HookReportedStatesReachClients(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
+	// The hello is what unlocks initial_state; other broadcasts may arrive first.
+	sendWorkspaceClientHello(t, wsConn)
 	waitForProtocolWebSocketEvent(t, wsConn, protocol.EventInitialState)
 
 	// A turn starts, the agent asks the user a question, the user answers and the
@@ -4520,7 +4533,8 @@ func TestDaemon_InjectTestSession_BroadcastsToWebSocket(t *testing.T) {
 	}
 	defer wsConn.Close(websocket.StatusNormalClosure, "")
 
-	// Read initial state
+	// The hello is what unlocks initial_state; nothing arrives before it.
+	sendWorkspaceClientHello(t, wsConn)
 	_, _, err := wsConn.Read(ctx)
 	if err != nil {
 		t.Fatalf("Read initial state error: %v", err)

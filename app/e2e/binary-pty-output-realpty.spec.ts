@@ -1,4 +1,5 @@
 import { test, expect } from './fixtures';
+import { E2E_CLIENT_TOKEN } from './profileEnv';
 
 const realPtyEnabled = process.env.VITE_FORCE_REAL_PTY === '1';
 
@@ -37,7 +38,7 @@ test.describe('Binary PTY output transport', () => {
     // Mirror the app's spawn flow: identify (client_hello), register the
     // owning workspace, then spawn the session runtime into it.
     const spawnResult = await page.evaluate(
-      ({ wsUrl, id }) =>
+      ({ wsUrl, id, clientToken }) =>
         new Promise<{ success?: boolean; error?: string }>((resolve, reject) => {
           const workspaceId = `workspace-${id}`;
           const ws = new WebSocket(wsUrl);
@@ -77,6 +78,7 @@ test.describe('Binary PTY output transport', () => {
               client_kind: 'e2e-test',
               version: 'e2e',
               capabilities: ['workspace_sessions'],
+              client_token: clientToken,
             }));
             ws.send(JSON.stringify({
               cmd: 'register_workspace',
@@ -96,7 +98,7 @@ test.describe('Binary PTY output transport', () => {
             }));
           };
         }),
-      { wsUrl: daemonInfo.wsUrl, id: sessionId }
+      { wsUrl: daemonInfo.wsUrl, id: sessionId, clientToken: E2E_CLIENT_TOKEN }
     );
     expect(spawnResult.success, JSON.stringify(spawnResult)).toBe(true);
 

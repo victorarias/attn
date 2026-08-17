@@ -177,6 +177,31 @@ export function dataDirForProfile(profile = currentHarnessProfile()) {
   return resolveHarnessResources(profile).dataDir;
 }
 
+// The credential the daemon requires in client_hello, minted into the profile's
+// data dir at daemon startup. Every harness socket sends it; without it the
+// daemon refuses the hello and names this file.
+export function clientTokenForProfile(profile = currentHarnessProfile()) {
+  const fromEnv = (process.env.ATTN_CLIENT_TOKEN ?? '').trim();
+  if (fromEnv) return fromEnv;
+  try {
+    return fs.readFileSync(path.join(dataDirForProfile(profile), 'client-token'), 'utf8').trim();
+  } catch {
+    return '';
+  }
+}
+
+// The hello every harness websocket opens with. One place, so a new field on
+// the message reaches all of them.
+export function harnessClientHello(clientKind, { version = 'real-app-harness', capabilities = ['workspace_sessions'] } = {}) {
+  return {
+    cmd: 'client_hello',
+    client_kind: clientKind,
+    version,
+    capabilities,
+    client_token: clientTokenForProfile(),
+  };
+}
+
 // Unix socket the `attn` CLI talks to for the active profile. Pass this as
 // ATTN_SOCKET_PATH when driving the CLI (e.g. `attn open`) against the daemon.
 export function socketPathForProfile(profile = currentHarnessProfile()) {

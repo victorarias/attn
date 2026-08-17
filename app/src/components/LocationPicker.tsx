@@ -301,6 +301,7 @@ export function LocationPicker({
   const [yoloMode, setYoloMode] = useState(false);
   const [chiefOfStaff, setChiefOfStaff] = useState(false);
   const [autoMode, setAutoMode] = useState(true);
+  const autoModeTouchedRef = useRef(false);
   // The conversation this session will pick up from, '' for a fresh one.
   const [resumeFile, setResumeFile] = useState('');
   const [pastConversations, setPastConversations] = useState<PastConversation[]>([]);
@@ -520,7 +521,13 @@ export function LocationPicker({
     }
   }, [chiefToggleEligible]);
 
+  // The toggle follows the promoted default only until someone answers for
+  // themselves. The picker can open before the settings snapshot lands, so a
+  // default arriving late must still move an untouched toggle — but once a
+  // human has flipped it, a default that changes underneath must not launch the
+  // opposite of what they chose.
   useEffect(() => {
+    if (autoModeTouchedRef.current) return;
     setAutoMode((prev) => (prev === autoModeDefault ? prev : autoModeDefault));
   }, [autoModeDefault]);
 
@@ -1137,7 +1144,10 @@ export function LocationPicker({
                   role="switch"
                   aria-checked={autoMode}
                   onMouseDown={(e) => e.preventDefault()}
-                  onClick={() => setAutoMode((prev) => !prev)}
+                  onClick={() => {
+                    autoModeTouchedRef.current = true;
+                    setAutoMode((prev) => !prev);
+                  }}
                   title="Judge calls that reach outside this session's directory against what the conversation asked for, instead of running everything"
                 >
                   <span className="agent-option-name">{autoMode ? 'On' : 'Off'}</span>

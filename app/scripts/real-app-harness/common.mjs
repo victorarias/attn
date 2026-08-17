@@ -6,6 +6,7 @@ import { waitForFirstWorkspacePane, waitForPaneVisible } from './scenarioAsserti
 import {
   assertProductionRunAllowed,
   currentHarnessProfile,
+  harnessClientHello,
   defaultAppPathForProfile,
   defaultWSURLForProfile,
   deepLinkSchemeForProfile,
@@ -321,10 +322,7 @@ async function writeDaemonSettings(entries, { wsUrl = defaultWSURLForProfile(), 
         // The daemon refuses commands from a client that has not claimed
         // workspace_sessions, and says so on the way out.
         ws.send(JSON.stringify({
-          cmd: 'client_hello',
-          client_kind: 'harness-observer',
-          version: 'real-app-harness',
-          capabilities: ['workspace_sessions'],
+          ...harnessClientHello('harness-observer'),
         }));
         for (const { key, value } of entries) {
           ws.send(JSON.stringify({ cmd: 'set_setting', key, value }));

@@ -2305,6 +2305,7 @@ export interface ClientHelloMessage {
     capabilities:        string[];
     client_id?:          string;
     client_kind:         string;
+    client_token?:       string;
     cmd:                 ClientHelloMessageCmd;
     version:             string;
     [property: string]: any;
@@ -7980,6 +7981,7 @@ export interface WebSocketEvent {
     directory?:                string;
     dirty?:                    boolean;
     error?:                    string;
+    error_code?:               string;
     event:                     string;
     exit_code?:                number;
     found?:                    boolean;
@@ -14531,6 +14533,7 @@ const typeMap: any = {
         { json: "capabilities", js: "capabilities", typ: a("") },
         { json: "client_id", js: "client_id", typ: u(undefined, "") },
         { json: "client_kind", js: "client_kind", typ: "" },
+        { json: "client_token", js: "client_token", typ: u(undefined, "") },
         { json: "cmd", js: "cmd", typ: r("ClientHelloMessageCmd") },
         { json: "version", js: "version", typ: "" },
     ], "any"),
@@ -18004,6 +18007,7 @@ const typeMap: any = {
         { json: "directory", js: "directory", typ: u(undefined, "") },
         { json: "dirty", js: "dirty", typ: u(undefined, true) },
         { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "error_code", js: "error_code", typ: u(undefined, "") },
         { json: "event", js: "event", typ: "" },
         { json: "exit_code", js: "exit_code", typ: u(undefined, 0) },
         { json: "found", js: "found", typ: u(undefined, true) },

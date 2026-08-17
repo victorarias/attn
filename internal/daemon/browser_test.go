@@ -50,12 +50,15 @@ func TestBrowserHostRequiresMatchingToken(t *testing.T) {
 	t.Setenv("ATTN_BROWSER_HOST_TOKEN", "expected-secret")
 	client := newWorkspaceProtocolTestClient()
 	client.trustedTauriOrigin = true
-	d := &Daemon{}
+	// The browser-host secret is a second credential on top of the client
+	// token; the hello has to clear the first gate to reach it.
+	d := newHelloTestDaemon(t, "client-token")
 
 	d.handleClientHello(client, &protocol.ClientHelloMessage{
 		ClientKind:       "tauri-app",
 		Version:          "test",
 		Capabilities:     []string{protocol.CapabilityBrowserHost},
+		ClientToken:      protocol.Ptr("client-token"),
 		BrowserHostToken: protocol.Ptr("wrong-secret"),
 	})
 	if client.IsBrowserHost() {
@@ -66,6 +69,7 @@ func TestBrowserHostRequiresMatchingToken(t *testing.T) {
 		ClientKind:       "tauri-app",
 		Version:          "test",
 		Capabilities:     []string{protocol.CapabilityBrowserHost},
+		ClientToken:      protocol.Ptr("client-token"),
 		BrowserHostToken: protocol.Ptr("expected-secret"),
 	})
 	if !client.IsBrowserHost() {
