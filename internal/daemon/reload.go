@@ -274,7 +274,14 @@ func (d *Daemon) executePreparedSessionReload(sessionID string, opts ptybackend.
 	// Success. Do NOT clear the flag here — the killed worker's exit consumes it.
 	// AfterFunc is a backstop only (never-arriving exit), so the flag cannot wedge.
 	time.AfterFunc(reloadStuckFlagGrace, func() { d.clearReloading(sessionID) })
-	d.store.SetLaunchIntent(sessionID, launchIntentFromSpawnOptions(opts, d.isChiefOfStaffSession(sessionID)))
+	intent := launchIntentFromSpawnOptions(opts, d.isChiefOfStaffSession(sessionID))
+	// SpawnOptions does not carry the auto mode choice — it never reaches the
+	// worker — so rewriting the intent from it alone would silently drop the
+	// launcher's override on every reload.
+	if prior, ok := d.store.LaunchIntent(sessionID); ok {
+		intent.AutoMode = prior.AutoMode
+	}
+	d.store.SetLaunchIntent(sessionID, intent)
 	d.recordReviewerEvidence(sessionID, opts.ApprovalRoute.ReviewerInLoop())
 	d.publishFact(FactSessionRespawned, sessionID, nil)
 	d.logf("reload: respawned %s (agent=%s resume=%t yolo=%t)", sessionID, opts.Agent, opts.ResumeSessionID != "", opts.YoloMode)
@@ -491,6 +498,11 @@ func (d *Daemon) preparePluginReload(session *protocol.Session, opts *ptybackend
 		if err != nil {
 			prepared.abort()
 			return nil, fmt.Errorf("read auto mode config: %w", err)
+		}
+		// A reload is the same session continuing, so it keeps the choice its
+		// launch was given rather than picking up today's enabled_default.
+		if intent, ok := d.store.LaunchIntent(session.ID); ok && intent.AutoMode != nil {
+			cfg.EnabledDefault = *intent.AutoMode
 		}
 		params.AutoMode = &cfg
 	}

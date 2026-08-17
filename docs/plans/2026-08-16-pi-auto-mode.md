@@ -168,9 +168,14 @@ Classifier (layer 2a → 2b):
    bare pi.
 4. **attn config + CLI.** Storage + migrations, `attn automode` verbs with
    propose semantics, daemon injection into spawn, protocol additions.
-5. **attn visibility + promotion.** Denial fact → notification + session
-   activity; proposed-rules settings section (promote/discard); launch
-   parameter toggle.
+5. **attn visibility + promotion.** Split in two so promotion did not wait
+   on slice 3's relay.
+   - **5a — promotion surface.** Proposed-rules settings section
+     (promote/discard) with a waiting-proposals badge; launch parameter
+     toggle carried through spawn, revive, and reload; shipped hard denies
+     over auto mode's own surfaces; proposal dedupe and per-proposer cap.
+   - **5b — denial reporting.** Denial fact → notification + session
+     activity. Needs slice 3's suite relay.
 6. **Live verification pass.** Harness scenario, daily-driver soak,
    evidence recordings; defaults flipped on for attn sessions.
 

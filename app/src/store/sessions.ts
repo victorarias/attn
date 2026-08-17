@@ -42,6 +42,10 @@ export interface Session {
   // spawn args are taken. The daemon persists it in the launch intent, so a
   // revive does not need it back from here.
   resumeConversationFile?: string;
+  // The launcher's per-session auto mode choice, undefined for "follow the
+  // promoted default". Like resumeConversationFile it is carried only until the
+  // spawn args are taken; the daemon persists it in the launch intent.
+  autoMode?: boolean;
   transcriptMatched: boolean;
   branch?: string;
   isWorktree?: boolean;
@@ -88,6 +92,7 @@ interface SessionStore {
     // An existing conversation to pick up from. Only a conversation agent reads
     // it; every other agent ignores it.
     resumeConversationFile?: string,
+    autoMode?: boolean,
   ) => Promise<string>;
   closeSession: (id: string) => void;
   removeSessionLocalState: (id: string) => void;
@@ -195,6 +200,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
     providedWorkspaceId: string,
     chiefOfStaff?: boolean,
     resumeConversationFile?: string,
+    autoMode?: boolean,
   ) => {
     // Use provided ID or generate new one
     const id = providedId || crypto.randomUUID();
@@ -214,6 +220,7 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       yoloMode: yoloMode ?? false,
       chiefOfStaff: chiefOfStaff ?? false,
       resumeConversationFile,
+      autoMode,
       transcriptMatched: resolvedAgent !== 'codex',
       workspace: createDefaultWorkspaceState(),
       daemonActivePaneId: '',
@@ -294,6 +301,9 @@ export const useSessionStore = create<SessionStore>((set, get) => ({
       yolo_mode: session.yoloMode ?? null,
       ...(session.chiefOfStaff ? { chief_of_staff: true } : {}),
       ...(session.resumeConversationFile ? { resume_conversation_file: session.resumeConversationFile } : {}),
+      // Explicit false is a real answer here — "the launcher turned auto mode
+      // off" — so the field is sent whenever it was set, never `&&`-collapsed.
+      ...(session.autoMode !== undefined ? { auto_mode: session.autoMode } : {}),
       ...(selectedExecutable ? { executable: selectedExecutable } : {}),
       ...(session.agent === 'claude' && selectedExecutable
         ? { claude_executable: selectedExecutable }

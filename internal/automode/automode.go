@@ -54,6 +54,83 @@ func Defaults() Config {
 	}
 }
 
+// ShippedHardDeny is auto mode's own leash: the patterns every machine gets
+// whether or not anyone configured one. A session under auto mode reaching for
+// the surfaces that decide what auto mode permits is denied by policy here, not
+// only by which transport carries which verb.
+//
+// Two surfaces, matched against a call signature (the bare command, for bash):
+// the `attn automode` verbs that write — environment prose lands in the
+// classifier's own prompt, and a proposal the agent files is a line in the
+// human's review list — and the app's WebSocket port, where promotion lives.
+// The read-only verbs (`show`, `denials`) stay reachable on purpose: a denied
+// agent explaining what stopped it is the behavior the plan asks for.
+//
+// wsPort is the daemon's own port, which is per-profile, so the deny names the
+// port this machine actually listens on rather than a hardcoded 9849.
+func ShippedHardDeny(wsPort string) []string {
+	patterns := []string{
+		"*attn automode env*",
+		"*attn automode allow*",
+		"*attn automode deny *",
+		"*attn automode model*",
+	}
+	if wsPort = strings.TrimSpace(wsPort); wsPort != "" {
+		patterns = append(patterns,
+			"*localhost:"+wsPort+"*",
+			"*127.0.0.1:"+wsPort+"*",
+			"*[::1]:"+wsPort+"*",
+		)
+	}
+	return patterns
+}
+
+// ResolveHardDeny is what a caller reads: the shipped denies first, then
+// whatever a human promoted. Shipped entries are resolved at read rather than
+// written into anyone's row, the same way an unset model resolves to the
+// default — so changing this list reaches every machine, and no stored row can
+// drop an entry from it.
+func ResolveHardDeny(wsPort string, stored []string) []string {
+	resolved := ShippedHardDeny(wsPort)
+	for _, pattern := range stored {
+		resolved = appendUnique(resolved, pattern)
+	}
+	return resolved
+}
+
+// StripShippedHardDeny is ResolveHardDeny's inverse, for the write path: a
+// config read, changed, and written back must not persist the shipped entries
+// it was handed.
+func StripShippedHardDeny(wsPort string, resolved []string) []string {
+	shipped := map[string]bool{}
+	for _, pattern := range ShippedHardDeny(wsPort) {
+		shipped[pattern] = true
+	}
+	stored := []string{}
+	for _, pattern := range resolved {
+		if !shipped[pattern] {
+			stored = append(stored, pattern)
+		}
+	}
+	return stored
+}
+
+func appendUnique(values []string, value string) []string {
+	for _, existing := range values {
+		if existing == value {
+			return values
+		}
+	}
+	return append(values, value)
+}
+
+// MaxPendingProposalsPerProposer caps how many unresolved proposals one
+// proposer can hold. The receipt is pi's own circuit breaker: a session is
+// stopped for a human question at 20 denials (docs/plans/2026-08-16-pi-auto-mode.md),
+// and a denial is what prompts a proposal, so no healthy session reaches this.
+// A proposer that does has stopped asking and started burying the review list.
+const MaxPendingProposalsPerProposer = 20
+
 // Proposal kinds and model targets. A proposal names one change; promotion in
 // the app is what applies it.
 const (

@@ -311,6 +311,7 @@ func buildStoredIntentSpawn(session *protocol.Session, intent store.LaunchIntent
 		Cols:        cols,
 		Rows:        rows,
 		YoloMode:    protocol.Ptr(intent.YoloMode),
+		AutoMode:    intent.AutoMode,
 	}
 	if intent.Executable != "" {
 		spawnMsg.Executable = protocol.Ptr(intent.Executable)

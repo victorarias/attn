@@ -1,0 +1,116 @@
+/* Auto mode settings section. Only the classes this section owns; the block,
+   intro, kicker, pill, action, hint, empty and warning vocabulary comes from
+   SettingsModal.css. */
+
+.automode-state {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+}
+
+.automode-section-head {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.automode-section-head h4 {
+  margin: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-md);
+}
+
+/* The review list: what is waiting, who asked, and the two ways out. */
+.automode-proposals {
+  display: grid;
+  gap: 6px;
+}
+
+.automode-proposal {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.automode-proposal-subject {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.automode-proposal-origin {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+
+.automode-proposal-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.automode-value {
+  overflow: hidden;
+  color: var(--color-text-primary);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: var(--font-size-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The policy those promotions produce. */
+.automode-config {
+  display: grid;
+  gap: 6px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  background: var(--color-bg-elevated);
+}
+
+.automode-field {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+}
+
+.automode-field-label {
+  color: var(--color-text-tertiary);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.automode-field-value {
+  min-width: 0;
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+}
+
+.automode-mono {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+.automode-patterns {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.automode-footer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 6px;
+}

@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/victorarias/attn/internal/automode"
 	"github.com/victorarias/attn/internal/protocol"
@@ -216,5 +217,24 @@ func TestPromotionIsNotReachableOverTheUnixSocket(t *testing.T) {
 		if got := protocol.Deref(resp.Error); !strings.Contains(got, "unknown command") {
 			t.Fatalf("%s was refused for the wrong reason: %q", cmd, got)
 		}
+	}
+}
+
+// The launch surface needs the promoted default to show what a session would
+// get, and the settings snapshot is how it gets there — read-only: the config
+// is written through the automode verbs, never through set_setting.
+func TestSettingsSnapshotCarriesTheAutoModeDefault(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	if got := d.settingsWithAgentAvailability()[SettingAutoModeEnabledDefault]; got != "true" {
+		t.Errorf("%s = %q on a fresh database, want the shipped default", SettingAutoModeEnabledDefault, got)
+	}
+	if _, err := d.store.SetAutoModeEnabledDefault(false, time.Now().UTC()); err != nil {
+		t.Fatalf("set default: %v", err)
+	}
+	if got := d.settingsWithAgentAvailability()[SettingAutoModeEnabledDefault]; got != "false" {
+		t.Errorf("%s = %q after turning it off", SettingAutoModeEnabledDefault, got)
+	}
+	if err := d.validateSetting(SettingAutoModeEnabledDefault, "true"); err == nil {
+		t.Error("set_setting accepted the daemon-computed auto mode default")
 	}
 }

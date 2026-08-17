@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/victorarias/attn/internal/automode"
+	"github.com/victorarias/attn/internal/config"
 )
 
 // Auto mode's persistence (migration 109): the promoted config, the proposals
@@ -58,7 +59,16 @@ func (s *Store) GetAutoModeConfig() (automode.Config, error) {
 // readAutoModeConfig takes a rowQuerier (documents.go) so the same read serves a
 // plain get and the read-back inside a promote's transaction.
 func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
-	cfg := automode.Defaults()
+	// The shipped hard denies are resolved in on every read, so a machine whose
+	// row predates them — or whose row never mentioned them — still runs with
+	// auto mode's own surfaces denied.
+	wsPort := config.WSPort()
+	defaults := func() automode.Config {
+		cfg := automode.Defaults()
+		cfg.HardDeny = automode.ResolveHardDeny(wsPort, nil)
+		return cfg
+	}
+	cfg := defaults()
 	if s.db == nil {
 		return cfg, nil
 	}
@@ -80,14 +90,16 @@ func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
 	}
 	cfg.EnabledDefault = enabled != 0
 	if cfg.Environment, err = decodeStringList(environment, "environment"); err != nil {
-		return automode.Defaults(), err
+		return defaults(), err
 	}
 	if cfg.Allow, err = decodeStringList(allow, "allow"); err != nil {
-		return automode.Defaults(), err
+		return defaults(), err
 	}
-	if cfg.HardDeny, err = decodeStringList(hardDeny, "hard_deny"); err != nil {
-		return automode.Defaults(), err
+	stored, err := decodeStringList(hardDeny, "hard_deny")
+	if err != nil {
+		return defaults(), err
 	}
+	cfg.HardDeny = automode.ResolveHardDeny(wsPort, stored)
 	if classifierModel != "" {
 		cfg.ClassifierModel = classifierModel
 	}
@@ -118,6 +130,13 @@ func (s *Store) SetAutoModeEnabledDefault(enabled bool, now time.Time) (automode
 
 // CreateAutoModeProposal records a proposed change. It validates first, so a
 // proposal that could never be promoted never reaches the app's review list.
+//
+// The review list is a human's, so it is defended twice. An identical pending
+// proposal returns the one already there rather than a second row — a session
+// denied the same call twice has asked once. Past that, one proposer holds at
+// most automode.MaxPendingProposalsPerProposer unresolved proposals, and the
+// refusal names the cap and what it was asked to add: a caller that hit it can
+// say what to promote or discard, and the list stays reviewable.
 func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, now time.Time) (AutoModeProposal, error) {
 	if err := automode.ValidateProposal(kind, target, value); err != nil {
 		return AutoModeProposal{}, err
@@ -126,6 +145,30 @@ func (s *Store) CreateAutoModeProposal(kind, target, value, proposedBy string, n
 	defer s.mu.Unlock()
 	if s.db == nil {
 		return AutoModeProposal{}, fmt.Errorf("store: no database")
+	}
+	existing, err := scanAutoModeProposal(s.db.QueryRow(`
+		SELECT id, kind, target, value, proposed_by, state, created_at, resolved_at
+		FROM automode_proposals
+		WHERE state = ? AND kind = ? AND target = ? AND value = ?
+		ORDER BY id ASC LIMIT 1`, automode.StatePending, kind, target, value))
+	if err == nil {
+		return existing, nil
+	}
+	if err != sql.ErrNoRows {
+		return AutoModeProposal{}, err
+	}
+	var pending int
+	if err := s.db.QueryRow(`
+		SELECT COUNT(*) FROM automode_proposals WHERE state = ? AND proposed_by = ?`,
+		automode.StatePending, proposedBy).Scan(&pending); err != nil {
+		return AutoModeProposal{}, err
+	}
+	if pending >= automode.MaxPendingProposalsPerProposer {
+		return AutoModeProposal{}, fmt.Errorf(
+			"%s already holds %d pending auto mode proposals (the cap is %d); "+
+				"promote or discard some in the app before proposing more. Asked to add: %s",
+			describeProposer(proposedBy), pending, automode.MaxPendingProposalsPerProposer,
+			describeProposedChange(kind, target, value))
 	}
 	stamp := now.UTC().Format(sortableTimeFormat)
 	res, err := s.db.Exec(`
@@ -353,6 +396,10 @@ func (s *Store) mutateAutoModeConfig(now time.Time, apply func(*automode.Config)
 // writeAutoModeConfig takes an execer (jobs.go) so it writes through either a
 // *sql.DB or a promote's transaction.
 func writeAutoModeConfig(e execer, cfg automode.Config, now time.Time) error {
+	// Every config here came out of a read, which resolved the shipped denies in.
+	// Persisting them would freeze today's list into the row and defeat the point
+	// of resolving at read.
+	cfg.HardDeny = automode.StripShippedHardDeny(config.WSPort(), cfg.HardDeny)
 	environment, err := encodeStringList(cfg.Environment)
 	if err != nil {
 		return err
@@ -396,6 +443,20 @@ func scanAutoModeProposal(row interface{ Scan(...any) error }) (AutoModeProposal
 	p.CreatedAt = parseStoredTime(created)
 	p.ResolvedAt = parseStoredTime(resolved)
 	return p, nil
+}
+
+func describeProposer(proposedBy string) string {
+	if proposedBy == "" {
+		return "this caller"
+	}
+	return proposedBy
+}
+
+func describeProposedChange(kind, target, value string) string {
+	if kind == automode.KindModel {
+		return fmt.Sprintf("%s %s %s", kind, target, value)
+	}
+	return fmt.Sprintf("%s %s", kind, value)
 }
 
 func parseStoredTime(value string) time.Time {
