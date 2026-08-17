@@ -1,0 +1,8 @@
+kind: internal
+area: docs
+change: >
+  A superdraft plan shapes the agent ledger (provenance and lifecycle
+  records that survive closure), agent-initiated session close behind a
+  confirm rule, and a daemon sweeper that deletes closed sessions'
+  worktrees after a configurable window using preserve-then-delete
+  bagging, grounded in a spike over 35 live worktrees.
