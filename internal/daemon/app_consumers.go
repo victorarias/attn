@@ -1154,7 +1154,7 @@ func (d *Daemon) noteAppReconcileFailure(name string, claim store.AppReconcileCl
 			name, claim.ThroughRequestID, stalled.Round(time.Second), attempts, firstLine(message)),
 		fmt.Sprintf(
 			"%s failed to reconcile through bus seq %d for %s across %d attempts, so attn disabled it. The rebuild remains owed. Fix the reconcile handler and `attn app enable %s`; `attn app status %s` shows the failure and fence.",
-			name, claim.ThroughSeq, stalled.Round(time.Minute), attempts, name, name))
+			name, claim.ThroughSeq, stalled.Round(time.Second), attempts, name, name))
 }
 
 func (d *Daemon) noteAppStall(name, kind string, key int64, eventName string, reconcileRequestID int64, message string) (time.Duration, int, bool) {
@@ -1252,7 +1252,7 @@ func (d *Daemon) autoDisableApp(name string, ev bus.Event, stalled time.Duration
 			name, ev.Name, ev.Seq, stalled.Round(time.Second), attempts, firstLine(message)),
 		fmt.Sprintf(
 			"%s failed on the same event (%s, seq %d) for %s across %d attempts, so attn disabled it — a stalled app holds the event log open for every other consumer. Fix the handler and `attn app enable %s`; `attn app status %s` shows the failures.",
-			name, ev.Name, ev.Seq, stalled.Round(time.Minute), attempts, name, name))
+			name, ev.Name, ev.Seq, stalled.Round(time.Second), attempts, name, name))
 }
 
 // disableAppAutomatically flips the app off, says so on the bus, and tells the

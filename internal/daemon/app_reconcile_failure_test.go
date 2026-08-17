@@ -204,8 +204,9 @@ func TestACommandIsRefusedByNameWhileAReconcileIsOwed(t *testing.T) {
 	if result.Reconcile == nil || len(result.Reconcile.Causes) == 0 {
 		t.Fatalf("the refusal carries no structured reason: %+v", result.Reconcile)
 	}
-	if !strings.Contains(protocol.Deref(result.Error), "reconcile") {
-		t.Fatalf("the refusal does not read as one: %q", protocol.Deref(result.Error))
+	refusal := protocol.Deref(result.Error)
+	if !strings.Contains(refusal, "greeter") || !strings.Contains(refusal, "rebuilding") {
+		t.Fatalf("the refusal does not name the app and what it is doing: %q", refusal)
 	}
 
 	// And it is a refusal, not a failure: nothing ran, so nothing is charged.

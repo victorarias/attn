@@ -13,14 +13,18 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+// appReconcileOwedError refuses a command against collections that are
+// mid-rebuild. It carries the reason so the result can name the fence on the
+// wire, rather than leaving a caller to parse it back out of the sentence.
 type appReconcileOwedError struct {
+	app    string
 	reason appReconcileReason
 }
 
 func (e *appReconcileOwedError) Error() string {
 	return fmt.Sprintf(
-		"reconcile_owed: app collection rebuild is owed through bus seq %d (%s); commands remain refused until reconcile succeeds",
-		e.reason.ThroughSeq, strings.Join(e.reason.Causes, ", "))
+		"%s is rebuilding what it derives from the event log (owed through bus seq %d: %s), so it runs no commands until that finishes; `attn app status %s` shows the rebuild",
+		e.app, e.reason.ThroughSeq, strings.Join(e.reason.Causes, ", "), e.app)
 }
 
 // A view acting: `app_command` in, `app_command_result` back.
@@ -228,7 +232,7 @@ func (d *Daemon) planAppCommand(name, command string) (*appDispatchPlan, error) 
 		return nil, fmt.Errorf("reading reconciliation owed by app %q: %w", name, err)
 	}
 	if len(claim.Requests) != 0 {
-		return nil, &appReconcileOwedError{reason: foldAppReconcileReason(version.ID, claim)}
+		return nil, &appReconcileOwedError{app: name, reason: foldAppReconcileReason(version.ID, claim)}
 	}
 	declared := manifest.CommandNames()
 	if !containsString(declared, command) {
