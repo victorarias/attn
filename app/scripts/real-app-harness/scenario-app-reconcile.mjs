@@ -39,11 +39,12 @@
  * deleted events, the gap detection, the refusal, the disable and the
  * notification are all real; only that one row is hand-made.
  *
- * Why it is not in the serial matrix (scenarioCatalog.mjs): it stops and
- * re-ensures the profile daemon to move ATTN_BUS_RETENTION and the app tripwires
- * in and out of the world, which is a world change the matrix's other scenarios
- * should not have to reason about — the same reason the kitty-image and
- * automation-scheduled-cleanup scenarios stay out. Run it directly:
+ * It is in the serial matrix (scenarioCatalog.mjs) despite changing the world:
+ * it stops and re-ensures the profile daemon to move ATTN_BUS_RETENTION and the
+ * app tripwires in and out, and puts the defaults back on the success path and
+ * the failure path both, so no later leg inherits a one-second retention window.
+ * A change here that can leave the tripwires behind belongs out of the catalog.
+ * Run it directly:
  *
  *   ATTN_HARNESS_PROFILE=<name> node scripts/real-app-harness/scenario-app-reconcile.mjs
  *
