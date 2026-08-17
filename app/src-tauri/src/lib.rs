@@ -479,6 +479,11 @@ fn get_browser_host_token(_caller: browser_host::TrustedMainWebview) -> Result<S
 }
 
 #[tauri::command]
+fn get_client_token() -> Result<String, String> {
+    profile::read_client_token()
+}
+
+#[tauri::command]
 fn ensure_daemon(_app: tauri::AppHandle) -> Result<(), String> {
     let _guard = ENSURE_DAEMON_LOCK
         .lock()
@@ -1128,6 +1133,7 @@ Object.defineProperty(window, "__ATTN_NATIVE_DIALOGS", {
             open_safe_markdown_target,
             get_build_profile,
             get_browser_host_token,
+            get_client_token,
             open_presentation_window,
             browser_host::browser_host_mount,
             browser_host::browser_host_update,

@@ -1,5 +1,5 @@
 import WebSocket from 'ws';
-import { assertProductionRunAllowed, defaultWSURLForProfile } from './harnessProfile.mjs';
+import { assertProductionRunAllowed, defaultWSURLForProfile, harnessClientHello } from './harnessProfile.mjs';
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -12,10 +12,7 @@ function workspacePaneIds(workspace) {
 function sendClientHello(ws) {
   ws.send(
     JSON.stringify({
-      cmd: 'client_hello',
-      client_kind: 'harness-observer',
-      version: 'real-app-harness',
-      capabilities: ['workspace_sessions'],
+      ...harnessClientHello('harness-observer'),
     }),
   );
 }

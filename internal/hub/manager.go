@@ -503,15 +503,20 @@ func (m *Manager) runEndpointLoop(ctx context.Context, id string) {
 			}
 		}
 
-		// Declare the workspace_sessions capability before anything else: the
-		// remote daemon rejects every gated command (register_workspace,
-		// spawn_session, forwarded client payloads, ...) from a connection
-		// that never sent client_hello, closing it with a policy violation.
-		// publishConnectionAndSendHello holds writeMu across publishing the
-		// connection and sending the hello so ForwardEndpointCommand can never
-		// win the race and write before it.
+		// Read after connecting, not before: a host whose daemon has never run
+		// has no token to read yet, and reaching here means it is up.
+		clientToken := m.remoteClientToken(ctx, record.SSHTarget, record.Profile)
+
+		// Present the token and declare the workspace_sessions capability
+		// before anything else: until this hello passes, the remote daemon
+		// sends this connection nothing at all — no initial_state, no
+		// broadcasts — and refuses every gated command (register_workspace,
+		// spawn_session, forwarded client payloads, ...) with a policy
+		// violation. publishConnectionAndSendHello holds writeMu across
+		// publishing the connection and sending the hello so
+		// ForwardEndpointCommand can never win the race and write before it.
 		connected := false
-		consumeErr := m.publishConnectionAndSendHello(ctx, id, conn, cmd)
+		consumeErr := m.publishConnectionAndSendHello(ctx, id, conn, cmd, clientToken)
 		if consumeErr == nil {
 			connected, consumeErr = m.consumeRemote(ctx, id, conn)
 		}
@@ -596,11 +601,16 @@ func versionMismatchStatus(e *VersionMismatchError) (string, string) {
 // re-broadcasts — so a binary frame would arrive as bytes it cannot parse and
 // would be pushed out as an invalid text message. Leaving the bit off makes the
 // remote daemon answer image pulls with base64 JSON, which survives the trip.
-func sendClientHello(ctx context.Context, conn *websocket.Conn) error {
+//
+// clientToken is the REMOTE daemon's, read off that host by remoteClientToken —
+// ws-relay is a raw byte pipe, so this hello reaches the remote daemon end to
+// end and is checked there like any other client's.
+func sendClientHello(ctx context.Context, conn *websocket.Conn, clientToken string) error {
 	payload, err := json.Marshal(protocol.ClientHelloMessage{
-		Cmd:        protocol.CmdClientHello,
-		ClientKind: "hub",
-		Version:    "protocol-" + protocol.ProtocolVersion,
+		Cmd:         protocol.CmdClientHello,
+		ClientKind:  "hub",
+		Version:     "protocol-" + protocol.ProtocolVersion,
+		ClientToken: protocol.Ptr(clientToken),
 		Capabilities: []string{
 			protocol.CapabilityWorkspaceSessions,
 			protocol.CapabilityKittyImages,
@@ -1717,7 +1727,7 @@ func (m *Manager) SetEndpointRemoteWeb(ctx context.Context, endpointID string, e
 // hello: ForwardEndpointCommand always reads runtime.conn under m.mu first,
 // so it either sees the old (nil or previous) connection, or it sees this
 // connection but then blocks on writeMu until the hello has been sent.
-func (m *Manager) publishConnectionAndSendHello(ctx context.Context, id string, conn *websocket.Conn, cmd *exec.Cmd) error {
+func (m *Manager) publishConnectionAndSendHello(ctx context.Context, id string, conn *websocket.Conn, cmd *exec.Cmd, clientToken string) error {
 	m.mu.Lock()
 	runtime, ok := m.runtimes[id]
 	if !ok {
@@ -1730,7 +1740,7 @@ func (m *Manager) publishConnectionAndSendHello(ctx context.Context, id string, 
 	m.mu.Unlock()
 	defer runtime.writeMu.Unlock()
 
-	return sendClientHello(ctx, conn)
+	return sendClientHello(ctx, conn, clientToken)
 }
 
 func (m *Manager) clearConnection(id string) {

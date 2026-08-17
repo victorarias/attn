@@ -1,5 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import { e2ePorts } from './e2e/profileEnv';
+import { E2E_CLIENT_TOKEN, e2ePorts } from './e2e/profileEnv';
 
 // Ports for the active ATTN_PROFILE. Default profile keeps the historical
 // 19849 (daemon) / 1421 (Vite); a named profile gets disjoint per-profile bands
@@ -25,6 +25,7 @@ export default defineConfig({
     timeout: 30000,
     env: {
       VITE_DAEMON_PORT: TEST_DAEMON_PORT,
+      VITE_CLIENT_TOKEN: E2E_CLIENT_TOKEN,
       VITE_MOCK_PTY: process.env.VITE_MOCK_PTY ?? '1',
       VITE_FORCE_REAL_PTY: process.env.VITE_FORCE_REAL_PTY ?? '0',
     },

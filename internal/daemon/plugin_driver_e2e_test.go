@@ -112,10 +112,11 @@ func TestPluginDriverEndToEnd_InstalledProcessLaunchReportAndResumeThroughWorker
 	}
 	defer ws.Close(websocket.StatusNormalClosure, "")
 
+	// The hello is what unlocks initial_state; nothing arrives before it.
+	sendWorkspaceClientHello(t, ws)
 	_ = waitForDaemonWebSocketEvent(t, ws, 10*time.Second, func(event map[string]interface{}) bool {
 		return asString(event["event"]) == protocol.EventInitialState
 	})
-	sendWorkspaceClientHello(t, ws)
 
 	sessionID := "plugin-driver-e2e"
 	workspaceID := "workspace-" + sessionID

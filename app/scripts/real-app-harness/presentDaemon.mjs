@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
-import { defaultDaemonPortForProfile } from './harnessProfile.mjs';
+import { defaultDaemonPortForProfile, harnessClientHello } from './harnessProfile.mjs';
 
 const HARNESS_DIR = path.dirname(fileURLToPath(import.meta.url));
 const DAEMON_SOCKET_HOOK_PATH = path.resolve(HARNESS_DIR, '../../src/hooks/useDaemonSocket.ts');
@@ -68,10 +68,9 @@ export async function withDaemonSocket(fn, { port = defaultDaemonPortForProfile(
     // so daemon-side diagnostics can tell harness connections apart.
     await sendAndWait(
       {
-        cmd: 'client_hello',
-        client_kind: 'harness-present-daemon',
-        version: `protocol-${readFrontendProtocolVersion()}`,
-        capabilities: ['workspace_sessions'],
+        ...harnessClientHello('harness-present-daemon', {
+          version: `protocol-${readFrontendProtocolVersion()}`,
+        }),
       },
       'initial_state',
     );
