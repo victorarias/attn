@@ -6,7 +6,7 @@ import { nisseAgentName, NisseDriver } from "./nisse-driver";
 import { RelayServer, type RelayConnection } from "./relay";
 import type { DriverSpawnParams, SessionClosedParams } from "./types";
 
-const pluginVersion = "0.1.0";
+const pluginVersion = "0.2.0";
 
 await runPlugin();
 
