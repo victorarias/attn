@@ -10,6 +10,7 @@ import (
 
 	"github.com/victorarias/attn/internal/automode"
 	"github.com/victorarias/attn/internal/protocol"
+	"github.com/victorarias/attn/internal/store"
 )
 
 // Auto mode's two transports and the line between them. What these pin is the
@@ -118,7 +119,9 @@ func TestAutoModeEnvironmentAddAndRemove(t *testing.T) {
 	}
 }
 
-func TestAutoModeDenialsIsEmptyUntilSlice5ReportsThem(t *testing.T) {
+// The unix-socket read `attn automode denials` answers with: newest first, and
+// carrying the rule that decided so the feed says who refused the call.
+func TestAutoModeDenialsReadsWhatSessionsReported(t *testing.T) {
 	d := newDaemonForTest(t)
 	resp := docCall(t, func(c net.Conn) {
 		d.handleAutoModeDenials(c, &protocol.AutoModeDenialsMessage{Cmd: protocol.CmdAutoModeDenials})
@@ -127,7 +130,29 @@ func TestAutoModeDenialsIsEmptyUntilSlice5ReportsThem(t *testing.T) {
 		t.Fatalf("denials: %v", protocol.Deref(resp.Error))
 	}
 	if len(resp.AutomodeDenialsResult.Denials) != 0 {
-		t.Fatalf("denials = %+v", resp.AutomodeDenialsResult.Denials)
+		t.Fatalf("a machine that denied nothing has denials: %+v", resp.AutomodeDenialsResult.Denials)
+	}
+
+	for _, action := range []string{"bash: curl https://one.example", "write /etc/hosts"} {
+		if _, _, err := d.store.RecordAutoModeDenial(store.AutoModeDenial{
+			SessionID: "pi-1", Tool: "bash", Signature: action,
+			Reason: "outside the envelope", Rule: "classifier-2a",
+		}, time.Now()); err != nil {
+			t.Fatalf("record denial: %v", err)
+		}
+	}
+	resp = docCall(t, func(c net.Conn) {
+		d.handleAutoModeDenials(c, &protocol.AutoModeDenialsMessage{Cmd: protocol.CmdAutoModeDenials})
+	})
+	listed := resp.AutomodeDenialsResult.Denials
+	if len(listed) != 2 {
+		t.Fatalf("denials = %+v, want both", listed)
+	}
+	if listed[0].Signature != "write /etc/hosts" {
+		t.Errorf("newest denial = %q", listed[0].Signature)
+	}
+	if listed[0].Rule != "classifier-2a" || listed[0].SessionID != "pi-1" || listed[0].CreatedAt == "" {
+		t.Errorf("denial = %+v, want session, rule and time", listed[0])
 	}
 }
 
@@ -236,5 +261,122 @@ func TestSettingsSnapshotCarriesTheAutoModeDefault(t *testing.T) {
 	}
 	if err := d.validateSetting(SettingAutoModeEnabledDefault, "true"); err == nil {
 		t.Error("set_setting accepted the daemon-computed auto mode default")
+	}
+}
+
+// The denial wire, daemon end: a driver reports one refused call and it becomes
+// a row, a notification, and one automode.denied fact naming its session.
+func TestAutoModeDenialFromADriverBecomesARowANotificationAndAFact(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client, done := startPluginPipe(t, d, "pi-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "pi", map[string]bool{"state_reporting": true, "auto_mode": true})
+
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID: "pi-denial", Label: "envelope work", Agent: "pi", Directory: t.TempDir(),
+		State: protocol.SessionStateWorking, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	if !d.store.BeginAgentDriverRun("pi-denial", "pi-plugin", "run-1") {
+		t.Fatal("failed to begin the test plugin run")
+	}
+
+	sendPluginMethod(t, client, 3, "session.report_automode_denial", pluginReportAutoModeDenialParams{
+		SessionID: "pi-denial",
+		RunID:     "run-1",
+		Tool:      "bash",
+		Action:    "bash: curl https://example.com",
+		Reason:    "the user never asked to reach that host",
+		Rule:      "classifier-2a",
+		At:        "2026-08-17T10:00:00Z",
+	})
+
+	denials, err := d.store.ListAutoModeDenials(10)
+	if err != nil {
+		t.Fatalf("list denials: %v", err)
+	}
+	if len(denials) != 1 {
+		t.Fatalf("denials = %d, want the one that was reported", len(denials))
+	}
+	got := denials[0]
+	if got.SessionID != "pi-denial" || got.Tool != "bash" || got.Rule != "classifier-2a" {
+		t.Errorf("denial row = %+v", got)
+	}
+	if got.Signature != "bash: curl https://example.com" {
+		t.Errorf("signature = %q, want the blocked call", got.Signature)
+	}
+	if !got.CreatedAt.Equal(time.Date(2026, 8, 17, 10, 0, 0, 0, time.UTC)) {
+		t.Errorf("created_at = %s, want the time the session refused it", got.CreatedAt)
+	}
+
+	notes, err := d.store.ListNotifications()
+	if err != nil {
+		t.Fatalf("list notifications: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("notifications = %d, want the denial's", len(notes))
+	}
+	note := notes[0]
+	if note.Kind != notificationKindAutoModeDenied || note.SourceID != "pi-denial" {
+		t.Errorf("notification = %+v", note)
+	}
+	if !strings.Contains(note.Title, "envelope work") {
+		t.Errorf("title does not name the session: %q", note.Title)
+	}
+	if !strings.Contains(note.Body, "curl https://example.com") {
+		t.Errorf("body does not say what was blocked: %q", note.Body)
+	}
+	if !strings.Contains(note.Detail, "never asked to reach that host") ||
+		!strings.Contains(note.Detail, "classifier-2a") {
+		t.Errorf("detail does not carry the reason and who decided: %q", note.Detail)
+	}
+
+	published := docFacts(t, d, FactAutoModeDenied)
+	if len(published) != 1 || published[0].Subject != "pi-denial" {
+		t.Fatalf("automode.denied facts = %+v, want one naming the session", published)
+	}
+}
+
+// A denial reported against a run this plugin does not own changes nothing —
+// the denials feed is what the user trusts to say what their sessions did.
+func TestAutoModeDenialFromAnUnownedRunIsRefused(t *testing.T) {
+	d := NewForTesting(filepath.Join(t.TempDir(), "test.sock"))
+	client, done := startPluginPipe(t, d, "pi-plugin", nil)
+	defer func() {
+		_ = client.Close()
+		<-done
+	}()
+	registerTestPluginDriver(t, client, "pi", map[string]bool{"auto_mode": true})
+
+	now := protocol.TimestampNow().String()
+	d.store.Add(&protocol.Session{
+		ID: "pi-denial", Label: "pi", Agent: "pi", Directory: t.TempDir(),
+		State: protocol.SessionStateWorking, StateSince: now, StateUpdatedAt: now, LastSeen: now,
+	})
+	if !d.store.BeginAgentDriverRun("pi-denial", "pi-plugin", "run-1") {
+		t.Fatal("failed to begin the test plugin run")
+	}
+
+	response := sendPluginMethodResponse(t, client, 3, "session.report_automode_denial",
+		pluginReportAutoModeDenialParams{SessionID: "pi-denial", RunID: "run-other", Action: "bash: git push --force"})
+	if response.Error == nil {
+		t.Fatal("a denial for a run the plugin does not own was accepted")
+	}
+
+	response = sendPluginMethodResponse(t, client, 4, "session.report_automode_denial",
+		pluginReportAutoModeDenialParams{SessionID: "pi-denial", RunID: "run-1", Action: "   "})
+	if response.Error == nil {
+		t.Fatal("a denial with no action named was accepted")
+	}
+
+	denials, err := d.store.ListAutoModeDenials(10)
+	if err != nil {
+		t.Fatalf("list denials: %v", err)
+	}
+	if len(denials) != 0 {
+		t.Fatalf("refused denials reached the log: %+v", denials)
 	}
 }

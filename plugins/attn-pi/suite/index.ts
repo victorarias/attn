@@ -22,11 +22,15 @@ const suite = new AttnPiSuite({
 
 // Auto mode exists only when attn sent a config. A bare pi that loads this
 // suite registers no command, no flag and no handlers for it, and behaves
-// exactly as it does without the file. Denials are not reported anywhere yet;
-// AutoMode's onDenial is the seam attn's own surfaces will hang off.
+// exactly as it does without the file. Every denial rides the same relay the
+// rest of the suite reports on, so attn can notify and list it.
 const autoModeSource = attnAutoModeSource(process.env);
 const autoMode = autoModeSource
-  ? new AutoMode({ config: autoModeSource.config, notice: autoModeSource.problem })
+  ? new AutoMode({
+      config: autoModeSource.config,
+      notice: autoModeSource.problem,
+      onDenial: (denial) => suite.reportDenial(denial),
+    })
   : undefined;
 
 export default function attnPiSuite(pi: ExtensionAPILike & AutoModePiLike): void {

@@ -1231,6 +1231,7 @@ export interface AutoModeDenialInfo {
     created_at: string;
     id:         number;
     reason:     string;
+    rule:       string;
     session_id: string;
     signature:  string;
     tool:       string;
@@ -1256,6 +1257,7 @@ export interface DenialElement {
     created_at: string;
     id:         number;
     reason:     string;
+    rule:       string;
     session_id: string;
     signature:  string;
     tool:       string;
@@ -13544,6 +13546,7 @@ const typeMap: any = {
         { json: "created_at", js: "created_at", typ: "" },
         { json: "id", js: "id", typ: 0 },
         { json: "reason", js: "reason", typ: "" },
+        { json: "rule", js: "rule", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "signature", js: "signature", typ: "" },
         { json: "tool", js: "tool", typ: "" },
@@ -13559,6 +13562,7 @@ const typeMap: any = {
         { json: "created_at", js: "created_at", typ: "" },
         { json: "id", js: "id", typ: 0 },
         { json: "reason", js: "reason", typ: "" },
+        { json: "rule", js: "rule", typ: "" },
         { json: "session_id", js: "session_id", typ: "" },
         { json: "signature", js: "signature", typ: "" },
         { json: "tool", js: "tool", typ: "" },

@@ -19,7 +19,18 @@ export const consecutiveDenialLimit = 3;
 /** Denials since the user last said anything. */
 export const totalDenialLimit = 20;
 
-export type DecisionRule = StaticRule | "cached-allow" | "cached-deny" | "classifier" | "circuit-breaker";
+// The rule names a denial reports as "who decided this". A classified call
+// names the layer that answered — 2a is the configured classifier, 2b the
+// escalation model — and falls back to the bare name when the classifier does
+// not say.
+export type DecisionRule =
+  | StaticRule
+  | "cached-allow"
+  | "cached-deny"
+  | "classifier"
+  | "classifier-2a"
+  | "classifier-2b"
+  | "circuit-breaker";
 
 export type SessionDecision =
   | { outcome: "run"; rule: DecisionRule }
@@ -114,16 +125,17 @@ export class AutoModeSession {
       transcript: this.transcript.snapshot(),
       signal: options.signal,
     });
+    const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
       this.cache.set(intent, { verdict: "allow", reason: judged.reason ?? "" });
-      return this.allowed("classifier");
+      return this.allowed(rule);
     }
     const reason =
       judged.verdict === "deny"
         ? judged.reason
         : `auto mode could not judge this call confidently${judged.reason ? `: ${judged.reason}` : ""}`;
     this.cache.set(intent, { verdict: "deny", reason });
-    return this.denied(call, "classifier", reason);
+    return this.denied(call, rule, reason);
   }
 
   private allowed(rule: DecisionRule): SessionDecision {

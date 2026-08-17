@@ -1155,6 +1155,8 @@ CREATE TABLE IF NOT EXISTS automode_denials (
     created_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DESC);`},
+	// Applied by applyMigration110, whose ALTER is column-guarded.
+	{110, "record which rule denied an auto mode call", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1551,6 +1553,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 107 {
 			if err := applyMigration107(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 110 {
+			if err := applyMigration110(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2732,6 +2739,22 @@ func applyMigration103(tx *sql.Tx) error {
 
 // applyMigration106 adds the opaque per-session cost ledger. The guard makes
 // schema-migration rewind tests and interrupted upgrade recovery idempotent.
+// applyMigration110 records who refused an auto mode call: a static envelope
+// rule ("hard-deny", "unknown-tool"), the classifier layer that answered
+// ("classifier-2a", "classifier-2b"), or the circuit breaker.
+//
+// Guarded because a database can reach this with the column already there: a
+// migration test builds the current schema and rewinds the recorded version,
+// which replays this ALTER against a table that already carries it.
+func applyMigration110(tx *sql.Tx) error {
+	has, err := columnExists(tx, "automode_denials", "rule")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE automode_denials ADD COLUMN rule TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
 func applyMigration106(tx *sql.Tx) error {
 	has, err := columnExists(tx, "sessions", "session_cost_json")
 	if err != nil || has {

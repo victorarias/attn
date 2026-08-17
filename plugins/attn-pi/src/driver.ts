@@ -7,6 +7,7 @@ import type {
   RelayDeliverMessageResult,
   RelayHelloParams,
   RelayHelloResult,
+  RelayReportDenialParams,
   RelayReportStateParams,
   RelayReportStopParams,
 } from "./relay-protocol";
@@ -205,6 +206,22 @@ export class PiDriver {
     });
   }
 
+  // A denial is an append, not a state report: it carries no seq, because
+  // nothing about it can be overtaken by a later report of the same session.
+  async suiteReportDenial(rawParams: unknown): Promise<void> {
+    const params = parseRelayReportDenial(rawParams);
+    const run = this.requireRunByToken(params.token);
+    await this.rpc.request("session.report_automode_denial", {
+      session_id: run.sessionID,
+      run_id: run.runID,
+      tool: params.tool,
+      action: params.action,
+      reason: params.reason,
+      rule: params.rule,
+      at: params.at,
+    });
+  }
+
   // Called for the daemon's driver.deliver_message request.
   async deliverMessage(rawParams: unknown): Promise<{ ok: boolean }> {
     const params = parseDeliverMessageParams(rawParams);
@@ -365,6 +382,27 @@ function parseRelayReportStop(value: unknown): RelayReportStopParams {
   if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_stop is missing token");
   if (typeof assistantText !== "string") throw new Error("suite.report_stop is missing assistant_text");
   return { token: token.trim(), assistant_text: assistantText };
+}
+
+function parseRelayReportDenial(value: unknown): RelayReportDenialParams {
+  if (typeof value !== "object" || value === null) throw new Error("suite.report_denial params must be an object");
+  const record = value as Record<string, unknown>;
+  const token = record.token;
+  if (typeof token !== "string" || token.trim() === "") throw new Error("suite.report_denial is missing token");
+  const action = record.action;
+  if (typeof action !== "string" || action.trim() === "") throw new Error("suite.report_denial is missing action");
+  return {
+    token: token.trim(),
+    tool: textField(record.tool),
+    action: action.trim(),
+    reason: textField(record.reason),
+    rule: textField(record.rule),
+    at: textField(record.at),
+  };
+}
+
+function textField(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function parseDeliverMessageParams(value: unknown): { session_id: string; run_id: string; text: string } {

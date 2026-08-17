@@ -164,6 +164,74 @@ func (d *Daemon) handleAutoModeDenials(conn net.Conn, msg *protocol.AutoModeDeni
 	})
 }
 
+// notificationKindAutoModeDenied marks the notification a refused call raises.
+const notificationKindAutoModeDenied = "automode_denied"
+
+// recordAutoModeDenial is where a session's refusal becomes something the user
+// can see: a row in the denials log, a notification naming what was blocked and
+// why, and one `automode.denied` fact carrying the session it happened in.
+//
+// Nothing here is recurring. A session that denies nothing writes nothing,
+// publishes nothing, and draws nothing.
+func (d *Daemon) recordAutoModeDenial(params pluginReportAutoModeDenialParams) error {
+	if d.store == nil {
+		return fmt.Errorf("no database")
+	}
+	sessionID := strings.TrimSpace(params.SessionID)
+	at := time.Now()
+	if stamp, err := time.Parse(time.RFC3339, strings.TrimSpace(params.At)); err == nil {
+		at = stamp
+	}
+	stored, dropped, err := d.store.RecordAutoModeDenial(store.AutoModeDenial{
+		SessionID: sessionID,
+		Tool:      strings.TrimSpace(params.Tool),
+		Signature: strings.TrimSpace(params.Action),
+		Reason:    strings.TrimSpace(params.Reason),
+		Rule:      strings.TrimSpace(params.Rule),
+	}, at)
+	if err != nil {
+		return err
+	}
+	if dropped > 0 {
+		d.logf("automode: denial log is at its %d-row cap; dropped %d oldest", store.AutoModeDenialRows, dropped)
+	}
+	record, err := d.store.AddNotification(autoModeDenialNotification(d.sessionLabel(sessionID), stored), time.Now())
+	if err != nil {
+		d.logf("automode: add denial notification for session %s: %v", sessionID, err)
+		return nil
+	}
+	d.logf("automode: denied session=%s rule=%s action=%q notification=%s",
+		sessionID, stored.Rule, stored.Signature, record.ID)
+	// One fact, not two: the notification is how this denial is surfaced, and
+	// automode.denied's projection is what pushes it. Its subject is the session
+	// because that is the entity a denial is about.
+	d.publishFact(FactAutoModeDenied, sessionID, nil)
+	return nil
+}
+
+// sessionLabel names a session the way the user does, falling back to its id
+// when the session is gone by the time the report lands.
+func (d *Daemon) sessionLabel(sessionID string) string {
+	if session := d.store.Get(sessionID); session != nil && strings.TrimSpace(session.Label) != "" {
+		return session.Label
+	}
+	return sessionID
+}
+
+func autoModeDenialNotification(label string, denial store.AutoModeDenial) store.NotificationRecord {
+	return store.NotificationRecord{
+		Kind: notificationKindAutoModeDenied,
+		// Auto mode working as designed: the agent got the reason, adapted or
+		// asked, and the run went on. Worth seeing, never worth interrupting for.
+		Severity:   store.NotificationInfo,
+		Title:      fmt.Sprintf("Auto mode blocked a call in %s", label),
+		Body:       denial.Signature,
+		Detail:     fmt.Sprintf("%s (%s)", denial.Reason, denial.Rule),
+		SourceKind: "session",
+		SourceID:   denial.SessionID,
+	}
+}
+
 func autoModeConfigInfo(cfg automode.Config) protocol.AutoModeConfigInfo {
 	return protocol.AutoModeConfigInfo{
 		EnabledDefault:  cfg.EnabledDefault,
@@ -205,6 +273,7 @@ func autoModeDenialInfos(denials []store.AutoModeDenial) []protocol.AutoModeDeni
 			Tool:      denial.Tool,
 			Signature: denial.Signature,
 			Reason:    denial.Reason,
+			Rule:      denial.Rule,
 			CreatedAt: formatAutoModeStamp(denial.CreatedAt),
 		})
 	}

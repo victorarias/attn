@@ -87,9 +87,15 @@ export type AutoModeExtensionAPILike = {
 
 export type AutoModeDenial = {
   toolCallId: string;
+  /** The tool pi was about to run. */
+  tool: string;
+  /** The blocked call in one line, the same text the model is given. */
   action: string;
   reason: string;
+  /** Who decided: a static rule name, `classifier-2a`/`-2b`, or the breaker. */
   rule: string;
+  /** When the call was refused, RFC 3339. */
+  at: string;
 };
 
 export type AutoModeOptions = {
@@ -176,11 +182,19 @@ export function createAutoMode(options: AutoModeOptions): (pi: AutoModeExtension
       if (decision.outcome === "run") return undefined;
       const denial: AutoModeDenial = {
         toolCallId: event.toolCallId,
+        tool: call.toolName,
         action: decision.action,
         reason: decision.reason,
         rule: decision.rule,
+        at: new Date().toISOString(),
       };
-      options.onDenial?.(denial);
+      try {
+        options.onDenial?.(denial);
+      } catch (error) {
+        // Reporting is fire-and-forget: whoever listens must not be able to turn
+        // a denial into something else by failing.
+        reportFailure(ctx, error);
+      }
       standing = [...standing, denial];
       showDenial(ctx, denial, standing);
       return { block: true, reason: decision.toolResult };
@@ -269,6 +283,12 @@ function messageText(message: MessageLike): string {
     .filter((block) => block.type === "text" && typeof block.text === "string")
     .map((block) => block.text)
     .join("\n");
+}
+
+/** A reporter that threw. The denial itself stands; only the report is lost. */
+function reportFailure(ctx: AutoModeContextLike, error: unknown): void {
+  const message = error instanceof Error ? error.message : String(error);
+  uiOf(ctx)?.notify(`auto mode could not report this denial to attn: ${message}`, "warning");
 }
 
 function failureReason(error: unknown): string {

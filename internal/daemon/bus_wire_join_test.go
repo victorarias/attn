@@ -289,8 +289,11 @@ var wireFixtures = map[string]wireFixture{
 	// Everything else with a panel of its own.
 	FactNotificationCreated: {events: []string{protocol.EventNotificationsUpdated}},
 	FactNotificationRead:    {events: []string{protocol.EventNotificationsUpdated}},
-	FactAutomationChanged:   {events: []string{protocol.EventAutomationsChanged}},
-	FactTaskChanged:         {events: []string{protocol.EventTasksChanged}},
+	// A denial is surfaced as a notification, so it pushes the same list. Its
+	// subject is the session it happened in, which no projection re-reads.
+	FactAutoModeDenied:    {events: []string{protocol.EventNotificationsUpdated}},
+	FactAutomationChanged: {events: []string{protocol.EventAutomationsChanged}},
+	FactTaskChanged:       {events: []string{protocol.EventTasksChanged}},
 	FactNotebookFileChanged: {
 		events:  []string{protocol.EventNotebookChanged},
 		subject: func(*wireWorld) string { return "note.md" },

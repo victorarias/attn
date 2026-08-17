@@ -394,5 +394,13 @@ rather than through dialogs. Design and slices:
   (`-p`, `--mode json`) is fail-closed, per `permission-gate.ts`'s precedent.
   Answering yes clears the counters and judges the call that tripped it — it
   approves nothing on its own.
-- Denials are reported through `AutoMode`'s `onDenial` seam. Nothing sets it
-  yet: attn-side reporting is slice 5.
+- Denials are reported through `AutoMode`'s `onDenial` seam. `suite/index.ts`
+  sets it to one `suite.report_denial` over the relay, which the driver
+  forwards to the daemon as `session.report_automode_denial`; the standalone
+  bundle leaves it unset, so a bare pi reports nowhere. It is fire-and-forget
+  like every other suite report — a reporter that throws is caught, because
+  nothing outside auto mode may turn a denial into something else. The report
+  carries no seq: it is an append, not a claim about the session's state.
+- A denial names who decided. Static rules keep their own names; a classified
+  call reports the layer that answered (`classifier-2a`, `classifier-2b`),
+  which is why `ClassifierVerdict` carries a `layer`.

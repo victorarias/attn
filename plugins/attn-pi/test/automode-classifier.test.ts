@@ -195,6 +195,7 @@ describe("2a to 2b routing", () => {
     const registry = new FakeRegistry([verdictJSON("allow", "routine work in the working directory")]);
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "allow",
+      layer: "2a",
       reason: "routine work in the working directory",
     });
     expect(registry.calls).toHaveLength(1);
@@ -206,7 +207,7 @@ describe("2a to 2b routing", () => {
       verdictJSON("deny", "an unreviewed script can do anything"),
     ]);
     const verdict = await classifierWith(registry).classify(request());
-    expect(verdict).toEqual({ verdict: "deny", reason: "an unreviewed script can do anything" });
+    expect(verdict).toEqual({ verdict: "deny", layer: "2b", reason: "an unreviewed script can do anything" });
     expect(registry.calls.map((call) => `${call.model.provider}/${call.model.id}`)).toEqual([
       "opencode-go/glm-5.3",
       "opencode-go/qwen3.8-max",
@@ -234,6 +235,7 @@ describe("2a to 2b routing", () => {
     ]);
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "deny",
+      layer: "2b",
       reason: "the target is a production namespace",
     });
   });
@@ -242,6 +244,7 @@ describe("2a to 2b routing", () => {
     const registry = new FakeRegistry([verdictJSON("deny", "force-push rewrites shared history", true)]);
     expect(await classifierWith(registry).classify(request())).toEqual({
       verdict: "deny",
+      layer: "2a",
       reason: "force-push rewrites shared history",
     });
     expect(registry.calls).toHaveLength(1);
@@ -249,7 +252,11 @@ describe("2a to 2b routing", () => {
 
   test("uncertain out of 2b resolves to deny", async () => {
     const registry = new FakeRegistry([verdictJSON("uncertain", "no idea"), verdictJSON("uncertain", "still no idea")]);
-    expect(await classifierWith(registry).classify(request())).toEqual({ verdict: "deny", reason: "still no idea" });
+    expect(await classifierWith(registry).classify(request())).toEqual({
+      verdict: "deny",
+      layer: "2b",
+      reason: "still no idea",
+    });
   });
 
   test("2b runs at most once", async () => {

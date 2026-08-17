@@ -773,6 +773,9 @@ type AutoModeDenialInfo struct {
 	// Reason corresponds to the JSON schema field "reason".
 	Reason string `json:"reason"`
 
+	// Rule corresponds to the JSON schema field "rule".
+	Rule string `json:"rule"`
+
 	// SessionID corresponds to the JSON schema field "session_id".
 	SessionID string `json:"session_id"`
 

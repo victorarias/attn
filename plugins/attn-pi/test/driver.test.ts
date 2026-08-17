@@ -54,6 +54,7 @@ function noopRelay(): RelayServer {
       },
       async suiteReportState() {},
       async suiteReportStop() {},
+      async suiteReportDenial() {},
     },
   });
 }
@@ -373,5 +374,43 @@ describe("PiDriver", () => {
     expect(stateReport).toBeDefined();
     expect(stopReport?.params.seq).toBeLessThan(stateReport?.params.seq);
     expect(stopReport?.params.verdict).toBe("idle");
+  });
+
+  test("a reported denial reaches the daemon addressed to the run that raised it", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteReportDenial({
+      token,
+      tool: "bash",
+      action: "bash: curl https://example.com",
+      reason: "the user never asked to reach that host",
+      rule: "classifier-2a",
+      at: "2026-08-17T10:00:00.000Z",
+    });
+
+    expect(rpc.requests.find((call) => call.method === "session.report_automode_denial")?.params).toEqual({
+      session_id: "session-1",
+      run_id: "run-1",
+      tool: "bash",
+      action: "bash: curl https://example.com",
+      reason: "the user never asked to reach that host",
+      rule: "classifier-2a",
+      at: "2026-08-17T10:00:00.000Z",
+    });
+  });
+
+  test("a denial from an unknown token is refused rather than attributed to somebody", async () => {
+    const driver = newDriver({ rpc: new FakeRPC() });
+    await expect(driver.suiteReportDenial({ token: "not-a-token", action: "bash: rm -rf /" })).rejects.toThrow(
+      /unknown pi suite token/,
+    );
+  });
+
+  test("a denial with no action named is refused: an empty row says nothing", async () => {
+    const driver = newDriver({ rpc: new FakeRPC() });
+    await expect(driver.suiteReportDenial({ token: "tok", action: "  " })).rejects.toThrow(/missing action/);
   });
 });

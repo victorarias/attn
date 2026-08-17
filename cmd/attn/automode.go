@@ -302,13 +302,20 @@ func runAutoModeDenials(args []string) {
 		writeJSON(result)
 		return
 	}
-	if len(result.Denials) == 0 {
-		fmt.Println("no denials recorded")
+	writeAutoModeDenials(os.Stdout, result.Denials)
+}
+
+// writeAutoModeDenials prints the feed newest first, one row per denial: when,
+// which session, who decided, what was blocked, and why.
+func writeAutoModeDenials(out io.Writer, denials []protocol.AutoModeDenialInfo) {
+	if len(denials) == 0 {
+		fmt.Fprintln(out, "no denials recorded")
 		return
 	}
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	for _, denial := range result.Denials {
-		fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", denial.CreatedAt, denial.SessionID, denial.Signature, denial.Reason)
+	w := tabwriter.NewWriter(out, 0, 0, 2, ' ', 0)
+	for _, denial := range denials {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
+			denial.CreatedAt, denial.SessionID, denial.Rule, denial.Signature, denial.Reason)
 	}
 	w.Flush()
 }

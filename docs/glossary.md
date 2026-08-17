@@ -840,3 +840,11 @@ able to write its own leash.
 Environment prose is the exception: `attn automode env add` edits it directly,
 because it describes the machine to the classifier rather than naming a rule
 that skips it.
+
+A **denial** is one call auto mode refused. The session reports it to attn,
+which keeps it in a bounded log, raises a notification naming what was blocked
+and why, and lists it under `attn automode denials`. Every denial says who
+decided — a static envelope rule, the classifier layer that answered
+(`classifier-2a`, `classifier-2b`), or the circuit breaker. A denial never
+stops the run: the agent is given the reason, and a plain reply approving the
+action is what lets it retry.
