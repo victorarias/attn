@@ -2,6 +2,8 @@ package store
 
 import (
 	"database/sql"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 )
@@ -120,18 +122,36 @@ type AppVersion struct {
 // window has to be measured against real invocation rates, and a number written
 // before there is anything to measure would be a limit with no receipt.
 type AppInvocation struct {
-	ID           int64
-	AppName      string
-	VersionID    int64
-	EventSeq     int64
-	EventName    string
-	EventSubject string
-	Handler      string
-	Status       string
-	Error        string
-	Duration     time.Duration
-	StartedAt    time.Time
+	ID               int64
+	AppName          string
+	VersionID        int64
+	Kind             string
+	EventSeq         int64
+	EventName        string
+	EventSubject     string
+	Handler          string
+	Status           string
+	Error            string
+	Duration         time.Duration
+	StartedAt        time.Time
+	FinishedAt       time.Time
+	ReconcileReason  string
+	ThroughRequestID int64
+	ThroughSeq       int64
 }
+
+const (
+	AppInvocationKindSubscription = "subscription"
+	AppInvocationKindCommand      = "command"
+	AppInvocationKindView         = "view"
+	AppInvocationKindReconcile    = "reconcile"
+
+	AppInvocationStatusRunning      = "running"
+	AppInvocationStatusOK           = "ok"
+	AppInvocationStatusError        = "error"
+	AppInvocationStatusRuntimeError = "runtime_error"
+	AppInvocationStatusInterrupted  = "interrupted"
+)
 
 // SaveApp creates a registry row, or touches an existing one. It never moves
 // current_version_id: the pointer moves only through CommitAppVersion,
@@ -300,12 +320,14 @@ func (s *Store) CommitAppVersion(v AppVersion, now time.Time) (AppVersion, bool,
 		return AppVersion{}, false, err
 	}
 	if moved && previous != 0 {
-		cursor, err := appConsumerCursorWith(tx, v.AppName)
+		cursor, subscribed, err := appConsumerCursorWith(tx, v.AppName)
 		if err != nil {
 			return AppVersion{}, false, err
 		}
-		if err := appendAppReconcileRequest(tx, v.AppName, AppReconcileVersionChange, v.ID, cursor, previous, now); err != nil {
-			return AppVersion{}, false, err
+		if subscribed {
+			if err := appendAppReconcileRequest(tx, v.AppName, AppReconcileVersionChange, v.ID, cursor, previous, now); err != nil {
+				return AppVersion{}, false, err
+			}
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -346,12 +368,14 @@ func (s *Store) SetAppCurrentVersion(name string, versionID int64, now time.Time
 		return err
 	}
 	if moved && previous != 0 {
-		cursor, err := appConsumerCursorWith(tx, name)
+		cursor, subscribed, err := appConsumerCursorWith(tx, name)
 		if err != nil {
 			return err
 		}
-		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
-			return err
+		if subscribed {
+			if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -400,12 +424,14 @@ func (s *Store) StepAppVersionBack(name string, target int64, now time.Time) err
 		return err
 	}
 	if previous != 0 {
-		cursor, err := appConsumerCursorWith(tx, name)
+		cursor, subscribed, err := appConsumerCursorWith(tx, name)
 		if err != nil {
 			return err
 		}
-		if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
-			return err
+		if subscribed {
+			if err := appendAppReconcileRequest(tx, name, AppReconcileVersionChange, versionID, cursor, previous, now); err != nil {
+				return err
+			}
 		}
 	}
 	return tx.Commit()
@@ -542,7 +568,9 @@ func (s *Store) countAppRows(query, name string) (int, error) {
 	return n, nil
 }
 
-// AppendAppInvocation records one handler run and returns its id.
+// AppendAppInvocation records one already-settled handler run and returns its
+// id. StartAppInvocation and SettleAppInvocation are the lifecycle seam for a
+// run whose in-flight state must survive a daemon restart.
 func (s *Store) AppendAppInvocation(inv AppInvocation) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -550,16 +578,183 @@ func (s *Store) AppendAppInvocation(inv AppInvocation) (int64, error) {
 	if s.db == nil {
 		return 0, nil
 	}
+	inv = normalizeAppInvocation(inv)
 	res, err := s.db.Exec(`
-		INSERT INTO app_invocations
-			(app_name, version_id, event_seq, event_name, event_subject, handler, status, error, duration_ms, started_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, inv.AppName, inv.VersionID, inv.EventSeq, inv.EventName, inv.EventSubject, inv.Handler,
-		inv.Status, inv.Error, inv.Duration.Milliseconds(), inv.StartedAt.UTC().Format(sortableTimeFormat))
+			INSERT INTO app_invocations
+				(app_name, version_id, event_seq, event_name, event_subject, handler, status, error,
+				 duration_ms, started_at, kind, reconcile_reason, through_request_id, through_seq, finished_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`, inv.AppName, inv.VersionID, inv.EventSeq, inv.EventName, inv.EventSubject, inv.Handler,
+		inv.Status, inv.Error, inv.Duration.Milliseconds(), inv.StartedAt.UTC().Format(sortableTimeFormat),
+		inv.Kind, inv.ReconcileReason, nullablePositiveInt64(inv.ThroughRequestID), nullableInt64(inv.ThroughSeq, inv.ThroughRequestID != 0),
+		nullableStoreTime(inv.FinishedAt))
 	if err != nil {
 		return 0, err
 	}
 	return res.LastInsertId()
+}
+
+// StartAppInvocation writes the running row before dispatch. A reconcile's
+// reason and claim boundary are part of the attempt, so a retry never has to
+// reconstruct them from requests that may have arrived after it started.
+func (s *Store) StartAppInvocation(inv AppInvocation) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.db == nil {
+		return 0, nil
+	}
+	inv = normalizeAppInvocation(inv)
+	if inv.StartedAt.IsZero() {
+		return 0, errors.New("store: an app invocation needs a start time")
+	}
+	if inv.Kind == AppInvocationKindReconcile {
+		if inv.ThroughRequestID <= 0 {
+			return 0, fmt.Errorf("store: a reconcile invocation needs a positive through_request_id (got %d)", inv.ThroughRequestID)
+		}
+		if !json.Valid([]byte(inv.ReconcileReason)) {
+			return 0, errors.New("store: a reconcile invocation needs a valid JSON reason")
+		}
+	}
+	res, err := s.db.Exec(`
+		INSERT INTO app_invocations
+			(app_name, version_id, event_seq, event_name, event_subject, handler, status, error,
+			 duration_ms, started_at, kind, reconcile_reason, through_request_id, through_seq, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?, NULL)
+	`, inv.AppName, inv.VersionID, inv.EventSeq, inv.EventName, inv.EventSubject, inv.Handler,
+		AppInvocationStatusRunning, inv.StartedAt.UTC().Format(sortableTimeFormat), inv.Kind,
+		inv.ReconcileReason, nullablePositiveInt64(inv.ThroughRequestID), nullableInt64(inv.ThroughSeq, inv.ThroughRequestID != 0))
+	if err != nil {
+		return 0, err
+	}
+	return res.LastInsertId()
+}
+
+// SettleAppInvocation closes one running row. The status predicate makes a
+// daemon-shutdown settlement and startup interruption repair safe to race: one
+// wins, and the terminal answer cannot be rewritten by the loser.
+func (s *Store) SettleAppInvocation(id int64, status, failure string, finishedAt time.Time) (bool, error) {
+	if !terminalAppInvocationStatus(status) {
+		return false, fmt.Errorf("store: %q is not a terminal app invocation status", status)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return false, nil
+	}
+
+	var startedText string
+	err := s.db.QueryRow(`SELECT started_at FROM app_invocations WHERE id = ? AND status = ?`, id, AppInvocationStatusRunning).Scan(&startedText)
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	if finishedAt.IsZero() {
+		return false, errors.New("store: settling an app invocation needs a finish time")
+	}
+	duration := finishedAt.Sub(parseStoreTime(startedText))
+	if duration < 0 {
+		duration = 0
+	}
+	res, err := s.db.Exec(`
+		UPDATE app_invocations
+		SET status = ?, error = ?, duration_ms = ?, finished_at = ?
+		WHERE id = ? AND status = ?
+	`, status, failure, duration.Milliseconds(), finishedAt.UTC().Format(sortableTimeFormat), id, AppInvocationStatusRunning)
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	return n > 0, err
+}
+
+// InterruptRunningAppInvocations repairs attempts a previous daemon could not
+// close. Their reconcile request and cursor are untouched, so an enabled lane
+// still owes the same work after startup.
+func (s *Store) InterruptRunningAppInvocations(now time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return 0, nil
+	}
+	if now.IsZero() {
+		return 0, errors.New("store: interrupting app invocations needs a time")
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	rows, err := tx.Query(`SELECT id, started_at FROM app_invocations WHERE status = ? ORDER BY id`, AppInvocationStatusRunning)
+	if err != nil {
+		return 0, err
+	}
+	type runningInvocation struct {
+		id      int64
+		started string
+	}
+	var running []runningInvocation
+	for rows.Next() {
+		var inv runningInvocation
+		if err := rows.Scan(&inv.id, &inv.started); err != nil {
+			_ = rows.Close()
+			return 0, err
+		}
+		running = append(running, inv)
+	}
+	if err := rows.Close(); err != nil {
+		return 0, err
+	}
+	stamp := now.UTC().Format(sortableTimeFormat)
+	for _, inv := range running {
+		duration := now.Sub(parseStoreTime(inv.started))
+		if duration < 0 {
+			duration = 0
+		}
+		if _, err := tx.Exec(`
+			UPDATE app_invocations
+			SET status = ?, duration_ms = ?, finished_at = ?
+			WHERE id = ? AND status = ?
+		`, AppInvocationStatusInterrupted, duration.Milliseconds(), stamp, inv.id, AppInvocationStatusRunning); err != nil {
+			return 0, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return len(running), nil
+}
+
+// LatestOwedAppReconcileInvocation returns the newest attempt whose claim is
+// still above the completed request boundary. It is the durable retry identity
+// after a failure or restart. An ok attempt remains visible here if completing
+// its request/cursor transaction failed, so the boundary is never lost.
+func (s *Store) LatestOwedAppReconcileInvocation(name string) (AppInvocation, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return AppInvocation{}, false, nil
+	}
+	inv, err := scanAppInvocation(s.db.QueryRow(`
+		SELECT id, app_name, version_id, event_seq, event_name, event_subject, handler,
+		       status, error, duration_ms, started_at, kind, reconcile_reason,
+		       through_request_id, through_seq, finished_at
+		FROM app_invocations
+		WHERE app_name = ? AND kind = ?
+		  AND through_request_id > COALESCE((
+			SELECT completed_request_id FROM app_reconcile_progress WHERE app_name = ?
+		  ), 0)
+		ORDER BY id DESC LIMIT 1
+	`, name, AppInvocationKindReconcile, name))
+	if err == sql.ErrNoRows {
+		return AppInvocation{}, false, nil
+	}
+	if err != nil {
+		return AppInvocation{}, false, err
+	}
+	return inv, true, nil
 }
 
 // ListAppInvocations returns an app's most recent invocations, newest first.
@@ -574,10 +769,11 @@ func (s *Store) ListAppInvocations(name string, limit int) ([]AppInvocation, err
 		limit = 20
 	}
 	rows, err := s.db.Query(`
-		SELECT id, app_name, version_id, event_seq, event_name, event_subject, handler,
-		       status, error, duration_ms, started_at
-		FROM app_invocations WHERE app_name = ? ORDER BY started_at DESC, id DESC LIMIT ?
-	`, name, limit)
+			SELECT id, app_name, version_id, event_seq, event_name, event_subject, handler,
+			       status, error, duration_ms, started_at, kind, reconcile_reason,
+			       through_request_id, through_seq, finished_at
+			FROM app_invocations WHERE app_name = ? ORDER BY started_at DESC, id DESC LIMIT ?
+		`, name, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -585,17 +781,10 @@ func (s *Store) ListAppInvocations(name string, limit int) ([]AppInvocation, err
 
 	var out []AppInvocation
 	for rows.Next() {
-		var (
-			inv       AppInvocation
-			durMillis int64
-			startedAt string
-		)
-		if err := rows.Scan(&inv.ID, &inv.AppName, &inv.VersionID, &inv.EventSeq, &inv.EventName,
-			&inv.EventSubject, &inv.Handler, &inv.Status, &inv.Error, &durMillis, &startedAt); err != nil {
+		inv, err := scanAppInvocation(rows)
+		if err != nil {
 			return nil, err
 		}
-		inv.Duration = time.Duration(durMillis) * time.Millisecond
-		inv.StartedAt = parseStoreTime(startedAt)
 		out = append(out, inv)
 	}
 	return out, rows.Err()
@@ -658,6 +847,77 @@ func (s *Store) TrimAppInvocations(cutoff time.Time, perApp int) (int, error) {
 		return removed, err
 	}
 	return removed + int(n), nil
+}
+
+func normalizeAppInvocation(inv AppInvocation) AppInvocation {
+	if inv.Kind == "" {
+		switch inv.EventName {
+		case "app.command":
+			inv.Kind = AppInvocationKindCommand
+		case "app.view.crashed":
+			inv.Kind = AppInvocationKindView
+		default:
+			inv.Kind = AppInvocationKindSubscription
+		}
+	}
+	if inv.Status != "" && inv.Status != AppInvocationStatusRunning && inv.FinishedAt.IsZero() && !inv.StartedAt.IsZero() {
+		inv.FinishedAt = inv.StartedAt.Add(inv.Duration)
+	}
+	return inv
+}
+
+func terminalAppInvocationStatus(status string) bool {
+	switch status {
+	case AppInvocationStatusOK, AppInvocationStatusError, AppInvocationStatusRuntimeError,
+		AppInvocationStatusInterrupted:
+		return true
+	default:
+		return false
+	}
+}
+
+func nullablePositiveInt64(value int64) any {
+	if value <= 0 {
+		return nil
+	}
+	return value
+}
+
+func nullableInt64(value int64, present bool) any {
+	if !present {
+		return nil
+	}
+	return value
+}
+
+func nullableStoreTime(value time.Time) any {
+	if value.IsZero() {
+		return nil
+	}
+	return value.UTC().Format(sortableTimeFormat)
+}
+
+func scanAppInvocation(row rowScanner) (AppInvocation, error) {
+	var (
+		inv                          AppInvocation
+		durMillis                    int64
+		startedAt                    string
+		finishedAt                   sql.NullString
+		throughRequestID, throughSeq sql.NullInt64
+	)
+	if err := row.Scan(&inv.ID, &inv.AppName, &inv.VersionID, &inv.EventSeq, &inv.EventName,
+		&inv.EventSubject, &inv.Handler, &inv.Status, &inv.Error, &durMillis, &startedAt,
+		&inv.Kind, &inv.ReconcileReason, &throughRequestID, &throughSeq, &finishedAt); err != nil {
+		return AppInvocation{}, err
+	}
+	inv.Duration = time.Duration(durMillis) * time.Millisecond
+	inv.StartedAt = parseStoreTime(startedAt)
+	inv.ThroughRequestID = throughRequestID.Int64
+	inv.ThroughSeq = throughSeq.Int64
+	if finishedAt.Valid {
+		inv.FinishedAt = parseStoreTime(finishedAt.String)
+	}
+	return inv, nil
 }
 
 func scanApp(row rowScanner) (App, error) {

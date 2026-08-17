@@ -390,6 +390,22 @@ func (s *Supervisor) Stop(name string) {
 	s.notify(name)
 }
 
+// TerminateGeneration kills the exact running generation and leaves the child
+// desired-running, so its exit follows the ordinary restart path. A stale
+// caller cannot kill a replacement that has already taken its place.
+func (s *Supervisor) TerminateGeneration(name string, generation uint64) (bool, error) {
+	s.mu.Lock()
+	c := s.children[name]
+	if c == nil || generation == 0 || generation != c.generation || c.desired != DesiredRunning || c.process == nil {
+		s.mu.Unlock()
+		return false, nil
+	}
+	process := c.process
+	s.mu.Unlock()
+
+	return true, process.Kill()
+}
+
 // Shutdown stops every child and refuses further Ensure calls.
 func (s *Supervisor) Shutdown() {
 	s.mu.Lock()
