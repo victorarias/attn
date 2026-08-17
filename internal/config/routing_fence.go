@@ -176,4 +176,3 @@ func routingValuesAgree(resolved, expected string, isPath bool) (bool, error) {
 	}
 	return resolvedPath == expectedPath, nil
 }
-
