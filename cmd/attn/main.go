@@ -184,6 +184,19 @@ func main() {
 		os.Exit(1)
 	}
 
+	// A profile whose resolved paths belong to a different profile is a
+	// contradiction, not a configuration: refuse before any command can open
+	// that world. The `profile` group is exempt on purpose — it derives
+	// canonical resources and never honors the overrides, so it stays the
+	// surface that reports and cleans up the mess (`attn profile status`
+	// prints the same conflict as a warning).
+	if !isProfileGroupCommand(os.Args) {
+		if err := config.ValidateProfileRouting(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	}
+
 	if len(os.Args) < 2 {
 		maybePrintProfileBanner()
 		runWrapper()
@@ -369,6 +382,12 @@ func maybePrintProfileBanner() {
 	config.PrintProfileBanner(os.Stderr)
 }
 
+// isProfileGroupCommand reports whether the invocation is `attn profile …`,
+// the diagnostic and cleanup surface exempt from the routing fence.
+func isProfileGroupCommand(args []string) bool {
+	return len(args) >= 2 && args[1] == "profile"
+}
+
 func isVersionCommand(args []string) bool {
 	if len(args) < 2 {
 		return false
@@ -544,6 +563,13 @@ func runDaemonCommand() {
 }
 
 func runDaemon() {
+	// Last check before the daemon takes a PID lock and migrates a database:
+	// the routing fence again, so a daemon can never boot into a data dir that
+	// belongs to another profile even if it is reached some other way.
+	if err := config.ValidateProfileRouting(); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	socketPath := config.SocketPath()
 	if err := config.ValidateDaemonIsolation(socketPath); err != nil {
 		fmt.Fprintln(os.Stderr, err)

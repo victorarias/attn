@@ -140,6 +140,12 @@ func runProfileStatus() {
 	fmt.Printf("  scheme     %s\n", r.DeepLinkScheme)
 	fmt.Printf("  e2e ports  daemon %s · vite %s\n\n", r.E2EDaemonPort, r.E2EVitePort)
 
+	// The one command that still runs under a contradicting environment, so it
+	// is the one that has to say what is wrong with it.
+	if err := config.ValidateProfileRouting(); err != nil {
+		fmt.Printf("CONFLICT — every other attn command refuses to run here:\n%v\n\n", err)
+	}
+
 	fmt.Println("Switch:   attn profile-env <name> | source   (fish: attn profile-env --fish <name> | source)")
 	fmt.Println("Resolve:  attn profile resolve --json         (single value: --field wsPort)")
 	fmt.Println("List:     attn profile list")

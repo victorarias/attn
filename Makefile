@@ -25,9 +25,18 @@ $(error empty PROFILE= passed on the command line — profile selection failed (
 endif
 endif
 
+# Every variable that outranks ATTN_PROFILE when a path or endpoint resolves —
+# mirrors config.RoutingOverrideEnv. ATTN_DATA_DIR and ATTN_PLUGIN_DIR were
+# missing here on 2026-08-17, so `install PROFILE=<name>` handed the profile's
+# binary the production data dir and it adopted the production daemon.
+PROFILE_ROUTING_VARS = ATTN_DATA_DIR ATTN_SOCKET_PATH ATTN_DB_PATH ATTN_CONFIG_PATH ATTN_PLUGIN_DIR ATTN_WS_PORT
 # Routing env that must NOT leak from a parent attn terminal into an isolated
 # profile daemon we (re)start. Shared by every non-default profile install.
-PROFILE_DAEMON_UNSET = -u ATTN_SOCKET_PATH -u ATTN_DB_PATH -u ATTN_CONFIG_PATH -u ATTN_WS_PORT -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT
+PROFILE_DAEMON_UNSET = $(foreach var,$(PROFILE_ROUTING_VARS),-u $(var)) -u ATTN_WRAPPER_PATH -u ATTN_INSIDE_APP -u ATTN_DAEMON_MANAGED -u ATTN_PTY_WORKER -u ATTN_SESSION_ID -u ATTN_AGENT
+# An install takes PROFILE=<name> as the intent and drops the inherited routing,
+# but the shell it ran from still points somewhere else — say so, because every
+# other attn command in that shell will refuse (config.ValidateProfileRouting).
+WARN_LEAKED_ROUTING = leaked=""; for var in $(PROFILE_ROUTING_VARS); do if printenv "$$var" >/dev/null; then leaked="$$leaked $$var"; fi; done; if [ -n "$$leaked" ]; then echo ">>> ignoring inherited routing env for this install:$$leaked"; echo ">>> this shell still routes elsewhere — select the profile with attn profile-env"; fi
 BUILD_DIR=./cmd/attn
 VERSION ?= $(shell bash ./scripts/version.sh)
 BUILD_TIME ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
@@ -247,6 +256,7 @@ install: build-app
 	rm -rf "$$app_bundle"; \
 	cp -r "app/src-tauri/target/release/bundle/macos/$$app_name.app" ~/Applications/; \
 	if [ -n "$$profile" ]; then \
+		$(WARN_LEAKED_ROUTING); \
 		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
 		: "Install time is the only moment the worktree behind a profile is known"; \
 		: "for certain, so record it here for cleanup tooling to read back."; \
@@ -280,6 +290,7 @@ install-daemon: ensure-codesign-identity build
 		codesign --force --sign "$$identity" "$$app_bundle"; \
 	fi; \
 	if [ -n "$$profile" ]; then \
+		$(WARN_LEAKED_ROUTING); \
 		env $(PROFILE_DAEMON_UNSET) ATTN_PROFILE="$$profile" "$$app_binary" daemon ensure >/dev/null; \
 		: "Same provenance record as the full install: a daemon-only install is"; \
 		: "still this worktree claiming the profile."; \
