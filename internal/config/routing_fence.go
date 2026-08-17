@@ -46,23 +46,25 @@ func ValidateProfileRouting() error {
 	profilePort := WSPortForProfile(profile)
 
 	// ATTN_DATA_DIR comes first: every other default derives from it, so
-	// reporting it once explains the rest.
+	// reporting it once explains the rest. configKey names the config.json
+	// field that can also produce the value — the only other source there is.
 	checks := []struct {
-		env      string
-		resolved string
-		expected string
-		isPath   bool
+		env       string
+		configKey string
+		resolved  string
+		expected  string
+		isPath    bool
 	}{
-		{"ATTN_DATA_DIR", DataDir(), profileDir, true},
-		{"ATTN_SOCKET_PATH", SocketPath(), filepath.Join(profileDir, "attn.sock"), true},
-		{"ATTN_DB_PATH", DBPath(), filepath.Join(profileDir, "attn.db"), true},
-		{"ATTN_CONFIG_PATH", ConfigPath(), filepath.Join(profileDir, "config.json"), true},
-		{"ATTN_PLUGIN_DIR", PluginDir(), filepath.Join(profileDir, "plugins"), true},
-		{"ATTN_WS_PORT", WSPort(), profilePort, false},
+		{"ATTN_DATA_DIR", "", DataDir(), profileDir, true},
+		{"ATTN_SOCKET_PATH", "socket_path", SocketPath(), filepath.Join(profileDir, "attn.sock"), true},
+		{"ATTN_DB_PATH", "db_path", DBPath(), filepath.Join(profileDir, "attn.db"), true},
+		{"ATTN_CONFIG_PATH", "", ConfigPath(), filepath.Join(profileDir, "config.json"), true},
+		{"ATTN_PLUGIN_DIR", "", PluginDir(), filepath.Join(profileDir, "plugins"), true},
+		{"ATTN_WS_PORT", "", WSPort(), profilePort, false},
 	}
 
 	var (
-		lines           []string
+		conflicts       []routingConflict
 		dataDirConflict bool
 	)
 	for _, check := range checks {
@@ -77,32 +79,77 @@ func ValidateProfileRouting() error {
 			dataDirConflict = true
 		}
 		if envValue, ok := lookupRoutingOverride(check.env); ok {
-			lines = append(lines, fmt.Sprintf("%-16s = %s", check.env, envValue))
+			conflicts = append(conflicts, routingConflict{label: check.env, value: envValue, env: check.env})
 			continue
 		}
-		if dataDirConflict {
+		if dataDirConflict || check.configKey == "" {
 			// Derived from the data dir that is already reported; one line is
 			// enough to explain the whole set.
 			continue
 		}
-		lines = append(lines, fmt.Sprintf("%-16s = %s (from %s)", check.env, check.resolved, ConfigPath()))
+		conflicts = append(conflicts, routingConflict{
+			label:      check.env,
+			value:      check.resolved,
+			configKey:  check.configKey,
+			configFile: ConfigPath(),
+		})
 	}
-	if len(lines) == 0 {
+	if len(conflicts) == 0 {
 		return nil
 	}
+	return formatRoutingConflict(profile, profileDir, profilePort, conflicts)
+}
 
+// routingConflict is one resolved value that does not belong to the active
+// profile, and where it came from: an environment variable, or a field in the
+// profile's own config.json. The source decides the remedy — scrubbing the
+// environment cannot fix a file.
+type routingConflict struct {
+	label      string
+	value      string
+	env        string
+	configKey  string
+	configFile string
+}
+
+func formatRoutingConflict(profile, profileDir, profilePort string, conflicts []routingConflict) error {
 	var b strings.Builder
 	fmt.Fprintf(&b, "ATTN_PROFILE=%s disagrees with the routing this process resolved.\n", profile)
 	fmt.Fprintf(&b, "  profile %s is %s (port %s), but:\n", profile, profileDir, profilePort)
-	for _, line := range lines {
-		fmt.Fprintf(&b, "    %s\n", line)
+
+	var envNames []string
+	var files []string
+	for _, conflict := range conflicts {
+		if conflict.env != "" {
+			fmt.Fprintf(&b, "    %-16s = %s\n", conflict.label, conflict.value)
+			envNames = append(envNames, conflict.env)
+			continue
+		}
+		fmt.Fprintf(&b, "    %-16s = %s (%s in %s)\n", conflict.label, conflict.value, conflict.configKey, conflict.configFile)
+		files = append(files, conflict.configFile)
 	}
-	b.WriteString("  An explicit override outranks ATTN_PROFILE, so this process would act as profile ")
-	b.WriteString(profile)
-	b.WriteString(" against another profile's data. Refusing before anything opens it.\n")
-	fmt.Fprintf(&b, "  Fix: %s ATTN_PROFILE=%s <command>\n", routingScrubPrefix(), profile)
-	fmt.Fprintf(&b, "  Or clear them in your shell: eval \"$(attn profile-env %s)\"", profile)
-	return fmt.Errorf("%s", b.String())
+	fmt.Fprintf(&b, "  An explicit override outranks ATTN_PROFILE, so this process would act as profile %s"+
+		" against another profile's data. Refusing before anything opens it.\n", profile)
+
+	if len(envNames) > 0 {
+		fmt.Fprintf(&b, "  Fix: env%s ATTN_PROFILE=%s <command>\n", scrubFlags(envNames), profile)
+		fmt.Fprintf(&b, "  Or clear them in your shell: eval \"$(attn profile-env %s)\"\n", profile)
+	}
+	if len(files) > 0 {
+		fmt.Fprintf(&b, "  No environment change fixes %s: edit it, or start the profile over with `attn profile clean %s`\n",
+			files[0], profile)
+	}
+	return fmt.Errorf("%s", strings.TrimRight(b.String(), "\n"))
+}
+
+// scrubFlags renders the `-u NAME` flags for the variables that are actually
+// set, so the printed command clears exactly what disagreed.
+func scrubFlags(names []string) string {
+	var b strings.Builder
+	for _, name := range names {
+		fmt.Fprintf(&b, " -u %s", name)
+	}
+	return b.String()
 }
 
 // lookupRoutingOverride reports whether a routing variable is set to a
@@ -130,14 +177,3 @@ func routingValuesAgree(resolved, expected string, isPath bool) (bool, error) {
 	return resolvedPath == expectedPath, nil
 }
 
-// routingScrubPrefix is the `env -u …` prefix that clears every routing
-// override currently set, so the error names a command that actually works.
-func routingScrubPrefix() string {
-	parts := []string{"env"}
-	for _, name := range routingOverrideEnv {
-		if _, ok := lookupRoutingOverride(name); ok {
-			parts = append(parts, "-u", name)
-		}
-	}
-	return strings.Join(parts, " ")
-}

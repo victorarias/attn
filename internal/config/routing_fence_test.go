@@ -130,6 +130,25 @@ func TestValidateProfileRouting_WSPortDisagreement(t *testing.T) {
 	}
 }
 
+// A divergent path can also come from the profile's own config.json, and no
+// amount of `env -u` fixes a file — so that message must point at the file.
+func TestFormatRoutingConflict_ConfigSourcedValueNamesTheFile(t *testing.T) {
+	configFile := "/Users/x/.attn-agent7/config.json"
+	err := formatRoutingConflict("agent7", "/Users/x/.attn-agent7", "22944", []routingConflict{
+		{label: "ATTN_DB_PATH", value: "/elsewhere/attn.db", configKey: "db_path", configFile: configFile},
+	})
+
+	message := err.Error()
+	for _, want := range []string{"db_path", configFile, "attn profile clean agent7"} {
+		if !strings.Contains(message, want) {
+			t.Errorf("error must name %q; got:\n%s", want, message)
+		}
+	}
+	if strings.Contains(message, "env -u") {
+		t.Errorf("scrubbing the environment cannot fix a config file, so do not offer it; got:\n%s", message)
+	}
+}
+
 func TestValidateProfileRouting_SymlinkedDataDirAgrees(t *testing.T) {
 	// The fence compares canonically: the same directory reached through a
 	// symlink is the same world, and refusing it would be a false positive.
