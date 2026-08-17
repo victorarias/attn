@@ -4960,7 +4960,8 @@ model AutoModeDenialInfo {
   "signature": string;
   "reason": string;
   // Who decided: a static envelope rule, the classifier layer that answered
-  // ("classifier-2a" | "classifier-2b"), or "circuit-breaker".
+  // ("classifier-2a" | "classifier-2b"), "classifier-unavailable" when no
+  // classifier model could be reached, or "circuit-breaker".
   "rule": string;
   "created_at": string;
 }

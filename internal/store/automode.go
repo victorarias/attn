@@ -37,7 +37,8 @@ type AutoModeProposal struct {
 
 // AutoModeDenial is one call auto mode refused. Signature is the blocked call
 // in one line; Rule names who decided — a static envelope rule, the classifier
-// layer that answered (`classifier-2a`/`-2b`), or the circuit breaker.
+// layer that answered (`classifier-2a`/`-2b`), `classifier-unavailable` when
+// no classifier model could be reached, or the circuit breaker.
 type AutoModeDenial struct {
 	ID        int64
 	SessionID string

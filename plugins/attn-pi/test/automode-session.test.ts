@@ -118,6 +118,34 @@ describe("verdict cache", () => {
     expect(classifier.requests).toHaveLength(2);
   });
 
+  test("a classifier nothing could reach blocks under its own rule", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      unavailable: true,
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+    });
+    const { session } = sessionWith(classifier);
+    expect(await session.decide(bash("git push origin main"), { cwd })).toMatchObject({
+      outcome: "block",
+      rule: "classifier-unavailable",
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+    });
+  });
+
+  test("an outage is not cached: the call is judged again once a model answers", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing could be reached" });
+    const { session } = sessionWith(classifier);
+    await session.decide(bash("git push origin main"), { cwd });
+
+    classifier.answerWith({ verdict: "allow", layer: "2a" });
+    expect(await session.decide(bash("git push origin main"), { cwd })).toEqual({
+      outcome: "run",
+      rule: "classifier-2a",
+    });
+    expect(classifier.requests).toHaveLength(2);
+  });
+
   test("a different intent is judged on its own", async () => {
     const { session, classifier } = sessionWith(new StubClassifier({ verdict: "allow" }));
     await session.decide(bash("go build ./..."), { cwd });

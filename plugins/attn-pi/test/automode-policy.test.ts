@@ -50,8 +50,8 @@ describe("config loading", () => {
       environment: ["this machine has no production access"],
       allow: ["go build ./..."],
       hardDeny: ["git push --force*"],
-      classifierModel: "opencode-go/glm-5.3",
-      escalationModel: "opencode-go/qwen3.8-max",
+      classifierModels: ["opencode-go/glm-5.3"],
+      escalationModels: ["opencode-go/qwen3.8-max"],
     });
   });
 
@@ -87,8 +87,41 @@ describe("config loading", () => {
 
   test("blank model names fall back to the receipt's defaults", () => {
     const config = loadAutoModeConfig({ classifier_model: "  ", escalation_model: "" });
-    expect(config.classifierModel).toBe(defaultAutoModeConfig.classifierModel);
-    expect(config.escalationModel).toBe(defaultAutoModeConfig.escalationModel);
+    expect(config.classifierModels).toEqual(defaultAutoModeConfig.classifierModels);
+    expect(config.escalationModels).toEqual(defaultAutoModeConfig.escalationModels);
+  });
+
+  test("the singular model fields still load, as a one-entry list", () => {
+    const config = loadAutoModeConfig({ classifier_model: "vendor/small", escalation_model: "vendor/big" });
+    expect(config.classifierModels).toEqual(["vendor/small"]);
+    expect(config.escalationModels).toEqual(["vendor/big"]);
+  });
+
+  test("a list names the layer's models in order, and wins over the singular field", () => {
+    const config = loadAutoModeConfig({
+      classifier_model: "vendor/ignored",
+      classifier_models: ["vendor/primary", " vendor/fallback "],
+      escalation_models: ["vendor/big"],
+    });
+    expect(config.classifierModels).toEqual(["vendor/primary", "vendor/fallback"]);
+    expect(config.escalationModels).toEqual(["vendor/big"]);
+  });
+
+  test.each([
+    ["classifier_models", { classifier_models: "vendor/one" }],
+    ["classifier_models", { classifier_models: [7] }],
+    ["classifier_models", { classifier_models: ["vendor/one", "  "] }],
+    ["classifier_models", { classifier_models: [] }],
+    ["escalation_models", { escalation_models: [] }],
+  ])("%s refuses a list it cannot serve a layer from", (field, raw) => {
+    let caught: unknown;
+    try {
+      loadAutoModeConfig(raw as never);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(AutoModeConfigError);
+    expect((caught as AutoModeConfigError).field).toBe(field);
   });
 });
 

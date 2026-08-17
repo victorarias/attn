@@ -106,8 +106,9 @@ Config schema (daemon-owned storage, global scope in v1, versioned/migrated
 from day one — a shipped CLI writer means user state exists):
 
 - `enabled_default` (bool, attn sessions), `environment` (prose entries),
-  `allow` (narrow patterns), `hard_deny` (patterns), `classifier_model`,
-  `escalation_model`.
+  `allow` (narrow patterns), `hard_deny` (patterns), `classifier_models`,
+  `escalation_models` (ordered lists, primary first; the singular
+  `classifier_model` / `escalation_model` still load as a one-entry list).
 
 Bare pi fallback: the standalone extension reads the same schema from a file
 under the pi config dir; no attn required.
@@ -136,6 +137,14 @@ Classifier (layer 2a → 2b):
   session's main model.
 - Allow verdicts cache per normalized intent for the session; deny verdicts
   drop on new user input (the next message may be the grant).
+- Each layer walks its list on transport failure only — a thrown request,
+  `stopReason: "error"`, an endpoint that is down — with one immediate retry
+  per entry before advancing. A model that answers ends the walk whatever it
+  answered, so a deny is never re-asked of the next model. An exhausted list
+  still blocks (fail closed), under the rule `classifier-unavailable` and with
+  a reason naming the layer, the models tried and the last failure: an outage
+  must not read as a judgment. Only a model with corpus receipts belongs in a
+  list.
 - Circuit breaker: 3 consecutive (or 20 total) denials → one human
   question; any approval resets. No-UI contexts (`-p`, json) fail closed.
 - Both layers pass `ctx.signal` and report usage into session totals.

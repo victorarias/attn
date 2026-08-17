@@ -2749,7 +2749,8 @@ func applyMigration103(tx *sql.Tx) error {
 // schema-migration rewind tests and interrupted upgrade recovery idempotent.
 // applyMigration110 records who refused an auto mode call: a static envelope
 // rule ("hard-deny", "unknown-tool"), the classifier layer that answered
-// ("classifier-2a", "classifier-2b"), or the circuit breaker.
+// ("classifier-2a", "classifier-2b"), "classifier-unavailable" when no
+// classifier model could be reached, or the circuit breaker.
 //
 // Guarded because a database can reach this with the column already there: a
 // migration test builds the current schema and rewinds the recorded version,

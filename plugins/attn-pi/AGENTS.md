@@ -354,6 +354,18 @@ rather than through dialogs. Design and slices:
   per-API request options, and the model thinks unbounded — 354 output tokens
   and 5.7 s against 60 tokens and 2.9 s on glm-5.3 with the same prompt
   (2026-08-17).
+- Each layer names an ordered list of models (`classifier_models`,
+  `escalation_models`; the singular spellings load as a one-entry list). The
+  list is walked ONLY when a model cannot be reached — a thrown request,
+  `stopReason: "error"` — and each entry gets one immediate retry first. A
+  model that answers ends the walk whatever it answered, including a deny and
+  including output that does not parse: advancing on a verdict would be
+  shopping for a different one. An abort ends the walk instead of advancing it.
+  When a layer's list is exhausted the call is still blocked, but under the
+  rule `classifier-unavailable` and with a reason naming the layer, the models
+  tried and the last failure — nothing judged the call, and the user reading
+  the block needs to know that. An unavailable deny is never cached: the cache
+  holds verdicts, and there was none.
 - Escalation is scoped to allow verdicts. A confident deny is final: the user
   overturns one by saying so, and a second opinion buys them only the wait.
   Letting denials escalate doubled the cost of the corpus before it was fixed.
@@ -402,5 +414,6 @@ rather than through dialogs. Design and slices:
   nothing outside auto mode may turn a denial into something else. The report
   carries no seq: it is an append, not a claim about the session's state.
 - A denial names who decided. Static rules keep their own names; a classified
-  call reports the layer that answered (`classifier-2a`, `classifier-2b`),
-  which is why `ClassifierVerdict` carries a `layer`.
+  call reports the layer that answered (`classifier-2a`, `classifier-2b`), or
+  `classifier-unavailable` when no model in the layer could be reached, which
+  is why `ClassifierVerdict` carries a `layer` and an `unavailable` flag.

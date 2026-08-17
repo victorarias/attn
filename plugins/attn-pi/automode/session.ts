@@ -22,7 +22,8 @@ export const totalDenialLimit = 20;
 // The rule names a denial reports as "who decided this". A classified call
 // names the layer that answered — 2a is the configured classifier, 2b the
 // escalation model — and falls back to the bare name when the classifier does
-// not say.
+// not say. `classifier-unavailable` is the one that is not a judgment: every
+// model a layer could reach failed to answer and auto mode failed closed.
 export type DecisionRule =
   | StaticRule
   | "cached-allow"
@@ -30,6 +31,7 @@ export type DecisionRule =
   | "classifier"
   | "classifier-2a"
   | "classifier-2b"
+  | "classifier-unavailable"
   | "circuit-breaker";
 
 export type SessionDecision =
@@ -125,6 +127,12 @@ export class AutoModeSession {
       transcript: this.transcript.snapshot(),
       signal: options.signal,
     });
+    if (judged.verdict === "deny" && judged.unavailable) {
+      // Nobody judged this call, so there is no verdict to remember: caching
+      // one would keep blocking the call after the endpoint is back, until the
+      // user happened to speak.
+      return this.denied(call, "classifier-unavailable", judged.reason);
+    }
     const rule: DecisionRule = judged.layer ? `classifier-${judged.layer}` : "classifier";
     if (judged.verdict === "allow") {
       this.cache.set(intent, { verdict: "allow", reason: judged.reason ?? "" });
