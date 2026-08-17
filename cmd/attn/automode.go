@@ -63,8 +63,8 @@ commands:
   env remove <index>                remove the entry at <index> (see env)
   allow <pattern>                   propose an allow entry
   deny <pattern>                    propose a hard-deny entry
-  model classifier <provider/id>    propose the layer-2a model
-  model escalation <provider/id>    propose the layer-2b model
+  model classifier <provider/id>…   propose layer 2a's models, primary first
+  model escalation <provider/id>…   propose layer 2b's models, primary first
   denials [--limit <n>]             recent denials, newest first
 
 Every command takes --json.
@@ -75,6 +75,11 @@ one with no literal characters left after the wildcards — is refused outright.
 
 Environment prose is a direct edit: it is what the classifier reads about this
 machine, not a rule that skips it.
+
+A layer's models are an ordered list — the first one judges, and the rest are
+tried only when the one before it cannot be reached. Name them separated by
+spaces or commas; the proposal replaces that layer's whole list.
+
 `)
 }
 
@@ -103,9 +108,9 @@ func runAutoModeShow(args []string) {
 	cfg := result.Config
 	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintf(w, "enabled by default\t%t\n", cfg.EnabledDefault)
-	fmt.Fprintf(w, "classifier model\t%s\n", cfg.ClassifierModel)
-	fmt.Fprintf(w, "escalation model\t%s\n", cfg.EscalationModel)
 	w.Flush()
+	printAutoModeList("classifier models", cfg.ClassifierModels)
+	printAutoModeList("escalation models", cfg.EscalationModels)
 	printAutoModeList("environment", cfg.Environment)
 	printAutoModeList("allow", cfg.Allow)
 	printAutoModeList("hard deny", cfg.HardDeny)
@@ -239,15 +244,23 @@ func runAutoModeModel(args []string) {
 			automode.TargetClassifier, automode.TargetEscalation, target)
 		os.Exit(2)
 	}
-	proposeAutoMode("model "+target, automode.KindModel, target, rest[1:], hasFlag(args, "--json"))
+	// Spaces or commas, either way: the list is what the layer runs on, and a
+	// typo is worth catching here rather than after a round trip.
+	models, err := automode.ParseModelList(strings.Join(rest[1:], automode.ModelListSeparator))
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "automode model %s: %v\n", target, err)
+		os.Exit(2)
+	}
+	proposeAutoMode("model "+target, automode.KindModel, target,
+		automode.FormatModelList(models), hasFlag(args, "--json"))
 }
 
 func runAutoModePropose(verb, kind, target string, args []string) {
-	proposeAutoMode(verb, kind, target, stripFlags(args), hasFlag(args, "--json"))
+	proposeAutoMode(verb, kind, target, strings.Join(stripFlags(args), " "), hasFlag(args, "--json"))
 }
 
-func proposeAutoMode(verb, kind, target string, rest []string, asJSON bool) {
-	value := strings.TrimSpace(strings.Join(rest, " "))
+func proposeAutoMode(verb, kind, target, value string, asJSON bool) {
+	value = strings.TrimSpace(value)
 	if value == "" {
 		fmt.Fprintf(os.Stderr, "automode %s: needs a value\n", verb)
 		os.Exit(2)

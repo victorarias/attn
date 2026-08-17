@@ -36,21 +36,24 @@ type Config struct {
 	Allow []string `json:"allow"`
 	// Patterns refused before anything else looks at the call.
 	HardDeny []string `json:"hard_deny"`
-	// Layer 2a, and layer 2b for what 2a cannot decide. Always resolved: a
-	// caller never has to know what the built-in default is.
-	ClassifierModel string `json:"classifier_model"`
-	EscalationModel string `json:"escalation_model"`
+	// Layer 2a's models, and layer 2b's for what 2a cannot decide. Ordered,
+	// primary first: pi walks the rest only when the one before it cannot be
+	// reached (plugins/attn-pi/automode/model-classifier.ts). Always resolved
+	// and never empty — a caller never has to know what the built-in default
+	// is, and an empty list is a layer that can judge nothing.
+	ClassifierModels []string `json:"classifier_models"`
+	EscalationModels []string `json:"escalation_models"`
 }
 
 // Defaults is the config a machine that has never been configured runs on.
 func Defaults() Config {
 	return Config{
-		EnabledDefault:  true,
-		Environment:     []string{},
-		Allow:           []string{},
-		HardDeny:        []string{},
-		ClassifierModel: DefaultClassifierModel,
-		EscalationModel: DefaultEscalationModel,
+		EnabledDefault:   true,
+		Environment:      []string{},
+		Allow:            []string{},
+		HardDeny:         []string{},
+		ClassifierModels: []string{DefaultClassifierModel},
+		EscalationModels: []string{DefaultEscalationModel},
 	}
 }
 
@@ -175,6 +178,46 @@ func ValidateAllowPattern(pattern string) error {
 	return nil
 }
 
+// ModelListSeparator is how a model proposal writes an ordered list into its
+// single value column: `provider/id,provider/id`, primary first. A proposal
+// names ONE change, and for a layer that change is which models may serve it —
+// promotion replaces the layer's list rather than appending to it, so there is
+// no reorder verb to miss and nothing to un-append.
+const ModelListSeparator = ","
+
+// ParseModelList reads a model proposal's value into the ordered list a layer
+// runs on. Every entry must be a `provider/id` pair, and a layer with no model
+// is refused: it could judge nothing, and "no models" is never what a caller
+// means by it.
+func ParseModelList(value string) ([]string, error) {
+	models := []string{}
+	for _, entry := range strings.Split(value, ModelListSeparator) {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if !strings.Contains(entry, "/") {
+			return nil, fmt.Errorf("model %q is not a provider/id pair", entry)
+		}
+		for _, seen := range models {
+			if seen == entry {
+				return nil, fmt.Errorf("model %q is named twice; a layer walks each model once", entry)
+			}
+		}
+		models = append(models, entry)
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("no model named: a layer needs at least one %s-separated provider/id", ModelListSeparator)
+	}
+	return models, nil
+}
+
+// FormatModelList is ParseModelList's inverse, for a proposal value and for
+// anywhere a layer's models are shown on one line.
+func FormatModelList(models []string) string {
+	return strings.Join(models, ModelListSeparator)
+}
+
 // ValidateProposal checks one proposed change before it is recorded. Refusing at
 // submission is what keeps an unpromotable entry out of the app's review list.
 func ValidateProposal(kind, target, value string) error {
@@ -197,13 +240,8 @@ func ValidateProposal(kind, target, value string) error {
 		if target != TargetClassifier && target != TargetEscalation {
 			return fmt.Errorf("model target must be %q or %q, got %q", TargetClassifier, TargetEscalation, target)
 		}
-		if value == "" {
-			return fmt.Errorf("model id is empty")
-		}
-		if !strings.Contains(value, "/") {
-			return fmt.Errorf("model %q is not a provider/id pair", value)
-		}
-		return nil
+		_, err := ParseModelList(value)
+		return err
 	default:
 		return fmt.Errorf("unknown proposal kind %q (want %s, %s or %s)", kind, KindAllow, KindDeny, KindModel)
 	}

@@ -268,8 +268,7 @@ function showDenial(ctx: AutoModeContextLike, denial: AutoModeDenial, standing: 
 async function askToResume(session: AutoModeSession, ctx: AutoModeContextLike): Promise<boolean> {
   const ui = uiOf(ctx);
   if (!ui) return false;
-  const breaker = session.breaker();
-  const question = breakerQuestion(breaker.consecutive, breaker.total);
+  const question = breakerQuestion(session.breaker());
   try {
     return await ui.confirm(question.title, question.message);
   } catch {

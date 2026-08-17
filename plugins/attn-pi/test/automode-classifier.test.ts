@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { ClassifierRequest } from "../automode/classifier";
 import { defaultAutoModeConfig, type AutoModeConfig } from "../automode/config";
 import {
+  attemptsPerModel,
   classifierThinkingLevel,
   ModelClassifier,
   type CompletionContext,
@@ -69,6 +70,16 @@ class FakeRegistry implements ModelRegistryLike {
 
 function says(text: string, usage?: UsageLike): CompletionResult {
   return { content: [{ type: "text", text }], usage, stopReason: "stop" };
+}
+
+/** One model's whole allowance of attempts, all of them thrown. */
+function errors(count: number, text: string): Error[] {
+  return Array.from({ length: count }, () => new Error(text));
+}
+
+/** The same, as the provider answering with an error instead of throwing. */
+function providerErrors(count: number, text: string): CompletionResult[] {
+  return Array.from({ length: count }, () => ({ stopReason: "error", errorMessage: text }));
 }
 
 function verdictJSON(verdict: string, reason: string, highStakes = false): CompletionResult {
@@ -277,7 +288,7 @@ describe("classification failures fail closed", () => {
 
   test("a model spec that names no provider denies", async () => {
     const registry = new FakeRegistry([]);
-    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModel: "glm-5.3" };
+    const config: AutoModeConfig = { ...defaultAutoModeConfig, classifierModels: ["glm-5.3"] };
     const verdict = await classifierWith(registry, config).classify(request());
     expect(verdict.verdict).toBe("deny");
     expect(verdict.reason).toContain("glm-5.3");
@@ -300,14 +311,14 @@ describe("classification failures fail closed", () => {
   });
 
   test("a completion that rejects denies, naming the failure", async () => {
-    const registry = new FakeRegistry([new Error("provider unreachable")]);
+    const registry = new FakeRegistry(errors(attemptsPerModel, "provider unreachable"));
     const verdict = await classifierWith(registry).classify(request());
     expect(verdict.verdict).toBe("deny");
     expect(verdict.reason).toContain("provider unreachable");
   });
 
   test("a provider error message denies rather than parsing as a verdict", async () => {
-    const registry = new FakeRegistry([{ stopReason: "error", errorMessage: "404 model retired" }]);
+    const registry = new FakeRegistry(providerErrors(attemptsPerModel, "404 model retired"));
     const verdict = await classifierWith(registry).classify(request());
     expect(verdict.verdict).toBe("deny");
     expect(verdict.reason).toContain("404 model retired");
@@ -323,6 +334,120 @@ describe("classification failures fail closed", () => {
   test("a stream that reports itself aborted throws too", async () => {
     const registry = new FakeRegistry([{ stopReason: "aborted" }]);
     await expect(classifierWith(registry).classify(request())).rejects.toThrow("aborted");
+  });
+});
+
+describe("the fallback walk", () => {
+  const twoDeep: AutoModeConfig = {
+    ...defaultAutoModeConfig,
+    classifierModels: ["vendor/primary", "vendor/fallback"],
+    escalationModels: ["vendor/big", "vendor/bigger"],
+  };
+  const specs = (registry: FakeRegistry) => registry.calls.map((call) => `${call.model.provider}/${call.model.id}`);
+
+  test("an unreachable model is retried once, then the walk moves on", async () => {
+    const registry = new FakeRegistry([...errors(attemptsPerModel, "503 upstream"), verdictJSON("allow", "routine")]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+      verdict: "allow",
+      layer: "2a",
+      reason: "routine",
+    });
+    expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary", "vendor/fallback"]);
+  });
+
+  test("a provider error advances the walk the same way a throw does", async () => {
+    const registry = new FakeRegistry([
+      ...providerErrors(attemptsPerModel, "503 Service Unavailable"),
+      verdictJSON("deny", "force-push rewrites shared history"),
+    ]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+      verdict: "deny",
+      layer: "2a",
+      reason: "force-push rewrites shared history",
+    });
+    expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary", "vendor/fallback"]);
+  });
+
+  test("the retry is enough on its own: a blip never reaches the fallback", async () => {
+    const registry = new FakeRegistry([new Error("connection reset"), verdictJSON("allow", "routine")]);
+    await classifierWith(registry, twoDeep).classify(request());
+    expect(specs(registry)).toEqual(["vendor/primary", "vendor/primary"]);
+  });
+
+  test("a deny is a verdict, so the next model is never asked", async () => {
+    const registry = new FakeRegistry([verdictJSON("deny", "touches prod")]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+      verdict: "deny",
+      layer: "2a",
+      reason: "touches prod",
+    });
+    expect(specs(registry)).toEqual(["vendor/primary"]);
+  });
+
+  test("output that reads as no verdict is still an answer, and ends the walk", async () => {
+    const registry = new FakeRegistry([says("I'd rather not say.")]);
+    const verdict = await classifierWith(registry, twoDeep).classify(request());
+    expect(verdict.verdict).toBe("deny");
+    expect(verdict.reason).toContain("cannot read as a verdict");
+    expect(specs(registry)).toEqual(["vendor/primary"]);
+  });
+
+  test("an abort ends the walk instead of advancing it", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const registry = new FakeRegistry(errors(6, "aborted"));
+    await expect(classifierWith(registry, twoDeep).classify(request({ signal: controller.signal }))).rejects.toThrow(
+      "aborted",
+    );
+    expect(specs(registry)).toEqual(["vendor/primary"]);
+  });
+
+  test("an exhausted list blocks as an outage, naming the layer, the models and the last failure", async () => {
+    const registry = new FakeRegistry([
+      ...errors(attemptsPerModel, "503 upstream"),
+      ...providerErrors(attemptsPerModel, "502 bad gateway"),
+    ]);
+    const verdict = await classifierWith(registry, twoDeep).classify(request());
+    expect(verdict).toMatchObject({ verdict: "deny", layer: "2a", unavailable: true });
+    expect(verdict.reason).toContain("classifier model (layer 2a)");
+    expect(verdict.reason).toContain("vendor/primary, vendor/fallback");
+    expect(verdict.reason).toContain("502 bad gateway");
+    expect(verdict.reason).toContain("outage");
+    expect(specs(registry)).toHaveLength(2 * attemptsPerModel);
+  });
+
+  test("escalation walks its own list", async () => {
+    const registry = new FakeRegistry([
+      verdictJSON("uncertain", "cannot tell what the script does"),
+      ...errors(attemptsPerModel, "503 upstream"),
+      verdictJSON("allow", "the user asked for exactly this"),
+    ]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toEqual({
+      verdict: "allow",
+      layer: "2b",
+      reason: "the user asked for exactly this",
+    });
+    expect(specs(registry)).toEqual(["vendor/primary", "vendor/big", "vendor/big", "vendor/bigger"]);
+  });
+
+  test("an exhausted escalation list blocks as a 2b outage", async () => {
+    const registry = new FakeRegistry([
+      verdictJSON("uncertain", "cannot tell what the script does"),
+      ...errors(2 * attemptsPerModel, "503 upstream"),
+    ]);
+    const verdict = await classifierWith(registry, twoDeep).classify(request());
+    expect(verdict).toMatchObject({ verdict: "deny", layer: "2b", unavailable: true });
+    expect(verdict.reason).toContain("escalation model (layer 2b)");
+    expect(verdict.reason).toContain("vendor/big, vendor/bigger");
+  });
+
+  test("a model missing from the catalog is walked past, not judged", async () => {
+    const registry = new FakeRegistry([verdictJSON("allow", "routine")], ["vendor/primary"]);
+    expect(await classifierWith(registry, twoDeep).classify(request())).toMatchObject({
+      verdict: "allow",
+      layer: "2a",
+    });
+    expect(specs(registry)).toEqual(["vendor/fallback"]);
   });
 });
 

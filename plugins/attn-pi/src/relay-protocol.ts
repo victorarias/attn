@@ -8,7 +8,8 @@ export type RelayHelloResult = { ok: true };
 export type RelayReportStateParams = { token: string; state: "working" };
 export type RelayReportStopParams = { token: string; assistant_text: string };
 // One call auto mode refused, on its way to attn's own surfaces. `rule` names
-// who decided (a static envelope rule, `classifier-2a`/`-2b`, the breaker) and
+// who decided (a static envelope rule, `classifier-2a`/`-2b`,
+// `classifier-unavailable`, the breaker) and
 // `at` is when the session refused it, RFC 3339.
 export type RelayReportDenialParams = {
   token: string;

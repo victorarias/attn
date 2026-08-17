@@ -117,8 +117,8 @@ describe("PiDriver", () => {
       environment: ["never touch prod"],
       allow: ["git push origin*"],
       hard_deny: [],
-      classifier_model: "opencode-go/glm-5.3",
-      escalation_model: "opencode-go/qwen3.8-max",
+      classifier_models: ["opencode-go/glm-5.3"],
+      escalation_models: ["opencode-go/qwen3.8-max"],
     };
     const withConfig = await driver.spawn(params({ session_id: "session-2", run_id: "run-2", auto_mode: config }));
     expect(JSON.parse(withConfig.env?.ATTN_PI_AUTOMODE_CONFIG ?? "null")).toEqual(config);

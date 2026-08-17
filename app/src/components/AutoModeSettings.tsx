@@ -130,14 +130,8 @@ export function AutoModeSettings({ policy }: AutoModeSettingsProps) {
               </span>
             </span>
           </div>
-          <div className="automode-field">
-            <span className="automode-field-label">Classifier</span>
-            <span className="automode-field-value automode-mono">{config.classifier_model}</span>
-          </div>
-          <div className="automode-field">
-            <span className="automode-field-label">Escalation</span>
-            <span className="automode-field-value automode-mono">{config.escalation_model}</span>
-          </div>
+          {renderModels('Classifier', 'automode-classifier-models', config.classifier_models)}
+          {renderModels('Escalation', 'automode-escalation-models', config.escalation_models)}
           {renderPatterns('Allowed', 'automode-allow', config.allow, 'Nothing skips the classifier.')}
           {renderPatterns(
             'Hard denied',
@@ -170,6 +164,34 @@ export function AutoModeSettings({ policy }: AutoModeSettingsProps) {
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * A layer's models, in the order pi walks them: the first one judges, and the
+ * rest are only reached when the one before it cannot be. Marking which is
+ * which is the whole difference between a fallback list and a list of models
+ * somebody might expect to share the work.
+ */
+function renderModels(label: string, testID: string, models: string[]) {
+  return (
+    <div className="automode-field">
+      <span className="automode-field-label">{label}</span>
+      <span className="automode-field-value" data-testid={testID}>
+        {models.length === 0 ? (
+          <span className="settings-hint">No model can serve this layer.</span>
+        ) : (
+          <ul className="automode-patterns">
+            {models.map((model, index) => (
+              <li key={model}>
+                <code className="automode-value automode-mono">{model}</code>
+                <span className="settings-hint"> {index === 0 ? 'judges' : 'fallback'}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </span>
+    </div>
   );
 }
 
