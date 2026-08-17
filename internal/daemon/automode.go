@@ -195,13 +195,25 @@ func (d *Daemon) recordAutoModeDenial(params pluginReportAutoModeDenialParams) e
 	if dropped > 0 {
 		d.logf("automode: denial log is at its %d-row cap; dropped %d oldest", store.AutoModeDenialRows, dropped)
 	}
+	// The notification is best effort, by design. The denial itself is already
+	// enforced and the row is durable, so a failed notification write costs the
+	// user this one surface — `attn automode denials` still lists it — and the
+	// report is not worth failing over a surface. The fact stays with the
+	// notification because pushing it alone would re-push a list the denial
+	// never reached. The log line names the denial either way, so a row is never
+	// the only trace of it.
+	notification := ""
 	record, err := d.store.AddNotification(autoModeDenialNotification(d.sessionLabel(sessionID), stored), time.Now())
 	if err != nil {
 		d.logf("automode: add denial notification for session %s: %v", sessionID, err)
-		return nil
+	} else {
+		notification = record.ID
 	}
 	d.logf("automode: denied session=%s rule=%s action=%q notification=%s",
-		sessionID, stored.Rule, stored.Signature, record.ID)
+		sessionID, stored.Rule, stored.Signature, notification)
+	if notification == "" {
+		return nil
+	}
 	// One fact, not two: the notification is how this denial is surfaced, and
 	// automode.denied's projection is what pushes it. Its subject is the session
 	// because that is the entity a denial is about.

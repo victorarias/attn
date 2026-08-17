@@ -1,0 +1,11 @@
+kind: fixed
+area: automode
+change: >
+  Auto mode's review list now says who asked. Two sessions proposing the
+  same rule are two asks rather than one row crediting whoever asked first,
+  a promotion answers every session that asked for that change, and the
+  database itself holds one pending ask per asker. The session launcher's
+  auto mode toggle also keeps an explicit choice: a promoted default that
+  changes while the launcher is open no longer flips it back.
+notes: >
+  Slice 6 of the pi auto mode plan (docs/plans/2026-08-16-pi-auto-mode.md).
