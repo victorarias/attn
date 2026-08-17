@@ -246,12 +246,12 @@ func autoModeDenialNotification(label string, denial store.AutoModeDenial) store
 
 func autoModeConfigInfo(cfg automode.Config) protocol.AutoModeConfigInfo {
 	return protocol.AutoModeConfigInfo{
-		EnabledDefault:  cfg.EnabledDefault,
-		Environment:     nonNilStrings(cfg.Environment),
-		Allow:           nonNilStrings(cfg.Allow),
-		HardDeny:        nonNilStrings(cfg.HardDeny),
-		ClassifierModel: cfg.ClassifierModel,
-		EscalationModel: cfg.EscalationModel,
+		EnabledDefault:   cfg.EnabledDefault,
+		Environment:      nonNilStrings(cfg.Environment),
+		Allow:            nonNilStrings(cfg.Allow),
+		HardDeny:         nonNilStrings(cfg.HardDeny),
+		ClassifierModels: nonNilStrings(cfg.ClassifierModels),
+		EscalationModels: nonNilStrings(cfg.EscalationModels),
 	}
 }
 

@@ -38,7 +38,6 @@ interface AutoModeDaemonEvent {
   [key: string]: unknown;
 }
 
-const str = (value: unknown): string => (typeof value === 'string' ? value : '');
 const list = <T,>(value: unknown): T[] => (Array.isArray(value) ? (value as T[]) : []);
 
 const emptyConfig = (): AutoModeConfigInfo => ({
@@ -46,8 +45,8 @@ const emptyConfig = (): AutoModeConfigInfo => ({
   environment: [],
   allow: [],
   hard_deny: [],
-  classifier_model: '',
-  escalation_model: '',
+  classifier_models: [],
+  escalation_models: [],
 });
 
 const toConfig = (value: unknown): AutoModeConfigInfo => {
@@ -58,8 +57,8 @@ const toConfig = (value: unknown): AutoModeConfigInfo => {
     environment: list<string>(raw.environment),
     allow: list<string>(raw.allow),
     hard_deny: list<string>(raw.hard_deny),
-    classifier_model: str(raw.classifier_model),
-    escalation_model: str(raw.escalation_model),
+    classifier_models: list<string>(raw.classifier_models),
+    escalation_models: list<string>(raw.escalation_models),
   };
 };
 

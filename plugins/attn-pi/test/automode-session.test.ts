@@ -118,6 +118,34 @@ describe("verdict cache", () => {
     expect(classifier.requests).toHaveLength(2);
   });
 
+  test("a classifier nothing could reach blocks under its own rule", async () => {
+    const classifier = new StubClassifier({
+      verdict: "deny",
+      layer: "2a",
+      unavailable: true,
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+    });
+    const { session } = sessionWith(classifier);
+    expect(await session.decide(bash("git push origin main"), { cwd })).toMatchObject({
+      outcome: "block",
+      rule: "classifier-unavailable",
+      reason: "auto mode could not reach its classifier model (layer 2a)",
+    });
+  });
+
+  test("an outage is not cached: the call is judged again once a model answers", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing could be reached" });
+    const { session } = sessionWith(classifier);
+    await session.decide(bash("git push origin main"), { cwd });
+
+    classifier.answerWith({ verdict: "allow", layer: "2a" });
+    expect(await session.decide(bash("git push origin main"), { cwd })).toEqual({
+      outcome: "run",
+      rule: "classifier-2a",
+    });
+    expect(classifier.requests).toHaveLength(2);
+  });
+
   test("a different intent is judged on its own", async () => {
     const { session, classifier } = sessionWith(new StubClassifier({ verdict: "allow" }));
     await session.decide(bash("go build ./..."), { cwd });
@@ -138,6 +166,7 @@ describe("circuit breaker", () => {
       consecutive: consecutiveDenialLimit,
       total: consecutiveDenialLimit,
       tripped: true,
+      outage: false,
     });
   });
 
@@ -162,7 +191,7 @@ describe("circuit breaker", () => {
     await denyOnce(session, "go run ./cmd/a");
     await denyOnce(session, "go run ./cmd/b");
     await session.decide(bash("git status"), { cwd });
-    expect(session.breaker()).toEqual({ consecutive: 0, total: 2, tripped: false });
+    expect(session.breaker()).toEqual({ consecutive: 0, total: 2, tripped: false, outage: false });
   });
 
   test("the user speaking clears both counters", async () => {
@@ -170,7 +199,7 @@ describe("circuit breaker", () => {
     for (let index = 0; index < consecutiveDenialLimit; index++) await denyOnce(session, `go run ./cmd/x${index}`);
     expect(session.breaker().tripped).toBe(true);
     session.noteUserInput();
-    expect(session.breaker()).toEqual({ consecutive: 0, total: 0, tripped: false });
+    expect(session.breaker()).toEqual({ consecutive: 0, total: 0, tripped: false, outage: false });
   });
 
   test("the total limit trips a session that keeps being told no between allows", async () => {
@@ -181,6 +210,31 @@ describe("circuit breaker", () => {
       await session.decide(bash("git status"), { cwd });
     }
     expect(session.breaker()).toMatchObject({ consecutive: 0, total: totalDenialLimit, tripped: true });
+  });
+
+  test("an episode of pure outages says so instead of claiming refusals", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" });
+    const { session } = sessionWith(classifier);
+    for (let index = 0; index < consecutiveDenialLimit; index++) await denyOnce(session, `go run ./cmd/x${index}`);
+    expect(session.breaker()).toMatchObject({ tripped: true, outage: true });
+
+    const decision = await session.decide(bash("go run ./cmd/y"), { cwd });
+    expect(decision.outcome).toBe("block");
+    if (decision.outcome === "block") {
+      expect(decision.rule).toBe("circuit-breaker");
+      expect(decision.reason).toContain("classifier could not be reached");
+      expect(decision.reason).toContain("Nothing judged any of those calls dangerous");
+      expect(decision.reason).not.toContain("has refused");
+    }
+  });
+
+  test("one judged refusal in the episode makes it a refusal episode again", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" });
+    const { session } = sessionWith(classifier);
+    await denyOnce(session, "go run ./cmd/a");
+    classifier.answerWith({ verdict: "deny", layer: "2a", reason: "the user said not to" });
+    await denyOnce(session, "go run ./cmd/b");
+    expect(session.breaker()).toMatchObject({ total: 2, outage: false });
   });
 
   test("hard denies count toward the breaker", async () => {

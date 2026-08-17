@@ -1398,12 +1398,12 @@ export enum AuthorsUpdatedMessageEvent {
 }
 
 export interface AutoModeConfigInfo {
-    allow:            string[];
-    classifier_model: string;
-    enabled_default:  boolean;
-    environment:      string[];
-    escalation_model: string;
-    hard_deny:        string[];
+    allow:             string[];
+    classifier_models: string[];
+    enabled_default:   boolean;
+    environment:       string[];
+    escalation_models: string[];
+    hard_deny:         string[];
     [property: string]: any;
 }
 
@@ -1537,12 +1537,12 @@ export interface AutoModePromoteResultMessage {
 }
 
 export interface Config {
-    allow:            string[];
-    classifier_model: string;
-    enabled_default:  boolean;
-    environment:      string[];
-    escalation_model: string;
-    hard_deny:        string[];
+    allow:             string[];
+    classifier_models: string[];
+    enabled_default:   boolean;
+    environment:       string[];
+    escalation_models: string[];
+    hard_deny:         string[];
     [property: string]: any;
 }
 
@@ -13980,10 +13980,10 @@ const typeMap: any = {
     ], "any"),
     "AutoModeConfigInfo": o([
         { json: "allow", js: "allow", typ: a("") },
-        { json: "classifier_model", js: "classifier_model", typ: "" },
+        { json: "classifier_models", js: "classifier_models", typ: a("") },
         { json: "enabled_default", js: "enabled_default", typ: true },
         { json: "environment", js: "environment", typ: a("") },
-        { json: "escalation_model", js: "escalation_model", typ: "" },
+        { json: "escalation_models", js: "escalation_models", typ: a("") },
         { json: "hard_deny", js: "hard_deny", typ: a("") },
     ], "any"),
     "AutoModeDenialInfo": o([
@@ -14063,10 +14063,10 @@ const typeMap: any = {
     ], "any"),
     "Config": o([
         { json: "allow", js: "allow", typ: a("") },
-        { json: "classifier_model", js: "classifier_model", typ: "" },
+        { json: "classifier_models", js: "classifier_models", typ: a("") },
         { json: "enabled_default", js: "enabled_default", typ: true },
         { json: "environment", js: "environment", typ: a("") },
-        { json: "escalation_model", js: "escalation_model", typ: "" },
+        { json: "escalation_models", js: "escalation_models", typ: a("") },
         { json: "hard_deny", js: "hard_deny", typ: a("") },
     ], "any"),
     "AutoModeProposalInfo": o([

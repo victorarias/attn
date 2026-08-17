@@ -929,8 +929,8 @@ type AutoModeConfigInfo struct {
 	// Allow corresponds to the JSON schema field "allow".
 	Allow []string `json:"allow"`
 
-	// ClassifierModel corresponds to the JSON schema field "classifier_model".
-	ClassifierModel string `json:"classifier_model"`
+	// ClassifierModels corresponds to the JSON schema field "classifier_models".
+	ClassifierModels []string `json:"classifier_models"`
 
 	// EnabledDefault corresponds to the JSON schema field "enabled_default".
 	EnabledDefault bool `json:"enabled_default"`
@@ -938,8 +938,8 @@ type AutoModeConfigInfo struct {
 	// Environment corresponds to the JSON schema field "environment".
 	Environment []string `json:"environment"`
 
-	// EscalationModel corresponds to the JSON schema field "escalation_model".
-	EscalationModel string `json:"escalation_model"`
+	// EscalationModels corresponds to the JSON schema field "escalation_models".
+	EscalationModels []string `json:"escalation_models"`
 
 	// HardDeny corresponds to the JSON schema field "hard_deny".
 	HardDeny []string `json:"hard_deny"`

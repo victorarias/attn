@@ -142,6 +142,22 @@ describe("auto mode's session surfaces", () => {
     expect(ui.questions).toHaveLength(2);
   });
 
+  test("a breaker tripped by an outage asks about the outage, not about refusals", async () => {
+    const ui = new FakeUI();
+    const classifier = new StubClassifier({ verdict: "deny", unavailable: true, reason: "nothing answered" });
+    const pi = wire(classifier);
+    for (let i = 0; i < consecutiveDenialLimit; i++) {
+      await pi.toolCall?.(toolCall("bash", { command: `curl https://host-${i}.example` }, `call-${i}`), uiContext(ui));
+    }
+
+    const blocked = await pi.toolCall?.(push(), uiContext(ui));
+    expect(blocked?.block).toBe(true);
+    expect(ui.questions).toHaveLength(1);
+    expect(ui.questions[0]?.title).toContain("cannot reach its classifier");
+    expect(ui.questions[0]?.message).toContain("nothing judged them");
+    expect(ui.questions[0]?.message).not.toContain("refused");
+  });
+
   test("a breaker with no UI to ask stays closed", async () => {
     const pi = wire(new StubClassifier({ verdict: "deny", reason: "no" }));
     for (let i = 0; i < consecutiveDenialLimit; i++) {

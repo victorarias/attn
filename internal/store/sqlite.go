@@ -1207,6 +1207,11 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
 	// tolerating a schema-version rewind in recovery tests, the guard prevents a
 	// rerun from reclassifying reconcile rows as subscriptions.
 	{113, "record app reconcile invocation lifecycles", ``},
+	// 112 and 113 are burned: they are in flight on another branch and already
+	// applied to real databases, so this one is 114.
+	// Applied by applyMigration114, which carries each single model into its
+	// layer's list and drops the column it came from.
+	{114, "auto mode judges from an ordered model list per layer", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1613,6 +1618,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 113 {
 			if err := applyMigration113(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 114 {
+			if err := applyMigration114(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2835,7 +2845,8 @@ func applyMigration103(tx *sql.Tx) error {
 // schema-migration rewind tests and interrupted upgrade recovery idempotent.
 // applyMigration110 records who refused an auto mode call: a static envelope
 // rule ("hard-deny", "unknown-tool"), the classifier layer that answered
-// ("classifier-2a", "classifier-2b"), or the circuit breaker.
+// ("classifier-2a", "classifier-2b"), "classifier-unavailable" when no
+// classifier model could be reached, or the circuit breaker.
 //
 // Guarded because a database can reach this with the column already there: a
 // migration test builds the current schema and rewinds the recorded version,
@@ -2847,6 +2858,49 @@ func applyMigration110(tx *sql.Tx) error {
 	}
 	_, err = tx.Exec("ALTER TABLE automode_denials ADD COLUMN rule TEXT NOT NULL DEFAULT ''")
 	return err
+}
+
+// applyMigration114 gives each classifier layer an ordered model list. The
+// single model a machine had promoted becomes that list's one entry, and the
+// column it came from goes: two spellings of the same setting is how one of
+// them ends up stale, and the read resolves an empty list to the shipped
+// default exactly as it resolved an empty string.
+//
+// Every step is guarded on what the database actually has, because a migration
+// test builds the current schema and rewinds the recorded version, replaying
+// this against a table that already carries the lists.
+func applyMigration114(tx *sql.Tx) error {
+	for _, layer := range []struct{ single, list string }{
+		{"classifier_model", "classifier_models"},
+		{"escalation_model", "escalation_models"},
+	} {
+		hasList, err := columnExists(tx, "automode_config", layer.list)
+		if err != nil {
+			return err
+		}
+		if !hasList {
+			if _, err := tx.Exec(fmt.Sprintf(
+				"ALTER TABLE automode_config ADD COLUMN %s TEXT NOT NULL DEFAULT '[]'", layer.list)); err != nil {
+				return err
+			}
+		}
+		hasSingle, err := columnExists(tx, "automode_config", layer.single)
+		if err != nil {
+			return err
+		}
+		if !hasSingle {
+			continue
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			"UPDATE automode_config SET %s = json_array(%s) WHERE %s != '' AND (%s = '' OR %s = '[]')",
+			layer.list, layer.single, layer.single, layer.list, layer.list)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE automode_config DROP COLUMN %s", layer.single)); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func applyMigration106(tx *sql.Tx) error {

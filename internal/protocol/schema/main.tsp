@@ -5167,19 +5167,23 @@ model AppRollbackResult {
 // not be able to write its own leash.
 
 // Auto mode's promoted config: what a pi session actually launches with. Model
-// fields are always resolved — a machine that never picked one gets the shipped
-// default here rather than an empty string the caller would have to fill in.
+// lists are always resolved and never empty — a machine that never picked one
+// gets the shipped default here rather than nothing the caller would have to
+// fill in. They are ordered, primary first: pi walks the rest only when the one
+// before it cannot be reached.
 model AutoModeConfigInfo {
   "enabled_default": boolean;
   "environment": string[];
   "allow": string[];
   "hard_deny": string[];
-  "classifier_model": string;
-  "escalation_model": string;
+  "classifier_models": string[];
+  "escalation_models": string[];
 }
 
 // One proposed change awaiting a human. "value" is a pattern for allow/deny and
-// a `provider/id` for model; "target" names which model and is empty otherwise.
+// a comma-separated ordered list of `provider/id` for model, which promotion
+// applies as that layer's whole list; "target" names which layer and is empty
+// otherwise.
 model AutoModeProposalInfo {
   "id": safeint;
   // "allow" | "deny" | "model".
@@ -5205,7 +5209,8 @@ model AutoModeDenialInfo {
   "signature": string;
   "reason": string;
   // Who decided: a static envelope rule, the classifier layer that answered
-  // ("classifier-2a" | "classifier-2b"), or "circuit-breaker".
+  // ("classifier-2a" | "classifier-2b"), "classifier-unavailable" when no
+  // classifier model could be reached, or "circuit-breaker".
   "rule": string;
   "created_at": string;
 }

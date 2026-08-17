@@ -300,7 +300,7 @@ async function drive({ options, profile, attnBin, runAttn, dbPath, stub, judgeQu
       await pollFor(
         () => {
           const shown = runAttn(['automode', 'show', '--json']).json;
-          return shown?.config?.classifier_model === stubJudgeModel ? shown : null;
+          return shown?.config?.classifier_models?.[0] === stubJudgeModel ? shown : null;
         },
         'the promoted config to name the stub classifier',
         20_000,

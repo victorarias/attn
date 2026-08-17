@@ -19,8 +19,8 @@ const autoModeState = (proposals: number): AutoModeState => ({
     environment: [],
     allow: [],
     hard_deny: [],
-    classifier_model: 'opencode-go/glm-5.3',
-    escalation_model: 'opencode-go/qwen3.8-max',
+    classifier_models: ['opencode-go/glm-5.3'],
+    escalation_models: ['opencode-go/qwen3.8-max'],
   },
   proposals: Array.from({ length: proposals }, (_unused, index) => ({
     id: index + 1,

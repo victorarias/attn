@@ -27,7 +27,17 @@ export type ClassifierLayer = "2a" | "2b";
 
 export type ClassifierVerdict =
   | { verdict: "allow"; reason?: string; layer?: ClassifierLayer }
-  | { verdict: "deny"; reason: string; layer?: ClassifierLayer }
+  | {
+      verdict: "deny";
+      reason: string;
+      layer?: ClassifierLayer;
+      /**
+       * Nothing judged this call: every model the layer could reach failed to
+       * answer. The deny is auto mode failing closed, so the surfaces name it
+       * apart from a model that looked and refused.
+       */
+      unavailable?: boolean;
+    }
   | { verdict: "uncertain"; reason?: string; layer?: ClassifierLayer };
 
 export interface Classifier {
