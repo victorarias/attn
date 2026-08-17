@@ -2,15 +2,19 @@ kind: fixed
 area: automode
 change: >
   A model endpoint being down no longer reads as auto mode refusing your work.
-  Each classifier layer now names an ordered list of models: the first one
-  judges, and the rest are tried only when the one before it cannot be reached,
-  each with one immediate retry first. A model that answers ends the walk
+  Each classifier layer now takes an ordered list of models instead of one:
+  `attn automode model classifier <provider/id> <provider/id>` proposes the
+  list, the app promotes it, and pi walks it only when a model cannot be
+  reached — each entry retried once first. A model that answers ends the walk
   whatever it answered, so a deny is never re-asked of the next model. When no
   model in a layer can be reached the call is still blocked — auto mode fails
   closed — but the block says it was an outage, names the layer, the models
   tried and the last error, and is not remembered, so the call is judged
-  normally as soon as a model answers again.
+  normally as soon as a model answers again. A session stopped by the circuit
+  breaker after nothing but outages now says its classifier is unreachable
+  instead of claiming it refused you.
 symptom: >
   Every classified tool call in a pi session was blocked with "auto mode's
-  classifier model could not judge this call: 503 ...", as though the
-  classifier had refused the work, while the model endpoint was simply down.
+  classifier model could not judge this call: 503 ...", and then the session
+  stopped saying it had refused three calls in a row — while the model
+  endpoint was simply down and nothing had judged anything.

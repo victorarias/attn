@@ -2,6 +2,7 @@ package store
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -23,11 +24,11 @@ func TestAutoModeConfigDefaultsOnAFreshDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if cfg.ClassifierModel != automode.DefaultClassifierModel {
-		t.Errorf("classifier model = %q, want the shipped default", cfg.ClassifierModel)
+	if len(cfg.ClassifierModels) != 1 || cfg.ClassifierModels[0] != automode.DefaultClassifierModel {
+		t.Errorf("classifier models = %v, want the shipped default", cfg.ClassifierModels)
 	}
-	if cfg.EscalationModel != automode.DefaultEscalationModel {
-		t.Errorf("escalation model = %q, want the shipped default", cfg.EscalationModel)
+	if len(cfg.EscalationModels) != 1 || cfg.EscalationModels[0] != automode.DefaultEscalationModel {
+		t.Errorf("escalation models = %v, want the shipped default", cfg.EscalationModels)
 	}
 	if !cfg.EnabledDefault {
 		t.Error("enabled_default = false on a fresh database, want true")
@@ -58,8 +59,8 @@ func TestAutoModeEnvironmentRoundTrips(t *testing.T) {
 		t.Errorf("environment[1] = %q", read.Environment[1])
 	}
 	// Editing prose must not disturb the models a promote set.
-	if read.ClassifierModel != automode.DefaultClassifierModel {
-		t.Errorf("classifier model drifted to %q", read.ClassifierModel)
+	if len(read.ClassifierModels) != 1 || read.ClassifierModels[0] != automode.DefaultClassifierModel {
+		t.Errorf("classifier models drifted to %v", read.ClassifierModels)
 	}
 }
 
@@ -85,8 +86,8 @@ func TestAutoModeProposalDoesNotChangeTheConfig(t *testing.T) {
 	if len(after.Allow) != 0 {
 		t.Errorf("allow list changed to %v", after.Allow)
 	}
-	if after.ClassifierModel != before.ClassifierModel {
-		t.Errorf("classifier model changed to %q", after.ClassifierModel)
+	if strings.Join(after.ClassifierModels, ",") != strings.Join(before.ClassifierModels, ",") {
+		t.Errorf("classifier models changed to %v", after.ClassifierModels)
 	}
 	pending, err := s.ListAutoModeProposals(automode.StatePending)
 	if err != nil {
@@ -139,18 +140,18 @@ func TestAutoModePromoteAppliesAndClosesTheProposal(t *testing.T) {
 	if _, cfg, err = s.PromoteAutoModeProposal(model.ID, now); err != nil {
 		t.Fatalf("promote model: %v", err)
 	}
-	if cfg.EscalationModel != "opencode-go/kimi-k3" {
-		t.Errorf("escalation model = %q", cfg.EscalationModel)
+	if len(cfg.EscalationModels) != 1 || cfg.EscalationModels[0] != "opencode-go/kimi-k3" {
+		t.Errorf("escalation models = %v", cfg.EscalationModels)
 	}
-	if cfg.ClassifierModel != automode.DefaultClassifierModel {
-		t.Errorf("classifier model = %q, want it untouched", cfg.ClassifierModel)
+	if len(cfg.ClassifierModels) != 1 || cfg.ClassifierModels[0] != automode.DefaultClassifierModel {
+		t.Errorf("classifier models = %v, want it untouched", cfg.ClassifierModels)
 	}
 
 	read, err := s.GetAutoModeConfig()
 	if err != nil {
 		t.Fatalf("get config: %v", err)
 	}
-	if len(read.Allow) != 1 || read.EscalationModel != "opencode-go/kimi-k3" {
+	if len(read.Allow) != 1 || len(read.EscalationModels) != 1 || read.EscalationModels[0] != "opencode-go/kimi-k3" {
 		t.Fatalf("promoted config did not survive the read: %+v", read)
 	}
 	pending, err := s.ListAutoModeProposals(automode.StatePending)
@@ -293,6 +294,70 @@ func TestAutoModeMigrationCreatesItsTables(t *testing.T) {
 	}
 	if applied != 1 {
 		t.Fatalf("migration 109 applied %d times, want once", applied)
+	}
+}
+
+// Migration 114 turns the single model a machine had promoted into its layer's
+// one-entry list. A machine that promoted one and then upgrades must launch on
+// exactly the model it picked, not on the shipped default.
+func TestMigration114CarriesAPromotedModelIntoItsLayersList(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := NewWithDB(dbPath)
+	if err != nil {
+		t.Fatalf("NewWithDB: %v", err)
+	}
+	defer s.Close()
+
+	// Put automode_config back the way a store before 114 had it, holding the
+	// model a human promoted.
+	for _, stmt := range []string{
+		`ALTER TABLE automode_config DROP COLUMN classifier_models`,
+		`ALTER TABLE automode_config DROP COLUMN escalation_models`,
+		`ALTER TABLE automode_config ADD COLUMN classifier_model TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE automode_config ADD COLUMN escalation_model TEXT NOT NULL DEFAULT ''`,
+		`INSERT INTO automode_config (id, enabled_default, environment, allow_patterns, hard_deny,
+		    classifier_model, escalation_model, updated_at)
+		 VALUES (1, 1, '[]', '[]', '[]', 'vendor/picked', '', '2026-08-17T09:00:00Z')`,
+	} {
+		if _, err := s.db.Exec(stmt); err != nil {
+			t.Fatalf("plant the pre-114 schema (%s): %v", stmt, err)
+		}
+	}
+
+	// Sanity: the planted schema really is the old one, so a pass here would
+	// mean the test proves nothing.
+	if _, err := s.GetAutoModeConfig(); err == nil {
+		t.Fatal("the planted schema already has the lists; this test would pass without the migration")
+	}
+
+	if _, err := s.db.Exec(`DELETE FROM schema_migrations WHERE version >= 114`); err != nil {
+		t.Fatalf("unrecord migration 114: %v", err)
+	}
+	if err := migrateDB(s.db, dbPath); err != nil {
+		t.Fatalf("migrateDB: %v", err)
+	}
+
+	cfg, err := s.GetAutoModeConfig()
+	if err != nil {
+		t.Fatalf("get config after the migration: %v", err)
+	}
+	if len(cfg.ClassifierModels) != 1 || cfg.ClassifierModels[0] != "vendor/picked" {
+		t.Errorf("classifier models = %v, want the promoted model carried over", cfg.ClassifierModels)
+	}
+	// The layer that never picked one resolves to the shipped default, exactly
+	// as an empty string did.
+	if len(cfg.EscalationModels) != 1 || cfg.EscalationModels[0] != automode.DefaultEscalationModel {
+		t.Errorf("escalation models = %v, want the shipped default", cfg.EscalationModels)
+	}
+	for _, column := range []string{"classifier_model", "escalation_model"} {
+		var rows int
+		if err := s.db.QueryRow(
+			`SELECT COUNT(*) FROM pragma_table_info('automode_config') WHERE name = ?`, column).Scan(&rows); err != nil {
+			t.Fatalf("read table info: %v", err)
+		}
+		if rows != 0 {
+			t.Errorf("column %s survived the migration; two spellings of one setting is how one goes stale", column)
+		}
 	}
 }
 

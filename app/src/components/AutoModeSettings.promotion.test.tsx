@@ -14,8 +14,8 @@ const config = (over: Partial<AutoModeConfigInfo> = {}): AutoModeConfigInfo => (
   environment: [],
   allow: [],
   hard_deny: ['*attn automode env*'],
-  classifier_model: 'opencode-go/glm-5.3',
-  escalation_model: 'opencode-go/qwen3.8-max',
+  classifier_models: ['opencode-go/glm-5.3'],
+  escalation_models: ['opencode-go/qwen3.8-max'],
   ...over,
 });
 
@@ -105,6 +105,21 @@ describe('AutoModeSettings', () => {
     expect(model).toHaveTextContent('classifier model');
     // A CLI caller that named nobody is still shown, rather than left blank.
     expect(model).toHaveTextContent('unattributed');
+  });
+
+  // A layer's models are walked in order, and which one judges is the whole
+  // difference between a fallback list and a list somebody reads as a pool.
+  it('shows each layer\'s models in order, marking the one that judges', async () => {
+    renderPane(state({
+      config: config({ classifier_models: ['opencode-go/glm-5.3', 'vendor/backup'] }),
+    }));
+    const classifier = await screen.findByTestId('automode-classifier-models');
+    expect(classifier).toHaveTextContent('opencode-go/glm-5.3 judges');
+    expect(classifier).toHaveTextContent('vendor/backup fallback');
+
+    const escalation = screen.getByTestId('automode-escalation-models');
+    expect(escalation).toHaveTextContent('opencode-go/qwen3.8-max judges');
+    expect(escalation).not.toHaveTextContent('fallback');
   });
 
   // Promotion is auto mode's trust boundary: this button is the only thing in

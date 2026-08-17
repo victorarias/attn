@@ -82,15 +82,15 @@ func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
 		return cfg, nil
 	}
 	var (
-		enabled                          int
-		environment, allow, hardDeny     string
-		classifierModel, escalationModel string
+		enabled                            int
+		environment, allow, hardDeny       string
+		classifierModels, escalationModels string
 	)
 	err := q.QueryRow(`
 		SELECT enabled_default, environment, allow_patterns, hard_deny,
-		       classifier_model, escalation_model
+		       classifier_models, escalation_models
 		FROM automode_config WHERE id = 1
-	`).Scan(&enabled, &environment, &allow, &hardDeny, &classifierModel, &escalationModel)
+	`).Scan(&enabled, &environment, &allow, &hardDeny, &classifierModels, &escalationModels)
 	if err == sql.ErrNoRows {
 		return cfg, nil
 	}
@@ -109,11 +109,18 @@ func (s *Store) readAutoModeConfig(q rowQuerier) (automode.Config, error) {
 		return defaults(), err
 	}
 	cfg.HardDeny = automode.ResolveHardDeny(wsPort, stored)
-	if classifierModel != "" {
-		cfg.ClassifierModel = classifierModel
+	// An empty list means "whichever models ship", the same way an empty string
+	// did before migration 114 — a machine that never picked one is not a
+	// machine whose classifier can judge nothing.
+	if models, err := decodeStringList(classifierModels, "classifier_models"); err != nil {
+		return defaults(), err
+	} else if len(models) > 0 {
+		cfg.ClassifierModels = models
 	}
-	if escalationModel != "" {
-		cfg.EscalationModel = escalationModel
+	if models, err := decodeStringList(escalationModels, "escalation_models"); err != nil {
+		return defaults(), err
+	} else if len(models) > 0 {
+		cfg.EscalationModels = models
 	}
 	return cfg, nil
 }
@@ -288,10 +295,15 @@ func (s *Store) PromoteAutoModeProposal(id int64, now time.Time) (AutoModePropos
 	case automode.KindDeny:
 		cfg.HardDeny = appendUnique(cfg.HardDeny, proposal.Value)
 	case automode.KindModel:
+		// The proposal names the layer's whole list, so promotion replaces it.
+		models, err := automode.ParseModelList(proposal.Value)
+		if err != nil {
+			return AutoModeProposal{}, automode.Config{}, err
+		}
 		if proposal.Target == automode.TargetClassifier {
-			cfg.ClassifierModel = proposal.Value
+			cfg.ClassifierModels = models
 		} else {
-			cfg.EscalationModel = proposal.Value
+			cfg.EscalationModels = models
 		}
 	}
 	if err := writeAutoModeConfig(tx, cfg, now); err != nil {
@@ -459,6 +471,14 @@ func writeAutoModeConfig(e execer, cfg automode.Config, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	classifierModels, err := encodeStringList(cfg.ClassifierModels)
+	if err != nil {
+		return err
+	}
+	escalationModels, err := encodeStringList(cfg.EscalationModels)
+	if err != nil {
+		return err
+	}
 	enabled := 0
 	if cfg.EnabledDefault {
 		enabled = 1
@@ -466,17 +486,17 @@ func writeAutoModeConfig(e execer, cfg automode.Config, now time.Time) error {
 	_, err = e.Exec(`
 		INSERT INTO automode_config
 			(id, enabled_default, environment, allow_patterns, hard_deny,
-			 classifier_model, escalation_model, updated_at)
+			 classifier_models, escalation_models, updated_at)
 		VALUES (1, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(id) DO UPDATE SET
-			enabled_default  = excluded.enabled_default,
-			environment      = excluded.environment,
-			allow_patterns   = excluded.allow_patterns,
-			hard_deny        = excluded.hard_deny,
-			classifier_model = excluded.classifier_model,
-			escalation_model = excluded.escalation_model,
-			updated_at       = excluded.updated_at
-	`, enabled, environment, allow, hardDeny, cfg.ClassifierModel, cfg.EscalationModel,
+			enabled_default   = excluded.enabled_default,
+			environment       = excluded.environment,
+			allow_patterns    = excluded.allow_patterns,
+			hard_deny         = excluded.hard_deny,
+			classifier_models = excluded.classifier_models,
+			escalation_models = excluded.escalation_models,
+			updated_at        = excluded.updated_at
+	`, enabled, environment, allow, hardDeny, classifierModels, escalationModels,
 		now.UTC().Format(sortableTimeFormat))
 	return err
 }

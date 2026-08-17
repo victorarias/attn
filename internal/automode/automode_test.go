@@ -55,6 +55,45 @@ func TestValidateProposalChecksModelShape(t *testing.T) {
 	}
 }
 
+func TestParseModelListReadsAnOrderedLayer(t *testing.T) {
+	models, err := ParseModelList(" vendor/primary , vendor/fallback ")
+	if err != nil {
+		t.Fatalf("parse: %v", err)
+	}
+	if len(models) != 2 || models[0] != "vendor/primary" || models[1] != "vendor/fallback" {
+		t.Fatalf("models = %v, want the pair in order", models)
+	}
+	if FormatModelList(models) != "vendor/primary,vendor/fallback" {
+		t.Errorf("format = %q", FormatModelList(models))
+	}
+}
+
+func TestParseModelListRefusesWhatNoLayerCouldRunOn(t *testing.T) {
+	for name, value := range map[string]string{
+		"nothing named":        "  ",
+		"only separators":      ",,",
+		"not a pair":           "glm-5.3",
+		"one entry not a pair": "vendor/ok,glm-5.3",
+		"the same model twice": "vendor/ok,vendor/ok",
+	} {
+		if _, err := ParseModelList(value); err == nil {
+			t.Errorf("%s (%q) was accepted", name, value)
+		}
+	}
+}
+
+func TestValidateProposalTakesAModelListAndNamesTheLayer(t *testing.T) {
+	if err := ValidateProposal(KindModel, TargetClassifier, "vendor/a,vendor/b"); err != nil {
+		t.Fatalf("a two-model list was refused: %v", err)
+	}
+	if err := ValidateProposal(KindModel, "", "vendor/a"); err == nil {
+		t.Fatal("a model proposal with no target was accepted")
+	}
+	if err := ValidateProposal(KindModel, TargetEscalation, "vendor/a,oops"); err == nil {
+		t.Fatal("a list with an entry that is not a provider/id pair was accepted")
+	}
+}
+
 func TestValidateProposalRejectsUnknownKinds(t *testing.T) {
 	if err := ValidateProposal("promote", "", "anything"); err == nil {
 		t.Fatal("unknown proposal kind was accepted")
@@ -75,7 +114,7 @@ func TestConfigMarshalsIntoThePiSideShape(t *testing.T) {
 	}
 	want := []string{
 		"enabled_default", "environment", "allow", "hard_deny",
-		"classifier_model", "escalation_model",
+		"classifier_models", "escalation_models",
 	}
 	if len(fields) != len(want) {
 		t.Fatalf("config has %d fields, want exactly %d: %s", len(fields), len(want), raw)

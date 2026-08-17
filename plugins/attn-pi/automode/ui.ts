@@ -7,6 +7,7 @@
 // classification, a widget that changes when a call is denied. Nothing repaints
 // on a timer, and a session where nothing happens draws nothing.
 import type { AutoModeDenial } from "./index";
+import type { BreakerState } from "./session";
 
 /** Keys are namespaced: a user's own extensions share these registries. */
 export const autoModeStatusKey = "attn-auto-mode";
@@ -62,12 +63,28 @@ export function denialWidgetLines(denials: readonly AutoModeDenial[]): string[] 
   return lines;
 }
 
-export function breakerQuestion(consecutive: number, total: number): { title: string; message: string } {
+/**
+ * The breaker's question, in the flavour the episode earned. An episode of
+ * blocks that no model ever judged is an outage, and asking the user to weigh
+ * in on refusals that never happened sends them after the wrong problem.
+ */
+export function breakerQuestion(breaker: BreakerState): { title: string; message: string } {
+  if (breaker.outage) {
+    return {
+      title: "auto mode cannot reach its classifier",
+      message:
+        `It blocked ${breaker.consecutive} calls in a row and ${breaker.total} since you last spoke, ` +
+        `every one of them because no classifier model answered — nothing judged them. Your model ` +
+        `endpoint looks to be down. Try again? Answering yes judges this call and the ones after it ` +
+        `normally, which will keep blocking while the endpoint is unreachable.`,
+    };
+  }
   return {
     title: "auto mode stopped judging calls",
     message:
-      `It has refused ${consecutive} calls in a row and ${total} since you last spoke, so it stopped ` +
-      `rather than let the agent grind against the same refusal. Resume auto mode? Answering yes ` +
-      `judges this call and the ones after it normally; it does not approve anything on its own.`,
+      `It has refused ${breaker.consecutive} calls in a row and ${breaker.total} since you last spoke, ` +
+      `so it stopped rather than let the agent grind against the same refusal. Resume auto mode? ` +
+      `Answering yes judges this call and the ones after it normally; it does not approve anything ` +
+      `on its own.`,
   };
 }

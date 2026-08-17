@@ -40,8 +40,9 @@ func automodePropose(t *testing.T, d *Daemon, kind, target, value string) protoc
 func TestAutoModeShowAnswersDefaultsOnAFreshProfile(t *testing.T) {
 	d := newDaemonForTest(t)
 	result := automodeShow(t, d)
-	if result.Config.ClassifierModel != automode.DefaultClassifierModel {
-		t.Errorf("classifier model = %q", result.Config.ClassifierModel)
+	if len(result.Config.ClassifierModels) != 1 ||
+		result.Config.ClassifierModels[0] != automode.DefaultClassifierModel {
+		t.Errorf("classifier models = %v", result.Config.ClassifierModels)
 	}
 	// The lists must marshal as [] rather than null: a client rendering a
 	// settings section should not have to tell "no entries" from "no answer".
@@ -195,8 +196,9 @@ func TestAutoModeDiscardFromTheAppClosesWithoutApplying(t *testing.T) {
 		t.Fatalf("discard failed: %q", protocol.Deref(discarded.Error))
 	}
 	got := automodeShow(t, d)
-	if got.Config.ClassifierModel != automode.DefaultClassifierModel {
-		t.Errorf("classifier model = %q after a discard", got.Config.ClassifierModel)
+	if len(got.Config.ClassifierModels) != 1 ||
+		got.Config.ClassifierModels[0] != automode.DefaultClassifierModel {
+		t.Errorf("classifier models = %v after a discard", got.Config.ClassifierModels)
 	}
 	if len(got.Proposals) != 0 {
 		t.Errorf("discarded proposal is still pending")

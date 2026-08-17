@@ -85,8 +85,8 @@ attn CLI (agent- and human-reachable; every verb has `--json`):
 - `attn automode allow <pattern>` / `deny <pattern>` — record a **proposal**
   only, and say so: promotion happens in the app. Broad patterns (`*`) are
   refused at submission.
-- `attn automode model <classifier|escalation> <provider/id>` — also a
-  proposal.
+- `attn automode model <classifier|escalation> <provider/id>…` — the layer's
+  ordered list, primary first; promotion replaces it. Also a proposal.
 - `attn automode denials` — recent denials with reasons.
 
 The CLI proposes; only the app promotes. Human input in the app is the trust
@@ -146,7 +146,10 @@ Classifier (layer 2a → 2b):
   must not read as a judgment. Only a model with corpus receipts belongs in a
   list.
 - Circuit breaker: 3 consecutive (or 20 total) denials → one human
-  question; any approval resets. No-UI contexts (`-p`, json) fail closed.
+  question; any approval resets. No-UI contexts (`-p`, json) fail closed. An
+  episode whose blocks were ALL outages asks about the outage rather than
+  claiming the session was refused: the counting is the same, the wording is
+  not.
 - Both layers pass `ctx.signal` and report usage into session totals.
 
 ## Architecture

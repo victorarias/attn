@@ -60,8 +60,9 @@ func TestSpawnCarriesThePromotedAutoModeConfig(t *testing.T) {
 		if len(params.AutoMode.Environment) != 1 {
 			t.Errorf("auto mode environment = %v", params.AutoMode.Environment)
 		}
-		if params.AutoMode.ClassifierModel != automode.DefaultClassifierModel {
-			t.Errorf("classifier model = %q", params.AutoMode.ClassifierModel)
+		if len(params.AutoMode.ClassifierModels) != 1 ||
+			params.AutoMode.ClassifierModels[0] != automode.DefaultClassifierModel {
+			t.Errorf("classifier models = %v", params.AutoMode.ClassifierModels)
 		}
 		// The payload IS plugins/attn-pi/automode/config.ts's raw shape, so the
 		// wire keys are checked rather than only the decoded struct.
@@ -72,7 +73,7 @@ func TestSpawnCarriesThePromotedAutoModeConfig(t *testing.T) {
 			t.Errorf("decode raw spawn params: %v", err)
 			return
 		}
-		for _, key := range []string{"enabled_default", "environment", "allow", "hard_deny", "classifier_model", "escalation_model"} {
+		for _, key := range []string{"enabled_default", "environment", "allow", "hard_deny", "classifier_models", "escalation_models"} {
 			if _, ok := raw.AutoMode[key]; !ok {
 				t.Errorf("auto mode payload is missing %q", key)
 			}

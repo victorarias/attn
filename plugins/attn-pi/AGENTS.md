@@ -405,7 +405,13 @@ rather than through dialogs. Design and slices:
 - The breaker asks once per episode through `ctx.ui.confirm`; `hasUI === false`
   (`-p`, `--mode json`) is fail-closed, per `permission-gate.ts`'s precedent.
   Answering yes clears the counters and judges the call that tripped it — it
-  approves nothing on its own.
+  approves nothing on its own. An outage counts toward the limits like any
+  other block — grinding against an unreachable classifier is what the breaker
+  exists to stop — but an episode where EVERY block was an outage says so
+  (`BreakerState.outage`) and asks about the outage instead of claiming the
+  session was refused N times. The breaker's own block inherits the episode's
+  kind, so reporting the trip does not turn a pure-outage run into a mixed
+  one.
 - Denials are reported through `AutoMode`'s `onDenial` seam. `suite/index.ts`
   sets it to one `suite.report_denial` over the relay, which the driver
   forwards to the daemon as `session.report_automode_denial`; the standalone
