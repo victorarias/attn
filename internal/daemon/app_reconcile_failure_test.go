@@ -192,7 +192,13 @@ func TestACommandIsRefusedByNameWhileAReconcileIsOwed(t *testing.T) {
 	second := manifest
 	second.Description = "the version that owes a rebuild"
 	installApp(t, d, "greeter", second)
-	startFakeAppRuntime(t, d, nil)
+	// The app's own consumer loop is running and would otherwise clear the fence
+	// out from under this test; a rebuild that cannot succeed keeps it owed for
+	// as long as the assertions need it.
+	runtime := startFakeAppRuntime(t, d, nil)
+	runtime.reconcile = func(*fakeAppRuntime, appReconcileRequest) error {
+		return errors.New("this rebuild never succeeds")
+	}
 
 	result := newAppCommandCaller().invoke(t, d, "greeter", "refresh", "")
 	if result.Success {
@@ -209,8 +215,10 @@ func TestACommandIsRefusedByNameWhileAReconcileIsOwed(t *testing.T) {
 		t.Fatalf("the refusal does not name the app and what it is doing: %q", refusal)
 	}
 
-	// And it is a refusal, not a failure: nothing ran, so nothing is charged.
-	if stall, ok := d.appStallSnapshot("greeter"); ok {
+	// And it is a refusal, not a failure: nothing ran, so nothing is charged to
+	// the app. The rebuild failing in the background is charged — that is the
+	// clock working — and a command must never add to it.
+	if stall, ok := d.appStallSnapshot("greeter"); ok && stall.kind != appStallKindReconcile {
 		t.Fatalf("a refused command put the app on the auto-disable clock: %+v", stall)
 	}
 }
