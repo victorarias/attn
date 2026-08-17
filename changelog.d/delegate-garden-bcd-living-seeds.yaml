@@ -1,0 +1,6 @@
+kind: added
+area: garden
+change: >
+  Open seed documents now re-anchor annotations as their body changes, send
+  feedback to a live tender by default, and keep unattended feedback as a note
+  in the seed ledger.

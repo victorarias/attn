@@ -705,9 +705,57 @@ func (d *Daemon) handleSeedShow(conn net.Conn, msg *protocol.SeedShowMessage) {
 	})
 }
 
+func (d *Daemon) handleSeedEdit(conn net.Conn, msg *protocol.SeedEditMessage) {
+	if err := d.requireHome(garden.Surface); err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	if err := garden.ValidateBody(msg.Body); err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	seed, doc, err := d.applySeedBodyEdit(msg.SeedID, msg.Body)
+	if err != nil {
+		d.sendGardenError(conn, "edit", err)
+		return
+	}
+	d.sendGardenResponse(conn, protocol.Response{
+		Ok:             true,
+		SeedEditResult: &protocol.SeedEditResult{Seed: seedToProtocol(seed, doc, d.gardenReady()[seed.ID])},
+	})
+}
+
+// applySeedBodyEdit changes only the living markdown body. Re-reading on a
+// conflict preserves lifecycle, tender and edge changes that landed while the
+// editor was writing.
+func (d *Daemon) applySeedBodyEdit(id, body string) (garden.Seed, docstore.Document, error) {
+	schema, err := d.seedsCollection()
+	if err != nil {
+		return garden.Seed{}, docstore.Document{}, err
+	}
+	const attempts = 3
+	for range attempts {
+		seed, doc, err := d.readSeed(id)
+		if err != nil {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+		seed.Body = body
+		written, err := d.writeSeed(*schema, seed, doc.Rev, FactGardenBodyEdited)
+		if err == nil {
+			return seed, written, nil
+		}
+		if !docstore.IsConflict(err) {
+			return garden.Seed{}, docstore.Document{}, err
+		}
+	}
+	return garden.Seed{}, docstore.Document{}, fmt.Errorf(
+		"%s was rewritten under all %d attempts to edit it; read it again with `attn seed show %s` and retry",
+		id, attempts, id)
+}
+
 // handleSeedDocumentGet returns the complete reading surface for one seed.
-// Garden mutation snapshots are the invalidation signal; clients refetch this
-// one-shot document after each snapshot instead of holding a second watcher.
+// Garden snapshots carry the live seed itself; clients use this detail read
+// for the ledger and as a fallback when a bounded snapshot omits the open seed.
 func (d *Daemon) handleSeedDocumentGet(client *wsClient, msg *protocol.SeedDocumentGetMessage) {
 	result := protocol.SeedDocumentGetResultMessage{
 		Event:     protocol.EventSeedDocumentGetResult,
@@ -750,10 +798,11 @@ func (d *Daemon) handleSeedDocumentGet(client *wsClient, msg *protocol.SeedDocum
 		wireSeed.PlotProgress = progress
 	}
 	result.Document = &protocol.SeedDocument{
-		Seed:       wireSeed,
-		Children:   read.wire(children),
-		Notes:      notes,
-		NotesTotal: notesTotal,
+		Seed:        wireSeed,
+		TenderHolds: seed.Tender().Holds(d.sessionExists),
+		Children:    read.wire(children),
+		Notes:       notes,
+		NotesTotal:  notesTotal,
 	}
 	result.Success = true
 	d.sendToClient(client, result)
@@ -1179,44 +1228,56 @@ func (d *Daemon) handleSeedNote(conn net.Conn, msg *protocol.SeedNoteMessage) {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
-	if err := garden.ValidateNote(msg.Body); err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
-	}
-	kind, err := garden.ParseNoteKind(protocol.Deref(msg.Kind))
-	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
-	}
-	// A note on a seed that is not planted is refused by name rather than
-	// written into a log nobody will ever read.
-	seed, _, err := d.readSeed(msg.SeedID)
-	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
-	}
-	schema, err := d.notesCollection()
-	if err != nil {
-		d.sendGardenError(conn, "note", err)
-		return
-	}
 	authorSession := strings.TrimSpace(protocol.Deref(msg.SourceSessionID))
-	note := garden.Note{
-		Seed:          seed.ID,
-		Kind:          kind,
-		Body:          msg.Body,
-		AuthorSession: authorSession,
-		AuthorMember:  d.resolveTenderMember(protocol.Deref(msg.Member), authorSession),
-	}
-	written, doc, err := d.mintAndWriteNote(*schema, note)
+	note, err := d.appendSeedNote(
+		msg.SeedID,
+		msg.Body,
+		authorSession,
+		protocol.Deref(msg.Member),
+		protocol.Deref(msg.Kind),
+	)
 	if err != nil {
 		d.sendGardenError(conn, "note", err)
 		return
 	}
 	d.sendGardenResponse(conn, protocol.Response{
 		Ok:             true,
-		SeedNoteResult: &protocol.SeedNoteResult{Note: noteToProtocol(written, doc)},
+		SeedNoteResult: &protocol.SeedNoteResult{Note: note},
 	})
+}
+
+// appendSeedNote is the one log-write path shared by the CLI and the seed
+// annotation destination. It validates the typed seed before minting so no
+// note can land in a log nobody can read.
+func (d *Daemon) appendSeedNote(seedID, body, authorSession, member, kindName string) (protocol.SeedNote, error) {
+	if err := garden.ValidateNote(body); err != nil {
+		return protocol.SeedNote{}, err
+	}
+	kind, err := garden.ParseNoteKind(kindName)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	seed, _, err := d.readSeed(seedID)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	schema, err := d.notesCollection()
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	authorSession = strings.TrimSpace(authorSession)
+	note := garden.Note{
+		Seed:          seed.ID,
+		Kind:          kind,
+		Body:          body,
+		AuthorSession: authorSession,
+		AuthorMember:  d.resolveTenderMember(member, authorSession),
+	}
+	written, doc, err := d.mintAndWriteNote(*schema, note)
+	if err != nil {
+		return protocol.SeedNote{}, err
+	}
+	return noteToProtocol(written, doc), nil
 }
 
 // mintAndWriteNote writes one log entry, minting again on a taken id for the

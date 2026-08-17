@@ -256,8 +256,14 @@ func ValidatePlant(title, body string) error {
 	if n := len([]rune(trimmed)); n > MaxTitleChars {
 		return fmt.Errorf("that title is %d characters and the limit is %d; a title names the work in a line — the detail goes in the body (`-m`, or `-m -` to read stdin)", n, MaxTitleChars)
 	}
+	return ValidateBody(body)
+}
+
+// ValidateBody applies the same measured body tripwire to planting and later
+// edits, so a seed cannot grow past the limit through a different door.
+func ValidateBody(body string) error {
 	if n := len(body); n > MaxBodyBytes {
-		return fmt.Errorf("that body is %d bytes and the limit is %d; a seed's body is a plan, not an archive", n, MaxBodyBytes)
+		return fmt.Errorf("max_body_bytes=%d, asked for %d; a seed's body is a plan, not an archive", MaxBodyBytes, n)
 	}
 	return nil
 }

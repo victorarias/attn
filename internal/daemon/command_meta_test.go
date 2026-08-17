@@ -25,6 +25,9 @@ func TestCommandMetaExamples(t *testing.T) {
 	if meta := CommandMeta[protocol.CmdOpenSeed]; meta.Scope != ScopeHubLocal {
 		t.Fatalf("open_seed scope = %v, want %v", meta.Scope, ScopeHubLocal)
 	}
+	if meta := CommandMeta[protocol.CmdSeedEdit]; meta.Scope != ScopeHubLocal {
+		t.Fatalf("seed_edit scope = %v, want %v", meta.Scope, ScopeHubLocal)
+	}
 	if !blocksDuringRecovery(protocol.CmdPtyInput) {
 		t.Fatal("pty_input should block during recovery")
 	}
@@ -109,8 +112,16 @@ func TestRemoteCommandSessionID(t *testing.T) {
 			// its own local store.
 			name: "markdown_annotations_submit",
 			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
-			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: protocol.Ptr("/tmp/notes.md"), TargetSessionID: "sess-md-submit"},
+			msg:  &protocol.MarkdownAnnotationsSubmitMessage{Path: protocol.Ptr("/tmp/notes.md"), TargetSessionID: protocol.Ptr("sess-md-submit")},
 			want: "sess-md-submit",
+		},
+		{
+			name: "markdown_annotations_note_on_seed stays home local",
+			cmd:  protocol.CmdMarkdownAnnotationsSubmit,
+			msg: &protocol.MarkdownAnnotationsSubmitMessage{
+				SeedID: protocol.Ptr("s-abc123"), TargetSeedID: protocol.Ptr("s-abc123"),
+			},
+			want: "",
 		},
 		{
 			// Hub→remote regression: a turn's stamps are written by the daemon

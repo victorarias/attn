@@ -21,8 +21,12 @@ export function DaemonApiProvider({ api, children }: { api: DaemonApi; children:
   return <DaemonApiContext.Provider value={api}>{children}</DaemonApiContext.Provider>;
 }
 
+export function useOptionalDaemonApi(): DaemonApi | null {
+  return useContext(DaemonApiContext);
+}
+
 export function useDaemonApi(): DaemonApi {
-  const api = useContext(DaemonApiContext);
+  const api = useOptionalDaemonApi();
   if (!api) {
     throw new Error('useDaemonApi must be used within DaemonApiProvider');
   }

@@ -35,7 +35,7 @@ export function useAnnotationSend<T extends AnnotationSendResult>({
     sendRef.current = send;
   }, [send]);
 
-  const sendNow = useCallback(() => {
+  const runSend = useCallback((action: () => T | null | Promise<T | null>) => {
     if (sendingRef.current) {
       return;
     }
@@ -43,7 +43,7 @@ export function useAnnotationSend<T extends AnnotationSendResult>({
 
     let result: T | null | Promise<T | null>;
     try {
-      result = sendRef.current();
+      result = action();
     } catch (error) {
       sendingRef.current = false;
       setOutcome({
@@ -81,6 +81,12 @@ export function useAnnotationSend<T extends AnnotationSendResult>({
       });
   }, []);
 
+  const sendNow = useCallback(() => runSend(sendRef.current), [runSend]);
+  const sendAlternative = useCallback(
+    (alternative: () => T | null | Promise<T | null>) => runSend(alternative),
+    [runSend],
+  );
+
   useShortcut(shortcutId, sendNow, enabled);
 
   useEffect(() => {
@@ -92,5 +98,5 @@ export function useAnnotationSend<T extends AnnotationSendResult>({
   }, [outcome, sentClearMs]);
 
   const clearOutcome = useCallback(() => setOutcome(null), []);
-  return { outcome, send: sendNow, clearOutcome };
+  return { outcome, send: sendNow, sendAlternative, clearOutcome };
 }

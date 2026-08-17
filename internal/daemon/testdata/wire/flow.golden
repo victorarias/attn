@@ -60,7 +60,13 @@
     "workspace_id": "workspace-1"
   }
 }
---- 05 workspace_layout
+--- 05 garden_seeds_updated
+{
+  "event": "garden_seeds_updated",
+  "seeds": null,
+  "total": 0
+}
+--- 06 workspace_layout
 {
   "event": "workspace_layout",
   "workspace_layout": {
@@ -81,7 +87,7 @@
     "workspace_id": "workspace-1"
   }
 }
---- 06 session_todos_updated
+--- 07 session_todos_updated
 {
   "event": "session_todos_updated",
   "session": {
@@ -99,7 +105,7 @@
     "workspace_id": "workspace-1"
   }
 }
---- 07 session_state_changed
+--- 08 session_state_changed
 {
   "event": "session_state_changed",
   "session": {
@@ -117,7 +123,7 @@
     "workspace_id": "workspace-1"
   }
 }
---- 08 workspace_state_changed
+--- 09 workspace_state_changed
 {
   "event": "workspace_state_changed",
   "workspace": {
@@ -130,7 +136,7 @@
     "title": "Renamed"
   }
 }
---- 09 workspace_state_changed
+--- 10 workspace_state_changed
 {
   "event": "workspace_state_changed",
   "workspace": {
@@ -143,7 +149,7 @@
     "title": "Renamed"
   }
 }
---- 10 session_unregistered
+--- 11 session_unregistered
 {
   "event": "session_unregistered",
   "session": {
@@ -162,7 +168,13 @@
     "workspace_muted": true
   }
 }
---- 11 workspace_unregistered
+--- 12 garden_seeds_updated
+{
+  "event": "garden_seeds_updated",
+  "seeds": null,
+  "total": 0
+}
+--- 13 workspace_unregistered
 {
   "event": "workspace_unregistered",
   "workspace": {
@@ -175,7 +187,7 @@
     "title": "Renamed"
   }
 }
---- 12 sessions_updated
+--- 14 sessions_updated
 {
   "event": "sessions_updated"
 }

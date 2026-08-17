@@ -288,6 +288,7 @@ export function GardenPanel({
             const relations = expanded ? relationsOf(index, seed.id) : [];
             const localDocument: SeedDocument = {
               seed,
+              tender_holds: Boolean(seed.tender_session || seed.tender_member),
               children: seeds.filter((candidate) => crownOf(candidate) === seed.id),
               notes: [],
               notes_total: 0,

@@ -3602,6 +3602,60 @@ describe('useDaemonSocket notebook and annotation events', () => {
     unmount();
   });
 
+  it('serializes exactly one typed markdown annotation destination', async () => {
+    const { result, unmount, ws } = await renderAndOpen();
+
+    const fileSource = fileMarkdownSource('ws-1', '/tmp/doc.md');
+    const delivered = result.current.submitMarkdownAnnotations(
+      fileSource,
+      { kind: 'session', sessionId: 'sess-a' },
+      ['moved-1'],
+    );
+    await Promise.resolve();
+    const sessionSent = lastSent(ws);
+    expect(sessionSent).toMatchObject({
+      cmd: 'markdown_annotations_submit',
+      document_uri: fileSource.uri,
+      target_session_id: 'sess-a',
+      orphaned_ids: ['moved-1'],
+    });
+    expect(sessionSent.target_seed_id).toBeUndefined();
+    ws.emit({
+      event: 'markdown_annotations_submit_result',
+      request_id: sessionSent.request_id,
+      document_uri: fileSource.uri,
+      success: true,
+      status: 'delivered',
+    });
+    await expect(delivered).resolves.toMatchObject({ status: 'delivered' });
+
+    const seedSource = seedMarkdownSource('s-7k3f9m');
+    const noted = result.current.submitMarkdownAnnotations(
+      seedSource,
+      { kind: 'seed', seedId: 's-7k3f9m' },
+      [],
+    );
+    await Promise.resolve();
+    const seedSent = lastSent(ws);
+    expect(seedSent).toMatchObject({
+      cmd: 'markdown_annotations_submit',
+      document_uri: seedSource.uri,
+      source_kind: 'seed',
+      seed_id: 's-7k3f9m',
+      target_seed_id: 's-7k3f9m',
+    });
+    expect(seedSent.target_session_id).toBeUndefined();
+    ws.emit({
+      event: 'markdown_annotations_submit_result',
+      request_id: seedSent.request_id,
+      document_uri: seedSource.uri,
+      success: true,
+      status: 'noted',
+    });
+    await expect(noted).resolves.toMatchObject({ status: 'noted' });
+    unmount();
+  });
+
   it('treats a stale save as a resolved outcome, not an error', async () => {
     const { result, unmount, ws } = await renderAndOpen();
 
@@ -3713,6 +3767,7 @@ describe('useDaemonSocket notebook and annotation events', () => {
     expect(sent).toMatchObject({ cmd: 'seed_document_get', seed_id: 's-7k3f9m' });
     const document = {
       seed: { id: 's-7k3f9m', title: 'Garden era', body: '# Plan' },
+      tender_holds: false,
       children: [],
       notes: [],
       notes_total: 0,

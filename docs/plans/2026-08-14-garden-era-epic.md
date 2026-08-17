@@ -168,8 +168,8 @@ events.
       panel read-only drill (ruling A).
 - [x] `attn://seed/<id>` URI, draft-key generalization, typed
       daemon fields (ruling B).
-- [ ] Live re-anchor on body edits (ruling C).
-- [ ] Split-button submit with the untended flip (ruling D).
+- [x] Live re-anchor on body edits (ruling C).
+- [x] Split-button submit with the untended flip (ruling D).
 - [ ] Delegation reporting on seeds: bind at dispatch, log-note status,
       typed `attach`/`detach` with the artifact projection, agent-msg
       steering — the weight transfer.

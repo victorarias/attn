@@ -55,7 +55,7 @@ var wireFixtures = map[string]wireFixture{
 		subject: (*wireWorld).session,
 	},
 	FactSessionRegistered: {
-		events:  []string{protocol.EventSessionRegistered},
+		events:  []string{protocol.EventSessionRegistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionReregistered: {
@@ -102,12 +102,12 @@ var wireFixtures = map[string]wireFixture{
 	},
 	FactSessionUnregistered: {
 		// The session is gone by then, so it rides in the payload.
-		events:  []string{protocol.EventSessionUnregistered},
+		events:  []string{protocol.EventSessionUnregistered, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 		payload: func(w *wireWorld) any { return w.d.sessionForBroadcast(w.d.store.Get(w.sessionID)) },
 	},
 	FactSessionRespawned: {
-		events:  []string{protocol.EventRuntimeRespawned},
+		events:  []string{protocol.EventRuntimeRespawned, protocol.EventGardenSeedsUpdated},
 		subject: (*wireWorld).session,
 	},
 	FactSessionPTYResized: {
@@ -205,6 +205,7 @@ var wireFixtures = map[string]wireFixture{
 	FactTicketAttached:      {events: []string{protocol.EventTicketsUpdated}},
 	FactTicketChanged:       {events: []string{protocol.EventTicketsUpdated}},
 	FactGardenPlanted:       {events: []string{protocol.EventGardenSeedsUpdated}},
+	FactGardenBodyEdited:    {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenTended:        {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenParked:        {events: []string{protocol.EventGardenSeedsUpdated}},
 	FactGardenHarvested:     {events: []string{protocol.EventGardenSeedsUpdated}},

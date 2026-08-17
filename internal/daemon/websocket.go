@@ -1534,7 +1534,7 @@ func remoteCommandSessionID(cmd string, msg interface{}) string {
 		}
 	case protocol.CmdMarkdownAnnotationsSubmit: // wire: markdown_annotations_submit
 		if typed, ok := msg.(*protocol.MarkdownAnnotationsSubmitMessage); ok {
-			return typed.TargetSessionID
+			return protocol.Deref(typed.TargetSessionID)
 		}
 	case protocol.CmdSettleTurn: // wire: settle_turn
 		// The turn's stamps live in the store of the daemon that owns the

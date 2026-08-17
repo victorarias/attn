@@ -153,6 +153,54 @@
   cursor: default;
 }
 
+.workspace-dock-tile-seed-submit {
+  position: relative;
+  display: inline-flex;
+}
+
+.workspace-dock-tile-send-button--split-primary {
+  border-radius: 5px 0 0 5px;
+}
+
+.workspace-dock-tile-send-button--split-caret {
+  width: 24px;
+  padding: 2px 4px;
+  margin-left: -1px;
+  border-radius: 0 5px 5px 0;
+}
+
+.workspace-dock-tile-seed-submit-menu {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  min-width: 132px;
+  padding: 4px;
+  border: 1px solid var(--color-border);
+  border-radius: 6px;
+  background: var(--color-bg-elevated, var(--color-bg-editor));
+  box-shadow: 0 8px 24px rgb(0 0 0 / 35%);
+}
+
+.workspace-dock-tile-seed-submit-menu button {
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.workspace-dock-tile-seed-submit-menu button:hover,
+.workspace-dock-tile-seed-submit-menu button:focus-visible {
+  background: var(--color-bg-hover);
+  outline: none;
+}
+
 .workspace-dock-tile-actions {
   display: inline-flex;
   align-items: center;

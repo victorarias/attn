@@ -84,6 +84,7 @@ import {
   markdownAnnotationKey,
 } from './daemonMarkdownAnnotationEvents';
 import type { MarkdownDocumentSource } from '../components/MarkdownReader/documentSource';
+import type { MarkdownAnnotationsDestination } from '../components/MarkdownReader/annotations/transport';
 import {
   pendingRequestKey,
   sendKeyedRequest as sendLastWriterWinsRequest,
@@ -133,6 +134,7 @@ export type TicketRow = GeneratedTicketRow;
 export type Seed = GeneratedSeed;
 export interface SeedDocument {
   seed: Seed;
+  tender_holds: boolean;
   children: Seed[];
   notes: GeneratedSeedNote[];
   notes_total: number;
@@ -4114,19 +4116,22 @@ export function useDaemonSocket({
       'clear', source, { generation },
     ), [sendMarkdownAnnotationsCommand]);
 
-  // PR6 send flow: format the persisted draft and type it into the target
-  // session's PTY. Pending key `submit:<path>` — a second Send for the same
-  // path supersedes the first; the doorbell is one PTY write, so the shared
-  // 10s timeout is ample. Resolves `{status, generation?, error?}` for both
-  // `delivered` and `skipped_pending_approval`; rejects on `status:"error"`.
+  // Format the persisted draft and submit it to one typed destination. Pending
+  // key `submit:<uri>` keeps this last-writer-wins per document. Resolves the
+  // accepted/skipped status and rejects on `status:"error"`.
   const submitMarkdownAnnotations = useCallback((
     source: MarkdownDocumentSource,
-    targetSessionId: string,
+    destination: MarkdownAnnotationsDestination,
     orphanedIds: string[],
-  ) =>
+  ) => {
+    const destinationFields = destination.kind === 'session'
+      ? { target_session_id: destination.sessionId }
+      : { target_seed_id: destination.seedId };
+    return (
     sendMarkdownAnnotationsCommand<{ status: string; generation?: number; error?: string }>(
-      'submit', source, { target_session_id: targetSessionId, orphaned_ids: orphanedIds },
-    ), [sendMarkdownAnnotationsCommand]);
+      'submit', source, { ...destinationFields, orphaned_ids: orphanedIds },
+    ));
+  }, [sendMarkdownAnnotationsCommand]);
 
   // Mute a PR with optimistic update
   const sendMutePR = useCallback((prId: string) => {

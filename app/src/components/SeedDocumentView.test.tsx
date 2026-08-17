@@ -45,6 +45,7 @@ function note(overrides: Partial<SeedDocumentNote> & { id: string }): SeedDocume
 function document(overrides: Partial<SeedDocument> = {}): SeedDocument {
   return {
     seed: seed(),
+    tender_holds: false,
     children: [],
     notes: [],
     notes_total: 0,

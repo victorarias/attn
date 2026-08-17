@@ -15,16 +15,20 @@ import type { WireAnnotation } from './types';
 import type { MarkdownDocumentSource } from '../documentSource';
 
 /**
- * Submit result. `delivered`: typed into the session, drafts tombstone-cleared
- * (`generation` is the client's new floor; `error` may still report a failed
- * clear). `skipped_pending_approval`: nothing typed, drafts kept. An error
- * status rejects the promise instead.
+ * Submit result. `delivered` types into a session; `noted` appends to a seed.
+ * Both tombstone-clear drafts (`generation` is the client's new floor;
+ * `error` may still report a failed clear). `skipped_pending_approval` keeps
+ * the draft. An error status rejects the promise instead.
  */
 export interface MarkdownAnnotationsSubmitResult {
   status: string;
   generation?: number;
   error?: string;
 }
+
+export type MarkdownAnnotationsDestination =
+  | { kind: 'session'; sessionId: string }
+  | { kind: 'seed'; seedId: string };
 
 export interface MarkdownAnnotationsTransport {
   getMarkdownAnnotations(
@@ -40,12 +44,12 @@ export interface MarkdownAnnotationsTransport {
     generation: number,
   ): Promise<{ generation: number }>;
   /**
-   * Routed by target session. `orphanedIds` is client-derived and not
-   * persisted.
+   * Routed by the typed destination. `orphanedIds` is client-derived and not
+   * persisted; the document URI remains opaque identity.
    */
   submitMarkdownAnnotations(
     source: MarkdownDocumentSource,
-    targetSessionId: string,
+    destination: MarkdownAnnotationsDestination,
     orphanedIds: string[],
   ): Promise<MarkdownAnnotationsSubmitResult>;
 }
