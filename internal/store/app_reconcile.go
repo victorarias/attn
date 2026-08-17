@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/victorarias/attn/internal/apps"
 )
 
 const (
@@ -46,19 +48,34 @@ func (s *Store) AppReconcilePending(name string) (AppReconcileClaim, error) {
 	if s.db == nil {
 		return AppReconcileClaim{}, nil
 	}
-	return appReconcilePending(s.db, name)
+	return appReconcilePendingThrough(s.db, name, 0)
 }
 
-func appReconcilePending(q reconcileQueryer, name string) (AppReconcileClaim, error) {
+// AppReconcilePendingThrough returns the still-owed prefix ending at requestID.
+// It is how a failed/interrupted attempt retries the exact claim it started,
+// leaving a trigger that arrived later for the next invocation.
+func (s *Store) AppReconcilePendingThrough(name string, requestID int64) (AppReconcileClaim, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.db == nil {
+		return AppReconcileClaim{}, nil
+	}
+	if requestID <= 0 {
+		return AppReconcileClaim{}, fmt.Errorf("store: a reconcile claim boundary must be positive (got %d)", requestID)
+	}
+	return appReconcilePendingThrough(s.db, name, requestID)
+}
+
+func appReconcilePendingThrough(q reconcileQueryer, name string, throughRequestID int64) (AppReconcileClaim, error) {
 	rows, err := q.Query(`
 		SELECT id, app_name, reason, version_id, through_seq,
 		       previous_version_id, cursor, earliest, missed, created_at
 		FROM app_reconcile_requests
 		WHERE app_name = ? AND id > COALESCE((
 			SELECT completed_request_id FROM app_reconcile_progress WHERE app_name = ?
-		), 0)
+		), 0) AND (? = 0 OR id <= ?)
 		ORDER BY id ASC
-	`, name, name)
+	`, name, name, throughRequestID, throughRequestID)
 	if err != nil {
 		return AppReconcileClaim{}, err
 	}
@@ -135,6 +152,80 @@ func (s *Store) CompleteAppReconcile(name string, throughRequestID, throughSeq i
 		return err
 	}
 	defer func() { _ = tx.Rollback() }()
+	if err := completeAppReconcileTx(tx, name, throughRequestID, throughSeq, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// CompleteAppReconcileInvocation settles a successful running attempt and
+// crosses its durable request/cursor fence in one transaction. A crash can
+// therefore leave either the whole attempt owed or the whole attempt complete,
+// never an ok row whose request still retries or a completed request startup
+// later labels interrupted.
+func (s *Store) CompleteAppReconcileInvocation(name string, invocationID, throughRequestID, throughSeq int64, now time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.db == nil {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	var (
+		appName                    string
+		kind                       string
+		status                     string
+		startedText                string
+		storedRequestID, storedSeq sql.NullInt64
+	)
+	err = tx.QueryRow(`
+		SELECT app_name, kind, status, started_at, through_request_id, through_seq
+		FROM app_invocations WHERE id = ?
+	`, invocationID).Scan(&appName, &kind, &status, &startedText, &storedRequestID, &storedSeq)
+	switch {
+	case err == sql.ErrNoRows:
+		return fmt.Errorf("store: no app invocation %d to complete", invocationID)
+	case err != nil:
+		return err
+	case appName != name:
+		return fmt.Errorf("store: app invocation %d belongs to app %q, not %q", invocationID, appName, name)
+	case kind != AppInvocationKindReconcile:
+		return fmt.Errorf("store: app invocation %d is kind %q, not reconcile", invocationID, kind)
+	case status != AppInvocationStatusRunning:
+		return fmt.Errorf("store: reconcile invocation %d is %q, not running; its claim was not completed", invocationID, status)
+	case !storedRequestID.Valid || storedRequestID.Int64 != throughRequestID || !storedSeq.Valid || storedSeq.Int64 != throughSeq:
+		return fmt.Errorf(
+			"store: reconcile invocation %d owns claim request %d through seq %d, not request %d through seq %d",
+			invocationID, storedRequestID.Int64, storedSeq.Int64, throughRequestID, throughSeq)
+	}
+	duration := now.Sub(parseStoreTime(startedText))
+	if duration < 0 {
+		duration = 0
+	}
+	res, err := tx.Exec(`
+		UPDATE app_invocations
+		SET status = ?, error = '', duration_ms = ?, finished_at = ?
+		WHERE id = ? AND status = ?
+	`, AppInvocationStatusOK, duration.Milliseconds(), now.UTC().Format(sortableTimeFormat), invocationID, AppInvocationStatusRunning)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n != 1 {
+		return fmt.Errorf("store: reconcile invocation %d stopped running before its claim could complete", invocationID)
+	}
+	if err := completeAppReconcileTx(tx, name, throughRequestID, throughSeq, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+func completeAppReconcileTx(tx *sql.Tx, name string, throughRequestID, throughSeq int64, now time.Time) error {
 	var exists int
 	if err := tx.QueryRow(`
 		SELECT COUNT(*) FROM app_reconcile_requests WHERE app_name = ? AND id = ?
@@ -169,7 +260,7 @@ func (s *Store) CompleteAppReconcile(name string, throughRequestID, throughSeq i
 	if n == 0 {
 		return fmt.Errorf("store: app %q has no bus consumer whose cursor can cross reconcile fence %d", name, throughSeq)
 	}
-	return tx.Commit()
+	return nil
 }
 
 func appendAppReconcileRequest(tx *sql.Tx, name, reason string, versionID, throughSeq, previousVersionID int64, now time.Time) error {
@@ -185,11 +276,26 @@ func appendAppReconcileRequest(tx *sql.Tx, name, reason string, versionID, throu
 	return err
 }
 
-func appConsumerCursorWith(q reconcileQueryer, name string) (int64, error) {
-	var cursor int64
-	err := q.QueryRow(`SELECT cursor FROM bus_consumers WHERE name = ?`, "app:"+name).Scan(&cursor)
+// appConsumerCursorWith reports the app's fact-delivery position, and whether
+// facts reach it at all. Every app carries a consumer row — the enabled bit lives
+// nowhere else — so a view-or-command-only app is recognised by the sentinel
+// filter it was registered with rather than by the row's absence.
+//
+// Such an app derives nothing from facts, so a version move invalidates no
+// derived state and owes no rebuild. Recording one anyway would refuse the app's
+// commands until a reconcile ran, and the pre-drain that runs on every poll tick
+// would disable a view-only app for not declaring a handler it has no use for.
+func appConsumerCursorWith(q reconcileQueryer, name string) (int64, bool, error) {
+	var (
+		cursor int64
+		filter string
+	)
+	err := q.QueryRow(`SELECT cursor, filter FROM bus_consumers WHERE name = ?`, "app:"+name).Scan(&cursor, &filter)
 	if err == sql.ErrNoRows {
-		return 0, nil
+		return 0, false, nil
 	}
-	return cursor, err
+	if err != nil {
+		return 0, false, err
+	}
+	return cursor, filter != apps.NoSubscriptionsPattern, nil
 }

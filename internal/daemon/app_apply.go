@@ -58,6 +58,9 @@ func (d *Daemon) handleAppApply(conn net.Conn, msg *protocol.AppApplyMessage) {
 		d.sendError(conn, "no database")
 		return
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 	hash := strings.TrimSpace(msg.ContentHash)
 	if err := validateContentHash(hash); err != nil {
 		d.sendError(conn, fmt.Sprintf("app apply %s: %v", name, err))
@@ -107,6 +110,19 @@ func (d *Daemon) handleAppApply(conn net.Conn, msg *protocol.AppApplyMessage) {
 		d.sendError(conn, fmt.Sprintf("app apply %s: %v", name, err))
 		return
 	}
+	if previous != 0 {
+		current, ok, err := d.store.GetAppVersion(previous)
+		if err != nil {
+			d.sendError(conn, fmt.Sprintf("app apply %s: reading current version %d: %v", name, previous, err))
+			return
+		}
+		if ok && current.ContentHash != hash {
+			if err := requireVersionMoveReconcile(name, fmt.Sprintf("version %d", previous), "content "+appbuild.ShortHash(hash), declaration); err != nil {
+				d.sendError(conn, "app apply "+name+": "+err.Error())
+				return
+			}
+		}
+	}
 	version, created, err := d.store.CommitAppVersion(store.AppVersion{
 		AppName:      name,
 		ContentHash:  hash,
@@ -154,6 +170,9 @@ func (d *Daemon) handleAppRollback(conn net.Conn, msg *protocol.AppRollbackMessa
 		d.sendError(conn, "no database")
 		return
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 	app, ok, err := d.store.GetApp(name)
 	if err != nil {
 		d.sendError(conn, fmt.Sprintf("reading app %q: %v", name, err))
@@ -171,6 +190,10 @@ func (d *Daemon) handleAppRollback(conn net.Conn, msg *protocol.AppRollbackMessa
 	target, err := pickRollbackTarget(name, app, versions, msg.VersionID)
 	if err != nil {
 		d.sendError(conn, err.Error())
+		return
+	}
+	if err := requireVersionMoveReconcile(name, fmt.Sprintf("version %d", app.CurrentVersionID), fmt.Sprintf("version %d", target.ID), target.Declaration); err != nil {
+		d.sendError(conn, "app rollback "+name+": "+err.Error())
 		return
 	}
 	// The two rollbacks move the pointer differently on purpose. A named version
@@ -328,4 +351,17 @@ func validateDeclaration(name, declaration string) error {
 		return fmt.Errorf("the declaration snapshot names app %q, not %q", probe.Name, name)
 	}
 	return nil
+}
+
+func requireVersionMoveReconcile(name, current, requested, declaration string) error {
+	var manifest appbuild.Manifest
+	if err := json.Unmarshal([]byte(declaration), &manifest); err != nil {
+		return fmt.Errorf("the declaration for requested %s is not readable: %w", requested, err)
+	}
+	if len(manifest.EventPatterns()) == 0 || manifest.Reconcile {
+		return nil
+	}
+	return fmt.Errorf(
+		"refusing to move %s from %s to %s: the requested subscribed version does not declare reconcile; add `reconcile = true` and implement the reconcile export so existing collections can be rebuilt",
+		name, current, requested)
 }

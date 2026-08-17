@@ -5,6 +5,12 @@ export type CommandOutcome = {
 } | {
     ok: false;
     error: string;
+    /**
+     * A stable name for the refusal, when attn had one. `"reconcile_owed"`
+     * means the app is rebuilding its collections and every command is held
+     * until that finishes — worth retrying, unlike a handler that threw.
+     */
+    code?: string;
 };
 /**
  * A command, ready to invoke. It is a function first, because that is what a

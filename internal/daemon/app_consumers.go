@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/victorarias/attn/internal/appbuild"
@@ -13,6 +15,7 @@ import (
 	"github.com/victorarias/attn/internal/bus"
 	"github.com/victorarias/attn/internal/docstore"
 	"github.com/victorarias/attn/internal/jobs"
+	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/store"
 	"github.com/victorarias/attn/internal/supervise"
 )
@@ -80,6 +83,58 @@ func (d *Daemon) appConnectWait() time.Duration {
 // ask the user to intervene. Its installed lane remains retained while disabled.
 const appAutoDisableStall = 15 * time.Minute
 
+// The three app-runtime tripwires, overridable from the daemon's environment.
+// Each one is minutes long by design, so the only way to witness what it does —
+// in a test harness or by hand — is to move it; without these the auto-disable
+// path can be demonstrated only by waiting fifteen minutes.
+const (
+	appAutoDisableStallEnv = "ATTN_APP_AUTO_DISABLE_STALL"
+	appDispatchTimeoutEnv  = "ATTN_APP_DISPATCH_TIMEOUT"
+	appPingTimeoutEnv      = "ATTN_APP_RUNTIME_PING_TIMEOUT"
+)
+
+// What kind of work an app is stalled on, and what state its rebuild is in. Both
+// vocabularies cross the wire, so they are named once here.
+const (
+	appStallKindSubscription = "subscription"
+	appStallKindReconcile    = "reconcile"
+
+	appReconcileStateNotNeeded   = "not_needed"
+	appReconcileStateUnsupported = "unsupported"
+	appReconcileStateIdle        = "idle"
+	appReconcileStateOwed        = "owed"
+	appReconcileStateRunning     = "running"
+)
+
+func (d *Daemon) appAutoDisableWindow() time.Duration {
+	if d.appAutoDisableWait > 0 {
+		return d.appAutoDisableWait
+	}
+	return appAutoDisableStall
+}
+
+func (d *Daemon) resolveAppRuntimeTripwires() error {
+	for _, setting := range []struct {
+		name   string
+		target *time.Duration
+	}{
+		{appAutoDisableStallEnv, &d.appAutoDisableWait},
+		{appDispatchTimeoutEnv, &d.appDispatchWait},
+		{appPingTimeoutEnv, &d.appPingWait},
+	} {
+		raw := strings.TrimSpace(os.Getenv(setting.name))
+		if raw == "" {
+			continue
+		}
+		value, err := time.ParseDuration(raw)
+		if err != nil || value <= 0 {
+			return fmt.Errorf("%s=%q is not a positive duration", setting.name, raw)
+		}
+		*setting.target = value
+	}
+	return nil
+}
+
 // appCrashStrikes is the second half of the auto-disable rule: an app the
 // runtime host named as the cause of a sidecar crash this many times inside
 // appCrashWindow is disabled.
@@ -115,11 +170,13 @@ const notificationKindAppAutoDisabled = "app_auto_disabled"
 // against a runtime that has also just restarted, which is the generous reading
 // and the right one.
 type appStall struct {
-	seq       int64
-	eventName string
-	since     time.Time
-	attempts  int
-	lastError string
+	kind               string
+	seq                int64
+	eventName          string
+	reconcileRequestID int64
+	since              time.Time
+	attempts           int
+	lastError          string
 }
 
 // appDispatchPlan is everything one delivery needs, read once per event.
@@ -136,6 +193,18 @@ type appDispatchPlan struct {
 	handler     string
 	label       string
 	collections []string
+}
+
+func (d *Daemon) appLane(name string) *sync.Mutex {
+	d.appLaneMu.Lock()
+	defer d.appLaneMu.Unlock()
+	if d.appLanes == nil {
+		d.appLanes = make(map[string]*sync.Mutex)
+	}
+	if d.appLanes[name] == nil {
+		d.appLanes[name] = &sync.Mutex{}
+	}
+	return d.appLanes[name]
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +263,10 @@ func (d *Daemon) registerAppConsumer(name string) error {
 
 func (d *Daemon) appPreDrain(name string) bus.PreDrain {
 	return func(ctx context.Context, consumer bus.Consumer, gap *bus.Gap) error {
+		lane := d.appLane(name)
+		lane.Lock()
+		defer lane.Unlock()
+
 		manifest, version, err := d.appDeclaration(name)
 		if err != nil {
 			return err
@@ -220,7 +293,7 @@ func (d *Daemon) appPreDrain(name string) bus.PreDrain {
 				return fmt.Errorf("recording the gap reconciliation for app %q: %w", name, err)
 			}
 		}
-		claim, err := d.store.AppReconcilePending(name)
+		claim, err := d.appReconcileClaim(name)
 		if err != nil {
 			return fmt.Errorf("reading reconciliation owed by app %q: %w", name, err)
 		}
@@ -228,10 +301,41 @@ func (d *Daemon) appPreDrain(name string) bus.PreDrain {
 			return nil
 		}
 		if !manifest.Reconcile {
-			return fmt.Errorf("app %q reconciliation is owed through bus seq %d, but version %d does not declare reconcile", name, claim.ThroughSeq, version.ID)
+			return d.disableAppMissingReconcile(name, version, claim)
 		}
 		return d.runAppReconcile(ctx, name, manifest, version, claim)
 	}
+}
+
+func (d *Daemon) disableAppMissingReconcile(name string, version store.AppVersion, claim store.AppReconcileClaim) error {
+	reason := foldAppReconcileReason(version.ID, claim)
+	reasonJSON, err := json.Marshal(reason)
+	if err != nil {
+		return err
+	}
+	failure := fmt.Sprintf(
+		"app %s reconciliation is owed through bus seq %d, but subscribed version %d does not declare reconcile",
+		name, claim.ThroughSeq, version.ID)
+	latest, found, readErr := d.store.LatestOwedAppReconcileInvocation(name)
+	if readErr != nil {
+		return readErr
+	}
+	if !found || latest.ThroughRequestID != claim.ThroughRequestID || latest.Handler != "missing_reconcile" {
+		now := d.appNow()
+		d.recordAppInvocation(store.AppInvocation{
+			AppName: name, VersionID: version.ID, Kind: store.AppInvocationKindReconcile,
+			Handler: "missing_reconcile", Status: store.AppInvocationStatusError,
+			Error: failure, StartedAt: now, FinishedAt: now,
+			ReconcileReason: string(reasonJSON), ThroughRequestID: claim.ThroughRequestID,
+			ThroughSeq: claim.ThroughSeq,
+		})
+	}
+	d.disableAppAutomatically(name, failure,
+		fmt.Sprintf("apps: disabled %s — %s", name, failure),
+		fmt.Sprintf(
+			"%s reached a reconcile fence, but version %d has no reconcile handler, so attn disabled it without moving its cursor. Add `reconcile = true`, implement the reconcile export, apply that version, and enable the app again.",
+			name, version.ID))
+	return errors.New(failure)
 }
 
 func (d *Daemon) runAppReconcile(ctx context.Context, name string, manifest appbuild.Manifest, version store.AppVersion, claim store.AppReconcileClaim) error {
@@ -247,14 +351,129 @@ func (d *Daemon) runAppReconcile(ctx context.Context, name string, manifest appb
 	}
 
 	reason := foldAppReconcileReason(version.ID, claim)
-	result, err := d.dispatchAppReconcile(ctx, plan, reason)
+	reasonJSON, err := json.Marshal(reason)
+	if err != nil {
+		return fmt.Errorf("encoding reconciliation owed by app %q: %w", name, err)
+	}
+	started := d.appNow()
+	invocation := store.AppInvocation{
+		AppName: name, VersionID: version.ID, Kind: store.AppInvocationKindReconcile,
+		Handler: "reconcile", Status: store.AppInvocationStatusRunning,
+		StartedAt: started, ReconcileReason: string(reasonJSON),
+		ThroughRequestID: claim.ThroughRequestID, ThroughSeq: claim.ThroughSeq,
+	}
+	invocationID, err := d.startAppInvocation(invocation)
 	if err != nil {
 		return err
 	}
-	if !result.OK {
-		return fmt.Errorf("app %s reconcile threw: %s", name, firstLine(result.Error))
+	invocation.ID = invocationID
+	result, err := d.dispatchAppReconcile(ctx, plan, reason)
+	if ctx.Err() != nil {
+		if settleErr := d.settleAppInvocation(&invocation, store.AppInvocationStatusInterrupted, ""); settleErr != nil {
+			return errors.Join(ctx.Err(), settleErr)
+		}
+		return ctx.Err()
 	}
-	return d.store.CompleteAppReconcile(name, claim.ThroughRequestID, claim.ThroughSeq, d.appNow())
+	if err != nil {
+		status := store.AppInvocationStatusRuntimeError
+		failure := err.Error()
+		if errors.Is(err, context.DeadlineExceeded) {
+			status = store.AppInvocationStatusError
+			failure = fmt.Sprintf("reconcile for app %s did not return within timeout=%s; attn terminated sidecar generation and left request %d owed",
+				name, d.appDispatchBudget(), claim.ThroughRequestID)
+		}
+		if settleErr := d.settleAppInvocation(&invocation, status, failure); settleErr != nil {
+			return errors.Join(err, settleErr)
+		}
+		if status == store.AppInvocationStatusError {
+			d.noteAppReconcileFailure(name, claim, failure)
+		} else {
+			d.clearAppStall(name)
+		}
+		return errors.New(failure)
+	}
+	if !result.OK {
+		failure := result.Error
+		if settleErr := d.settleAppInvocation(&invocation, store.AppInvocationStatusError, failure); settleErr != nil {
+			return settleErr
+		}
+		d.noteAppReconcileFailure(name, claim, failure)
+		return fmt.Errorf("app %s reconcile threw: %s", name, firstLine(failure))
+	}
+	finished := d.appNow()
+	if err := d.store.CompleteAppReconcileInvocation(
+		name, invocationID, claim.ThroughRequestID, claim.ThroughSeq, finished,
+	); err != nil {
+		return fmt.Errorf("completing reconciliation of app %q: %w", name, err)
+	}
+	invocation.Status = store.AppInvocationStatusOK
+	invocation.FinishedAt = finished
+	invocation.Duration = finished.Sub(started)
+	d.notifyAppWatchers(appInvocationForWire(invocation.ID, invocation), name)
+	d.clearAppStall(name)
+	return nil
+}
+
+func (d *Daemon) appReconcileClaim(name string) (store.AppReconcileClaim, error) {
+	previous, ok, err := d.store.LatestOwedAppReconcileInvocation(name)
+	if err != nil {
+		return store.AppReconcileClaim{}, err
+	}
+	if ok && previous.ThroughRequestID > 0 {
+		claim, err := d.store.AppReconcilePendingThrough(name, previous.ThroughRequestID)
+		if err != nil || len(claim.Requests) != 0 {
+			return claim, err
+		}
+	}
+	return d.store.AppReconcilePending(name)
+}
+
+// appReconcileStatusForWire answers "does this app owe a rebuild, and can it run
+// one?" — the two questions an operator has. It reports only what is durable: a
+// running attempt is the row a previous daemon left behind or this one wrote, so
+// status after a restart reads the same before and after startup repair.
+func (d *Daemon) appReconcileStatusForWire(name string) (protocol.AppReconcileStatus, error) {
+	manifest, version, err := d.appDeclaration(name)
+	if err != nil {
+		return protocol.AppReconcileStatus{}, err
+	}
+	if version.ID == 0 || len(manifest.EventPatterns()) == 0 {
+		return protocol.AppReconcileStatus{State: appReconcileStateNotNeeded}, nil
+	}
+	claim, err := d.appReconcileClaim(name)
+	if err != nil {
+		return protocol.AppReconcileStatus{}, err
+	}
+	status := protocol.AppReconcileStatus{State: appReconcileStateIdle}
+	if !manifest.Reconcile {
+		status.State = appReconcileStateUnsupported
+	}
+	if len(claim.Requests) == 0 {
+		return status, nil
+	}
+	if manifest.Reconcile {
+		status.State = appReconcileStateOwed
+	}
+	status.Reason = appReconcileReasonForWire(foldAppReconcileReason(version.ID, claim))
+	attempt, ok, err := d.store.LatestOwedAppReconcileInvocation(name)
+	if err != nil {
+		return protocol.AppReconcileStatus{}, err
+	}
+	if !ok {
+		return status, nil
+	}
+	if attempt.Status == store.AppInvocationStatusRunning {
+		if manifest.Reconcile {
+			status.State = appReconcileStateRunning
+		}
+		info := appInvocationForWire(attempt.ID, attempt)
+		status.CurrentAttempt = &info
+		return status, nil
+	}
+	if attempt.Error != "" {
+		status.LastError = protocol.Ptr(attempt.Error)
+	}
+	return status, nil
 }
 
 func foldAppReconcileReason(versionID int64, claim store.AppReconcileClaim) appReconcileReason {
@@ -434,6 +653,18 @@ func (d *Daemon) appEventHandler(name string) bus.Handler {
 // redeliver it with backoff — never skip it. That is true for both failure
 // classes; what differs is what gets recorded and whether the stall clock moves.
 func (d *Daemon) deliverAppEvent(ctx context.Context, name string, ev bus.Event) error {
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
+
+	claim, err := d.store.AppReconcilePending(name)
+	if err != nil {
+		return fmt.Errorf("reading reconciliation owed by app %q: %w", name, err)
+	}
+	if len(claim.Requests) != 0 {
+		return fmt.Errorf("app %q reconciliation is owed through bus seq %d; facts remain fenced until it succeeds", name, claim.ThroughSeq)
+	}
+
 	plan, err := d.planAppDispatch(name, ev)
 	if err != nil {
 		return err
@@ -458,6 +689,7 @@ func (d *Daemon) deliverAppEvent(ctx context.Context, name string, ev bus.Event)
 	invocation := store.AppInvocation{
 		AppName:      name,
 		VersionID:    plan.versionID,
+		Kind:         store.AppInvocationKindSubscription,
 		EventSeq:     ev.Seq,
 		EventName:    ev.Name,
 		EventSubject: ev.Subject,
@@ -673,6 +905,17 @@ func (d *Daemon) attributeWedgedDispatch(ctx context.Context, runtime *appRuntim
 	d.logf("apps: %s hit the dispatch timeout; the app runtime %s a liveness ping after %s",
 		name, pingOutcome(err), d.appNow().Sub(asked).Round(time.Microsecond))
 
+	// A timeout has to interrupt the work, not merely stop waiting for it: a
+	// handler that never yields cannot be cancelled from Go, and leaving it on the
+	// shared loop starves every sibling app. The generation is fenced, so a stale
+	// waiter can never kill the replacement that has already taken over.
+	terminated, terminateErr := d.ensureAppRuntimeSupervisor().TerminateGeneration(appRuntimeChildName, runtime.generation)
+	if terminateErr != nil {
+		d.logf("apps: terminating timed-out app runtime generation %d: %v", runtime.generation, terminateErr)
+	} else if terminated {
+		d.logf("apps: terminated timed-out app runtime generation %d; the supervisor will start its replacement", runtime.generation)
+	}
+
 	if err == nil {
 		// The loop is turning, so nothing is holding it: this app's own handler is
 		// what did not return. The ledger is left alone — an answered ping says
@@ -828,6 +1071,51 @@ func (d *Daemon) recordAppInvocation(invocation store.AppInvocation) {
 	d.notifyAppWatchers(appInvocationForWire(id, invocation), invocation.AppName)
 }
 
+func (d *Daemon) startAppInvocation(invocation store.AppInvocation) (int64, error) {
+	if d.store == nil {
+		return 0, errors.New("apps: cannot start an invocation without a store")
+	}
+	id, err := d.store.StartAppInvocation(invocation)
+	if err != nil {
+		return 0, fmt.Errorf("starting %s invocation of app %s: %w", invocation.Kind, invocation.AppName, err)
+	}
+	invocation.ID = id
+	invocation.Status = store.AppInvocationStatusRunning
+	d.notifyAppWatchers(appInvocationForWire(id, invocation), invocation.AppName)
+	return id, nil
+}
+
+func (d *Daemon) repairInterruptedAppInvocations() error {
+	if d.store == nil {
+		return nil
+	}
+	interrupted, err := d.store.InterruptRunningAppInvocations(d.appNow())
+	if err != nil {
+		return fmt.Errorf("repair interrupted app invocations: %w", err)
+	}
+	if interrupted > 0 {
+		d.logf("apps: marked %d invocation(s) interrupted during startup repair", interrupted)
+	}
+	return nil
+}
+
+func (d *Daemon) settleAppInvocation(invocation *store.AppInvocation, status, failure string) error {
+	finished := d.appNow()
+	settled, err := d.store.SettleAppInvocation(invocation.ID, status, failure, finished)
+	if err != nil {
+		return fmt.Errorf("settling invocation %d of app %s: %w", invocation.ID, invocation.AppName, err)
+	}
+	if !settled {
+		return fmt.Errorf("settling invocation %d of app %s: it is no longer running", invocation.ID, invocation.AppName)
+	}
+	invocation.Status = status
+	invocation.Error = failure
+	invocation.FinishedAt = finished
+	invocation.Duration = finished.Sub(invocation.StartedAt)
+	d.notifyAppWatchers(appInvocationForWire(invocation.ID, *invocation), invocation.AppName)
+	return nil
+}
+
 // firstLine trims a stack trace down to its message, for a log line and a bus
 // error that already have the whole text recorded beside them.
 func firstLine(s string) string {
@@ -848,15 +1136,39 @@ func firstLine(s string) string {
 // time is not stuck, it is unreliable, and unreliable does not pin the retention
 // floor. Only the same seq failing over and over does.
 func (d *Daemon) noteAppFailure(name string, ev bus.Event, message string) {
-	now := d.appNow()
+	stalled, attempts, disable := d.noteAppStall(name, appStallKindSubscription, ev.Seq, ev.Name, 0, message)
+	if !disable {
+		return
+	}
+	d.autoDisableApp(name, ev, stalled, attempts, message)
+}
 
+func (d *Daemon) noteAppReconcileFailure(name string, claim store.AppReconcileClaim, message string) {
+	stalled, attempts, disable := d.noteAppStall(
+		name, appStallKindReconcile, claim.ThroughRequestID, "", claim.ThroughRequestID, message)
+	if !disable {
+		return
+	}
+	d.disableAppAutomatically(name, message,
+		fmt.Sprintf("apps: disabled %s — reconcile request %d stalled for %s across %d attempts: %s",
+			name, claim.ThroughRequestID, stalled.Round(time.Second), attempts, firstLine(message)),
+		fmt.Sprintf(
+			"%s failed to reconcile through bus seq %d for %s across %d attempts, so attn disabled it. The rebuild remains owed. Fix the reconcile handler and `attn app enable %s`; `attn app status %s` shows the failure and fence.",
+			name, claim.ThroughSeq, stalled.Round(time.Second), attempts, name, name))
+}
+
+func (d *Daemon) noteAppStall(name, kind string, key int64, eventName string, reconcileRequestID int64, message string) (time.Duration, int, bool) {
+	now := d.appNow()
 	d.appStallMu.Lock()
 	if d.appStalls == nil {
 		d.appStalls = make(map[string]*appStall)
 	}
 	stall := d.appStalls[name]
-	if stall == nil || stall.seq != ev.Seq {
-		stall = &appStall{seq: ev.Seq, eventName: ev.Name, since: now}
+	if stall == nil || stall.kind != kind || stall.seq != key {
+		stall = &appStall{
+			kind: kind, seq: key, eventName: eventName,
+			reconcileRequestID: reconcileRequestID, since: now,
+		}
 		d.appStalls[name] = stall
 	}
 	stall.attempts++
@@ -864,11 +1176,7 @@ func (d *Daemon) noteAppFailure(name string, ev bus.Event, message string) {
 	stalled := now.Sub(stall.since)
 	attempts := stall.attempts
 	d.appStallMu.Unlock()
-
-	if stalled < appAutoDisableStall {
-		return
-	}
-	d.autoDisableApp(name, ev, stalled, attempts, message)
+	return stalled, attempts, stalled >= d.appAutoDisableWindow()
 }
 
 func (d *Daemon) clearAppStall(name string) {
@@ -944,7 +1252,7 @@ func (d *Daemon) autoDisableApp(name string, ev bus.Event, stalled time.Duration
 			name, ev.Name, ev.Seq, stalled.Round(time.Second), attempts, firstLine(message)),
 		fmt.Sprintf(
 			"%s failed on the same event (%s, seq %d) for %s across %d attempts, so attn disabled it — a stalled app holds the event log open for every other consumer. Fix the handler and `attn app enable %s`; `attn app status %s` shows the failures.",
-			name, ev.Name, ev.Seq, stalled.Round(time.Minute), attempts, name, name))
+			name, ev.Name, ev.Seq, stalled.Round(time.Second), attempts, name, name))
 }
 
 // disableAppAutomatically flips the app off, says so on the bus, and tells the

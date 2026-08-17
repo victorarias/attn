@@ -1,6 +1,6 @@
 // To parse this data:
 //
-//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutoModeConfigInfo, AutoModeDenialInfo, AutoModeDenialsMessage, AutoModeDenialsResult, AutoModeDiscardMessage, AutoModeDiscardResultMessage, AutoModeEnvAddMessage, AutoModeEnvRemoveMessage, AutoModeEnvResult, AutoModeGetMessage, AutoModePromoteMessage, AutoModePromoteResultMessage, AutoModeProposalInfo, AutoModeProposeMessage, AutoModeProposeResult, AutoModeShowMessage, AutoModeShowResult, AutoModeStateResultMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewDayClose, CrewHandoffMessage, CrewHandoffResult, CrewListMessage, CrewListResult, CrewMember, CrewPrimeMessage, CrewPrimeResult, CrewSetMessage, CrewSetResult, CrewSleepMessage, CrewSleepResult, CrewSleepResultMessage, CrewUpdatedMessage, CrewWakeMessage, CrewWakeResult, CrewWakeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
+//   import { Convert, ActivityStatusMessage, ActivityStatusResult, ActivityStatusSession, AddEndpointMessage, AgentAttachMessage, AgentClearQueueMessage, AgentEventMessage, AgentHistoryMessage, AgentMsgMessage, AgentMsgResult, AgentMsgStatus, AgentPeekMessage, AgentPeekResult, AgentPeekScreen, AgentPromptMessage, AgentSetModelMessage, AgentToolDetailMessage, AppApplyMessage, AppApplyResult, AppCommandInfo, AppCommandMessage, AppCommandResultMessage, AppConsumerInfo, AppInvocationInfo, AppListMessage, AppListResult, AppLogsMessage, AppLogsResult, AppReconcileGapInfo, AppReconcileReasonInfo, AppReconcileStatus, AppRegistryEntry, AppRemoveMessage, AppRemoveResult, AppRollbackMessage, AppRollbackResult, AppRuntimeInfo, AppRuntimeRestartMessage, AppRuntimeRestartResult, AppRuntimeStatusMessage, AppRuntimeStatusResult, AppSetEnabledMessage, AppSetEnabledResult, AppStallInfo, AppStatusMessage, AppStatusResult, AppSummary, AppVersionInfo, AppViewCrashMessage, AppViewInfo, AppWatchMessage, AppWatchResult, ApprovePRMessage, AppsUpdatedMessage, AttachBlock, AttachPolicy, AttachResultMessage, AttachSessionMessage, AttachSnapshot, AuthorState, AuthorsUpdatedMessage, AutoModeConfigInfo, AutoModeDenialInfo, AutoModeDenialsMessage, AutoModeDenialsResult, AutoModeDiscardMessage, AutoModeDiscardResultMessage, AutoModeEnvAddMessage, AutoModeEnvRemoveMessage, AutoModeEnvResult, AutoModeGetMessage, AutoModePromoteMessage, AutoModePromoteResultMessage, AutoModeProposalInfo, AutoModeProposeMessage, AutoModeProposeResult, AutoModeShowMessage, AutoModeShowResult, AutoModeStateResultMessage, AutomationApplyMessage, AutomationApplyResultMessage, AutomationCleanupMessage, AutomationCleanupResultMessage, AutomationDefinitionGetMessage, AutomationDefinitionResultMessage, AutomationDefinitionSummary, AutomationDefinitionsGetMessage, AutomationDefinitionsResultMessage, AutomationDeleteMessage, AutomationDeleteResultMessage, AutomationRunMessage, AutomationRunResultMessage, AutomationRunSummary, AutomationRunsGetMessage, AutomationRunsResultMessage, AutomationSetEnabledMessage, AutomationSetEnabledResultMessage, AutomationValidateMessage, AutomationValidateResultMessage, AutomationsChangedMessage, BootstrapEndpointMessage, Branch, BranchChangedMessage, BranchesResultMessage, BrowseDirectoryMessage, BrowseDirectoryResultMessage, BrowserControlMessage, BrowserControlRequestMessage, BrowserControlResponseMessage, BrowserControlResultMessage, BusConsumerStatus, BusHealthEntry, BusProducerStatus, BusSetConsumerEnabledMessage, BusSetConsumerEnabledResultMessage, BusStatusGetMessage, BusStatusResultMessage, CancelCountdownMessage, ChiefOfStaffResultMessage, ClearSessionActivityMessage, ClearSessionsMessage, ClearWarningsMessage, ClientEvictionNoticeMessage, ClientHelloMessage, CollapseRepoMessage, CommandErrorMessage, CreateWorktreeFromBranchMessage, CreateWorktreeMessage, CreateWorktreeResultMessage, CrewDayClose, CrewHandoffMessage, CrewHandoffResult, CrewListMessage, CrewListResult, CrewMember, CrewPrimeMessage, CrewPrimeResult, CrewSetMessage, CrewSetResult, CrewSleepMessage, CrewSleepResult, CrewSleepResultMessage, CrewUpdatedMessage, CrewWakeMessage, CrewWakeResult, CrewWakeResultMessage, DaemonWarning, DelegateMessage, DelegateResult, DelegateResultMessage, DelegateStatusMessage, DelegateWorktreeRequest, DelegationOperation, DelegationOperationMessage, DelegationOperationState, DeleteWorktreeMessage, DeleteWorktreeResultMessage, DetachSessionMessage, DirectoryEntry, DispatchWorkState, DocCollectionsMessage, DocCollectionsResult, DocCountMessage, DocCountResult, DocDefineMessage, DocDefineResult, DocDeleteMessage, DocDeleteResult, DocGetMessage, DocGetResult, DocPutMessage, DocPutResult, DocQueryMessage, DocQueryResult, DocSubscribeMessage, DocSubscribeResult, DocSubscriptionDeliveryMessage, DocSubscriptionEndedMessage, DocUndefineMessage, DocUndefineResult, DocUnsubscribeMessage, DocumentCollectionSchema, DocumentConflict, DocumentFieldSpec, DocumentFilter, DocumentQuery, DocumentRevision, DocumentSort, EndpointActionResultMessage, EndpointCapabilities, EndpointInfo, EndpointStatusChangedMessage, EndpointsUpdatedMessage, EnsureRepoMessage, EnsureRepoResultMessage, EvidenceExcerpt, FetchPRDetailsMessage, FetchPRDetailsResultMessage, FetchRemotesMessage, FetchRemotesResultMessage, FileActivity, FileDiffResultMessage, FilesEditedMessage, FSChangedMessage, FSDeleteMessage, FSDeleteResult, FSDeleteResultMessage, FSEntry, FSExistsMessage, FSExistsResult, FSExistsResultMessage, FSIndexMessage, FSIndexResultMessage, FSListMessage, FSListResultMessage, FSReadAssetMessage, FSReadAssetResult, FSReadAssetResultMessage, FSReadMessage, FSReadResult, FSReadResultMessage, FSRenameMessage, FSRenameResult, FSRenameResultMessage, FSUnwatchMessage, FSUnwatchResultMessage, FSWatchMessage, FSWatchResultMessage, FSWriteMessage, FSWriteResult, FSWriteResultMessage, GardenSeedsUpdatedMessage, GetDefaultBranchMessage, GetDefaultBranchResultMessage, GetFileDiffMessage, GetKittyImageMessage, GetPresentationRoundMessage, GetPresentationRoundResultMessage, GetPresentationsMessage, GetPresentationsResultMessage, GetRecentLocationsMessage, GetRepoInfoMessage, GetRepoInfoResultMessage, GetScreenSnapshotMessage, GetScreenSnapshotResultMessage, GetSettingsMessage, GetTicketMessage, GitFileChange, GitHubHostsUpdatedMessage, GitOperation, GitOperationFinishedMessage, GitOperationKind, GitOperationStartedMessage, GitOperationStatus, GitStatusUpdateMessage, HeartbeatMessage, HeatState, HookCompactionMessage, HookNotificationMessage, HookStopFailureMessage, InitialStateMessage, InjectTestPRMessage, InjectTestSessionMessage, InspectPathMessage, InspectPathResultMessage, InstallBundledPluginMessage, InstallPluginMessage, JournalAppendMessage, JournalAppendResult, KillSessionMessage, KittyImageResultMessage, KittyPlacement, KittyPlacementsMessage, ListBranchesMessage, ListEndpointsMessage, ListPastConversationsMessage, ListPluginsMessage, ListRemoteBranchesMessage, ListRemoteBranchesResultMessage, ListWorktreesMessage, MarkdownAnnotation, MarkdownAnnotationAnchor, MarkdownAnnotationsClearMessage, MarkdownAnnotationsClearResultMessage, MarkdownAnnotationsGetMessage, MarkdownAnnotationsGetResultMessage, MarkdownAnnotationsSaveMessage, MarkdownAnnotationsSaveResultMessage, MarkdownAnnotationsSubmitMessage, MarkdownAnnotationsSubmitResultMessage, MergePRMessage, MuteAuthorMessage, MutePRMessage, MuteRepoMessage, MuteWorkspaceMessage, NotebookBacklinksMessage, NotebookBacklinksResultMessage, NotebookChangedMessage, NotebookEntry, NotebookGuideMessage, NotebookGuideResult, NotebookListMessage, NotebookListResultMessage, NotebookReadMessage, NotebookReadResult, NotebookReadResultMessage, NotebookSendToChiefMessage, NotebookSendToChiefResult, NotebookSendToChiefResultMessage, NotebookWriteMessage, NotebookWriteResult, NotebookWriteResultMessage, Notification, NotificationListMessage, NotificationListResultMessage, NotificationMarkReadMessage, NotificationMarkReadResultMessage, NotificationSeverity, NotificationsUpdatedMessage, OpenBrowserMessage, OpenMarkdownMessage, OpenMarkdownResultMessage, OpenSentFilesMessage, PR, PRActionResultMessage, PRRole, PRVisitedMessage, PRsUpdatedMessage, PastConversation, PastConversationsResultMessage, PathInspection, PinSessionMessage, PinWorkspaceMessage, PluginActionResultMessage, PluginInfo, PluginIssue, PluginsUpdatedMessage, PresentAnnotation, PresentCloseMessage, PresentCloseResultMessage, PresentCommentInput, PresentFeedbackMessage, PresentFeedbackResult, PresentFile, PresentManifestView, PresentOpenMessage, PresentOpenResult, PresentSubmitRoundMessage, PresentSubmitRoundResultMessage, Presentation, PresentationAddedMessage, PresentationComment, PresentationRound, PresentationUpdatedMessage, PtyDesyncMessage, PtyInputMessage, PtyInputProbeResultMessage, PtyOutputMessage, PtyResizeMessage, PtyResizedMessage, QueryAuthorsMessage, QueryMessage, QueryPRsMessage, QueryReposMessage, RateLimitedMessage, RecentFilesMessage, RecentFilesResultMessage, RecentLocation, RecentLocationsResultMessage, RefreshPRsMessage, RefreshPRsResultMessage, RegisterMessage, RegisterWorkspaceMessage, ReloadSessionMessage, ReloadSessionResultMessage, RemoveEndpointMessage, RemovePluginMessage, RenameResultMessage, RenameSessionMessage, RenameWorkspaceMessage, RepoInfo, RepoState, ReposUpdatedMessage, Response, ReviewComment, RuntimeRespawnedMessage, Seed, SeedEdge, SeedLinkMessage, SeedLinkResult, SeedListMessage, SeedListResult, SeedNote, SeedNoteMessage, SeedNoteResult, SeedNotesMessage, SeedNotesResult, SeedPlantMessage, SeedPlantResult, SeedPlotChild, SeedPlotMessage, SeedPlotProgress, SeedPlotResult, SeedReadyMessage, SeedReadyResult, SeedRelation, SeedShowMessage, SeedShowResult, SeedTransitionMessage, SeedTransitionResult, SeedVar, Session, SessionAnnotation, SessionAnnotationsClearMessage, SessionAnnotationsClearResultMessage, SessionAnnotationsGetMessage, SessionAnnotationsGetResultMessage, SessionAnnotationsSaveMessage, SessionAnnotationsSaveResultMessage, SessionAnnotationsSubmitMessage, SessionAnnotationsSubmitResultMessage, SessionContextWindowCapResultMessage, SessionExitedMessage, SessionInstructionsMessage, SessionInstructionsResult, SessionMessage, SessionMessageWindowStatus, SessionMessagesChangedMessage, SessionMessagesGetMessage, SessionMessagesGetResultMessage, SessionRegisteredMessage, SessionSelectedMessage, SessionState, SessionStateChangedMessage, SessionTodosUpdatedMessage, SessionTranscriptEvent, SessionTranscriptMessage, SessionTranscriptResult, SessionUnregisteredMessage, SessionsUpdatedMessage, SetChiefOfStaffMessage, SetClientPresenceMessage, SetEndpointRemoteWebMessage, SetPluginPriorityMessage, SetSessionContextWindowCapMessage, SetSessionResumeIDMessage, SetSettingMessage, SetTerminalThemeMessage, SetTicketStatusMessage, SetWorkspaceRankMessage, SettingsUpdatedMessage, SettleTurnMessage, SnoozeTurnMessage, SpawnResultMessage, SpawnSessionMessage, StateExplainEntry, StateExplainMessage, StateExplainResult, StateMessage, StopMessage, StoredDocument, SubscribeGitStatusMessage, Task, TaskListMessage, TaskListResultMessage, TaskRetryMessage, TaskRetryResultMessage, TasksChangedMessage, TerminalPointerActivityMessage, Ticket, TicketActionResultMessage, TicketActivity, TicketActivityKind, TicketAddCommentMessage, TicketArtifact, TicketAttachFile, TicketAttachMessage, TicketAttachResult, TicketAttachResultMessage, TicketChangeStatusMessage, TicketCommentMessage, TicketCommentResult, TicketCreateMessage, TicketCreateResult, TicketEditDescriptionMessage, TicketEvent, TicketEventBundle, TicketEventKind, TicketInboxMessage, TicketInboxMode, TicketInboxResult, TicketListMessage, TicketListResult, TicketResultMessage, TicketResumeMessage, TicketResumeResultMessage, TicketRow, TicketShowMessage, TicketShowResult, TicketStatus, TicketStatusResult, TicketSubscribeMessage, TicketSubscribeResult, TicketTakeMessage, TicketTakeResult, TicketUnsubscribeMessage, TicketUnsubscribeResult, TicketsUpdatedMessage, TodosMessage, TriggerNudgeMessage, UninstallPluginMessage, UnregisterMessage, UnregisterWorkspaceMessage, UnsubscribeGitStatusMessage, UpdateEndpointMessage, WakeTurnMessage, WebSocketEvent, WorkflowActionResultMessage, WorkflowAgentCall, WorkflowAgentCallStatus, WorkflowCallUpsertMessage, WorkflowRun, WorkflowRunCancelMessage, WorkflowRunGetMessage, WorkflowRunListMessage, WorkflowRunStatus, WorkflowRunUpdatedMessage, WorkflowRunUpsertMessage, Workspace, WorkspaceContext, WorkspaceContextChangedMessage, WorkspaceContextCheckoutMessage, WorkspaceContextCompactMessage, WorkspaceContextListMessage, WorkspaceContextListResultMessage, WorkspaceContextMaintenanceAction, WorkspaceContextMaintenanceResult, WorkspaceContextResult, WorkspaceContextResultMessage, WorkspaceContextRollbackMessage, WorkspaceContextStatusMessage, WorkspaceContextUpdateMessage, WorkspaceLayout, WorkspaceLayoutActionResultMessage, WorkspaceLayoutAddSessionPaneMessage, WorkspaceLayoutClosePaneMessage, WorkspaceLayoutDockEdge, WorkspaceLayoutDockTileMessage, WorkspaceLayoutFocusPaneMessage, WorkspaceLayoutGetMessage, WorkspaceLayoutMessage, WorkspaceLayoutMoveLeafMessage, WorkspaceLayoutMoveLeafToNewWorkspaceMessage, WorkspaceLayoutMoveLeafToWorkspaceMessage, WorkspaceLayoutPane, WorkspaceLayoutPaneKind, WorkspaceLayoutPaneStatus, WorkspaceLayoutRenamePaneMessage, WorkspaceLayoutSetSplitRatioMessage, WorkspaceLayoutSplitDirection, WorkspaceLayoutUndockTileMessage, WorkspaceLayoutUpdateTileMessage, WorkspaceLayoutUpdatedMessage, WorkspaceRegisteredMessage, WorkspaceSelectedMessage, WorkspaceStateChangedMessage, WorkspaceStatus, WorkspaceTileContentGetMessage, WorkspaceTileContentMessage, WorkspaceUnregisteredMessage, Worktree, WorktreeCreatedEvent, WorktreeDeletedEvent, WorktreesUpdatedMessage } from "./generated";
 //
 //   const activityStatusMessage = Convert.toActivityStatusMessage(json);
 //   const activityStatusResult = Convert.toActivityStatusResult(json);
@@ -30,6 +30,9 @@
 //   const appListResult = Convert.toAppListResult(json);
 //   const appLogsMessage = Convert.toAppLogsMessage(json);
 //   const appLogsResult = Convert.toAppLogsResult(json);
+//   const appReconcileGapInfo = Convert.toAppReconcileGapInfo(json);
+//   const appReconcileReasonInfo = Convert.toAppReconcileReasonInfo(json);
+//   const appReconcileStatus = Convert.toAppReconcileStatus(json);
 //   const appRegistryEntry = Convert.toAppRegistryEntry(json);
 //   const appRemoveMessage = Convert.toAppRemoveMessage(json);
 //   const appRemoveResult = Convert.toAppRemoveResult(json);
@@ -814,16 +817,34 @@ export enum AppCommandMessageCmd {
 }
 
 export interface AppCommandResultMessage {
-    error?:     string;
-    event:      AppCommandResultMessageEvent;
-    payload?:   string;
-    request_id: string;
-    success:    boolean;
+    error?:      string;
+    error_code?: string;
+    event:       AppCommandResultMessageEvent;
+    payload?:    string;
+    reconcile?:  ReasonObject;
+    request_id:  string;
+    success:     boolean;
     [property: string]: any;
 }
 
 export enum AppCommandResultMessageEvent {
     AppCommandResult = "app_command_result",
+}
+
+export interface ReasonObject {
+    causes:            string[];
+    gap?:              Gap;
+    previous_versions: number[];
+    through_seq:       number;
+    version:           number;
+    [property: string]: any;
+}
+
+export interface Gap {
+    cursor:   number;
+    earliest: number;
+    missed:   number;
+    [property: string]: any;
 }
 
 export interface AppConsumerInfo {
@@ -836,16 +857,20 @@ export interface AppConsumerInfo {
 }
 
 export interface AppInvocationInfo {
-    duration_ms:   number;
-    error:         string;
-    event_name:    string;
-    event_seq:     number;
-    event_subject: string;
-    handler:       string;
-    id:            number;
-    started_at:    string;
-    status:        string;
-    version_id:    number;
+    duration_ms?:        number;
+    error?:              string;
+    event_name?:         string;
+    event_seq?:          number;
+    event_subject?:      string;
+    finished_at?:        string;
+    handler:             string;
+    id:                  number;
+    kind:                string;
+    reconcile?:          ReasonObject;
+    started_at:          string;
+    status:              string;
+    through_request_id?: number;
+    version_id:          number;
     [property: string]: any;
 }
 
@@ -922,6 +947,48 @@ export interface AppLogsResult {
     name:      string;
     path:      string;
     truncated: boolean;
+    [property: string]: any;
+}
+
+export interface AppReconcileGapInfo {
+    cursor:   number;
+    earliest: number;
+    missed:   number;
+    [property: string]: any;
+}
+
+export interface AppReconcileReasonInfo {
+    causes:            string[];
+    gap?:              Gap;
+    previous_versions: number[];
+    through_seq:       number;
+    version:           number;
+    [property: string]: any;
+}
+
+export interface AppReconcileStatus {
+    current_attempt?: CurrentAttempt;
+    last_error?:      string;
+    reason?:          ReasonObject;
+    state:            string;
+    [property: string]: any;
+}
+
+export interface CurrentAttempt {
+    duration_ms?:        number;
+    error?:              string;
+    event_name?:         string;
+    event_seq?:          number;
+    event_subject?:      string;
+    finished_at?:        string;
+    handler:             string;
+    id:                  number;
+    kind:                string;
+    reconcile?:          ReasonObject;
+    started_at:          string;
+    status:              string;
+    through_request_id?: number;
+    version_id:          number;
     [property: string]: any;
 }
 
@@ -1059,12 +1126,14 @@ export interface AppSetEnabledResult {
 }
 
 export interface AppStallInfo {
-    attempts:    number;
-    disables_at: string;
-    event_name:  string;
-    event_seq:   number;
-    last_error:  string;
-    since:       string;
+    attempts:            number;
+    disables_at:         string;
+    event_name?:         string;
+    event_seq?:          number;
+    kind:                string;
+    last_error:          string;
+    since:               string;
+    through_request_id?: number;
     [property: string]: any;
 }
 
@@ -1081,8 +1150,9 @@ export enum AppStatusMessageCmd {
 export interface AppStatusResult {
     app:                    App;
     invocations:            number;
-    recent?:                InvocationElement[];
+    recent?:                CurrentAttempt[];
     recent_versions?:       CurrentVersion[];
+    reconcile:              AppStatusResultReconcile;
     runtime?:               Runtime;
     serving_history?:       CurrentVersion[];
     serving_history_steps?: number;
@@ -1091,27 +1161,23 @@ export interface AppStatusResult {
     [property: string]: any;
 }
 
-export interface InvocationElement {
-    duration_ms:   number;
-    error:         string;
-    event_name:    string;
-    event_seq:     number;
-    event_subject: string;
-    handler:       string;
-    id:            number;
-    started_at:    string;
-    status:        string;
-    version_id:    number;
+export interface AppStatusResultReconcile {
+    current_attempt?: CurrentAttempt;
+    last_error?:      string;
+    reason?:          ReasonObject;
+    state:            string;
     [property: string]: any;
 }
 
 export interface Stall {
-    attempts:    number;
-    disables_at: string;
-    event_name:  string;
-    event_seq:   number;
-    last_error:  string;
-    since:       string;
+    attempts:            number;
+    disables_at:         string;
+    event_name?:         string;
+    event_seq?:          number;
+    kind:                string;
+    last_error:          string;
+    since:               string;
+    through_request_id?: number;
     [property: string]: any;
 }
 
@@ -1168,7 +1234,7 @@ export enum AppWatchMessageCmd {
 }
 
 export interface AppWatchResult {
-    invocation: InvocationElement;
+    invocation: CurrentAttempt;
     [property: string]: any;
 }
 
@@ -5915,8 +5981,9 @@ export interface AppSetEnabledResultObject {
 export interface AppStatusResultObject {
     app:                    App;
     invocations:            number;
-    recent?:                InvocationElement[];
+    recent?:                CurrentAttempt[];
     recent_versions?:       CurrentVersion[];
+    reconcile:              AppStatusResultReconcile;
     runtime?:               Runtime;
     serving_history?:       CurrentVersion[];
     serving_history_steps?: number;
@@ -5926,7 +5993,7 @@ export interface AppStatusResultObject {
 }
 
 export interface AppWatchResultObject {
-    invocation: InvocationElement;
+    invocation: CurrentAttempt;
     [property: string]: any;
 }
 
@@ -8851,6 +8918,30 @@ export class Convert {
 
     public static appLogsResultToJson(value: AppLogsResult): string {
         return JSON.stringify(uncast(value, r("AppLogsResult")), null, 2);
+    }
+
+    public static toAppReconcileGapInfo(json: string): AppReconcileGapInfo {
+        return cast(JSON.parse(json), r("AppReconcileGapInfo"));
+    }
+
+    public static appReconcileGapInfoToJson(value: AppReconcileGapInfo): string {
+        return JSON.stringify(uncast(value, r("AppReconcileGapInfo")), null, 2);
+    }
+
+    public static toAppReconcileReasonInfo(json: string): AppReconcileReasonInfo {
+        return cast(JSON.parse(json), r("AppReconcileReasonInfo"));
+    }
+
+    public static appReconcileReasonInfoToJson(value: AppReconcileReasonInfo): string {
+        return JSON.stringify(uncast(value, r("AppReconcileReasonInfo")), null, 2);
+    }
+
+    public static toAppReconcileStatus(json: string): AppReconcileStatus {
+        return cast(JSON.parse(json), r("AppReconcileStatus"));
+    }
+
+    public static appReconcileStatusToJson(value: AppReconcileStatus): string {
+        return JSON.stringify(uncast(value, r("AppReconcileStatus")), null, 2);
     }
 
     public static toAppRegistryEntry(json: string): AppRegistryEntry {
@@ -13487,10 +13578,24 @@ const typeMap: any = {
     ], "any"),
     "AppCommandResultMessage": o([
         { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "error_code", js: "error_code", typ: u(undefined, "") },
         { json: "event", js: "event", typ: r("AppCommandResultMessageEvent") },
         { json: "payload", js: "payload", typ: u(undefined, "") },
+        { json: "reconcile", js: "reconcile", typ: u(undefined, r("ReasonObject")) },
         { json: "request_id", js: "request_id", typ: "" },
         { json: "success", js: "success", typ: true },
+    ], "any"),
+    "ReasonObject": o([
+        { json: "causes", js: "causes", typ: a("") },
+        { json: "gap", js: "gap", typ: u(undefined, r("Gap")) },
+        { json: "previous_versions", js: "previous_versions", typ: a(0) },
+        { json: "through_seq", js: "through_seq", typ: 0 },
+        { json: "version", js: "version", typ: 0 },
+    ], "any"),
+    "Gap": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "earliest", js: "earliest", typ: 0 },
+        { json: "missed", js: "missed", typ: 0 },
     ], "any"),
     "AppConsumerInfo": o([
         { json: "cursor", js: "cursor", typ: 0 },
@@ -13500,15 +13605,19 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
     ], "any"),
     "AppInvocationInfo": o([
-        { json: "duration_ms", js: "duration_ms", typ: 0 },
-        { json: "error", js: "error", typ: "" },
-        { json: "event_name", js: "event_name", typ: "" },
-        { json: "event_seq", js: "event_seq", typ: 0 },
-        { json: "event_subject", js: "event_subject", typ: "" },
+        { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event_name", js: "event_name", typ: u(undefined, "") },
+        { json: "event_seq", js: "event_seq", typ: u(undefined, 0) },
+        { json: "event_subject", js: "event_subject", typ: u(undefined, "") },
+        { json: "finished_at", js: "finished_at", typ: u(undefined, "") },
         { json: "handler", js: "handler", typ: "" },
         { json: "id", js: "id", typ: 0 },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "reconcile", js: "reconcile", typ: u(undefined, r("ReasonObject")) },
         { json: "started_at", js: "started_at", typ: "" },
         { json: "status", js: "status", typ: "" },
+        { json: "through_request_id", js: "through_request_id", typ: u(undefined, 0) },
         { json: "version_id", js: "version_id", typ: 0 },
     ], "any"),
     "AppListMessage": o([
@@ -13560,6 +13669,40 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
         { json: "path", js: "path", typ: "" },
         { json: "truncated", js: "truncated", typ: true },
+    ], "any"),
+    "AppReconcileGapInfo": o([
+        { json: "cursor", js: "cursor", typ: 0 },
+        { json: "earliest", js: "earliest", typ: 0 },
+        { json: "missed", js: "missed", typ: 0 },
+    ], "any"),
+    "AppReconcileReasonInfo": o([
+        { json: "causes", js: "causes", typ: a("") },
+        { json: "gap", js: "gap", typ: u(undefined, r("Gap")) },
+        { json: "previous_versions", js: "previous_versions", typ: a(0) },
+        { json: "through_seq", js: "through_seq", typ: 0 },
+        { json: "version", js: "version", typ: 0 },
+    ], "any"),
+    "AppReconcileStatus": o([
+        { json: "current_attempt", js: "current_attempt", typ: u(undefined, r("CurrentAttempt")) },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: u(undefined, r("ReasonObject")) },
+        { json: "state", js: "state", typ: "" },
+    ], "any"),
+    "CurrentAttempt": o([
+        { json: "duration_ms", js: "duration_ms", typ: u(undefined, 0) },
+        { json: "error", js: "error", typ: u(undefined, "") },
+        { json: "event_name", js: "event_name", typ: u(undefined, "") },
+        { json: "event_seq", js: "event_seq", typ: u(undefined, 0) },
+        { json: "event_subject", js: "event_subject", typ: u(undefined, "") },
+        { json: "finished_at", js: "finished_at", typ: u(undefined, "") },
+        { json: "handler", js: "handler", typ: "" },
+        { json: "id", js: "id", typ: 0 },
+        { json: "kind", js: "kind", typ: "" },
+        { json: "reconcile", js: "reconcile", typ: u(undefined, r("ReasonObject")) },
+        { json: "started_at", js: "started_at", typ: "" },
+        { json: "status", js: "status", typ: "" },
+        { json: "through_request_id", js: "through_request_id", typ: u(undefined, 0) },
+        { json: "version_id", js: "version_id", typ: 0 },
     ], "any"),
     "AppRegistryEntry": o([
         { json: "content_hash", js: "content_hash", typ: u(undefined, "") },
@@ -13651,10 +13794,12 @@ const typeMap: any = {
     "AppStallInfo": o([
         { json: "attempts", js: "attempts", typ: 0 },
         { json: "disables_at", js: "disables_at", typ: "" },
-        { json: "event_name", js: "event_name", typ: "" },
-        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_name", js: "event_name", typ: u(undefined, "") },
+        { json: "event_seq", js: "event_seq", typ: u(undefined, 0) },
+        { json: "kind", js: "kind", typ: "" },
         { json: "last_error", js: "last_error", typ: "" },
         { json: "since", js: "since", typ: "" },
+        { json: "through_request_id", js: "through_request_id", typ: u(undefined, 0) },
     ], "any"),
     "AppStatusMessage": o([
         { json: "cmd", js: "cmd", typ: r("AppStatusMessageCmd") },
@@ -13663,33 +13808,30 @@ const typeMap: any = {
     "AppStatusResult": o([
         { json: "app", js: "app", typ: r("App") },
         { json: "invocations", js: "invocations", typ: 0 },
-        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("CurrentAttempt"))) },
         { json: "recent_versions", js: "recent_versions", typ: u(undefined, a(r("CurrentVersion"))) },
+        { json: "reconcile", js: "reconcile", typ: r("AppStatusResultReconcile") },
         { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
         { json: "serving_history", js: "serving_history", typ: u(undefined, a(r("CurrentVersion"))) },
         { json: "serving_history_steps", js: "serving_history_steps", typ: u(undefined, 0) },
         { json: "stall", js: "stall", typ: u(undefined, r("Stall")) },
         { json: "versions", js: "versions", typ: 0 },
     ], "any"),
-    "InvocationElement": o([
-        { json: "duration_ms", js: "duration_ms", typ: 0 },
-        { json: "error", js: "error", typ: "" },
-        { json: "event_name", js: "event_name", typ: "" },
-        { json: "event_seq", js: "event_seq", typ: 0 },
-        { json: "event_subject", js: "event_subject", typ: "" },
-        { json: "handler", js: "handler", typ: "" },
-        { json: "id", js: "id", typ: 0 },
-        { json: "started_at", js: "started_at", typ: "" },
-        { json: "status", js: "status", typ: "" },
-        { json: "version_id", js: "version_id", typ: 0 },
+    "AppStatusResultReconcile": o([
+        { json: "current_attempt", js: "current_attempt", typ: u(undefined, r("CurrentAttempt")) },
+        { json: "last_error", js: "last_error", typ: u(undefined, "") },
+        { json: "reason", js: "reason", typ: u(undefined, r("ReasonObject")) },
+        { json: "state", js: "state", typ: "" },
     ], "any"),
     "Stall": o([
         { json: "attempts", js: "attempts", typ: 0 },
         { json: "disables_at", js: "disables_at", typ: "" },
-        { json: "event_name", js: "event_name", typ: "" },
-        { json: "event_seq", js: "event_seq", typ: 0 },
+        { json: "event_name", js: "event_name", typ: u(undefined, "") },
+        { json: "event_seq", js: "event_seq", typ: u(undefined, 0) },
+        { json: "kind", js: "kind", typ: "" },
         { json: "last_error", js: "last_error", typ: "" },
         { json: "since", js: "since", typ: "" },
+        { json: "through_request_id", js: "through_request_id", typ: u(undefined, 0) },
     ], "any"),
     "AppSummary": o([
         { json: "commands", js: "commands", typ: u(undefined, a(r("CommandElement"))) },
@@ -13726,7 +13868,7 @@ const typeMap: any = {
         { json: "name", js: "name", typ: "" },
     ], "any"),
     "AppWatchResult": o([
-        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
+        { json: "invocation", js: "invocation", typ: r("CurrentAttempt") },
     ], "any"),
     "ApprovePRMessage": o([
         { json: "cmd", js: "cmd", typ: r("ApprovePRMessageCmd") },
@@ -16614,8 +16756,9 @@ const typeMap: any = {
     "AppStatusResultObject": o([
         { json: "app", js: "app", typ: r("App") },
         { json: "invocations", js: "invocations", typ: 0 },
-        { json: "recent", js: "recent", typ: u(undefined, a(r("InvocationElement"))) },
+        { json: "recent", js: "recent", typ: u(undefined, a(r("CurrentAttempt"))) },
         { json: "recent_versions", js: "recent_versions", typ: u(undefined, a(r("CurrentVersion"))) },
+        { json: "reconcile", js: "reconcile", typ: r("AppStatusResultReconcile") },
         { json: "runtime", js: "runtime", typ: u(undefined, r("Runtime")) },
         { json: "serving_history", js: "serving_history", typ: u(undefined, a(r("CurrentVersion"))) },
         { json: "serving_history_steps", js: "serving_history_steps", typ: u(undefined, 0) },
@@ -16623,7 +16766,7 @@ const typeMap: any = {
         { json: "versions", js: "versions", typ: 0 },
     ], "any"),
     "AppWatchResultObject": o([
-        { json: "invocation", js: "invocation", typ: r("InvocationElement") },
+        { json: "invocation", js: "invocation", typ: r("CurrentAttempt") },
     ], "any"),
     "AutomodeDenialsResult": o([
         { json: "denials", js: "denials", typ: a(r("DenialElement")) },

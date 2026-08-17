@@ -404,6 +404,10 @@ type Daemon struct {
 	appDispatchMu  sync.Mutex
 	appDispatches  map[string]*appDispatch
 	appDispatchSeq uint64
+	// appLanes serialize one app's handlers, commands, reconcile fence, and
+	// serving-version moves. Different apps keep running concurrently.
+	appLaneMu sync.Mutex
+	appLanes  map[string]*sync.Mutex
 	// appStalls is the auto-disable clock, one entry per app that is currently
 	// failing on an event. See appStall.
 	appStallMu sync.Mutex
@@ -434,6 +438,7 @@ type Daemon struct {
 	// appClock is the clock every app-runtime duration is measured against.
 	// Injected by tests so the fifteen-minute stall window costs no wall time.
 	appClock            func() time.Time
+	appAutoDisableWait  time.Duration
 	removePlugin        func(pluginDir, name string) error
 	pluginActionMu      sync.Mutex
 	bundledPluginMu     sync.Mutex
@@ -988,6 +993,9 @@ func NewWithGitHubClient(socketPath string, ghClient github.GitHubClient) *Daemo
 
 // Start starts the daemon
 func (d *Daemon) Start() error {
+	if err := d.resolveAppRuntimeTripwires(); err != nil {
+		return fmt.Errorf("resolve app runtime tripwires: %w", err)
+	}
 	if d.dataRoot == "" {
 		d.dataRoot = filepath.Dir(d.socketPath)
 	}
@@ -1165,6 +1173,12 @@ func (d *Daemon) Start() error {
 	// back — before the consumers that would otherwise lazy-start the runtime on
 	// their first due fact.
 	d.restoreAppRuntimePark()
+	// A running invocation belonged to the daemon process that just died. Close
+	// it before any app lane resumes; its durable reconcile request is untouched
+	// and therefore remains the next work the consumer owes.
+	if err := d.repairInterruptedAppInvocations(); err != nil {
+		return err
+	}
 	// Apps get their consumers here, not their runtime: the sidecar starts on the
 	// first fact an app is actually due, so a user with installed-but-quiet apps
 	// pays nothing for them.

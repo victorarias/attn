@@ -81,3 +81,57 @@ func TestAMultiLineHandlerErrorSurvivesBothRenderings(t *testing.T) {
 		t.Fatalf("a single-line error was changed to %q", got)
 	}
 }
+
+func TestInvocationRenderingNamesReconcileWorkWithoutInventingAnEvent(t *testing.T) {
+	reason := protocol.AppReconcileReasonInfo{
+		Causes: []string{"gap", "version_changed"}, Version: 7, ThroughSeq: 42,
+		PreviousVersions: []int{3, 5},
+	}
+	inv := protocol.AppInvocationInfo{
+		ID: 9, VersionID: 7, Kind: "reconcile", Handler: "reconcile",
+		Status: "running", StartedAt: "2026-08-17T10:00:00Z", Reconcile: &reason,
+		ThroughRequestID: protocol.Ptr(12),
+	}
+	if got := appInvocationWork(inv); got != "through seq 42 (gap, version_changed)" {
+		t.Fatalf("reconcile work = %q", got)
+	}
+	line := devInvocationLine(inv)
+	for _, want := range []string{"running", "reconcile", "through seq 42", "gap, version_changed"} {
+		if !strings.Contains(line, want) {
+			t.Fatalf("dev line %q does not contain %q", line, want)
+		}
+	}
+	if strings.Contains(line, " in ") {
+		t.Fatalf("running invocation invented a duration: %q", line)
+	}
+}
+
+func TestInvocationRenderingKeepsSubscriptionIdentity(t *testing.T) {
+	inv := protocol.AppInvocationInfo{
+		ID: 2, VersionID: 1, Kind: "subscription", Handler: "subscribe:ticket.*",
+		Status: "error", StartedAt: "2026-08-17T10:00:00Z",
+		EventSeq: protocol.Ptr(81), EventName: protocol.Ptr("ticket.updated"),
+		EventSubject: protocol.Ptr("tk-7"), DurationMs: protocol.Ptr(4),
+	}
+	if got := appInvocationWork(inv); got != "seq 81 ticket.updated tk-7" {
+		t.Fatalf("subscription work = %q", got)
+	}
+	if got := devInvocationLine(inv); !strings.Contains(got, "in 4ms") || !strings.Contains(got, "ticket.updated tk-7") {
+		t.Fatalf("dev line = %q", got)
+	}
+}
+
+func TestReconcileStatusRenderingNamesUnsupportedAndOwedStates(t *testing.T) {
+	unsupported := appReconcileStatusCell(protocol.AppReconcileStatus{State: "unsupported"})
+	if !strings.Contains(unsupported, "unsupported") || !strings.Contains(unsupported, "declares and implements reconcile") {
+		t.Fatalf("unsupported status = %q", unsupported)
+	}
+	reason := protocol.AppReconcileReasonInfo{
+		Causes: []string{"version_changed"}, Version: 4, ThroughSeq: 18,
+		PreviousVersions: []int{3},
+	}
+	owed := appReconcileStatusCell(protocol.AppReconcileStatus{State: "owed", Reason: &reason})
+	if owed != "owed through seq 18 (version_changed)" {
+		t.Fatalf("owed status = %q", owed)
+	}
+}

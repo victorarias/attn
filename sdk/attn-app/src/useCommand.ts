@@ -20,7 +20,16 @@ import { useAppViewRuntime } from "./runtime"
 /** What one invocation did. Never a rejection — see the file header. */
 export type CommandOutcome =
   | { ok: true; value: unknown }
-  | { ok: false; error: string }
+  | {
+      ok: false
+      error: string
+      /**
+       * A stable name for the refusal, when attn had one. `"reconcile_owed"`
+       * means the app is rebuilding its collections and every command is held
+       * until that finishes — worth retrying, unlike a handler that threw.
+       */
+      code?: string
+    }
 
 /**
  * A command, ready to invoke. It is a function first, because that is what a
@@ -81,8 +90,9 @@ export function useCommand(command: string): CommandRunner {
         return { ok: true, value }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
+        const code = (err as { code?: unknown } | null)?.code
         if (live.current) setError(message)
-        return { ok: false, error: message }
+        return { ok: false, error: message, code: typeof code === "string" ? code : undefined }
       } finally {
         if (live.current) setPending(false)
       }

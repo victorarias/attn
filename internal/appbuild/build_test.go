@@ -319,7 +319,9 @@ func TestBuild_UndeclaredCommandHandlerIsACompilerError(t *testing.T) {
 
 func TestBuild_DeclaredReconcileWithNoHandlerIsACompilerError(t *testing.T) {
 	env := newBuildEnv(t, "unreconciled-app")
-	env.editManifest(t, `entrypoint = "src/index.ts"`, "entrypoint = \"src/index.ts\"\nreconcile = true")
+	// The scaffold declares reconcile and implements it, so this drops the
+	// handler rather than adding the declaration.
+	env.edit(t, "src/index.ts", "\n  reconcile,", "")
 
 	_, err := env.build(t)
 	if err == nil {
@@ -671,8 +673,9 @@ func TestBuild_AppWithAViewAndNoSubscriptionsBuilds(t *testing.T) {
 	env.dropScaffoldView(t)
 	env.addView(t, "approvals", "export default function Approvals(): string { return \"approvals\" }\n")
 	env.editManifest(t, "[[subscribe]]\nevents = [\"session.state.changed\"]\n", "")
+	env.editManifest(t, "reconcile = true\n", "")
 	env.edit(t, "src/index.ts",
-		"export default {\n  subscriptions: { \"session.state.changed\": onSessionState },\n} satisfies Handlers",
+		"export default {\n  subscriptions: { \"session.state.changed\": onSessionState },\n  reconcile,\n} satisfies Handlers",
 		"export default {} satisfies Handlers")
 
 	res := env.mustBuild(t)

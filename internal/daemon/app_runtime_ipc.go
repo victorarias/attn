@@ -307,28 +307,89 @@ func (d *Daemon) handleAppWatch(conn net.Conn, msg *protocol.AppWatchMessage) {
 // appInvocationForWire renders a recorded invocation, so the streamed shape and
 // the one `attn app status` returns cannot drift.
 func appInvocationForWire(id int64, inv store.AppInvocation) protocol.AppInvocationInfo {
-	return protocol.AppInvocationInfo{
-		ID:           int(id),
-		VersionID:    int(inv.VersionID),
-		EventSeq:     int(inv.EventSeq),
-		EventName:    inv.EventName,
-		EventSubject: inv.EventSubject,
-		Handler:      inv.Handler,
-		Status:       inv.Status,
-		Error:        inv.Error,
-		DurationMs:   int(inv.Duration.Milliseconds()),
-		StartedAt:    stampForWire(inv.StartedAt),
+	info := protocol.AppInvocationInfo{
+		ID:        int(id),
+		VersionID: int(inv.VersionID),
+		Kind:      inv.Kind,
+		Handler:   inv.Handler,
+		Status:    inv.Status,
+		StartedAt: stampForWire(inv.StartedAt),
 	}
+	if info.Kind == "" {
+		info.Kind = store.AppInvocationKindSubscription
+	}
+	// Fact identity belongs to a subscription. A command, a view crash, and a
+	// reconcile all borrowed the event columns before this kind existed; a reader
+	// that sees them filled in for those kinds cannot tell a real seq from a
+	// placeholder.
+	if info.Kind == store.AppInvocationKindSubscription {
+		info.EventSeq = protocol.Ptr(int(inv.EventSeq))
+		info.EventName = protocol.Ptr(inv.EventName)
+		info.EventSubject = protocol.Ptr(inv.EventSubject)
+	} else if inv.EventName != "" {
+		info.EventName = protocol.Ptr(inv.EventName)
+		if inv.EventSubject != "" {
+			info.EventSubject = protocol.Ptr(inv.EventSubject)
+		}
+	}
+	if inv.Error != "" {
+		info.Error = protocol.Ptr(inv.Error)
+	}
+	if inv.Status != store.AppInvocationStatusRunning {
+		info.DurationMs = protocol.Ptr(int(inv.Duration.Milliseconds()))
+	}
+	if !inv.FinishedAt.IsZero() {
+		info.FinishedAt = protocol.Ptr(stampForWire(inv.FinishedAt))
+	}
+	if inv.ThroughRequestID > 0 {
+		info.ThroughRequestID = protocol.Ptr(int(inv.ThroughRequestID))
+	}
+	if inv.ReconcileReason != "" {
+		var reason appReconcileReason
+		if err := json.Unmarshal([]byte(inv.ReconcileReason), &reason); err == nil {
+			info.Reconcile = appReconcileReasonForWire(reason)
+		}
+	}
+	return info
+}
+
+func appReconcileReasonForWire(reason appReconcileReason) *protocol.AppReconcileReasonInfo {
+	info := &protocol.AppReconcileReasonInfo{
+		Causes:           append([]string{}, reason.Causes...),
+		Version:          int(reason.Version),
+		ThroughSeq:       int(reason.ThroughSeq),
+		PreviousVersions: []int{},
+	}
+	for _, version := range reason.PreviousVersions {
+		info.PreviousVersions = append(info.PreviousVersions, int(version))
+	}
+	if reason.Gap != nil {
+		info.Gap = &protocol.AppReconcileGapInfo{
+			Cursor:   int(reason.Gap.Cursor),
+			Earliest: int(reason.Gap.Earliest),
+			Missed:   int(reason.Gap.Missed),
+		}
+	}
+	return info
 }
 
 // appStallForWire renders the auto-disable clock, including when it fires.
-func appStallForWire(stall appStall) protocol.AppStallInfo {
-	return protocol.AppStallInfo{
-		EventSeq:   int(stall.seq),
-		EventName:  stall.eventName,
+func (d *Daemon) appStallForWire(stall appStall) protocol.AppStallInfo {
+	info := protocol.AppStallInfo{
+		Kind:       stall.kind,
 		Since:      stampForWire(stall.since),
 		Attempts:   stall.attempts,
 		LastError:  stall.lastError,
-		DisablesAt: stampForWire(stall.since.Add(appAutoDisableStall)),
+		DisablesAt: stampForWire(stall.since.Add(d.appAutoDisableWindow())),
 	}
+	if info.Kind == "" {
+		info.Kind = appStallKindSubscription
+	}
+	if info.Kind == appStallKindReconcile {
+		info.ThroughRequestID = protocol.Ptr(int(stall.reconcileRequestID))
+		return info
+	}
+	info.EventSeq = protocol.Ptr(int(stall.seq))
+	info.EventName = protocol.Ptr(stall.eventName)
+	return info
 }
