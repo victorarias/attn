@@ -74,7 +74,9 @@ touches worktrees only — the main repo folder is never a candidate, ever.
     the bag path; `attn agent show <id>` prints it (and `--json` for
     agents); `attn agent list --all` shows `swept (bag kept)` in the
     WORKTREE column. Restore is a documented two-liner in the manifest
-    itself: re-worktree the branch, untar over it.
+    itself: re-worktree the branch, untar over it. When the branch is
+    gone (squash-merge prunes it — the spike's common case), worktree
+    the recorded head hash instead, or main where the head was merged.
   - **For how long: forever, by default.** Bags are KB-scale by receipt —
     a safety net that deletes itself isn't one. Cleanup is a human verb
     (`attn sweep clear [--older-than 30d]`), and `agent list --all`
@@ -84,8 +86,9 @@ touches worktrees only — the main repo folder is never a candidate, ever.
     headroom — nothing healthy touches this. If any entry exceeds it, the
     sweeper does NOT silently drop it and does NOT delete the worktree:
     that sweep aborts with **one notification per worktree**, listing
-    every offending path with its size (".pnpm-store/ 1.8GB, target/
-    900MB — over the 50MB bag cap"), never one per entry. Resolution is
+    every offending path with its size (hypothetical, e.g.
+    ".pnpm-store/ 1.8GB, target/ 900MB — over the 50MB bag cap"; the
+    spike observed no such case), never one per entry. Resolution is
     one human-or-agent decision: remove the junk, or consent to not
     preserve it (`attn agent sweep <id> --skip <path>`, repeatable), and
     the sweep proceeds.
