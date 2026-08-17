@@ -961,6 +961,8 @@ export function LocationPicker({
     rememberRepoDestination,
     repoRootPath,
     agent,
+    autoMode,
+    autoModeSupported,
     effectiveAgentAvailability,
     selectedEndpointId,
     setSelectedPathFromPhysical,
