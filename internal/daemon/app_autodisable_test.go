@@ -313,3 +313,71 @@ func TestADisabledInstalledAppStillHoldsTheRetentionFloor(t *testing.T) {
 		t.Fatalf("compaction removed %d retained event(s) after auto-disable", removed)
 	}
 }
+
+// How long attn tried, in units that survive the window being moved.
+//
+// Both auto-disable notifications rounded their stall to the minute. The only
+// way anyone witnesses this path without waiting a quarter of an hour is to move
+// the window with ATTN_APP_AUTO_DISABLE_STALL — and every such run read "for
+// 0s", which is the notification saying attn gave up immediately. At the shipped
+// fifteen minutes it was no better: "for 15m" repeats the constant instead of
+// reporting the measurement. Live verification is what read these strings back;
+// the tests beside them checked the phrases around the number, so the number was
+// free to be wrong.
+func TestAnAutoDisableNotificationReportsHowLongAttnTried(t *testing.T) {
+	// Short enough that rounding to the minute renders it as zero, which is
+	// exactly the operator's case.
+	const window = 25 * time.Second
+
+	t.Run("a handler stuck on one event", func(t *testing.T) {
+		d := newAppDaemon(t)
+		clock := newAppTestClock(d)
+		d.appAutoDisableWait = window
+		installApp(t, d, "greeter", subscribing("ticket.*"))
+		startFakeAppRuntime(t, d, failEvery("TypeError: undefined is not a function"))
+		stuck := appEvent("ticket.created", "tk-1", 12)
+
+		if err := d.deliverAppEvent(context.Background(), "greeter", stuck); err == nil {
+			t.Fatal("a throwing handler reported success")
+		}
+		clock.advance(30 * time.Second)
+		if err := d.deliverAppEvent(context.Background(), "greeter", stuck); err == nil {
+			t.Fatal("a throwing handler reported success")
+		}
+		assertDisableNotificationSaysDuration(t, d, "30s")
+	})
+
+	t.Run("a rebuild that keeps throwing", func(t *testing.T) {
+		d := newAppDaemon(t)
+		clock := newAppTestClock(d)
+		d.appAutoDisableWait = window
+		reconcilingApp(t, d, "greeter")
+		runtime := startFakeAppRuntime(t, d, nil)
+		runtime.reconcile = func(*fakeAppRuntime, appReconcileRequest) error {
+			return errors.New("TypeError: snapshot.sessions is not iterable")
+		}
+
+		if err := appReconcilePreDrain(t, d, "greeter"); err == nil {
+			t.Fatal("a throwing reconcile reported success")
+		}
+		clock.advance(30 * time.Second)
+		if err := appReconcilePreDrain(t, d, "greeter"); err == nil {
+			t.Fatal("a throwing reconcile reported success")
+		}
+		assertDisableNotificationSaysDuration(t, d, "30s")
+	})
+}
+
+func assertDisableNotificationSaysDuration(t *testing.T, d *Daemon, want string) {
+	t.Helper()
+	if appEnabled(t, d, "greeter") {
+		t.Fatal("greeter is still enabled past its stall window")
+	}
+	notes := appNotifications(t, d, notificationKindAppAutoDisabled)
+	if len(notes) != 1 {
+		t.Fatalf("auto-disable notifications = %d, want 1", len(notes))
+	}
+	if !strings.Contains(notes[0].Body, "for "+want) {
+		t.Fatalf("the notification does not report how long attn tried (want %q): %q", want, notes[0].Body)
+	}
+}

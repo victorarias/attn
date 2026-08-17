@@ -564,6 +564,7 @@ func (d *Daemon) ensureEventBus() {
 		Store:       backing,
 		Log:         d.logf,
 		Compactable: CompactableFacts,
+		Retention:   bus.RetentionFromEnv(d.logf),
 		PinAlarmAge: d.busPinAlarmAge(),
 	})
 	d.busUnsubscribe = d.eventBus.Subscribe(bus.All, d.projectToClients)

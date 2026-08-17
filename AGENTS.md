@@ -565,7 +565,11 @@ reaching no projection has to name the consumer that does read it.
 - Retention trims past the age window but never past an **enabled** consumer's
   cursor or an **installed app** consumer's cursor. A disabled ordinary consumer
   does not pin; a disabled installed app keeps its unread backlog until enable
-  or uninstall.
+  or uninstall. The window is 30 days, so a trim over any database younger than
+  that removes nothing whatever the floor says: `ATTN_BUS_RETENTION` moves it,
+  and is the only way to watch a trim — or a consumer resuming below
+  `earliest` — happen at all. Set it for the daemon and for `attn bus trim`
+  together, or the hourly pass and the manual one keep different windows.
 - An enabled consumer that stops consuming therefore grows the log until someone
   intervenes, so past `bus.DefaultPinAlarmAge` the pin is reported: a warning
   notification, a `(PINNING …)` tag in `attn bus status`, and a badge on the

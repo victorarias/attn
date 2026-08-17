@@ -20,6 +20,7 @@ import (
 
 const (
 	// DefaultRetention is the trim age window, floored by enabled-consumer cursors.
+	// RetentionEnv moves it, which is the only way to watch a trim do anything.
 	DefaultRetention = 30 * 24 * time.Hour
 	// DefaultTrimInterval is how often retention runs.
 	DefaultTrimInterval = time.Hour
@@ -1178,6 +1179,43 @@ func pinAlarmAgeOrDefault(v time.Duration) time.Duration {
 		return DefaultPinAlarmAge
 	}
 	return v
+}
+
+// RetentionEnv overrides the trim age window. Thirty days is unreachable in any
+// run anyone can watch, so without this the only observable behavior of
+// retention is that it never removes anything: a trim against a fresh database
+// removes zero rows whatever the cursor floor says, and what a consumer resuming
+// below `earliest` does could not be produced outside a unit test.
+//
+// A duration ("1s", "5m"). There is no off switch — retention is a window, not a
+// finding — so a non-positive value is refused like an unparseable one.
+const RetentionEnv = "ATTN_BUS_RETENTION"
+
+// RetentionFromEnv resolves the trim window for one process. It lives beside
+// PinAlarmAgeFromEnv and for the same reason: the daemon that trims hourly and
+// the CLI that runs a pass by hand read one database, and a window they disagree
+// about makes `attn bus trim` remove rows the daemon would have kept.
+func RetentionFromEnv(log LogFunc) time.Duration {
+	if log == nil {
+		log = func(string, ...interface{}) {}
+	}
+	raw := strings.TrimSpace(os.Getenv(RetentionEnv))
+	if raw == "" {
+		return DefaultRetention
+	}
+	window, err := time.ParseDuration(raw)
+	if err != nil {
+		log("bus: %s=%q is not a duration (%v); using the default %s",
+			RetentionEnv, raw, err, DefaultRetention)
+		return DefaultRetention
+	}
+	if window <= 0 {
+		log("bus: %s=%q is not a positive window; using the default %s",
+			RetentionEnv, raw, DefaultRetention)
+		return DefaultRetention
+	}
+	log("bus: retention window set to %s by %s (default %s)", window, RetentionEnv, DefaultRetention)
+	return window
 }
 
 // PinAlarmAgeEnv overrides the retention-pin tripwire, so the condition can be

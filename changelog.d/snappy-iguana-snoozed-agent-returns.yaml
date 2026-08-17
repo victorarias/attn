@@ -1,0 +1,9 @@
+kind: fixed
+area: queue
+change: >
+  A snoozed agent now comes back. A snooze only opens a turn if the agent is in
+  a state that wants you, and a daemon restart used to leave every agent in
+  "launching" — so when the deadline arrived the deferral was cashed and
+  nothing was delivered: the agent silently left the Snoozed section without
+  ever reaching your queue. Deadlines already survived a restart; now the state
+  they are delivered against does too.

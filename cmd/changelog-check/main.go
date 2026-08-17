@@ -39,6 +39,14 @@ func validateFragment(data []byte) error {
 		}
 		return err
 	}
+	// One fragment per file: the decoder reads the first document and stops, so
+	// a second one here would pass this check and then never reach the changelog.
+	var extra fragment
+	if err := dec.Decode(&extra); err == nil {
+		return fmt.Errorf("fragment file holds more than one YAML document; put each fragment in its own file")
+	} else if !errors.Is(err, io.EOF) {
+		return err
+	}
 	if !slices.Contains(validKinds, f.Kind) {
 		return fmt.Errorf("kind must be one of %s (got %q)", strings.Join(validKinds, ", "), f.Kind)
 	}

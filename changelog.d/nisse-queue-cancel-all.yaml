@@ -1,0 +1,9 @@
+kind: added
+area: sessions
+change: >
+  Anything you have sent a conversation agent that it has not read yet can be
+  cancelled. The queue strip has a Cancel all next to it, and it empties once
+  the agent confirms the messages are gone.
+symptom: >
+  A steer or follow-up typed by mistake sat in the queue until the agent read
+  it, and there was no way to take it back.

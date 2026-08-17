@@ -16,6 +16,7 @@ import {
   currentHarnessProfile,
   dataDirForProfile,
   resolveHarnessResources,
+  profileCliEnv as profileEnv,
 } from './harnessProfile.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -29,13 +30,6 @@ function parseArgs(argv) {
   return { options, help: args.includes('--help') || args.includes('-h') };
 }
 
-function profileEnv(profile, extra = {}) {
-  const env = { ...process.env, ATTN_PROFILE: profile, ...extra };
-  for (const key of ['ATTN_SOCKET_PATH', 'ATTN_DB_PATH', 'ATTN_CONFIG_PATH', 'ATTN_PLUGIN_DIR']) {
-    delete env[key];
-  }
-  return env;
-}
 
 function run(binary, args, env, options = {}) {
   return execFileSync(binary, args, {

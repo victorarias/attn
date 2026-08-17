@@ -332,6 +332,15 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'app-reconcile',
+    label: 'App reconcile: version move rebuilds, a real trim gap disables loudly, an interrupted rebuild repairs',
+    command: ['pnpm', 'run', 'real-app:scenario-app-reconcile'],
+    // Restarts the daemon with short retention/stall/dispatch tripwires and
+    // puts the defaults back. Needs bun for `attn app apply`; the Linux
+    // witness leg self-skips when the VM has no attn.
+    timeoutMs: 600_000,
+  },
+  {
     id: 'focus-probe',
     label: 'Focus probe (no focus steal on background session create)',
     command: ['pnpm', 'run', 'real-app:focus-probe'],

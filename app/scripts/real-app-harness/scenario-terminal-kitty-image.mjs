@@ -39,7 +39,7 @@ import {
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
-import { currentHarnessProfile, resolveHarnessResources } from './harnessProfile.mjs';
+import { currentHarnessProfile, resolveHarnessResources, profileCliEnv as profileEnv } from './harnessProfile.mjs';
 import { ensureFreshWorld } from './freshWorld.mjs';
 import {
   captureSessionArtifacts,
@@ -89,15 +89,6 @@ function parseArgs(argv) {
   return { options, help: args.includes('--help') || args.includes('-h') };
 }
 
-function profileEnv(profile, extra = {}) {
-  const env = { ...process.env, ATTN_PROFILE: profile, ...extra };
-  // profile-env's job in shell form: a routing override inherited from the
-  // caller's shell would silently aim these daemon commands somewhere else.
-  for (const key of ['ATTN_SOCKET_PATH', 'ATTN_DB_PATH', 'ATTN_CONFIG_PATH', 'ATTN_PLUGIN_DIR']) {
-    delete env[key];
-  }
-  return env;
-}
 
 function run(binary, args, env) {
   return execFileSync(binary, args, {

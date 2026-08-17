@@ -214,6 +214,15 @@ func TestACommandIsRefusedByNameWhileAReconcileIsOwed(t *testing.T) {
 	if !strings.Contains(refusal, "greeter") || !strings.Contains(refusal, "rebuilding") {
 		t.Fatalf("the refusal does not name the app and what it is doing: %q", refusal)
 	}
+	// The code travels in its own field, so the sentence is free to be a
+	// sentence. It led with `reconcile_owed:` once, which reads to a person as
+	// noise and to a caller as something to parse.
+	if strings.HasPrefix(refusal, protocol.ErrorCodeReconcileOwed) {
+		t.Fatalf("the refusal leads with the wire code instead of saying what happened: %q", refusal)
+	}
+	if !strings.Contains(refusal, "attn app status greeter") {
+		t.Fatalf("the refusal does not name where to look: %q", refusal)
+	}
 
 	// And it is a refusal, not a failure: nothing ran, so nothing is charged to
 	// the app. The rebuild failing in the background is charged — that is the
