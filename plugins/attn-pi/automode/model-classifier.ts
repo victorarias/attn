@@ -15,7 +15,7 @@
 // Duck-typed against pi's shapes (0.83.0, core/model-registry.ts) the same way
 // index.ts is duck-typed against ExtensionAPI, so `bun test` covers the whole
 // path with a fake registry and no network.
-import type { Classifier, ClassifierRequest, ClassifierVerdict } from "./classifier";
+import type { Classifier, ClassifierLayer, ClassifierRequest, ClassifierVerdict } from "./classifier";
 import type { AutoModeConfig } from "./config";
 import {
   classifierSystemPrompt,
@@ -116,7 +116,7 @@ export class ModelClassifier implements Classifier {
     // the call expensive to get wrong. A confident deny does not go: the user
     // overturns one by saying so, and a second opinion buys them nothing but
     // the wait.
-    if (first.verdict === "deny" || (first.verdict === "allow" && !first.highStakes)) return narrow(first);
+    if (first.verdict === "deny" || (first.verdict === "allow" && !first.highStakes)) return narrow(first, "2a");
 
     const second = await this.judge({
       modelSpec: this.options.config.escalationModel,
@@ -130,10 +130,11 @@ export class ModelClassifier implements Classifier {
     if (second.verdict === "uncertain") {
       return {
         verdict: "deny",
+        layer: "2b",
         reason: second.reason === "" ? "neither classifier could judge this call" : second.reason,
       };
     }
-    return narrow(second);
+    return narrow(second, "2b");
   }
 
   private async judge(input: {
@@ -211,12 +212,16 @@ function refusal(layer: string, why: string): ParsedVerdict {
   return { verdict: "deny", reason: `auto mode's ${layer} model could not judge this call: ${why}`, highStakes: false };
 }
 
-function narrow(parsed: ParsedVerdict): ClassifierVerdict {
-  if (parsed.verdict === "allow") return { verdict: "allow", reason: parsed.reason };
+function narrow(parsed: ParsedVerdict, layer: ClassifierLayer): ClassifierVerdict {
+  if (parsed.verdict === "allow") return { verdict: "allow", layer, reason: parsed.reason };
   if (parsed.verdict === "deny") {
-    return { verdict: "deny", reason: parsed.reason === "" ? "the classifier refused this call" : parsed.reason };
+    return {
+      verdict: "deny",
+      layer,
+      reason: parsed.reason === "" ? "the classifier refused this call" : parsed.reason,
+    };
   }
-  return { verdict: "uncertain", reason: parsed.reason };
+  return { verdict: "uncertain", layer, reason: parsed.reason };
 }
 
 function textOf(result: CompletionResult): string {

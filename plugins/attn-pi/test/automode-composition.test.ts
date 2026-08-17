@@ -2,7 +2,11 @@
 // `/auto` command that override it, and the gate that keeps a bare pi
 // untouched.
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { RelayServer } from "../src/relay";
+import { AttnPiSuite } from "../suite/core";
 import { defaultAutoModeConfig } from "../automode/config";
 import { AutoMode } from "../automode/mode";
 import type {
@@ -237,5 +241,56 @@ describe("turning auto mode on and off", () => {
     const blocked = await pi.toolCall?.(push(), uiContext(new FakeUI()));
     expect(blocked?.block).toBe(true);
     expect(blocked?.reason).toContain("no model catalog");
+  });
+});
+
+// The seam suite/index.ts wires: a denied call in the session becomes one
+// suite.report_denial on the driver's relay socket. Everything here is real
+// except pi itself and the driver behind the socket.
+describe("a denial leaving the session", () => {
+  test("reaches the relay with the call, the reason and the layer that decided", async () => {
+    const socketPath = join(mkdtempSync(join(tmpdir(), "attn-pi-denial-")), "s.sock");
+    const reported: unknown[] = [];
+    const relay = new RelayServer({
+      socketPath,
+      delegate: {
+        async suiteHello() {
+          return { ok: true as const };
+        },
+        async suiteReportState() {},
+        async suiteReportStop() {},
+        async suiteReportDenial(params: unknown) {
+          reported.push(params);
+        },
+      },
+    });
+    await relay.listen();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-denial", piVersion: "0.83.0" });
+    const mode = new AutoMode({
+      config: defaultAutoModeConfig,
+      onDenial: (denial) => suite.reportDenial(denial),
+    });
+    const pi = new FakePi();
+    mode.register(pi);
+    pi.start(uiContext(new FakeUI(), { modelRegistry: new CountingRegistry(denies()) }));
+
+    expect((await pi.toolCall?.(push(), uiContext(new FakeUI())))?.block).toBe(true);
+
+    const deadline = Date.now() + 2_000;
+    while (reported.length === 0) {
+      if (Date.now() > deadline) throw new Error("no denial reached the relay");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+    expect(reported[0]).toEqual({
+      token: "tok-denial",
+      tool: "bash",
+      action: "bash: git push --force origin main",
+      reason: "not asked for",
+      rule: "classifier-2a",
+      at: expect.any(String),
+    });
+
+    suite.close();
+    relay.close();
   });
 });

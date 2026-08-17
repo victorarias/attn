@@ -1,8 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"strings"
 	"testing"
+
+	"github.com/victorarias/attn/internal/protocol"
 )
 
 // The pattern an agent types is the whole payload, and it routinely contains
@@ -45,5 +48,38 @@ func TestAutoModeTakeStringFlagReadsBothForms(t *testing.T) {
 	}
 	if _, ok := takeStringFlag([]string{"--json"}, "--limit"); ok {
 		t.Error("takeStringFlag found a flag that is not there")
+	}
+}
+
+// The denials feed is what a person or an agent reads to see what auto mode
+// refused, so every column has to be there: when, which session, who decided,
+// the blocked call, and the reason.
+func TestAutoModeDenialsRenderEveryColumn(t *testing.T) {
+	var out bytes.Buffer
+	writeAutoModeDenials(&out, []protocol.AutoModeDenialInfo{{
+		ID:        2,
+		SessionID: "pi-1",
+		Tool:      "bash",
+		Signature: "bash: curl https://example.com",
+		Reason:    "the user never asked to reach that host",
+		Rule:      "classifier-2a",
+		CreatedAt: "2026-08-17T10:00:00Z",
+	}})
+	rendered := out.String()
+	for _, want := range []string{
+		"2026-08-17T10:00:00Z", "pi-1", "classifier-2a",
+		"bash: curl https://example.com", "the user never asked to reach that host",
+	} {
+		if !strings.Contains(rendered, want) {
+			t.Errorf("denials output is missing %q:\n%s", want, rendered)
+		}
+	}
+}
+
+func TestAutoModeDenialsSayWhenThereAreNone(t *testing.T) {
+	var out bytes.Buffer
+	writeAutoModeDenials(&out, nil)
+	if !strings.Contains(out.String(), "no denials recorded") {
+		t.Errorf("empty feed rendered as %q", out.String())
 	}
 }

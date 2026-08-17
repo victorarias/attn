@@ -35,8 +35,27 @@ describe("auto mode extension", () => {
     const pi = wire(new StubClassifier({ verdict: "deny", reason: "nope" }), { onDenial: (d) => denials.push(d) });
     await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
     expect(denials).toEqual([
-      { toolCallId: "call-1", action: "bash: git push --force", reason: "nope", rule: "classifier" },
+      {
+        toolCallId: "call-1",
+        tool: "bash",
+        action: "bash: git push --force",
+        reason: "nope",
+        rule: "classifier",
+        at: expect.any(String),
+      },
     ]);
+    expect(Number.isNaN(Date.parse(denials[0]!.at))).toBe(false);
+  });
+
+  test("a reporter that throws still leaves the call blocked", async () => {
+    const pi = wire(new StubClassifier({ verdict: "deny", reason: "nope" }), {
+      onDenial: () => {
+        throw new Error("relay is gone");
+      },
+    });
+    const result = await pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
+    expect(result?.block).toBe(true);
+    expect(result?.reason).toContain("nope");
   });
 
   test("a thrown classifier blocks the tool rather than letting it run", async () => {

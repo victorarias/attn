@@ -112,6 +112,20 @@ type pluginDeliverMessageResult struct {
 	OK bool `json:"ok"`
 }
 
+// One call a driver's agent refused under auto mode. No seq: a denial is an
+// append, not a declaration about the session's current state, so nothing later
+// can overtake it.
+type pluginReportAutoModeDenialParams struct {
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	Tool      string `json:"tool"`
+	Action    string `json:"action"`
+	Reason    string `json:"reason"`
+	Rule      string `json:"rule"`
+	// When the session refused it, RFC 3339. Empty falls back to arrival.
+	At string `json:"at"`
+}
+
 type pluginClassifyStopParams struct {
 	SessionID     string `json:"session_id"`
 	RunID         string `json:"run_id"`
@@ -288,6 +302,21 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 				return nil, true, err
 			}
 			d.applyPluginReportedMetadata(params)
+		}
+		return struct{}{}, true, nil
+	case "session.report_automode_denial":
+		var params pluginReportAutoModeDenialParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			return nil, true, fmt.Errorf("decode session.report_automode_denial params: %w", err)
+		}
+		if strings.TrimSpace(params.Action) == "" {
+			return nil, true, errors.New("session.report_automode_denial action is required")
+		}
+		if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
+			return nil, true, err
+		}
+		if err := d.recordAutoModeDenial(params); err != nil {
+			return nil, true, err
 		}
 		return struct{}{}, true, nil
 	default:

@@ -213,8 +213,14 @@ func TestAutoModeDenialsReadNewestFirst(t *testing.T) {
 	s := New()
 	now := time.Now().UTC()
 	for _, signature := range []string{"bash curl evil.example", "write /etc/hosts", "bash git push --force"} {
-		if _, err := s.RecordAutoModeDenial("session-1", "bash", signature, "outside the envelope", now); err != nil {
+		denial := AutoModeDenial{
+			SessionID: "session-1", Tool: "bash", Signature: signature,
+			Reason: "outside the envelope", Rule: "classifier-2a",
+		}
+		if _, dropped, err := s.RecordAutoModeDenial(denial, now); err != nil {
 			t.Fatalf("record denial: %v", err)
+		} else if dropped != 0 {
+			t.Fatalf("dropped %d rows well under the %d-row cap", dropped, AutoModeDenialRows)
 		}
 	}
 	denials, err := s.ListAutoModeDenials(2)
@@ -226,6 +232,46 @@ func TestAutoModeDenialsReadNewestFirst(t *testing.T) {
 	}
 	if denials[0].Signature != "bash git push --force" {
 		t.Errorf("newest denial = %q", denials[0].Signature)
+	}
+	if denials[0].Rule != "classifier-2a" {
+		t.Errorf("rule = %q, want the layer that decided", denials[0].Rule)
+	}
+}
+
+// The row cap is a tripwire, so this is the only place anyone sees it work: a
+// session looping past it keeps the newest AutoModeDenialRows and says how many
+// it dropped.
+func TestAutoModeDenialsTrimToTheRowCap(t *testing.T) {
+	s := New()
+	now := time.Now().UTC()
+	total := AutoModeDenialRows + 3
+	droppedTotal := int64(0)
+	for i := range total {
+		denial := AutoModeDenial{
+			SessionID: "session-1", Tool: "bash",
+			Signature: fmt.Sprintf("bash echo %d", i), Reason: "outside the envelope",
+		}
+		_, dropped, err := s.RecordAutoModeDenial(denial, now)
+		if err != nil {
+			t.Fatalf("record denial %d: %v", i, err)
+		}
+		droppedTotal += dropped
+	}
+	if droppedTotal != 3 {
+		t.Errorf("dropped %d rows, want the 3 that overflowed the cap", droppedTotal)
+	}
+	denials, err := s.ListAutoModeDenials(total)
+	if err != nil {
+		t.Fatalf("list denials: %v", err)
+	}
+	if len(denials) != AutoModeDenialRows {
+		t.Fatalf("kept %d denials, want the %d-row cap", len(denials), AutoModeDenialRows)
+	}
+	if want := fmt.Sprintf("bash echo %d", total-1); denials[0].Signature != want {
+		t.Errorf("newest kept denial = %q, want %q", denials[0].Signature, want)
+	}
+	if want := fmt.Sprintf("bash echo %d", total-AutoModeDenialRows); denials[len(denials)-1].Signature != want {
+		t.Errorf("oldest kept denial = %q, want %q", denials[len(denials)-1].Signature, want)
 	}
 }
 

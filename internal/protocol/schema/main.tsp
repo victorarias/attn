@@ -4946,14 +4946,17 @@ model AutoModeProposalInfo {
   "resolved_at": string;
 }
 
-// One call auto mode refused. Nothing reports these until slice 5; the shape
-// ships now so the reader and the writer are never introduced separately.
+// One call auto mode refused, as the session reported it.
 model AutoModeDenialInfo {
   "id": safeint;
   "session_id": string;
   "tool": string;
+  // The blocked call in one line — the same text the model was given.
   "signature": string;
   "reason": string;
+  // Who decided: a static envelope rule, the classifier layer that answered
+  // ("classifier-2a" | "classifier-2b"), or "circuit-breaker".
+  "rule": string;
   "created_at": string;
 }
 

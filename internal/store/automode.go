@@ -35,17 +35,25 @@ type AutoModeProposal struct {
 	ResolvedAt time.Time
 }
 
-// AutoModeDenial is one call auto mode refused. Nothing writes these yet —
-// reporting arrives with slice 5 — but the shape ships now so the CLI's
-// `denials` verb reads the table it will always read.
+// AutoModeDenial is one call auto mode refused. Signature is the blocked call
+// in one line; Rule names who decided — a static envelope rule, the classifier
+// layer that answered (`classifier-2a`/`-2b`), or the circuit breaker.
 type AutoModeDenial struct {
 	ID        int64
 	SessionID string
 	Tool      string
 	Signature string
 	Reason    string
+	Rule      string
 	CreatedAt time.Time
 }
+
+// AutoModeDenialRows is how many denials the log keeps. A tripwire, not a
+// budget: auto mode's own circuit breaker stops a session at 20 denials since
+// the user last spoke (`totalDenialLimit`, plugins/attn-pi/automode/session.ts),
+// so this is 25 breaker-limit episodes — past any real day of work, and short
+// of a loop nobody is watching filling the database.
+const AutoModeDenialRows = 500
 
 // GetAutoModeConfig reads the promoted config, resolved: a machine with no row,
 // or a row that never named a model, gets the shipped defaults rather than empty
@@ -316,30 +324,49 @@ func (s *Store) DiscardAutoModeProposal(id int64, now time.Time) (AutoModePropos
 	return proposal, nil
 }
 
-// RecordAutoModeDenial stores one refused call. Slice 5 wires the reports; this
-// is the writer they land in.
-func (s *Store) RecordAutoModeDenial(sessionID, tool, signature, reason string, now time.Time) (AutoModeDenial, error) {
+// RecordAutoModeDenial stores one refused call and trims the log back to
+// AutoModeDenialRows, returning how many rows that dropped so the caller can
+// say so. The insert and the trim share one transaction: a denial that reached
+// the feed and then vanished on the next write is worse than one never stored.
+func (s *Store) RecordAutoModeDenial(denial AutoModeDenial, now time.Time) (AutoModeDenial, int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.db == nil {
-		return AutoModeDenial{}, fmt.Errorf("store: no database")
+		return AutoModeDenial{}, 0, fmt.Errorf("store: no database")
 	}
-	stamp := now.UTC().Format(sortableTimeFormat)
-	res, err := s.db.Exec(`
-		INSERT INTO automode_denials (session_id, tool, signature, reason, created_at)
-		VALUES (?, ?, ?, ?, ?)
-	`, sessionID, tool, signature, reason, stamp)
+	tx, err := s.db.Begin()
 	if err != nil {
-		return AutoModeDenial{}, err
+		return AutoModeDenial{}, 0, err
 	}
-	id, err := res.LastInsertId()
+	defer tx.Rollback()
+
+	denial.CreatedAt = now.UTC()
+	res, err := tx.Exec(`
+		INSERT INTO automode_denials (session_id, tool, signature, reason, rule, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, denial.SessionID, denial.Tool, denial.Signature, denial.Reason, denial.Rule,
+		denial.CreatedAt.Format(sortableTimeFormat))
 	if err != nil {
-		return AutoModeDenial{}, err
+		return AutoModeDenial{}, 0, err
 	}
-	return AutoModeDenial{
-		ID: id, SessionID: sessionID, Tool: tool, Signature: signature,
-		Reason: reason, CreatedAt: now.UTC(),
-	}, nil
+	if denial.ID, err = res.LastInsertId(); err != nil {
+		return AutoModeDenial{}, 0, err
+	}
+	trimmed, err := tx.Exec(`
+		DELETE FROM automode_denials
+		WHERE id <= (SELECT id FROM automode_denials ORDER BY id DESC LIMIT 1 OFFSET ?)`,
+		AutoModeDenialRows)
+	if err != nil {
+		return AutoModeDenial{}, 0, err
+	}
+	dropped, err := trimmed.RowsAffected()
+	if err != nil {
+		return AutoModeDenial{}, 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return AutoModeDenial{}, 0, err
+	}
+	return denial, dropped, nil
 }
 
 // ListAutoModeDenials returns the most recent denials, newest first.
@@ -353,7 +380,7 @@ func (s *Store) ListAutoModeDenials(limit int) ([]AutoModeDenial, error) {
 		limit = 20
 	}
 	rows, err := s.db.Query(`
-		SELECT id, session_id, tool, signature, reason, created_at
+		SELECT id, session_id, tool, signature, reason, rule, created_at
 		FROM automode_denials ORDER BY id DESC LIMIT ?`, limit)
 	if err != nil {
 		return nil, err
@@ -363,7 +390,7 @@ func (s *Store) ListAutoModeDenials(limit int) ([]AutoModeDenial, error) {
 	for rows.Next() {
 		var d AutoModeDenial
 		var created string
-		if err := rows.Scan(&d.ID, &d.SessionID, &d.Tool, &d.Signature, &d.Reason, &created); err != nil {
+		if err := rows.Scan(&d.ID, &d.SessionID, &d.Tool, &d.Signature, &d.Reason, &d.Rule, &created); err != nil {
 			return nil, err
 		}
 		d.CreatedAt = parseStoredTime(created)

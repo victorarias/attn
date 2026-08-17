@@ -18,10 +18,17 @@ export type ClassifierRequest = {
   signal?: AbortSignal;
 };
 
+/**
+ * Which pass answered: 2a is the configured classifier, 2b the escalation
+ * model. Carried so a denial can say who decided it; a classifier that does not
+ * name a layer (the stub, a future one-pass judge) leaves it unset.
+ */
+export type ClassifierLayer = "2a" | "2b";
+
 export type ClassifierVerdict =
-  | { verdict: "allow"; reason?: string }
-  | { verdict: "deny"; reason: string }
-  | { verdict: "uncertain"; reason?: string };
+  | { verdict: "allow"; reason?: string; layer?: ClassifierLayer }
+  | { verdict: "deny"; reason: string; layer?: ClassifierLayer }
+  | { verdict: "uncertain"; reason?: string; layer?: ClassifierLayer };
 
 export interface Classifier {
   classify(request: ClassifierRequest): Promise<ClassifierVerdict>;
