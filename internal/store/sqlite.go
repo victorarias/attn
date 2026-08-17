@@ -1134,6 +1134,19 @@ CREATE TABLE IF NOT EXISTS app_reconcile_progress (
     completed_request_id INTEGER NOT NULL,
     updated_at           TEXT NOT NULL
 );`},
+	// Reconcile attempts are long-lived enough to cross a daemon restart, unlike
+	// the terminal-only handler rows the invocation log held before. The claim
+	// boundary and reason make a retry reconstruct the exact attempt it owes;
+	// finished_at distinguishes a live attempt from one startup must interrupt.
+	//
+	// Existing event columns stay NOT NULL. Older readers and every existing
+	// append call already use their empty-string/zero representation for commands
+	// and view crashes, and rebuilding this history table only to turn those values
+	// into NULL would add migration risk without adding information.
+	// Applied by applyMigration109, whose ALTERs are column-guarded. Besides
+	// tolerating a schema-version rewind in recovery tests, the guard prevents a
+	// rerun from reclassifying reconcile rows as subscriptions.
+	{109, "record app reconcile invocation lifecycles", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1533,6 +1546,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
+		} else if m.version == 109 {
+			if err := applyMigration109(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
 		} else {
 			if _, err := tx.Exec(m.sql); err != nil {
 				tx.Rollback()
@@ -1570,6 +1588,45 @@ func applyMigration107(tx *sql.Tx) error {
 		return nil
 	}
 	_, err = tx.Exec(`ALTER TABLE ticket_delivery_attention ADD COLUMN delivered_through_seq INTEGER NOT NULL DEFAULT 0`)
+	return err
+}
+
+func applyMigration109(tx *sql.Tx) error {
+	hadKind, err := columnExists(tx, "app_invocations", "kind")
+	if err != nil {
+		return err
+	}
+	columns := []struct {
+		name string
+		sql  string
+	}{
+		{"kind", `ALTER TABLE app_invocations ADD COLUMN kind TEXT NOT NULL DEFAULT 'subscription'`},
+		{"reconcile_reason", `ALTER TABLE app_invocations ADD COLUMN reconcile_reason TEXT NOT NULL DEFAULT ''`},
+		{"through_request_id", `ALTER TABLE app_invocations ADD COLUMN through_request_id INTEGER`},
+		{"through_seq", `ALTER TABLE app_invocations ADD COLUMN through_seq INTEGER`},
+		{"finished_at", `ALTER TABLE app_invocations ADD COLUMN finished_at TEXT`},
+	}
+	for _, column := range columns {
+		exists, err := columnExists(tx, "app_invocations", column.name)
+		if err != nil {
+			return err
+		}
+		if exists {
+			continue
+		}
+		if _, err := tx.Exec(column.sql); err != nil {
+			return err
+		}
+	}
+	if hadKind {
+		return nil
+	}
+	_, err = tx.Exec(`UPDATE app_invocations
+		SET kind = CASE event_name
+			WHEN 'app.command' THEN 'command'
+			WHEN 'app.view.crashed' THEN 'view'
+			ELSE 'subscription'
+		END`)
 	return err
 }
 

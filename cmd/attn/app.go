@@ -118,8 +118,9 @@ commands:
   status <name> [--json]
         one app in full — its current version, its bus consumer, the ids of its
         recent versions (what rollback takes), where a bare rollback can still
-        go, and its most recent runs. Reports only what exists: an app with no
-        consumer says so rather than showing a default.
+        go, reconcile support and any rebuild it owes, and its most recent runs.
+        Reports only what exists: an app with no consumer says so rather than
+        showing a default.
 
   enable <name>
         resume delivery to the app, from wherever its consumer's cursor stands.
@@ -318,11 +319,17 @@ func runAppStatus(args []string) {
 		}
 	}
 	fmt.Printf("  runtime:    %s\n", appRuntimeCell(result.Runtime))
+	printAppReconcileStatus(result.Reconcile)
 	if result.Stall != nil {
 		// The stall clock is the only thing here that ends with the app being
 		// switched off, so it says when, not just that.
-		fmt.Printf("  stalled:    on event %d (%s) since %s, %d attempt(s)\n",
-			result.Stall.EventSeq, result.Stall.EventName, result.Stall.Since, result.Stall.Attempts)
+		if result.Stall.Kind == "reconcile" {
+			fmt.Printf("  stalled:    reconcile request %s since %s, %d attempt(s)\n",
+				optionalIntCell(result.Stall.ThroughRequestID), result.Stall.Since, result.Stall.Attempts)
+		} else {
+			fmt.Printf("  stalled:    on event %s (%s) since %s, %d attempt(s)\n",
+				optionalIntCell(result.Stall.EventSeq), protocol.Deref(result.Stall.EventName), result.Stall.Since, result.Stall.Attempts)
+		}
 		fmt.Print(indentBlock("              ", result.Stall.LastError))
 		fmt.Printf("              disables itself at %s unless it succeeds first\n", result.Stall.DisablesAt)
 	}
@@ -343,17 +350,86 @@ func runAppStatus(args []string) {
 	}
 	fmt.Println("  recent:")
 	w := tabwriter.NewWriter(os.Stdout, 4, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "\tSTARTED\tVERSION\tSEQ\tEVENT\tHANDLER\tSTATUS\tMS\tERROR")
+	fmt.Fprintln(w, "\tSTARTED\tVERSION\tKIND\tWORK\tHANDLER\tSTATUS\tMS\tERROR")
 	for _, inv := range result.Recent {
 		// One line per invocation, so the error is its first line only — a
 		// JavaScript stack pasted into a column destroys the table it is in. The
 		// stall block above carries the whole thing for the failure that matters,
 		// and `attn app logs <name>` has what the handler printed.
-		fmt.Fprintf(w, "\t%s\t%d\t%d\t%s\t%s\t%s\t%d\t%s\n",
-			inv.StartedAt, inv.VersionID, inv.EventSeq, inv.EventName, inv.Handler,
-			inv.Status, inv.DurationMs, firstErrorLine(inv.Error))
+		fmt.Fprintf(w, "\t%s\t%d\t%s\t%s\t%s\t%s\t%s\t%s\n",
+			inv.StartedAt, inv.VersionID, inv.Kind, appInvocationWork(inv), inv.Handler,
+			inv.Status, optionalIntCell(inv.DurationMs), firstErrorLine(protocol.Deref(inv.Error)))
 	}
 	w.Flush()
+}
+
+func printAppReconcileStatus(status protocol.AppReconcileStatus) {
+	fmt.Printf("  reconcile:  %s\n", appReconcileStatusCell(status))
+	if status.State == "running" && status.CurrentAttempt != nil {
+		fmt.Printf("              attempt %d started %s (request %s)\n",
+			status.CurrentAttempt.ID, status.CurrentAttempt.StartedAt,
+			optionalIntCell(status.CurrentAttempt.ThroughRequestID))
+	}
+	if status.LastError != nil && *status.LastError != "" {
+		fmt.Println("              last error:")
+		fmt.Print(indentBlock("                ", *status.LastError))
+	}
+}
+
+func appReconcileStatusCell(status protocol.AppReconcileStatus) string {
+	switch status.State {
+	case "not_needed":
+		return "not needed — the serving version declares no subscriptions"
+	case "unsupported":
+		return "unsupported — version moves and a discovered gap are refused until the app declares and implements reconcile"
+	case "idle":
+		return "supported, no rebuild owed"
+	case "owed", "running":
+		line := status.State
+		if status.Reason != nil {
+			line += " " + appReconcileReasonCell(*status.Reason)
+		}
+		return line
+	default:
+		return status.State
+	}
+}
+
+func appReconcileReasonCell(reason protocol.AppReconcileReasonInfo) string {
+	causes := strings.Join(reason.Causes, ", ")
+	if causes == "" {
+		causes = "unknown cause"
+	}
+	return fmt.Sprintf("through seq %d (%s)", reason.ThroughSeq, causes)
+}
+
+func appInvocationWork(inv protocol.AppInvocationInfo) string {
+	if inv.Reconcile != nil {
+		return appReconcileReasonCell(*inv.Reconcile)
+	}
+	event := protocol.Deref(inv.EventName)
+	subject := protocol.Deref(inv.EventSubject)
+	seq := ""
+	if inv.EventSeq != nil {
+		seq = fmt.Sprintf("seq %d", *inv.EventSeq)
+	}
+	parts := make([]string, 0, 3)
+	for _, part := range []string{seq, event, subject} {
+		if part != "" {
+			parts = append(parts, part)
+		}
+	}
+	if len(parts) == 0 {
+		return "-"
+	}
+	return strings.Join(parts, " ")
+}
+
+func optionalIntCell(value *int) string {
+	if value == nil {
+		return "-"
+	}
+	return fmt.Sprintf("%d", *value)
 }
 
 // firstErrorLine is one row's worth of an error, with a marker when there is

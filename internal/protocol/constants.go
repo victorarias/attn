@@ -10,12 +10,12 @@ import (
 // ProtocolVersion is the version of the daemon-client protocol.
 // Increment this when making breaking changes to the protocol.
 // Client and daemon must have matching versions.
-const ProtocolVersion = "254"
+const ProtocolVersion = "255"
 
 // Error codes. A failed response may carry one beside its message text, naming
-// what a caller can do about it rather than leaving it to match English. Only
-// the document store issues them today; the field is on Response because the
-// question — "is this worth retrying, or is it broken?" — is not specific to it.
+// what a caller can do about it rather than leaving it to match English. The
+// question — "is this worth retrying, or is it broken?" — is not specific to a
+// domain, so document operations and app commands share this vocabulary.
 //
 // A client that does not recognise a code must treat the failure as broken
 // rather than guessing, which is what keeps adding one from being a breaking
@@ -49,6 +49,10 @@ const (
 	// the ask, because a silently dropped subscription is a tile that renders
 	// nothing forever with nothing to read.
 	ErrorCodeSubscriptionLimit = "subscription_limit"
+	// ErrorCodeReconcileOwed refuses an app command while the app's collection
+	// rebuild is owed or running. The result carries the current structured
+	// reconcile reason so a caller never has to recover the fence from prose.
+	ErrorCodeReconcileOwed = "reconcile_owed"
 )
 
 // DocSubscriptionsPerClient bounds how many live queries one WebSocket client

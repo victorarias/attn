@@ -13,6 +13,16 @@ import (
 	"github.com/victorarias/attn/internal/store"
 )
 
+type appReconcileOwedError struct {
+	reason appReconcileReason
+}
+
+func (e *appReconcileOwedError) Error() string {
+	return fmt.Sprintf(
+		"reconcile_owed: app collection rebuild is owed through bus seq %d (%s); commands remain refused until reconcile succeeds",
+		e.reason.ThroughSeq, strings.Join(e.reason.Causes, ", "))
+}
+
 // A view acting: `app_command` in, `app_command_result` back.
 //
 // A view that can only read is a way in with no way out. What makes this a
@@ -116,6 +126,9 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 	if d.store == nil {
 		return nil, fmt.Errorf("this daemon has no store, so it runs no apps")
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 
 	plan, err := d.planAppCommand(name, command)
 	if err != nil {
@@ -131,6 +144,7 @@ func (d *Daemon) runAppCommand(msg *protocol.AppCommandMessage) (json.RawMessage
 	invocation := store.AppInvocation{
 		AppName:      name,
 		VersionID:    plan.versionID,
+		Kind:         store.AppInvocationKindCommand,
 		EventName:    appCommandEvent,
 		EventSubject: command,
 		Handler:      plan.label,
@@ -203,6 +217,13 @@ func (d *Daemon) planAppCommand(name, command string) (*appDispatchPlan, error) 
 	}
 	if version.ID == 0 {
 		return nil, fmt.Errorf("%s has no version serving, so there is no code to run; `attn app apply <path>` builds one", name)
+	}
+	claim, err := d.appReconcileClaim(name)
+	if err != nil {
+		return nil, fmt.Errorf("reading reconciliation owed by app %q: %w", name, err)
+	}
+	if len(claim.Requests) != 0 {
+		return nil, &appReconcileOwedError{reason: foldAppReconcileReason(version.ID, claim)}
 	}
 	declared := manifest.CommandNames()
 	if !containsString(declared, command) {

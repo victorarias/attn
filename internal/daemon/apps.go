@@ -220,6 +220,9 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 		d.sendError(conn, "no database")
 		return
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 	if _, ok, err := d.store.GetApp(name); err != nil {
 		d.sendError(conn, fmt.Sprintf("reading app %q: %v", name, err))
 		return

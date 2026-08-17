@@ -150,6 +150,11 @@ export const scenarioCatalog = [
     timeoutMs: 600_000,
   },
   {
+    id: 'app-reconcile-failure',
+    label: 'App reconcile failure: generation recycle, sibling recovery, and auto-disable notification',
+    command: ['pnpm', 'run', 'real-app:scenario-app-reconcile-failure'],
+  },
+  {
     id: 'terminal-block-copy',
     label: 'OSC 133 block copy via real fish + native Cmd+C',
     command: ['pnpm', 'run', 'real-app:scenario-terminal-block-copy'],

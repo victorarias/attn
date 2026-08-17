@@ -335,13 +335,12 @@ func devWatchInvocations(app string, stop <-chan struct{}) {
 }
 
 func devInvocationLine(inv protocol.AppInvocationInfo) string {
-	line := fmt.Sprintf("%s  %s(%s) in %dms", inv.Status, inv.Handler, inv.EventName, inv.DurationMs)
-	if inv.EventSubject != "" {
-		line = fmt.Sprintf("%s  %s(%s %s) in %dms",
-			inv.Status, inv.Handler, inv.EventName, inv.EventSubject, inv.DurationMs)
+	line := fmt.Sprintf("%s  %s [%s]", inv.Status, inv.Handler, appInvocationWork(inv))
+	if inv.DurationMs != nil {
+		line += fmt.Sprintf(" in %dms", *inv.DurationMs)
 	}
-	if inv.Error != "" {
-		line += "\n            " + inv.Error
+	if inv.Error != nil && *inv.Error != "" {
+		line += "\n            " + *inv.Error
 	}
 	return line
 }
