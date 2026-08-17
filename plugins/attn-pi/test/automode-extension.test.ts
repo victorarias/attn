@@ -8,7 +8,7 @@ import { assistantMessage, ctx, FakePi, toolCall, userInput } from "./automode-f
 
 function wire(
   classifier: Classifier,
-  extra: { enabled?: boolean; onDenial?: (denial: AutoModeDenial) => void; usageLedger?: UsageLedger } = {},
+  extra: { isEnabled?: () => boolean; onDenial?: (denial: AutoModeDenial) => void; usageLedger?: UsageLedger } = {},
 ): FakePi {
   const pi = new FakePi();
   createAutoMode({ config: defaultAutoModeConfig, classifier, ...extra })(pi);
@@ -74,10 +74,28 @@ describe("auto mode extension", () => {
     expect((await call())?.block).toBe(true);
   });
 
-  test("auto mode off registers nothing", () => {
-    const pi = wire(new StubClassifier(), { enabled: false });
-    expect(pi.toolCall).toBeUndefined();
-    expect(pi.input).toBeUndefined();
+  test("auto mode off judges nothing, and still listens to the conversation", async () => {
+    const classifier = new StubClassifier({ verdict: "deny", reason: "no" });
+    let on = false;
+    const pi = wire(classifier, { isEnabled: () => on });
+    const push = () => pi.toolCall?.(toolCall("bash", { command: "git push --force" }), ctx);
+
+    expect(await push()).toBeUndefined();
+    expect(classifier.requests).toHaveLength(0);
+
+    pi.say("clean up the branch");
+    on = true;
+    expect((await push())?.block).toBe(true);
+    expect(classifier.requests[0]?.transcript).toEqual([{ role: "user", text: "clean up the branch" }]);
+  });
+
+  test("auto mode off leaves the system prompt alone", () => {
+    const pi = wire(new StubClassifier(), { isEnabled: () => false });
+    const result = pi.beforeAgentStart?.(
+      { type: "before_agent_start", prompt: "ship it", systemPrompt: "pi's own prompt" },
+      ctx,
+    );
+    expect(result?.systemPrompt).toBeUndefined();
   });
 
   test("each factory run gets its own session state", async () => {

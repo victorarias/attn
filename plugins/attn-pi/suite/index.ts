@@ -10,6 +10,8 @@
 // against the current pi/ctx on each factory call. All testable behavior
 // lives in ./core, which has no pi import so it can run under `bun test`.
 import { VERSION } from "@earendil-works/pi-coding-agent";
+import { AutoMode, type AutoModePiLike } from "../automode/mode";
+import { attnAutoModeSource } from "../automode/source";
 import { AttnPiSuite, type ExtensionAPILike } from "./core";
 
 const suite = new AttnPiSuite({
@@ -18,6 +20,16 @@ const suite = new AttnPiSuite({
   piVersion: VERSION,
 });
 
-export default function attnPiSuite(pi: ExtensionAPILike): void {
+// Auto mode exists only when attn sent a config. A bare pi that loads this
+// suite registers no command, no flag and no handlers for it, and behaves
+// exactly as it does without the file. Denials are not reported anywhere yet;
+// AutoMode's onDenial is the seam attn's own surfaces will hang off.
+const autoModeSource = attnAutoModeSource(process.env);
+const autoMode = autoModeSource
+  ? new AutoMode({ config: autoModeSource.config, notice: autoModeSource.problem })
+  : undefined;
+
+export default function attnPiSuite(pi: ExtensionAPILike & AutoModePiLike): void {
   suite.register(pi);
+  autoMode?.register(pi);
 }

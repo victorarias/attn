@@ -361,11 +361,38 @@ rather than through dialogs. Design and slices:
   usage. A blocked call never reaches pi's result hook, so there is nothing to
   attach it to at the time — the session total is right, per-call attribution
   is not, and a session whose last act is a denial never reports that one.
-- Nothing loads it yet — it is not composed into `suite/` and
-  `build-bundled-plugins.sh` does not stage it.
 - attn's config reaches a pi session through the launch: the daemon hands the
   promoted config to a driver that advertises the `auto_mode` capability, and
   the driver forwards it as `ATTN_PI_AUTOMODE_CONFIG` (JSON, the exact shape
   `automode/config.ts` parses). Environment rather than argv because prose
   entries are multi-line and argv is world-readable. A config change reaches
   the next session; a live one is not refreshed.
+- Two entrypoints, one module. `suite/index.ts` composes auto mode in when
+  `ATTN_PI_AUTOMODE_CONFIG` is set — attn's launch injection — and builds
+  nothing at all when it is not, so a bare pi loading `suite.js` registers no
+  command, no flag and no handler for it. `automode/standalone.ts` is the same
+  extension for `pi -e automode.js`, reading the same JSON from
+  `attn-automode.json` under pi's config dir (`PI_CODING_AGENT_DIR`, or
+  `~/.pi/agent`). Both are staged by `build-bundled-plugins.sh`.
+- The `AutoMode` in `mode.ts` lives at module scope and survives session
+  transitions; the session state the factory owns does not. That is the line:
+  the user's `/auto` choice is theirs until they change it, while the verdict
+  cache and the breaker belong to one session.
+- Precedence is `/auto` > `--auto`/`--no-auto` > `enabled_default`. The flags
+  carry no default so an unset one reads as undefined, and the plan's
+  "flag > /auto" holds at launch, when there is no `/auto` yet — after one, the
+  command the user typed wins, because a command that loses to a flag is not a
+  command.
+- The classifier is built from `ctx.modelRegistry`, captured at
+  `session_start`. A session with no catalog refuses classified calls with a
+  named reason rather than running them.
+- Every UI surface is set on a transition and never on a timer: the status when
+  the mode changes, the working message for the length of one classification,
+  the denial widget when a call is denied and cleared when the user speaks. A
+  quiet session draws nothing.
+- The breaker asks once per episode through `ctx.ui.confirm`; `hasUI === false`
+  (`-p`, `--mode json`) is fail-closed, per `permission-gate.ts`'s precedent.
+  Answering yes clears the counters and judges the call that tripped it — it
+  approves nothing on its own.
+- Denials are reported through `AutoMode`'s `onDenial` seam. Nothing sets it
+  yet: attn-side reporting is slice 5.

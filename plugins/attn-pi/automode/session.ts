@@ -67,6 +67,17 @@ export class AutoModeSession {
     this.totalDenials = 0;
   }
 
+  /**
+   * The user answered the breaker's question. It clears the counters and
+   * nothing else: resuming means calls get judged again, not that the call
+   * that tripped the breaker is approved. The deny cache stays, so a refusal
+   * the user has not spoken to still stands.
+   */
+  resumeAfterBreaker(): void {
+    this.consecutiveDenials = 0;
+    this.totalDenials = 0;
+  }
+
   /** The agent said something. Only what it SAID: never a tool result. */
   noteAssistantText(text: string): void {
     this.transcript.record("assistant", text);
