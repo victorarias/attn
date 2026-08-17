@@ -4799,6 +4799,12 @@ model AppCommandResultMessage {
   "request_id": string;
   "success": boolean;
   "error"?: string;
+  // Stable refusal code for callers that need to distinguish a command held
+  // behind the reconcile fence from an app or handler failure.
+  "error_code"?: string;
+  // Present with error_code=reconcile_owed. The message remains the surface a
+  // person reads; this is the structured fence a caller can inspect.
+  "reconcile"?: AppReconcileReasonInfo;
   // The handler's return value as JSON text, when it returned one.
   "payload"?: string;
 }
@@ -4835,6 +4841,37 @@ model AppStatusMessage {
   "name": string;
 }
 
+// The lost range carried by a gap reconcile request.
+model AppReconcileGapInfo {
+  "cursor": safeint;
+  "earliest": safeint;
+  "missed": safeint;
+}
+
+// The durable requests folded into one reconcile attempt. Causes are ordered
+// gap, version_changed; previous_versions stays in request order with repeats
+// removed.
+model AppReconcileReasonInfo {
+  "causes": string[];
+  "version": safeint;
+  "through_seq": safeint;
+  "gap"?: AppReconcileGapInfo;
+  "previous_versions": safeint[];
+}
+
+// Reconcile state as one `attn app status` call observes it.
+model AppReconcileStatus {
+  // "not_needed" | "unsupported" | "idle" | "owed" | "running".
+  "state": string;
+  "reason"?: AppReconcileReasonInfo;
+  // The durable running row. Startup repairs an attempt interrupted before it
+  // settled, so a current attempt is never inferred from process memory.
+  "current_attempt"?: AppInvocationInfo;
+  // The latest settled reconcile failure, kept visible while the request stays
+  // owed and after an interrupted daemon has restarted.
+  "last_error"?: string;
+}
+
 // What is known about one app, and only what is known: the registry row, the
 // consumer if there is one, the invocations recorded so far, and the shared
 // runtime's state. An app's status must not claim a health it cannot observe, so
@@ -4843,6 +4880,8 @@ model AppStatusResult {
   "app": AppSummary;
   "versions": safeint;
   "invocations": safeint;
+  // Required because unsupported is a real operator state, not missing data.
+  "reconcile": AppReconcileStatus;
   // The most recent versions, newest first, capped — "versions" above says how
   // many exist. Rollback names ids in its refusals and there is nowhere else to
   // read them, so a status that carried only a count sent the reader looking for
@@ -4901,15 +4940,20 @@ model AppRuntimeInfo {
   "last_exit"?: string;
 }
 
-// An app that has failed on the same event long enough to be on the clock.
+// An app that has failed on the same delivery or reconcile claim long enough to
+// be on the clock.
 //
 // `disables_at` is the whole point of reporting this: an app stalled on one
 // event holds the durable log's retention floor open for every other consumer,
 // so attn disables it, and the reader is entitled to know when.
 model AppStallInfo {
-  "event_seq": safeint;
-  "event_name": string;
-  // When the app first failed on this event.
+  // "subscription" | "reconcile".
+  "kind": string;
+  "event_seq"?: safeint;
+  "event_name"?: string;
+  // The immutable claim boundary while a reconcile request is retrying.
+  "through_request_id"?: safeint;
+  // When the app first failed on this work item.
   "since": string;
   "attempts": int32;
   "last_error": string;
@@ -4994,14 +5038,23 @@ model AppInvocationInfo {
   // The version that actually ran, which is not necessarily the one the app
   // points at now — a rollback does not rewrite what happened.
   "version_id": safeint;
-  "event_seq": safeint;
-  "event_name": string;
-  "event_subject": string;
+  // "subscription" | "command" | "view" | "reconcile".
+  "kind": string;
+  // Fact identity exists only for subscription invocations.
+  "event_seq"?: safeint;
+  "event_name"?: string;
+  "event_subject"?: string;
   "handler": string;
   "status": string;
-  "error": string;
-  "duration_ms": safeint;
+  "error"?: string;
+  // Absent while status=running.
+  "duration_ms"?: safeint;
   "started_at": string;
+  "finished_at"?: string;
+  // Reconcile attempts retain the exact claimed input and request boundary, so
+  // retries and interruptions remain inspectable after restart.
+  "reconcile"?: AppReconcileReasonInfo;
+  "through_request_id"?: safeint;
 }
 
 // Flip an app's enabled state, which is its bus consumer's enabled bit and

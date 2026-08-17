@@ -11,8 +11,29 @@ interface AppDaemonEvent {
   request_id?: unknown;
   success?: boolean;
   error?: string;
+  /** A stable name for the refusal, when the daemon had one. */
+  error_code?: unknown;
+  /** Present with error_code `reconcile_owed`: the rebuild the app owes. */
+  reconcile?: unknown;
   /** The handler's return value, still JSON text, absent when it returned nothing. */
   payload?: unknown;
+}
+
+/**
+ * A refusal a view can branch on. The message is the surface a person reads; the
+ * code is what tells "retry once the rebuild finishes" apart from "this app's
+ * handler is broken", which no two prose strings can be relied on to do.
+ */
+export class AppCommandError extends Error {
+  readonly code: string;
+  readonly reconcile: unknown;
+
+  constructor(message: string, code: string, reconcile: unknown) {
+    super(message);
+    this.name = 'AppCommandError';
+    this.code = code;
+    this.reconcile = reconcile;
+  }
 }
 
 /**
@@ -30,6 +51,21 @@ export interface AppCommandResult {
  */
 export function handleAppDaemonEvent(event: AppDaemonEvent, pending: PendingRequests): boolean {
   if (event.event !== 'app_command_result') return false;
+  if (event.success === false && typeof event.error_code === 'string' && event.error_code !== '') {
+    settlePendingRequest(
+      pending,
+      'app_command',
+      { ...event, success: false },
+      () => undefined,
+      'The command was refused',
+      new AppCommandError(
+        event.error || 'The command was refused',
+        event.error_code,
+        event.reconcile,
+      ),
+    );
+    return true;
+  }
   settlePendingRequest(
     pending,
     'app_command',

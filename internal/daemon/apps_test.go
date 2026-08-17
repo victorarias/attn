@@ -428,7 +428,7 @@ func TestAppStatusReportsHistoryAndRecentInvocations(t *testing.T) {
 	if len(result.Recent) != 2 || result.Recent[0].Status != "error" {
 		t.Fatalf("recent = %+v, want the newest first", result.Recent)
 	}
-	if result.Recent[0].VersionID != int(version.ID) || result.Recent[0].EventSeq != 11 {
+	if result.Recent[0].VersionID != int(version.ID) || protocol.Deref(result.Recent[0].EventSeq) != 11 {
 		t.Fatalf("recent[0] = %+v", result.Recent[0])
 	}
 	if result.App.Consumer == nil || result.App.Consumer.Enabled {
@@ -449,7 +449,7 @@ func TestAppStatusListsTheVersionIdsRollbackTakes(t *testing.T) {
 		version, _, err := d.store.CommitAppVersion(store.AppVersion{
 			AppName:      "approval-gate",
 			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
-			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			Declaration:  `{"name":"approval-gate","reconcile":true,"subscribe":[{"events":["ticket.*"]}]}`,
 			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
 		}, now)
 		if err != nil {
@@ -491,7 +491,7 @@ func TestAppStatusShowsWhereRollbackCanStillGo(t *testing.T) {
 		version, _, err := d.store.CommitAppVersion(store.AppVersion{
 			AppName:      "approval-gate",
 			ContentHash:  fmt.Sprintf("sha256:build-%02d", i),
-			Declaration:  `{"name":"approval-gate","subscribe":[{"events":["ticket.*"]}]}`,
+			Declaration:  `{"name":"approval-gate","reconcile":true,"subscribe":[{"events":["ticket.*"]}]}`,
 			ArtifactPath: fmt.Sprintf("apps/approval-gate/%02d.js", i),
 		}, now)
 		if err != nil {

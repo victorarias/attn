@@ -152,7 +152,13 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		recentVersions = recentVersions[:recentVersionLimit]
 	}
 
-	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations}
+	reconcile, err := d.appReconcileStatusForWire(name)
+	if err != nil {
+		d.sendError(conn, fmt.Sprintf("reading the reconcile state of app %q: %v", name, err))
+		return
+	}
+
+	result := protocol.AppStatusResult{App: summary, Versions: versions, Invocations: invocations, Reconcile: reconcile}
 	for _, version := range recentVersions {
 		result.RecentVersions = append(result.RecentVersions, protocol.AppVersionInfo{
 			ID:           int(version.ID),
@@ -193,7 +199,7 @@ func (d *Daemon) handleAppStatus(conn net.Conn, msg *protocol.AppStatusMessage) 
 		result.Runtime = &info
 	}
 	if stall, ok := d.appStallSnapshot(name); ok {
-		info := appStallForWire(stall)
+		info := d.appStallForWire(stall)
 		result.Stall = &info
 	}
 	d.sendDocResponse(conn, protocol.Response{Ok: true, AppStatusResult: &result})
@@ -220,6 +226,9 @@ func (d *Daemon) handleAppSetEnabled(conn net.Conn, msg *protocol.AppSetEnabledM
 		d.sendError(conn, "no database")
 		return
 	}
+	lane := d.appLane(name)
+	lane.Lock()
+	defer lane.Unlock()
 	if _, ok, err := d.store.GetApp(name); err != nil {
 		d.sendError(conn, fmt.Sprintf("reading app %q: %v", name, err))
 		return

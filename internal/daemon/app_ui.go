@@ -214,6 +214,7 @@ func (d *Daemon) handleAppViewCrash(_ *wsClient, msg *protocol.AppViewCrashMessa
 	d.recordAppInvocation(store.AppInvocation{
 		AppName:      name,
 		VersionID:    version.ID,
+		Kind:         store.AppInvocationKindView,
 		EventName:    appViewCrashEvent,
 		EventSubject: strings.TrimSpace(msg.TileID),
 		Handler:      apps.ViewLabel(view),

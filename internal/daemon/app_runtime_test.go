@@ -444,8 +444,30 @@ func installApp(t *testing.T, d *Daemon, name string, manifest appbuild.Manifest
 	return version
 }
 
+// subscribing is a subscribed app as this attn expects one: it derives state
+// from facts, so it declares reconcile and can therefore be moved between
+// versions. subscribingWithoutReconcile is the grandfathered shape, for the
+// tests about what attn refuses.
 func subscribing(events ...string) appbuild.Manifest {
+	m := subscribingWithoutReconcile(events...)
+	m.Reconcile = true
+	return m
+}
+
+func subscribingWithoutReconcile(events ...string) appbuild.Manifest {
 	return appbuild.Manifest{Subscribe: []appbuild.Subscribe{{Events: events}}}
+}
+
+// settleAppReconcile runs the pre-drain hook the bus runs, which is the only
+// path that clears what a version move owes. A test that applies a second
+// version and then delivers a fact has to cross that fence the same way the
+// running daemon does.
+func settleAppReconcile(t *testing.T, d *Daemon, name string) {
+	t.Helper()
+	hook := d.appPreDrain(name)
+	if err := hook(context.Background(), bus.Consumer{Name: apps.ConsumerName(name)}, nil); err != nil {
+		t.Fatalf("reconcile %s: %v", name, err)
+	}
 }
 
 func appEvent(name, subject string, seq int64) bus.Event {
@@ -869,6 +891,8 @@ func TestHotReloadStampsTheNewVersionOnTheNextDispatch(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("the in-flight delivery failed: %v", err)
 	}
+	// A version move owes a rebuild, and no fact crosses that fence until it runs.
+	settleAppReconcile(t, d, "greeter")
 	if err := d.deliverAppEvent(context.Background(), "greeter", appEvent("ticket.created", "tk-2", 2)); err != nil {
 		t.Fatalf("the second delivery failed: %v", err)
 	}

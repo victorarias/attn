@@ -130,6 +130,13 @@ attn_app_api = %d
 
 entrypoint = "src/index.ts"
 
+# An app whose collections are derived from facts must be able to rebuild them
+# from attn's current state: a version move changes what the app derives, and a
+# gap means facts it can never receive. Declaring this makes `+"`reconcile`"+` a required
+# export in src/generated.ts, and a subscribed version without it is refused a
+# version move.
+reconcile = true
+
 # Every event pattern listed here becomes a required handler in src/generated.ts.
 # A pattern is an exact fact name (session.state.changed) or a family (session.*).
 # `+"`attn bus status`"+` lists the consumers; the fact names are attn's domain
@@ -166,7 +173,7 @@ description = "Drop one session from the list."
 
 func scaffoldEntrypoint() string {
 	return fmt.Sprintf(`import type { Ctx, Handlers } from "./generated"
-import type { AppEvent } from %q
+import type { AppEvent, ReconcileReason } from %q
 
 // One handler per subscription and one per command in %s. The `+"`satisfies Handlers`"+` below is
 // what keeps the two in step: declare either one in the manifest without a
@@ -193,11 +200,34 @@ async function forget(payload: unknown, ctx: Ctx): Promise<{ forgotten: boolean 
   return { forgotten: await ctx.collections.seen.delete(id) }
 }
 
+// Reconcile rebuilds what the subscriptions derive, from current state rather
+// than from facts. attn calls it when this app moves to a different version or
+// resumes below the oldest surviving fact, and no fact or command runs until it
+// succeeds. It must converge: run it twice, or after an interrupted attempt, and
+// the collection ends up the same. Deleting what current truth no longer has is
+// half the job — a rebuild that only upserts leaves rows nothing will remove.
+async function reconcile(_reason: ReconcileReason, ctx: Ctx): Promise<void> {
+  const current = await ctx.current.snapshot()
+  const live = new Set(current.sessions.map((session) => session.id))
+  for (const row of await ctx.collections.seen.query({})) {
+    if (!live.has(row.id)) {
+      await ctx.collections.seen.delete(row.id)
+    }
+  }
+  for (const session of current.sessions) {
+    await ctx.collections.seen.put(session.id, {
+      state: String(session.state),
+      seq: current.asOfSeq,
+    })
+  }
+}
+
 // Handlers are grouped by kind, and attn knows which kind it is running: a
 // command and a subscription can share a name without either becoming ambiguous.
 export default {
   subscriptions: { "session.state.changed": onSessionState },
   commands: { forget },
+  reconcile,
 } satisfies Handlers
 `, SDKModule, ManifestName)
 }
