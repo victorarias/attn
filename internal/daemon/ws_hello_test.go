@@ -248,6 +248,11 @@ func TestClientHelloWithAnotherProfilesTokenIsRefused(t *testing.T) {
 // dialWhenListening retries until the connection is made, which is the signal itself:
 // Start() binds the unix socket before the WebSocket port, so waitForSocket
 // returning does not mean the port answers yet.
+//
+// The pause is backoff, not a guess at how long binding takes: a refused
+// connection comes back in microseconds, and the suite runs seven test binaries
+// against three procs, so an unpaced retry loop spends a whole core starving
+// them.
 func dialWhenListening(t *testing.T, ctx context.Context, url string) *websocket.Conn {
 	t.Helper()
 	for {
@@ -258,6 +263,7 @@ func dialWhenListening(t *testing.T, ctx context.Context, url string) *websocket
 		if ctx.Err() != nil {
 			t.Fatalf("websocket dial %s: %v", url, err)
 		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
 
