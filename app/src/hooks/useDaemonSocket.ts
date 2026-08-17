@@ -73,6 +73,11 @@ import { kittyImageBlobFromResult, kittyImageCache } from '../utils/kittyImageCa
 import { resolveDaemonWebSocketURL, type DaemonEndpointProfile } from '../utils/daemonEndpoint';
 import { handleAppDaemonEvent, type AppCommandResult } from './daemonAppEvents';
 import { handleBusDaemonEvent, type BusStatus } from './daemonBusEvents';
+import {
+  handleAutoModeDaemonEvent,
+  type AutoModePromotion,
+  type AutoModeState,
+} from './daemonAutoModeEvents';
 import { handleFsDaemonEvent } from './daemonFsEvents';
 import { handleNotebookDaemonEvent } from './daemonNotebookEvents';
 import {
@@ -270,7 +275,7 @@ export interface RateLimitState {
 
 // Protocol version - must match daemon's ProtocolVersion
 // Increment when making breaking changes to the protocol
-export const PROTOCOL_VERSION = '254';
+export const PROTOCOL_VERSION = '256';
 const MAX_PENDING_ATTACH_OUTPUTS = 512;
 
 // Identifies this app process to the daemon across its own reconnects, so a
@@ -3074,6 +3079,7 @@ export function useDaemonSocket({
             if (handleBusDaemonEvent(data, pending)) break;
             if (handleAppDaemonEvent(data, pending)) break;
             if (docSubscriptions.handleEvent(data)) break;
+            if (handleAutoModeDaemonEvent(data, pending)) break;
             break;
           }
         }
@@ -3180,6 +3186,9 @@ export function useDaemonSocket({
       ...(args.resume_picker && { resume_picker: args.resume_picker }),
       ...(args.resume_conversation_file && { resume_conversation_file: args.resume_conversation_file }),
       ...(args.yolo_mode && { yolo_mode: args.yolo_mode }),
+      // Tri-state, unlike yolo: absent means "follow the promoted default", so
+      // an explicit false has to survive rather than be dropped as falsy.
+      ...(args.auto_mode !== undefined && { auto_mode: args.auto_mode }),
       ...(args.chief_of_staff && { chief_of_staff: args.chief_of_staff }),
       ...(args.spawned_from && { spawned_from: args.spawned_from }),
       ...(args.executable && { executable: args.executable }),
@@ -3442,6 +3451,35 @@ export function useDaemonSocket({
       'bus_set_consumer_enabled',
       { consumer, enabled },
       'Changing the consumer timed out',
+    );
+  }, [sendRequest]);
+
+  // Auto mode's app-only surface. `automode_get` reads the promoted policy and
+  // the proposals waiting on a human; promote and discard resolve one. The CLI
+  // can propose and nothing else — a human in the app is the trust boundary
+  // that keeps an agent from writing its own leash, which is why these three
+  // exist on this transport alone.
+  const sendAutoModeGet = useCallback((): Promise<AutoModeState> => {
+    return sendRequest<AutoModeState>(
+      'automode_get',
+      {},
+      'Reading auto mode timed out',
+    );
+  }, [sendRequest]);
+
+  const sendAutoModePromote = useCallback((id: number): Promise<AutoModePromotion> => {
+    return sendRequest<AutoModePromotion>(
+      'automode_promote',
+      { id },
+      'Promoting the proposal timed out',
+    );
+  }, [sendRequest]);
+
+  const sendAutoModeDiscard = useCallback((id: number): Promise<AutoModePromotion> => {
+    return sendRequest<AutoModePromotion>(
+      'automode_discard',
+      { id },
+      'Discarding the proposal timed out',
     );
   }, [sendRequest]);
 
@@ -5730,6 +5768,9 @@ export function useDaemonSocket({
     sendAgentSetModel,
     sendListPastConversations,
     sendBusStatusGet,
+    sendAutoModeGet,
+    sendAutoModePromote,
+    sendAutoModeDiscard,
     sendBusSetConsumerEnabled,
     sendTriggerNudge,
     sendSettleTurn,

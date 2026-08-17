@@ -1913,6 +1913,12 @@ model SpawnSessionMessage {
   resume_session_id?: string;
   resume_picker?: boolean;
   yolo_mode?: boolean;
+  // Per-session auto mode, for an agent whose driver advertises `auto_mode`.
+  // Tri-state on purpose: absent follows the promoted config's
+  // `enabled_default`, and true/false is the launcher overriding it for this
+  // session alone. Persisted with the launch intent, so a revive or a reload
+  // relaunches on the choice that was made rather than on today's default.
+  auto_mode?: boolean;
   chief_of_staff?: boolean;    // Launch this session already holding the chief role (guidance injected at first spawn)
   spawned_from?: string;       // The session this one was split from. Consulted only for agent "shell": the daemon resolves it to the owning agent session and stores that as the satellite's parent.
   initial_prompt?: string;
@@ -5089,6 +5095,166 @@ model AppRollbackResult {
 }
 
 // ============================================================================
+// Auto mode
+// ============================================================================
+//
+// pi's permission system, configured attn-side. Design:
+// docs/plans/2026-08-16-pi-auto-mode.md.
+//
+// The surface is deliberately split in two, and the split IS the security
+// design. These commands — everything an agent can reach over the unix socket —
+// only ever record a PROPOSAL, which changes nothing a session launches with.
+// Promotion lives on the WebSocket surface alone (automode_promote), because a
+// human in the app is the trust boundary no CLI caller can fake. An agent must
+// not be able to write its own leash.
+
+// Auto mode's promoted config: what a pi session actually launches with. Model
+// fields are always resolved — a machine that never picked one gets the shipped
+// default here rather than an empty string the caller would have to fill in.
+model AutoModeConfigInfo {
+  "enabled_default": boolean;
+  "environment": string[];
+  "allow": string[];
+  "hard_deny": string[];
+  "classifier_model": string;
+  "escalation_model": string;
+}
+
+// One proposed change awaiting a human. "value" is a pattern for allow/deny and
+// a `provider/id` for model; "target" names which model and is empty otherwise.
+model AutoModeProposalInfo {
+  "id": safeint;
+  // "allow" | "deny" | "model".
+  "kind": string;
+  // "classifier" | "escalation" for a model proposal; empty otherwise.
+  "target": string;
+  "value": string;
+  // Who proposed it, when the caller said. Empty when nobody did.
+  "proposed_by": string;
+  // "pending" | "promoted" | "discarded".
+  "state": string;
+  "created_at": string;
+  // Empty while still pending.
+  "resolved_at": string;
+}
+
+// One call auto mode refused, as the session reported it.
+model AutoModeDenialInfo {
+  "id": safeint;
+  "session_id": string;
+  "tool": string;
+  // The blocked call in one line — the same text the model was given.
+  "signature": string;
+  "reason": string;
+  // Who decided: a static envelope rule, the classifier layer that answered
+  // ("classifier-2a" | "classifier-2b"), or "circuit-breaker".
+  "rule": string;
+  "created_at": string;
+}
+
+model AutoModeShowMessage {
+  "cmd": "automode_show";
+}
+
+model AutoModeShowResult {
+  "config": AutoModeConfigInfo;
+  // Everything still pending, oldest first.
+  "proposals": AutoModeProposalInfo[];
+}
+
+// Environment prose is a direct write, not a proposal — the plan's public
+// interface specifies `env add`/`env remove` as edits.
+model AutoModeEnvAddMessage {
+  "cmd": "automode_env_add";
+  "text": string;
+}
+
+model AutoModeEnvRemoveMessage {
+  "cmd": "automode_env_remove";
+  // Zero-based index into the entries `automode_show` returned.
+  "index": safeint;
+}
+
+model AutoModeEnvResult {
+  "environment": string[];
+}
+
+// Record a proposal. Refused at submission when it could never be promoted — a
+// broad allow pattern most of all, mirroring the pi-side config loader.
+model AutoModeProposeMessage {
+  "cmd": "automode_propose";
+  "kind": string;
+  "target"?: string;
+  "value": string;
+  "proposed_by"?: string;
+}
+
+model AutoModeProposeResult {
+  "proposal": AutoModeProposalInfo;
+}
+
+model AutoModeDenialsMessage {
+  "cmd": "automode_denials";
+  "limit"?: safeint;
+}
+
+model AutoModeDenialsResult {
+  "denials": AutoModeDenialInfo[];
+}
+
+// The app's read: config plus the pending proposals its settings section
+// reviews, plus the recent denials it lists.
+model AutoModeGetMessage {
+  cmd: "automode_get";
+  request_id: string;
+}
+
+model AutoModeStateResultMessage {
+  event: "automode_state_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  config: AutoModeConfigInfo;
+  proposals: AutoModeProposalInfo[];
+  denials: AutoModeDenialInfo[];
+}
+
+// Apply a pending proposal to the config. The app only — this command has no
+// unix-socket half, and that absence is the whole trust boundary.
+model AutoModePromoteMessage {
+  cmd: "automode_promote";
+  id: safeint;
+  request_id: string;
+}
+
+model AutoModePromoteResultMessage {
+  event: "automode_promote_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  proposal?: AutoModeProposalInfo;
+  // The config as it stands after the promotion.
+  config?: AutoModeConfigInfo;
+}
+
+// Close a pending proposal without applying it. App-only for symmetry: the
+// review list is the app's, and a caller that cannot promote must not be able to
+// clear what a human has not seen.
+model AutoModeDiscardMessage {
+  cmd: "automode_discard";
+  id: safeint;
+  request_id: string;
+}
+
+model AutoModeDiscardResultMessage {
+  event: "automode_discard_result";
+  request_id: string;
+  success: boolean;
+  error?: string;
+  proposal?: AutoModeProposalInfo;
+}
+
+// ============================================================================
 // Response Types
 // ============================================================================
 
@@ -5175,6 +5341,10 @@ model Response {
   app_runtime_status_result?: AppRuntimeStatusResult;
   app_runtime_restart_result?: AppRuntimeRestartResult;
   app_watch_result?: AppWatchResult;
+  automode_show_result?: AutoModeShowResult;
+  automode_env_result?: AutoModeEnvResult;
+  automode_propose_result?: AutoModeProposeResult;
+  automode_denials_result?: AutoModeDenialsResult;
 }
 
 // One recorded state observation and its fate. Outcome separates the ways an
@@ -6162,4 +6332,7 @@ alias DaemonEvent =
   | AppsUpdatedMessage
   | AppCommandResultMessage
   | DocSubscriptionDeliveryMessage
-  | DocSubscriptionEndedMessage;
+  | DocSubscriptionEndedMessage
+  | AutoModeStateResultMessage
+  | AutoModePromoteResultMessage
+  | AutoModeDiscardResultMessage;

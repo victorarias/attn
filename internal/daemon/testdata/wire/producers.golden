@@ -179,6 +179,7 @@
     "auto_settle_arm_seconds": "30",
     "auto_settle_countdown_seconds": "15",
     "auto_settle_enabled": "false",
+    "automode_enabled_default": "true",
     "chief_context_window_cap": "128000",
     "claude_available": "<probed>",
     "claude_cap_classifier": "true",

@@ -1,0 +1,20 @@
+kind: added
+area: automode
+change: >
+  Auto mode has a human surface. Settings gained an "Auto mode" section that
+  lists the rules sessions proposed — what each one asks for, who asked, and
+  when — with promote and discard beside each, and shows the effective policy
+  a session would launch with. The settings nav counts waiting proposals so
+  they cannot rot unseen. The session launcher gained an auto mode toggle for
+  agents whose driver supports it; it starts from the promoted default and the
+  per-session choice survives a revive or a reload. Auto mode also now ships
+  its own leash: the patterns that would let an agent rewrite auto mode's
+  policy — the mutating `attn automode` verbs and attn's own WebSocket port —
+  are hard-denied on every machine, resolved at read rather than written into
+  anyone's config, so `show` and `denials` stay reachable. Identical pending
+  proposals collapse into one, and a proposer is capped at 20 unresolved
+  proposals with an error that names the limit and the ask.
+notes: >
+  Slice 5a of the pi auto mode plan (docs/plans/2026-08-16-pi-auto-mode.md) —
+  the attn app/daemon half. Promotion remains app-only: the CLI can propose,
+  never promote. Denial reporting and the denials feed are a later slice.

@@ -854,3 +854,36 @@ conversation agent unchanged — and say **pi** for the engine underneath. On th
 wire and in the CLI the agent is `nisse` (`attn delegate --agent nisse`); its
 launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
 `plugins/attn-pi`, which also registers the PTY-backed `pi` agent.
+
+## Auto mode, proposals, and promotion
+
+**Auto mode** is pi's permission system: a static safety envelope (work inside
+the session's working directory runs free), a classifier for everything that
+reaches past it, and denials the agent answers conversationally rather than
+through a dialog. Design:
+[docs/plans/2026-08-16-pi-auto-mode.md](plans/2026-08-16-pi-auto-mode.md).
+
+Its **config** is daemon-owned and global: the environment prose the classifier
+reads about this machine, the allow and hard-deny patterns, the classifier and
+escalation models, and whether attn sessions start with auto mode on. A pi
+session is handed the config it launches with; changing it reaches the next
+session, not the running one.
+
+A **proposal** is a requested change to that config — an allow pattern, a hard
+deny, or a model — recorded and inert. **Promotion** is a human applying one in
+the attn app, and it is the only thing that changes what a session runs under.
+The asymmetry is the point: `attn automode allow …` is reachable by any agent
+and only ever proposes, while promotion has no CLI at all. An agent must not be
+able to write its own leash.
+
+Environment prose is the exception: `attn automode env add` edits it directly,
+because it describes the machine to the classifier rather than naming a rule
+that skips it.
+
+A **denial** is one call auto mode refused. The session reports it to attn,
+which keeps it in a bounded log, raises a notification naming what was blocked
+and why, and lists it under `attn automode denials`. Every denial says who
+decided — a static envelope rule, the classifier layer that answered
+(`classifier-2a`, `classifier-2b`), or the circuit breaker. A denial never
+stops the run: the agent is given the reason, and a plain reply approving the
+action is what lets it retry.

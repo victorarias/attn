@@ -210,6 +210,19 @@ export type SuiteEnv = {
   piVersion: string;
 };
 
+/**
+ * What travels to attn when auto mode refuses a call — the subset of
+ * `automode/index.ts`'s AutoModeDenial that leaves the session. The tool-call
+ * id stays behind: it addresses nothing outside pi's own run.
+ */
+export type SuiteDenial = {
+  tool: string;
+  action: string;
+  reason: string;
+  rule: string;
+  at: string;
+};
+
 export class AttnPiSuite {
   private readonly piVersion: string;
   // Undefined means "running outside attn" (no ATTN_PI_SUITE_SOCKET/ATTN_PI_TOKEN):
@@ -272,6 +285,25 @@ export class AttnPiSuite {
       const assistantText = this.cachedAssistantText;
       this.cachedAssistantText = "";
       void relay.client.send(relayMethods.reportStop, { token: relay.token, assistant_text: assistantText });
+    });
+  }
+
+  /**
+   * Reports one refused call to attn. Like every other suite report this is
+   * fire-and-forget: a bare pi (no relay) drops it, and so does a relay that
+   * will not answer. Auto mode's decision has already been made and given to
+   * the model; nothing here can change it.
+   */
+  reportDenial(denial: SuiteDenial): void {
+    const relay = this.relay;
+    if (!relay) return;
+    void relay.client.send(relayMethods.reportDenial, {
+      token: relay.token,
+      tool: denial.tool,
+      action: denial.action,
+      reason: denial.reason,
+      rule: denial.rule,
+      at: denial.at,
     });
   }
 

@@ -1,0 +1,16 @@
+kind: added
+area: attn-pi
+change: >
+  Auto mode now runs in pi sessions. Work inside the session's working
+  directory runs untouched; anything reaching past it is judged against what
+  the conversation asked for, and a refusal comes back to the agent as its
+  tool result rather than stopping the run — approving it in your next reply
+  is what lets the agent retry. The status line says whether auto mode is on,
+  `/auto` toggles it, `--auto` and `--no-auto` set it at launch, a call being
+  judged says so instead of looking stuck, and blocked calls are listed until
+  you answer them. If auto mode ends up refusing call after call it asks once
+  whether to carry on, and an unattended session (`-p`, `--mode json`) keeps
+  refusing rather than guessing. attn sessions take their configuration from
+  attn; a plain pi gets the same extension with
+  `pi -e <plugin>/automode.js`, configured by a file under its own config
+  directory.

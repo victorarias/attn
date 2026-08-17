@@ -437,6 +437,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   give-up parking, per-child log capture). Consumers name a child and hand over
   a start function; the package knows nothing about what it supervises. The
   plugin runtime is one consumer, the app runtime's sidecar is the other
+- `internal/automode`: pi auto mode's config value and the rules about what may
+  be written into it — the Go mirror of `plugins/attn-pi/automode/config.ts`,
+  and the JSON handed to a driver at launch. Storage is
+  `internal/store/automode.go`, whose `PromoteAutoModeProposal` is the ONLY way
+  a pattern or a model reaches the config; every CLI-reachable verb writes a
+  proposal instead
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`

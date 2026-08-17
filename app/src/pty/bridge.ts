@@ -22,6 +22,8 @@ export interface PtySpawnArgs {
    */
   resume_conversation_file?: string;
   yolo_mode?: boolean | null;
+  /** Tri-state: absent follows the promoted auto mode default. */
+  auto_mode?: boolean;
   chief_of_staff?: boolean | null;
   /**
    * The session this one was split from. Only meaningful for a shell: the daemon

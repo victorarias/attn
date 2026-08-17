@@ -1112,7 +1112,59 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// Applied by applyMigration106, whose ALTER is column-guarded.
 	{106, "add durable per-session token cost state", ``},
 	{107, "record which ticket event a delivery covered", ``},
-	{108, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
+	// Auto mode's home, at 109 because 108 is burned: a branch still in flight
+	// applied it to a production database before merging, and migrateDB skips
+	// anything at or below the highest version already applied. That cuts both
+	// ways — a database created after this lands sits at 109, so a later 108
+	// would be skipped there too. Whatever that branch ships must renumber
+	// above this one.
+	//
+	// One promoted config row, the proposals waiting on a human, and the denials
+	// slice 5 reports. The split is the security design: the CLI writes
+	// proposals, only the app promotes one into the config row, so an agent
+	// cannot write its own leash. Empty model columns mean "whichever default
+	// ships" — automode.Defaults() resolves them at read.
+	{109, "auto mode config, proposals and denials", `CREATE TABLE IF NOT EXISTS automode_config (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled_default  INTEGER NOT NULL DEFAULT 1,
+    environment      TEXT NOT NULL DEFAULT '[]',
+    allow_patterns   TEXT NOT NULL DEFAULT '[]',
+    hard_deny        TEXT NOT NULL DEFAULT '[]',
+    classifier_model TEXT NOT NULL DEFAULT '',
+    escalation_model TEXT NOT NULL DEFAULT '',
+    updated_at       TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS automode_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    target      TEXT NOT NULL DEFAULT '',
+    value       TEXT NOT NULL,
+    proposed_by TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT ''
+);
+-- The review list: everything still pending, oldest first.
+CREATE INDEX IF NOT EXISTS idx_automode_proposals_state ON automode_proposals(state, id);
+CREATE TABLE IF NOT EXISTS automode_denials (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL DEFAULT '',
+    tool       TEXT NOT NULL DEFAULT '',
+    signature  TEXT NOT NULL DEFAULT '',
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DESC);`},
+	// Applied by applyMigration110, whose ALTER is column-guarded.
+	{110, "record which rule denied an auto mode call", ``},
+	// The reconcile tables, at 112 rather than the 108 they were written as.
+	// 108 and 111 are both burned — each was applied to a production database by
+	// a branch still in flight — and migrateDB skips anything at or below the
+	// highest version a database already carries, so a database that took auto
+	// mode's 109/110 first would never see a 108. Every statement here is
+	// IF NOT EXISTS, so a database that did apply the old number re-runs this to
+	// the same shape.
+	{112, "record app reconciliation owed across cursor fences", `CREATE TABLE IF NOT EXISTS app_reconcile_requests (
     id                  INTEGER PRIMARY KEY AUTOINCREMENT,
     app_name            TEXT NOT NULL,
     reason              TEXT NOT NULL,
@@ -1530,6 +1582,11 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 107 {
 			if err := applyMigration107(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 110 {
+			if err := applyMigration110(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2711,6 +2768,22 @@ func applyMigration103(tx *sql.Tx) error {
 
 // applyMigration106 adds the opaque per-session cost ledger. The guard makes
 // schema-migration rewind tests and interrupted upgrade recovery idempotent.
+// applyMigration110 records who refused an auto mode call: a static envelope
+// rule ("hard-deny", "unknown-tool"), the classifier layer that answered
+// ("classifier-2a", "classifier-2b"), or the circuit breaker.
+//
+// Guarded because a database can reach this with the column already there: a
+// migration test builds the current schema and rewinds the recorded version,
+// which replays this ALTER against a table that already carries it.
+func applyMigration110(tx *sql.Tx) error {
+	has, err := columnExists(tx, "automode_denials", "rule")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE automode_denials ADD COLUMN rule TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
 func applyMigration106(tx *sql.Tx) error {
 	has, err := columnExists(tx, "sessions", "session_cost_json")
 	if err != nil || has {

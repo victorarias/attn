@@ -264,6 +264,9 @@ func main() {
 	case "app":
 		maybePrintProfileBanner()
 		runApp()
+	case "automode":
+		maybePrintProfileBanner()
+		runAutoMode()
 	case "journal":
 		maybePrintProfileBanner()
 		runJournal()

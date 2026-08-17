@@ -184,6 +184,14 @@
   line-height: 18px;
 }
 
+/* A count that is waiting on the reader, not just describing the section:
+   proposals nobody promotes are proposals that rot. Mirrors .settings-pill.bad. */
+.settings-nav-count.waiting {
+  border-color: rgba(255, 116, 108, 0.42);
+  background: rgba(255, 116, 108, 0.11);
+  color: #ff746c;
+}
+
 .settings-body {
   position: relative;
   min-height: 0;

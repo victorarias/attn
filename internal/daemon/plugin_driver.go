@@ -10,6 +10,7 @@ import (
 	"time"
 
 	agentdriver "github.com/victorarias/attn/internal/agent"
+	"github.com/victorarias/attn/internal/automode"
 	"github.com/victorarias/attn/internal/protocol"
 	"github.com/victorarias/attn/internal/ptybackend"
 )
@@ -55,6 +56,11 @@ type pluginDriverSpawnParams struct {
 	InitialPrompt string                    `json:"initial_prompt,omitempty"`
 	Metadata      json.RawMessage           `json:"metadata,omitempty"`
 	Instructions  *pluginLaunchInstructions `json:"instructions,omitempty"`
+	// The promoted auto-mode config, for a driver that advertises `auto_mode`.
+	// It is the exact JSON shape plugins/attn-pi/automode/config.ts parses, so a
+	// driver forwards it to the session rather than translating it. Config
+	// changes reach new sessions only; a live session is not refreshed.
+	AutoMode *automode.Config `json:"auto_mode,omitempty"`
 }
 
 type pluginDriverSpawnResult struct {
@@ -104,6 +110,20 @@ type pluginDeliverMessageParams struct {
 
 type pluginDeliverMessageResult struct {
 	OK bool `json:"ok"`
+}
+
+// One call a driver's agent refused under auto mode. No seq: a denial is an
+// append, not a declaration about the session's current state, so nothing later
+// can overtake it.
+type pluginReportAutoModeDenialParams struct {
+	SessionID string `json:"session_id"`
+	RunID     string `json:"run_id"`
+	Tool      string `json:"tool"`
+	Action    string `json:"action"`
+	Reason    string `json:"reason"`
+	Rule      string `json:"rule"`
+	// When the session refused it, RFC 3339. Empty falls back to arrival.
+	At string `json:"at"`
 }
 
 type pluginClassifyStopParams struct {
@@ -201,6 +221,7 @@ func validatePluginDriverCapabilities(values map[string]bool) (map[string]bool, 
 		"effort_pin":          {},
 		"launch_instructions": {},
 		"conversation":        {},
+		"auto_mode":           {},
 	}
 	out := make(map[string]bool, len(values))
 	for name, enabled := range values {
@@ -281,6 +302,21 @@ func (d *Daemon) handlePluginDriverMethod(plugin *pluginConnection, msg jsonRPCM
 				return nil, true, err
 			}
 			d.applyPluginReportedMetadata(params)
+		}
+		return struct{}{}, true, nil
+	case "session.report_automode_denial":
+		var params pluginReportAutoModeDenialParams
+		if err := json.Unmarshal(msg.Params, &params); err != nil {
+			return nil, true, fmt.Errorf("decode session.report_automode_denial params: %w", err)
+		}
+		if strings.TrimSpace(params.Action) == "" {
+			return nil, true, errors.New("session.report_automode_denial action is required")
+		}
+		if err := d.authorizePluginSessionReport(plugin, params.SessionID, params.RunID); err != nil {
+			return nil, true, err
+		}
+		if err := d.recordAutoModeDenial(params); err != nil {
+			return nil, true, err
 		}
 		return struct{}{}, true, nil
 	default:

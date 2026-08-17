@@ -121,6 +121,11 @@ stage_plugin() {
     # must stay an external import.
     bun build "${source_dir}/suite/index.ts" --target=node --format=esm --minify \
       --external "@earendil-works/pi-coding-agent" --outfile "${stage_dir}/suite.js"
+    # Auto mode ships inside suite.js by import; this second bundle is the same
+    # extension for a pi that knows nothing about attn (`pi -e automode.js`),
+    # under the same external rule.
+    bun build "${source_dir}/automode/standalone.ts" --target=node --format=esm --minify \
+      --external "@earendil-works/pi-coding-agent" --outfile "${stage_dir}/automode.js"
     # nisse is its own process: attn's daemon spawns one per conversation
     # session and talks to it over pipes, so it is a second executable beside
     # the driver rather than code inside it. pi is bundled in (not external)

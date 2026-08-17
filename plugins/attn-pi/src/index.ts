@@ -6,7 +6,7 @@ import { nisseAgentName, NisseDriver } from "./nisse-driver";
 import { RelayServer, type RelayConnection } from "./relay";
 import type { DriverSpawnParams, SessionClosedParams } from "./types";
 
-const pluginVersion = "0.1.0";
+const pluginVersion = "0.2.0";
 
 await runPlugin();
 
@@ -26,6 +26,7 @@ async function runPlugin(): Promise<void> {
       suiteHello: (connection: RelayConnection, params: unknown) => driver.suiteHello(connection, params),
       suiteReportState: (params: unknown) => driver.suiteReportState(params),
       suiteReportStop: (params: unknown) => driver.suiteReportStop(params),
+      suiteReportDenial: (params: unknown) => driver.suiteReportDenial(params),
     },
   });
   driver = new PiDriver({ rpc, relay, suitePath: suitePath() });

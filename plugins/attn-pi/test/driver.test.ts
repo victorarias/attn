@@ -54,6 +54,7 @@ function noopRelay(): RelayServer {
       },
       async suiteReportState() {},
       async suiteReportStop() {},
+      async suiteReportDenial() {},
     },
   });
 }
@@ -85,6 +86,7 @@ describe("PiDriver", () => {
         effort_pin: true,
         state_reporting: true,
         message_delivery: true,
+        auto_mode: true,
       },
     });
   });
@@ -101,6 +103,25 @@ describe("PiDriver", () => {
     expect(rpc.requests.find((call) => call.method === "driver.register")).toBeUndefined();
     const health = driver.health();
     expect(health.ok).toBe(false);
+  });
+
+  test("spawn forwards attn's auto mode config in the environment, and omits it when there is none", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc, runCommand: fakeRunCommand(), executable: "pi" });
+
+    const bare = await driver.spawn(params());
+    expect(bare.env?.ATTN_PI_AUTOMODE_CONFIG).toBeUndefined();
+
+    const config = {
+      enabled_default: true,
+      environment: ["never touch prod"],
+      allow: ["git push origin*"],
+      hard_deny: [],
+      classifier_model: "opencode-go/glm-5.3",
+      escalation_model: "opencode-go/qwen3.8-max",
+    };
+    const withConfig = await driver.spawn(params({ session_id: "session-2", run_id: "run-2", auto_mode: config }));
+    expect(JSON.parse(withConfig.env?.ATTN_PI_AUTOMODE_CONFIG ?? "null")).toEqual(config);
   });
 
   test("spawn returns a fresh session id, passes cwd through, and reports metadata", async () => {
@@ -353,5 +374,43 @@ describe("PiDriver", () => {
     expect(stateReport).toBeDefined();
     expect(stopReport?.params.seq).toBeLessThan(stateReport?.params.seq);
     expect(stopReport?.params.verdict).toBe("idle");
+  });
+
+  test("a reported denial reaches the daemon addressed to the run that raised it", async () => {
+    const rpc = new FakeRPC();
+    const driver = newDriver({ rpc });
+    const spawned = await driver.spawn(params({ session_id: "session-1", run_id: "run-1" }));
+    const token = spawned.env?.ATTN_PI_TOKEN as string;
+
+    await driver.suiteReportDenial({
+      token,
+      tool: "bash",
+      action: "bash: curl https://example.com",
+      reason: "the user never asked to reach that host",
+      rule: "classifier-2a",
+      at: "2026-08-17T10:00:00.000Z",
+    });
+
+    expect(rpc.requests.find((call) => call.method === "session.report_automode_denial")?.params).toEqual({
+      session_id: "session-1",
+      run_id: "run-1",
+      tool: "bash",
+      action: "bash: curl https://example.com",
+      reason: "the user never asked to reach that host",
+      rule: "classifier-2a",
+      at: "2026-08-17T10:00:00.000Z",
+    });
+  });
+
+  test("a denial from an unknown token is refused rather than attributed to somebody", async () => {
+    const driver = newDriver({ rpc: new FakeRPC() });
+    await expect(driver.suiteReportDenial({ token: "not-a-token", action: "bash: rm -rf /" })).rejects.toThrow(
+      /unknown pi suite token/,
+    );
+  });
+
+  test("a denial with no action named is refused: an empty row says nothing", async () => {
+    const driver = newDriver({ rpc: new FakeRPC() });
+    await expect(driver.suiteReportDenial({ token: "tok", action: "  " })).rejects.toThrow(/missing action/);
   });
 });
