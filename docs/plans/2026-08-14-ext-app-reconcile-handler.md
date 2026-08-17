@@ -369,7 +369,11 @@ trigger while still enabled.
 
 An A5 view-only app keeps the sentinel consumer row used for uniform lifecycle
 handling, but its filter matches nothing. It cannot miss a subscribed fact, so
-reconcile obligations are inert for it.
+reconcile obligations are inert for it. Inert means the trigger is never
+recorded: completion advances a bus cursor, and an app whose filter matches
+nothing has none to advance, so a request written for it could only sit owed
+forever and refuse the app's commands. As built in slice 1 the version-change
+trigger did fire for such an app; slice 3 guards it on the filter.
 
 Silently keeping the old A1 skip-to-head behavior was rejected. So was running
 an optional no-op reconcile: both certify stale collections as current.
@@ -489,8 +493,10 @@ proof.
    and increment `ProtocolVersion`; generated Go and TypeScript are never
    edited by hand. Verification tier: full non-production app plus packaged-app
    harness. Prove an infinite loop loses its generation and another app resumes.
-4. **Scaffold and exit proof.** Teach the handler in `attn app new` and the SDK
-   docs. First demonstrate today's stale state. Then show disable, publish
+4. **Scaffold and exit proof.** Teach the handler in the SDK docs. Slice 3
+   already gave `attn app new` a declared, converging reconcile handler,
+   because gate 7's version-move refusal otherwise scaffolds an app that can
+   never be updated; what remains here is the prose that teaches it. First demonstrate today's stale state. Then show disable, publish
    facts, enable delivering the retained backlog in order with no reconcile;
    force a gap and show the loud disable; apply a version deriving a new field
    and show the rebuild followed by delivery of facts the old version never
