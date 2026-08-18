@@ -133,7 +133,7 @@ Each rock opens with its own alignment + implementation doc.
 - [x] **attn citizenship** — linking, declared state, doorbell/nudge steering.
 - [ ] **Headless host + rendered conversation** — the SDK host process and the
       React conversation surface, built in vertical slices (own plan doc).
-- [ ] **Safety envelope + auto mode** — the autonomy dial.
+- [x] **Safety envelope + auto mode** — the autonomy dial.
 - [ ] **Subagents** — adapted from ecosystem prior art.
 - [ ] **Background eyes** — monitors that wake the agent.
 - [ ] **Skills** — trial the existing corpus as-is; curate from real use.
@@ -141,8 +141,3 @@ Each rock opens with its own alignment + implementation doc.
       everything above.
 - [ ] **Compaction tuning and workflows** — likely last; needs the most
       design.
-
-## Open questions
-
-- The safety envelope's exact policy vocabulary — designed fresh in its own
-  doc, not inherited from claude's permission modes.

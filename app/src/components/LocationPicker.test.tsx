@@ -168,7 +168,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'snipe', 'ep-1', false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'snipe', 'ep-1', false, false, undefined, undefined);
     });
     expect(onGetRepoInfo).not.toHaveBeenCalled();
   });
@@ -199,7 +199,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -222,7 +222,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('~/projects', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -356,7 +356,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -388,7 +388,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/tmp/project', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/tmp/project', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/project', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -431,7 +431,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/home/remote/projects/recent-repo', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/recent-repo', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/recent-repo', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -527,7 +527,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/tmp/other', undefined);
-      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -602,7 +602,7 @@ describe('LocationPicker', () => {
         'feat-images',
         undefined,
       );
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-more', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-more', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -643,7 +643,7 @@ describe('LocationPicker', () => {
       fireEvent.click(screen.getByTestId('repo-option-0'));
 
       expect(setSetting).toHaveBeenCalledWith(destinationKey, 'main_repo');
-      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined, undefined);
     });
 
     it('records a new worktree when one is created', async () => {
@@ -676,7 +676,7 @@ describe('LocationPicker', () => {
       fireEvent.click(screen.getByTestId('repo-option-1'));
 
       await waitFor(() => {
-        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-images', 'claude', undefined, false, false, undefined);
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin--feat-images', 'claude', undefined, false, false, undefined, undefined);
       });
       expect(setSetting).not.toHaveBeenCalled();
     });
@@ -705,7 +705,7 @@ describe('LocationPicker', () => {
       expect(screen.getByTestId('repo-option-0')).toHaveClass('selected');
       fireEvent.keyDown(screen.getByTestId('repo-options'), { key: 'Enter' });
 
-      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith(repoRoot, 'claude', undefined, false, false, undefined, undefined);
       expect(onCreateWorktree).not.toHaveBeenCalled();
     });
 
@@ -1043,7 +1043,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onInspectPath).toHaveBeenCalledWith('/', 'ep-1');
-      expect(onSelect).toHaveBeenCalledWith('/', 'codex', 'ep-1', false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/', 'codex', 'ep-1', false, false, undefined, undefined);
     });
   });
 
@@ -1219,7 +1219,7 @@ describe('LocationPicker', () => {
     });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -1304,7 +1304,7 @@ describe('LocationPicker', () => {
 
     await waitFor(() => {
       expect(onError).toHaveBeenCalledWith('unborn HEAD');
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/exsin', 'claude', undefined, false, false, undefined, undefined);
     });
   });
 
@@ -1430,7 +1430,7 @@ describe('LocationPicker', () => {
     fireEvent.keyDown(screen.getByTestId('location-picker-path-input'), { key: 'Enter' });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/tmp/other', 'claude', undefined, false, false, undefined, undefined);
     });
 
     firstRepoInfoGate.resolve({
@@ -1600,7 +1600,7 @@ describe('LocationPicker', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', true, false, undefined);
+      expect(onSelect).toHaveBeenCalledWith('/home/remote/projects/remote-repo', 'claude', 'ep-1', true, false, undefined, undefined);
     });
   });
 
@@ -1651,7 +1651,7 @@ describe('LocationPicker', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, true, undefined);
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, true, undefined, undefined);
       });
     });
 
@@ -1664,7 +1664,7 @@ describe('LocationPicker', () => {
       fireEvent.keyDown(input, { key: 'Enter' });
 
       await waitFor(() => {
-        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined);
+        expect(onSelect).toHaveBeenCalledWith('/home/remote/projects', 'claude', undefined, false, false, undefined, undefined);
       });
     });
   });

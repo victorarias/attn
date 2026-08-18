@@ -108,6 +108,10 @@ class RecordingDelegate implements RelayDelegate {
   async suiteReportStop(params: unknown): Promise<void> {
     this.calls.push({ method: relayMethods.reportStop, params });
   }
+
+  async suiteReportDenial(params: unknown): Promise<void> {
+    this.calls.push({ method: relayMethods.reportDenial, params });
+  }
 }
 
 async function buildHarness(): Promise<{ relay: RelayServer; delegate: RecordingDelegate; socketPath: string }> {
@@ -291,6 +295,53 @@ describe("AttnPiSuite: driver.deliver_message", () => {
 
     suite.close();
     relay.close();
+  });
+});
+
+describe("AttnPiSuite: auto mode denials -> suite.report_denial", () => {
+  const denial = {
+    tool: "bash",
+    action: "bash: curl https://example.com",
+    reason: "the user never asked to reach that host",
+    rule: "classifier-2a",
+    at: "2026-08-17T10:00:00.000Z",
+  };
+
+  test("carries the token, the blocked call, the reason and who decided", async () => {
+    const { relay, delegate, socketPath } = await buildHarness();
+    const suite = new AttnPiSuite({ socketPath, token: "tok-8", piVersion: "0.80.10" });
+
+    suite.reportDenial(denial);
+
+    await waitFor(() => delegate.calls.some((call) => call.method === relayMethods.reportDenial));
+    expect(delegate.calls.find((call) => call.method === relayMethods.reportDenial)?.params).toEqual({
+      token: "tok-8",
+      ...denial,
+    });
+
+    suite.close();
+    relay.close();
+  });
+
+  test("outside attn it is a no-op, and a dead relay never crashes pi", async () => {
+    const bare = new AttnPiSuite({ socketPath: undefined, token: undefined, piVersion: "0.80.10" });
+    expect(() => bare.reportDenial(denial)).not.toThrow();
+    bare.close();
+
+    const suite = new AttnPiSuite({ socketPath: nextSocketPath(), token: "tok-9", piVersion: "0.80.10" });
+    let unhandled: unknown;
+    const onUnhandledRejection = (reason: unknown) => {
+      unhandled = reason;
+    };
+    process.on("unhandledRejection", onUnhandledRejection);
+    try {
+      suite.reportDenial(denial);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      process.off("unhandledRejection", onUnhandledRejection);
+    }
+    expect(unhandled).toBeUndefined();
+    suite.close();
   });
 });
 

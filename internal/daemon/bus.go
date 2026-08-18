@@ -160,6 +160,13 @@ const (
 	FactNotificationCreated = "notification.created"
 	FactNotificationRead    = "notification.read"
 
+	// FactAutoModeDenied: a pi session refused a tool call under auto mode.
+	// Subject is the session it happened in — the entity a denial is about. The
+	// denial itself is already in the store when this is published, and the
+	// notification that surfaces it with it, which is why the projection is the
+	// notification push and there is no second notification.created fact.
+	FactAutoModeDenied = "automode.denied"
+
 	// FactAutomationChanged: subject is the automation definition id.
 	FactAutomationChanged = "automation.changed"
 	// FactWorkflowRunUpdated: subject is the workflow run id.
@@ -520,6 +527,10 @@ func buildWireProjections() []projection {
 		},
 		{
 			filter: bus.Filter{"notification.*"},
+			apply:  func(d *Daemon, _ bus.Event) { d.projectNotificationsUpdated() },
+		},
+		{
+			filter: bus.Filter{FactAutoModeDenied},
 			apply:  func(d *Daemon, _ bus.Event) { d.projectNotificationsUpdated() },
 		},
 		{

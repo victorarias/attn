@@ -112,8 +112,12 @@ permissions.
   show the change.
 - Named profile: select it with `eval "$(./attn profile-env <name>)"`, then run
   `make install PROFILE=<name>`. The shell's `ATTN_PROFILE` must match.
-- `profile-env` clears inherited routing overrides. Verify the emitted
-  `[attn profile=…]` banner before acting.
+- `profile-env` clears inherited routing overrides (`ATTN_DATA_DIR` included).
+  Verify the emitted `[attn profile=…]` banner before acting.
+- `ATTN_PROFILE` set beside a data dir, socket, DB, config, plugin dir, or WS
+  port belonging to another profile is refused outright — the error names both
+  sides and the `env -u …` that fixes it. Your session inherits production
+  routing, so scrub it (or `profile-env`) before any profile command.
 - Inspect with `attn profile`, `attn profile list`, or
   `attn profile resolve --json`; remove with `attn profile clean <name>`.
 - **Clean up the profile you created.** Nothing reaps it for you: its daemon
@@ -437,6 +441,12 @@ forgets that position and `--since <RFC3339>` replays from an instant.
   give-up parking, per-child log capture). Consumers name a child and hand over
   a start function; the package knows nothing about what it supervises. The
   plugin runtime is one consumer, the app runtime's sidecar is the other
+- `internal/automode`: pi auto mode's config value and the rules about what may
+  be written into it — the Go mirror of `plugins/attn-pi/automode/config.ts`,
+  and the JSON handed to a driver at launch. Storage is
+  `internal/store/automode.go`, whose `PromoteAutoModeProposal` is the ONLY way
+  a pattern or a model reaches the config; every CLI-reachable verb writes a
+  proposal instead
 - `internal/classifier`: stop-time state classification
 - `internal/transcript`: assistant-message extraction from JSONL
 - `app`: Tauri frontend; WebSocket `ws://localhost:9849`
@@ -477,6 +487,16 @@ settles it; `turn_owed` is derived at broadcast from the persisted
 
 IPC: `~/.attn/attn.sock`. WebSocket clients buffer 256 messages; sustained
 over-send may drop messages or disconnect slow clients.
+
+Every WebSocket client presents the profile's **client token** in
+`client_hello` — the socket has file permissions, the port had nothing. The
+daemon mints `<data-dir>/client-token` at startup; clients read it through one
+path per language (`config.ClientToken()`, `get_client_token`,
+`harnessClientHello()`). A new client that dials the daemon must send it, or
+the hello is refused by name. Nothing is pushed before that hello: hub
+registration and `initial_state` both happen in `admitClient`, so an
+unauthorized connection sees no broadcast at all, not merely refused commands.
+See `docs/glossary.md`.
 
 ## Cross-cutting contracts
 

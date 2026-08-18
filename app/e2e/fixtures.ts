@@ -5,7 +5,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as net from 'net';
-import { e2ePorts, resolveAttnBinaryPath } from './profileEnv';
+import { E2E_CLIENT_TOKEN, e2ePorts, resolveAttnBinaryPath } from './profileEnv';
 import { waitForDaemonSocket } from './daemonReadiness';
 import { WHATS_NEW_ID, WHATS_NEW_STORAGE_KEY } from '../src/hooks/useWhatsNew';
 
@@ -183,7 +183,12 @@ async function startDaemon(ghUrl: string): Promise<{ proc: ChildProcess; socketP
     env: {
       ...process.env,
       PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+      // The throwaway daemon is routed entirely by these explicit paths, so it
+      // must not also claim the surrounding shell's profile: a profile whose
+      // resolved paths are somebody else's is refused (ValidateProfileRouting).
+      ATTN_PROFILE: '',
       ATTN_DATA_DIR: tempDir,
+      ATTN_CLIENT_TOKEN: E2E_CLIENT_TOKEN,
       ATTN_WS_PORT: TEST_DAEMON_PORT, // Use test port to avoid conflicts with production daemon
       ATTN_SOCKET_PATH: socketPath, // Test isolation: separate socket
       ATTN_DB_PATH: dbPath, // Test isolation: separate database
@@ -273,7 +278,10 @@ function createManagedDaemon(ghUrl: string): ManagedDaemon {
       env: {
         ...process.env,
         PATH: `${stubs.binDir}${path.delimiter}${process.env.PATH}`,
+        // Same reason as the fixture daemon above: explicit paths, no profile.
+        ATTN_PROFILE: '',
         ATTN_DATA_DIR: tempDir,
+        ATTN_CLIENT_TOKEN: E2E_CLIENT_TOKEN,
         ATTN_WS_PORT: TEST_DAEMON_PORT,
         ATTN_SOCKET_PATH: socketPath,
         ATTN_DB_PATH: dbPath,

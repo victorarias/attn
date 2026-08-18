@@ -76,6 +76,11 @@ export type DriverSpawnParams = {
   effort?: string;
   initial_prompt?: string;
   metadata?: unknown;
+  // attn's promoted auto-mode config, in the raw snake_case shape
+  // automode/config.ts parses (enabled_default, environment, allow, hard_deny,
+  // classifier_models/classifier_model, escalation_models/escalation_model).
+  // Absent when the daemon sent none.
+  auto_mode?: unknown;
 };
 
 export type DriverSpawnResult = {

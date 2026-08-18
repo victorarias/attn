@@ -110,8 +110,12 @@ type Daemon struct {
 	pidFile          *os.File // Held open with flock for exclusive access
 	dataRoot         string
 	daemonInstanceID string
-	store            *store.Store
-	automationMu     sync.Mutex // serializes idempotent ensure/adopt delivery per profile
+	// clientToken gates the WebSocket port, which has no file permissions of its
+	// own. Read once at startup: every client_hello compares against it, and the
+	// file it came from is what the refusal names.
+	clientToken  string
+	store        *store.Store
+	automationMu sync.Mutex // serializes idempotent ensure/adopt delivery per profile
 	// wsAutomationMutationTimeout bounds how long a WS-originated automation
 	// mutation (set_enabled) waits to acquire automationMu before aborting
 	// without mutating. 0 resolves to defaultWSAutomationMutationTimeout via
@@ -1038,6 +1042,13 @@ func (d *Daemon) Start() error {
 			return fmt.Errorf("ensure daemon instance id: %w", err)
 		}
 		d.daemonInstanceID = instanceID
+	}
+	if d.clientToken == "" {
+		token, err := config.EnsureClientToken(d.dataRoot)
+		if err != nil {
+			return fmt.Errorf("ensure client token: %w", err)
+		}
+		d.clientToken = token
 	}
 	if err := d.ensureEnrollment(); err != nil {
 		return fmt.Errorf("ensure enrollment record: %w", err)
@@ -2747,6 +2758,18 @@ func (d *Daemon) handleConnection(conn net.Conn) {
 		d.handleAppRuntimeRestart(conn, msg.(*protocol.AppRuntimeRestartMessage))
 	case protocol.CmdAppWatch: // wire: app_watch
 		d.handleAppWatch(conn, msg.(*protocol.AppWatchMessage))
+	// Auto mode's agent-reachable verbs. automode_promote and automode_discard
+	// are deliberately absent: they exist on the WebSocket alone.
+	case protocol.CmdAutoModeShow: // wire: automode_show
+		d.handleAutoModeShow(conn, msg.(*protocol.AutoModeShowMessage))
+	case protocol.CmdAutoModeEnvAdd: // wire: automode_env_add
+		d.handleAutoModeEnvAdd(conn, msg.(*protocol.AutoModeEnvAddMessage))
+	case protocol.CmdAutoModeEnvRemove: // wire: automode_env_remove
+		d.handleAutoModeEnvRemove(conn, msg.(*protocol.AutoModeEnvRemoveMessage))
+	case protocol.CmdAutoModePropose: // wire: automode_propose
+		d.handleAutoModePropose(conn, msg.(*protocol.AutoModeProposeMessage))
+	case protocol.CmdAutoModeDenials: // wire: automode_denials
+		d.handleAutoModeDenials(conn, msg.(*protocol.AutoModeDenialsMessage))
 	case protocol.CmdTicketCreate: // wire: ticket_create
 		d.handleTicketCreate(conn, msg.(*protocol.TicketCreateMessage))
 	case protocol.CmdTicketComment: // wire: ticket_comment

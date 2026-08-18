@@ -426,6 +426,7 @@ describe('worktree cleanup prompt', () => {
         expect.stringMatching(/^workspace-/),
         undefined,
         undefined,
+        undefined,
       );
     });
     expect(screen.getByRole('dialog')).toHaveTextContent('Starting session');
@@ -476,6 +477,9 @@ describe('worktree cleanup prompt', () => {
         undefined,
         false,
         'workspace-s1',
+        undefined,
+        undefined,
+        undefined,
       );
     });
     const sessionId = createSession.mock.calls[0][2];

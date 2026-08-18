@@ -682,7 +682,7 @@ func TestSendClientHelloDeclaresExactlyTheRelaysCapabilities(t *testing.T) {
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	if err := sendClientHello(ctx, conn); err != nil {
+	if err := sendClientHello(ctx, conn, "remote-token"); err != nil {
 		t.Fatalf("sendClientHello() error = %v", err)
 	}
 
@@ -761,7 +761,7 @@ func TestPublishConnectionAndSendHelloOrdersBeforeForwardedCommands(t *testing.T
 	}
 	defer conn.Close(websocket.StatusNormalClosure, "")
 
-	if err := manager.publishConnectionAndSendHello(ctx, "endpoint-1", conn, nil); err != nil {
+	if err := manager.publishConnectionAndSendHello(ctx, "endpoint-1", conn, nil, "remote-token"); err != nil {
 		t.Fatalf("publishConnectionAndSendHello() error = %v", err)
 	}
 

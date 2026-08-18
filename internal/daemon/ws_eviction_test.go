@@ -11,6 +11,7 @@ import (
 
 	"nhooyr.io/websocket"
 
+	"github.com/victorarias/attn/internal/config"
 	"github.com/victorarias/attn/internal/protocol"
 )
 
@@ -24,6 +25,7 @@ func sendClientHelloAs(t *testing.T, conn *websocket.Conn, clientID string) {
 		"client_id":    clientID,
 		"version":      "protocol-" + protocol.ProtocolVersion,
 		"capabilities": []string{protocol.CapabilityWorkspaceSessions},
+		"client_token": config.ClientToken(),
 	}); err != nil {
 		t.Fatalf("send client hello: %v", err)
 	}

@@ -47,6 +47,9 @@ type wsClient struct {
 	// per-profile secret delivered only to the trusted main webview.
 	trustedTauriOrigin       bool
 	browserHostAuthenticated bool
+	// bearerAuthorized records that this connection cleared ATTN_WS_AUTH_TOKEN
+	// at the HTTP layer, which stands in for the client token — see handleWS.
+	bearerAuthorized bool
 
 	// PTY subscriptions keyed by session ID
 	attachedStreams map[string]ptybackend.Stream // session -> stream
@@ -59,6 +62,10 @@ type wsClient struct {
 	tileContentPending       map[string]time.Time
 	tileContentMu            sync.RWMutex
 
+	// admitted guards hub registration and the initial_state push, which happen
+	// when client_hello passes rather than when the socket opens. A client that
+	// helloes twice is still admitted once.
+	admitted sync.Once
 	// Identity + capabilities declared via client_hello.
 	clientKind    string
 	clientVersion string
@@ -402,7 +409,6 @@ type outboundMessage struct {
 type wsHub struct {
 	clients    map[*wsClient]bool
 	broadcast  chan outboundMessage
-	register   chan *wsClient
 	unregister chan *wsClient
 	mu         sync.RWMutex
 	// evictions remembers, per client_id, why the hub hung up — read back on the
@@ -432,7 +438,6 @@ func newWSHub() *wsHub {
 	return &wsHub{
 		clients:    make(map[*wsClient]bool),
 		broadcast:  make(chan outboundMessage, 256),
-		register:   make(chan *wsClient),
 		unregister: make(chan *wsClient),
 		logf:       func(format string, args ...interface{}) {}, // no-op by default
 	}
@@ -456,19 +461,14 @@ func previewBinaryForLog(data []byte) string {
 func (h *wsHub) run() {
 	for {
 		select {
-		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			h.mu.Unlock()
-
 		case client := <-h.unregister:
 			h.mu.Lock()
-			if _, ok := h.clients[client]; ok {
-				delete(h.clients, client)
-				client.closeSendChannel()
-				// Cleanup git status subscription
-				client.stopGitStatusPoll()
-			}
+			delete(h.clients, client)
+			// A connection refused at client_hello was never in the map, and
+			// its write pump still has to be let go. Both calls are idempotent,
+			// so the eviction path having run first costs nothing.
+			client.closeSendChannel()
+			client.stopGitStatusPoll()
 			h.mu.Unlock()
 
 		case message := <-h.broadcast:
@@ -496,6 +496,15 @@ func (h *wsHub) run() {
 			h.mu.Unlock()
 		}
 	}
+}
+
+// add takes a client into the fan-out, synchronously: from the caller's next
+// line the client is receiving broadcasts. Its counterpart is asynchronous
+// because a disconnect is discovered on the read pump, not asked for.
+func (h *wsHub) add(client *wsClient) {
+	h.mu.Lock()
+	h.clients[client] = true
+	h.mu.Unlock()
 }
 
 // Broadcast sends an event to all connected clients
@@ -715,6 +724,11 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "forbidden origin", http.StatusForbidden)
 		return
 	}
+	// An operator-set bearer means this port was deliberately exposed beyond
+	// loopback (tailscale serve). Clearing it proves the same thing the client
+	// token proves, at the layer that fits the caller: a browser served from
+	// that port cannot read a file on the daemon's disk.
+	bearerAuthorized := false
 	if required := config.WSAuthToken(); required != "" {
 		provided := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 		if provided == "" {
@@ -724,6 +738,7 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
+		bearerAuthorized = true
 	}
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
@@ -745,16 +760,17 @@ func (d *Daemon) handleWS(w http.ResponseWriter, r *http.Request) {
 		recv:               make(chan []byte, 256), // buffer for incoming messages
 		connectedAt:        time.Now(),
 		trustedTauriOrigin: isTrustedTauriOrigin(origin),
+		bearerAuthorized:   bearerAuthorized,
 		attachedStreams:    make(map[string]ptybackend.Stream),
 		attachedRemote:     make(map[string]struct{}),
 		pendingRemote:      make(map[string]struct{}),
 	}
 
-	d.wsHub.register <- client
-	d.logf("WebSocket client connected (%d total)", d.wsHub.ClientCount())
-
-	// Send initial state unless recovery barrier is active.
-	d.scheduleInitialState(client)
+	// Not registered with the hub yet, and no initial_state: both wait for
+	// client_hello to present this profile's token. A connection the daemon has
+	// not authorized receives nothing it did not ask for — the hub is the only
+	// fan-out, so staying out of it is what keeps every broadcast away from it.
+	d.logf("WebSocket connection accepted, awaiting client_hello")
 
 	// Start ping keepalive (detects dead connections, keeps proxies happy)
 	done := make(chan struct{})
@@ -887,9 +903,25 @@ func (d *Daemon) sendOutboundBlocking(client *wsClient, message outboundMessage,
 // This runs in a dedicated goroutine to avoid blocking the read loop
 func (d *Daemon) wsMsgPump(client *wsClient) {
 	for data := range client.recv {
+		// A refused client_hello closes the send channel and leaves the write
+		// pump to deliver the refusal. Handling what the client had already
+		// pipelined behind that hello would answer with a second verdict — and
+		// the gates that hang up on their own would close the socket out from
+		// under the refusal that is still queued.
+		if client.sendChannelClosed() {
+			continue
+		}
 		d.handleClientMessage(client, data)
 	}
 	d.logf("WebSocket message pump exited")
+}
+
+// sendChannelClosed reports that the daemon has finished with this client and
+// is only waiting for the write pump to drain.
+func (c *wsClient) sendChannelClosed() bool {
+	c.sendMu.RLock()
+	defer c.sendMu.RUnlock()
+	return c.sendClosed
 }
 
 // The keepalive defaults, both carried over unchanged from when this loop was
@@ -1326,6 +1358,14 @@ func (d *Daemon) handleClientMessage(client *wsClient, data []byte) {
 		d.handleBusStatusGet(client, msg.(*protocol.BusStatusGetMessage))
 	case protocol.CmdBusSetConsumerEnabled: // wire: bus_set_consumer_enabled
 		d.handleBusSetConsumerEnabled(client, msg.(*protocol.BusSetConsumerEnabledMessage))
+	// Auto mode's app-only verbs. Promotion is here and nowhere else: a human in
+	// the app is the trust boundary a CLI caller cannot fake.
+	case protocol.CmdAutoModeGet: // wire: automode_get
+		d.handleAutoModeGet(client, msg.(*protocol.AutoModeGetMessage))
+	case protocol.CmdAutoModePromote: // wire: automode_promote
+		d.handleAutoModePromote(client, msg.(*protocol.AutoModePromoteMessage))
+	case protocol.CmdAutoModeDiscard: // wire: automode_discard
+		d.handleAutoModeDiscard(client, msg.(*protocol.AutoModeDiscardMessage))
 	case protocol.CmdPtyResize: // wire: pty_resize
 		d.handlePtyResize(client, msg.(*protocol.PtyResizeMessage))
 	case protocol.CmdKillSession: // wire: kill_session

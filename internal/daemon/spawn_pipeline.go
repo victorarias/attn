@@ -347,6 +347,21 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 			}
 			params.Instructions, plan.instructionsRollback = instructions, rollback
 		}
+		if req.pluginDriver.Capabilities["auto_mode"] {
+			cfg, err := d.store.GetAutoModeConfig()
+			if err != nil {
+				d.finishPluginSessionLaunch(msg.ID, false)
+				plan.rollback(d, msg.ID)
+				return &spawnOutcome{err: fmt.Errorf("read auto mode config: %w", err)}
+			}
+			// The launcher's per-session choice overrides the promoted default and
+			// nothing else: patterns and models stay as promoted. Absent means the
+			// session follows enabled_default, which is why the field is tri-state.
+			if msg.AutoMode != nil {
+				cfg.EnabledDefault = *msg.AutoMode
+			}
+			params.AutoMode = &cfg
+		}
 		result, err := d.resolvePluginDriverLaunch(req.pluginDriver, params, req.existingSession != nil && req.pluginDriver.Capabilities["resume"])
 		if err != nil {
 			d.finishPluginSessionLaunch(msg.ID, false)
@@ -403,6 +418,7 @@ func (d *Daemon) executeSpawn(req *spawnRequest, plan *spawnPlan) *spawnOutcome 
 		// runtime gets this.
 		intent.InitialPrompt = req.initialPrompt
 	}
+	intent.AutoMode = msg.AutoMode
 	d.store.SetLaunchIntent(session.ID, intent)
 	if err := d.spawnSessionRuntime(req, plan.spawnOpts); err != nil {
 		if req.existingSession == nil {

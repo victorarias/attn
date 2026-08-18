@@ -614,6 +614,30 @@ written by whoever tends it; a **crew handoff** is the member's day-line.
 Plan:
 [docs/plans/2026-08-11-the-crew-primitive.md](plans/2026-08-11-the-crew-primitive.md).
 
+## Client token
+
+The credential a client presents in `client_hello` to speak the daemon's
+protocol at all. The daemon mints it at first startup into its own profile's
+data directory as `client-token`, owner-only, and reuses it forever after so a
+restart never strands a client.
+
+It exists because the daemon's two front doors are gated differently: the unix
+socket has file permissions, and the loopback WebSocket port has nothing. The
+token gives the port the same gate. Per-profile is the point — the same binary
+serves every profile, so one profile's app cannot drive another's daemon.
+
+Distinct from the two tokens that already existed. The **browser host token**
+says *which* client is the trusted Tauri main webview, once it is already
+inside; `ATTN_WS_AUTH_TOKEN` is an operator-set HTTP bearer for a WS port
+deliberately exposed beyond loopback. The client token answers the earlier
+question: may this process speak here? — and a connection that already cleared
+the bearer is exempt from it, because that is the same question answered at the
+layer that fits a browser.
+
+`attn client-token` prints it. A refused hello names the file and the profile,
+so the fix is readable off the error. Plan:
+[docs/plans/2026-08-16-local-ws-client-token.md](plans/2026-08-16-local-ws-client-token.md).
+
 ## Home daemon
 
 A daemon that is **its own home** — standalone, complete, owning its garden,
@@ -815,3 +839,36 @@ conversation agent unchanged — and say **pi** for the engine underneath. On th
 wire and in the CLI the agent is `nisse` (`attn delegate --agent nisse`); its
 launch environment is the `ATTN_NISSE_*` block; the plugin that registers it is
 `plugins/attn-pi`, which also registers the PTY-backed `pi` agent.
+
+## Auto mode, proposals, and promotion
+
+**Auto mode** is pi's permission system: a static safety envelope (work inside
+the session's working directory runs free), a classifier for everything that
+reaches past it, and denials the agent answers conversationally rather than
+through a dialog. Design:
+[docs/plans/2026-08-16-pi-auto-mode.md](plans/2026-08-16-pi-auto-mode.md).
+
+Its **config** is daemon-owned and global: the environment prose the classifier
+reads about this machine, the allow and hard-deny patterns, the classifier and
+escalation models, and whether attn sessions start with auto mode on. A pi
+session is handed the config it launches with; changing it reaches the next
+session, not the running one.
+
+A **proposal** is a requested change to that config — an allow pattern, a hard
+deny, or a model — recorded and inert. **Promotion** is a human applying one in
+the attn app, and it is the only thing that changes what a session runs under.
+The asymmetry is the point: `attn automode allow …` is reachable by any agent
+and only ever proposes, while promotion has no CLI at all. An agent must not be
+able to write its own leash.
+
+Environment prose is the exception: `attn automode env add` edits it directly,
+because it describes the machine to the classifier rather than naming a rule
+that skips it.
+
+A **denial** is one call auto mode refused. The session reports it to attn,
+which keeps it in a bounded log, raises a notification naming what was blocked
+and why, and lists it under `attn automode denials`. Every denial says who
+decided — a static envelope rule, the classifier layer that answered
+(`classifier-2a`, `classifier-2b`), or the circuit breaker. A denial never
+stops the run: the agent is given the reason, and a plain reply approving the
+action is what lets it retry.

@@ -247,6 +247,7 @@ interface SplitSessionOptions {
   endpointId?: string | null;
   label?: string;
   yoloMode?: boolean;
+  autoMode?: boolean;
 }
 
 function paneIdForSession(sessionId: string): string {
@@ -989,7 +990,7 @@ function AppContent({
     agent?: SessionAgent,
     endpointId?: string,
     yoloMode = false,
-    options?: { chiefOfStaff?: boolean; resumeConversationFile?: string },
+    options?: { chiefOfStaff?: boolean; resumeConversationFile?: string; autoMode?: boolean },
   ) => {
     const sessionId = providedSessionId || crypto.randomUUID();
     const workspaceId = `workspace-${sessionId}`;
@@ -998,7 +999,7 @@ function AppContent({
     let paneAdded = false;
     try {
       await sendRegisterWorkspace(workspaceId, label, cwd, endpointId);
-      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff, options?.resumeConversationFile);
+      const createdSessionId = await createSession(label, cwd, sessionId, agent, endpointId, yoloMode, workspaceId, options?.chiefOfStaff, options?.resumeConversationFile, options?.autoMode);
       localCreated = true;
       // Capture spawn args synchronously, before any await that could let a daemon
       // sessions broadcast prune the just-created local session. At this point its
@@ -2083,6 +2084,9 @@ function AppContent({
         endpointId,
         agent === 'shell' ? false : options.yoloMode ?? activeSession.yoloMode,
         workspaceId,
+        undefined,
+        undefined,
+        agent === 'shell' ? undefined : options.autoMode,
       );
       const spawnArgs = takeSessionSpawnArgs(sessionId, 80, 24);
       await sendWorkspaceAddSessionPane(workspaceId, sessionId, label, { paneId: newPaneId, targetPaneId: paneId, direction });
@@ -2139,6 +2143,7 @@ function AppContent({
       yoloMode = false,
       chiefOfStaff = false,
       resumeConversationFile?: string,
+      autoMode?: boolean,
     ) => {
       const jobId = sessionCreationJobIdRef.current + 1;
       sessionCreationJobIdRef.current = jobId;
@@ -2175,6 +2180,7 @@ function AppContent({
           endpointId: endpointId ?? null,
           label: folderName,
           yoloMode,
+          autoMode,
         });
         return;
       }
@@ -2193,7 +2199,7 @@ function AppContent({
           selectedAgent,
           endpointId,
           yoloMode,
-          { chiefOfStaff, resumeConversationFile },
+          { chiefOfStaff, resumeConversationFile, autoMode },
         );
         setSessionCreationJob((current) => (
           current?.id === jobId
@@ -2218,6 +2224,7 @@ function AppContent({
     endpointId: string | undefined,
     agent: SessionAgent,
     yoloMode: boolean,
+    autoMode?: boolean,
   ) => {
     const endpointKey = endpointId || 'local';
     if (worktreeSessionCreateEndpointsRef.current.has(endpointKey)) {
@@ -2254,13 +2261,14 @@ function AppContent({
             endpointId: endpointId ?? null,
             label: folderName,
             yoloMode,
+            autoMode,
           });
           setSessionCreationJob((current) => (
             current?.id === jobId ? null : current
           ));
           return;
         }
-        const sessionId = await createWorkspaceSession(folderName, worktreePath, undefined, agent, endpointId, yoloMode);
+        const sessionId = await createWorkspaceSession(folderName, worktreePath, undefined, agent, endpointId, yoloMode, { autoMode });
         setSessionCreationJob((current) => (
           current?.id === jobId
             ? { ...current, label: folderName, path: worktreePath, phase: 'starting_session', sessionId }

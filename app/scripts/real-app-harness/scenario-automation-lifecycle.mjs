@@ -52,7 +52,7 @@ import { fileURLToPath } from 'node:url';
 import WebSocket from 'ws';
 import { parseCommonArgs, printCommonHelp, launchFreshAppAndConnect } from './common.mjs';
 import { createScenarioRunner } from './scenarioRunner.mjs';
-import { currentHarnessProfile, dataDirForProfile, resolveHarnessResources } from './harnessProfile.mjs';
+import { currentHarnessProfile, dataDirForProfile, harnessClientHello, resolveHarnessResources } from './harnessProfile.mjs';
 import { UiAutomationClient } from './uiAutomationClient.mjs';
 import { DaemonObserver } from './daemonObserver.mjs';
 import { captureFrontWindowScreenshot } from './nativeWindowCapture.mjs';
@@ -317,10 +317,9 @@ async function wsRequest(wsURL, message, event, timeoutMs = 30_000) {
     const timer = setTimeout(() => { ws.close(); reject(new Error(`timed out waiting for ${event}`)); }, timeoutMs);
     let ready = false;
     ws.once('open', () => ws.send(JSON.stringify({
-      cmd: 'client_hello',
-      client_kind: 'harness-automation-lifecycle',
-      version: `protocol-${readFrontendProtocolVersion()}`,
-      capabilities: ['workspace_sessions'],
+      ...harnessClientHello('harness-automation-lifecycle', {
+        version: `protocol-${readFrontendProtocolVersion()}`,
+      }),
     })));
     ws.on('message', (raw) => {
       const value = JSON.parse(raw.toString());

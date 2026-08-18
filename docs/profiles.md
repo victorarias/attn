@@ -7,9 +7,10 @@ agents run attn — and its tests — side by side without colliding.
 **One knob: `ATTN_PROFILE`.** Set it once in a shell and every entrypoint (CLI,
 daemon, frontend e2e, real-app harness, build) targets the same isolated world.
 You never set per-entrypoint profile variables by hand. `profile-env` first
-clears inherited explicit routing overrides (`ATTN_SOCKET_PATH`, `ATTN_DB_PATH`,
-`ATTN_CONFIG_PATH`, `ATTN_WS_PORT`, and `ATTN_PLUGIN_DIR`) so the selected profile
-actually wins, including inside an attn-managed session.
+clears inherited explicit routing overrides (`ATTN_DATA_DIR`,
+`ATTN_SOCKET_PATH`, `ATTN_DB_PATH`, `ATTN_CONFIG_PATH`, `ATTN_PLUGIN_DIR`, and
+`ATTN_WS_PORT`) so the selected profile actually wins, including inside an
+attn-managed session.
 
 ```
 attn profile-env agent7 | source     # fish:  set ATTN_PROFILE=agent7
@@ -38,6 +39,38 @@ It is a per-process scoping override, not a profile. `attn profile resolve`
 and `attn profile clean` deliberately keep reporting and operating on the
 profile's canonical directories and do not honor it, so under `ATTN_DATA_DIR`
 the live process's runtime paths differ from `resolve`'s output by design.
+
+## The routing fence: a profile never touches another profile's world
+
+Because an explicit override outranks `ATTN_PROFILE`, the two can contradict
+each other: the profile name says `agent7` while every resolved path says
+production. That combination is never intentional, and it is not a scoping
+override — it is an isolation failure. On 2026-08-17 an inherited production
+`ATTN_DATA_DIR` let `make install PROFILE=fb2lists` take the production PID
+lock and run migrations on the production database.
+
+So `ATTN_PROFILE` set alongside a data dir, socket, database, config path,
+plugin dir, or websocket port that is not that profile's is refused, at the
+CLI entry point and again before the daemon boots — before anything opens a
+database, takes the PID lock, binds a socket, or stops another daemon. Nothing
+is corrected: guessing which half was meant is how this gets worse.
+
+```
+$ ATTN_PROFILE=fb2lists attn daemon ensure
+ATTN_PROFILE=fb2lists disagrees with the routing this process resolved.
+  profile fb2lists is /Users/victor/.attn-fb2lists (port 27441), but:
+    ATTN_DATA_DIR    = /Users/victor/.attn
+    ATTN_SOCKET_PATH = /Users/victor/.attn/attn.sock
+    ...
+  Fix: env -u ATTN_DATA_DIR … ATTN_PROFILE=fb2lists <command>
+  Or clear them in your shell: eval "$(attn profile-env fb2lists)"
+```
+
+`ATTN_DATA_DIR` with **no** `ATTN_PROFILE` is untouched by this — that is the
+test/harness scoping shape above, and it stays legal. `attn profile` is the one
+command that still runs under the contradiction: it prints the same conflict as
+a warning, so there is always something that explains it and `attn profile
+clean` still works.
 
 ## The single authority: `attn profile resolve`
 

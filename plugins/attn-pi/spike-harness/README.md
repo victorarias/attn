@@ -1,6 +1,6 @@
 # pi SDK spike harness — the pin-bump gate
 
-Six scenarios that drive pi's SDK directly, without attn. They are the evidence
+Seven scenarios that drive pi's SDK directly, without attn. They are the evidence
 behind the headless host's design, and they are the gate a pi version bump has
 to pass: run them against the new pin, diff the receipts against the ones
 recorded in `docs/grounding/pi-plugins.md` and
@@ -26,6 +26,7 @@ bun s1-smoke.js
 | `s5-child.js` | what happens to pi's tool subprocesses |
 | `s5-crash-revive.js`, `s5b-crash-revive.js` | the orphan-on-hard-kill receipt: killing the host strands the tool subprocesses, which is why attn's daemon owns the host's process group and kills the group |
 | `s6-memory-slope.js` | memory over a long session |
+| `s7-classifier-receipt.js` | auto-mode classifier latency/cost/quality across candidate models (receipt behind the auto-mode plan's model defaults) |
 
 Each scenario writes JSONL to `logs/` and pi session files to `sessions/`, both
 gitignored: the scripts are the gate, what they produce is per-run. Session

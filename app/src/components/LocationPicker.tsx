@@ -78,13 +78,14 @@ interface LocationPickerProps {
     yoloMode?: boolean,
     chiefOfStaff?: boolean,
     resumeConversationFile?: string,
+    autoMode?: boolean,
   ) => void;
   onGetRecentLocations?: (endpointId?: string) => Promise<{ locations: RecentLocation[]; home_path?: string }>;
   onBrowseDirectory?: (inputPath: string, endpointId?: string) => Promise<BrowseDirectoryResult>;
   onInspectPath?: (path: string, endpointId?: string) => Promise<InspectPathResult>;
   onGetRepoInfo?: (mainRepo: string, endpointId?: string) => Promise<{ success: boolean; info?: BackendRepoInfo; error?: string }>;
   onCreateWorktree?: (mainRepo: string, branch: string, path?: string, startingFrom?: string, endpointId?: string) => Promise<{ success: boolean; path?: string; error?: string }>;
-  onCreateWorktreeSession?: (mainRepo: string, branch: string, startingFrom: string, endpointId: string | undefined, agent: SessionAgent, yoloMode: boolean) => void;
+  onCreateWorktreeSession?: (mainRepo: string, branch: string, startingFrom: string, endpointId: string | undefined, agent: SessionAgent, yoloMode: boolean, autoMode?: boolean) => void;
   onDeleteWorktree?: (path: string, endpointId?: string, options?: { force?: boolean }) => Promise<{ success: boolean; error?: string }>;
   onError?: (message: string) => void;
   projectsDirectory?: string;
@@ -127,6 +128,12 @@ const MAX_RECENT_LOCATIONS = 10;
 const SESSION_AGENT_KEY = 'new_session_agent';
 const SESSION_YOLO_KEY = 'new_session_yolo';
 const SESSION_DESTINATION_KEY = 'new_session_destination';
+// READ-ONLY, daemon-computed: the promoted auto mode config's enabled_default.
+// The toggle starts here so the picker shows what a session would get, and the
+// launcher's answer is always sent explicitly — a default that moves later must
+// not silently move a session that was already launched.
+const AUTOMODE_DEFAULT_KEY = 'automode_enabled_default';
+const AUTOMODE_CAPABILITY = 'auto_mode';
 const LOCAL_TARGET = '__local__';
 const TERMINAL_AGENT: SessionAgent = 'shell';
 const TARGET_SHORTCUT_KEYS = ['q', 'w', 'e', 'r', 'a', 's', 'd', 'f', 'g', 'z', 'x', 'c', 'v', 'b'];
@@ -293,6 +300,8 @@ export function LocationPicker({
   const [targetId, setTargetId] = useState(LOCAL_TARGET);
   const [yoloMode, setYoloMode] = useState(false);
   const [chiefOfStaff, setChiefOfStaff] = useState(false);
+  const [autoMode, setAutoMode] = useState(true);
+  const autoModeTouchedRef = useRef(false);
   // The conversation this session will pick up from, '' for a fresh one.
   const [resumeFile, setResumeFile] = useState('');
   const [pastConversations, setPastConversations] = useState<PastConversation[]>([]);
@@ -439,6 +448,10 @@ export function LocationPicker({
 
   const savedAgent = normalizeAgent(settings[SESSION_AGENT_KEY]);
   const yoloSupported = Boolean(agentCapabilities[agent]?.yolo);
+  // Only a driver that advertises auto_mode is handed the config at spawn, so
+  // only its sessions have anything to toggle.
+  const autoModeSupported = Boolean(agentCapabilities[agent]?.[AUTOMODE_CAPABILITY]);
+  const autoModeDefault = parseBooleanSetting(settings[AUTOMODE_DEFAULT_KEY]) ?? true;
   // The "create as chief" toggle is offered only when no chief exists yet (the
   // role is single-holder), the selected agent has a guidance launch path
   // (claude/codex only, matching the daemon's agentSupportsChiefReload gate), and
@@ -507,6 +520,16 @@ export function LocationPicker({
       setChiefOfStaff(false);
     }
   }, [chiefToggleEligible]);
+
+  // The toggle follows the promoted default only until someone answers for
+  // themselves. The picker can open before the settings snapshot lands, so a
+  // default arriving late must still move an untouched toggle — but once a
+  // human has flipped it, a default that changes underneath must not launch the
+  // opposite of what they chose.
+  useEffect(() => {
+    if (autoModeTouchedRef.current) return;
+    setAutoMode((prev) => (prev === autoModeDefault ? prev : autoModeDefault));
+  }, [autoModeDefault]);
 
   // The listing is read once per opening of the bar, and dropped when the bar
   // goes away — switching agent or target must not leave a resume selected that
@@ -671,10 +694,13 @@ export function LocationPicker({
       yoloMode && yoloSupported,
       chiefOfStaff && chiefToggleEligible,
       resumeEligible && resumeFile !== '' ? resumeFile : undefined,
+      autoModeSupported ? autoMode : undefined,
     );
     onClose();
   }, [
     agent,
+    autoMode,
+    autoModeSupported,
     chiefOfStaff,
     chiefToggleEligible,
     effectiveAgentAvailability,
@@ -905,6 +931,7 @@ export function LocationPicker({
         selectedEndpointId,
         selectedAgent,
         yoloMode && yoloSupported,
+        autoModeSupported ? autoMode : undefined,
       );
       onClose();
       return;
@@ -941,6 +968,8 @@ export function LocationPicker({
     rememberRepoDestination,
     repoRootPath,
     agent,
+    autoMode,
+    autoModeSupported,
     effectiveAgentAvailability,
     selectedEndpointId,
     setSelectedPathFromPhysical,
@@ -1103,6 +1132,30 @@ export function LocationPicker({
             </div>
           </div>
         </div>
+        {autoModeSupported && (
+          <div className="picker-chief-bar">
+            <div className="picker-agent-label">AUTO MODE</div>
+            <div className="picker-chief-controls">
+              <div className="agent-toggle">
+                <button
+                  type="button"
+                  className={`agent-option ${autoMode ? 'active' : ''}`}
+                  data-testid="location-picker-automode-toggle"
+                  role="switch"
+                  aria-checked={autoMode}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    autoModeTouchedRef.current = true;
+                    setAutoMode((prev) => !prev);
+                  }}
+                  title="Judge calls that reach outside this session's directory against what the conversation asked for, instead of running everything"
+                >
+                  <span className="agent-option-name">{autoMode ? 'On' : 'Off'}</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         {chiefToggleEligible && (
           <div className="picker-chief-bar">
             <div className="picker-agent-label">CHIEF OF STAFF</div>

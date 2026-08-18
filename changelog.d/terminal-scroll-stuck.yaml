@@ -1,0 +1,11 @@
+kind: fixed
+area: terminal
+change: >
+  Scrolling a terminal no longer gets stuck after a command prints a
+  screenful of wrapped output. The check for whether a program wants the
+  wheel itself read four bytes out of the terminal model where the ABI
+  writes one, so it picked up the leftovers of the previous read — and
+  the reader running just before a wheel event was the hover-link
+  detector, which leaves a 64-bit row handle there. A pane with no mouse
+  tracking at all reported that it had some, and every wheel event went
+  to the running program as arrow keys instead of moving the viewport.

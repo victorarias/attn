@@ -1,0 +1,10 @@
+kind: added
+area: cli
+change: >
+  `attn automode` configures pi's auto mode: `show` reads the effective
+  policy, `env add`/`env remove` edit the prose the classifier reads about
+  this machine, `denials` lists refused calls, and `allow`, `deny` and
+  `model` record a proposal for review. Those three deliberately change
+  nothing on their own — a proposal only takes effect once a human promotes
+  it in the attn app, so an agent cannot write its own permissions. A pi
+  session is handed the promoted config when it launches.

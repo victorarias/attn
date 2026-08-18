@@ -15,6 +15,7 @@ const SETTINGS_SECTION_IDS = [
   'hygiene',
   'backgroundTasks',
   'eventBus',
+  'autoMode',
 ] as const;
 
 export type SettingsAutomationSectionID = (typeof SETTINGS_SECTION_IDS)[number];

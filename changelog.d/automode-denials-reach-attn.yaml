@@ -1,0 +1,9 @@
+kind: added
+area: automode
+change: >
+  A call auto mode refuses in a pi session now reaches attn. The denial
+  arrives as a notification naming what was blocked and why, and
+  `attn automode denials` lists the recent ones with the session, the
+  blocked call, the reason, and which rule or classifier layer decided.
+  The run is never interrupted: the agent gets the reason, adapts or asks,
+  and a plain reply in the conversation is still the approval.

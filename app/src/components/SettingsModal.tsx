@@ -12,6 +12,8 @@ import {
 } from '../hooks/useDaemonSocket';
 import { BackgroundTasksSettings } from './BackgroundTasksSettings';
 import { EventBusSettings } from './EventBusSettings';
+import { AutoModeSettings } from './AutoModeSettings';
+import { useAutoModePolicy } from '../hooks/useAutoModePolicy';
 import {
   assertValidSettingsSectionID,
   setSettingsAutomationHandle,
@@ -100,7 +102,7 @@ interface SettingsModalProps {
   taskChangeSignal?: number;
 }
 
-type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks' | 'eventBus';
+type SettingsSectionID = 'general' | 'connectivity' | 'plugins' | 'agents' | 'data' | 'review' | 'hygiene' | 'backgroundTasks' | 'eventBus' | 'autoMode';
 
 // Fallback shown when the daemon has not yet sent a normalized value; the daemon
 // mirrors this default (agent.DefaultContextWindowCap) for both context-window caps.
@@ -203,7 +205,23 @@ export function SettingsModal({
   retryTask,
   taskChangeSignal,
 }: SettingsModalProps) {
-  const { sendGetSettings, sendBusStatusGet, sendBusSetConsumerEnabled } = useDaemonApi();
+  const {
+    sendGetSettings,
+    sendBusStatusGet,
+    sendBusSetConsumerEnabled,
+    sendAutoModeGet,
+    sendAutoModePromote,
+    sendAutoModeDiscard,
+  } = useDaemonApi();
+  // Read here rather than inside the section: the nav badge needs the pending
+  // count before the section mounts, and one read serves both. Gated on the
+  // modal being open, so a closed panel holds nothing.
+  const autoModePolicy = useAutoModePolicy({
+    enabled: isOpen,
+    getState: sendAutoModeGet,
+    promoteProposal: sendAutoModePromote,
+    discardProposal: sendAutoModeDiscard,
+  });
   const [projectsDir, setProjectsDir] = useState(settings.projects_directory || '');
   const [notebookRoot, setNotebookRoot] = useState(settings['notebook.root'] || '');
   const [agentExecutables, setAgentExecutables] = useState<Record<SessionAgent, string>>({});
@@ -1087,6 +1105,14 @@ export function SettingsModal({
           count: 1,
           keywords: 'event bus log durable facts producers consumers cursor lag retention compaction trim stalled disabled kill switch seq',
         },
+        {
+          id: 'autoMode',
+          label: 'Auto mode',
+          title: 'Auto mode',
+          description: "pi's safety envelope: the policy sessions launch with, and the rule changes agents have proposed.",
+          count: autoModePolicy.pendingCount,
+          keywords: 'auto mode automode pi safety envelope classifier proposals promote discard allow deny hard deny patterns policy permissions',
+        },
       ],
     },
     {
@@ -1135,6 +1161,7 @@ export function SettingsModal({
     orderedAgentList.length,
     pluginIssues.length,
     plugins.length,
+    autoModePolicy.pendingCount,
   ]);
 
   const filteredNavGroups = useMemo(() => {
@@ -1205,6 +1232,21 @@ export function SettingsModal({
               {modelCaptureEnabled ? 'capture on' : 'capture off'}
             </span>
             <span className="settings-pill">{modelCaptureBytes}</span>
+          </>
+        );
+      case 'autoMode':
+        return (
+          <>
+            <span className={`settings-pill ${autoModePolicy.pendingCount === 0 ? 'good' : 'warn'}`}>
+              {autoModePolicy.pendingCount === 0
+                ? 'nothing waiting'
+                : `${autoModePolicy.pendingCount} proposal${autoModePolicy.pendingCount === 1 ? '' : 's'} waiting`}
+            </span>
+            {autoModePolicy.state && (
+              <span className="settings-pill">
+                {autoModePolicy.state.config.enabled_default ? 'on by default' : 'off by default'}
+              </span>
+            )}
           </>
         );
       case 'hygiene':
@@ -2845,6 +2887,8 @@ export function SettingsModal({
         return renderBackgroundTasksSettings();
       case 'eventBus':
         return renderEventBusSettings();
+      case 'autoMode':
+        return <AutoModeSettings policy={autoModePolicy} />;
       case 'connectivity':
       default:
         return renderConnectivitySettings();
@@ -2893,7 +2937,9 @@ export function SettingsModal({
                       onClick={() => setSelectedSection(item.id)}
                     >
                       <span>{item.label}</span>
-                      <span className="settings-nav-count">{item.count}</span>
+                      <span className={`settings-nav-count${item.id === 'autoMode' && item.count > 0 ? ' waiting' : ''}`}>
+                        {item.count}
+                      </span>
                     </button>
                   ))}
                 </div>

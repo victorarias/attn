@@ -1112,6 +1112,64 @@ CREATE INDEX IF NOT EXISTS idx_app_invocations_started ON app_invocations(starte
 	// Applied by applyMigration106, whose ALTER is column-guarded.
 	{106, "add durable per-session token cost state", ``},
 	{107, "record which ticket event a delivery covered", ``},
+	// Auto mode's home, at 109 because 108 is burned: a branch still in flight
+	// applied it to a production database before merging, and migrateDB skips
+	// anything at or below the highest version already applied. That cuts both
+	// ways — a database created after this lands sits at 109, so a later 108
+	// would be skipped there too. Whatever that branch ships must renumber
+	// above this one.
+	//
+	// One promoted config row, the proposals waiting on a human, and the denials
+	// slice 5 reports. The split is the security design: the CLI writes
+	// proposals, only the app promotes one into the config row, so an agent
+	// cannot write its own leash. Empty model columns mean "whichever default
+	// ships" — automode.Defaults() resolves them at read.
+	{109, "auto mode config, proposals and denials", `CREATE TABLE IF NOT EXISTS automode_config (
+    id               INTEGER PRIMARY KEY CHECK (id = 1),
+    enabled_default  INTEGER NOT NULL DEFAULT 1,
+    environment      TEXT NOT NULL DEFAULT '[]',
+    allow_patterns   TEXT NOT NULL DEFAULT '[]',
+    hard_deny        TEXT NOT NULL DEFAULT '[]',
+    classifier_model TEXT NOT NULL DEFAULT '',
+    escalation_model TEXT NOT NULL DEFAULT '',
+    updated_at       TEXT NOT NULL DEFAULT ''
+);
+CREATE TABLE IF NOT EXISTS automode_proposals (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind        TEXT NOT NULL,
+    target      TEXT NOT NULL DEFAULT '',
+    value       TEXT NOT NULL,
+    proposed_by TEXT NOT NULL DEFAULT '',
+    state       TEXT NOT NULL DEFAULT 'pending',
+    created_at  TEXT NOT NULL,
+    resolved_at TEXT NOT NULL DEFAULT ''
+);
+-- The review list: everything still pending, oldest first.
+CREATE INDEX IF NOT EXISTS idx_automode_proposals_state ON automode_proposals(state, id);
+CREATE TABLE IF NOT EXISTS automode_denials (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL DEFAULT '',
+    tool       TEXT NOT NULL DEFAULT '',
+    signature  TEXT NOT NULL DEFAULT '',
+    reason     TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_automode_denials_recent ON automode_denials(id DESC);`},
+	// Applied by applyMigration110, whose ALTER is column-guarded.
+	{110, "record which rule denied an auto mode call", ``},
+	// The review list says who asked, so one asker's pending row is what the
+	// dedupe collapses — a second session asking the same thing is a second ask.
+	// The index is what makes that true against the database rather than only
+	// inside the process that happens to hold the store's lock.
+	{111, "one pending auto mode proposal per asker", `CREATE UNIQUE INDEX IF NOT EXISTS
+    idx_automode_proposals_pending_ask
+    ON automode_proposals(kind, target, value, proposed_by)
+    WHERE state = 'pending';`},
+	// 112 and 113 are burned: they are in flight on another branch and already
+	// applied to real databases, so this one is 114.
+	// Applied by applyMigration114, which carries each single model into its
+	// layer's list and drops the column it came from.
+	{114, "auto mode judges from an ordered model list per layer", ``},
 }
 
 // migration99SQL is everything migration 99 does after its guarded ALTER.
@@ -1508,6 +1566,16 @@ func migrateDB(db *sql.DB, dbPath string) error {
 			}
 		} else if m.version == 107 {
 			if err := applyMigration107(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 110 {
+			if err := applyMigration110(tx); err != nil {
+				tx.Rollback()
+				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
+			}
+		} else if m.version == 114 {
+			if err := applyMigration114(tx); err != nil {
 				tx.Rollback()
 				return fmt.Errorf("migration %d (%s): %w", m.version, m.desc, err)
 			}
@@ -2689,6 +2757,66 @@ func applyMigration103(tx *sql.Tx) error {
 
 // applyMigration106 adds the opaque per-session cost ledger. The guard makes
 // schema-migration rewind tests and interrupted upgrade recovery idempotent.
+// applyMigration110 records who refused an auto mode call: a static envelope
+// rule ("hard-deny", "unknown-tool"), the classifier layer that answered
+// ("classifier-2a", "classifier-2b"), "classifier-unavailable" when no
+// classifier model could be reached, or the circuit breaker.
+//
+// Guarded because a database can reach this with the column already there: a
+// migration test builds the current schema and rewinds the recorded version,
+// which replays this ALTER against a table that already carries it.
+func applyMigration110(tx *sql.Tx) error {
+	has, err := columnExists(tx, "automode_denials", "rule")
+	if err != nil || has {
+		return err
+	}
+	_, err = tx.Exec("ALTER TABLE automode_denials ADD COLUMN rule TEXT NOT NULL DEFAULT ''")
+	return err
+}
+
+// applyMigration114 gives each classifier layer an ordered model list. The
+// single model a machine had promoted becomes that list's one entry, and the
+// column it came from goes: two spellings of the same setting is how one of
+// them ends up stale, and the read resolves an empty list to the shipped
+// default exactly as it resolved an empty string.
+//
+// Every step is guarded on what the database actually has, because a migration
+// test builds the current schema and rewinds the recorded version, replaying
+// this against a table that already carries the lists.
+func applyMigration114(tx *sql.Tx) error {
+	for _, layer := range []struct{ single, list string }{
+		{"classifier_model", "classifier_models"},
+		{"escalation_model", "escalation_models"},
+	} {
+		hasList, err := columnExists(tx, "automode_config", layer.list)
+		if err != nil {
+			return err
+		}
+		if !hasList {
+			if _, err := tx.Exec(fmt.Sprintf(
+				"ALTER TABLE automode_config ADD COLUMN %s TEXT NOT NULL DEFAULT '[]'", layer.list)); err != nil {
+				return err
+			}
+		}
+		hasSingle, err := columnExists(tx, "automode_config", layer.single)
+		if err != nil {
+			return err
+		}
+		if !hasSingle {
+			continue
+		}
+		if _, err := tx.Exec(fmt.Sprintf(
+			"UPDATE automode_config SET %s = json_array(%s) WHERE %s != '' AND (%s = '' OR %s = '[]')",
+			layer.list, layer.single, layer.single, layer.list, layer.list)); err != nil {
+			return err
+		}
+		if _, err := tx.Exec(fmt.Sprintf("ALTER TABLE automode_config DROP COLUMN %s", layer.single)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func applyMigration106(tx *sql.Tx) error {
 	has, err := columnExists(tx, "sessions", "session_cost_json")
 	if err != nil || has {

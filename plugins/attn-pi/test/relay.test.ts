@@ -127,6 +127,7 @@ async function buildHarness(rpc: FakeRPC): Promise<{ driver: PiDriver; relay: Re
       suiteHello: (connection: RelayConnection, params: unknown) => driver.suiteHello(connection, params),
       suiteReportState: (params: unknown) => driver.suiteReportState(params),
       suiteReportStop: (params: unknown) => driver.suiteReportStop(params),
+      suiteReportDenial: (params: unknown) => driver.suiteReportDenial(params),
     },
   });
   driver = new PiDriver({ rpc: rpc as any, relay, suitePath, runCommand: fakeRunCommand() });
@@ -149,6 +150,7 @@ async function buildBareRelay(): Promise<{ relay: RelayServer; socketPath: strin
       },
       async suiteReportState() {},
       async suiteReportStop() {},
+      async suiteReportDenial() {},
     },
   });
   await relay.listen();
