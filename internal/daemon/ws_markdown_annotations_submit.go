@@ -104,7 +104,7 @@ func (d *Daemon) handleMarkdownAnnotationsSubmit(client *wsClient, msg *protocol
 		}
 		result.Status = annotationSubmitStatusDelivered
 	} else {
-		if _, err := d.appendSeedNote(targetSeed, payload, "", "", ""); err != nil {
+		if _, err := d.appendSeedNote(targetSeed, payload, "", "", "", nil); err != nil {
 			d.logf("markdown_annotations_submit: %s -> seed %s: note failed: %v", source.draftKey, targetSeed, err)
 			fail(err.Error())
 			return

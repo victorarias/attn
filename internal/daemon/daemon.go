@@ -509,6 +509,10 @@ type Daemon struct {
 	gardenBroadcastHook   func([]protocol.Seed, int)                // optional, tests only
 	gardenMintID          func() (string, error)                    // optional, tests only
 	gardenMintNoteID      func() (string, error)                    // optional, tests only
+	// gardenNotePageSize sizes the whole-log read's pages; zero means the store's
+	// own maximum. A test lowers it to walk several pages without writing a
+	// thousand notes.
+	gardenNotePageSize int
 
 	// automationsBroadcastHook mirrors workflowBroadcastHook for the automations
 	// WS surface (automations_broadcast.go): invoked before every

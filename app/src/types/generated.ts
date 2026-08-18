@@ -670,6 +670,7 @@ export interface AgentMsgMessage {
     cmd:               AgentMsgMessageCmd;
     content:           string;
     source_session_id: string;
+    target_seed_id?:   string;
     target_session_id: string;
     [property: string]: any;
 }
@@ -6086,6 +6087,7 @@ export interface SeedReadyResultObject {
 }
 
 export interface SeedShowResultObject {
+    artifacts:   Artifact[];
     handoff?:    Note;
     notes:       Note[];
     notes_total: number;
@@ -6405,6 +6407,7 @@ export interface SeedArtifactReference {
 }
 
 export interface SeedDocument {
+    artifacts:    Artifact[];
     children:     SeedElement[];
     notes:        Note[];
     notes_total:  number;
@@ -6434,6 +6437,7 @@ export interface SeedDocumentGetResultMessage {
 }
 
 export interface SeedDocumentGetResultMessageDocument {
+    artifacts:    Artifact[];
     children:     SeedElement[];
     notes:        Note[];
     notes_total:  number;
@@ -6519,6 +6523,7 @@ export interface SeedNote {
 }
 
 export interface SeedNoteMessage {
+    artifact?:          Artifact;
     body:               string;
     cmd:                SeedNoteMessageCmd;
     kind?:              string;
@@ -6658,6 +6663,7 @@ export enum SeedShowMessageCmd {
 }
 
 export interface SeedShowResult {
+    artifacts:   Artifact[];
     handoff?:    Note;
     notes:       Note[];
     notes_total: number;
@@ -13385,6 +13391,7 @@ const typeMap: any = {
         { json: "cmd", js: "cmd", typ: r("AgentMsgMessageCmd") },
         { json: "content", js: "content", typ: "" },
         { json: "source_session_id", js: "source_session_id", typ: "" },
+        { json: "target_seed_id", js: "target_seed_id", typ: u(undefined, "") },
         { json: "target_session_id", js: "target_session_id", typ: "" },
     ], "any"),
     "AgentMsgResult": o([
@@ -16738,6 +16745,7 @@ const typeMap: any = {
         { json: "seeds", js: "seeds", typ: a(r("SeedElement")) },
     ], "any"),
     "SeedShowResultObject": o([
+        { json: "artifacts", js: "artifacts", typ: a(r("Artifact")) },
         { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },
@@ -16971,6 +16979,7 @@ const typeMap: any = {
         { json: "url", js: "url", typ: u(undefined, "") },
     ], "any"),
     "SeedDocument": o([
+        { json: "artifacts", js: "artifacts", typ: a(r("Artifact")) },
         { json: "children", js: "children", typ: a(r("SeedElement")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },
@@ -16990,6 +16999,7 @@ const typeMap: any = {
         { json: "success", js: "success", typ: true },
     ], "any"),
     "SeedDocumentGetResultMessageDocument": o([
+        { json: "artifacts", js: "artifacts", typ: a(r("Artifact")) },
         { json: "children", js: "children", typ: a(r("SeedElement")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },
@@ -17041,6 +17051,7 @@ const typeMap: any = {
         { json: "seed_id", js: "seed_id", typ: "" },
     ], "any"),
     "SeedNoteMessage": o([
+        { json: "artifact", js: "artifact", typ: u(undefined, r("Artifact")) },
         { json: "body", js: "body", typ: "" },
         { json: "cmd", js: "cmd", typ: r("SeedNoteMessageCmd") },
         { json: "kind", js: "kind", typ: u(undefined, "") },
@@ -17126,6 +17137,7 @@ const typeMap: any = {
         { json: "seed_id", js: "seed_id", typ: "" },
     ], "any"),
     "SeedShowResult": o([
+        { json: "artifacts", js: "artifacts", typ: a(r("Artifact")) },
         { json: "handoff", js: "handoff", typ: u(undefined, r("Note")) },
         { json: "notes", js: "notes", typ: a(r("Note")) },
         { json: "notes_total", js: "notes_total", typ: 0 },

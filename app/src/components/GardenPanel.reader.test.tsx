@@ -42,6 +42,7 @@ function seedDocument(root: Seed, noteBody: string): SeedDocument {
       created_at: '2026-08-15T09:00:00Z',
     }] : [],
     notes_total: noteBody ? 1 : 0,
+    artifacts: [],
   };
 }
 
@@ -60,6 +61,9 @@ describe('GardenPanel seed reader drill', () => {
       artifact: { kind: 'markdown_file', path: '/repo/evidence.md' },
     });
     fetched.notes_total += 1;
+    // The set is the daemon's projection over the whole log, not something the
+    // panel recomputes from the notes it happens to have been sent.
+    fetched.artifacts = [{ kind: 'markdown_file', path: '/repo/evidence.md' }];
     const fetchSeedDocument = vi.fn().mockResolvedValue(fetched);
     const onOpenAsTile = vi.fn();
     const onOpenMarkdownArtifact = vi.fn();

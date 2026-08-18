@@ -761,9 +761,14 @@ model AgentPeekMessage {
 // attributed prompt, and delivers it into the target's conversation — the
 // sender never touches the target's PTY, so attribution cannot be forged
 // beyond what the sender puts in content.
+// Exactly one destination: a session (or crew member) by id, or a seed, whose
+// tender the daemon resolves. The caller decides which field it fills — a seed
+// id has a shape the CLI recognizes — so the daemon is handed authority instead
+// of a string to sniff.
 model AgentMsgMessage {
   cmd: "agent_msg";
-  target_session_id: string;    // full id or unique prefix
+  target_session_id: string;    // full id or unique prefix; empty when addressing a seed
+  target_seed_id?: string;      // deliver to this seed's tender
   source_session_id: string;    // who is speaking; the daemon composes from this
   content: string;
 }
@@ -4500,6 +4505,11 @@ model SeedShowResult {
   // whoever tends the seed next, so it is rendered before the seed itself and
   // not left to be recognised in a log.
   "handoff"?: SeedNote;
+  // The seed's current artifacts: every attach on its log that no later detach
+  // took back. The projection is the daemon's, computed over the whole log, so
+  // a bounded `notes` list here cannot make the set wrong and no client has to
+  // recompute it.
+  "artifacts": SeedArtifactReference[];
 }
 
 // Replace one seed's markdown body without moving its lifecycle or claim.
@@ -4533,6 +4543,11 @@ model SeedDocument {
   "children": Seed[];
   "notes": SeedNote[];
   "notes_total": int32;
+  // The seed's current artifacts: every attach on its log that no later detach
+  // took back. The projection is the daemon's, computed over the whole log, so
+  // a bounded `notes` list here cannot make the set wrong and no client has to
+  // recompute it.
+  "artifacts": SeedArtifactReference[];
 }
 
 model SeedDocumentGetResultMessage {
@@ -4626,10 +4641,13 @@ model SeedTransitionResult {
 // One entry on a seed's log: what happened and what was learned, written for
 // whoever tends the seed next. A note is anchored to the work and routed to
 // nobody — directed messages are their own surface.
-// Typed artifact association carried by future attach/detach log entries.
-// This reading-surface slice adds the readable shape only; no writer exists yet.
+// Typed artifact association carried by an attach or detach log entry. Each
+// kind names the fields that carry it and refuses the rest; the daemon
+// validates that shape and never reads meaning out of a string. Storage does
+// not move — the seed records the association only.
 model SeedArtifactReference {
-  // markdown_file | notebook | repository | url.
+  // markdown_file (path, optional repository) | notebook (notebook_document_id)
+  // | repository (repository and path) | url (url).
   "kind": string;
   "notebook_document_id"?: string;
   "repository"?: string;
@@ -4640,8 +4658,9 @@ model SeedArtifactReference {
 model SeedNote {
   "id": string;
   "seed_id": string;
-  // note or handoff. A handoff is written to whoever tends the seed next, and
-  // the freshest one is put in front of them by show and tend.
+  // note, handoff, attach or detach. A handoff is written to whoever tends the
+  // seed next, and the freshest one is put in front of them by show and tend;
+  // attach and detach are the only kinds that carry an artifact.
   "kind": string;
   "body": string;
   "author_session": string;
@@ -4659,6 +4678,9 @@ model SeedNoteMessage {
   // Omitted is a plain log entry, so a caller that never heard of kinds
   // writes a note. An unknown kind is refused, naming the whole set.
   "kind"?: string;
+  // Required on attach and detach, refused on every other kind. When the body
+  // is empty the daemon renders one from this reference.
+  "artifact"?: SeedArtifactReference;
 }
 
 model SeedNoteResult {

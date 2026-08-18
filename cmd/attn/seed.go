@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -50,6 +51,8 @@ func runSeed() {
 		runSeedTransition(os.Args[2], args)
 	case "note":
 		runSeedNote(args)
+	case "attach", "detach":
+		runSeedArtifact(os.Args[2], args)
 	case "notes":
 		runSeedNotes(args)
 	case "link", "unlink":
@@ -141,6 +144,14 @@ commands:
         successor on this seed: show renders the freshest one first and tend
         prints it on the claim, so it is read before any work.
 
+  attach <id> (--path <file> [--repo <repo>] | --notebook <id> | --url <u>) [-m "<why>"]
+        associate a document with the seed. Where the document lives does not
+        change — the seed records the association, and the seed's current
+        artifacts are every attach that has not been detached.
+
+  detach <id> (--path <file> [--repo <repo>] | --notebook <id> | --url <u>) [-m "<why>"]
+        take an association back. Name the same document the attach named.
+
   notes <id> [--limit <n>] [--json]
         the whole log, newest first. show renders the newest few and says
         how many more are here.
@@ -159,6 +170,10 @@ flags:
   --window <d>       the stale window, like 72h or 14d (ls --stale)
   -f <path>          the plot payload to read (plot; default stdin)
   --handoff          write a note to whoever tends the seed next (note)
+  --path <file>      a markdown document at this path (attach, detach)
+  --repo <name>      the repository that path lives in (attach, detach)
+  --notebook <id>    a Notebook document (attach, detach)
+  --url <url>        anything reachable by URL (attach, detach)
   --member <name>    the crew member asking, recorded as planter, tender or
                      note author
   --session <id>     the session asking (defaults to ATTN_SESSION_ID)
@@ -207,42 +222,50 @@ func seedFail(verb string, err error) {
 // best-effort: a headless caller with no session is a real case, and only the
 // commands that need a scope refuse it.
 type seedFlags struct {
-	fs      *flag.FlagSet
-	session *string
-	member  *string
-	json    *bool
-	all     *bool
-	tree    *bool
-	stale   *bool
-	window  *string
-	plot    *string
-	partOf  *string
-	file    *string
-	message *string
-	out     *string
-	limit   *int
-	handoff *bool
+	fs       *flag.FlagSet
+	session  *string
+	member   *string
+	json     *bool
+	all      *bool
+	tree     *bool
+	stale    *bool
+	window   *string
+	plot     *string
+	partOf   *string
+	file     *string
+	message  *string
+	out      *string
+	limit    *int
+	handoff  *bool
+	path     *string
+	repo     *string
+	notebook *string
+	url      *string
 }
 
 func newSeedFlags(verb string) *seedFlags {
 	fs := flag.NewFlagSet("seed "+verb, flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	return &seedFlags{
-		fs:      fs,
-		session: fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)"),
-		member:  fs.String("member", "", "crew member planting this seed"),
-		json:    fs.Bool("json", false, "print the result as JSON"),
-		all:     fs.Bool("all", false, "the whole garden, overriding a dispatched session's plot"),
-		tree:    fs.Bool("tree", false, "nest seeds under the crown they are part of"),
-		stale:   fs.Bool("stale", false, "only open seeds whose log has not moved for the window"),
-		window:  fs.String("window", "", "the stale window, like 72h or 14d"),
-		plot:    fs.String("plot", "", "scope to one plot, by its crown"),
-		partOf:  fs.String("part-of", "", "plant under this crown"),
-		file:    fs.String("f", "", "the plot payload to read (- or empty reads stdin)"),
-		message: fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
-		out:     fs.String("out", "", "file to write (- for stdout)"),
-		limit:   fs.Int("limit", 0, "how many log entries to read"),
-		handoff: fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
+		fs:       fs,
+		session:  fs.String("session", "", "session id (defaults to ATTN_SESSION_ID)"),
+		member:   fs.String("member", "", "crew member planting this seed"),
+		json:     fs.Bool("json", false, "print the result as JSON"),
+		all:      fs.Bool("all", false, "the whole garden, overriding a dispatched session's plot"),
+		tree:     fs.Bool("tree", false, "nest seeds under the crown they are part of"),
+		stale:    fs.Bool("stale", false, "only open seeds whose log has not moved for the window"),
+		window:   fs.String("window", "", "the stale window, like 72h or 14d"),
+		plot:     fs.String("plot", "", "scope to one plot, by its crown"),
+		partOf:   fs.String("part-of", "", "plant under this crown"),
+		file:     fs.String("f", "", "the plot payload to read (- or empty reads stdin)"),
+		message:  fs.String("m", "", "the seed's body, as markdown (- reads stdin)"),
+		out:      fs.String("out", "", "file to write (- for stdout)"),
+		limit:    fs.Int("limit", 0, "how many log entries to read"),
+		handoff:  fs.Bool("handoff", false, "write this note to whoever tends the seed next"),
+		path:     fs.String("path", "", "a markdown document at this path"),
+		repo:     fs.String("repo", "", "the repository the path lives in"),
+		notebook: fs.String("notebook", "", "a Notebook document, by its id"),
+		url:      fs.String("url", "", "anything reachable by URL"),
 	}
 }
 
@@ -555,6 +578,29 @@ func runSeedEdit(args []string) {
 	fmt.Printf("updated %s at revision %d\n", result.Seed.ID, result.Seed.Rev)
 }
 
+// fprintArtifacts renders the current set as a small block above the log, not
+// as entries in it: what a seed points at now is a state, and reading it out of
+// a timeline of attaches and detaches is work nobody should have to do.
+func fprintArtifacts(w io.Writer, artifacts []protocol.SeedArtifactReference) {
+	fmt.Fprintln(w, "artifacts:")
+	for _, artifact := range artifacts {
+		line := protocol.Deref(artifact.Path)
+		if line == "" {
+			line = protocol.Deref(artifact.NotebookDocumentID)
+		}
+		if line == "" {
+			line = protocol.Deref(artifact.URL)
+		}
+		if line == "" {
+			line = protocol.Deref(artifact.Repository)
+		}
+		if repo := protocol.Deref(artifact.Repository); repo != "" && repo != line {
+			line += " (" + repo + ")"
+		}
+		fmt.Fprintf(w, "  %s  %s\n", artifact.Kind, line)
+	}
+}
+
 // fprintSeedShow renders one seed for a reader. The handoff comes before the
 // seed, not after it: it was written to whoever is reading this, and a
 // continuity note under the body is a note nobody reads.
@@ -564,6 +610,10 @@ func fprintSeedShow(w io.Writer, result *protocol.SeedShowResult) {
 	if len(result.Relations) > 0 {
 		fmt.Fprintln(w)
 		fprintRelations(w, result.Relations)
+	}
+	if len(result.Artifacts) > 0 {
+		fmt.Fprintln(w)
+		fprintArtifacts(w, result.Artifacts)
 	}
 	// The handoff is already above; repeating it in the log would print the
 	// same paragraph twice on one screen. What was withheld is counted against
@@ -803,7 +853,7 @@ func runSeedNote(args []string) {
 		seedFail("note", fmt.Errorf(`needs exactly one seed id, got %d: attn seed note s-7k3f9m -m "what happened"`, len(positionals)))
 	}
 	result, err := seedClient().SeedNote(
-		f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member), f.noteKind())
+		f.sessionID(), positionals[0], f.text("note"), strings.TrimSpace(*f.member), f.noteKind(), nil)
 	if err != nil {
 		seedFail("note", err)
 	}
@@ -816,6 +866,89 @@ func runSeedNote(args []string) {
 		return
 	}
 	fmt.Printf("noted on %s\n", result.Note.SeedID)
+}
+
+// runSeedArtifact writes one attach or detach. The reference is assembled from
+// the flag the caller used, so the kind is chosen by what they pointed at
+// rather than typed twice — and the daemon is handed a typed shape, never a
+// string to read meaning out of.
+func runSeedArtifact(verb string, args []string) {
+	f := newSeedFlags(verb)
+	positionals := f.parse(verb, args)
+	if len(positionals) != 1 {
+		seedFail(verb, fmt.Errorf("needs exactly one seed id, got %d: attn seed %s s-7k3f9m --path docs/plans/thing.md", len(positionals), verb))
+	}
+	artifact, err := f.artifact()
+	if err != nil {
+		seedFail(verb, err)
+	}
+	kind := garden.NoteKindAttach
+	if verb == "detach" {
+		kind = garden.NoteKindDetach
+	}
+	// The body is optional here alone: the daemon renders one from the reference
+	// when the caller had nothing to add, so the log reads as prose either way.
+	result, err := seedClient().SeedNote(
+		f.sessionID(), positionals[0], f.text(verb), strings.TrimSpace(*f.member), kind, artifact)
+	if err != nil {
+		seedFail(verb, err)
+	}
+	if *f.json {
+		writeJSON(result.Note)
+		return
+	}
+	// The answer names the document that moved: with a -m the body is the
+	// caller's own words, which on their own never say which document they were
+	// about. Without one the daemon already rendered that same sentence as the
+	// body, so it is printed once either way.
+	moved := garden.DefaultNoteBody(kind, garden.ArtifactReference{
+		Kind:               artifact.Kind,
+		NotebookDocumentID: protocol.Deref(artifact.NotebookDocumentID),
+		Repository:         protocol.Deref(artifact.Repository),
+		Path:               protocol.Deref(artifact.Path),
+		URL:                protocol.Deref(artifact.URL),
+	})
+	fmt.Printf("%s %s\n", positionals[0], moved)
+	if body := strings.TrimSpace(result.Note.Body); body != "" && body != moved {
+		fmt.Printf("%s\n", body)
+	}
+}
+
+// artifact reads the one reference flag the caller passed. Exactly one, because
+// a call naming two documents does not say which one it means.
+func (f *seedFlags) artifact() (*protocol.SeedArtifactReference, error) {
+	path := strings.TrimSpace(*f.path)
+	repo := strings.TrimSpace(*f.repo)
+	notebook := strings.TrimSpace(*f.notebook)
+	url := strings.TrimSpace(*f.url)
+	named := []string{}
+	for flag, value := range map[string]string{"--path": path, "--notebook": notebook, "--url": url} {
+		if value != "" {
+			named = append(named, flag)
+		}
+	}
+	slices.Sort(named)
+	switch len(named) {
+	case 0:
+		return nil, fmt.Errorf("name the document: --path <file> [--repo <repository>], --notebook <document-id>, or --url <url>")
+	case 1:
+	default:
+		return nil, fmt.Errorf("%s were all given and a reference names one document; run it once per document", strings.Join(named, " and "))
+	}
+	switch {
+	case path != "":
+		// A repository beside a path is what tells the same relative path in two
+		// worktrees apart; without one the path stands alone.
+		ref := &protocol.SeedArtifactReference{Kind: garden.ArtifactMarkdownFile, Path: protocol.Ptr(path)}
+		if repo != "" {
+			ref.Repository = protocol.Ptr(repo)
+		}
+		return ref, nil
+	case notebook != "":
+		return &protocol.SeedArtifactReference{Kind: garden.ArtifactNotebook, NotebookDocumentID: protocol.Ptr(notebook)}, nil
+	default:
+		return &protocol.SeedArtifactReference{Kind: garden.ArtifactURL, URL: protocol.Ptr(url)}, nil
+	}
 }
 
 func runSeedNotes(args []string) {

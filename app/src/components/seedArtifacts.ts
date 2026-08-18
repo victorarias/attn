@@ -1,11 +1,16 @@
 import type { SeedArtifactReference, SeedNote } from '../types/generated';
 
-/** SeedNote is deliberately forward-compatible with the later artifact verbs. */
-export type SeedDocumentNote = Omit<SeedNote, 'artifact'> & {
-  artifact?: SeedArtifactReference;
-};
+/**
+ * The seed log entry as the view reads it. Identical to the wire shape; the
+ * alias exists so the ledger's type follows the note, not the generated file.
+ */
+export type SeedDocumentNote = SeedNote;
 
-function artifactKey(artifact: SeedArtifactReference): string {
+/**
+ * A stable React key for one artifact. Every field participates: two references
+ * differing anywhere are two artifacts, and collapsing them would drop one.
+ */
+export function artifactKey(artifact: SeedArtifactReference): string {
   return [
     artifact.kind,
     artifact.path ?? '',
@@ -15,18 +20,11 @@ function artifactKey(artifact: SeedArtifactReference): string {
   ].join('\0');
 }
 
-/** Project the current set by replaying the newest-first log chronologically. */
-export function currentSeedArtifacts(notes: readonly SeedDocumentNote[]): SeedArtifactReference[] {
-  const current = new Map<string, SeedArtifactReference>();
-  for (let i = notes.length - 1; i >= 0; i -= 1) {
-    const note = notes[i];
-    if (!note.artifact) continue;
-    const key = artifactKey(note.artifact);
-    if (note.kind === 'attach') {
-      current.set(key, note.artifact);
-    } else if (note.kind === 'detach') {
-      current.delete(key);
-    }
-  }
-  return Array.from(current.values());
+/** The field that identifies an artifact — the part a person recognizes. */
+export function artifactLabel(artifact: SeedArtifactReference): string {
+  return artifact.path
+    || artifact.notebook_document_id
+    || artifact.url
+    || artifact.repository
+    || artifact.kind;
 }

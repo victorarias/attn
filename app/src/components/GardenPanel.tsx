@@ -292,6 +292,7 @@ export function GardenPanel({
               children: seeds.filter((candidate) => crownOf(candidate) === seed.id),
               notes: [],
               notes_total: 0,
+              artifacts: [],
             };
             const displayedDocument = seedDocument?.seed.id === seed.id ? seedDocument : localDocument;
             return (

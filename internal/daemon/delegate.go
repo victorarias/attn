@@ -579,7 +579,15 @@ func (d *Daemon) delegate(msg *protocol.DelegateMessage) (*protocol.DelegateResu
 }
 
 func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID, workspaceID, directory, name, agent, model, effort, brief string) error {
-	initialPrompt := withLeafIdentity(delegatedTicketPrompt(brief))
+	// Bound before the spawn, because the launch primer and the delegate's own
+	// prompt both read it: a delegate must launch already knowing the seed it
+	// reports to and, when it was dispatched at a crown, its plot.
+	seedID, err := d.bindDelegationSeed(sessionID, strings.TrimSpace(msg.SourceSessionID),
+		brief, name, strings.TrimSpace(protocol.Deref(msg.Plot)))
+	if err != nil {
+		return err
+	}
+	initialPrompt := withLeafIdentity(delegatedTicketPrompt(brief) + delegatedSeedPrompt(seedID))
 	spawnMsg := &protocol.SpawnSessionMessage{
 		Cmd:           protocol.CmdSpawnSession,
 		ID:            sessionID,
@@ -598,16 +606,9 @@ func (d *Daemon) spawnDelegatedRuntime(msg *protocol.DelegateMessage, sessionID,
 	if effort != "" {
 		spawnMsg.Effort = protocol.Ptr(effort)
 	}
-	// Recorded before the spawn, because the launch primer reads it: a delegate
-	// dispatched at a crown must launch already knowing its plot.
-	if crown := strings.TrimSpace(protocol.Deref(msg.Plot)); crown != "" {
-		if err := d.recordGardenDispatch(sessionID, crown); err != nil {
-			return fmt.Errorf("dispatch %s at %s: %w", sessionID, crown, err)
-		}
-	}
 	spawnClient := newInternalWSClient()
 	d.handleSpawnSession(spawnClient, spawnMsg)
-	_, err := readInternalActionResult(spawnClient)
+	_, err = readInternalActionResult(spawnClient)
 	return err
 }
 
@@ -1053,6 +1054,37 @@ Report the other states as they happen.
 
 Continue the assigned work after reporting unless you are blocked or waiting on
 the user.`
+}
+
+// delegatedSeedPrompt is the seed half of a delegated agent's prompt: where its
+// work lives in the garden, and the two verbs that put something there. It is
+// empty when no seed bound, so a delegate is never pointed at an id that is not
+// in the garden.
+//
+// The ticket half above still carries the status verbs; this step transfers the
+// weight, and the cutover that turns those into signposts is a later one.
+func delegatedSeedPrompt(seedID string) string {
+	if strings.TrimSpace(seedID) == "" {
+		return ""
+	}
+	return `
+
+Your work is seed ` + "`" + seedID + "`" + ` in the garden — the brief above is its body, and
+you are its tender. Everything you report on the ticket also lands on its log,
+so whoever reads the seed next sees the whole thread. Write what a status
+report cannot carry:
+
+    attn seed note ` + seedID + ` -m "<what happened and what you learned>"
+
+Associate a document you produced or are working from, and take it back when it
+stops being current:
+
+    attn seed attach ` + seedID + ` --path <file.md> [--repo <repository>]
+    attn seed attach ` + seedID + ` --notebook <document-id>
+    attn seed attach ` + seedID + ` --url <url>
+    attn seed detach ` + seedID + ` --path <file.md>
+
+Read it back with ` + "`" + `attn seed show ` + seedID + "`" + `.`
 }
 
 func (d *Daemon) handleDelegate(conn net.Conn, msg *protocol.DelegateMessage) {

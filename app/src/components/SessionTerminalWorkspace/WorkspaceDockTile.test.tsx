@@ -1048,6 +1048,7 @@ function seedDocumentFixture(body = '# Seed body\n\nAnnotate this plan.'): SeedD
       created_at: '2026-08-15T09:00:00Z',
     }],
     notes_total: 1,
+    artifacts: [],
   };
 }
 
