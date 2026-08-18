@@ -1455,30 +1455,46 @@ func (d *Daemon) readNotes(seedID string, limit int) ([]protocol.SeedNote, int, 
 // readNotesDomain reads a seed's whole log as domain notes. The artifact
 // projection needs the typed reference, which the wire shape carries as
 // pointers; decoding once here keeps that conversion out of it.
+//
+// Whole means whole: the read pages to the end of the log rather than stopping
+// at one query's limit. A set that quietly shrinks as a log gets busy is worse
+// than none, and a seed is the durable record of a delegation that may run for
+// months.
 func (d *Daemon) readNotesDomain(seedID string) ([]garden.Note, error) {
 	if d.store == nil {
 		return nil, errors.New("no database")
 	}
-	read, _, err := d.runDocQuery(docstore.Query{
-		Namespace:  garden.Namespace,
-		Collection: garden.CollectionNotes,
-		Filters:    []docstore.Filter{{Field: "seed", Op: docstore.OpEq, Value: seedID}},
-		Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
-		Limit:      docstore.MaxLimit,
-	})
-	if err != nil {
-		return nil, err
+	page := d.gardenNotePageSize
+	if page <= 0 {
+		page = docstore.MaxLimit
 	}
-	notes := make([]garden.Note, 0, len(read.Documents))
-	for _, doc := range read.Documents {
-		note, err := garden.DecodeNote(doc.Body)
+	notes := []garden.Note{}
+	after := ""
+	for {
+		read, _, err := d.runDocQuery(docstore.Query{
+			Namespace:  garden.Namespace,
+			Collection: garden.CollectionNotes,
+			Filters:    []docstore.Filter{{Field: "seed", Op: docstore.OpEq, Value: seedID}},
+			Sort:       &docstore.Sort{Field: docstore.FieldCreatedAt, Desc: true},
+			Limit:      page,
+			After:      after,
+		})
 		if err != nil {
-			d.logf("garden: note %s has an unreadable body: %v", doc.ID, err)
-			continue
+			return nil, err
 		}
-		notes = append(notes, note)
+		for _, doc := range read.Documents {
+			note, err := garden.DecodeNote(doc.Body)
+			if err != nil {
+				d.logf("garden: note %s has an unreadable body: %v", doc.ID, err)
+				continue
+			}
+			notes = append(notes, note)
+		}
+		if len(read.Documents) < page {
+			return notes, nil
+		}
+		after = read.Documents[len(read.Documents)-1].ID
 	}
-	return notes, nil
 }
 
 // freshestHandoff reads the one handoff a tender must see: the newest note of

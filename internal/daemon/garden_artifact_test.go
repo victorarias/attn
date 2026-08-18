@@ -96,6 +96,36 @@ func TestSeedArtifactsSurviveABusyLog(t *testing.T) {
 	}
 }
 
+// A log longer than one query's page: the oldest entry is the attach, so a
+// projection that stopped at the first page would answer with no artifacts at
+// all. The page size is lowered rather than a thousand notes written — the
+// property is that the read pages to the end, not what the store's own maximum
+// happens to be.
+func TestSeedArtifactsPageToTheEndOfTheLog(t *testing.T) {
+	d := newGardenDaemon(t)
+	d.gardenNotePageSize = 3
+	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Long haul"})
+	if resp := artifactNote(t, d, seed.ID, garden.NoteKindAttach, "", markdownArtifact("plan.md")); !resp.Ok {
+		t.Fatalf("attach: %v", protocol.Deref(resp.Error))
+	}
+	for i := 0; i < 3*d.gardenNotePageSize; i++ {
+		note(t, d, "sess-a", seed.ID, "another day of work", "")
+	}
+
+	result := show(t, d, seed.ID)
+	if len(result.Artifacts) != 1 || protocol.Deref(result.Artifacts[0].Path) != "plan.md" {
+		t.Fatalf("artifacts = %+v, want plan.md still current several pages down", result.Artifacts)
+	}
+
+	// And the detach reaches it from the same distance.
+	if resp := artifactNote(t, d, seed.ID, garden.NoteKindDetach, "", markdownArtifact("plan.md")); !resp.Ok {
+		t.Fatalf("detach: %v", protocol.Deref(resp.Error))
+	}
+	if after := show(t, d, seed.ID); len(after.Artifacts) != 0 {
+		t.Fatalf("artifacts = %+v, want the detach to have taken it back", after.Artifacts)
+	}
+}
+
 func TestSeedNoteRefusesArtifactsThatSayNothing(t *testing.T) {
 	d := newGardenDaemon(t)
 	seed := plant(t, d, protocol.SeedPlantMessage{Title: "Ship the thing"})

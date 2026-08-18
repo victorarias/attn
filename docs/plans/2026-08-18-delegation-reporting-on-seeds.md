@@ -34,12 +34,18 @@ delegation now has a crown to be dispatched at, because it plants one.
 Recovery is idempotent through the same record: a reserved session that
 already has a dispatch is re-bound, never re-planted.
 
-An outpost is the one named exception. The garden fence refuses every write
-there, so the seed bind is skipped with a log line rather than failing the
-delegation — retiring outpost delegations is gated on the uplink per
-[the arc plan](2026-08-10-home-garden-crew-arc.md). Every other bind failure
-fails the delegation atomically, for the same reason a ticket failure does:
-a session nobody can reach is worse than no session.
+A bind failure is fatal exactly when the caller named the crown. `--plot`
+says where this delegation reports, so a dispatch that cannot be recorded
+there is not the delegation that was asked for, and it fails atomically. A
+planted seed is the transition's second channel — the ticket is still the
+authoritative one — so a failure to plant or record it is logged and the
+delegation launches anyway: trading a working delegation for a missing log
+is the wrong way round.
+
+An outpost is neither case. The garden fence refuses every write there, so
+the bind is skipped with a log line whichever form was used, including
+`--plot` — retiring outpost delegations is gated on the uplink per
+[the arc plan](2026-08-10-home-garden-crew-arc.md).
 
 ## Status reports mirror onto the log
 
