@@ -422,9 +422,12 @@ rather than through dialogs. Design and slices:
   A failed write is said out loud as an error, because it is the only leg with
   nothing behind it. Design:
   [docs/plans/2026-08-18-automode-denial-ledger.md](../../docs/plans/2026-08-18-automode-denial-ledger.md).
-- The ledger keeps an active file and one rotated generation, and every
-  rotation past that writes a marker naming how many records were dropped, so
-  the reader is told rather than shown a partial episode. `paths.ts` protects
+- The ledger keeps an active file and one rotated generation. A rotation
+  destroys the older generation, so its records AND the markers it carried are
+  counted into one marker opening the new active file; the marker in the file
+  being renamed survives the rename and is counted where it lands, never here
+  too. The reader sums the markers of both generations, so counting a marker in
+  both places doubles every earlier rotation and compounds with each one. `paths.ts` protects
   any last path segment beginning `attn-automode`: a session that can edit the
   record of what it was refused leaves no record.
 - Denials are also reported through `AutoMode`'s `onDenial` seam, which is the

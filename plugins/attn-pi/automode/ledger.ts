@@ -90,17 +90,33 @@ export class DenialLedger implements DenialLedgerLike {
   }
 
   /**
-   * Keeps the active file and one previous generation. The generation being
-   * overwritten is counted first and its count is carried into the new active
-   * file's opening marker, plus whatever earlier rotations already dropped:
-   * the reader sums those markers, so a clip is always something the person
-   * reading the feed is told about rather than a gap they cannot see.
+   * Keeps the active file and one previous generation, so a rotation destroys
+   * whatever the older generation held: its records, and the markers standing
+   * for what IT displaced. Both are counted into the marker that opens the new
+   * active file, and both are counted from the generation being destroyed —
+   * never from the active file, whose own marker survives the rename and is
+   * still there for the reader to sum. Counting that one here as well would
+   * double every earlier rotation, compounding with each one.
    */
   private rotateIfFull(): void {
     if (sizeOf(this.path) < this.maxBytes) return;
     const previous = `${this.path}.1`;
-    const dropped = countRecords(previous) + carriedDropCount(this.path);
-    renameSync(this.path, previous);
+    const dropped = countRecords(previous) + carriedDropCount(previous);
+    try {
+      renameSync(this.path, previous);
+    } catch (error) {
+      // Every session in a profile appends to one ledger, so another one may
+      // have rotated between the size check and here. Its rotation is this
+      // rotation: the active file is fresh, and the record about to be written
+      // belongs in it. Losing a denial to the bookkeeping around denials is the
+      // failure this file exists to end.
+      if ((error as NodeJS.ErrnoException)?.code !== "ENOENT") throw error;
+      return;
+    }
+    // Nothing was dropped on the first rotation — the previous generation is
+    // still on disk — and a marker claiming zero is noise the reader has to
+    // step over.
+    if (dropped === 0) return;
     const marker = JSON.stringify({ type: "rotated", dropped, at: new Date().toISOString() });
     appendFileSync(this.path, `${marker}\n`, { encoding: "utf8", mode: 0o600 });
   }
@@ -124,19 +140,16 @@ function readLines(path: string): string[] {
   return contents.split("\n").filter((line) => line.trim() !== "");
 }
 
+/** What the markers in a generation stand for: records dropped before it. */
+function carriedDropCount(path: string): number {
+  let total = 0;
+  for (const line of readLines(path)) total += markerDropCount(line) ?? 0;
+  return total;
+}
+
 /** Records in a generation, markers excluded — a marker is not a denial. */
 function countRecords(path: string): number {
   return readLines(path).filter((line) => !isMarker(line)).length;
-}
-
-/** What the markers already in a generation say was dropped before it. */
-function carriedDropCount(path: string): number {
-  let total = 0;
-  for (const line of readLines(path)) {
-    const dropped = markerDropCount(line);
-    if (dropped !== undefined) total += dropped;
-  }
-  return total;
 }
 
 function isMarker(line: string): boolean {

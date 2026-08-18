@@ -2,7 +2,7 @@
 // a denial — a bare pi has none, and a relay whose socket died drops what it is
 // handed — so these tests are about what survives that.
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { RelayServer } from "../src/relay";
@@ -71,6 +71,17 @@ function readMarkers(path: string): { dropped: number }[] {
   return readLines(path)
     .map((line) => JSON.parse(line) as { type?: string; dropped: number })
     .filter((record) => record.type === "rotated");
+}
+
+/**
+ * What the Go reader computes: the markers of both generations, summed. Kept
+ * here so the writer's arithmetic is pinned against the reader that consumes
+ * it rather than against itself.
+ */
+function droppedAcrossGenerations(path: string): number {
+  return [`${path}.1`, path]
+    .flatMap((generation) => (existsSync(generation) ? readMarkers(generation) : []))
+    .reduce((total, marker) => total + marker.dropped, 0);
 }
 
 function readLines(path: string): string[] {
@@ -233,41 +244,71 @@ describe("what a denial leaves behind", () => {
 });
 
 describe("what the ledger admits it lost", () => {
-  test("rotation keeps the previous generation and counts nothing as dropped yet", () => {
+  test("the first rotation drops nothing, and says nothing", () => {
     const path = tempPath();
     const ledger = new DenialLedger(path, "sess-1", 100);
 
     ledger.record(denial({ toolCallId: "one" }));
     ledger.record(denial({ toolCallId: "two" }));
 
+    // Both records are still on disk, one per generation.
     expect(readRecords(`${path}.1`).map((record) => record.tool_call_id)).toEqual(["one"]);
-    expect(readRecords(path)).toHaveLength(1);
-    expect(readRecords(path)[0]?.tool_call_id).toBe("two");
+    expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["two"]);
+    expect(readMarkers(path)).toEqual([]);
+    expect(droppedAcrossGenerations(path)).toBe(0);
   });
 
-  test("a second rotation drops a generation, and the count travels in the file", () => {
+  // The count the reader computes is the sum of the markers across BOTH
+  // generations (internal/automode/denialledger.go), so a marker that folded in
+  // an earlier one would be counted twice and the error would compound with
+  // every rotation. This drives the real writer through three rotations and
+  // does the reader's arithmetic on what it wrote.
+  test("a dropped generation is counted once, however many rotations came before", () => {
     const path = tempPath();
     const ledger = new DenialLedger(path, "sess-1", 100);
 
     for (const id of ["one", "two", "three", "four"]) ledger.record(denial({ toolCallId: id }));
 
-    // Four records, one per generation: "one" and "two" are gone for good and
-    // the active file says so, while "three" and "four" are still on disk.
-    expect(readMarkers(path).at(-1)?.dropped).toBe(2);
-    expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["four"]);
+    // "three" and "four" are still on disk, so "one" and "two" are the loss.
     expect(readRecords(`${path}.1`).map((record) => record.tool_call_id)).toEqual(["three"]);
+    expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["four"]);
+    expect(droppedAcrossGenerations(path)).toBe(2);
+
+    ledger.record(denial({ toolCallId: "five" }));
+    expect(readRecords(`${path}.1`).map((record) => record.tool_call_id)).toEqual(["four"]);
+    expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["five"]);
+    expect(droppedAcrossGenerations(path)).toBe(3);
   });
 
-  test("a marker is not a denial", () => {
+  // Every session in a profile appends to one ledger. Losing a denial to the
+  // bookkeeping around denials is the failure this file exists to end.
+  test("a generation another session rotated out from under this one costs no record", () => {
+    const path = tempPath();
+    const ledger = new DenialLedger(path, "sess-1", 100);
+    ledger.record(denial({ toolCallId: "one" }));
+    // What a concurrent rotation leaves behind: the active file is gone.
+    renameSync(path, `${path}.1`);
+
+    expect(() => ledger.record(denial({ toolCallId: "two" }))).not.toThrow();
+    expect(readRecords(path).map((record) => record.tool_call_id)).toEqual(["two"]);
+  });
+
+  test("a marker is not a denial, and a loss already claimed is not claimed twice", () => {
     const path = tempPath();
     writeFileSync(path, `${JSON.stringify({ type: "rotated", dropped: 3, at: "2026-08-18T10:00:00.000Z" })}\n`);
     const ledger = new DenialLedger(path, "sess-1", 1);
 
     ledger.record(denial());
 
-    // The new active file carries the 3 the marker already claimed, plus the
-    // zero records the rotated generation held.
-    expect(readMarkers(path)[0]?.dropped).toBe(3);
+    // The marker rode into the rotated generation, where the reader still sums
+    // it. The new active file holds the record and no marker of its own: the
+    // generation it displaced held no denials.
     expect(readRecords(path)).toHaveLength(1);
+    expect(readMarkers(path)).toEqual([]);
+    expect(droppedAcrossGenerations(path)).toBe(3);
+
+    // Rotating again destroys that generation, so its claim moves forward once.
+    ledger.record(denial({ toolCallId: "second" }));
+    expect(droppedAcrossGenerations(path)).toBe(3);
   });
 });

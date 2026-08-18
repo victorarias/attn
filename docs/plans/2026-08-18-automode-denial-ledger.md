@@ -55,13 +55,19 @@ being re-imported after the store's own row cap trims it away.
 
 ## No silent clipping
 
-- The ledger keeps an active file and one rotated generation. Rotation past
-  that drops records, and the count travels: the new active file opens with a
-  `{"type":"rotated","dropped":N}` marker, the reader sums the markers, and
-  `AutoModeDenialsResult` carries `ledger_dropped` so the CLI prints a footer
-  naming how many older denials were lost. A protocol bump comes with it.
+- The ledger keeps an active file and one rotated generation. A rotation
+  destroys whatever the older generation held, so the count travels: the new
+  active file opens with a `{"type":"rotated","dropped":N}` marker counting the
+  destroyed generation's records **and** the markers it carried, and the reader
+  sums the markers of both generations on disk. The marker in the file being
+  renamed survives the rename, so it is counted where it lands and never here
+  as well — folding it in too would double every earlier rotation and compound
+  with each one. `AutoModeDenialsResult.ledger_note` carries the total so the
+  CLI prints a footer naming what was lost. A protocol bump comes with it.
 - A malformed line is counted and reported the same way rather than skipped
-  quietly.
+  quietly, and a line past the reader's in-memory cap is stepped over rather
+  than stopping the read — stopping would drop every record after it and report
+  the whole loss as one unreadable line.
 
 ## Receipt for the rotation size
 

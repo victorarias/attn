@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"sort"
@@ -83,12 +84,22 @@ func readDenialGeneration(path string, into *DenialLedgerReading) error {
 	}
 	defer file.Close()
 
-	scanner := bufio.NewScanner(file)
-	// A denial's action and reason are prose the model was shown, so a line is
-	// far larger than bufio's 64KB default allows for.
-	scanner.Buffer(make([]byte, 0, 64*1024), denialLedgerMaxLineBytes)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	reader := bufio.NewReaderSize(file, 64*1024)
+	for {
+		bytesRead, tooLong, err := readLedgerLine(reader)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return fmt.Errorf("read denial ledger %s: %w", path, err)
+		}
+		// One line past the cap is one denial lost, and the lines after it are
+		// not: the reader steps over it, counts it, and keeps going.
+		if tooLong {
+			into.Malformed++
+			continue
+		}
+		line := strings.TrimSpace(string(bytesRead))
 		if line == "" {
 			continue
 		}
@@ -116,19 +127,37 @@ func readDenialGeneration(path string, into *DenialLedgerReading) error {
 			At:         at,
 		})
 	}
-	if err := scanner.Err(); err != nil {
-		// A line too long to read is one denial lost, not a failed read: the
-		// rest of the file is still the record everything else depends on.
-		into.Malformed++
-		return nil
-	}
 	return nil
 }
 
-// denialLedgerMaxLineBytes bounds one record. Measured 2026-08-18: a real
-// denial line is ~450 bytes, and the largest field is the classifier's reason,
-// which the pi side already writes as one collapsed line. 1 MiB is past any
-// denial and short of a file that would be read into memory by accident.
+// readLedgerLine returns one line without its newline. A line longer than
+// denialLedgerMaxLineBytes is discarded to the next newline and reported as
+// tooLong — the alternative, stopping, would silently drop every record after
+// it and report the loss as a single unreadable line.
+func readLedgerLine(reader *bufio.Reader) (line []byte, tooLong bool, err error) {
+	for {
+		chunk, isPrefix, err := reader.ReadLine()
+		if err != nil {
+			return nil, false, err
+		}
+		line = append(line, chunk...)
+		if !isPrefix {
+			return line, tooLong, nil
+		}
+		if len(line) > denialLedgerMaxLineBytes {
+			// Keep reading to the newline so the next line starts where it
+			// should, but hold nothing: the point is to get past this one.
+			line = line[:0]
+			tooLong = true
+		}
+	}
+}
+
+// denialLedgerMaxLineBytes bounds one record held in memory. Measured
+// 2026-08-18: a fat denial line is 476 bytes, and the largest field is the
+// classifier's reason, which the pi side already writes as one collapsed line.
+// 1 MiB is past any denial and short of a file read into memory by accident.
+// A line past it is counted and stepped over, never a stop.
 const denialLedgerMaxLineBytes = 1024 * 1024
 
 type denialLedgerLine struct {

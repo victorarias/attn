@@ -3,6 +3,7 @@ package automode
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,6 +86,61 @@ func TestReadDenialLedgerCountsWhatItCannotRead(t *testing.T) {
 	}
 	if reading.Malformed != 2 {
 		t.Errorf("Malformed = %d, want 2", reading.Malformed)
+	}
+}
+
+// The exact two files plugins/attn-pi/automode/ledger.ts leaves after five
+// denials at a one-record cap — one marker per generation, each standing for
+// the generation its rotation destroyed. The writer's own test
+// ("a dropped generation is counted once, however many rotations came before")
+// pins that it produces this; this pins that the reader adds it up right.
+// Three denials are gone, and the reader must say three, not five and not two.
+func TestReadDenialLedgerSumsTheWritersMarkersOnce(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
+	writeLedger(t, path+".1",
+		`{"type":"rotated","dropped":1,"at":"2026-08-18T10:00:03.000Z"}`,
+		record("2026-08-18T10:00:04.000Z", "bash: four"),
+	)
+	writeLedger(t, path,
+		`{"type":"rotated","dropped":2,"at":"2026-08-18T10:00:04.500Z"}`,
+		record("2026-08-18T10:00:05.000Z", "bash: five"),
+	)
+
+	reading, err := ReadDenialLedger(path)
+	if err != nil {
+		t.Fatalf("reading the ledger: %v", err)
+	}
+	if reading.Dropped != 3 {
+		t.Errorf("Dropped = %d, want the 3 denials that are gone", reading.Dropped)
+	}
+	if len(reading.Records) != 2 {
+		t.Errorf("records = %+v, want the two still on disk", reading.Records)
+	}
+}
+
+// A line past the in-memory cap is one denial lost. The records after it are
+// not: stopping there would drop them all and report the loss as one line.
+func TestReadDenialLedgerStepsOverALineItCannotHold(t *testing.T) {
+	path := filepath.Join(t.TempDir(), DenialLedgerFileName)
+	huge := `{"session_id":"pi-1","action":"` + strings.Repeat("x", denialLedgerMaxLineBytes+16) + `"}`
+	writeLedger(t, path,
+		record("2026-08-18T10:00:00.000Z", "bash: before"),
+		huge,
+		record("2026-08-18T10:00:02.000Z", "bash: after"),
+	)
+
+	reading, err := ReadDenialLedger(path)
+	if err != nil {
+		t.Fatalf("reading the ledger: %v", err)
+	}
+	if len(reading.Records) != 2 {
+		t.Fatalf("records = %+v, want the two the oversized line sits between", reading.Records)
+	}
+	if reading.Records[1].Action != "bash: after" {
+		t.Errorf("the record after the oversized line was lost: %+v", reading.Records)
+	}
+	if reading.Malformed != 1 {
+		t.Errorf("Malformed = %d, want the one line it stepped over", reading.Malformed)
 	}
 }
 
